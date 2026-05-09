@@ -64,3 +64,21 @@ Open a new Claude Code session and type `launch feature coordinator`.
 - `docs/doc-sync.md` — confirmed already correct. `architecture.md` and `docs/decisions/` are both registered with their update triggers. No new rows needed.
 
 **Branch status:** All 15 chunks complete. Branch `claude/support-ticket-structure-xMcy8` is ready for Phase 3 (finalisation-coordinator).
+
+---
+
+## Phase 2 — post-build steps (in flight)
+
+| Step | Status | Notes |
+|---|---|---|
+| 6 — G2 integrated-state gate | done | Attempt 1: `npm run lint` 0 errors / 888 pre-existing warnings (non-blocking); `npm run typecheck` clean. PASS. |
+| 7 — Post-G2 spec-validity checkpoint | pending | Operator confirmation required. |
+| 8.1 — spec-conformance | pending | |
+| 8.2 — adversarial-reviewer | pending | Auto-trigger check pending. |
+| 8.3 — pr-reviewer | pending | |
+| 8.4 — Fix-loop with G3 | pending | Conditional on pr-reviewer verdict. |
+| 8.5 — dual-reviewer | pending | Codex availability check pending. |
+| 9 — Doc-sync gate | pending | |
+| 10 — Phase 2 handoff write | pending | |
+| 11 — current-focus.md → REVIEWING | pending | |
+| 12 — End-of-phase prompt + auto-commit | pending | |

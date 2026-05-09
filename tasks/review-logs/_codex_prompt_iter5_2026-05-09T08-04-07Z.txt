@@ -1,0 +1,28 @@
+You are reviewing a specification document for implementation-readiness, iteration 5 (final iteration — MAX_ITERATIONS cap).
+
+The spec is at: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (commit e8cac575).
+
+Iterations 1-4 surfaced and resolved 19 mechanical findings total. The most recent edit (iter 4) addressed:
+- F15: §8.5 late-link predicate now covers both `outbound` and `internal_note` message directions; visibility-match disambiguation added.
+
+Iteration 5 task: confirm full convergence. Re-review the spec for any remaining mechanical issues. If the iter 4 edit introduced new gaps, surface them; otherwise confirm the spec is mechanically tight.
+
+The source brief is LOCKED v5.3. Findings that change brief-locked decisions are out of scope.
+
+Five open questions exist in §22 (OQ-1..OQ-5). Findings whose work is captured by an OQ should be skipped.
+
+Project framing context:
+- Pre-production, no live agency clients.
+- Testing posture: static_gates_primary, runtime_tests: pure_function_only. No vitest/E2E/playwright/supertest/frontend tests for non-pure code.
+- Rollout: commit_and_revert. No feature flags. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Output findings in the same structured format. If you find no NEW mechanical issues, say "No new mechanical findings — spec is mechanically tight."
+
+Do NOT raise:
+- The 19 issues already resolved in iterations 1-4.
+- Adding tests beyond the pure-function set.
+- Adding feature flags or staged rollout.
+- New primitives that duplicate existing ones.
+- Anything covered by OQ-1..OQ-5.
+- Brief-locked decisions.

@@ -9,13 +9,36 @@
 
 import { eq, and } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { canonicalInboxes } from '../db/schema/index.js';
+import { canonicalInboxes, connectorConfigs } from '../db/schema/index.js';
 import type { CanonicalInbox } from '../db/schema/canonicalInboxes.js';
 import type { PrincipalContext } from './principal/types.js';
 import {
   SupportInboxAgentConfigSchema,
   type SupportInboxAgentConfig,
 } from '../../shared/types/supportInboxAgentConfig.js';
+
+// ---------------------------------------------------------------------------
+// Sync-health types and classifier
+// ---------------------------------------------------------------------------
+
+export type SyncHealth = 'running' | 'degraded' | 'failed';
+
+export interface InboxWithSyncHealth extends CanonicalInbox {
+  syncHealth: SyncHealth;
+  lastSyncAt: Date | null;
+  syncErrorMessage: string | null;
+}
+
+function classifyHealth(cc: {
+  status: string;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
+}): SyncHealth {
+  if (cc.status === 'error' || cc.status === 'disconnected') return 'failed';
+  if (cc.lastSyncStatus === 'error') return 'failed';
+  if (cc.lastSyncStatus === 'partial') return 'degraded';
+  return 'running';
+}
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -34,31 +57,56 @@ function agentConfigInvalidError(message: string): Error {
 // ---------------------------------------------------------------------------
 
 /**
- * List all inboxes for the org.
+ * List all inboxes for the org, including sync-health derived from connector_configs.
  */
 export async function listInboxes(
   principalCtx: PrincipalContext,
-): Promise<CanonicalInbox[]> {
+): Promise<InboxWithSyncHealth[]> {
   const db = getOrgScopedDb('supportInboxService.listInboxes');
-  return db
-    .select()
+  const rows = await db
+    .select({
+      inbox: canonicalInboxes,
+      connectorStatus: connectorConfigs.status,
+      lastSyncAt: connectorConfigs.lastSyncAt,
+      lastSyncStatus: connectorConfigs.lastSyncStatus,
+      lastSyncError: connectorConfigs.lastSyncError,
+    })
     .from(canonicalInboxes)
+    .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
     .where(eq(canonicalInboxes.organisationId, principalCtx.organisationId))
     .orderBy(canonicalInboxes.createdAt);
+
+  return rows.map(r => ({
+    ...r.inbox,
+    syncHealth: classifyHealth({
+      status: r.connectorStatus ?? 'active',
+      lastSyncStatus: r.lastSyncStatus ?? null,
+      lastSyncError: r.lastSyncError ?? null,
+    }),
+    lastSyncAt: r.lastSyncAt ?? null,
+    syncErrorMessage: r.lastSyncError ?? null,
+  }));
 }
 
 /**
- * Get a single inbox by id.
+ * Get a single inbox by id, including sync-health.
  * Throws 404 if not found.
  */
 export async function getInbox(
   inboxId: string,
   principalCtx: PrincipalContext,
-): Promise<CanonicalInbox> {
+): Promise<InboxWithSyncHealth> {
   const db = getOrgScopedDb('supportInboxService.getInbox');
-  const [inbox] = await db
-    .select()
+  const [row] = await db
+    .select({
+      inbox: canonicalInboxes,
+      connectorStatus: connectorConfigs.status,
+      lastSyncAt: connectorConfigs.lastSyncAt,
+      lastSyncStatus: connectorConfigs.lastSyncStatus,
+      lastSyncError: connectorConfigs.lastSyncError,
+    })
     .from(canonicalInboxes)
+    .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
     .where(
       and(
         eq(canonicalInboxes.id, inboxId),
@@ -67,11 +115,20 @@ export async function getInbox(
     )
     .limit(1);
 
-  if (!inbox) {
+  if (!row) {
     throw notFoundError('support.inbox.not_found');
   }
 
-  return inbox;
+  return {
+    ...row.inbox,
+    syncHealth: classifyHealth({
+      status: row.connectorStatus ?? 'active',
+      lastSyncStatus: row.lastSyncStatus ?? null,
+      lastSyncError: row.lastSyncError ?? null,
+    }),
+    lastSyncAt: row.lastSyncAt ?? null,
+    syncErrorMessage: row.lastSyncError ?? null,
+  };
 }
 
 /**

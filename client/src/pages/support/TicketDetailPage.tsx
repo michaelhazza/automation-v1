@@ -18,6 +18,14 @@ interface Ticket {
   contactId?: string | null;
 }
 
+interface MessageAttachment {
+  externalId: string;
+  filename: string;
+  providerUrl: string | null;
+  mimeType?: string;
+  size?: number;
+}
+
 interface Message {
   id: string;
   direction: 'inbound' | 'outbound';
@@ -25,6 +33,7 @@ interface Message {
   body: string;
   authorName?: string | null;
   createdAtExternal: string;
+  attachments?: MessageAttachment[] | null;
 }
 
 interface DraftOverlay {
@@ -112,14 +121,44 @@ export default function TicketDetailPage() {
         {/* Thread */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {messages.map(msg => (
-            <ThreadMessage
-              key={msg.id}
-              direction={msg.direction}
-              visibility={msg.visibility}
-              body={msg.body}
-              authorName={msg.authorName}
-              createdAt={msg.createdAtExternal}
-            />
+            <div key={msg.id}>
+              <ThreadMessage
+                direction={msg.direction}
+                visibility={msg.visibility}
+                body={msg.body}
+                authorName={msg.authorName}
+                createdAt={msg.createdAtExternal}
+              />
+              {msg.attachments && msg.attachments.length > 0 && (
+                <div className="ml-4 mb-3 flex flex-wrap gap-2">
+                  {msg.attachments.map(att => (
+                    <div key={att.externalId} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded text-xs text-slate-600">
+                      {att.providerUrl ? (
+                        <a
+                          href={att.providerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-indigo-600 truncate max-w-[160px]"
+                        >
+                          {att.filename}
+                        </a>
+                      ) : (
+                        <>
+                          <span className="text-slate-400 truncate max-w-[120px]">{att.filename}</span>
+                          <span className="text-red-500">Couldn&apos;t load</span>
+                          <button
+                            onClick={load}
+                            className="text-indigo-600 hover:underline"
+                          >
+                            retry
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
           {drafts.map(draft => (
             <DraftOverlayMessage

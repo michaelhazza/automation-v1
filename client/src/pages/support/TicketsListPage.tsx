@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import StatusPill from '../../components/support/StatusPill';
 import PriorityPill from '../../components/support/PriorityPill';
-import QuarantineBanner from '../../components/support/QuarantineBanner';
 
 interface Ticket {
   id: string;
@@ -15,6 +14,10 @@ interface Ticket {
   openedAt: string | null;
   lastActivityAt: string | null;
   inboxId: string;
+}
+
+interface Inbox {
+  syncHealth?: 'running' | 'degraded' | 'failed';
 }
 
 type StatusGroup = 'needs_attention' | 'all_open' | 'quarantined' | 'all';
@@ -31,6 +34,8 @@ export default function TicketsListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusGroup, setStatusGroup] = useState<StatusGroup>('needs_attention');
+  const [quarantinedCount, setQuarantinedCount] = useState<number>(0);
+  const [syncHealth, setSyncHealth] = useState<'running' | 'degraded' | 'failed' | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -42,14 +47,70 @@ export default function TicketsListPage() {
       .finally(() => setLoading(false));
   }, [statusGroup]);
 
-  const hasQuarantined = tickets.some(t => t.status === 'unknown_provider_status');
+  // Fetch quarantined count when not already viewing quarantined
+  useEffect(() => {
+    if (statusGroup === 'quarantined') {
+      setQuarantinedCount(0);
+      return;
+    }
+    api.get<{ tickets: Ticket[] }>('/api/support/tickets?statusGroup=quarantined')
+      .then(({ data }) => setQuarantinedCount((data.tickets ?? []).length))
+      .catch(() => { /* non-fatal */ });
+  }, [statusGroup]);
+
+  // Fetch inbox sync health
+  useEffect(() => {
+    api.get<{ inboxes: Inbox[] }>('/api/support/inboxes')
+      .then(({ data }) => {
+        const inboxes = data.inboxes ?? [];
+        if (inboxes.some(i => i.syncHealth === 'failed')) {
+          setSyncHealth('failed');
+        } else if (inboxes.some(i => i.syncHealth === 'degraded')) {
+          setSyncHealth('degraded');
+        } else {
+          setSyncHealth(null);
+        }
+      })
+      .catch(() => { /* non-fatal */ });
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
-      {hasQuarantined && statusGroup === 'quarantined' && <QuarantineBanner />}
+      {/* Sync-health indicator */}
+      {syncHealth === 'failed' && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+          Provider connection failed
+        </div>
+      )}
+      {syncHealth === 'degraded' && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+          Provider sync degraded
+        </div>
+      )}
 
       <div className="px-6 pt-5 pb-3 border-b border-slate-200 bg-white">
         <h1 className="text-lg font-semibold text-slate-900 mb-3">Tickets</h1>
+
+        {/* Quarantine count banner */}
+        {quarantinedCount > 0 && statusGroup !== 'quarantined' && (
+          <div className="flex items-center gap-1 mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>
+              {quarantinedCount} quarantined ticket{quarantinedCount !== 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => setStatusGroup('quarantined')}
+              className="ml-1 underline hover:no-underline font-medium"
+            >
+              Show quarantined
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           {FILTER_PILLS.map(pill => (
             <button

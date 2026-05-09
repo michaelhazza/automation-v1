@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
+import SyncHealthPill from '../../components/support/SyncHealthPill';
 
 interface SupportInboxAgentConfig {
   mode: 'disabled' | 'draft_only' | 'auto_send';
@@ -12,6 +13,9 @@ interface Inbox {
   name: string;
   connectorConfigId: string;
   agentConfig: SupportInboxAgentConfig | null;
+  syncHealth?: 'running' | 'degraded' | 'failed';
+  lastSyncAt?: string | null;
+  syncErrorMessage?: string | null;
 }
 
 const MODE_OPTIONS: { value: SupportInboxAgentConfig['mode']; label: string; description: string }[] = [
@@ -68,7 +72,18 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-5 mb-4">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-slate-900">{inbox.name}</h2>
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">{inbox.name}</h2>
+          {inbox.syncHealth && (
+            <div className="mt-1">
+              <SyncHealthPill
+                health={inbox.syncHealth}
+                lastSyncAt={inbox.lastSyncAt}
+                tooltip={inbox.syncErrorMessage}
+              />
+            </div>
+          )}
+        </div>
         {isDirty && (
           <span className="text-xs text-amber-600 font-medium">Unsaved changes</span>
         )}

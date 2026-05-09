@@ -1,10 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import api from '../../lib/api';
+import SyncHealthPill from '../../components/support/SyncHealthPill';
+
+interface InboxHealth {
+  id: string;
+  name: string;
+  syncHealth?: 'running' | 'degraded' | 'failed';
+  lastSyncAt?: string | null;
+  syncErrorMessage?: string | null;
+}
 
 type Step = 'choose-provider' | 'connect' | 'confirm';
 
 export default function SupportDeskSetupPage() {
   const [step, setStep] = useState<Step>('choose-provider');
+  const [inboxes, setInboxes] = useState<InboxHealth[]>([]);
+
+  useEffect(() => {
+    if (step !== 'confirm') return;
+    api.get<{ inboxes: InboxHealth[] }>('/api/support/inboxes')
+      .then(({ data }) => setInboxes(data.inboxes ?? []))
+      .catch(() => { /* non-fatal */ });
+  }, [step]);
 
   if (step === 'choose-provider') {
     return (
@@ -92,6 +110,23 @@ export default function SupportDeskSetupPage() {
         </div>
         <h1 className="text-xl font-semibold text-slate-900 mb-1">Support Desk is ready</h1>
         <p className="text-sm text-slate-500 mb-6">Your Teamwork inbox is connected. Configure agent behaviour from the Inboxes page.</p>
+
+        {inboxes.length > 0 && (
+          <div className="mb-6 text-left space-y-2">
+            {inboxes.map(inbox => (
+              <div key={inbox.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded">
+                <span className="text-xs text-slate-700 font-medium">{inbox.name}</span>
+                {inbox.syncHealth && (
+                  <SyncHealthPill
+                    health={inbox.syncHealth}
+                    lastSyncAt={inbox.lastSyncAt}
+                    tooltip={inbox.syncErrorMessage}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-2 justify-center">
           <Link

@@ -13,6 +13,8 @@ interface Draft {
   status: string;
   createdAt: string;
   preflightFailureReason?: string | null;
+  reconciliationAttemptCount?: number;
+  lastReconciliationAt?: string | null;
 }
 
 export default function DraftReviewQueue() {
@@ -22,6 +24,7 @@ export default function DraftReviewQueue() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(selectedIdParam ?? null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [hasOverrideCollisionPerm, setHasOverrideCollisionPerm] = useState(false);
 
   const load = useCallback(() => {
     api.get<{ drafts: Draft[] }>('/api/support/drafts')
@@ -39,8 +42,19 @@ export default function DraftReviewQueue() {
     return () => clearInterval(interval);
   }, [load]);
 
+  useEffect(() => {
+    api.get<{ permissions: string[] }>('/api/my-permissions')
+      .then(({ data }) => {
+        setHasOverrideCollisionPerm(data.permissions?.includes('support.draft.override_collision') ?? false);
+      })
+      .catch(() => {
+        // permissions fetch failure is non-fatal; default to no override perm
+      });
+  }, []);
+
   const selected = drafts.find(d => d.id === selectedId) ?? null;
   const isReconciliation = selected?.status === 'needs_reconciliation';
+  const isDispatching = selected?.status === 'dispatching';
   const hasCollision = selected?.preflightFailureReason === 'human_collision_blocked';
 
   const handleApprove = async (overrideCollision = false) => {
@@ -108,14 +122,24 @@ export default function DraftReviewQueue() {
               className={`w-full text-left p-3 border-b border-slate-100 transition-colors ${
                 selectedId === draft.id
                   ? 'bg-indigo-50 border-l-2 border-l-indigo-600'
-                  : draft.status === 'needs_reconciliation'
-                    ? 'bg-amber-50 hover:bg-amber-100'
-                    : 'hover:bg-slate-50'
+                  : draft.preflightFailureReason === 'human_collision_blocked'
+                    ? 'bg-red-50 hover:bg-red-100'
+                    : draft.status === 'needs_reconciliation'
+                      ? 'bg-amber-50 hover:bg-amber-100'
+                      : draft.status === 'dispatching'
+                        ? 'bg-slate-50 hover:bg-slate-100'
+                        : 'hover:bg-slate-50'
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <StatusPill status={draft.status} />
                 {draft.status === 'manually_marked_sent' && <BackLinkAwaitingBadge />}
+                {draft.preflightFailureReason === 'provider_conflict' && (
+                  <span className="text-xs text-amber-700 font-medium">Conflict detected, refresh ticket</span>
+                )}
+                {draft.preflightFailureReason === 'human_collision_blocked' && (
+                  <span className="text-xs text-red-700 font-medium">Human collision</span>
+                )}
               </div>
               <p className="text-xs font-medium text-slate-700 truncate">{draft.ticketId}</p>
               <p className="text-xs text-slate-500 mt-1 line-clamp-2">{draft.proposedBodyText}</p>
@@ -141,10 +165,16 @@ export default function DraftReviewQueue() {
                 </span>
               </div>
 
+              {selected.preflightFailureReason === 'provider_conflict' && (
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700 font-medium">
+                  Conflict detected, refresh ticket
+                </div>
+              )}
+
               {hasCollision && (
                 <CollisionCallout
                   message="A human agent may have already replied to this ticket."
-                  onOverride={() => handleApprove(true)}
+                  onOverride={hasOverrideCollisionPerm ? () => handleApprove(true) : undefined}
                   overriding={actionLoading}
                 />
               )}
@@ -158,7 +188,14 @@ export default function DraftReviewQueue() {
                 </div>
               </div>
 
-              {!isReconciliation && !hasCollision && (
+              {isDispatching && (
+                <div className="flex items-center gap-2 text-xs text-slate-500 mt-2">
+                  <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+                  still dispatching...
+                </div>
+              )}
+
+              {!isReconciliation && !isDispatching && !hasCollision && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleApprove()}
@@ -180,6 +217,14 @@ export default function DraftReviewQueue() {
               {isReconciliation && (
                 <div className="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                   <p className="text-xs font-semibold text-amber-700 mb-2">Manual resolution required</p>
+                  {(selected.reconciliationAttemptCount ?? 0) > 0 && (
+                    <p className="text-xs text-amber-600 mb-1">
+                      Reconciliation attempt {selected.reconciliationAttemptCount}
+                      {selected.lastReconciliationAt && (
+                        <> · Last tried {new Date(selected.lastReconciliationAt).toLocaleString()}</>
+                      )}
+                    </p>
+                  )}
                   <p className="text-xs text-amber-600 mb-3">This draft could not be automatically reconciled. Choose an action:</p>
                   <div className="flex gap-2 flex-wrap">
                     <button
@@ -187,21 +232,21 @@ export default function DraftReviewQueue() {
                       disabled={actionLoading}
                       className="px-3 py-1.5 rounded bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
                     >
-                      Retry
+                      Retry reconciliation
                     </button>
                     <button
                       onClick={() => handleManualResolve('mark_sent')}
                       disabled={actionLoading}
                       className="px-3 py-1.5 rounded border border-amber-300 text-amber-700 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 transition-colors"
                     >
-                      Mark as Sent
+                      Mark provider send as verified
                     </button>
                     <button
                       onClick={() => handleManualResolve('mark_failed')}
                       disabled={actionLoading}
                       className="px-3 py-1.5 rounded border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50 disabled:opacity-50 transition-colors"
                     >
-                      Mark as Failed
+                      Mark as failed in provider
                     </button>
                   </div>
                 </div>

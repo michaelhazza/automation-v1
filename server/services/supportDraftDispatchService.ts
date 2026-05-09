@@ -2,15 +2,18 @@
 // Spec: tasks/builds/support-desk-canonical/spec.md §8, §14.1, §14.7
 //
 // All DB access uses getOrgScopedDb(). Pure helpers live in supportDraftDispatchServicePure.ts.
+// Preflight pure evaluator in supportDraftDispatchPreflightPure.ts.
 
-import { eq, and, inArray, or, sql, notInArray } from 'drizzle-orm';
+import { eq, and, inArray, or, sql, notInArray, gt } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalTickets,
   canonicalTicketDrafts,
+  canonicalSupportAgents,
   connectorConfigs,
   integrationConnections,
   canonicalInboxes,
+  actionAttempts,
 } from '../db/schema/index.js';
 import type { CanonicalTicketDraft } from '../db/schema/canonicalTicketDrafts.js';
 import type { PrincipalContext } from './principal/types.js';
@@ -18,13 +21,16 @@ import {
   deriveActionIdempotencyKey,
   planSameRunSupersession,
 } from './supportDraftDispatchServicePure.js';
+import { evaluatePreflight } from './supportDraftDispatchPreflightPure.js';
 import type { SupportProposedActions } from '../../shared/types/supportProposedActions.js';
+import type { SupportInboxAgentConfig } from '../../shared/types/supportInboxAgentConfig.js';
 import { adapters } from '../adapters/index.js';
 import { classifyAdapterError } from '../adapters/integrationAdapter.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { logger } from '../lib/logger.js';
 import { SUPPORT_LOG_CODES } from '../../shared/types/supportObservability.js';
+import { auditService } from './auditService.js';
 
 // ---------------------------------------------------------------------------
 // Internal error helpers
@@ -174,10 +180,6 @@ export async function approveDraft(
     throw notFoundError('support.ticket.not_found');
   }
 
-  if (ticket.status === 'unknown_provider_status') {
-    throw preflightError('support.draft.preflight_failed', 'ticket_quarantined');
-  }
-
   // Load inbox agentConfig
   const [inbox] = await db
     .select({ agentConfig: canonicalInboxes.agentConfig })
@@ -190,8 +192,92 @@ export async function approveDraft(
     )
     .limit(1);
 
-  if (inbox?.agentConfig?.mode === 'disabled') {
-    throw preflightError('support.draft.preflight_failed', 'inbox_disabled');
+  // Resolve assignee agent kind when a human-assignee check is needed
+  let assigneeAgentKind: 'human' | 'bot' | null = null;
+  if (ticket.assigneeAgentId) {
+    const [assignee] = await db
+      .select({ agentKind: canonicalSupportAgents.agentKind })
+      .from(canonicalSupportAgents)
+      .where(
+        and(
+          eq(canonicalSupportAgents.id, ticket.assigneeAgentId),
+          eq(canonicalSupportAgents.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    assigneeAgentKind = assignee?.agentKind ?? null;
+  }
+
+  // Check for a newer draft superseding this one (§8.1 check #7)
+  // A draft is "newer" if it was created after this draft's createdAt for the same
+  // (ticket, run, visibility) tuple and is in an active or post-dispatch state.
+  const [newerDraft] = await db
+    .select({ id: canonicalTicketDrafts.id })
+    .from(canonicalTicketDrafts)
+    .where(
+      and(
+        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        eq(canonicalTicketDrafts.ticketId, draft.ticketId),
+        eq(canonicalTicketDrafts.proposedVisibility, draft.proposedVisibility),
+        gt(canonicalTicketDrafts.createdAt, draft.createdAt),
+        inArray(canonicalTicketDrafts.status, ['awaiting_review', 'dispatching', 'needs_reconciliation', 'sent']),
+      ),
+    )
+    .limit(1);
+
+  const agentConfig = inbox?.agentConfig as SupportInboxAgentConfig | null | undefined;
+  const callerIsAutonomousAgent = principalCtx.type !== 'user';
+
+  const preflight = evaluatePreflight({
+    draftStatus: draft.status,
+    proposedVisibility: draft.proposedVisibility as 'public' | 'internal',
+    inboxMode: agentConfig?.mode ?? null,
+    ticketStatus: ticket.status,
+    customerContactId: ticket.canonicalContactId,
+    assigneeAgentId: ticket.assigneeAgentId,
+    lastHumanActivityAt: ticket.lastHumanActivityAt ?? null,
+    collisionWindowMinutes: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+    respectHumanAssignee: agentConfig?.collisionWindow?.respectHumanAssignee ?? true,
+    assigneeAgentKind,
+    hasNewerDraft: newerDraft !== undefined,
+    overrideCollision: options?.overrideCollision === true,
+    callerIsAutonomousAgent,
+  });
+
+  if (!preflight.ok) {
+    if (preflight.reason === 'human_collision_blocked') {
+      logger.info(SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED, {
+        organisationId: principalCtx.organisationId,
+        connectorConfigId: draft.connectorConfigId,
+        ticketId: draft.ticketId,
+        draftId: draft.id,
+        inboxId: ticket.inboxId,
+        lastHumanActivityAt: preflight.collisionDetail?.lastHumanActivityAt,
+        minMinutesRequired: preflight.collisionDetail?.minMinutesRequired,
+      });
+    }
+    throw preflightError('support.draft.preflight_failed', preflight.reason ?? 'unknown');
+  }
+
+  // Collision override: if the caller is a human and overrideCollision was set, write audit event (§8.6 #2)
+  // The pure evaluator already approved the request (ok=true) when override is valid.
+  if (options?.overrideCollision === true && !callerIsAutonomousAgent) {
+    const actorUserId = principalCtx.type === 'user' ? principalCtx.id : undefined;
+    await auditService.log({
+      organisationId: principalCtx.organisationId,
+      actorId: actorUserId,
+      actorType: 'user',
+      action: 'support.draft.collision_override',
+      entityType: 'canonical_ticket_drafts',
+      entityId: draft.id,
+      metadata: {
+        draftId: draft.id,
+        ticketId: draft.ticketId,
+        reviewNote: options.reviewNotes ?? null,
+        lastHumanActivityAt: ticket.lastHumanActivityAt ?? null,
+        minMinutesRequired: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+      },
+    });
   }
 
   // ── Phase 2: Durable transition ─────────────────────────────────────────
@@ -274,6 +360,47 @@ export async function approveDraft(
     return { status: 'failed' };
   }
 
+  // ── action_attempts ledger (§14.1 + OQ-3 closure: no native idempotency) ──
+  // Lookup-then-insert before the adapter call to prevent duplicate provider sends.
+  const actionType = draft.proposedVisibility === 'public' ? 'reply' : 'internal_note';
+
+  const [existingAttempt] = await db
+    .select()
+    .from(actionAttempts)
+    .where(
+      and(
+        eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+        eq(actionAttempts.idempotencyKey, idempotencyKey),
+      ),
+    )
+    .limit(1);
+
+  if (existingAttempt?.attemptStatus === 'succeeded') {
+    // Already dispatched successfully — short-circuit; treat draft as sent.
+    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
+    await db
+      .update(canonicalTicketDrafts)
+      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
+      .where(eq(canonicalTicketDrafts.id, draftId));
+    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
+    return { status: 'sent', messageId: existingMessageId };
+  }
+
+  // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
+  if (!existingAttempt) {
+    await db
+      .insert(actionAttempts)
+      .values({
+        organisationId: principalCtx.organisationId,
+        connectorConfigId: draft.connectorConfigId,
+        idempotencyKey,
+        actionType,
+        attemptStatus: 'in_flight',
+        attemptedAt: new Date(),
+      })
+      .onConflictDoNothing();
+  }
+
   try {
     let replyId: string;
 
@@ -301,6 +428,17 @@ export async function approveDraft(
       replyId = result.replyId;
     }
 
+    // Mark the ledger row as succeeded
+    await db
+      .update(actionAttempts)
+      .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
+      .where(
+        and(
+          eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+          eq(actionAttempts.idempotencyKey, idempotencyKey),
+        ),
+      );
+
     const messageId = replyId || draft.id;
     await db
       .update(canonicalTicketDrafts)
@@ -313,6 +451,7 @@ export async function approveDraft(
     const adapterError = classifyAdapterError(err, config.connectorType, 'addReply');
 
     if (adapterError.retryable) {
+      // Leave the ledger row in 'in_flight' — reconciliation worker will update it.
       await db
         .update(canonicalTicketDrafts)
         .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
@@ -326,7 +465,17 @@ export async function approveDraft(
       return { status: 'needs_reconciliation' };
     }
 
-    // Terminal failure
+    // Terminal failure — mark ledger row failed
+    await db
+      .update(actionAttempts)
+      .set({ attemptStatus: 'failed' })
+      .where(
+        and(
+          eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+          eq(actionAttempts.idempotencyKey, idempotencyKey),
+        ),
+      );
+
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'failed', updatedAt: sql`NOW()` })

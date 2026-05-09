@@ -3512,7 +3512,7 @@ A provider-agnostic support-ticket layer that mirrors helpdesk data into five ca
 Five tenant-isolated tables (all carry `organisation_id` + RLS):
 - `canonical_inboxes` — one row per connected provider mailbox/queue; holds `provider_type`, `external_id`, `display_name`, `last_synced_at`, `sync_cursor`, `sync_health`.
 - `canonical_support_agents` — helpdesk agent identity; `external_id`, `display_name`, `email`, `is_active`. Read-only mirror; no write-back to provider.
-- `canonical_tickets` — core support ticket; FK to `canonical_inboxes` + nullable FK to `canonical_support_agents` (assignee); columns: `status` (open/pending/solved/closed/spam/quarantine), `priority`, `subject`, `customer_email`, `tags` (text[]), `provider_deleted`, `sla_breach_at`. `status='quarantine'` is a fail-closed sentinel for unknown provider statuses.
+- `canonical_tickets` — core support ticket; FK to `canonical_inboxes` + nullable FK to `canonical_support_agents` (assignee); columns: `status` (open/pending_internal/waiting_on_customer/resolved/closed/unknown_provider_status), `priority`, `subject`, `customer_email`, `tags` (text[]), `provider_deleted`, `sla_due_at`. `status='unknown_provider_status'` is a fail-closed sentinel for unknown provider statuses.
 - `canonical_ticket_messages` — messages and internal notes on a ticket. **Polymorphic-FK split:** `author_type IN ('customer','agent','bot','system')` discriminator + `author_contact_id` (→ `canonical_contacts`) + `author_support_agent_id` (→ `canonical_support_agents`) + CHECK constraint. `source_draft_id` UUID column (no inline FK in migration 0310; FK + partial index added in migration 0311 after the drafts table exists — deferred-FK pattern).
 - `canonical_ticket_drafts` — AI-proposed replies; status state machine: `draft | awaiting_review → dispatching → sent | needs_reconciliation | failed`; also `rejected`, `expired`, `superseded` (pre-dispatch exits); `manually_marked_sent` (operator override from `needs_reconciliation`). `dispatch_action_id` FK to `actions`.
 
@@ -3544,7 +3544,7 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 
 **Webhook path:** `server/adapters/teamwork/teamworkSupportWebhookHandler.ts` — real-time event ingestion + back-link writer. Deletion events from webhooks are unconditional (deterministic signal).
 
-**Status map:** `server/adapters/teamwork/teamworkSupportStatusMap.ts` — fail-closed: unknown Teamwork statuses map to `'quarantine'` rather than silently becoming `'open'`.
+**Status map:** `server/adapters/teamwork/teamworkSupportStatusMap.ts` — fail-closed: unknown Teamwork statuses map to `'unknown_provider_status'` rather than silently becoming `'open'`.
 
 ### Execution model — reconciliation
 
