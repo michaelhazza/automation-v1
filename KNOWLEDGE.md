@@ -3227,3 +3227,17 @@ The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test fil
 **Apply to:** `.claude/agents/finalisation-coordinator.md` Step 12.3. Locked in by operator 2026-05-09.
 
 **Detection heuristic.** Any future Phase-3 merge that does NOT use `--admin` either: (a) skips the prep commit entirely (also valid — but loses the bundled `current-focus → NONE` state in the squash), OR (b) wastes a full CI run on a docs-only commit. If the playbook ever drops `--admin`, treat as a contract violation and surface to operator before merging.
+
+
+### [2026-05-09] Pattern — Spec-design: drop the backfill that contradicts a conservative default introduced in the same spec
+
+**Date:** 2026-05-09
+**Source:** ChatGPT spec review of `tasks/builds/synthetos-foundation-refactor/spec.md` round 1, finding F1. Session log: `tasks/review-logs/chatgpt-spec-review-synthetos-foundation-refactor-2026-05-09T07-43-56Z.md`.
+
+**Rule.** When a spec adds (i) a new column with a conservative DEFAULT, (ii) a new governance column with a conservative DEFAULT that constrains downstream behaviour, AND (iii) a one-shot UPDATE that retroactively rewrites historical rows on the new column — check whether (iii) writes values the new governance default in (ii) would block. If yes, the backfill creates a permanent row-vs-policy mismatch (e.g., `agent_runs.controller_style = 'operator'` for an agent whose `subaccount_agents.controller_style_allowed = 'native_only'`). Drop the backfill rather than constraining it: the constrained version usually no-ops in practice (because the conservative default applies to almost all rows) and the unconstrained version produces inconsistent state. Forward-only on the new column is the right trade.
+
+**Apply to:** every spec that adds a new typed/enum column on a hot table AND introduces a governance column or default that gates downstream values on that column. Specifically: when migration N introduces both columns, ask "does my proposed backfill on column A write values that column B's default would forbid?". If yes, drop the backfill in the spec and document the forward-only trade (existing rows render with the conservative default; historical accuracy is the explicit cost).
+
+**Detection heuristic.** During spec review, grep the spec for `UPDATE.*SET.*WHERE.*default` patterns and cross-check against any new `DEFAULT` introduced in the same migration set. The contradiction is invisible at the SQL level (both statements are valid) but produces a class of "agent allow-list says X but historical run says Y" data states that surface confusingly months later in Run Trace UI.
+
+**Related:** the same review caught a CI-gate script using `node --eval "require('./....ts')"` (won't load TypeScript without a loader). Repo precedent for typed verifier harnesses is `npx tsx scripts/foo.ts` invoked from a thin bash wrapper — see `scripts/verify-visibility-parity.sh`. When sketching a new verify gate in a spec, match the existing repo pattern (bash + awk for source-text scans; bash + `npx tsx` for typed import-then-check). Don't invent a third pattern.

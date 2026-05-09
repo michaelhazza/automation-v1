@@ -6,6 +6,8 @@
 - PR: #149 — https://github.com/michaelhazza/automation-v1/pull/149
 - Mode: manual
 - Started: 2026-05-09T07:43:56Z
+- Finalised: 2026-05-09T08:01:19Z
+- **Verdict:** APPROVED (2 rounds; ChatGPT lock recommendation reached after the round-2 minor patch)
 
 ---
 
@@ -152,4 +154,59 @@ Apply the three final tightenings above. Then mark the spec accepted and move to
 Integrity check: 0 issues found this round (auto: 0, escalated: 0).
 
 Rationale: cross-checked log-code count (§3.5 8 entries; §9.4 8 listed) — consistent. Cross-checked `controller_style_decided` source union (§4.1.6 type union, §4.4.4 payload union) — now match. Cross-checked headline copy rules (§4.5.6 prohibits "blocked by policy" for envelope failure; §5.1.3 reserves "blocked by policy" for policy decisions, adds "failed before execution" for envelope failure) — consistent and non-overlapping. The R2-2 separation cleanly partitions controller-style-rejection (`foundation.controller_style.rejected`) from environment-rejection (`foundation.execution_environment.rejected`); §4.2.8 enforcement now references the correct code.
+
+---
+
+## Final Summary
+
+### Cross-round consistency
+No contradictions found across the two rounds. All findings were `apply` (auto or user-approved); no finding was applied in one round and rejected in another. Round 2 strictly tightened decisions made in Round 1 (the source-union mismatch in R2-1 was a forward-reference gap from Round 1's F2 mapping addition; R2-2 refined the rejection-event naming established by R1-F2's enforcement clause; R2-3 corrected a copy decision implicit in R1-F5's INV-19; R2-Optional formalised the closure rule R1-F10 introduced).
+
+### Implementation readiness checklist
+- [x] All inputs defined — every new function (`deriveControllerStyle`, `deriveGateLevel`, `executionModeToEnvironment`, `resolvePolicyEnvelope`, `runTraceService.query`, all five `credentialBrokerService` methods) has explicit input types in §4.x.
+- [x] All outputs defined — return shapes pinned for each function; HTTP error codes pinned for each route (`controller_style_not_allowed_for_agent`, `execution_mode_not_allowed_for_agent`); event payloads pinned for all eight `foundation.*` log codes.
+- [x] Failure modes covered — INV-19 (envelope resolution failure → run.status='failed' with reason `policy_envelope_resolution_failed`); §4.1.6 controllerStyle override-rejection vs derivation-downgrade; §4.2.8 environment rejection; §4.4.4 late-event handling.
+- [x] Ordering guarantees explicit — gate-derivation precedence (`subaccount_constraint > policy_override > preserved_existing > tier_default`) in §4.2.8; Run Trace cursor tuple `(timestamp, COALESCE(sequence_number, 0), source_table, source_id)` in §4.4.5 with terminal-timestamp pin in §4.4.4.
+- [x] No unresolved forward references — every section the spec references resolves to defined content; the new closed `ExecutionEnvironment` enum is defined in §4.2.8 and referenced consistently in §3.6, §4.5.4, §5.2.9, and §9.1.
+
+### Verdict
+**APPROVED.** ChatGPT explicitly recommended lock after the round-2 minor patch ("Apply the three final tightenings above. Then mark the spec accepted and move to build planning."). All four tightenings (R2-1, R2-2, R2-3, R2-Optional) applied. Spec status updated from `reviewing` to `accepted`.
+
+### Pattern extraction
+- **KNOWLEDGE.md** updated: yes (1 new entry — `[2026-05-09] Pattern — Spec-design: drop the backfill that contradicts a conservative default introduced in the same spec`). Entry captures (a) the F1 backfill-vs-default contradiction class, (b) the F6 CI-script TS-loader pattern (`npx tsx` from a bash wrapper, matching `verify-visibility-parity.sh`).
+
+### Doc sync sweep
+
+Per `docs/doc-sync.md` Investigation procedure. Candidate-stale-reference set (grep terms) derived from this session's diff: `controllerStyle`, `controller_style`, `controller_style_allowed`, `allowed_environments`, `policy_envelope_snapshot`, `executionModeToEnvironment`, `ExecutionEnvironment`, `CredentialBrokerService`, `policyEnvelopeResolver`, `runTraceService`, `RunTraceEvent`, `riskTier`, `RiskTier`, `deriveGateLevel`, `INV-19`, `foundation.execution_environment.rejected`, `foundation.policy_envelope.resolution_failed`, `verify-risk-tier-assigned`, `verify-no-direct-credential-service-calls`, `synthetos-nomenclature`.
+
+- **architecture.md** updated: no — none of the spec's new primitives are implemented yet; the spec describes future state. The architecture.md doc describes shipped behaviour and references no new primitives. Greps for `controllerStyle`, `CredentialBrokerService`, `policyEnvelopeResolver`, `runTraceService`, `policy_envelope_snapshot`, `riskTier`, `INV-19` all returned zero hits — nothing in architecture.md to update until after build phase.
+- **docs/capabilities.md** updated: n/a — spec is an internal-platform refactor (governance primitives, run-trace observability, credential facade structural rename). No customer-visible capability is added, removed, or renamed by the spec; capabilities.md scope per the doc-sync table did not apply.
+- **docs/integration-reference.md** updated: n/a — no integration behaviour change. The credential broker is a structural facade over existing `connectionTokenService` / `integrationConnectionService`; no new OAuth scope, no new skill, no new write capability, no new MCP preset, no new capability slug. Integration-reference scope did not apply.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md** updated: no — no new convention or build-discipline rule introduced. The spec follows existing conventions (RLS via `RLS_PROTECTED_TABLES`, service-tier separation via pure helpers, gates via `scripts/run-all-gates.sh`, migrations via `migrations/_down/`, idempotency posture per §3.6, test gates CI-only). `[missing-doc]` count this session: 0 (well under the >2 threshold that would force-update CLAUDE.md/architecture.md). Greps for `controllerStyle`, `CredentialBrokerService`, `policyEnvelopeResolver`, `riskTier`, `INV-19` returned zero hits.
+- **CONTRIBUTING.md** updated: n/a — no lint-suppression policy or contributor-facing convention change.
+- **docs/frontend-design-principles.md** updated: no — F8 (the "Coming soon" link removal) applied existing rules ("default to hidden", "one primary action") rather than introducing a new rule. The spec edits referenced the existing rules in `docs/frontend-design-principles.md` but did not add a new pattern, hard rule, or worked example to that doc.
+- **KNOWLEDGE.md** updated: yes (1 new entry — `[2026-05-09] Pattern — Spec-design: drop the backfill that contradicts a conservative default introduced in the same spec`).
+- **docs/spec-context.md** updated: yes (Framing date: bumped `last_reviewed_at` from `2026-05-05` to `2026-05-09` and the inline "Current as of" date to match. The framing block was verified during this spec review and remains correct — no statement changed; the bump records the verification per the file's "Update [...] when the framing is verified to still apply" rule).
+- **docs/decisions/** updated: n/a — durable architectural choices in this session (INV-19 fail-closed posture, Run Trace virtual-view-then-canonical-ledger strategy, no service-wide rename in Phase 1) are captured in the spec itself as invariants and non-goals. No standalone ADR authored; the spec serves as the durable record. Future ADR can be authored if any of these choices need their own home post-build.
+- **docs/context-packs/** updated: n/a — no `architecture.md` section anchor changed; no new context-pack mode needed.
+- **references/test-gate-policy.md** updated: n/a — no test-gate posture change. The new `verify-risk-tier-assigned.sh` is a CI-only static gate following the existing pattern; no umbrella command was added or removed; local-vs-CI policy unchanged.
+- **references/spec-review-directional-signals.md** updated: n/a — `spec-reviewer` (Codex) classifier signals were not surfaced this session.
+- **.claude/FRAMEWORK_VERSION + CHANGELOG.md** updated: n/a — repo-specific spec edits do not bump the framework version.
+
+### Final counts
+- Rounds: 2
+- Auto-accepted (technical): 9 applied (R1: F1, F3, F4, F6, F7, F9, F10 + R2: R2-1, R2-2, R2-Optional) | 0 rejected | 0 deferred
+- User-decided (user-facing + technical-escalated): 4 applied (R1: F2, F5, F8 + R2: R2-3) | 0 rejected | 0 deferred
+- Total findings processed: 13 | applied: 13 | rejected: 0 | deferred: 0
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / synthetos-foundation-refactor:
+  - [auto] `verify-no-direct-credential-service-calls.sh` advisory gate — Phase 1 advisory; promote to hard gate in Phase 1.5 if drift observed
+- KNOWLEDGE.md updated: yes (1 entry)
+- architecture.md updated: no — checked controllerStyle, CredentialBrokerService, policyEnvelopeResolver, runTraceService, policy_envelope_snapshot, riskTier, INV-19; zero stale references; spec describes future state not yet implemented
+- capabilities.md updated: n/a
+- integration-reference.md updated: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked controllerStyle, CredentialBrokerService, policyEnvelopeResolver, riskTier, INV-19; zero stale references; no convention or build-discipline rule introduced
+- spec-context.md updated: yes (last_reviewed_at bumped 2026-05-05 → 2026-05-09; inline date matched)
+- frontend-design-principles.md updated: no — F8 applied existing rules without introducing a new one
+- PR: #149 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/149
 

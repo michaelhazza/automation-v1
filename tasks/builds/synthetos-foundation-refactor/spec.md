@@ -1,8 +1,8 @@
 # SynthetOS Phase 1 Foundation Refactor — Implementation Spec
 
-**Status:** reviewing (spec-reviewer iterations 1–3 complete; READY_FOR_BUILD per `tasks/review-logs/spec-review-final-synthetos-foundation-refactor-2026-05-09T07-34-15Z.md`; awaiting operator acceptance to flip to `accepted`)  
+**Status:** accepted (spec-reviewer iterations 1–3 + chatgpt-spec-review rounds 1–2 complete; ChatGPT verdict APPROVED per `tasks/review-logs/chatgpt-spec-review-synthetos-foundation-refactor-2026-05-09T07-43-56Z.md`; ready for build planning via `feature-coordinator`)  
 **Spec date:** 2026-05-09  
-**Last updated:** 2026-05-09  
+**Last updated:** 2026-05-09 (chatgpt-spec-review round 2 finalisation)  
 **Author:** SynthetOS architecture group  
 **Build slug:** synthetos-foundation-refactor
 

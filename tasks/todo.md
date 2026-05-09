@@ -2471,6 +2471,10 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 - [ ] CI gate: "no raw DB writes outside transaction helpers" — Phase 4 candidate. Source: chatgpt-spec-review round 1 finding F6. Forbids `db.insert/update/delete` outside `withOrgTx` / explicit `db.transaction(...)` blocks. Allowlist for system bootstrap, migrations, RLS policy enforcement queries, admin tooling. Aligns with org-scoping invariants but outside Phase 3's deferred-backlog charter. Co-locate with R3-2 `AppError` taxonomy backfill (also Phase 4) — both items "tighten the write surface." [user]
 - [ ] Author OAuth-enrol + connection-token failure runbooks — post-launch task. Source: chatgpt-spec-review round 4 finding F11. Build a 1-page operational playbook covering `auditEvent.oauth.enrolFailed`, `auditEvent.oauth.enrolPartial`, `auditEvent.security.crossTenantAttempt`, `auditEvent.security.missingPrincipalContext` — what each event means, what to check, expected operator action. Defer until first-agency monitoring + on-call rotation are in place so the runbook is grounded in real signal patterns, not speculation. Lives at `docs/runbooks/oauth-enrol-failures.md` (or similar) — separate from the spec. [user]
 
+### synthetos-foundation-refactor (2026-05-09)
+
+- [ ] `verify-no-direct-credential-service-calls.sh` — author the advisory CI gate sketched in `tasks/builds/synthetos-foundation-refactor/spec.md` §11. Mirrors `verify-no-direct-adapter-calls.sh`; scans non-test source files outside the broker/token/connection services for direct imports. Phase 1 advisory; promote to a hard CI gate in Phase 1.5 if any drift is observed post-merge. Source: chatgpt-spec-review round 1 finding F7. [auto]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
