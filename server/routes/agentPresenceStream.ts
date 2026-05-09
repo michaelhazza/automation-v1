@@ -161,9 +161,17 @@ router.get(
   '/api/agent-presence/stream/:agentId',
   authenticateStreamToken,
   asyncHandler(async (req, res) => {
-    // Verify the token's bound scope matches the URL path param
-    const claimedAgentId = (req.streamTokenScope as { agentId?: string } | undefined)?.agentId;
-    if (claimedAgentId && claimedAgentId !== req.params.agentId) {
+    // Stream tokens are bound to a specific scope kind + ID. Reject any token
+    // whose scope.kind is not 'agent' or whose agentId does not match the URL
+    // path param. A workspace-scoped token must NOT be usable on an agent
+    // route, even though it would otherwise pass token signature verification.
+    const tokenScope = req.streamTokenScope;
+    if (
+      !tokenScope ||
+      tokenScope.kind !== 'agent' ||
+      !tokenScope.agentId ||
+      tokenScope.agentId !== req.params.agentId
+    ) {
       throw { statusCode: 403, message: 'Token scope does not match requested agent' };
     }
 
@@ -181,9 +189,18 @@ router.get(
   '/api/agent-presence/stream/workspace/:subaccountId',
   authenticateStreamToken,
   asyncHandler(async (req, res) => {
-    // Verify the token's bound scope matches the URL path param
-    const claimedSubaccountId = (req.streamTokenScope as { subaccountId?: string } | undefined)?.subaccountId;
-    if (claimedSubaccountId && claimedSubaccountId !== req.params.subaccountId) {
+    // Stream tokens are bound to a specific scope kind + ID. Reject any token
+    // whose scope.kind is not 'workspace' or whose subaccountId does not match
+    // the URL path param. An agent-scoped token must NOT be usable on a
+    // workspace route, even though it would otherwise pass token signature
+    // verification.
+    const tokenScope = req.streamTokenScope;
+    if (
+      !tokenScope ||
+      tokenScope.kind !== 'workspace' ||
+      !tokenScope.subaccountId ||
+      tokenScope.subaccountId !== req.params.subaccountId
+    ) {
       throw { statusCode: 403, message: 'Token scope does not match requested workspace' };
     }
 

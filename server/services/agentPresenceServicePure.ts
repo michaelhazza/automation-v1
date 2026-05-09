@@ -52,10 +52,21 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput 
   const lastEvent = events.length > 0 ? events[events.length - 1] : null;
   const lastEventTimestamp = lastEvent?.eventTimestamp ?? null;
 
-  // Detect terminal failure
-  const hasFailed = events.some(e =>
-    e.eventType === 'run_failed' || e.eventType === 'run_error' || e.eventType === 'run_terminated_with_error'
-  ) || sessionState?.status === 'failed';
+  // Detect terminal failure.
+  //
+  // The canonical run-lifecycle event is `run.completed` (architecture.md
+  // § Critical events; producer at `agentExecutionService.ts:1652`). There is
+  // no separate `run.failed` event — failure is signalled by the `finalStatus`
+  // field on the `run.completed` payload (`finalStatus !== 'completed'`).
+  // `sessionState.status === 'failed'` is an additional trip-wire from the
+  // IEE session lifecycle (container failure path, spec §6.2).
+  const isFailedRunCompleted = (e: PresenceInput['events'][number]): boolean => {
+    if (e.eventType !== 'run.completed') return false;
+    const payload = e.payload as { finalStatus?: unknown } | null;
+    const finalStatus = payload && typeof payload === 'object' ? payload.finalStatus : undefined;
+    return typeof finalStatus === 'string' && finalStatus !== 'completed';
+  };
+  const hasFailed = events.some(isFailedRunCompleted) || sessionState?.status === 'failed';
 
   if (hasFailed) {
     return {
@@ -70,11 +81,13 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput 
     };
   }
 
-  // Detect active run (run_started but no run_completed/run_failed)
-  const runStarted = events.filter(e => e.eventType === 'run_started');
+  // Detect active run (run.started but no run.completed for the same runId —
+  // success and failure both surface as `run.completed`; failure path is
+  // handled by the hasFailed branch above).
+  const runStarted = events.filter(e => e.eventType === 'run.started');
   const runCompleted = new Set(
     events
-      .filter(e => e.eventType === 'run_completed' || e.eventType === 'run_failed')
+      .filter(e => e.eventType === 'run.completed')
       .map(e => e.runId)
   );
   const activeRuns = runStarted.filter(e => e.runId && !runCompleted.has(e.runId));
@@ -85,10 +98,10 @@ export function resolvePresenceFromEvents(input: PresenceInput): PresenceOutput 
   if (activeRunId) {
     const activeRunEvents = events.filter(e => e.runId === activeRunId);
     const lastActiveEvent = activeRunEvents.at(-1);
-    // event_stream_delayed fires only when no activity beyond run_started has been received —
+    // event_stream_delayed fires only when no activity beyond run.started has been received —
     // steps in flight, HITL gates, and external calls indicate progress even if old
     const hasActivityBeyondStart = activeRunEvents.some(
-      e => e.eventType !== 'run_started'
+      e => e.eventType !== 'run.started'
     );
     if (!hasActivityBeyondStart && lastActiveEvent) {
       const msSinceLastEvent = nowMs - new Date(lastActiveEvent.eventTimestamp).getTime();
