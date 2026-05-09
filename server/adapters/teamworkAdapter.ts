@@ -195,7 +195,7 @@ export const teamworkAdapter: IntegrationAdapter = {
       connection: IntegrationConnection,
       ticketId: string,
       body: string,
-      options?: { status?: string },
+      options?: { idempotencyKey?: string; status?: string },
     ): Promise<TicketReplyResult> {
       try {
         const baseUrl = getBaseUrl(connection);
