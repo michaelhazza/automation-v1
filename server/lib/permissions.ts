@@ -185,6 +185,8 @@ export const SUBACCOUNT_PERMISSIONS = {
   SCORECARDS_VIEW:      'subaccount.scorecards.view',
   SCORECARDS_MANAGE:    'subaccount.scorecards.manage',
   CORRECTIONS_CREATE:   'subaccount.corrections.create',
+  // ── Credentials audit log (SynthetOS Phase 1) ────────────────────────────
+  CREDENTIALS_AUDIT_READ: 'credentials:audit:read',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -353,6 +355,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_VIEW,    description: 'List subaccount-visible scorecards',                               groupName: 'subaccount.scorecards' },
   { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_MANAGE,  description: 'Create, edit, and delete subaccount-scope scorecards; attach/detach suggested scorecards', groupName: 'subaccount.scorecards' },
   { key: SUBACCOUNT_PERMISSIONS.CORRECTIONS_CREATE, description: 'Use the Correct action on Run-trace to submit a correction',       groupName: 'subaccount.corrections' },
+  // subaccount.credentials (SynthetOS Phase 1)
+  { key: SUBACCOUNT_PERMISSIONS.CREDENTIALS_AUDIT_READ, description: 'View the credential audit log for this subaccount', groupName: 'subaccount.credentials' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
