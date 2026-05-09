@@ -3211,3 +3211,19 @@ The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test fil
 - If zero, also check `from '(\.\./|\./)[^']+\.ts'` is zero (never `.ts` — always `.js` for ESM resolution).
 
 **Applies to:** `.claude/agents/builder.md` Step 3 "CI-gate pre-flight"; `KNOWLEDGE.md [2026-05-09] Correction — four CI-only gates that G1 misses` (this is sub-rule 1.b — the `.js` extension requirement on relative imports inside `__tests__/`).
+
+
+### [2026-05-09] Correction — finalisation-coordinator merge command must use `--admin --squash --delete-branch`
+
+**Date:** 2026-05-09
+**Source:** Operator correction during PR #276 (slug: agent-workspace) Phase 3 finalisation merge step. The original `finalisation-coordinator` Step 12.3 used `gh pr merge {N} --squash --delete-branch`. The post-merge-prep commit in 12.2 (a docs-only `tasks/current-focus.md` edit setting status to NONE + capturing the squash-sha placeholder) triggers a fresh CI run on push. The merge then has to wait for required status checks to pass on a commit that changes nothing CI cares about — pure compute / wall-clock waste.
+
+**Rule.** `gh pr merge` in 12.3 is invoked with `--admin --squash --delete-branch`. The `--admin` flag bypasses the required-status-checks gate and merges immediately. This is safe because:
+
+- The prep commit in 12.2 is pure metadata: `tasks/current-focus.md` only. It cannot break code, schema, RLS, lint, or types.
+- The PREVIOUS commit (the last code-bearing commit on the feature branch) already passed all required checks before Step 12.1 was reached. That's the actual "what shipped" content; the squash-merge bundles the prep commit in but adds no new risk.
+- Required-status-checks is the contract for code changes; `--admin` is the documented operator override for exactly this kind of metadata-only trailing commit.
+
+**Apply to:** `.claude/agents/finalisation-coordinator.md` Step 12.3. Locked in by operator 2026-05-09.
+
+**Detection heuristic.** Any future Phase-3 merge that does NOT use `--admin` either: (a) skips the prep commit entirely (also valid — but loses the bundled `current-focus → NONE` state in the squash), OR (b) wastes a full CI run on a docs-only commit. If the playbook ever drops `--admin`, treat as a contract violation and surface to operator before merging.
