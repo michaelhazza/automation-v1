@@ -14,21 +14,25 @@ interface Props {
 }
 
 export default function FirstRunOverview({ agentId, identity }: Props) {
+  // Identity-language quick actions per locked brief — the first-run surface
+  // sells the embodiment layer, so we frame these as agent identity moves
+  // ("teach", "decide when it should work", "watch") rather than config tasks
+  // ("configure", "set a schedule", "add connections").
   const quickActions: QuickAction[] = [
     {
-      label: 'Configure this agent',
-      description: 'Set instructions, model, and behaviour.',
-      href: `/agents/${agentId}/edit?tab=configure`,
+      label: 'Teach the agent',
+      description: 'Give it instructions, knowledge, and a way of working.',
+      href: `/agents/${agentId}/edit?tab=behaviour`,
     },
     {
-      label: 'Set a schedule',
-      description: 'Run automatically on a trigger or timetable.',
+      label: 'Decide when it should work',
+      description: 'Pick the triggers and timetable for when this agent runs.',
       href: `/agents/${agentId}/edit?tab=schedule`,
     },
     {
-      label: 'Add connections',
-      description: 'Connect external services this agent can use.',
-      href: '/connections',
+      label: 'Watch it work',
+      description: 'See live progress, observations, and connections as runs happen.',
+      href: `/agents/${agentId}/edit?tab=runs`,
     },
   ];
 

@@ -74,19 +74,28 @@ interface WtEvent {
 /**
  * Accumulates working time from events.
  *
- * Pairing rule (spec §7.5):
- *   1. If both the `step_started` and the matching `step_completed` carry a
- *      non-empty `stepId`, pair on `(runId, stepId)`. This is the canonical
- *      path — concurrent / nested / retried steps in the same run pair
- *      correctly because each carries its own id.
- *   2. If `stepId` is missing on either side, fall back to `(runId)` — a
- *      single open slot per run. Multiple concurrent step_started events on
- *      the same run with no stepId are NOT supported (only the most recent
- *      open is tracked); the matching end pairs to it. Producers should
- *      always emit stepId; the fallback exists for legacy event fixtures.
+ * Pairing rule (spec §7.5) — strict fail-closed:
  *
- * The fallback never mis-pairs across runs or step ids; the worst case is a
- * dropped pair (under-count) rather than mis-attribution.
+ *   1. **Identified path.** When `step_completed.stepId` is present, pair to
+ *      the open `step_started` with the same `(runId, stepId)`. If no such
+ *      open exists, **drop the pair** — never fall through to the run-level
+ *      fallback. (Cross-fall-through under stepId asymmetry would risk
+ *      mis-pairing a stepId-bearing end to an unidentified start under
+ *      concurrent steps.)
+ *
+ *   2. **Unidentified path.** When `step_completed.stepId` is absent, pair
+ *      to the open `step_started` for that run **only when** exactly one
+ *      open exists in that run AND it also has no stepId. Any of these
+ *      conditions abort the pair (drop + skip):
+ *        - more than one open step is currently in flight for that run
+ *          (ambiguous — can't tell which the unidentified end belongs to);
+ *        - the only open step in the run carries a stepId (mismatched
+ *          identity — would cross-match an identified start to an
+ *          unidentified end).
+ *
+ *   3. **Retry semantics.** A `step_started` with the same `(runId, stepId)`
+ *      as an existing open replaces it. The earlier start was abandoned
+ *      (retry path); only the most recent one pairs.
  *
  * Wait-state subtraction (HITL pause, external call, retry backoff,
  * sub-agent delegation per §7.5) is NOT applied here — this helper is the
@@ -94,8 +103,13 @@ interface WtEvent {
  * `agentWorkingTimeService.ts` composes this with the wait-state ledger.
  */
 export function accumulateWorkingTime(events: WtEvent[]): WorkingTimeAccumulation {
-  const openByStepId = new Map<string, number>();   // key: `${runId}::${stepId}`
-  const openByRunId = new Map<string, number>();    // fallback: runId only
+  // Open intervals are tracked as a flat list so we can reason about
+  // "number of opens currently in flight per run" cleanly. An entry is the
+  // tuple `(runId, stepId | null, startMs)`. Producers retry by re-emitting
+  // `step_started` with the same `(runId, stepId)`; that case overwrites the
+  // existing entry rather than appending a duplicate.
+  interface OpenStep { runId: string; stepId: string | null; startMs: number; }
+  const openSteps: OpenStep[] = [];
   let totalMs = 0;
   const runIds = new Set<string>();
   const completedRuns = new Set<string>();
@@ -108,21 +122,34 @@ export function accumulateWorkingTime(events: WtEvent[]): WorkingTimeAccumulatio
 
     if (event.eventType === 'step_started') {
       const startMs = new Date(event.eventTimestamp).getTime();
-      if (event.stepId) {
-        openByStepId.set(`${event.runId}::${event.stepId}`, startMs);
+      const stepId = event.stepId ?? null;
+      const idx = openSteps.findIndex(o => o.runId === event.runId && o.stepId === stepId);
+      if (idx >= 0) {
+        // Retry / re-emit: replace the abandoned start with the new one.
+        openSteps[idx] = { runId: event.runId, stepId, startMs };
       } else {
-        openByRunId.set(event.runId, startMs);
+        openSteps.push({ runId: event.runId, stepId, startMs });
       }
     } else if (event.eventType === 'step_completed') {
       let startMs: number | undefined;
       if (event.stepId) {
-        const k = `${event.runId}::${event.stepId}`;
-        startMs = openByStepId.get(k);
-        if (startMs !== undefined) openByStepId.delete(k);
-      }
-      if (startMs === undefined) {
-        startMs = openByRunId.get(event.runId);
-        if (startMs !== undefined) openByRunId.delete(event.runId);
+        // Path 1: identified — pair only by exact (runId, stepId). No
+        // cross-fallback to the unidentified path; drop if no match.
+        const idx = openSteps.findIndex(o => o.runId === event.runId && o.stepId === event.stepId);
+        if (idx >= 0) {
+          startMs = openSteps[idx].startMs;
+          openSteps.splice(idx, 1);
+        }
+      } else {
+        // Path 2: unidentified — pair only when exactly one open exists in
+        // this run AND it lacks stepId. Multiple opens or any identified
+        // open in flight aborts (ambiguous identity).
+        const opensInRun = openSteps.filter(o => o.runId === event.runId);
+        if (opensInRun.length === 1 && opensInRun[0].stepId === null) {
+          startMs = opensInRun[0].startMs;
+          const idx = openSteps.indexOf(opensInRun[0]);
+          openSteps.splice(idx, 1);
+        }
       }
       if (startMs !== undefined) {
         const endMs = new Date(event.eventTimestamp).getTime();

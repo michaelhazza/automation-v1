@@ -137,4 +137,44 @@ describe('accumulateWorkingTime', () => {
     const result = accumulateWorkingTime(events);
     expect(result.workingTimeSeconds).toBe(30);
   });
+
+  it('drops the pair when end has stepId but no matching open exists', () => {
+    // step_completed carries stepId='B' but only stepId='A' is open. Strict
+    // fail-closed: do not cross-fall through to the unidentified slot,
+    // even though one is implicitly available. Drop the pair entirely.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_completed', stepId: 'B', eventTimestamp: '2026-05-08T10:00:30.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(0); // no pair recorded
+  });
+
+  it('drops the pair when end lacks stepId but an identified open is in flight', () => {
+    // An identified step (stepId='A') is open in run1; an unidentified end
+    // arrives. Cross-pairing would mis-attribute the unidentified end to A.
+    // Strict fail-closed: drop instead.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      { runId: 'run1', eventType: 'step_completed',              eventTimestamp: '2026-05-08T10:00:30.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(0);
+  });
+
+  it('drops an unidentified pair when multiple opens are in flight (ambiguous)', () => {
+    // Two unidentified starts in the same run — the run-level fallback can
+    // no longer decide which one a single unidentified end belongs to. Both
+    // pairs would otherwise become arbitrary. Drop instead.
+    const events = [
+      { runId: 'run1', eventType: 'step_started',   eventTimestamp: '2026-05-08T10:00:00.000Z' },
+      // The retry-replacement rule means a second start without stepId in
+      // the same run replaces the first. Use a concurrent identified start
+      // alongside an unidentified one to genuinely create ambiguity.
+      { runId: 'run1', eventType: 'step_started',   stepId: 'A', eventTimestamp: '2026-05-08T10:00:10.000Z' },
+      { runId: 'run1', eventType: 'step_completed',              eventTimestamp: '2026-05-08T10:00:30.000Z' },
+    ];
+    const result = accumulateWorkingTime(events);
+    expect(result.workingTimeSeconds).toBe(0);
+  });
 });

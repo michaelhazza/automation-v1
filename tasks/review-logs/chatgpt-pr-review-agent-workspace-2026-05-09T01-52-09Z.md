@@ -48,3 +48,35 @@ Diffs prepared. Awaiting operator paste.
 - `npm run lint` — 0 errors (888 pre-existing warnings, none new).
 - `npm run typecheck` — clean.
 - `npx vitest run server/services/agentWorkingTimeServicePure.test.ts` — **12/12 passed** (3 new cases for stepId pairing).
+
+## Round 2 — ChatGPT verdict + triage
+
+**Verdict:** APPROVED with minor follow-ups — no blocking architecture / security / contract issues remain. Two technical follow-ups + one optional polish; operator said "implement what is worth keeping and finalise this review", so all three implemented.
+
+| ID | Title | Triage | Severity | Recommendation | User decision | Outcome |
+|---|---|---|---|---|---|---|
+| R2-S1 | Permission-gated Overview tab has pre-fetch visibility window | technical | low | implement | auto | implemented |
+| R2-S2 | Working-time fallback should fail closed when only one side lacks stepId | technical | low | implement | auto | implemented |
+| R2-Polish | FirstRunOverview uses config-language not identity-language | user-facing | low | implement | approved (operator gave discretion + locked brief favours identity language) | implemented |
+
+### Implementation summary
+
+- **R2-S1** (`client/src/pages/build/AgentEditPage.tsx`): `visibleTabs` now fails closed during pre-fetch — any tab with a permission gate is hidden until `/api/my-permissions` resolves. The page render also waits for `orgPerms !== null` before showing tab content, so the URL `?tab=overview` can never mount the Overview tab + fire a protected backend request before the redirect lands. Admin / system_admin still see all tabs immediately.
+- **R2-S2** (`server/services/agentWorkingTimeServicePure.ts`, `server/services/agentWorkingTimeService.ts`, `server/services/agentWorkingTimeServicePure.test.ts`): pure helper rewritten to track open intervals as a flat list of `(runId, stepId | null)` tuples. End with `stepId` matches only by exact `(runId, stepId)` and never falls through to the unidentified slot; end without `stepId` pairs only when exactly one open exists in that run AND it lacks `stepId` (drops on multiple opens or any identified open in flight). Production service mirrors: identified path failures drop + warn `working_time.step_identity_missing`; unidentified path runs the legacy "latest prior in same run" fallback only after a count subquery confirms zero identified opens are in flight. 3 new pure-helper tests cover the three drop cases (asymmetric stepId, identified open vs unidentified end, ambiguous concurrent opens). 15/15 pure tests pass.
+- **R2-Polish** (`client/src/components/agent-workspace/FirstRunOverview.tsx`): quick-action labels rewritten in identity language per locked brief — "Configure this agent" → "Teach the agent", "Set a schedule" → "Decide when it should work", "Add connections" → "Watch it work" (with target tabs realigned). Behaviour tab is the right destination for "Teach"; Runs tab for "Watch".
+
+### Verification
+
+- `npm run lint` — 0 errors (888 pre-existing warnings, none new from this round).
+- `npm run typecheck` — clean.
+- `npx vitest run server/services/agentWorkingTimeServicePure.test.ts` — **15/15 passed** (3 new round-2 fail-closed cases).
+
+## Final Summary
+
+**Operator signal:** "finalise this review and continue on" after Round 2 verdict APPROVED-with-minor-follow-ups + all three follow-ups implemented.
+
+**Closing verdict:** APPROVED — operator finalised after Round 2.
+
+**Rounds:** 2 (Round 1 closed 4 Blockers + 3 Strong; Round 2 closed 2 small follow-ups + 1 polish).
+
+**Doc-sync sweep:** carried by `finalisation-coordinator` Step 6 (full sweep across 13 registered docs).

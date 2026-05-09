@@ -123,21 +123,22 @@ export async function applyEvent(
   }
 
   // 3. step_completed — pair to the matching step_started by stable step
-  //    identity (spec §7.5). Pairing rule:
-  //      a) If `payload.stepId` is present, find the start with the same
-  //         `runId` AND matching `payload->>'stepId'`. This is the canonical
-  //         path — concurrent / nested / retried steps in the same run pair
-  //         correctly because each carries its own id.
-  //      b) Workflow-engine steps may use `(taskId, taskSequence)` instead;
-  //         when both are present, find the start with the matching pair.
-  //      c) Fallback: latest prior `step_started` in the same run by
-  //         sequenceNumber. Used only for legacy events emitted before the
-  //         producer wired a stepId — the writer logs a one-line warning so
-  //         operators can detect drift.
+  //    identity (spec §7.5). Strict fail-closed: never cross-fall-through
+  //    between identity paths, because identity asymmetry between an end
+  //    and a start indicates a producer bug, not a legacy event.
   //
-  //    The fallback never pairs across runs (the runId scope is enforced)
-  //    so the worst case is a single mis-pair within one run rather than
-  //    cross-tenant or cross-run leakage.
+  //    Pairing paths in priority order:
+  //      a) `payload.stepId` present → match start by `payload->>'stepId'`.
+  //         If no match, drop + warn `step_identity_missing`.
+  //      b) `(taskId, taskSequence)` both present (Workflows V1) → match
+  //         start by both. If no match, drop + warn.
+  //      c) Neither present (true legacy event) → fall back to "latest
+  //         prior step_started in same run" ONLY IF no identified open
+  //         start exists in this run. Otherwise the unidentified end could
+  //         ambiguously match an identified open — drop + warn.
+  //
+  //    Path (a/b) failure does NOT fall through to (c). Cross-pairing under
+  //    identity asymmetry would silently mis-attribute time.
   if (eventTypeStr === 'step_completed') {
     const completedPayload = (event.payload ?? {}) as { stepId?: string | null };
     const stepId = typeof completedPayload.stepId === 'string' && completedPayload.stepId.length > 0
@@ -145,8 +146,9 @@ export async function applyEvent(
       : null;
     const completedTaskId = (event as { taskId?: string | null }).taskId ?? null;
     const completedTaskSequence = (event as { taskSequence?: number | null }).taskSequence ?? null;
+    const hasTaskKey = completedTaskId !== null && completedTaskSequence !== null;
 
-    let startRows: Array<{ eventTimestamp: Date | string }> = [];
+    let startRows: Array<{ eventTimestamp: Date | string }>;
 
     if (stepId) {
       // Path (a): pair by explicit stepId.
@@ -164,9 +166,17 @@ export async function applyEvent(
         )
         .orderBy(desc(agentExecutionEvents.sequenceNumber))
         .limit(1);
-    }
 
-    if (startRows.length === 0 && completedTaskId && completedTaskSequence !== null) {
+      if (startRows.length === 0) {
+        logger.warn('working_time.step_identity_missing', {
+          runId: event.runId,
+          eventId: event.id,
+          reason: 'stepId on completed has no matching start',
+          stepId,
+        });
+        return;
+      }
+    } else if (hasTaskKey) {
       // Path (b): pair by workflow `(taskId, taskSequence)`.
       startRows = await db
         .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
@@ -177,21 +187,67 @@ export async function applyEvent(
             eq(agentExecutionEvents.organisationId, organisationId),
             eq(agentExecutionEvents.eventType, 'step_started'),
             lt(agentExecutionEvents.sequenceNumber, event.sequenceNumber),
-            eq(agentExecutionEvents.taskId, completedTaskId),
-            eq(agentExecutionEvents.taskSequence, completedTaskSequence),
+            eq(agentExecutionEvents.taskId, completedTaskId!),
+            eq(agentExecutionEvents.taskSequence, completedTaskSequence!),
           ),
         )
         .orderBy(desc(agentExecutionEvents.sequenceNumber))
         .limit(1);
-    }
 
-    if (startRows.length === 0) {
-      // Path (c): legacy fallback — latest prior step_started in same run.
+      if (startRows.length === 0) {
+        logger.warn('working_time.step_identity_missing', {
+          runId: event.runId,
+          eventId: event.id,
+          reason: 'task key on completed has no matching start',
+          taskId: completedTaskId,
+          taskSequence: completedTaskSequence,
+        });
+        return;
+      }
+    } else {
+      // Path (c): legacy event with no identity. Only safe to fall back
+      // when no identified concurrent step is open for this run. The check
+      // counts identified starts vs identified completions in this run; if
+      // starts > completions, an identified open exists and the
+      // unidentified end cannot be safely paired.
+      const openIdentified = await db.execute<{ open_count: number }>(sql`
+        SELECT GREATEST(0,
+          (SELECT COUNT(*)::int FROM agent_execution_events s
+           WHERE s.run_id = ${event.runId}::uuid
+             AND s.organisation_id = ${organisationId}::uuid
+             AND s.event_type = 'step_started'
+             AND s.sequence_number < ${event.sequenceNumber}
+             AND (s.payload->>'stepId' IS NOT NULL
+                  OR (s.task_id IS NOT NULL AND s.task_sequence IS NOT NULL)))
+          -
+          (SELECT COUNT(*)::int FROM agent_execution_events e
+           WHERE e.run_id = ${event.runId}::uuid
+             AND e.organisation_id = ${organisationId}::uuid
+             AND e.event_type = 'step_completed'
+             AND e.sequence_number < ${event.sequenceNumber}
+             AND (e.payload->>'stepId' IS NOT NULL
+                  OR (e.task_id IS NOT NULL AND e.task_sequence IS NOT NULL)))
+        ) AS open_count
+      `);
+
+      const openCountRows = openIdentified as unknown as Array<{ open_count: number }>;
+      const openCount = openCountRows[0]?.open_count ?? 0;
+
+      if (openCount > 0) {
+        logger.warn('working_time.step_identity_missing', {
+          runId: event.runId,
+          eventId: event.id,
+          reason: 'unidentified completed while identified step is open',
+          openIdentifiedCount: openCount,
+        });
+        return;
+      }
+
       logger.warn('working_time.step_completed_without_step_id', {
         runId: event.runId,
         eventId: event.id,
-        hasStepId: stepId !== null,
-        hasTaskKey: completedTaskId !== null && completedTaskSequence !== null,
+        hasStepId: false,
+        hasTaskKey: false,
       });
       startRows = await db
         .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })

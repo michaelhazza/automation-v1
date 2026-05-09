@@ -108,12 +108,19 @@ export default function AgentEditPage() {
 
   // Visible tab set — Overview is hidden for users without `org.agents.view`
   // (spec §4.1). System / org admins always see all tabs.
+  //
+  // Fail-closed pre-fetch: while permissions are loading we hide every tab
+  // that has a permission gate. The "Overview tab does not appear" UI
+  // contract holds for users without `org.agents.view` even during the brief
+  // window before `/api/my-permissions` resolves, and we never render an
+  // Overview tab that would mount and fire a protected backend request
+  // before the redirect lands.
   const visibleTabs = useMemo<TabKey[]>(() => {
-    if (orgPerms === null) return TAB_ORDER; // pre-fetch: render all to avoid flicker; redirect runs once perms load
     return TAB_ORDER.filter((tab) => {
       const required = TAB_PERMISSION_KEYS[tab];
       if (!required) return true;
       if (userRole === 'system_admin' || userRole === 'admin') return true;
+      if (orgPerms === null) return false; // fail-closed during pre-fetch
       return orgPerms.has(required);
     });
   }, [orgPerms, userRole]);
@@ -257,7 +264,11 @@ export default function AgentEditPage() {
     }
   }, [id, navigate]);
 
-  if (isLoading) {
+  // Wait for permissions before rendering content. The agent fetch and the
+  // perms fetch run in parallel; if perms haven't arrived yet we hold the
+  // loading state so we never render a tab strip with a permission-gated
+  // tab visible to a user who lacks that permission.
+  if (isLoading || orgPerms === null) {
     return (
       <PageShell>
         <div className="p-8 text-slate-400 text-sm">Loading...</div>
