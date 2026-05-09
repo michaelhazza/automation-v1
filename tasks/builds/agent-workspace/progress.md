@@ -78,8 +78,8 @@ Audit found **7 mechanical gaps** across 6 of the 8 surfaces. All fixed. Surface
 | **Plan gate** | **done** | **Operator approved Rev 3 on 2026-05-08. No Round 2 review — verdict "diminishing returns, not missing structural rigor." Proceed to per-chunk builder loop on Sonnet.** |
 | Per-chunk loop | done | 13 of 14 chunks built and committed (Chunk 12 deferred per spec — HARD-BLOCKED on Phase 1 contract lock). See per-chunk table below. |
 | G2 integrated-state static-check gate | done | lint 0 errors, typecheck clean. 1 attempt. |
-| Branch-level review pass | in_progress | spec-conformance: CONFORMANT_AFTER_FIXES (1 mech fix, 6 directional gaps deferred AGW-DEF-1..6, log `tasks/review-logs/spec-conformance-log-agent-workspace-2026-05-08T22-10-41Z.md`, commits `7ee4f417` + `06da5000`). adversarial-reviewer: HOLES_FOUND (1 confirmed-hole AGW-ADV-1 cross-tenant SSE leak; 2 likely-holes AGW-ADV-2 working-time split-brain, AGW-ADV-3 unbounded pagination; log `tasks/review-logs/adversarial-review-log-agent-workspace-2026-05-08T22-28-13Z.md`). pr-reviewer next. |
-| Doc-sync gate | pending | Verdicts already recorded in this file under `## Chunk 14 doc-sync verdicts` — verify completeness. |
+| Branch-level review pass | done | spec-conformance: CONFORMANT_AFTER_FIXES (1 mech fix, 6 deferred). adversarial-reviewer: HOLES_FOUND (1 confirmed AGW-ADV-1 closed in fix-loop B1; 2 likely AGW-ADV-2/3 deferred). pr-reviewer round 0: CHANGES_REQUESTED (8 Blockers). Fix-loop round 1 (`2f2a3ed3`/`54796eb9`/`b9f90b49`/`a9f1f2c4`): closed 6/8. pr-reviewer round 1: CHANGES_REQUESTED (4 new Blockers + 1 strong). Fix-loop round 2 (`ba956806`): closed B-NEW-1..4 + S2. Migration renumber + S2 merge (`cbe5904f`/`d931116d`): branch migrations 0295/0296 → 0305/0306; PR #275 absorbed. pr-reviewer round 2: APPROVED. S4 cleanup (`58739da5`): dead authenticateSSE export removed. dual-reviewer: APPROVED with 3 fixes applied (`b7335b75`/`57334bec`) — schema `.js` suffixes, scope-kind enforcement, canonical `run.*` event names. pr-reviewer §8.5 re-review: APPROVED. |
+| Doc-sync gate | done | Verdicts re-verified at Phase 2 close (see `## Phase 2 close doc-sync verdicts` section). |
 | Handoff write (Phase 2 section) | pending | |
 | current-focus.md → REVIEWING | pending | |
 | End-of-phase prompt | pending | |
@@ -170,3 +170,23 @@ Investigation procedure per `docs/doc-sync.md` ran for all 13 registered docs. G
 | `references/test-gate-policy.md` | NO — no test-gate posture change; no new umbrella command became forbidden or allowed | N/A | `no — no test-gate posture change` |
 | `references/spec-review-directional-signals.md` | NO — no spec-reviewer signal pattern repeated >2 times in this build | N/A | `no — no recurring spec-reviewer signal in this build` |
 | `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | NO — agent-workspace is a repo-specific feature build; framework layer (agent fleet/conventions) not changed | N/A | `no — repo-specific feature build; framework version not affected` |
+
+## Phase 2 close doc-sync verdicts
+
+Re-verified at Phase 2 close after fix-loops + dual-reviewer + S2 merge of PR #275. Investigation procedure per `docs/doc-sync.md` ran for all 13 registered docs. Cumulative branch diff vs `origin/main` covers 109 files including 14 chunks of agent-workspace + fix-loop changes (stream-token system, producer wiring, SSE event-type fanout, run-step observation hook, B6 working-time pairing rewrite, dual-reviewer fixes).
+
+| Doc | Verdict |
+|-----|---------|
+| `architecture.md` | `yes (Agent Workspace section, Key files per domain rows for agent-workspace files, Presence stream topology updated to authenticateStreamToken + signed stream-token via B-NEW-4 fix-loop)` |
+| `KNOWLEDGE.md` | `yes (5 entries appended in Chunk 14: single-node SSE topology, monotonic-clock working time, bounded SSE payload, immutability GUC bypass, withOrgTx side-effect boundary)` |
+| `docs/capabilities.md` | `yes (Persistent Agent Workspace product capability section + Hosted VM-per-agent platforms row added in Chunk 13)` |
+| `docs/integration-reference.md` | `no — checked agentPresenceStreamPublisher, ieeSessionService, agentWorkingTimeService, agentObservationService, authenticateStreamToken, signStreamToken; zero new integration slugs, OAuth providers, MCP presets, capability slugs, or aliases` |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | `no — no build-discipline / convention / agent-fleet / review-pipeline changes; the SSE stream-token pattern is documented in architecture.md and ADR-0008, not in CLAUDE.md/DEVELOPMENT_GUIDELINES.md` |
+| `CONTRIBUTING.md` | `no — no lint-suppression / comment-format / contributor-convention changes` |
+| `docs/frontend-design-principles.md` | `no — no new UI hard rule or worked example introduced; agent-workspace UI follows existing principles` |
+| `docs/spec-context.md` | `n/a — Phase 2 build, not a spec-review session` |
+| `docs/decisions/` | `yes (ADR-0008 — SSE auth via short-lived signed stream-token; durable architectural choice surfaced by pr-reviewer round 0 finding B3 and operator-elected over HttpOnly cookie / fetch-event-source polyfill alternatives. README.md index updated.)` |
+| `docs/context-packs/` | `no — no architecture.md anchor renamed or removed; new `agent-workspace` section added but context packs reference existing anchors only` |
+| `references/test-gate-policy.md` | `no — no test-gate posture change; no new umbrella command became forbidden or allowed` |
+| `references/spec-review-directional-signals.md` | `no — no recurring spec-reviewer signal pattern surfaced >2 times in this build` |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | `no — agent-workspace is a repo-specific feature build; framework layer (agent fleet/conventions) not changed` |

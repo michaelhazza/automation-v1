@@ -134,6 +134,65 @@ Phase 2 must NOT implement deferred items — if a chunk surfaces a need that pu
 
 ---
 
+## Phase 2 (BUILD) — complete
+
+**Plan path:** `tasks/builds/agent-workspace/plan.md` (Rev 4 — migration renumber post-S2)
+**Chunks built:** 13 of 14 (Chunk 12 deliberately deferred per spec — HARD-BLOCKED on Phase 1 contract lock; intentional and pre-approved)
+**Branch HEAD at handoff:** `57334bec`
+**Branch state:** 0 behind / 55 ahead of `origin/main` (S2 sync absorbed PR #275 trust-verification-layer)
+**G1 attempts (per chunk):** all chunks 1-attempt G1 except Chunk 8 (2 attempts) and Chunk 9 (3 attempts due to spec-compliance fix `d03de2cd`)
+**G2 attempts:** 1
+**G3 attempts (post-fix-loops):** 1 each round, 0 errors
+
+### Branch-level review pass
+
+| Stage | Verdict | Log |
+|---|---|---|
+| spec-conformance | CONFORMANT_AFTER_FIXES (1 mech fix; 6 directional gaps deferred AGW-DEF-1..6) | `tasks/review-logs/spec-conformance-log-agent-workspace-2026-05-08T22-10-41Z.md` |
+| adversarial-reviewer | HOLES_FOUND (1 confirmed AGW-ADV-1 closed in fix-loop; 2 likely AGW-ADV-2/3 deferred) | `tasks/review-logs/adversarial-review-log-agent-workspace-2026-05-08T22-28-13Z.md` |
+| pr-reviewer round 0 | CHANGES_REQUESTED (8 Blockers B1..B8) | `tasks/review-logs/pr-review-log-agent-workspace-2026-05-08T22-41-57Z.md` |
+| Fix-loop round 1 | Closed 6 of 8 (B1, B3, B4, B6, B7, B8). B2 partial. | Commits `2f2a3ed3`, `54796eb9`, `b9f90b49`, `a9f1f2c4` |
+| pr-reviewer round 1 | CHANGES_REQUESTED (4 new Blockers B-NEW-1..4 + 1 strong S2) | `tasks/review-logs/pr-review-log-agent-workspace-2026-05-09T00-23-16Z.md` |
+| Fix-loop round 2 | Closed B-NEW-1, B-NEW-2, B-NEW-3, B-NEW-4, S2 | Commit `ba956806` |
+| Migration renumber + S2 merge | Branch's 0295/0296 → 0305/0306; PR #275 absorbed; 7 conflicts resolved | Commits `cbe5904f`, `d931116d` |
+| pr-reviewer round 2 (post-merge) | APPROVED (zero Blockers; 4 Strong carry-overs + 1 new strong S4 dead authenticateSSE) | `tasks/review-logs/pr-review-log-agent-workspace-2026-05-09T01-09-02Z.md` |
+| S4 cleanup | Dead `authenticateSSE` export removed | Commit `58739da5` |
+| dual-reviewer (Codex) | APPROVED with 3 substantive fixes applied: schema `.js` suffixes, scope-kind enforcement, canonical `run.*` event names | `tasks/review-logs/dual-review-log-agent-workspace-2026-05-09T01-29-34Z.md` (commits `b7335b75`, `57334bec`) |
+| pr-reviewer §8.5 re-review | APPROVED (3 dual-reviewer fixes confirmed-closed; no regressions; 1 Strong carry-over surfaced not introduced) | `tasks/review-logs/pr-review-log-agent-workspace-2026-05-09T01-37-36Z.md` |
+
+### Doc-sync gate (13 registered docs)
+
+All verdicts recorded in `tasks/builds/agent-workspace/progress.md § Phase 2 close doc-sync verdicts`. Summary:
+
+- **Updated:** `architecture.md` (Agent Workspace section, Presence stream topology with new auth scheme), `KNOWLEDGE.md` (5 patterns), `docs/capabilities.md` (Persistent Agent Workspace), `docs/decisions/0008-sse-stream-token-auth.md` (new ADR), `docs/decisions/README.md` (index)
+- **Not updated (with rationale):** `docs/integration-reference.md`, `CLAUDE.md`/`DEVELOPMENT_GUIDELINES.md`, `CONTRIBUTING.md`, `docs/frontend-design-principles.md`, `docs/context-packs/`, `references/test-gate-policy.md`, `references/spec-review-directional-signals.md`, `.claude/FRAMEWORK_VERSION`/`.claude/CHANGELOG.md`
+- **n/a:** `docs/spec-context.md` (spec-review only)
+
+### Open issues for finalisation
+
+**Deferred from this build (routed to `tasks/todo.md`):**
+- AGW-DEF-1..6 (6 directional gaps from spec-conformance — non-architectural)
+- AGW-ADV-2 (working-time split-brain on crash; partly mitigated by B6 rewrite, retains a small window)
+- AGW-ADV-3 (unbounded pagination on Overview endpoints — stub today, becomes hole when stubs replaced with real queries)
+- 4 Strong carry-overs from pr-reviewer rounds 1/2: S1 (idempotency UNIQUE org-scope follow-up migration), S2 (permission-revocation lag on live SSE — bounded by 120s TTL), S3 (producer-wiring tests), S-NEW (`finalStatus !== 'completed'` discriminator coarseness — surfaced not introduced)
+
+**For Phase 3 (finalisation-coordinator):**
+- Run S2 branch sync (already done early in Phase 2 at operator's request — should be a no-op or tiny delta)
+- G4 regression guard
+- chatgpt-pr-review (manual ChatGPT-web rounds — operator-driven cadence)
+- Full doc-sync sweep
+- KNOWLEDGE.md pattern extraction (any new patterns surfaced during Phase 3)
+- `tasks/todo.md` cleanup
+- `tasks/current-focus.md` → MERGE_READY
+- Apply ready-to-merge label
+- CI monitor + auto-fix (per `finalisation-coordinator` Step 11)
+- Auto-merge
+
+**Notable architectural decision recorded as ADR:**
+- ADR-0008 — SSE auth via short-lived signed stream-token (not long-lived JWT in URL). Operator-elected during fix-loop B3 over HttpOnly cookie / fetch-event-source polyfill alternatives.
+
+---
+
 ## Phase 3 (FINALISE)
 
-To be filled in by `finalisation-coordinator` after Phase 2 completes. Do not pre-populate.
+To be filled in by `finalisation-coordinator` after Phase 3 completes. Do not pre-populate.

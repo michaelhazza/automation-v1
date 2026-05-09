@@ -53,5 +53,8 @@ Update when adding ADRs.
 | [0003](./0003-workspace-identity-canonical-pattern.md) | Workspace identity uses canonical pattern, one workspace per subaccount | accepted | workspace identity |
 | [0004](./0004-geo-skills-as-methodology-skills.md) | GEO skills implemented as methodology skills, not intelligence skills | accepted | skill system |
 | [0005](./0005-risk-class-split-rollout-pattern.md) | Risk-class split rollout for read-vs-write enforcement gaps | accepted | rollout / enforcement |
+| [0006](./0006-ghl-oauth-nonce-single-instance-constraint.md) | GHL OAuth nonce verifier — single-instance constraint | accepted | auth |
+| [0007](./0007-consolidation-build-page-retirement.md) | Consolidation build page retirement | accepted | UI consolidation |
+| [0008](./0008-sse-stream-token-auth.md) | SSE auth via short-lived signed stream-token (not long-lived JWT in URL) | accepted | auth |
 
 ADRs 0001-0005 were extracted from KNOWLEDGE.md historical "Decision" entries on 2026-05-03. The remaining 6 historical Decision entries stay in KNOWLEDGE.md as observations — they're either implementation patterns (not durable choices) or research notes (no decision to defend). Promote them to ADRs only if they keep being cited.
