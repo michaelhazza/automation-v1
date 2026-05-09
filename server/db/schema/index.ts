@@ -298,7 +298,8 @@ export * from './agentPresenceProjections.js';
 export * from './agentWorkingTimeRollups.js';
 export * from './agentWorkingTimeEventLedger.js';
 
-// Support Desk canonical tables — inboxes, support agents, tickets (migrations 0307, 0308, 0309)
+// Support Desk canonical tables — inboxes, support agents, tickets, messages (migrations 0307–0310)
 export * from './canonicalInboxes.js';
 export * from './canonicalSupportAgents.js';
 export * from './canonicalTickets.js';
+export * from './canonicalTicketMessages.js';
