@@ -3673,6 +3673,57 @@ Round-2 verification against the integrated `claude/support-ticket-structure-xMc
 - [ ] **SDC-ADV-5 (worth-confirming) — `drizzleSql.raw()` usage in boot recovery.** `supportDispatchBootRecovery.ts:32` uses `drizzleSql.raw(String(STALLED_THRESHOLD_SECONDS))`. The constant is module-level (`= 60`), safe today. Pattern is fragile — replacing with a config-sourced value would create direct SQL injection.
   - **Suggested:** replace with hardcoded SQL literal in the template tag: `` drizzleSql`... INTERVAL '60 seconds'` ``.
 
-- [ ] **SDC-ADV-6 (worth-confirming, correctness — not security) — `sentMessageId` UUID type mismatch with provider replyId.** `supportDraftDispatchService.ts:442-445` — `const messageId = replyId || draft.id` assigns the provider response string (e.g. `"12345"`) to `sentMessageId`, a `uuid()` column with FK to `canonical_ticket_messages(id)`. Postgres rejects non-UUID strings on INSERT.
-  - Per spec §8.2 the back-link routine resolves provider `replyId → canonical message id` after ingestion. `sentMessageId` should be set to NULL on the `sent` transition and back-filled by the back-link routine when ingestion lands the new message.
-  - **Suggested:** set `sentMessageId: null` on the `sent` transition; rely on the back-link routine (already implemented in C9 webhook dispatcher) to fill it later. Verify the back-link routine looks up by `(connectorConfigId, externalId=replyId)` against `canonical_ticket_messages`.
+- [x] **SDC-ADV-6 (worth-confirming, correctness — not security) — `sentMessageId` UUID type mismatch with provider replyId.** `supportDraftDispatchService.ts:442-445` — `const messageId = replyId || draft.id` assigns the provider response string (e.g. `"12345"`) to `sentMessageId`, a `uuid()` column with FK to `canonical_ticket_messages(id)`. Postgres rejects non-UUID strings on INSERT.
+  - **Closed in dual-reviewer commit `c9bdec5c`** — dispatch now routes successful sends through `needs_reconciliation` and lets the back-link routine resolve `replyId → canonical message id`.
+
+## Deferred from pr-reviewer — support-desk-canonical (2026-05-09)
+
+**Captured:** 2026-05-09T22:50:50Z
+**Source logs:**
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T21-41-38Z.md` (round 1, CHANGES_REQUESTED)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-02-25Z.md` (round 2, APPROVED post fix-loop)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-38-27Z.md` (round 3, CHANGES_REQUESTED post dual-reviewer)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-50-50Z.md` (round 4, APPROVED post fix-loop round 2)
+**Branch HEAD at final review:** `85c54a16`
+
+All 7 blocking findings (5 in round 1, 2 in round 3) closed in fix-loop commits `f64cd397` + `ec581e11`. Strong + non-blocking carry-overs deferred:
+
+- [ ] **SDC-PR-1 (Strong) — `decideOutcome` matcher does not exclude messages already back-linked to another draft.** `server/services/supportDraftReconciliationPure.ts:85-91`. Two cross-run drafts on the same ticket with identical normalised body text could bind to the same `canonical_ticket_messages.id`. Both drafts would flip to `sent` pointing at the same message id.
+  - **Suggested:** thread `sourceDraftId` into the worker's `latestMessages` projection and add `msg.sourceDraftId == null` to the matcher predicate (and to the SELECT so the worker doesn't re-fetch).
+
+- [ ] **SDC-PR-2 (Strong) — `decideOutcome` post-dispatch timestamp filter assumes monotonic clock alignment.** `server/services/supportDraftReconciliationPure.ts:89` — `msg.createdAtExternal.getTime() >= dispatchedAt.getTime()`. Provider timestamps frequently lag. An outbound message even 1ms before `dispatchingStartedAt` will be filtered → sync-success drafts stuck in `needs_reconciliation`.
+  - **Suggested:** allow tolerance window (e.g. `dispatchedAt.getTime() - 5_000`) or explicitly document the assumption.
+
+- [ ] **SDC-PR-3 (Strong) — `support.find_customer_history` does direct DB access in `skillExecutor.ts`.** `server/services/skillExecutor.ts:2298-2341`. Other 9 support skills delegate to services. Convention deviation — same behaviour, just placement.
+  - **Suggested:** extract to `findCustomerHistory(email, principalCtx)` export in `supportTicketService.ts` (or new `supportCustomerHistoryService.ts`), have skill handler delegate.
+
+- [ ] **SDC-PR-4 (Strong) — Reconciliation worker + boot-recovery untested at orchestration layer.** `server/lib/supportDispatchBootRecovery.ts`, `server/jobs/supportDraftReconciliationWorker.ts`. Pure pieces are well-covered; orchestrating impure layers are not.
+  - **Suggested tests (Vitest):**
+    - Boot-recovery enqueue-once: 2 stranded drafts in 2 orgs both transition + enqueue inside one `withAdminConnectionGuarded` invocation.
+    - Worker CAS-miss is silent: concurrent webhook back-link flips draft to `sent` between SELECT and UPDATE → UPDATE returns 0 rows, logger.debug fires, no throw.
+    - Worker honours `decision.messageId`: returned messageId matches the UPDATE write.
+
+- [ ] **SDC-PR-5 (Strong) — No targeted unit tests for B1 (webhook author resolution) or B2 (boot recovery RLS) fixes.** Captured in round-4 review.
+  - **Suggested:**
+    - `server/services/__tests__/webhookAdapterService.authorResolution.test.ts` — missing/unknown author external id paths emit `INGEST_CONTRACT_VIOLATION` and skip insert without throwing.
+    - `server/lib/__tests__/supportDispatchBootRecovery.test.ts` — verifies RLS bypass + per-row enqueue.
+
+- [ ] **SDC-PR-6 (Non-blocking) — Type-safety drift on `Message.direction`.** `client/src/pages/support/TicketDetailPage.tsx:31` declares `'inbound' | 'outbound'` but server DTO emits `'inbound' | 'outbound' | 'internal_note'`. Practical rendering correct (visibility carries the load-bearing signal), interface drift will surface if a future change switches on direction.
+  - **Suggested:** widen client interface OR map `direction` to UI-direction server-side.
+
+- [ ] **SDC-PR-7 (Non-blocking) — Permission-scope inconsistency between architecture.md and code.** `architecture.md:3574-3578` documents `support.draft.{approve,reject,override_collision}` + `support.inbox.configure` as **subaccount** scope; `server/lib/permissions.ts:113-117` defines them under `ORG_PERMISSIONS` and routes use `requireOrgPermission`.
+  - **Suggested:** doc-sync gap to address — either update architecture.md to "Org" or migrate keys to `SUBACCOUNT_PERMISSIONS` and routes to `requireSubaccountPermission`.
+
+- [ ] **SDC-PR-8 (Non-blocking) — `lastReconciliationAt` inconsistent timestamping.** `server/jobs/supportDraftReconciliationWorker.ts:78-92` sets it on `surface_manual` and `retry_after_ms` but not on `resolve_sent` / `resolve_failed`. Either set consistently or document why terminal transitions don't.
+
+- [ ] **SDC-PR-9 (Non-blocking) — Stray `§934` reference in `supportDraftDispatchService.ts:79`.** Tidy to a real spec section pointer or remove.
+
+- [ ] **SDC-PR-10 (Non-blocking) — Dead `void hasOverrideCollisionPerm` in `TicketDetailPage.tsx:100`.** Either wire up the inline action bar or delete the state + effect.
+
+- [ ] **SDC-PR-11 (Non-blocking) — `TICKET_HUMAN_COLLISION_BLOCKED` logged at `info`.** `server/services/supportDraftDispatchService.ts:249-258`. Consider `warn` since it represents a guarded action.
+
+- [ ] **SDC-PR-12 (Non-blocking) — Adapter `addReply` / `addInternalNote` accept `idempotencyKey` but ignore it.** `server/adapters/teamworkAdapter.ts:252-313`. Add inline comment that the `action_attempts` ledger is the sole idempotency boundary so the next contributor doesn't assume provider honours it.
+
+- [ ] **SDC-PR-13 (Non-blocking) — `shapeThreadMessage` inlines redaction logic.** `server/services/supportTicketService.ts:169-170` inlines `row.redacted ? '[redacted]' : row.bodyText` instead of calling `applyMessageRedactionFilterForAudience`. Pure helper now uncalled. Either delete or keep for `audit` audience.
+
+- [ ] **SDC-PR-14 (Non-blocking) — Boot recovery enqueue inside admin tx.** `server/lib/supportDispatchBootRecovery.ts`. If `boss.send` throws, the tx rolls back the status flip — actually the desired idempotency-on-retry behaviour. Document with a brief comment.

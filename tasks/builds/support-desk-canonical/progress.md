@@ -75,9 +75,9 @@ Open a new Claude Code session and type `launch feature coordinator`.
 | 7 — Post-G2 spec-validity checkpoint | pending | Operator confirmation required. |
 | 8.1 — spec-conformance | done | Round 1 NON_CONFORMANT (7 dir gaps); builder remediated all 7 in commit `74fb0306`. Round 2 NON_CONFORMANT (1 new low-sev gap REQ #72) — closed inline in commit `62f9a28e`. Logs: `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T20-34-30Z.md` + `…21-08-30Z.md`. |
 | 8.2 — adversarial-reviewer | done | HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming). 1 spec-contradiction noted (read perms = spec design). 6 items routed to `tasks/todo.md` § *Deferred from adversarial-reviewer — support-desk-canonical (2026-05-09)*. Non-blocking advisory per playbook. Log: `tasks/review-logs/adversarial-review-log-support-desk-canonical-2026-05-09T21-28-46Z.md`. |
-| 8.3 — pr-reviewer | pending | |
-| 8.4 — Fix-loop with G3 | pending | Conditional on pr-reviewer verdict. |
-| 8.5 — dual-reviewer | pending | Codex availability check pending. |
+| 8.3 — pr-reviewer | done | Round 1 CHANGES_REQUESTED (5 blockers + 5 strong + 3 non-blocking) → fix-loop round 1 → Round 2 APPROVED. Logs: 21-41-38Z + 22-02-25Z. |
+| 8.4 — Fix-loop with G3 | done | Round 1: 5 blockers + S1, S3, S4 fixed in commit `f64cd397`. Round 2 (post dual-reviewer + post round 3 review): B1 webhook author FK + B2 boot recovery RLS fixed in commit `ec581e11`. |
+| 8.5 — dual-reviewer | done | APPROVED with 6 [ACCEPT] decisions over 3 iterations: 2 P1 (sentMessageId UUID, agent/bot author FK in polling) + 4 P2 (drafts hidden from review, retry_reconciliation stuck, matcher tightening, webhook back-link extension). Commits `c9bdec5c` + `6cc2542e`. Re-review: pr-reviewer round 3 found 2 NEW P1s (symmetric webhook author FK, boot recovery RLS) → fix-loop round 2 (`ec581e11`) → pr-reviewer round 4 APPROVED. Logs: dual-review-log-…22-30-00Z.md, pr-review-log-…22-38-27Z.md, pr-review-log-…22-50-50Z.md. |
 | 9 — Doc-sync gate | pending | |
 | 10 — Phase 2 handoff write | pending | |
 | 11 — current-focus.md → REVIEWING | pending | |
