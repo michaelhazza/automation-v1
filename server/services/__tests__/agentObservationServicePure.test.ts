@@ -5,7 +5,7 @@ import {
   classifyObservation,
   OBSERVATION_BODY_MAX_BYTES,
   SUPERSESSION_DEPTH_LIMIT,
-} from '../agentObservationServicePure';
+} from '../agentObservationServicePure.js';
 
 describe('validateObservationBody', () => {
   it('accepts body at exactly 8192 ASCII bytes', () => {

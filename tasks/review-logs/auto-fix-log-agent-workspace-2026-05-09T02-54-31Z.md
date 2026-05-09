@@ -65,3 +65,41 @@ Iteration 1 also bundles two non-CI-fix changes that were prepared earlier in th
 - `.claude/agents/finalisation-coordinator.md` Step 10 reorder: write + commit + push Phase 3 artefacts FIRST, apply label LAST. Same correction.
 
 These are not CI fixes but are on disk uncommitted from earlier in this session per the operator's explicit instruction to "update this now but don't push it until all tests are finished". Tests have finished (with failures). Bundling avoids a separate commit + a separate CI re-fire.
+
+## Iteration 2 — 2026-05-09T03:13:00Z
+
+Two new failures surfaced in CI on commit `4768ad23`:
+
+### Failure 2.A — `integration tests` (FK violation, second iteration of same test)
+
+- **Failed check:** `integration tests`
+- **Failed test:** `server/services/__tests__/llmRouterLaelIntegration.test.ts > test 1`
+- **Error signature:** `update or delete on table "agent_execution_events" violates foreign key constraint "agent_working_time_event_ledger_event_id_fkey" on table "agent_working_time_event_ledger"`
+- **Root cause:** Iteration 1 fixed `agent_presence_projections` FKs but the same test has a chained FK from `agent_working_time_event_ledger.event_id` (PK + FK to agent_execution_events). The integration test's `DELETE FROM agent_execution_events WHERE run_id = ?` cleanup is now blocked at the next FK in the chain.
+- **Stuck-detection check:** different FK constraint, different table, different fix target — NOT a re-attempt of the same approach. Continuing iteration is allowed per CLAUDE.md §1.
+- **Category (G3 allowlist match):** SQL / migration syntax (FK ON DELETE clause).
+- **Guardrail status:** G1=PASS (no test file modified), G2={lines}/50 (estimated 8 lines including the comment), G3=PASS, G4=logged.
+- **Fix:** Add `ON DELETE CASCADE` to `agent_working_time_event_ledger.event_id`. The ledger row is the derived "I processed this event" idempotency marker — semantically, if the source event is gone, the marker has no anchor and should go too. CASCADE is the correct policy. Also defensively added `ON DELETE SET NULL` to `iee_artifacts.producing_event_id` (nullable pointer column) to avoid a future iteration on a third FK.
+- **`agent_observations.event_id`** intentionally NOT touched. Postgres reports all FK violations atomically, not just the first; the iteration 1 failure showed only the projection FK and the iteration 2 failure showed only the ledger FK — observations were never reported, meaning the LAEL test does not create observation rows. Touching it would risk the immutability-trigger interaction without a real failure to motivate it.
+
+### Failure 2.B — `unit tests` / `verify-pure-helper-convention.sh`
+
+- **Failed check:** `unit tests` (gate-script-detected violation)
+- **Violations (4):** Test files in `__tests__/` import from `../X` without the `.js` extension that the gate's grep pattern requires:
+  - `server/services/__tests__/agentObservationServicePure.test.ts`
+  - `server/services/__tests__/ieeSessionServicePure.test.ts`
+  - `server/services/__tests__/agentWorkingTimeServicePure.test.ts`
+  - `server/services/__tests__/agentPresenceServicePure.test.ts`
+- **Root cause:** Iteration 1 fixed `./X` → `../X` but the gate's regex is `from\s+'(\.\./|\./)[^']+\.js'` — it requires the `.js` extension that ESM-style relative imports use. The 5th moved file (`agentPresenceStreamPublisherPure.test.ts`) already had `.js` and passed; the four others needed it added.
+- **Stuck-detection check:** different gate, different fix target than iteration 1's location-only fix — NOT a re-attempt. Continuing iteration is allowed.
+- **Category (G3 allowlist match):** Gate-script bug (regex requires `.js`).
+- **Guardrail status:** G1=PASS (path-only and import-extension change, no test logic), G2=5 lines (4 file imports + 1 secondary import in agentPresenceServicePure for `shared/types/agentPresence`).
+- **Fix:** Append `.js` to all 5 relative imports across the 4 flagged files.
+
+### Cumulative diff stat for iteration 2
+
+Estimated ~13 lines net (8 + 5). Well within G2's 50-line cap.
+
+### Preventive-rule update
+
+The `verify-pure-helper-convention.sh` `.js`-extension requirement was NOT in the iteration-1 builder.md / KNOWLEDGE.md preventive entries. Adding to KNOWLEDGE.md as a sub-bullet under the existing `[2026-05-09] Correction — four CI-only gates that G1 misses` entry.

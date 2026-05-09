@@ -220,7 +220,11 @@ CREATE POLICY agent_working_time_rollups_org_isolation ON agent_working_time_rol
   );
 
 CREATE TABLE agent_working_time_event_ledger (
-  event_id                    UUID         PRIMARY KEY REFERENCES agent_execution_events(id),
+  -- ON DELETE CASCADE: this row is the derived "I processed this event"
+  -- idempotency marker for the working-time pipeline. If the source event is
+  -- deleted (retention prune, integration-test cleanup), the marker must go
+  -- too — it has no meaning without its anchor.
+  event_id                    UUID         PRIMARY KEY REFERENCES agent_execution_events(id) ON DELETE CASCADE,
   organisation_id             UUID         NOT NULL REFERENCES organisations(id),
   agent_id                    UUID         NOT NULL REFERENCES agents(id),
   applied_at                  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -246,7 +250,10 @@ CREATE POLICY agent_working_time_event_ledger_org_isolation ON agent_working_tim
 
 ALTER TABLE iee_artifacts
   ADD COLUMN agent_run_id UUID REFERENCES agent_runs(id),
-  ADD COLUMN producing_event_id UUID REFERENCES agent_execution_events(id),
+  -- ON DELETE SET NULL: producing_event_id is a nullable pointer ("the event
+  -- that produced this artifact"). If the source event is pruned, the artifact
+  -- itself outlives it — null out the pointer instead of cascading.
+  ADD COLUMN producing_event_id UUID REFERENCES agent_execution_events(id) ON DELETE SET NULL,
   ADD COLUMN produced_version_id UUID;
 
 CREATE INDEX iee_artifacts_agent_run_idx ON iee_artifacts (agent_run_id) WHERE agent_run_id IS NOT NULL;

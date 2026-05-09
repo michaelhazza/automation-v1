@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideIdleTimeout, classifyTeardownReason, detectOrphan, IEE_SESSION_IDLE_TIMEOUT_SECONDS } from '../ieeSessionServicePure';
+import { decideIdleTimeout, classifyTeardownReason, detectOrphan, IEE_SESSION_IDLE_TIMEOUT_SECONDS } from '../ieeSessionServicePure.js';
 
 function makeSession(overrides: Partial<Parameters<typeof decideIdleTimeout>[0]> = {}) {
   return {

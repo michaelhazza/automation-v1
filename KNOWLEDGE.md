@@ -3194,3 +3194,20 @@ The G1 gate run inside `builder` only exercises lint + typecheck + targeted vite
 - `grep "REFERENCES agent_execution_events" migrations/<new>.sql` should not return entries without an `ON DELETE` clause unless the column is intentionally `NO ACTION`.
 
 **Applies to:** `.claude/agents/builder.md` Step 3 ("CI-gate pre-flight"); `docs/testing-conventions.md § Test discovery` (already names the rule but builder agents missed it). Locked in by operator 2026-05-09.
+
+
+### [2026-05-09] Sub-pattern — `verify-pure-helper-convention.sh` requires `.js` extension on relative imports
+
+**Date:** 2026-05-09
+**Source:** Phase 3 finalisation auto-fix iteration 2 on PR #276 (slug: agent-workspace). Iteration 1 fixed test-file location (`./X` → `../X`); iteration 2 caught a follow-on gate failure because the gate's regex requires `.js` on the relative import.
+
+The gate (`scripts/verify-pure-helper-convention.sh`) checks that every test file under `__tests__/` imports something from its parent directory. The grep pattern is `from\s+'(\.\./|\./)[^']+\.js'` — the `.js` extension is required. Without it, a TypeScript-only relative import like `from '../somethingPure'` is invisible to the gate even though TypeScript resolves it correctly.
+
+**Pattern (mandatory shape).** Every relative import in a test file MUST end in `.js` — both the sibling-module import and any deeper relative path (`../../../shared/types/X.js`). This matches the project's TypeScript-ESM `nodenext` resolution mode and the gate's regex.
+
+**Detection heuristic.** Pair this check with the test-file-location check in builder.md Step 3:
+
+- `find <new-test-files> -name '*.test.ts' | xargs grep -E "from '(\.\./|\./)[^']+'$"` should return zero (every relative import should have an extension).
+- If zero, also check `from '(\.\./|\./)[^']+\.ts'` is zero (never `.ts` — always `.js` for ESM resolution).
+
+**Applies to:** `.claude/agents/builder.md` Step 3 "CI-gate pre-flight"; `KNOWLEDGE.md [2026-05-09] Correction — four CI-only gates that G1 misses` (this is sub-rule 1.b — the `.js` extension requirement on relative imports inside `__tests__/`).
