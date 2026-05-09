@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: pending
+active_plan: pending
+build_slug: support-desk-canonical
+branch: claude/support-ticket-structure-xMcy8
+status: PLANNING
 last_updated: 2026-05-09
 last_merged_pr: #276
 last_merged_slug: agent-workspace
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE** — no active build.
+**Active spec:** pending (Phase 1 in flight — spec authoring after mockups complete)
+**Active plan:** pending
+**Active build slug:** support-desk-canonical
+**Branch:** claude/support-ticket-structure-xMcy8
+**Status:** **PLANNING** — spec-coordinator running on canonical Support Desk layer + Teamwork validating implementation. Brief v5.3 LOCKED (`tasks/builds/support-desk-canonical/brief.md`). Five hi-fi mockups frozen as design source of truth (`prototypes/support-desk-canonical/`). Major-class scope: 5 canonical entities, 12 design invariants, Teamwork v1 acceptance bar.
 
 **Just merged:** PR #276 — `agent-workspace` (squash-commit `5f7e63b8`, 2026-05-09T03:28:03Z). Persistent Agent Workspace + cloud-compute lifecycle. Spec: `tasks/builds/agent-workspace/spec.md` (1599 lines, LOCKED, 2 ChatGPT-spec-review rounds). Phase 3 handoff: `tasks/builds/agent-workspace/handoff.md`. Pipeline: 13 of 14 chunks built (Chunk 12 deferred per spec — Phase-1 contract lock) → branch-level review pass (spec-conformance CONFORMANT_AFTER_FIXES with 6 directional gaps deferred AGW-DEF-1..6, adversarial-reviewer 1 confirmed AGW-ADV-1 closed + 2 likely AGW-ADV-2/3 deferred, pr-reviewer 3 rounds APPROVED, dual-reviewer Codex APPROVED with 3 fixes, doc-sync sweep complete with ADR-0008 added for SSE stream-token decision) → chatgpt-pr-review 2 rounds APPROVED (Round 1 closed 4 Blockers + 3 Strong in `6a105041`; Round 2 closed 2 follow-ups + 1 polish in `3c4760ae`) → 3 CI auto-fix iterations (`4768ad23` 4 blocking gates fixed + preventive rules locked; `d0d79d14` chain FK + .js-extension imports; `5ec967b8` all 6 agent_runs FKs in migration 0305). CI ALL GREEN at merge time. KNOWLEDGE.md +5 patterns (paired-event accumulators need stable identity; permission-gated UI fails closed during async load; finalisation-coordinator commits Phase 3 BEFORE label; 4 CI-only gates G1 misses; .js extension required on relative imports inside `__tests__/`).
 
