@@ -3647,3 +3647,27 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
 - [ ] **ADV-OBS-3 — `require_approval_at_tier` CHECK 0-7 vs spec text 0-6**
   - File: `migrations/0307_subaccount_agents_governance.sql:14`
   - Implementation uses 7 as a sentinel ("never require"); spec §5.2.9 SQL block says 0-6. Update spec text to canonicalise the sentinel, or tighten CHECK and use NULL for "never require".
+
+## PR re-review findings — synthetos-foundation-refactor (2026-05-10)
+
+**Captured:** 2026-05-10T00:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-synthetos-foundation-refactor-2026-05-10T00-30-00Z.md`
+**Verdict:** APPROVED with 2 strong + 2 nits deferred.
+
+- [ ] **SFR-S7 — Stale comment + redundant `aeeToolPredicate` in `runTraceService.ts`**
+  - Files: `server/services/runTraceService.ts:113-119, 152`
+  - After dual-reviewer fix #5, the `agent_execution_events` UNION arm's inner WHERE restricts to the three foundation log codes; the legacy `aeeToolPredicate` and header comment no longer match. Behaviorally correct by empty intersection. Cosmetic cleanup.
+  - Suggested: replace `aeeToolPredicate` with `excludeWhenToolSlug` for that arm and update the header comment to say tool_call/tool_result rows flow through the `actions` arm instead.
+
+- [ ] **SFR-S8 — Add `subaccountAgentService.updateLink` governance-fields persistence test**
+  - File: `server/services/__tests__/subaccountAgentService.test.ts` (new)
+  - Given an existing link, when updateLink is called with the four governance fields, then the row reflects all four; partial updates do not clobber unspecified fields.
+
+- [ ] **SFR-N8 — Zod `allowedEnvironments` accepts empty array (lockout risk)**
+  - File: `server/schemas/subaccountAgents.ts:37`
+  - Empty array silently locks an agent out (every run fails with ExecutionModeNotAllowedForAgentError after dual-reviewer fix #3).
+  - Suggested: add `.min(1)` to the Zod array, or UI-side guard preventing all-unchecked save, or both.
+
+- [ ] **SFR-N9 — Future-only: functional index on `audit_events ((metadata->>'subaccountId'))`**
+  - File: `server/db/schema/auditEvents.ts`
+  - Current `(organisation_id, created_at)` index is sufficient at current scale. Add only if subaccount-scoped audit queries grow large enough that the current narrow-org-partition path slows.
