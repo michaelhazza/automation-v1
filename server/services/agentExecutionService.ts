@@ -78,13 +78,14 @@ import {
 import { isFailureError } from '../../shared/iee/failure.js';
 import { maskObservations, tagIteration } from './middleware/observationMasking.js';
 import {
-  MAX_LOOP_ITERATIONS,
   WRAP_UP_MAX_TOKENS,
   TOKEN_INPUT_RATIO,
   TOKEN_OUTPUT_RATIO,
   MAX_CROSS_AGENT_TASKS,
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
+import { CONTROLLER_LIMITS } from '../config/controllerLimits.js';
+import { deriveControllerStyle } from './controllerStyleResolver.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
 // orgAgentConfigService import removed — deprecated post-migration 0106
 import { organisations } from '../db/schema/index.js';
@@ -283,6 +284,13 @@ export interface AgentRunRequest {
   conversationId?: string;
   /** Workflow nesting depth — propagated from parent run via workflow.run.start skill. Top-level orchestrator runs set this to 1. */
   workflowRunDepth?: number;
+  /**
+   * Optional caller-requested controller style override. When provided and the
+   * agent's controllerStyleAllowed permits it, overrides the executionMode
+   * default. Throws ControllerStyleNotAllowedForAgentError (HTTP 422) when
+   * override='operator' but the agent link is 'native_only'.
+   */
+  controllerStyle?: string;
 }
 
 export interface AgentRunResult {
@@ -410,7 +418,28 @@ export const agentExecutionService = {
       }
     }
 
-    // ── 1. Create the run record ──────────────────────────────────────────
+    // ── 1. Resolve controller style before inserting the run ─────────────
+    // Read controllerStyleAllowed from the subaccountAgents row so we can
+    // pass the resolved value into the INSERT. Default 'native_only' matches
+    // the DB column default so missing rows are safe.
+    let resolvedControllerStyleAllowed = 'native_only';
+    if (request.subaccountAgentId) {
+      const [saGovRow] = await db
+        .select({ controllerStyleAllowed: subaccountAgents.controllerStyleAllowed })
+        .from(subaccountAgents)
+        .where(eq(subaccountAgents.id, request.subaccountAgentId));
+      if (saGovRow) {
+        resolvedControllerStyleAllowed = saGovRow.controllerStyleAllowed;
+      }
+    }
+    const { controllerStyle: resolvedControllerStyle, source: controllerStyleSource } =
+      deriveControllerStyle(
+        request.executionMode ?? 'api',
+        resolvedControllerStyleAllowed,
+        request.controllerStyle,
+      );
+
+    // ── 2. Create the run record ──────────────────────────────────────────
     const [run] = await db
       .insert(agentRuns)
       .values({
@@ -422,6 +451,7 @@ export const agentExecutionService = {
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
         executionScope: 'subaccount',
+        controllerStyle: resolvedControllerStyle,
         runSource: request.runSource ?? null,
         status: 'running',
         triggerContext: request.triggerContext ?? null,
@@ -468,6 +498,23 @@ export const agentExecutionService = {
         agentId: request.agentId,
         runType: request.runType,
         triggeredBy: request.runSource ?? 'unknown',
+      },
+      linkedEntity: { type: 'agent', id: request.agentId },
+    });
+
+    // Log the resolved controller style for observability (spec §3.5 log code).
+    tryEmitAgentEvent({
+      runId: run.id,
+      organisationId: request.organisationId,
+      subaccountId: request.subaccountId ?? null,
+      sourceService: 'agentExecutionService',
+      payload: {
+        eventType: 'foundation.controller_style.derived',
+        critical: false,
+        runId: run.id,
+        executionMode: request.executionMode ?? 'api',
+        controllerStyle: resolvedControllerStyle,
+        source: controllerStyleSource,
       },
       linkedEntity: { type: 'agent', id: request.agentId },
     });
@@ -530,7 +577,8 @@ export const agentExecutionService = {
         if (!link) throw Object.assign(new Error('Subaccount agent link not found'), { statusCode: 404, errorCode: 'SUBACCOUNT_AGENT_NOT_FOUND' });
         saLink = link;
 
-        tokenBudget = link.tokenBudgetPerRun;
+        const controllerLimits = CONTROLLER_LIMITS[run.controllerStyle];
+        tokenBudget = Math.round(link.tokenBudgetPerRun * controllerLimits.defaultTokenBudgetMultiplier);
         maxToolCalls = link.maxToolCallsPerRun;
         timeoutMs = link.timeoutSeconds * 1000;
         configSkillSlugs = (link.skillSlugs ?? []) as string[];
@@ -1430,6 +1478,7 @@ export const agentExecutionService = {
             tools: effectiveTools,
             tokenBudget,
             maxToolCalls,
+            maxLoopIterations: CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations,
             timeoutMs,
             startTime,
             request,
@@ -2417,6 +2466,8 @@ interface LoopParams {
   tools: AnthropicTool[];
   tokenBudget: number;
   maxToolCalls: number;
+  /** Maximum loop iterations for this run — derived from CONTROLLER_LIMITS[controllerStyle]. */
+  maxLoopIterations: number;
   timeoutMs: number;
   startTime: number;
   request: AgentRunRequest;
@@ -2481,7 +2532,7 @@ interface LoopResult {
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, routerCtx, systemPrompt, tools: initialTools, tokenBudget,
-    maxToolCalls, timeoutMs, startTime, request, orgProcesses,
+    maxToolCalls, maxLoopIterations, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
     configVersion, agentDomain, hierarchyContext,
   } = params;
@@ -2694,7 +2745,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   }
 
   outerLoop:
-  for (let iteration = startingIteration; iteration < MAX_LOOP_ITERATIONS; iteration++) {
+  for (let iteration = startingIteration; iteration < maxLoopIterations; iteration++) {
     mwCtx.iteration = iteration;
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
@@ -2702,7 +2753,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // ── User-triggered cancel observation ──────────────────────────────
     // agentRunCancelService flips agent_runs.status to 'cancelling' when a
     // user cancels an in-flight non-IEE run. This per-iteration PK read is
-    // the cheapest place to observe that — runs at most MAX_LOOP_ITERATIONS
+    // the cheapest place to observe that — runs at most maxLoopIterations
     // times per run and is dwarfed by the LLM call that follows. IEE-
     // delegated runs are stopped via the worker's per-step ownership check
     // (worker/src/persistence/runs.ts::assertWorkerOwnership), so this guard
@@ -3489,7 +3540,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     });
 
     // Check if we've hit the max iteration limit — enforce the exit
-    if (iteration >= MAX_LOOP_ITERATIONS - 1) {
+    if (iteration >= maxLoopIterations - 1) {
       finalStatus = finalStatus ?? 'completed';
       emitLoopTermination('max_iterations', { iteration, totalToolCalls });
       break outerLoop;

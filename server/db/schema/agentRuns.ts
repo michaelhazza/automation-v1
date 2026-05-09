@@ -1,4 +1,5 @@
 ﻿import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
+import type { ControllerStyle } from '../../../shared/types/controllerStyle.js';
 import { sql } from 'drizzle-orm';
 import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
 import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
@@ -40,6 +41,10 @@ export const agentRuns = pgTable(
 
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
+
+    // Controller style for this run — resolved at run creation via controllerStyleResolver.
+    // 'native' = standard limits; 'operator' = elevated limits (spec §4.1.5).
+    controllerStyle: text('controller_style').notNull().default('native').$type<ControllerStyle>(),
 
     // How the run was sourced — explicit for observability and segmentation
     runSource: text('run_source').$type<'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system'>(),

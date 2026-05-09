@@ -105,7 +105,8 @@ export type AgentExecutionEventType =
   | 'correction.captured'
   | 'retrieval.summary'
   | 'retrieval.always_available.mode_changed'
-  | 'observation_emitted';
+  | 'observation_emitted'
+  | 'foundation.controller_style.derived';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -332,6 +333,15 @@ export type AgentExecutionEventPayload =
       observationType: 'learned' | 'detected' | 'decided' | 'flagged' | 'produced';
       agentId: string;
       sourceKind: 'run_step' | 'retrieval_summary' | 'tool_result' | 'memory_block_insert';
+    }
+  | {
+      /** Foundation refactor spec §3.5 — resolved controller style at run creation. */
+      eventType: 'foundation.controller_style.derived';
+      critical: false;
+      runId: string;
+      executionMode: string;
+      controllerStyle: 'native' | 'operator';
+      source: 'explicit_override' | 'execution_mode_default' | 'subaccount_constraint_downgrade';
     };
 
 // ---------------------------------------------------------------------------
@@ -367,6 +377,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'retrieval.summary': false,
   'retrieval.always_available.mode_changed': false,
   'observation_emitted': false,
+  'foundation.controller_style.derived': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

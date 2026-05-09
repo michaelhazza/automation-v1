@@ -436,6 +436,12 @@ export function validateEventPayload(
       }
       return { ok: true };
 
+    case 'foundation.controller_style.derived':
+      if (!isStr(p.runId) || !isStr(p.executionMode) || !isStr(p.controllerStyle) || !isStr(p.source)) {
+        return { ok: false, reason: 'foundation.controller_style.derived_missing_fields' };
+      }
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.
