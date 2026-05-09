@@ -34,7 +34,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { connectorConfigs } from './connectorConfigs.js';
 import { canonicalContacts } from './canonicalEntities.js';
