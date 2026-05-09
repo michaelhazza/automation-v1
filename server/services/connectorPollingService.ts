@@ -700,6 +700,7 @@ async function phaseD_upsertTicketMessages(
   connection: AnyConnection,
   adapter: SupportIngestionAdapter,
   touchedTicketExternalIds: string[],
+  agentExternalToId: Map<string, string>,
 ): Promise<void> {
   if (touchedTicketExternalIds.length === 0) return;
 
@@ -754,6 +755,30 @@ async function phaseD_upsertTicketMessages(
       async () => {
         const orgDb = getOrgScopedDb('connectorPollingService.phaseD_upsertMessages');
         for (const msg of messagesResult.rows) {
+          // Resolve author FK per polymorphic-FK CHECK constraint on
+          // canonical_ticket_messages (migration 0310): agent/bot messages MUST
+          // carry author_support_agent_id; customer/system messages must NOT.
+          let authorSupportAgentId: string | null = null;
+          if (msg.authorType === 'agent' || msg.authorType === 'bot') {
+            const externalId = msg.authorExternalId;
+            const resolved = externalId ? agentExternalToId.get(externalId) : undefined;
+            if (!resolved) {
+              console.warn(
+                `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION}`,
+                JSON.stringify({
+                  code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
+                  connectorConfigId,
+                  ticketExternalId,
+                  messageExternalId: msg.externalId,
+                  authorType: msg.authorType,
+                  reason: externalId ? 'unknown_agent_external_id' : 'missing_author_external_id',
+                }),
+              );
+              continue;
+            }
+            authorSupportAgentId = resolved;
+          }
+
           await orgDb
             .insert(canonicalTicketMessages)
             .values({
@@ -765,6 +790,7 @@ async function phaseD_upsertTicketMessages(
               direction: msg.direction,
               visibility: msg.visibility,
               authorType: msg.authorType,
+              authorSupportAgentId,
               bodyText: msg.bodyText,
               bodyHtml: msg.bodyHtml ?? null,
               attachments: msg.attachments ?? null,
@@ -829,6 +855,7 @@ async function runSupportIngestionCycle(
     connection,
     adapter,
     touchedExternalIds,
+    agentExternalToId,
   );
 
   // Advance the sync cursor to now so the next incremental cycle only fetches
@@ -948,6 +975,7 @@ export async function pollSupportFullReconciliation(connectorConfigId: string): 
       connection as never,
       supportAdapter,
       touchedExternalIds,
+      agentExternalToId,
     );
   }
 

@@ -918,7 +918,12 @@ export async function dispatchSupportEvent(
         const newMessageId = inserted[0].id;
         const newMessageBodyText = (messageData?.body as string | undefined) ?? '';
 
-        // Load drafts eligible for back-linking: manually_marked_sent or sent with no sent_message_id
+        // Load drafts eligible for back-linking. Three eligible status sets:
+        //   - manually_marked_sent — operator-confirmed dispatch awaiting late linking (spec §11.7)
+        //   - sent (sent_message_id IS NULL) — defensive; no callsite produces this today
+        //   - needs_reconciliation — synchronous-success drafts parked here so the
+        //     reconciliation worker / back-link can resolve them to `sent` once the
+        //     canonical message lands (see supportDraftDispatchService.ts approveDraft).
         const candidateDraftRows = await orgDb
           .select({
             id: canonicalTicketDrafts.id,
@@ -932,7 +937,7 @@ export async function dispatchSupportEvent(
             and(
               eq(canonicalTicketDrafts.ticketId, ticketRow.id),
               eq(canonicalTicketDrafts.organisationId, organisationId),
-              inArray(canonicalTicketDrafts.status, ['manually_marked_sent', 'sent']),
+              inArray(canonicalTicketDrafts.status, ['manually_marked_sent', 'sent', 'needs_reconciliation']),
             ),
           );
 

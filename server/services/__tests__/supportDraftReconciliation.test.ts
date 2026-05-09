@@ -80,14 +80,75 @@ describe('decideOutcome', () => {
     expect(resolved.messageId).toBe('msg-exact');
   });
 
-  it('returns resolve_sent when the draft body is a substring of the message body', () => {
+  it('does NOT bind on substring match — body must be a normalised exact match', () => {
+    // Substring fallback was removed once successful dispatches were routed
+    // through reconciliation, because a quoted reply or autoresponder repeat
+    // could otherwise bind the draft to the wrong message.
     const msg = makeMessage({ bodyText: 'Hello — Thank you for contacting us. We will respond shortly.' });
     const result = decideOutcome({
       draft: makeDraft({ proposedBodyText: 'Thank you for contacting us.' }),
       latestMessages: [msg],
       attemptCount: 1,
     });
+    expect(result.kind).toBe('retry_after_ms');
+  });
+
+  it('skips messages whose direction does not align with the draft visibility', () => {
+    // Public draft must bind to an outbound message — an inbound message with the
+    // same body (e.g. customer quoted the agent's prior reply) must not match.
+    const inboundEcho = makeMessage({
+      direction: 'inbound',
+      visibility: 'public',
+      bodyText: 'Thank you for contacting us.',
+    });
+    const result = decideOutcome({
+      draft: makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
+      latestMessages: [inboundEcho],
+      attemptCount: 0,
+    });
+    expect(result.kind).toBe('retry_after_ms');
+  });
+
+  it('skips messages older than the draft dispatchingStartedAt', () => {
+    // A pre-existing outbound message with the same body — e.g. a previous reply
+    // by another agent — must not bind to this dispatch attempt.
+    const dispatchedAt = new Date('2026-01-01T12:00:00Z');
+    const olderMatch = makeMessage({
+      direction: 'outbound',
+      visibility: 'public',
+      bodyText: 'Thank you for contacting us.',
+      createdAtExternal: new Date('2026-01-01T10:00:00Z'),
+    });
+    const result = decideOutcome({
+      draft: {
+        ...makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
+        dispatchingStartedAt: dispatchedAt,
+      },
+      latestMessages: [olderMatch],
+      attemptCount: 0,
+    });
+    expect(result.kind).toBe('retry_after_ms');
+  });
+
+  it('binds to a post-dispatch message that matches direction + visibility + normalised body', () => {
+    const dispatchedAt = new Date('2026-01-01T12:00:00Z');
+    const newMatch = makeMessage({
+      id: 'msg-post-dispatch',
+      direction: 'outbound',
+      visibility: 'public',
+      bodyText: '  Thank you   for contacting us. ',
+      createdAtExternal: new Date('2026-01-01T12:00:05Z'),
+    });
+    const result = decideOutcome({
+      draft: {
+        ...makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
+        dispatchingStartedAt: dispatchedAt,
+      },
+      latestMessages: [newMatch],
+      attemptCount: 0,
+    });
     expect(result.kind).toBe('resolve_sent');
+    expect((result as { kind: 'resolve_sent'; messageId: string }).messageId).toBe('msg-post-dispatch');
   });
 
   it('returns retry_after_ms when no message matches and budget remains', () => {
@@ -223,13 +284,14 @@ describe('findBackLinkCandidate', () => {
     expect(result.ambiguous).toBe(false);
   });
 
-  it('does not match drafts with ineligible status', () => {
+  it('does not match drafts with ineligible status (pre-dispatch / dispatching / terminal-failed)', () => {
     const result = findBackLinkCandidate({
       newlyLandedMessage: makeMessage({ direction: 'outbound', bodyText: 'Thank you for contacting us.' }),
       candidateDrafts: [
         makeCandidateDraft({ status: 'awaiting_review' }),
         makeCandidateDraft({ status: 'dispatching' }),
-        makeCandidateDraft({ status: 'needs_reconciliation' }),
+        makeCandidateDraft({ status: 'failed' }),
+        makeCandidateDraft({ status: 'rejected' }),
       ],
     });
     expect(result.match).toBeNull();
@@ -306,6 +368,25 @@ describe('findBackLinkCandidate', () => {
       ],
     });
     expect(result.match).toEqual({ id: 'draft-sent' });
+    expect(result.ambiguous).toBe(false);
+  });
+
+  it('matches drafts with status needs_reconciliation (synchronous-success park state)', () => {
+    // Successful synchronous dispatches are parked in needs_reconciliation until
+    // the canonical message lands. The webhook back-link path may see the message
+    // before the reconciliation worker fires — both must resolve to terminal `sent`.
+    const result = findBackLinkCandidate({
+      newlyLandedMessage: makeMessage({ direction: 'outbound', bodyText: 'Reply text.' }),
+      candidateDrafts: [
+        makeCandidateDraft({
+          id: 'draft-needs-reconciliation',
+          proposedBodyText: 'Reply text.',
+          status: 'needs_reconciliation',
+          sentMessageId: null,
+        }),
+      ],
+    });
+    expect(result.match).toEqual({ id: 'draft-needs-reconciliation' });
     expect(result.ambiguous).toBe(false);
   });
 });

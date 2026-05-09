@@ -35,7 +35,10 @@ export type DraftStatus =
  *   needs_reconciliation → failed          (manual resolve — give up)
  *   needs_reconciliation → manually_marked_sent  (operator manually marks it sent)
  *   needs_reconciliation → sent            (back-link route resolves)
- *   needs_reconciliation → dispatching     (retry_reconciliation re-enqueues dispatch)
+ *   needs_reconciliation → dispatching     (boot recovery may re-promote stalled rows;
+ *                                           retry_reconciliation does NOT use this transition —
+ *                                           it preserves status and only resets attempt count
+ *                                           so the §8.4 worker re-processes the row)
  *
  * Explicit prohibition: dispatching → expired is blocked (expiry scanner must not
  * touch in-flight drafts; they transition to needs_reconciliation instead).

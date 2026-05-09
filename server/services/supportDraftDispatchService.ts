@@ -76,6 +76,25 @@ export async function proposeReply(
     throw notFoundError('support.ticket.not_found');
   }
 
+  // Load inbox agent_config to choose initial draft state per spec §8 / §934:
+  //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
+  //   autonomous → 'draft' (proceeds without the review queue gate)
+  //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
+  const [inboxRow] = await db
+    .select({ agentConfig: canonicalInboxes.agentConfig })
+    .from(canonicalInboxes)
+    .where(
+      and(
+        eq(canonicalInboxes.id, ticket.inboxId),
+        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+      ),
+    )
+    .limit(1);
+  const inboxMode =
+    (inboxRow?.agentConfig as SupportInboxAgentConfig | null | undefined)?.mode ?? 'assisted';
+  const initialStatus: 'draft' | 'awaiting_review' =
+    inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
+
   // Load any existing active draft for this (ticketId, runId, visibility)
   const [existingDraft] = await db
     .select({ status: canonicalTicketDrafts.status })
@@ -121,7 +140,7 @@ export async function proposeReply(
       proposedBodyText: input.body,
       proposedVisibility: input.visibility,
       proposedActions: input.proposedActions ?? null,
-      status: 'draft',
+      status: initialStatus,
       createdByAgentRunId: input.runId,
       reconciliationAttemptCount: 0,
       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
@@ -376,14 +395,31 @@ export async function approveDraft(
     .limit(1);
 
   if (existingAttempt?.attemptStatus === 'succeeded') {
-    // Already dispatched successfully — short-circuit; treat draft as sent.
-    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
+    // Already dispatched successfully on a prior attempt. The provider has
+    // acknowledged the send, but the canonical message row may not yet exist
+    // (or may already have been back-linked). Park in needs_reconciliation and
+    // let the back-link / reconciliation routine resolve to terminal `sent` —
+    // never fabricate a UUID for `sent_message_id` from the provider response id.
     await db
       .update(canonicalTicketDrafts)
-      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
-      .where(eq(canonicalTicketDrafts.id, draftId));
-    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
-    return { status: 'sent', messageId: existingMessageId };
+      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review', 'dispatching']),
+        ),
+      );
+    const boss = await getPgBoss();
+    await boss.send('support-draft-reconciliation', {
+      draftId,
+      organisationId: principalCtx.organisationId,
+    }, getJobConfig('support-draft-reconciliation'));
+    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
+      draftId,
+      idempotencyKey,
+      providerResponseId: existingAttempt.providerResponseId,
+    });
+    return { status: 'needs_reconciliation' };
   }
 
   // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
@@ -428,7 +464,10 @@ export async function approveDraft(
       replyId = result.replyId;
     }
 
-    // Mark the ledger row as succeeded
+    // Mark the ledger row as succeeded — providerResponseId carries the provider's
+    // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
+    // UUID is resolved later by webhook back-link or polling reconciliation (per spec
+    // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
     await db
       .update(actionAttempts)
       .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
@@ -439,14 +478,29 @@ export async function approveDraft(
         ),
       );
 
-    const messageId = replyId || draft.id;
+    // Provider has acknowledged the send, but the canonical message row has not yet
+    // landed (ingest will create it via webhook or poll). Park the draft in
+    // needs_reconciliation so the back-link routine (or the reconciliation worker)
+    // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
+    // known. Marking `sent` here would either violate the FK on sent_message_id or
+    // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
     await db
       .update(canonicalTicketDrafts)
-      .set({ status: 'sent', sentMessageId: messageId, updatedAt: sql`NOW()` })
+      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
       .where(eq(canonicalTicketDrafts.id, draftId));
 
-    logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, { draftId, messageId });
-    return { status: 'sent', messageId };
+    const boss = await getPgBoss();
+    await boss.send('support-draft-reconciliation', {
+      draftId,
+      organisationId: principalCtx.organisationId,
+    }, getJobConfig('support-draft-reconciliation'));
+
+    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
+      draftId,
+      providerResponseId: replyId,
+      transition: 'dispatching_to_needs_reconciliation_post_provider_ack',
+    });
+    return { status: 'needs_reconciliation' };
   } catch (err: unknown) {
     const adapterError = classifyAdapterError(err, config.connectorType, 'addReply');
 
@@ -610,9 +664,14 @@ export async function manualResolveDraft(
     }
 
   } else if (action === 'retry_reconciliation') {
+    // Spec §1014: "resets the reconciliation budget and re-enqueues the draft
+    // for the §8.4 worker." The worker only processes drafts in
+    // `needs_reconciliation` status — keep the state, reset the attempt count,
+    // and preserve `dispatching_started_at` so the back-link timestamp match
+    // (which compares against the original send time) still works.
     const result = await db
       .update(canonicalTicketDrafts)
-      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
+      .set({ reconciliationAttemptCount: 0, updatedAt: now })
       .where(
         and(
           eq(canonicalTicketDrafts.id, draftId),

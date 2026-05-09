@@ -58,6 +58,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
           reconciliationAttemptCount: draft.reconciliationAttemptCount,
           proposedBodyText: draft.proposedBodyText,
           proposedVisibility: draft.proposedVisibility,
+          dispatchingStartedAt: draft.dispatchingStartedAt ?? null,
         },
         latestMessages: messages.map((m) => ({
           id: m.id,

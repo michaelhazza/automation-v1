@@ -27,6 +27,20 @@ export type ReconciliationDecision =
  *  2. Budget exhausted → surface_manual
  *  3. Matching message found → resolve_sent
  *  4. Otherwise → retry_after_ms (exponential backoff, capped at 1 hour)
+ *
+ * Match constraints (mirror §11.7 back-link semantics — see `findBackLinkCandidate`):
+ *   - Direction must align with the draft's visibility:
+ *       proposedVisibility = 'public'   → message direction = 'outbound'
+ *       proposedVisibility = 'internal' → message direction = 'internal_note'
+ *   - Visibility must match the draft's proposedVisibility.
+ *   - Message `createdAtExternal` must be at-or-after the draft's `dispatchingStartedAt`
+ *     when both are known. This prevents binding the draft to an unrelated older
+ *     message that happens to contain the same body text (quoted reply, autoresponder
+ *     repeat, etc.).
+ *   - Body comparison uses normalised whitespace (trim + collapse internal whitespace)
+ *     and requires exact equality after normalisation. Substring fallback is no longer
+ *     used because, with successful dispatches now routed through reconciliation, the
+ *     prior loose match could bind a draft to an unrelated earlier message.
  */
 export function decideOutcome(input: {
   draft: {
@@ -35,6 +49,7 @@ export function decideOutcome(input: {
     reconciliationAttemptCount: number;
     proposedBodyText: string;
     proposedVisibility: string;
+    dispatchingStartedAt?: Date | null;
   };
   latestMessages: Array<{
     id: string;
@@ -59,12 +74,20 @@ export function decideOutcome(input: {
   }
 
   // 3. Check whether any landed message matches the draft's proposed body
-  const proposedBody = input.draft.proposedBodyText;
+  //    under the constrained match criteria documented above.
+  const expectedDirection: 'outbound' | 'internal_note' =
+    input.draft.proposedVisibility === 'internal' ? 'internal_note' : 'outbound';
+  const expectedVisibility: 'public' | 'internal' =
+    input.draft.proposedVisibility === 'internal' ? 'internal' : 'public';
+  const dispatchedAt = input.draft.dispatchingStartedAt ?? null;
+  const normalisedProposed = normaliseBody(input.draft.proposedBodyText);
+
   const match = input.latestMessages.find(
     (msg) =>
-      msg.bodyText === proposedBody ||
-      msg.bodyText.includes(proposedBody) ||
-      proposedBody.includes(msg.bodyText),
+      msg.direction === expectedDirection &&
+      msg.visibility === expectedVisibility &&
+      (dispatchedAt == null || msg.createdAtExternal.getTime() >= dispatchedAt.getTime()) &&
+      normaliseBody(msg.bodyText) === normalisedProposed,
   );
 
   if (match) {
@@ -91,7 +114,13 @@ function normaliseBody(text: string): string {
 /**
  * Finds a back-link candidate draft for a newly landed inbound/outbound message.
  *
- * Eligible drafts: status IN ('manually_marked_sent', 'sent') AND sent_message_id IS NULL.
+ * Eligible drafts: status IN ('manually_marked_sent', 'sent', 'needs_reconciliation')
+ *                  AND sent_message_id IS NULL.
+ *
+ * `needs_reconciliation` is included because synchronous-success dispatches park
+ * the draft in that state until the canonical message lands (see
+ * supportDraftDispatchService.ts approveDraft). The webhook back-link path may
+ * see the message before the reconciliation worker fires.
  *
  * Match criteria:
  *   - Direction aligns: outbound message → reply draft; internal_note message → internal_note draft
@@ -119,10 +148,12 @@ export function findBackLinkCandidate(input: {
 }): { match: { id: string } | null; ambiguous: boolean } {
   const { newlyLandedMessage, candidateDrafts } = input;
 
-  // Only consider drafts in eligible statuses with no back-link yet
+  // Only consider drafts in eligible statuses with no back-link yet.
   const eligible = candidateDrafts.filter(
     (d) =>
-      (d.status === 'manually_marked_sent' || d.status === 'sent') &&
+      (d.status === 'manually_marked_sent' ||
+        d.status === 'sent' ||
+        d.status === 'needs_reconciliation') &&
       (d.sentMessageId == null),
   );
 
