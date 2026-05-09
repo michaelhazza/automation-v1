@@ -231,6 +231,8 @@ If either invariant changes, search for `resolveAgentSubaccountId` and `workspac
 <a id="orchestrator-capability-aware-routing"></a>
 ## Orchestrator Capability-Aware Routing
 
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping.
+
 System-managed agent that classifies inbound tasks into one of four deterministic routes. Full spec at [`docs/orchestrator-capability-routing-spec.md`](./docs/orchestrator-capability-routing-spec.md). Implemented in migrations 0156 (schema), 0157 (agent seed), 0158 (hardening), 0159 (revert forever-unique index).
 
 ### Four routing paths
@@ -1565,6 +1567,8 @@ Runs per tool call, in order:
 
 <a id="policy-engine"></a>
 ## Policy Engine
+
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping (Policy Engine, Policy Envelope, Risk Tier).
 
 `policyRules` table defines constraints on agent behaviour. `policyEngineService` evaluates rules during execution — can restrict actions, require escalation, or block execution. Evaluated before skill execution in the processor pipeline. Sprint 3 adds `confidence_threshold` and `guidance_text` columns (migration 0085) enabling decision-time guidance — the middleware injects guidance when a rule matches but confidence is above the threshold.
 
@@ -3024,6 +3028,8 @@ Extends the existing multi-tenant Slack webhook to dispatch inbound messages to 
 <a id="iee-integrated-execution-environment"></a>
 ## IEE — Integrated Execution Environment
 
+> See [SynthetOS Nomenclature](docs/synthetos-nomenclature.md) for the brief v1.2 ↔ code name mapping.
+
 IEE is a deterministic, multi-tenant execution context for **stateful agentic loops** over a browser or a dev workspace. Where the skill system is request/response, IEE is **iterative**: the LLM observes environment state, decides on an action, executes it, observes the result, and loops until `done`, `failed`, the step limit, or the wall-clock timeout. Costs are attributed per run for billing.
 
 The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-spec.md). This section is the architectural overview.
@@ -3969,3 +3975,66 @@ Three lifecycle methods:
 `KnowledgeInUseCard` reads `retrieval.summary` events from `agent_execution_events`. These events are written by `server/services/retrievalObservabilityService.ts` (PR #274). The agent-workspace surface composes with the Document Retrieval Pipeline rather than duplicating it.
 
 Cross-reference: see § *Document Retrieval Pipeline* above for chunk ranking, mode handling, scope precedence, and the observability service contract.
+
+---
+
+## SynthetOS Phase 1 Foundation Primitives
+
+Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation-refactor`). Together they introduce the controllerStyle / risk-tier / policy-envelope / run-trace contract that downstream Phase 1 product features (42 Macro Task, Support Inbox MVP) build on. Spec: `tasks/builds/synthetos-foundation-refactor/spec.md`.
+
+### Schema additions
+
+- `agent_runs.controller_style` (text, NOT NULL, DEFAULT `'native'`, CHECK in `('native','operator')`). Partial index `agent_runs_controller_style_idx ON agent_runs(controller_style) WHERE controller_style = 'operator'`. Migration `0308`.
+- `agent_runs.policy_envelope_snapshot` (jsonb, nullable). Migration `0309`. Immutable after run start (INV-9). State-based UPDATE-WHERE-NULL persist pattern in `policyEnvelopeResolver.persist`.
+- `subaccount_agents` four governance columns: `controller_style_allowed` (text, default `'native_only'`, CHECK in `('native_only','native_and_operator')`), `allowed_environments` (text[], default `['api_tool','headless','browser']`, app-layer Zod-closed enum over `'api_tool'|'headless'|'browser'|'terminal_repo'` with `.min(1)` non-empty constraint — an empty array would deny every executionMode at run start), `max_risk_tier` (int 0-6, default 3), `require_approval_at_tier` (int 0-6, default 4). Migration `0307`.
+
+### New shared types
+
+- `shared/types/controllerStyle.ts` — `ControllerStyle = 'native' | 'operator'`, `ControllerLimits` interface, `CONTROLLER_STYLES` constant.
+- `shared/types/riskTier.ts` — `RiskTier = 0..6`, `GateLevel = 'auto' | 'review' | 'block'`, `deriveGateLevel()` pure derivation function with sources `'policy_override' | 'preserved_existing' | 'tier_default'`.
+- `shared/types/executionEnvironment.ts` — closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`, `executionModeToEnvironment(mode)` exhaustive mapping.
+- `shared/types/policyEnvelope.ts` — `PolicyEnvelopeSnapshot` (schemaVersion 1) — captures resolved constraints at run start.
+- `shared/types/runTraceEvent.ts` — 14-member `RunTraceEventType` union (Phase 1; `routing_path_chosen` deferred to Phase 3 alongside canonical ledger consolidation, when `routing_outcomes` gains a run linkage), base64 cursor codec for run-trace pagination.
+
+### New services
+
+| Service | File | Responsibility |
+|---|---|---|
+| `controllerStyleResolver` | `server/services/controllerStyleResolver.ts` | Pure `deriveControllerStyle(executionMode, allowList, override?)` returning `{ style, source }`. Throws `ControllerStyleNotAllowedForAgentError` (HTTP 422) on explicit-override-rejected path; downgrades to `'native'` with source `'subaccount_constraint'` on derivation-conflict path. |
+| `credentialBrokerService` | `server/services/credentialBrokerService.ts` | Facade over `connectionTokenService` + `integrationConnectionService`. Methods: `issueCredential`, `injectIntoEnvironment`, `revoke` (subaccount-scoped, returns boolean), `audit`, `resolveAvailableCredentials`. Strict-branched on `subaccountId === null` for org-level vs subaccount-scoped revokes. |
+| `policyEnvelopeResolver` | `server/services/policyEnvelopeResolver.ts` + `policyEnvelopeResolverPure.ts` | Aggregates 6 sources at run start (subaccount governance, spending policies, active policy rules, available credentials, capability map, controller limits), persists v1 snapshot via state-based UPDATE-WHERE-NULL with first-resolver-wins re-read. Throws `PolicyEnvelopePersistFailedError` only if both UPDATE and re-read fail. Throws `ExecutionModeNotAllowedForAgentError` (HTTP 422, errorCode `execution_mode_not_allowed_for_agent`) when the resolved envelope's `allowedEnvironments` does not include the run's mapped environment. |
+| `runTraceService` | `server/services/runTraceService.ts` | Unified read across 7 ledger tables (agent_execution_events, delegation_outcomes, tool_call_security_events, review_audit_records, actions, llm_requests, iee_steps) plus a synthesised `run_terminated` event from `agent_runs.status`. Cursor pagination with all five filters (cursor / eventTypes / sinceTimestamp / untilTimestamp / toolSlug) pushed into SQL. `routing_outcomes` excluded from UNION (no `run_id` column). Errors propagate via `logger.error('foundation.run_trace.query_failed')` then rethrow. |
+
+### New routes
+
+- `GET /api/agent-runs/:runId/trace` — Run Trace endpoint, cursor-paginated. `requireOrgPermission(AGENTS_VIEW)`. Query params: `cursor`, `limit` (max 200), `eventTypes`, `toolSlug`, `sinceTimestamp`, `untilTimestamp`. `InvalidRunTraceCursorError` mapped to HTTP 400. (Wired in `server/routes/agentRuns.ts:677`.)
+- `GET /api/subaccounts/:subaccountId/credential-audit` — read-only credential audit log. `requireSubaccountPermission(CREDENTIALS_AUDIT_READ)`. Reads through `credentialBrokerService.audit` with SQL-pushed `metadata->>'subaccountId'` predicate. (`server/routes/credentials.ts`.)
+
+### New permission
+
+- `credentials:audit:read` (subaccount-scoped). Granted to roles that already hold connections-management permissions.
+
+### Stable foundation log codes (consumers depend on these — do not rename)
+
+- `foundation.controller_style.derived` — `controllerStyle` resolved at run start, with `source ∈ {'override','execution_mode_default','subaccount_constraint'}`.
+- `foundation.controller_style.rejected` — explicit override rejected by `controller_style_allowed`.
+- `foundation.execution_environment.rejected` — `executionMode` maps to environment not in agent's `allowed_environments`. Distinct from `controller_style.rejected` for log-search and dashboard targeting.
+- `foundation.risk_tier.gate_derived` — `gateLevel` derived from `riskTier`, with source.
+- `foundation.credential_broker.issued` — credential issued.
+- `foundation.credential_broker.revoked` — credential revoked.
+- `foundation.policy_envelope.resolved` — snapshot resolved at run start.
+- `foundation.policy_envelope.resolution_failed` — snapshot resolution threw or persist failed; run transitions to `'failed'` with reason `policy_envelope_resolution_failed` per INV-19.
+- `foundation.run_trace.queried` — run-trace endpoint queried with event counts and latency.
+- `foundation.run_trace.query_failed` — UNION query threw (DB outage, schema drift); error propagates to caller.
+
+### CI gate
+
+- `scripts/verify-risk-tier-assigned.sh` + `verify-risk-tier-assigned.ts` — every entry in `server/config/actionRegistry.ts` must declare a numeric `riskTier ∈ 0..6`. 138 entries covered.
+
+### Subaccount Agent Edit page tabs (current set)
+
+`/admin/subaccounts/:subaccountId/agents/:linkId/manage` (`SubaccountAgentEditPage`) presents 11 tabs total: **Skills**, **Instructions**, **Budget**, **Scheduling**, **Beliefs**, **Identity**, **Activity**, **Execution** (controllerStyleAllowed + allowedEnvironments + scheduling sub-controls), **Governance** (maxRiskTier + requireApprovalAtTier), **Models & Identity** (placeholder for Phase 1.5 / Phase 3), **Integrations** (capability-map view).
+
+### Glossary
+
+- `docs/synthetos-nomenclature.md` — canonical name glossary mapping v1.2 brief product names to code identifiers (single source of truth for the SynthetOS naming pass; awareness comments in code reference it). 58 lines.

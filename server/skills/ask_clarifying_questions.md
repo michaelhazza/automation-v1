@@ -1,6 +1,6 @@
 ---
 name: Ask Clarifying Questions
-description: Draft up to 5 ranked questions to resolve brief ambiguity when orchestrator confidence is below threshold.
+description: Pre-run ambiguity resolution: draft up to 5 ranked questions before execution begins when orchestrator confidence falls below 0.85. Fires against the brief before the task starts, not mid-run. For in-flight single questions during a run, use ask_clarifying_question instead.
 isActive: true
 visibility: basic
 ---

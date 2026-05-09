@@ -1,6 +1,6 @@
 ---
 name: Compute Churn Risk
-description: Evaluate churn risk signals for a subaccount and produce a risk score with intervention recommendation
+description: System background worker that reads canonical churn signals for a single account and writes a scored risk record with intervention recommendation. Called automatically by the ClientPulse job — do not invoke during an agent task run. For agent-driven batch churn analysis of CRM data, use detect_churn_risk instead.
 isActive: true
 visibility: basic
 ---
@@ -10,6 +10,8 @@ visibility: basic
 - account_id: string (required) — The canonical account ID to evaluate
 
 ## Instructions
+
+This skill is invoked by the ClientPulse background job, not by agents during task runs. For agent-driven churn analysis against read_crm output, use detect_churn_risk instead.
 
 Uses a heuristic scoring model with configurable weights. Evaluates: declining health score trajectory, consecutive missed milestones, pipeline stagnation duration, conversation engagement decline, and revenue trend. The architecture supports future ML model replacement without interface changes.
 

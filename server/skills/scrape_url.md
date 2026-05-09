@@ -1,6 +1,6 @@
 ---
 name: Scrape URL
-description: Fetch and extract content from any web page using a tiered scraping engine with automatic anti-bot escalation.
+description: Extract content from web pages that require JavaScript rendering, anti-bot bypass, or structured content extraction. Use when pages require JS execution or have bot protection. For plain HTTP API calls and non-rendered pages, use fetch_url instead. For consistent field extraction across multiple runs, use scrape_structured.
 isActive: true
 visibility: basic
 ---

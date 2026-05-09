@@ -1,11 +1,13 @@
 # SynthetOS Phase 1 Foundation Refactor — Implementation Spec
 
-**Status:** Draft v1.0  
-**Date:** 2026-05-09  
-**Branch:** `claude/synthetos-foundation-refactor-{tbd}`  
+**Status:** accepted (spec-reviewer iterations 1–3 + chatgpt-spec-review rounds 1–2 complete; ChatGPT verdict APPROVED per `tasks/review-logs/chatgpt-spec-review-synthetos-foundation-refactor-2026-05-09T07-43-56Z.md`; ready for build planning via `feature-coordinator`)  
+**Spec date:** 2026-05-09  
+**Last updated:** 2026-05-09 (chatgpt-spec-review round 2 finalisation)  
+**Author:** SynthetOS architecture group  
+**Build slug:** synthetos-foundation-refactor
+
 **Authoritative brief:** `docs/synthetos-governed-agentic-os-brief-v1.2.md`  
 **Companion documents:** `docs/synthetos-brief-v1.1-to-v1.2-changes.md`, `docs/openclaw-strategic-analysis.md`, `docs/iee-delegation-lifecycle-spec.md`  
-**Authors:** SynthetOS architecture group  
 **Reviewers required:** spec-reviewer (Codex loop), architect (sign-off), pr-reviewer at implementation, dual-reviewer if local Codex available
 
 This spec converts the six Phase 1 foundation items defined in `docs/synthetos-governed-agentic-os-brief-v1.2.md` Section 18.1 into an implementation plan. It is the first of three Phase 1 specs (this one, the Support Desk Canonical spec, the Support Agent MVP spec). Specs B and C consume the primitives shipped here.
@@ -31,7 +33,8 @@ This spec converts the six Phase 1 foundation items defined in `docs/synthetos-g
 - [8. Rollout Plan](#8-rollout-plan)
 - [9. Acceptance Criteria](#9-acceptance-criteria)
 - [10. Risk Register](#10-risk-register)
-- [11. Open Decisions](#11-open-decisions)
+- [11. Deferred Items](#11-deferred-items)
+- [12. Open Decisions](#12-open-decisions)
 
 ---
 
@@ -47,7 +50,7 @@ This is not a Phase 1.5 spec. This is not the Support Desk Canonical spec (`task
 
 ### 0.3 Authority
 
-Where this spec contradicts the v1.2 brief, the v1.2 brief is authoritative for **what** and this spec is authoritative for **how**. Where this spec contradicts existing implementation, this spec is authoritative for the target state and must define a migration. Where the v1.2 brief is silent, this spec may make implementation choices but must enumerate them in Section 11 (Open Decisions) before lock-in.
+Where this spec contradicts the v1.2 brief, the v1.2 brief is authoritative for **what** and this spec is authoritative for **how**. Where this spec contradicts existing implementation, this spec is authoritative for the target state and must define a migration. Where the v1.2 brief is silent, this spec may make implementation choices but must enumerate them in Section 12 (Open Decisions) before lock-in.
 
 ### 0.4 Companion artefacts
 
@@ -67,7 +70,8 @@ The following CI-enforced contracts must be in place when this spec ships:
 2. Existing `scripts/verify-skill-read-paths.sh` — unchanged; new actions inherit the `readPath` requirement.
 3. Existing `scripts/verify-job-idempotency-keys.sh` — unchanged.
 4. Existing `scripts/verify-no-direct-adapter-calls.sh` — unchanged; LLM router contract preserved.
-5. New (optional, advisory): `scripts/verify-controller-style-mapping.sh` — every `executionMode` value has a documented default `controllerStyle` derivation.
+
+A future advisory gate (`scripts/verify-controller-style-mapping.sh`) is sketched in §11 Deferred Items but is not part of the mandatory anchor set for this spec.
 
 ---
 
@@ -119,11 +123,11 @@ This spec **extends and consolidates** the above. It does **not** rebuild any of
 | 1. `controllerStyle` | New schema column, new TS type, new dispatch logic | None |
 | 2. Risk Tier sweep | New TS type, new field on action def, new derivation function, new CI gate | Maps to existing `actions.gateLevel` |
 | 3. `CredentialBrokerService` | None | Facade over existing `connectionTokenService` and `integrationConnectionService` |
-| 4. Run Trace API | New endpoint, new service, new shared type | Joins existing 5+ event tables |
+| 4. Run Trace API | New endpoint, new service, new shared type | Joins the Phase 1 decision-ledger source tables (seven joined; routing_outcomes deferred to Phase 3) (§4.4.1) |
 | 5. Policy Envelope snapshot | New JSONB column on `agent_runs`, new type, new resolver function | Aggregates existing constraint sources |
 | 6. Naming pass | New glossary doc, file-level awareness comments | Documents existing names |
 
-Schema impact: **two new columns on `agent_runs`** (`controller_style`, `policy_envelope_snapshot`). No new tables. No data destruction. No breaking changes to existing APIs.
+Schema impact: **two new columns on `agent_runs`** (`controller_style`, `policy_envelope_snapshot`) plus **four new columns on `subaccount_agents`** (`controller_style_allowed`, `allowed_environments`, `max_risk_tier`, `require_approval_at_tier`) used by the new Agent Configuration governance tab (Section 5.2). No new tables. No data destruction. No breaking changes to existing APIs. RLS on the four new `subaccount_agents` columns is inherited from the existing `subaccount_agents` policy (no manifest change required because the table is already in `RLS_PROTECTED_TABLES`).
 
 ---
 
@@ -133,11 +137,11 @@ Schema impact: **two new columns on `agent_runs`** (`controller_style`, `policy_
 
 **G1. Establish `controllerStyle` as a first-class axis** orthogonal to `executionMode`. Native runs default to short loops with strict templating; Operator runs default to longer loops with adaptive tool use. Loop limits, token budgets, and approval defaults derive from `controllerStyle` plus `executionMode`, not from `executionMode` alone.
 
-**G2. Annotate every action with a Risk Tier (0 to 6).** The 110 actions in `server/config/actionRegistry.ts` each receive a tier classification. The `gateLevel` for each action is derived from its tier plus any policy override; the existing tier-to-gate default (Tier 0-2 auto, Tier 3-5 review, Tier 6 block-unless-policy) holds.
+**G2. Annotate every action with a Risk Tier (0 to 6).** The 110 actions in `server/config/actionRegistry.ts` each receive a tier classification. The tier-to-gate default (Tier 0-2 auto, Tier 3-5 review, Tier 6 block-unless-policy) is the bottom-of-precedence rule; the runtime gate is resolved by `deriveGateLevel` plus subaccount constraints in priority `subaccount_constraint > policy_override > preserved_existing > tier_default`. Adding `riskTier` to a pre-existing action does not change its current `gateLevel` (per INV-8); the tier default applies only to actions that have no preserved existing gate or runtime override.
 
 **G3. Expose credential infrastructure as a single named facade.** `CredentialBrokerService` becomes the only documented entry point for credential issuance, revocation, audit, and runtime injection. Existing call sites migrate; new callers must use the facade.
 
-**G4. Provide a server-side Run Trace API contract.** `GET /api/agent-runs/:runId/trace` returns a unified, ordered, paginated, filterable event stream by joining the existing five decision-ledger tables. The existing `RunTracePage.tsx` is updated to consume the endpoint.
+**G4. Provide a server-side Run Trace API contract.** `GET /api/agent-runs/:runId/trace` returns a unified, ordered, paginated, filterable event stream by joining the existing decision-ledger source tables (Phase 1 unifies seven; routing_outcomes deferred to Phase 3) (Section 4.4.1). The existing `RunTracePage.tsx` is updated to consume the endpoint.
 
 **G5. Capture a Policy Envelope snapshot per run.** At run creation, the resolved constraint set (allowed controllers, environments, integrations, tools; budgets; approval requirements; credential availability; HITL rules) is computed and persisted on `agent_runs.policy_envelope_snapshot`. The snapshot is read-only after run start and surfaced in Run Trace.
 
@@ -157,7 +161,7 @@ The following are explicitly **not** delivered by this spec:
 
 **NG3. Operator Session Identity (`auth_type: 'operator_session'`).** ChatGPT OAuth as a session-based model identity is Phase 3. The credential broker facade in Section 4.3 is forward-compatible with this auth_type but does not implement it.
 
-**NG4. Canonical Run Trace event ledger.** Phase 3+ consolidation. The Phase 1 contract is a virtual view across the existing five tables. A canonical `run_trace_events` table is deferred until either scale or audit forces it.
+**NG4. Canonical Run Trace event ledger.** Phase 3+ consolidation. The Phase 1 contract is a virtual view across the Phase 1 decision-ledger source tables (seven joined; routing_outcomes deferred to Phase 3) (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it.
 
 **NG5. Per-task containers, Firecracker, Kubernetes orchestration.** The diagram shows these as future-state IEE infrastructure; the codebase ships Docker Compose. Phase 3+ work.
 
@@ -165,7 +169,7 @@ The following are explicitly **not** delivered by this spec:
 
 **NG7. Service-wide renames.** The naming pass produces a glossary and awareness comments only. Renaming `orchestratorFromTaskJob` to `routerFromTaskJob` (or similar) is explicitly deferred. The brief locks the canonical name "Router and Execution Planner"; the file prefix stays "Orchestrator" in code.
 
-**NG8. AI and Models settings tab.** The v1.2 brief proposes a Subaccount Settings tab for Model Access, Routing, Limits, Cost Controls, Operator Identities. Phase 1 does not build this; per-agent model selection in the existing Agent Config is sufficient. Phase 1.5 picks it up.
+**NG8. Subaccount-level AI and Models settings tab.** The v1.2 brief proposes a *Subaccount Settings* tab for Model Access, Routing, Limits, Cost Controls, Operator Identities. Phase 1 does not build this subaccount-level tab; per-agent model selection in the new *per-agent* "Models and Identity" tab on the Agent Config page (§5.2.5) is sufficient for Phase 1. Phase 1.5 picks up the subaccount-level tab.
 
 **NG9. Cost analytics dashboards.** Run-level cost is shown in the Run Trace headline (Section 5). Agent-level and org-level cost dashboards are Phase 1.5 or later.
 
@@ -189,7 +193,7 @@ These are non-negotiable properties of the foundation refactor. Every change mus
 
 ### 3.2 Schema constraints
 
-**INV-5. Two new columns on `agent_runs`, nothing else.** `controller_style text NOT NULL DEFAULT 'native'` and `policy_envelope_snapshot jsonb`. No other schema changes in this spec. New tables, new event ledgers, and new audit tables are deferred.
+**INV-5. Schema changes are bounded to columns on two existing tables, plus one named partial index.** On `agent_runs`: `controller_style text NOT NULL DEFAULT 'native'`, `policy_envelope_snapshot jsonb`, and one partial index `agent_runs_controller_style_idx ON agent_runs(controller_style) WHERE controller_style = 'operator'` (Section 4.1.3). On `subaccount_agents`: `controller_style_allowed`, `allowed_environments`, `max_risk_tier`, `require_approval_at_tier` (Section 5.2.9). No other schema changes in this spec. New tables, new event ledgers, and new audit tables are deferred. Both tables are already in `RLS_PROTECTED_TABLES`; the new columns inherit the existing org-scoped RLS policies.
 
 **INV-6. Defaults are safe for existing runs.** `controller_style` defaults to `'native'`; this is the conservative choice (Native is the default per v1.2 brief Section 6.3). `policy_envelope_snapshot` defaults to `NULL` (legacy runs predate the snapshot; readers must tolerate `NULL`).
 
@@ -199,7 +203,9 @@ These are non-negotiable properties of the foundation refactor. Every change mus
 
 **INV-8. Risk Tier never changes existing approval behaviour without explicit policy.** A given action's existing `gateLevel` (`auto` / `review` / `block`) must be preserved unless a new policy rule explicitly overrides it. Adding `riskTier` to an action does not silently change its approval behaviour; it documents the tier for future policy consumers and surfaces it in Run Trace.
 
-**INV-9. Policy Envelope snapshot is immutable after run start.** Once written, `policy_envelope_snapshot` is read-only. Mid-run constraint changes (e.g., a credential is revoked while a run is executing) do not retroactively rewrite the snapshot. They surface as separate events in Run Trace and may abort the run via existing policy mechanisms.
+**INV-9. Policy Envelope snapshot is immutable after run start.** Once written, `policy_envelope_snapshot` is read-only. Immutability is enforced at the service-layer write predicate: every write goes through `policyEnvelopeResolver.persist(runId, snapshot)` which executes `UPDATE agent_runs SET policy_envelope_snapshot = $1 WHERE id = $2 AND policy_envelope_snapshot IS NULL`. Zero-rows-affected indicates the snapshot already exists; the resolver returns the persisted snapshot to the caller (first-resolver-wins). Mid-run constraint changes (e.g., a credential is revoked while a run is executing) do not retroactively rewrite the snapshot. They surface as separate events in Run Trace and may abort the run via existing policy mechanisms.
+
+**INV-19. No agent loop starts without a successfully persisted Policy Envelope snapshot.** The `agent_runs` row is created first, the resolver runs second, and the snapshot UPDATE per INV-9 must succeed (rowCount ≥ 1, including the first-resolver-wins re-read path) before any tool call, LLM call, IEE worker dispatch, or other externally-visible action executes for that run. If envelope resolution throws or the persist UPDATE returns zero rows AND the subsequent re-read also fails (i.e., the snapshot is genuinely unwritable, not just already-resolved), the run transitions to `status: 'failed'` with reason `policy_envelope_resolution_failed`. The log code `foundation.policy_envelope.resolution_failed` is emitted with payload `{ runId, error, sourceCounts? }`. The agent loop never observes a NULL or partial snapshot at runtime — readers within the agent loop assume the snapshot is present, and that assumption is load-bearing. Legacy (pre-spec) runs may still carry NULL `policy_envelope_snapshot` and are unaffected by this invariant; INV-19 governs new runs only.
 
 **INV-10. Run Trace is read-only.** The new endpoint `GET /api/agent-runs/:runId/trace` is a query surface only. No client may write to the constituent ledger tables through this contract. Existing write paths (`agent_execution_events` inserts from middleware, `routing_outcomes` from orchestrator, etc.) are unchanged.
 
@@ -219,13 +225,37 @@ These are non-negotiable properties of the foundation refactor. Every change mus
 
 **INV-16. Structured logs use stable codes.** Foundation work introduces these stable log codes (consumers depend on them; do not rename):
 
-- `foundation.controller_style.derived` — `controllerStyle` resolved at run start, with source (`override` / `executionMode` / `default`).
-- `foundation.risk_tier.gate_derived` — `gateLevel` derived from `riskTier`, with source (`tier_default` / `policy_override`).
+- `foundation.controller_style.derived` — `controllerStyle` resolved at run start, with source (`override` / `execution_mode_default` / `subaccount_constraint`).
+- `foundation.controller_style.rejected` — per-run `controllerStyle` override rejected because the agent's `controller_style_allowed` doesn't permit it (Section 4.1.6). Scoped to controller-style rejections only; environment rejections use the dedicated code below.
+- `foundation.execution_environment.rejected` — `executionMode` requested at run creation maps (via `executionModeToEnvironment`, §4.2.8) to an `ExecutionEnvironment` not present in the agent's `allowed_environments`. Payload: `{ runId, agentId, executionMode, executionEnvironment, allowedEnvironments, reason: 'execution_mode_not_allowed_for_agent' }`. Kept separate from `foundation.controller_style.rejected` so log searches and dashboards can target each governance rejection class without overloading a single code.
+- `foundation.risk_tier.gate_derived` — `gateLevel` derived from `riskTier`, with source (`tier_default` / `preserved_existing` / `policy_override` / `subaccount_constraint`).
 - `foundation.credential_broker.issued` — credential issued via the facade, with scope and purpose.
 - `foundation.policy_envelope.resolved` — snapshot resolved at run start, with source counts.
+- `foundation.policy_envelope.resolution_failed` — snapshot resolution threw or persist UPDATE failed; run transitioning to `failed` with reason `policy_envelope_resolution_failed` per INV-19. Payload: `{ runId, error, sourceCounts? }`.
 - `foundation.run_trace.queried` — Run Trace endpoint queried, with event counts and latency.
 
 **INV-17. Telemetry must not regress.** Existing Langfuse spans continue to fire. New spans for foundation primitives use the same registry pattern (`server/lib/tracing.ts`). No new telemetry backend.
+
+### 3.6 Execution-safety contracts (per spec-authoring-checklist §10)
+
+For every new write or externally-triggered operation introduced by this spec, idempotency posture, retry classification, and concurrency guard are pinned below. Read-only operations (Run Trace endpoint, credential audit endpoint) are listed for completeness.
+
+| Operation | Idempotency posture | Retry class | Concurrency guard |
+|---|---|---|---|
+| Policy Envelope snapshot write (Section 4.5.6) | state-based: `UPDATE agent_runs SET policy_envelope_snapshot = $1 WHERE id = $2 AND policy_envelope_snapshot IS NULL` (0-rows-affected = already-resolved; resolver returns the existing snapshot to the caller) | guarded | optimistic predicate above; first-resolver-wins; losing caller reads the persisted snapshot |
+| Credential broker `issueCredential` / `revoke` / `injectIntoEnvironment` / `audit` / `resolveAvailableCredentials` (Section 4.3) | delegated: facade is structural; underlying `connectionTokenService` and `integrationConnectionService` keep their existing semantics (advisory locks for OAuth refresh; drop-after-use for web login; AES-256-GCM at rest) | inherited from underlying services | inherited (advisory locks already in place) |
+| Credential audit route `GET /api/subaccounts/:id/credential-audit` (Section 5.4.4) | read-only | safe | none required (read path) |
+| Subaccount governance column updates (existing route in `SubaccountAgentEditPage`) | existing path; no change | existing | existing |
+| Run Trace endpoint `GET /api/agent-runs/:runId/trace` (Section 4.4) | read-only | safe | none required (read path) |
+| Risk Tier assignment in `actionRegistry.ts` (Section 4.2) | not a runtime write — config-level type assignment enforced by CI gate `verify-risk-tier-assigned.sh` | n/a | n/a |
+
+**Terminal event guarantee (Run Trace).** The Run Trace virtual view exposes `run_terminated` as a single derived event sourced from `agent_runs.status` reaching a terminal value defined by `shared/runStatus.ts` (`TERMINAL_RUN_STATUSES`: `completed | failed | timeout | cancelled | loop_detected | budget_exceeded | completed_with_uncertainty`). The view yields exactly one `run_terminated` event per run. The terminal event's `timestamp` is sourced from `agent_runs.completed_at`, falling back to `agent_runs.updated_at` if the former is null at the moment the run reaches a terminal status (full pin in §4.4.4). Late events from constituent ledger tables (events whose own row-level `timestamp` is greater than the resolved terminal timestamp) are returned ordered after the terminal event, marked `late: true` in their payload, and treated as diagnostic rather than behaviour-changing. The Phase 1 virtual view is read-only and does not enforce post-terminal write prohibition on the constituent ledger tables — that becomes enforceable when the canonical `run_trace_events` ledger lands in Phase 3+ (NG4).
+
+**No-silent-partial-success.** Partial-success outcomes are represented through the existing `completed_with_uncertainty` terminal status (already in `TERMINAL_RUN_STATUSES`); the trace surface does not invent a separate `partial` value. The `run_terminated` event's payload echoes the actual `agent_runs.status` value verbatim so consumers can distinguish full success from partial / uncertainty cases.
+
+**Unique-constraint mapping.** This spec introduces no new DB unique constraints and therefore no new HTTP mappings for `23505 unique_violation`. The existing `agent_runs.id` and `subaccount_agents.id` primary keys are the only uniqueness boundaries the spec touches; their existing error handling is unchanged.
+
+**State machine closure.** `controller_style` is closed: `'native' | 'operator'`. Adding a value requires a spec amendment and a check-constraint migration. `controller_style_allowed` is closed: `'native_only' | 'native_and_operator'`. `allowed_environments` is closed: each element is one of `'api_tool' | 'headless' | 'browser' | 'terminal_repo'` (the closed `ExecutionEnvironment` enum introduced for governance enforcement; see §4.2.8 for the `executionMode → ExecutionEnvironment` mapping). Adding a value requires a spec amendment plus either a migration-time CHECK constraint update or an application-layer Zod validator update (the column is `text[]` not a Postgres enum, so the closure is enforced in code rather than at the DB level — the implementer chooses the enforcement site, but the closure itself is fixed at the spec level). `policy_envelope_snapshot.schemaVersion` is closed at v1; future versions are additive (new optional fields) until a breaking change forces v2.
 
 ---
 
@@ -321,28 +351,67 @@ When `controllerStyle` is not explicitly provided at run creation, derive from `
 
 ```ts
 // server/services/controllerStyleResolver.ts (new file)
+type ControllerStyleAllowed = 'native_only' | 'native_and_operator';
+type ControllerStyleSource =
+  | 'override'
+  | 'execution_mode_default'
+  | 'subaccount_constraint';
+
 export function deriveControllerStyle(
   executionMode: ExecutionMode,
+  controllerStyleAllowed: ControllerStyleAllowed,
   override?: ControllerStyle,
-): { style: ControllerStyle; source: 'override' | 'execution_mode_default' } {
-  if (override) return { style: override, source: 'override' };
+): { style: ControllerStyle; source: ControllerStyleSource } {
+  // 1) Compute the un-constrained candidate style
+  let candidate: ControllerStyle;
+  let source: ControllerStyleSource;
 
-  switch (executionMode) {
-    case 'api':
-    case 'headless':
-      return { style: 'native', source: 'execution_mode_default' };
-    case 'claude-code':
-    case 'iee_browser':
-    case 'iee_dev':
-      return { style: 'operator', source: 'execution_mode_default' };
-    default:
-      // Forward-compatible: future execution modes default to native (conservative)
-      return { style: 'native', source: 'execution_mode_default' };
+  if (override) {
+    candidate = override;
+    source = 'override';
+  } else {
+    switch (executionMode) {
+      case 'api':
+      case 'headless':
+        candidate = 'native';
+        source = 'execution_mode_default';
+        break;
+      case 'claude-code':
+      case 'iee_browser':
+      case 'iee_dev':
+        candidate = 'operator';
+        source = 'execution_mode_default';
+        break;
+      default:
+        candidate = 'native';
+        source = 'execution_mode_default';
+    }
   }
+
+  // 2) Apply subaccount-agent constraint (Section 4.1.6 / 5.2.9)
+  if (controllerStyleAllowed === 'native_only' && candidate === 'operator') {
+    if (source === 'override') {
+      // Explicit override: caller error — route layer rejects with HTTP 422.
+      throw new ControllerStyleNotAllowedForAgentError();
+    }
+    // Derivation path: downgrade to native, log the constraint application.
+    return { style: 'native', source: 'subaccount_constraint' };
+  }
+
+  return { style: candidate, source };
 }
 ```
 
 The override path supports the orthogonality the brief requires: a 42 Macro Task using `iee_browser` may explicitly request `controllerStyle: 'native'` to inherit short-loop, strict-templating defaults despite running in a browser environment.
+
+**Subaccount-agent precedence.** Validation runs against the **final resolved style** (after override-or-derivation) and respects `subaccount_agents.controller_style_allowed` (Section 5.2.9):
+
+- If `controller_style_allowed = 'native_and_operator'`: both styles are permitted.
+- If `controller_style_allowed = 'native_only'`:
+  - **Explicit override path:** a request that explicitly sets `controllerStyle: 'operator'` is rejected. The route returns HTTP 422 with code `controller_style_not_allowed_for_agent` and emits `foundation.controller_style.rejected`. The caller must change the agent's allow-list before retrying.
+  - **Derivation path (no explicit override):** if derivation produces `operator` (e.g., `executionMode: iee_browser`), the resolved style is **downgraded to `native`** with source `subaccount_constraint`, NOT rejected. This preserves backward compatibility for existing browser/dev runs that pre-date the governance column. The downgrade is logged as `foundation.controller_style.derived` with source `subaccount_constraint` so it is visible in Run Trace; if the agent owner wants long-loop Operator behaviour on browser/dev runs they can flip `controller_style_allowed` to `native_and_operator`.
+
+The default is `'native_only'` (conservative); operators must opt the agent into Operator style explicitly. The downgrade path means existing data continues to work without manual backfill.
 
 #### 4.1.7 Code changes
 
@@ -354,27 +423,20 @@ The override path supports the orthogonality the brief requires: a 42 Macro Task
 | `shared/types/controllerStyle.ts` | New type + constant | +10 |
 | `server/config/controllerLimits.ts` | New limits table | +30 |
 | `server/services/controllerStyleResolver.ts` | New pure function (testable in isolation) | +30 |
-| `server/services/controllerStyleResolverPure.test.ts` | Unit tests | +60 |
+| `server/services/controllerStyleResolverPure.test.ts` | Unit tests (pure) | +60 |
 | `server/services/agentExecutionService.ts` | Replace `MAX_LOOP_ITERATIONS` with `CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations`; replace token budget default with multiplier; capture controllerStyle at run creation; emit `foundation.controller_style.derived` log | +40 to +60 |
-| `server/services/agentRunService.ts` (or wherever runs are created) | Accept optional `controllerStyle` override on create; persist on insert | +15 |
-| `server/routes/agentRuns.ts` | Route handlers accept and pass through `controllerStyle` override (optional query/body param) | +10 |
-| Tests | Integration test: native vs operator runs use different loop limits, token budgets | +80 |
+| `server/services/agentRunService.ts` (or wherever runs are created) | Accept optional `controllerStyle` override on create; validate against subaccount-level `controller_style_allowed` per §4.1.6; persist on insert | +20 |
+| `server/routes/agentRuns.ts` | Route handlers accept and pass through `controllerStyle` override (optional query/body param); HTTP 422 on subaccount-rejection | +15 |
 
-**Total: ~290 to 310 LOC.**
+**Total: ~210 to 230 LOC** (excluding any new pure unit-test files, which are listed in the canonical inventory in §7.2).
 
 #### 4.1.8 Backfill strategy
 
-Existing rows get `controller_style = 'native'` from the column default. This is wrong for some historical runs (e.g., `iee_browser` runs that should map to `operator`), but the historical accuracy is low value and the conservative default is safe. A one-shot backfill job applies the derivation rule retroactively:
+Existing rows get `controller_style = 'native'` from the column default. This is wrong for some historical runs (e.g., `iee_browser` runs that should map to `operator`), but the historical accuracy is low value and the conservative default is safe.
 
-```sql
--- backfill (run once, post-migration)
-UPDATE agent_runs
-SET controller_style = 'operator'
-WHERE execution_mode IN ('claude-code', 'iee_browser', 'iee_dev')
-  AND controller_style = 'native';
-```
+**No retroactive backfill is run.** A previous draft of this spec proposed an UPDATE that re-derived `controller_style` for historical `claude-code | iee_browser | iee_dev` runs, but it conflicts with the conservative `controller_style_allowed = 'native_only'` default introduced in §5.2.9: an unconstrained backfill would write `'operator'` to historical rows whose owning subaccount-agent's allow-list (after migration) is `'native_only'`, producing run-row vs. agent-allow-list inconsistencies. A constrained backfill (only when the owning agent's `controller_style_allowed = 'native_and_operator'`) would no-op for almost all rows because the new column defaults to `'native_only'`. The contradiction is resolved by leaving historical rows on the conservative default; legacy rows display as "Native run" in Run Trace headlines, which the spec explicitly accepts as a low-value historical-accuracy trade.
 
-The backfill is idempotent and can be re-run safely. It is not in the migration itself because it locks the table; it runs as a separate maintenance task after migration apply.
+Forward-only is the correct trade. New runs derive `controller_style` per §4.1.6 and reflect the new governance columns from day one.
 
 #### 4.1.9 Observability
 
@@ -384,7 +446,7 @@ The backfill is idempotent and can be re-run safely. It is not in the migration 
 
 #### 4.1.10 Tests
 
-- Pure: `controllerStyleResolver.test.ts` covers all five `executionMode` values, override path, undefined case, forward-compat default.
+- Pure: `controllerStyleResolverPure.test.ts` (per §7.2 canonical inventory) covers all five `executionMode` values, override path, undefined case, forward-compat default, and the subaccount-constraint downgrade/reject paths.
 - Integration: spawn a native run and an operator run from the same agent; assert different `MAX_LOOP_ITERATIONS` are applied; assert different token budgets resolve.
 - Regression: existing `agentExecutionService` tests pass unchanged; the `MAX_LOOP_ITERATIONS` constant is replaced with a derivation lookup that returns 25 for native (preserving prior behaviour).
 
@@ -442,15 +504,24 @@ export type GateLevel = 'auto' | 'review' | 'block';
 
 export function deriveGateLevel(
   riskTier: RiskTier,
+  preservedExistingGateLevel?: GateLevel,
   policyOverride?: GateLevel,
-): { gateLevel: GateLevel; source: 'tier_default' | 'policy_override' } {
+): {
+  gateLevel: GateLevel;
+  source: 'policy_override' | 'preserved_existing' | 'tier_default';
+} {
   if (policyOverride) return { gateLevel: policyOverride, source: 'policy_override' };
+  if (preservedExistingGateLevel) {
+    return { gateLevel: preservedExistingGateLevel, source: 'preserved_existing' };
+  }
 
   if (riskTier <= 2) return { gateLevel: 'auto', source: 'tier_default' };
   if (riskTier <= 5) return { gateLevel: 'review', source: 'tier_default' };
   return { gateLevel: 'block', source: 'tier_default' };
 }
 ```
+
+**Precedence:** `policy_override > preserved_existing > tier_default`. `preservedExistingGateLevel` is the action's existing `gateLevel` at registry-sweep time (per INV-8) and is the floor for any pre-existing action. Newly-introduced actions pass `undefined` and fall through to the tier default. Policy rules at runtime override both via `policyOverride`.
 
 This function is pure and lives in `shared/`. Test coverage in `shared/types/__tests__/riskTier.test.ts`.
 
@@ -488,7 +559,7 @@ The assignment process:
 
 1. Implementer reads each action's docstring and `gateLevel`.
 2. Implementer assigns tier per the rubric in 4.2.3.
-3. Implementer verifies tier-to-gateLevel derivation matches existing `gateLevel`. **If derivation differs from existing `gateLevel`, the existing `gateLevel` wins and is recorded as a `policyOverride` per INV-8.**
+3. Implementer verifies tier-to-gateLevel derivation matches existing `gateLevel`. **If derivation differs from existing `gateLevel`, the existing `gateLevel` wins per INV-8 and is recorded with source `preserved_existing` (not `policy_override` — `policy_override` is reserved for runtime policy rules).**
 4. Architect reviews the full CSV before the PR merges.
 
 #### 4.2.7 CI gate
@@ -500,18 +571,32 @@ The assignment process:
 
 set -euo pipefail
 
-# Find all action definitions and check riskTier presence
-node --eval "
-  const reg = require('./server/config/actionRegistry.ts');
-  const missing = Object.entries(reg.ACTION_REGISTRY)
-    .filter(([_, def]) => def.riskTier === undefined || def.riskTier === null)
-    .map(([slug]) => slug);
-  if (missing.length > 0) {
-    console.error('Actions missing riskTier:', missing.join(', '));
-    process.exit(1);
-  }
-  console.log('All actions have riskTier assigned.');
-"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Delegate the typed import + presence check to a tsx harness.
+# (Direct `node --eval "require('./....ts')"` does not work — Node's CommonJS
+# loader does not understand TypeScript syntax. The repo uses `npx tsx` for
+# typed verifier harnesses; see scripts/verify-visibility-parity.sh for the
+# precedent.)
+exec npx tsx "$ROOT_DIR/scripts/verify-risk-tier-assigned.ts"
+```
+
+```ts
+// scripts/verify-risk-tier-assigned.ts
+// Typed harness invoked by the bash wrapper above.
+import { ACTION_REGISTRY } from '../server/config/actionRegistry.js';
+
+const missing = Object.entries(ACTION_REGISTRY)
+  .filter(([_slug, def]) => (def as { riskTier?: unknown }).riskTier === undefined
+    || (def as { riskTier?: unknown }).riskTier === null)
+  .map(([slug]) => slug);
+
+if (missing.length > 0) {
+  console.error('Actions missing riskTier:', missing.join(', '));
+  process.exit(1);
+}
+console.log(`All ${Object.keys(ACTION_REGISTRY).length} actions have riskTier assigned.`);
 ```
 
 Registered in `scripts/run-all-gates.sh` alongside existing gates. Failure blocks the build.
@@ -524,7 +609,12 @@ Registered in `scripts/run-all-gates.sh` alongside existing gates. Failure block
 // server/services/policyEngineService.ts (extended)
 async function evaluatePolicy(action: ActionDefinition, context: PolicyContext): Promise<PolicyDecision> {
   const policyOverride = await lookupPolicyOverride(action.slug, context);
-  const { gateLevel, source } = deriveGateLevel(action.riskTier, policyOverride);
+  // INV-8: preserve the existing registry-declared gateLevel as the floor
+  const { gateLevel, source } = deriveGateLevel(
+    action.riskTier,
+    action.gateLevel,
+    policyOverride,
+  );
 
   emitEvent('foundation.risk_tier.gate_derived', {
     actionSlug: action.slug,
@@ -540,21 +630,73 @@ async function evaluatePolicy(action: ActionDefinition, context: PolicyContext):
 
 The `riskTier` and the derivation source are returned from the policy decision so middleware (`proposeActionMiddleware`) and Run Trace can surface them.
 
+**Subaccount-agent governance enforcement (Section 5.2.9 columns).** The new governance columns on `subaccount_agents` are enforced at distinct checkpoints — they are NOT used by the Policy Envelope (replay/audit only, per §4.5.7):
+
+- **`controller_style_allowed`** is enforced inside `controllerStyleResolver.deriveControllerStyle` (see §4.1.6 above).
+- **`allowed_environments`** is enforced inside `agentRunService.createRun` at run creation against the *mapped* `ExecutionEnvironment`, not the raw `executionMode`. Enforcement uses the closed mapping below; if the mapped environment is not in `allowed_environments`, the route returns HTTP 422 with code `execution_mode_not_allowed_for_agent` and emits the dedicated `foundation.execution_environment.rejected` log code (§3.5). Payload includes both the raw `executionMode` and the mapped `executionEnvironment` so consumers can correlate against the controller-style rejection event without overloading a single log code.
+
+  **Closed `ExecutionEnvironment` enum + `executionModeToEnvironment` mapping (new contract for §4.2.8 enforcement).**
+
+  ```ts
+  // shared/types/executionEnvironment.ts (new file)
+  export type ExecutionEnvironment =
+    | 'api_tool'
+    | 'headless'
+    | 'browser'
+    | 'terminal_repo';
+
+  export const EXECUTION_ENVIRONMENTS = ['api_tool', 'headless', 'browser', 'terminal_repo'] as const;
+
+  // Closed mapping. Every existing executionMode value lands on one environment.
+  // Adding a new executionMode value requires updating this function (compiler
+  // exhaustiveness check via the `never` fall-through) and amending the spec.
+  export function executionModeToEnvironment(mode: ExecutionMode): ExecutionEnvironment {
+    switch (mode) {
+      case 'api':         return 'api_tool';
+      case 'headless':    return 'headless';
+      case 'iee_browser': return 'browser';
+      case 'claude-code': return 'terminal_repo';
+      case 'iee_dev':     return 'terminal_repo';
+      default: {
+        const _exhaustive: never = mode;
+        return _exhaustive;
+      }
+    }
+  }
+  ```
+
+  Used by `agentRunService.createRun`:
+
+  ```ts
+  const env = executionModeToEnvironment(req.executionMode);
+  if (!subaccountAgent.allowed_environments.includes(env)) {
+    throw new ExecutionModeNotAllowedForAgentError(req.executionMode, env);
+  }
+  ```
+- **`max_risk_tier`** is enforced inside `policyEngineService.evaluatePolicy` AFTER `deriveGateLevel` runs: if `action.riskTier > subaccountAgent.max_risk_tier`, the decision is overridden to `gateLevel: 'block'` with source `subaccount_constraint` (a fourth source value added to the gate-derivation type union for this purpose). Logged as `foundation.risk_tier.gate_derived`.
+- **`require_approval_at_tier`** is enforced inside the same `policyEngineService.evaluatePolicy`: if `action.riskTier >= subaccountAgent.require_approval_at_tier` and the resolved gate is `auto`, the decision is upgraded to `review` with source `subaccount_constraint`.
+
+Add `subaccount_constraint` to the `deriveGateLevel` source union (the precedence becomes `subaccount_constraint > policy_override > preserved_existing > tier_default` for block-direction overrides; `subaccount_constraint > policy_override > preserved_existing > tier_default` for review-upgrades; the `policyEngineService` applies the constraint after the pure derivation completes so the source-of-precedence logic is colocated in the service rather than the pure function).
+
+The Run Trace `tool_security_decision` event payload includes `gateLevelSource: 'tier_default' | 'preserved_existing' | 'policy_override' | 'subaccount_constraint'` so consumers can distinguish the four cases.
+
 #### 4.2.9 Code changes
 
 | File | Change | Rough LOC |
 |---|---|---|
 | `shared/types/riskTier.ts` | New type, constant, `deriveGateLevel` pure function | +30 |
 | `shared/types/__tests__/riskTier.test.ts` | Pure function tests | +60 |
+| `shared/types/executionEnvironment.ts` | New `ExecutionEnvironment` enum + closed `executionModeToEnvironment` mapping (§4.2.8) | +30 |
+| `shared/types/__tests__/executionEnvironment.test.ts` | Pure function tests for the mapping (covers all five `executionMode` values + exhaustiveness) | +30 |
 | `server/config/actionRegistry.ts` | Extend `ActionDefinition` interface; assign tier to ~110 actions | +110 (one line per action) |
 | `tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv` | Reviewable artefact | (CSV, not LOC) |
-| `scripts/verify-risk-tier-assigned.sh` | New CI gate | +30 |
+| `scripts/verify-risk-tier-assigned.sh` | New CI gate (bash wrapper that execs the tsx harness) | +15 |
+| `scripts/verify-risk-tier-assigned.ts` | New tsx harness (typed import of `ACTION_REGISTRY`, presence check, exit code) | +20 |
 | `scripts/run-all-gates.sh` | Register new gate | +1 |
-| `server/services/policyEngineService.ts` | Integrate `riskTier` in decision evaluation | +20 |
+| `server/services/policyEngineService.ts` | Integrate `riskTier` in decision evaluation per §4.2.8 | +20 |
 | `server/services/middleware/proposeActionMiddleware.ts` | Pass through `riskTier` to decision record | +5 |
-| Tests | Integration test: action with tier 6 routes to review by default; policy override to auto works | +80 |
 
-**Total: ~340 LOC plus the registry sweep.**
+**Total: ~260 LOC plus the registry sweep** (test files are listed in §7.2).
 
 #### 4.2.10 Migration strategy
 
@@ -782,7 +924,7 @@ Rollout: the facade ships alongside its first migrated call site. Subsequent mig
 
 #### 4.4.1 Current state
 
-Decision audit lives across at least seven tables today:
+Decision audit lives across nine ledger tables today (seven joined into the Phase 1 Run Trace UNION; `routing_outcomes` deferred to Phase 3 alongside canonical ledger consolidation; `agent_runs` contributes only the synthesised `run_terminated` event):
 
 - `agent_execution_events` — per-run event log with `eventType`, `sequenceNumber`, ordered by run.
 - `routing_outcomes` — Orchestrator path A/B/C/D classification + outcome.
@@ -791,6 +933,8 @@ Decision audit lives across at least seven tables today:
 - `reviewAuditRecords` — HITL approval decisions.
 - `actions` — proposed actions with gateLevel and reasoning.
 - `llm_requests` — every LLM call with full attribution.
+- `iee_steps` — IEE worker per-step progress records.
+- `agent_runs` — run-level lifecycle state (sourced for `run_started` and `run_terminated` events).
 
 The existing UI surface is `client/src/pages/operate/RunTracePage.tsx` (~350 lines). It joins these tables client-side: it fetches run detail, IEE progress, delegation graph, and renders them as a tree of tool-call events. Each event surface (delegation, IEE progress, runtime checks) has its own fetch and render path.
 
@@ -798,7 +942,7 @@ There is **no server-side endpoint that returns a unified, ordered, queryable Ru
 
 #### 4.4.2 Target state
 
-A `GET /api/agent-runs/:runId/trace` endpoint that returns a unified, ordered, paginated, filterable event stream by joining the existing five decision-ledger tables on the server. The endpoint is a **virtual view** per v1.2 brief Section 12.1; no new tables are introduced. The contract is forward-compatible with the Phase 3+ canonical ledger consolidation (v1.2 brief Section 12.2).
+A `GET /api/agent-runs/:runId/trace` endpoint that returns a unified, ordered, paginated, filterable event stream by joining the decision-ledger source tables (Phase 1 unifies seven; routing_outcomes deferred to Phase 3) listed in Section 4.4.1 on the server. The endpoint is a **virtual view** per v1.2 brief Section 12.1; no new tables are introduced. The contract is forward-compatible with the Phase 3+ canonical ledger consolidation (v1.2 brief Section 12.2).
 
 #### 4.4.3 Endpoint contract
 
@@ -842,10 +986,14 @@ Permissions: same as GET /api/agent-runs/:runId; org-scoped via RLS.
 ```ts
 // shared/types/runTraceEvent.ts (new file)
 
+// Phase 1 union: 14 members. `routing_path_chosen` was originally specified
+// here sourced from `routing_outcomes`, but `routing_outcomes` lacks a
+// `run_id`/`agent_run_id` column so the join is impossible without a schema
+// change. The event is deferred to Phase 3 alongside canonical ledger
+// consolidation, when `routing_outcomes` gains a run linkage.
 export type RunTraceEventType =
   | 'controller_style_decided'         // from agent_execution_events
   | 'policy_envelope_resolved'         // from agent_execution_events (new event type, Section 4.5)
-  | 'routing_path_chosen'              // from routing_outcomes
   | 'tool_proposed'                    // from actions
   | 'tool_security_decision'           // from tool_call_security_events
   | 'tool_call'                        // from agent_execution_events
@@ -863,27 +1011,41 @@ export interface RunTraceEventBase {
   eventType: RunTraceEventType;
   runId: string;
   organisationId: string;
-  timestamp: string;            // ISO8601
-  sequenceNumber: number;       // global per run, monotonically increasing
-  sourceTable: string;          // for debugging only; consumers do not depend on this
-  payload: Record<string, unknown>; // event-type-specific shape (discriminated)
+  timestamp: string;                  // ISO8601
+  sequenceNumber: number | null;      // populated for events from agent_execution_events; null for events sourced from tables without a per-run sequence
+  sourceTable: string;                // table name (used as a tiebreaker in pagination ordering)
+  sourceId: string;                   // primary-key value of the underlying source row; included as the final tiebreaker in the cursor tuple so pagination is stable when (timestamp, sequence_number, source_table) ties
+  payload: Record<string, unknown>;   // event-type-specific shape (discriminated)
 }
 
 export type RunTraceEvent =
-  | RunTraceEventBase & { eventType: 'controller_style_decided'; payload: { controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' } }
-  | RunTraceEventBase & { eventType: 'tool_security_decision'; payload: { toolSlug: string; decision: 'allow' | 'deny' | 'review'; riskTier: RiskTier; gateLevel: GateLevel; gateLevelSource: 'tier_default' | 'policy_override' } }
+  | RunTraceEventBase & { eventType: 'controller_style_decided'; controllerStyle: ControllerStyle; source: 'override' | 'execution_mode_default' | 'subaccount_constraint' }
+  | RunTraceEventBase & { eventType: 'tool_security_decision'; toolSlug: string; decision: 'allow' | 'deny' | 'review'; riskTier: RiskTier; gateLevel: GateLevel; gateLevelSource: 'tier_default' | 'preserved_existing' | 'policy_override' | 'subaccount_constraint' }
   // ... full discriminated union for each event type
   ;
 ```
 
+**Wire shape note.** Per-event fields live at the top level of the discriminated-union member (sibling of `RunTraceEventBase`), NOT nested under a `payload` key. The implementation chose flatten consistently across the type, the SQL projection, and the UI consumer (`RunTraceEventRenderer.tsx`). The `runTraceService.test.ts` shape pin asserts this contract — see §N3 reconciliation. Earlier drafts of this section sketched a `payload: { ... }` envelope; that draft has been retired.
+
 The discriminated union shape is the consumer contract. New event types may be added; existing event type payloads are append-only (no breaking changes).
+
+**Terminal event guarantee (per spec-authoring-checklist §10.4).** The `run_terminated` event is sourced from `agent_runs.status` reaching one of the terminal values defined in `shared/runStatus.ts` (`TERMINAL_RUN_STATUSES`: `completed | failed | timeout | cancelled | loop_detected | budget_exceeded | completed_with_uncertainty`). Exactly one `run_terminated` event is emitted per run.
+
+**Terminal timestamp source (pin).** `run_terminated.timestamp` is sourced from `agent_runs.completed_at` when present, falling back to `agent_runs.updated_at` if the former is null at the moment the run reaches a terminal status. (Schema reality: `agent_runs` exposes `completedAt` and `updatedAt` per `server/db/schema/agentRuns.ts`; there is no `terminated_at` column. If a future migration adds one, that column becomes the highest-priority source and this rule is updated.) The pinned timestamp is what the cursor-ordering tuple `(timestamp, COALESCE(sequence_number, 0), source_table, source_id)` uses for the terminal event.
+
+**Late-event predicate.** A constituent-ledger event is marked `late: true` in its payload when its own row-level `timestamp` (the source-table column already projected into the unified shape per the UNION ALL in §4.4.5) is strictly greater than the resolved `run_terminated.timestamp` per the rule above. Late events still appear in the result set ordered after the terminal event and are treated as diagnostic rather than behaviour-changing.
+
+Phase 1 is a read-only virtual view and does not enforce post-terminal write prohibition on the constituent tables — that becomes enforceable when the canonical `run_trace_events` ledger lands in Phase 3+ (NG4).
 
 #### 4.4.5 Server-side query strategy
 
-Single query with `UNION ALL` across the five tables, projected to the common `RunTraceEvent` shape, ordered by `(timestamp, sequence_number, id)` tiebreaker, paginated by cursor.
+Single query with `UNION ALL` across seven Phase 1 source tables (`agent_execution_events`, `delegation_outcomes`, `tool_call_security_events`, `review_audit_records`, `actions`, `llm_requests`, `iee_steps`) plus a synthesised `run_terminated` event from `agent_runs`. `routing_outcomes` is excluded because the table has no `run_id`/`agent_run_id` column; reintroducing `routing_path_chosen` is a Phase 3 task once that linkage exists. Projected to the common `RunTraceEvent` shape, ordered by `(timestamp, COALESCE(sequence_number, 0), source_table, source_id)` tiebreaker, paginated by cursor. The cursor encodes the same four-tuple, and the SQL predicate compares the same four-tuple, so pagination is stable across requests even when timestamps tie.
 
 ```sql
 -- sketch only; production query lives in runTraceService.ts
+-- Every UNION arm projects (event_type, run_id, organisation_id, timestamp,
+--   sequence_number, source_table, source_id, payload). source_id is the
+--   primary key value of the underlying source row, cast to text for uniformity.
 WITH events AS (
   SELECT
     'controller_style_decided' AS event_type,
@@ -892,34 +1054,46 @@ WITH events AS (
     created_at AS timestamp,
     sequence_number,
     'agent_execution_events' AS source_table,
+    id::text AS source_id,
     payload
   FROM agent_execution_events
   WHERE run_id = $1 AND event_type = 'controller_style_decided'
 
-  UNION ALL
+  -- routing_outcomes intentionally NOT joined — the table has no run_id /
+  -- agent_run_id column. Reintroducing `routing_path_chosen` requires either
+  -- adding that column or joining via decision_record → task → run; both are
+  -- Phase 3 work. See architecture.md § Run Trace.
 
-  SELECT
-    'routing_path_chosen' AS event_type,
-    agent_run_id AS run_id,
-    organisation_id,
-    created_at AS timestamp,
-    NULL AS sequence_number,
-    'routing_outcomes' AS source_table,
-    jsonb_build_object('pathTaken', path_taken, 'outcome', outcome, 'reason', decision_reason) AS payload
-  FROM routing_outcomes
-  WHERE agent_run_id = $1
-
-  -- ... unions for delegation_outcomes, tool_call_security_events, reviewAuditRecords, etc.
+  -- ... unions for delegation_outcomes, tool_call_security_events, reviewAuditRecords,
+  -- actions, llm_requests, iee_steps, agent_runs (each with its PK as source_id).
 )
 SELECT * FROM events
 WHERE
-  ($cursor_timestamp IS NULL OR (timestamp, sequence_number) > ($cursor_timestamp, $cursor_seq))
+  ($cursor_timestamp IS NULL OR
+    (timestamp, COALESCE(sequence_number, 0), source_table, source_id)
+      > ($cursor_timestamp, $cursor_seq, $cursor_source_table, $cursor_source_id))
   AND ($event_types IS NULL OR event_type = ANY($event_types))
   AND ($since_timestamp IS NULL OR timestamp >= $since_timestamp)
   AND ($until_timestamp IS NULL OR timestamp <= $until_timestamp)
-ORDER BY timestamp, COALESCE(sequence_number, 0), source_table
+ORDER BY timestamp, COALESCE(sequence_number, 0), source_table, source_id
 LIMIT $limit;
 ```
+
+**`toolSlug` filter semantics.** `toolSlug` is meaningful only for events that involve a specific tool. When the caller supplies `toolSlug = X`:
+
+| Source table | Predicate when `toolSlug` is set |
+|---|---|
+| `agent_execution_events` | event-types `tool_call`, `tool_result` only; predicate `payload->>'tool_slug' = X` |
+| `tool_call_security_events` | `tool_slug = X` (column) |
+| `actions` | `skill_slug = X` (column) |
+| `routing_outcomes` | excluded (not tool-scoped) |
+| `delegation_outcomes` | excluded |
+| `reviewAuditRecords` | excluded (review item references the action via FK; if the joined action's `skill_slug = X`, included) |
+| `llm_requests` | excluded |
+| `iee_steps` | excluded |
+| `agent_runs` | excluded (run-level lifecycle events, not tool-scoped) |
+
+Events from excluded source tables are filtered out of the result set when `toolSlug` is set (they reappear when the filter is omitted). Per-table predicates compose with the existing `WHERE` clauses inside each UNION arm.
 
 Performance notes:
 
@@ -1006,7 +1180,7 @@ The existing `RunTraceEventRenderer.tsx`, `DelegationGraphView.tsx`, and helper 
 
 #### 4.4.10 Migration strategy
 
-No database migration. The endpoint reads existing tables. The client switch from old fetch paths to the new endpoint is a single-PR change behind a feature flag (`RUN_TRACE_API_V1`) that defaults on after one week of dogfooding.
+No database migration. The endpoint reads existing tables. The client switch from old fetch paths to the new endpoint ships in a single PR; the new endpoint coexists with the old fetch paths in the same release because the change is additive on the server side. If a rollback is required, revert the client PR — the server endpoint is harmless when unused. (No feature flag is added; the project's framing reserves runtime flags for behaviour modes, not rollout gates.)
 
 #### 4.4.11 Observability
 
@@ -1016,10 +1190,10 @@ No database migration. The endpoint reads existing tables. The client switch fro
 
 #### 4.4.12 Tests
 
-- Pure: type discrimination tests, cursor encoding/decoding tests.
-- Integration: seed a run with events across all five tables; query with various filters and pagination; assert result shape and ordering.
+- Pure: type discrimination tests, cursor encoding / decoding tests (per §7.2 canonical inventory).
+- Integration: seed a run with events across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) (§4.4.1); query with various filters and pagination; assert result shape and ordering.
 - Regression: existing RunTracePage rendering tests pass with the new endpoint.
-- Performance: a synthetic run with 5,000 events queries in under 500ms.
+- Performance: synthetic performance tests are not authored as part of this spec (per §7.5, `performance_baselines: defer_until_production`); the alerting threshold above is the runtime signal.
 
 #### 4.4.13 Effort estimate
 
@@ -1047,7 +1221,7 @@ Each enforcement point queries its source on-demand. There is no single record o
 
 #### 4.5.2 Target state
 
-A `policy_envelope_snapshot` JSONB column on `agent_runs`, written at run creation (before the first tool call) with the resolved constraint set. The snapshot is **immutable after run start** (INV-9). Consumers (Run Trace, eval, audit) read the snapshot directly; the snapshot is the single source of truth for "what was in force during this run."
+A `policy_envelope_snapshot` JSONB column on `agent_runs`, written at run creation (before the first tool call) with the resolved constraint set. The snapshot is **immutable after run start** (INV-9). Consumers (Run Trace, eval, audit) read the snapshot directly; the snapshot is the source of truth for **what was in force at run start**, used for replay and audit. Per §4.5.7, runtime enforcement reads live policy sources, not the snapshot — live policy sources win for enforcement, the snapshot wins for replay/audit.
 
 #### 4.5.3 Schema changes
 
@@ -1168,23 +1342,59 @@ The resolver is **pure relative to its inputs** but reads from the database to g
 
 #### 4.5.6 Write site
 
-In `server/services/agentExecutionService.ts`, at run creation (before the first tool call):
+In `server/services/agentExecutionService.ts`, at run creation (before the first tool call). Per INV-19, the agent loop does not start until the snapshot is persisted; resolver failure transitions the run to `failed`.
 
 ```ts
 // after creating agent_runs row, before runAgenticLoop
-const snapshot = await resolvePolicyEnvelope({
-  runId: run.id,
-  agentId: run.agentId,
-  subaccountAgentId: run.subaccountAgentId,
-  organisationId: run.organisationId,
-  subaccountId: run.subaccountId,
-  controllerStyle: run.controllerStyle,
-  executionMode: run.executionMode,
-});
+let snapshot: PolicyEnvelopeSnapshot;
+try {
+  snapshot = await resolvePolicyEnvelope({
+    runId: run.id,
+    agentId: run.agentId,
+    subaccountAgentId: run.subaccountAgentId,
+    organisationId: run.organisationId,
+    subaccountId: run.subaccountId,
+    controllerStyle: run.controllerStyle,
+    executionMode: run.executionMode,
+  });
+} catch (err) {
+  emitEvent('foundation.policy_envelope.resolution_failed', {
+    runId: run.id,
+    error: serialiseError(err),
+  });
+  await transitionRunToFailed(run.id, 'policy_envelope_resolution_failed');
+  // INV-19: agent loop must NOT start. Caller observes the failed run.
+  throw err;
+}
 
-await db.update(agentRuns)
+// State-based concurrency guard (INV-9): immutable after first write.
+const result = await db.update(agentRuns)
   .set({ policyEnvelopeSnapshot: snapshot })
-  .where(eq(agentRuns.id, run.id));
+  .where(and(
+    eq(agentRuns.id, run.id),
+    isNull(agentRuns.policyEnvelopeSnapshot),
+  ));
+
+if (result.rowCount === 0) {
+  // Already resolved (e.g. retry). Return the persisted snapshot.
+  // Per INV-19, if the re-read also fails (snapshot genuinely unwritable),
+  // transition the run to failed and abort.
+  const existing = await readPersistedSnapshot(run.id);
+  if (!existing) {
+    emitEvent('foundation.policy_envelope.resolution_failed', {
+      runId: run.id,
+      error: 'persist UPDATE returned 0 rows and re-read found no snapshot',
+      sourceCounts: {
+        activePolicyRules: snapshot.activePolicyRuleIds.length,
+        availableCredentials: snapshot.availableCredentialIds.length,
+        allowedIntegrations: snapshot.allowedIntegrationSlugs.length,
+      },
+    });
+    await transitionRunToFailed(run.id, 'policy_envelope_resolution_failed');
+    throw new PolicyEnvelopePersistFailedError(run.id);
+  }
+  return existing;
+}
 
 emitEvent('foundation.policy_envelope.resolved', {
   runId: run.id,
@@ -1198,6 +1408,17 @@ emitEvent('foundation.policy_envelope.resolved', {
 ```
 
 Mid-run constraint changes (e.g., a credential is revoked) do NOT rewrite the snapshot. They surface as separate Run Trace events. The snapshot answers "what was in force at run start"; live state changes are tracked separately.
+
+**Failure-path observability.** Runs that fail at this checkpoint surface as `agent_runs.status = 'failed'` with reason `policy_envelope_resolution_failed`. Run Trace shows the run terminated before any tool calls executed; the `foundation.policy_envelope.resolution_failed` log is the first signal in any post-incident triage. This is intentionally a fail-closed posture: a run with no enforceable constraint set is not allowed to execute external actions.
+
+**Headline copy distinction.** The Run Trace headline must NOT use "blocked by policy" for envelope resolution failure, because the run never reached a policy decision — it failed at infrastructure/config resolution before policy was evaluated. The headline copy for this case is:
+
+```
+Native run · failed before execution · $0.00
+Operator run · failed before execution · $0.00
+```
+
+(Controller-style label is preserved because `controllerStyle` is resolved before the snapshot resolver runs, per §4.1.6.) Optional detail line in the trace tree: "Policy settings could not be resolved, so the run was stopped before any tools or model calls executed." "Blocked by policy" is reserved for runs that reached a policy decision and were denied (§5.1.3 case `Operator run · blocked by policy · ...`).
 
 #### 4.5.7 Read sites
 
@@ -1293,7 +1514,7 @@ code name(s), and a meaning.
 | Risk Tier | (new in Phase 1 foundation) | The capability risk classification (0 to 6) per v1.2 brief Section 11. |
 | Policy Engine | `policy_rules` plus `policyEngineService` | The runtime enforcement of declared policy rules; one component of the broader Policy Envelope. |
 | Policy Envelope | (new in Phase 1 foundation) | The resolved constraint set captured per run; aggregates Policy Engine, budgets, credentials, environments, etc. |
-| Run Trace | `agent_execution_events` plus 4 sibling tables (Phase 1 virtual view); `RunTracePage.tsx` UI surface | The governed execution observability layer: ordered, queryable, decision-aware event stream per run. |
+| Run Trace | Phase 1 virtual view across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) enumerated in §4.4.1; `RunTracePage.tsx` UI surface | The governed execution observability layer: ordered, queryable, decision-aware event stream per run. |
 | Credential Broker and Identity Boundary | `CredentialBrokerService` facade over `connectionTokenService` plus `integrationConnectionService` | The named primitive for credential issuance, injection, audit, revocation, and tenant isolation. |
 | Capability Matching | `list_platform_capabilities`, `check_capability_gap`, `list_connections`, `request_feature` skills | The Router's mechanism for resolving available capabilities at routing time. |
 | Agent Capability Map | `subaccountAgents.capabilityMap` (JSONB) | Per-agent snapshot of resolved integrations, read capabilities, write capabilities, skills, primitives. |
@@ -1433,7 +1654,11 @@ Operator run · auto-approved · 2 min 14 sec · $0.42
 Native run · awaiting approval · 12 sec · $0.03
 Operator run · blocked by policy · 8 sec · $0.01
 Native run · failed · 3 sec · $0.00
+Native run · failed before execution · $0.00      (Policy Envelope resolution failure, per §4.5.6)
+Operator run · failed before execution · $0.00    (Policy Envelope resolution failure, per §4.5.6)
 ```
+
+The "failed before execution" copy is reserved for the INV-19 fail-closed path where the agent loop never started. "Blocked by policy" is reserved for runs that reached a policy decision and were denied. "Failed" (without "before execution") is for runs that started, executed at least one step, then errored.
 
 What the headline shows:
 
@@ -1451,7 +1676,9 @@ What the headline does NOT show:
 
 #### 5.1.4 Details panel (deferred to Phase 1.5)
 
-A "Details" link from the headline opens a side-panel with full Policy Envelope, Risk Tier per action, model routing, credential scopes. The link is present but the panel content is Phase 1.5 work. For Phase 1, the link reads "Coming soon."
+A "Details" link from the headline will, in Phase 1.5, open a side-panel with full Policy Envelope, Risk Tier per action, model routing, credential scopes. **In Phase 1 the link is omitted from the headline entirely** — no placeholder text, no disabled element, no "Coming soon" copy. Adding a non-functional control violates the spec's frontend design rules (default to hidden, one primary action per screen) and creates UI noise for non-technical operators on a surface explicitly designed for plain-English summarisation.
+
+When Phase 1.5 ships the details panel, the link is added at that point. Until then, operators who need the underlying detail use the existing tree view below the headline.
 
 #### 5.1.5 Code changes
 
@@ -1460,9 +1687,9 @@ A "Details" link from the headline opens a side-panel with full Policy Envelope,
 | `client/src/components/run-trace/RunTraceHeadline.tsx` | New component | +80 |
 | `client/src/pages/operate/RunTracePage.tsx` | Render headline above existing tree | +10 |
 | `client/src/lib/runTraceFormatters.ts` | Helper formatters (duration, cost, controller label) | +40 |
-| `client/src/components/run-trace/__tests__/RunTraceHeadline.test.tsx` | Component tests | +60 |
+| `client/src/lib/__tests__/runTraceFormatters.test.ts` | Pure-function tests for formatters | +40 |
 
-**Total: ~190 LOC.**
+**Total: ~170 LOC.**
 
 ### 5.2 Agent Configuration: four new tabs
 
@@ -1491,8 +1718,9 @@ Some existing tabs may be merged or moved (e.g., Scheduling rolls into Execution
 │    deterministic workflows)                          │
 │                                                     │
 │ Allowed environments:                               │
-│   [✓] Browser (iee_browser)                         │
 │   [✓] API and Tool                                  │
+│   [✓] Headless                                       │
+│   [✓] Browser (iee_browser)                         │
 │   [ ] Sandbox (Phase 2)                              │
 │   [ ] Terminal and Repo (system agents only)        │
 │                                                     │
@@ -1532,7 +1760,7 @@ The "Advanced scheduling" disclosure preserves the existing scheduling fields wi
 │   (only models already connected are shown)         │
 │                                                     │
 │ Use Operator Session Identity?   [grayed out]       │
-│   ChatGPT OAuth — Phase 2                            │
+│   ChatGPT OAuth — Phase 3                            │
 │                                                     │
 │ Bring-your-own API keys:        [Phase 1.5]          │
 │                                                     │
@@ -1576,10 +1804,10 @@ The "Credentials this agent can use" disclosure links to the Subaccount-level cr
 | `client/src/components/agent-config/ModelsIdentityTab.tsx` | New tab component | +80 |
 | `client/src/components/agent-config/IntegrationsTab.tsx` | New tab component (may reuse existing) | +60 |
 | `server/db/schema/subaccountAgents.ts` | Add fields if not present: `controllerStyleAllowed`, `allowedEnvironments`, `maxRiskTier`, `requireApprovalAtTier` | +20 |
-| `migrations/NNNN_subaccount_agents_governance.sql` | Migration for new fields | +30 |
-| Tests | Component tests for each new tab | +200 |
+| `migrations/NNNN_subaccount_agents_governance.sql` | Migration for new fields (ships in Phase 1A; see §8.1) | +30 |
+| `migrations/_down/NNNN_subaccount_agents_governance.down.sql` | Reverse migration: `ALTER TABLE subaccount_agents DROP COLUMN ...` for each new column | +10 |
 
-**Total: ~700 LOC.**
+**Total: ~500 LOC** (test files are listed in §7.2; per framing, no component tests are added).
 
 #### 5.2.9 Schema additions
 
@@ -1588,11 +1816,30 @@ The "Credentials this agent can use" disclosure links to the Subaccount-level cr
 ALTER TABLE subaccount_agents
   ADD COLUMN controller_style_allowed text NOT NULL DEFAULT 'native_only'
     CHECK (controller_style_allowed IN ('native_only', 'native_and_operator')),
-  ADD COLUMN allowed_environments text[] NOT NULL DEFAULT ARRAY['browser', 'api_tool'],
+  -- Default broadened from ['browser', 'api_tool'] to ['api_tool', 'headless', 'browser']
+  -- to preserve backward compatibility with existing agents whose runs use
+  -- executionMode = 'headless' (today's executionMode column default per
+  -- server/db/schema/agentRuns.ts:39). Without 'headless' in the default list,
+  -- §4.2.8 enforcement would reject every existing headless run on first call
+  -- after migration. 'terminal_repo' is intentionally excluded from the
+  -- default — the §5.2.3 UI mockup gates Terminal/Repo as "system agents only",
+  -- and subaccount-level agents must opt into terminal/repo capability
+  -- explicitly. Closure: every element must be one of
+  -- 'api_tool' | 'headless' | 'browser' | 'terminal_repo' (§3.6 closure rule).
+  ADD COLUMN allowed_environments text[] NOT NULL DEFAULT ARRAY['api_tool', 'headless', 'browser'],
   ADD COLUMN max_risk_tier integer NOT NULL DEFAULT 3
     CHECK (max_risk_tier BETWEEN 0 AND 6),
   ADD COLUMN require_approval_at_tier integer NOT NULL DEFAULT 4
     CHECK (require_approval_at_tier BETWEEN 0 AND 6);
+```
+
+```sql
+-- Migration NNNN_subaccount_agents_governance.down.sql
+ALTER TABLE subaccount_agents
+  DROP COLUMN controller_style_allowed,
+  DROP COLUMN allowed_environments,
+  DROP COLUMN max_risk_tier,
+  DROP COLUMN require_approval_at_tier;
 ```
 
 ### 5.3 Approval UX: risk tier and policy reason context
@@ -1639,9 +1886,8 @@ Context: Using Gmail support@example.com
 | `client/src/components/review/ApprovalRiskContext.tsx` | New component | +50 |
 | `client/src/pages/admin/ReviewQueuePage.tsx` | Render context header | +15 |
 | `server/services/slackConversationService.ts` | Update Block Kit template to include tier + policy | +30 |
-| Tests | Component tests | +60 |
 
-**Total: ~155 LOC.**
+**Total: ~95 LOC.**
 
 ### 5.4 Credentials: audit log section
 
@@ -1672,21 +1918,22 @@ Defaulted-collapsed disclosure. Expanding shows the last 30 days of credential e
 |---|---|---|
 | `client/src/components/CredentialsAuditLog.tsx` | New component | +80 |
 | `client/src/components/CredentialsTab.tsx` | Add audit log section | +20 |
-| `server/routes/credentials.ts` | New endpoint `GET /api/subaccounts/:id/credential-audit` | +40 |
-| Tests | Component and route tests | +80 |
+| `server/routes/credentials.ts` | New endpoint `GET /api/subaccounts/:id/credential-audit`. Route stack: `authenticate`, `resolveSubaccount`, `requirePermission('credentials:audit:read')`, principal-scoped DB context. Backed by `auditEvents` (already in `RLS_PROTECTED_TABLES`). Read-only; idempotency = safe. | +40 |
+| Permission registry (existing file — name varies by codebase, e.g. `server/lib/permissions.ts` or `shared/permissions/index.ts`; the implementer registers the new permission slug there alongside the existing credential-related slugs) | Add new slug `credentials:audit:read` to the registry and to the role-permission mapping for the subaccount-admin role | +5 |
+| Tests | Pure-function tests for any new formatters; route handler covered by existing route-test conventions | +30 |
 
-**Total: ~220 LOC.**
+**Total: ~170 LOC.**
 
 ### 5.5 UI changes summary
 
 | Surface | Effort | Priority |
 |---|---|---|
-| Run Trace headline | Small (~190 LOC) | Must have |
-| Agent Config tabs | Medium (~700 LOC plus migration) | Must have |
-| Approval UX context | Small (~155 LOC) | Should have |
-| Credentials audit log | Small (~220 LOC) | Nice to have |
+| Run Trace headline | Small (~170 LOC) | Must have |
+| Agent Config tabs | Medium (~500 LOC plus migration) | Must have |
+| Approval UX context | Small (~95 LOC) | Should have |
+| Credentials audit log | Small (~170 LOC) | Should have |
 
-**Total UI effort: ~1,265 LOC plus one migration. Roughly 5 to 8 dev-days.**
+**Total UI effort: ~935 LOC plus one migration. Roughly 4 to 6 dev-days.**
 
 UI work runs in parallel with foundation work in Section 4. Both ship together.
 
@@ -1712,19 +1959,19 @@ This spec deliberately introduces zero new tables. All net-new state is captured
 
 The three migrations are independent and can apply in any order. They are:
 
-1. Idempotent on re-apply (no-op if column exists).
-2. Reversible (drop column reverses).
-3. Non-destructive (no data loss).
+1. Applied once via the Drizzle migration runner; the `__drizzle_migrations` ledger prevents re-application without explicit force.
+2. Reversible via the `.down.sql` counterpart (drop column).
+3. Non-destructive (no data loss; default-backed column adds only).
 
 ### 6.4 Backfill jobs
 
-Two one-time backfill jobs run after migrations land:
+No backfill jobs run. All three column groups rely on column defaults.
 
 | Job | Trigger | Idempotent | Effect |
 |---|---|---|---|
-| `backfill_controller_style_from_execution_mode` | Manual; run once after migration 1 | Yes | Updates existing `agent_runs` rows with derived `controller_style` based on `execution_mode` |
-| (no backfill for `policy_envelope_snapshot`) | NA | NA | Existing rows keep NULL; readers tolerate NULL |
-| (no backfill for `subaccount_agents` governance fields) | NA | NA | Existing rows use the column defaults |
+| (no backfill for `controller_style`) | n/a | n/a | Existing rows keep `'native'` from the column default; per §4.1.8 forward-only is the chosen trade because a retroactive backfill conflicts with the `controller_style_allowed = 'native_only'` default |
+| (no backfill for `policy_envelope_snapshot`) | n/a | n/a | Existing rows keep NULL; readers tolerate NULL |
+| (no backfill for `subaccount_agents` governance fields) | n/a | n/a | Existing rows use the column defaults |
 
 ### 6.5 Migration risk
 
@@ -1738,64 +1985,63 @@ Risk mitigation: run migrations on staging first, time the apply, monitor lock d
 
 ## 7. Test Strategy
 
-### 7.1 Test pyramid
+### 7.1 Posture
 
-The spec follows the project test pyramid:
+Project default per `docs/spec-context.md` is **static gates primary, pure-function-only runtime tests, no frontend / E2E / performance baselines / composition tests**.
 
-- **Pure tests (Vitest)**: derivation functions, type integrity, snapshot shape. Co-located with source as `*.test.ts`. Fast, deterministic, run in CI on every commit.
-- **Integration tests (Vitest, scope-tagged)**: schema migrations, end-to-end run with new primitives, multi-table query correctness. Run in CI gate jobs.
-- **Component tests (Vitest, jsdom)**: UI component rendering and interaction. Run in CI.
-- **End-to-end smoke tests (manual or scripted)**: a real run from creation through completion, asserting all foundation primitives engage correctly. Run before merge.
+This spec follows the project default with **two named integration-test exceptions**, both permitted by framing because they cover hot-path concerns that pure-function tests cannot reach:
 
-### 7.2 New test files
+1. `policyEnvelopeResolver` aggregation across multiple constraint sources (multi-table read).
+2. `runTraceService` UNION across seven Phase 1 source tables (routing_outcomes deferred to Phase 3) with cursor pagination (multi-table query correctness).
 
-| Test file | Coverage |
-|---|---|
-| `server/services/__tests__/controllerStyleResolverPure.test.ts` | Derivation rule for all `executionMode` values |
-| `shared/types/__tests__/riskTier.test.ts` | `deriveGateLevel` for all tier values, with and without override |
-| `shared/types/__tests__/policyEnvelope.test.ts` | Snapshot shape integrity |
-| `server/services/__tests__/credentialBrokerService.test.ts` | Facade delegation correctness with mocked underlying services |
-| `server/services/__tests__/policyEnvelopeResolver.test.ts` | Resolver aggregates all six constraint sources |
-| `server/services/__tests__/runTraceService.test.ts` | Multi-table query, pagination, filtering |
-| `client/src/components/run-trace/__tests__/RunTraceHeadline.test.tsx` | Headline rendering for all run states |
-| `client/src/components/agent-config/__tests__/ExecutionTab.test.tsx` | Tab rendering and state |
-| `client/src/components/agent-config/__tests__/GovernanceTab.test.tsx` | Tab rendering and state |
-| `client/src/components/review/__tests__/ApprovalRiskContext.test.tsx` | Context header for tier and policy |
+In addition, this spec adds **one new CI static gate** (`verify-risk-tier-assigned.sh`) and **pure-function unit tests** for every new derivation, resolver, formatter, and discriminated-union type. No new frontend, E2E, API contract, performance, or composition tests are added.
+
+### 7.2 Test inventory (canonical)
+
+| Test file | Kind | Coverage |
+|---|---|---|
+| `server/services/controllerStyleResolverPure.test.ts` | pure unit | Derivation rule for all `executionMode` values, override path, forward-compatible default |
+| `shared/types/__tests__/riskTier.test.ts` | pure unit | `deriveGateLevel` with all combinations of tier, preserved gateLevel, policy override |
+| `shared/types/__tests__/policyEnvelope.test.ts` | pure unit | Snapshot shape integrity (schemaVersion, required-field presence) |
+| `shared/types/__tests__/runTraceEvent.test.ts` | pure unit | Discriminated-union exhaustiveness; cursor encode / decode round-trip |
+| `shared/types/__tests__/executionEnvironment.test.ts` | pure unit | `executionModeToEnvironment` mapping for all five `executionMode` values (§4.2.8); exhaustiveness check guards future enum additions |
+| `server/services/__tests__/credentialBrokerService.test.ts` | pure unit | Facade delegation correctness with mocked underlying services |
+| `server/services/policyEnvelopeResolverPure.test.ts` | pure unit | Pure helpers (tier-default mapping, source-version hashing) |
+| `server/services/__tests__/policyEnvelopeResolver.test.ts` | integration | Resolver aggregates all constraint sources (subaccount agent, spending policies, active policy rules, credential availability, capability map, controller limits, risk tier defaults) into a valid v1 snapshot — one of the carved-out integration tests permitted by framing for hot-path concerns |
+| `server/services/__tests__/runTraceService.test.ts` | integration | Multi-table UNION query correctness, pagination cursor stability across requests — second carved-out integration test (multi-table SQL UNION is a correctness-critical path that pure-function tests cannot cover) |
+| `client/src/components/__tests__/credentialsAuditLogFormatters.test.ts` | pure unit | Audit-log formatter functions (provider names, action labels, timestamps) — adds only if §5.4 ships new formatter functions. The route handler itself relies on existing route-test conventions and adds no new test file. |
 
 ### 7.3 Existing test regression
 
 Every existing test must continue to pass without modification. Specifically:
 
 - All `agentExecutionService` tests pass with `controllerStyle` defaulting to `native`.
-- All `policyEngineService` tests pass with `riskTier` derivation falling back to existing `gateLevel`.
+- All `policyEngineService` tests pass with `riskTier` derivation preserving existing `gateLevel` per INV-8.
 - All credential connection tests pass with calls migrated to the facade.
-- All Run Trace UI tests pass with the new endpoint feature-flagged.
+- Existing Run Trace UI behaviour is preserved when the client switches to the new endpoint.
 
 ### 7.4 New CI gate
 
-`scripts/verify-risk-tier-assigned.sh` (Section 4.2.7) is added to `scripts/run-all-gates.sh`. The gate fails the build if any action in `actionRegistry.ts` is missing a `riskTier`.
+`scripts/verify-risk-tier-assigned.sh` (Section 4.2.7) is registered with the existing CI gate runner. The gate fails the build if any action in `actionRegistry.ts` is missing a `riskTier`. Test gates run in CI only — implementers do not run gate suites locally (see CLAUDE.md, "Test gates are CI-only").
 
-### 7.5 Performance baselines
+### 7.5 Performance posture
 
-Baseline metrics captured before merge so regression is detectable:
+Performance baselines for new primitives are deferred per `performance_baselines: defer_until_production`. Latency budgets live as alerting thresholds in observability (Section 4.4.11 names the Run Trace endpoint p95 < 500ms threshold; Section 4.5.10 names the resolver p95 < 100ms threshold), but no synthetic performance tests are authored as part of this spec.
 
-| Metric | Baseline target | Measurement |
-|---|---|---|
-| Run start latency | Existing p95 (capture from staging) | New `policy_envelope.resolved` event latency |
-| Run Trace endpoint p95 | Under 500ms for runs with up to 5,000 events | Synthetic run with 5,000 events |
-| Action gate evaluation latency | Existing p95 (capture from staging) | Existing `policy_engine.decision` event latency |
+### 7.6 Acceptance scenarios (verification checklist)
 
-If any metric regresses by more than 20%, investigate before merge.
+These seven scenarios are the run-correctness criteria the spec must satisfy. They are not staging or production smoke tests — CI runs the existing test suite as the pre-merge gate, and the pure-function and carved-out integration tests in §7.2 are the durable assertions. The scenarios below are restated as acceptance items the implementer verifies during PR review:
 
-### 7.6 Smoke test scenarios
-
-Five scenarios covered in the smoke test before merge:
-
-1. **Native run with auto-approved actions** — assert `controller_style = 'native'`, `policy_envelope_snapshot` populated, all actions Tier 0 to 2 auto-approve, Run Trace headline reads "Native run · auto-approved · ...".
-2. **Operator run with review-required action** — assert `controller_style = 'operator'`, action at Tier 4 routes to review queue, reviewer approves, run completes, Run Trace headline reads "Operator run · approved by [reviewer] · ...".
-3. **Tier 6 action blocked by default** — assert action without explicit policy override is blocked, run terminates with policy block reason, Run Trace headline reads "blocked by policy".
-4. **Credential broker facade** — assert credentials issued via facade, used by IEE worker, audit log entry visible in Credentials tab.
-5. **Run Trace endpoint** — query the endpoint for the runs above, assert event ordering and payloads match expectations.
+1. **Native run with auto-approved actions** — `controller_style = 'native'`, `policy_envelope_snapshot` populated, Tier 0 to 2 actions whose preserved existing `gateLevel` is `auto` resolve to `auto` (most do, since pre-existing gate-level matches the tier default for low tiers), Run Trace headline reads "Native run · auto-approved · ...".
+2. **Operator run with review-required action** — `controller_style = 'operator'`, Tier 4 action routes to review queue, reviewer approves, run completes, Run Trace headline reads "Operator run · approved by [reviewer] · ...".
+3. **New Tier 6 action blocks by default** — a newly-introduced Tier 6 action with no preserved existing `gateLevel` and no policy override resolves to `block` via the tier-default rule (§4.2.4), the run terminates with policy block reason, and the Run Trace headline reads "blocked by policy".
+4. **Existing action gate preservation (regression scenario for INV-8)** — a pre-existing action assigned Tier 6 in this spec but previously configured with `gateLevel: 'review'` continues to resolve to `review` (`source: 'preserved_existing'`) unless an explicit policy override or subaccount constraint upgrades or downgrades it. The Run Trace `tool_security_decision` event payload reports `gateLevelSource: 'preserved_existing'`. This scenario verifies that adding `riskTier` to the registry does not silently change approval behaviour for any existing action.
+5. **Subaccount-constraint gate overrides (regression scenario for §4.2.8 enforcement)** — three sub-checks against the new `subaccount_agents` governance columns:
+   - `riskTier > subaccountAgent.max_risk_tier` resolves to `gateLevel: 'block'` with `gateLevelSource: 'subaccount_constraint'` (overrides any `auto` or `review` from preceding sources).
+   - `riskTier >= subaccountAgent.require_approval_at_tier` upgrades a resolved `auto` to `review` with `gateLevelSource: 'subaccount_constraint'`.
+   - The Run Trace `tool_security_decision` event payload reports `gateLevelSource: 'subaccount_constraint'` for both upgrade paths.
+6. **Credential broker facade** — credentials issued via facade, used by IEE worker, audit log entry visible in Credentials tab.
+7. **Run Trace endpoint** — query the endpoint for the runs above, event ordering and payloads match expectations.
 
 ---
 
@@ -1808,15 +2054,16 @@ Per v1.2 brief Section 18.1 and the phasing recommendation in `docs/synthetos-v1
 **Phase 1A (Weeks 1 to 2): Independent foundations in parallel**
 - Section 4.1 (controllerStyle): 2 to 3 dev-days
 - Section 4.2 (Risk Tier sweep): 2 to 4 dev-days
-- Section 4.4 (Run Trace API): 3 to 4 dev-days
+- Section 4.3 (CredentialBrokerService): 1 to 2 dev-days
+- `subaccount_agents` governance migration (§5.2.9 schema): 0.25 dev-day, runs alongside §4.1 because the `controller_style_allowed` column is consumed by §4.1.6 validation — the columns ship in 1A even though the *UI* that reads/writes them ships in 1D
 
-These three are independent and can run in parallel with three engineers, or sequentially with one engineer.
+These items are independent and can run in parallel with three engineers, or sequentially with one engineer. The governance migration is intentionally lifted into 1A so the validation in §4.1.6 has a backing column from day one; defaults are conservative (`controller_style_allowed = 'native_only'`, etc.) so existing routes and runs continue to work without UI changes.
 
 **Phase 1B (Weeks 2 to 3): Items that depend on Phase 1A**
-- Section 4.3 (CredentialBrokerService): 1 to 2 dev-days
 - Section 4.5 (Policy Envelope): 3 to 4 dev-days
+- Section 4.4 (Run Trace API): 3 to 4 dev-days
 
-Section 4.5 depends on Sections 4.1, 4.2, 4.3 to feed the snapshot.
+Section 4.5 depends on Sections 4.1, 4.2, 4.3 to feed the snapshot. Section 4.4 depends on 4.5 (the trace response embeds the policy envelope) and on 4.1/4.2 (event payloads reference `controllerStyle` and `riskTier`), so it ships after the Phase 1A primitives are stable.
 
 **Phase 1C (Week 3): Documentation pass**
 - Section 4.6 (Naming pass): 1 to 2 dev-days
@@ -1830,8 +2077,8 @@ Phase 1D can start in parallel with Phase 1B once Phase 1A primitives are stable
 
 | Phase | Branch | PRs |
 |---|---|---|
-| 1A | `claude/synthetos-foundation-1a` | 1 PR per item, parallel |
-| 1B | `claude/synthetos-foundation-1b` | 1 PR for Section 4.3, 1 PR for Section 4.5 |
+| 1A | `claude/synthetos-foundation-1a` | 1 PR per item (§4.1, §4.2, §4.3), parallel |
+| 1B | `claude/synthetos-foundation-1b` | 1 PR for Section 4.5, 1 PR for Section 4.4 |
 | 1C | `claude/synthetos-foundation-1c` | 1 PR (glossary doc + awareness comments) |
 | 1D | `claude/synthetos-foundation-1d` | 4 PRs, one per UI surface |
 
@@ -1839,39 +2086,37 @@ Each PR goes through spec-conformance, pr-reviewer, and (if local Codex availabl
 
 ### 8.3 Feature flags
 
-| Flag | Default | Cleanup |
-|---|---|---|
-| `RUN_TRACE_API_V1` | off | On after one week of dogfooding; remove flag after one month |
-| `POLICY_ENVELOPE_SNAPSHOT` | on | Always on; flag for emergency disable only |
-| (no flags for controllerStyle, Risk Tier, CredentialBroker; backward-compat defaults handle gradual rollout) | NA | NA |
+No feature flags are added by this spec. The project framing (`docs/spec-context.md`: `feature_flags: only_for_behaviour_modes`) reserves runtime flags for behaviour modes (e.g. shadow vs active), not rollout gates. Rollout safety is provided by:
+
+- Backward-compatible defaults on every new column (`controller_style DEFAULT 'native'`, `policy_envelope_snapshot NULL`, `controller_style_allowed DEFAULT 'native_only'`, `allowed_environments DEFAULT ARRAY['api_tool', 'headless', 'browser']` — broadened from the original sketch to include `'headless'` so existing headless agents are not rejected at run creation; see §4.2.8 mapping rule and §5.2.9 inline comment, `max_risk_tier DEFAULT 3`, `require_approval_at_tier DEFAULT 4`).
+- Additive-only API changes (the new Run Trace endpoint coexists with the old fetch paths until the client migration ships).
+- Per-PR revert as the rollback path (Section 8.4).
 
 ### 8.4 Rollback plan
 
 Each migration has a `.down.sql`. Rollback procedure:
 
-1. Disable feature flag (if applicable).
-2. Revert PR(s) for the affected item.
-3. Run `.down.sql` migrations in reverse order.
-4. Re-deploy previous worker version.
+1. Revert PR(s) for the affected item.
+2. Run `.down.sql` migrations in reverse order.
+3. Re-deploy previous worker version.
 
 Rollback is item-by-item; the foundation refactor does not need to be rolled back as a unit.
 
-### 8.5 Production verification
+### 8.5 Post-deploy verification
 
 After merge to main and deploy:
 
 1. Confirm migrations applied (verify column existence on `agent_runs` and `subaccount_agents`).
-2. Run smoke tests (Section 7.6) on production.
-3. Monitor `foundation.*` log codes for the first 24 hours.
-4. Monitor Run Trace endpoint p95 latency for the first week.
-5. Run Risk Tier audit: dump `actionRegistry` tier assignments and review for anomalies.
+2. Walk the §7.6 acceptance scenarios on the deployed environment as a smoke check (manual, one pass).
+3. Confirm `foundation.*` log codes are emitted by inspecting recent runs.
+4. Note Run Trace endpoint p95 latency and the resolver p95 latency against the alerting thresholds (no synthetic load test).
+5. Run a Risk Tier audit: dump `actionRegistry` tier assignments and review for anomalies.
 
 ### 8.6 Lock-in
 
 Foundation refactor is "locked" once:
 
-- All five smoke tests pass on production.
-- All performance baselines are within the 20% tolerance.
+- All seven §7.6 acceptance scenarios verify on the deployed environment.
 - Architecture team has signed off the Risk Tier assignment CSV.
 - Glossary doc is published and referenced from `architecture.md`.
 - The two showcase MVPs (42 Macro and Support Inbox) have begun consuming the foundation primitives.
@@ -1889,9 +2134,10 @@ The foundation refactor is **accepted** when all of the following are true.
 - [ ] `agent_runs.controller_style text NOT NULL DEFAULT 'native'` column exists in production.
 - [ ] `agent_runs.policy_envelope_snapshot jsonb` column exists in production.
 - [ ] `subaccount_agents.controller_style_allowed`, `allowed_environments`, `max_risk_tier`, `require_approval_at_tier` columns exist.
+- [ ] Application-layer validation (e.g., Zod or equivalent on the create/update routes for `subaccount_agents`) rejects any `allowed_environments` element outside the closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`, AND rejects an empty array (`.min(1)` — an empty list would deny every executionMode at run start, bricking the agent). Closure is enforced in code per §3.6 because the column is `text[]` rather than a Postgres enum; this acceptance item is the durable check that the prose-only closure has a runtime backstop.
 - [ ] All migrations have `.down.sql` counterparts that successfully reverse them on staging.
 - [ ] All 110 actions in `actionRegistry.ts` have `riskTier` assigned (CI gate passes).
-- [ ] `CredentialBrokerService` exists at `server/services/credentialBrokerService.ts` with the four methods specified in Section 4.3.3.
+- [ ] `CredentialBrokerService` exists at `server/services/credentialBrokerService.ts` with the five methods specified in Section 4.3.3 (`issueCredential`, `injectIntoEnvironment`, `revoke`, `audit`, `resolveAvailableCredentials`).
 - [ ] All call sites outside `connectionTokenService` and `integrationConnectionService` use the facade.
 - [ ] `GET /api/agent-runs/:runId/trace` endpoint returns the unified event stream per the contract in Section 4.4.3.
 - [ ] `policy_envelope_snapshot` is populated on every new run (verify with sample of recent runs).
@@ -1902,7 +2148,7 @@ The foundation refactor is **accepted** when all of the following are true.
 - [ ] All new test files exist and pass.
 - [ ] Existing test suite passes without modification.
 - [ ] CI gates pass: lint, typecheck, build:server, build:client, RLS coverage, idempotency keys, read-paths, no-direct-adapter-calls, canonical-dictionary, integration-reference, test-quality, plus the new `verify-risk-tier-assigned.sh`.
-- [ ] All five smoke test scenarios pass on staging.
+- [ ] All seven §7.6 acceptance scenarios pass during PR review (manual one-pass verification).
 
 ### 9.3 UI
 
@@ -1913,9 +2159,9 @@ The foundation refactor is **accepted** when all of the following are true.
 
 ### 9.4 Observability
 
-- [ ] All five new log codes (`foundation.controller_style.derived`, `foundation.risk_tier.gate_derived`, `foundation.credential_broker.issued`, `foundation.policy_envelope.resolved`, `foundation.run_trace.queried`) are emitted in expected scenarios.
+- [ ] All eight new log codes (`foundation.controller_style.derived`, `foundation.controller_style.rejected`, `foundation.execution_environment.rejected`, `foundation.risk_tier.gate_derived`, `foundation.credential_broker.issued`, `foundation.policy_envelope.resolved`, `foundation.policy_envelope.resolution_failed`, `foundation.run_trace.queried`) are emitted in expected scenarios.
 - [ ] Existing Langfuse spans continue to fire.
-- [ ] Run Trace endpoint p95 under 500ms for runs with up to 5,000 events.
+- [ ] Run Trace endpoint observability emits the `foundation.run_trace.queried` event with latency; alerting thresholds (p95 > 500ms) wired up. Performance baselines themselves are deferred per `performance_baselines: defer_until_production`.
 
 ### 9.5 Process
 
@@ -1932,8 +2178,8 @@ The foundation refactor is **accepted** when all of the following are true.
 |---|---|---|---|
 | Risk Tier misclassification changes existing approval behaviour silently | Medium | Medium | INV-8 mandates that existing `gateLevel` is preserved unless explicit policy override; architect review of CSV before merge; smoke test 1 verifies auto-approve flow |
 | Policy Envelope resolver misses a constraint source | Medium | Medium | Source manifest in snapshot makes omissions discoverable; integration test with seeded constraints; resolver checklist in PR description |
-| Run Trace endpoint performance regression at scale | Medium | High | Performance baseline captured pre-merge; alerting threshold p95 over 500ms; partial indexes available as escape hatch; canonical ledger consolidation already roadmapped (Phase 3+) |
-| controllerStyle backfill misclassifies historical runs | Low | Low | Historical accuracy is low-value; Native default is the conservative choice; backfill is idempotent and re-runnable |
+| Run Trace endpoint performance regression at scale | Medium | High | Alerting threshold (p95 over 500ms) on `foundation.run_trace.queried` is the runtime signal; partial indexes available as escape hatch; canonical ledger consolidation already roadmapped (Phase 3+). Performance baselines themselves are deferred per `performance_baselines: defer_until_production`. |
+| Legacy `agent_runs` rows display as "Native run" in Run Trace UI even when their `execution_mode` was `iee_browser | iee_dev | claude-code` | Low | Low | Forward-only is the chosen trade per §4.1.8 (no retroactive backfill); historical accuracy is low value, conservative `'native'` default is internally consistent with `controller_style_allowed = 'native_only'` agent-level default |
 | CredentialBrokerService facade has subtle delegation bugs | Low | High | Underlying services unchanged; facade is structural; integration tests verify delegation correctness; existing connection tests cover regression |
 | New JSONB column on `agent_runs` causes table bloat | Low | Medium | Snapshot is roughly 2-5KB per run; at 10K runs/day, roughly 50MB/day; existing retention policy applies; monitor over first month |
 | Migration locks `agent_runs` table during business hours | Low | High | Postgres 11+ ADD COLUMN with DEFAULT is metadata-only; verify Postgres version on target environment before running; staging dry-run |
@@ -1946,79 +2192,99 @@ The foundation refactor is **accepted** when all of the following are true.
 
 ---
 
-## 11. Open Decisions
+## 11. Deferred Items
 
-These are decisions that need to be made before this spec is locked. Each is small enough that the spec-reviewer or architect can resolve them; they do not need a separate spec.
+Per spec-authoring-checklist §7, every deferred concern in this spec is enumerated below. The non-goals list (§2.2 NG1-NG10) is the canonical scope boundary; this section gathers the smaller per-feature deferrals that surfaced in the Implementation and UI sections.
 
-### 11.1 Operator default loop iteration limit
+### 11.0 Accepted Implementation Deviation — `routing_path_chosen` event deferred to Phase 3
 
-**Decision needed**: should `CONTROLLER_LIMITS.operator.maxLoopIterations` default to 100, or some other value?
+The original Phase 1 contract specified a 15-member `RunTraceEventType` union including `routing_path_chosen`, sourced from `routing_outcomes` joined to runs via `agent_run_id`. The shipped implementation exposes **14 event types**; `routing_path_chosen` is **deferred to Phase 3** because `routing_outcomes` has no `run_id` / `agent_run_id` column today, so the join is impossible without a schema change. The Phase 1 Run Trace UNION joins **seven** ledger tables (`agent_execution_events`, `delegation_outcomes`, `tool_call_security_events`, `review_audit_records`, `actions`, `llm_requests`, `iee_steps`) plus a synthesised `run_terminated` event from `agent_runs`. `routing_outcomes` is excluded.
 
-**Discussion**: 100 is 4x the Native default of 25. This roughly matches the difference between "a structured workflow with well-defined steps" (Native) and "an investigative loop that explores and corrects" (Operator). Higher values (200+) risk runaway loops; lower values (50) might prematurely terminate legitimate Operator work.
+This is an accepted deviation — applied via chatgpt-pr-review Round 2 (operator decision: DROP `routing_path_chosen` from Phase 1 union, roadmap to Phase 3) recorded in `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` (finding F5 / N2). Reintroduction lands in Phase 3 alongside canonical Run Trace ledger consolidation, when either `routing_outcomes` gains a `run_id`/`agent_run_id` linkage or the canonical `run_trace_events` table absorbs routing events directly. The discriminated-union API contract is forward-compatible with the Phase 3 reintroduction (new event types are additive per INV-3).
 
-**Recommendation**: 100 as default. Configurable per agent via existing `maxToolCallsPerRun` field. Monitor in production after Spec C (Support Agent MVP) ships.
+### 11.1 Deferred follow-ups
 
-**Owner**: Architect.
+- **Per-task sandbox isolation primitive (NG1).** Phase 2. Today's `iee_dev` mode collapses sandbox-style execution and terminal/repo execution; splitting them requires a sandbox isolation primitive (Docker-per-task, gVisor, Firecracker, or hosted execution provider). Reason: design and infra investment outside Phase 1 scope.
+- **ExecutionBackend adapter contract (NG2).** Phase 3 prerequisite per `docs/openclaw-strategic-analysis.md`. Reason: sequenced after foundation primitives stabilise.
+- **Operator Session Identity / `auth_type: 'operator_session'` (NG3).** Phase 3 (ChatGPT OAuth as a session-based model identity). Reason: depends on Phase-3 ExecutionBackend work; the credential broker facade in §4.3 is forward-compatible.
+- **Canonical Run Trace event ledger (NG4).** Phase 3+. The Phase 1 contract is a virtual view across the seven Phase 1 source tables (routing_outcomes deferred to Phase 3) (§4.4.1). A canonical `run_trace_events` table is deferred until either scale or audit forces it; the API contract is forward-compatible with the canonical ledger.
+- **Per-task containers, Firecracker, Kubernetes orchestration (NG5).** Phase 3+. The diagram shows these as future-state IEE infrastructure; the codebase ships Docker Compose.
+- **42 Macro Task Full MVP and Support Inbox showcase MVP (NG6).** Downstream Phase 1 specs (Spec B and Spec C); this spec only ships the foundation refactor and minimum UI.
+- **Service-wide renames (NG7).** The naming pass produces a glossary and awareness comments only. Renaming `orchestratorFromTaskJob` to `routerFromTaskJob` (or similar) is explicitly deferred.
+- **AI and Models settings tab (NG8).** Phase 1.5. Per-agent model selection in the existing Agent Config is sufficient for Phase 1.
+- **Cost analytics dashboards (NG9).** Run-level cost is shown in the Run Trace headline; agent-level and org-level cost dashboards are Phase 1.5 or later.
+- **Marketplace, multi-region, customer-owned IEE nodes, full autonomy mode (NG10).** Phase 4+.
+- **Run Trace details panel (§5.1.4).** Phase 1.5. Both the side-panel content (full Policy Envelope, Risk Tier per action, model routing, credential scopes) and the headline-level "Details" link itself ship together in Phase 1.5. Phase 1 omits the link entirely to avoid a non-functional control on the headline.
+- **Beliefs tab (§5.2.7).** Defer; Phase 2 conceptual fit. The existing tab stays but is not part of foundation work.
+- **Per-agent cost limits separate from subaccount-level (§5.2.7).** Defer; subaccount-level caps are sufficient for Phase 1.
+- **Escalation rules matrix (§5.2.7).** Phase 1.5.
+- **BYO API keys (§5.2.7).** Phase 1.5.
+- **Per-subaccount Risk Tier defaults (§12.2).** Phase 1.5 if customer demand surfaces; per-agent defaults via `subaccount_agents.requireApprovalAtTier` are sufficient for Phase 1.
+- **Phase-3 placeholder rows in Models and Identity tab (§12.6).** Decision recommended (ship grayed-out) but the actual feature (Operator Session Identity, BYO API keys) is Phase 3 / Phase 1.5 respectively.
+- **Performance baselines for new primitives (§7.5).** Per `performance_baselines: defer_until_production`. Alerting thresholds are in place; synthetic baselines are not authored as part of this spec.
+- **Frontend, E2E, API contract, composition tests (§7.1).** Per project framing, none are added by this spec.
+- **Advisory CI gate `verify-controller-style-mapping.sh` (§0.5).** Sketched but not implemented in Phase 1. Adds a static check that every `executionMode` value has a documented default `controllerStyle` derivation in `controllerStyleResolver.ts`. Reason: the resolver is small enough that visual review at PR time is sufficient until the resolver grows beyond a handful of branches.
+- **Advisory CI gate `verify-no-direct-credential-service-calls.sh` (§4.3).** Sketched but not implemented in Phase 1. Mirrors the existing `verify-no-direct-adapter-calls.sh` pattern: scans non-test source files outside `server/services/credentialBrokerService.ts`, `server/services/connectionTokenService.ts`, and `server/services/integrationConnectionService.ts` for direct imports of the latter two services and fails the build if any new direct call site appears. Reason: §9.1 acceptance already requires every external call site to migrate to the facade; the static gate locks that invariant against drift in future PRs. Carried as advisory in Phase 1 (visual review during the §4.3.5 migration covers the initial sweep) and promoted to a hard gate in Phase 1.5 if any drift is observed post-merge.
 
-### 11.2 Risk Tier 0 to 2 default to `auto`
+## 12. Open Decisions
 
-**Decision needed**: is the default mapping (Tier 0-2 → auto, Tier 3-5 → review, Tier 6 → block) the right floor for **every** subaccount, or should it be configurable per subaccount?
+Each subsection below lists a decision the spec records as **resolved** (the inline implementation already commits to the recommended value) or **open** (still pending operator/architect input). Mechanical fixes adopted the recommendation as the verdict where the spec already used that value elsewhere; explicitly-open items remain marked as such.
 
-**Discussion**: A high-trust subaccount might want Tier 3 actions to default to `auto`. A high-stakes subaccount might want Tier 2 to default to `review`. The existing `subaccountAgents.requireApprovalAtTier` field (Section 5.2.9) handles this per-agent; do we need per-subaccount?
+### 12.1 Operator default loop iteration limit — RESOLVED
 
-**Recommendation**: Per-agent is sufficient for Phase 1. Per-subaccount default can be added in Phase 1.5 if customer demand surfaces.
+**Decision**: `CONTROLLER_LIMITS.operator.maxLoopIterations = 100`. Configurable per agent via existing `maxToolCallsPerRun` field. Reconsider after Spec C (Support Agent MVP) ships and real-workload data is available.
+
+**Rationale**: 100 is 4x the Native default of 25, matching the difference between "a structured workflow with well-defined steps" (Native) and "an investigative loop that explores and corrects" (Operator). Higher values (200+) risk runaway loops; lower values (50) might prematurely terminate legitimate Operator work.
+
+**Owner**: Architect (revisit post-Spec-C).
+
+### 12.2 Per-subaccount Risk Tier defaults — RESOLVED for Phase 1
+
+**Decision**: Per-agent defaults (`subaccount_agents.requireApprovalAtTier`, §5.2.9) are sufficient for Phase 1. Per-subaccount defaults are deferred to Phase 1.5 if customer demand surfaces. (Listed in §11 Deferred Items.)
+
+**Rationale**: A high-trust subaccount might want Tier 3 actions to default to `auto`; a high-stakes subaccount might want Tier 2 to default to `review`. Per-agent granularity covers the common case; per-subaccount adds a knob without an immediate need.
 
 **Owner**: Product + Architect.
 
-### 11.3 Run Trace pagination default size
+### 12.3 Run Trace pagination default size — RESOLVED
 
-**Decision needed**: default `limit` for `GET /api/agent-runs/:runId/trace` queries.
+**Decision**: `limit` defaults to 50, maximum 200, per the §4.4.3 endpoint contract.
 
-**Discussion**: 50 is a reasonable scrollable page. 100 risks showing too much at once for non-technical operators. The UI mostly consumes this for the tree view, which can paginate.
-
-**Recommendation**: default 50, max 200.
+**Rationale**: 50 is a reasonable scrollable page. 100 risks showing too much at once for non-technical operators. The UI mostly consumes this for the tree view, which paginates further.
 
 **Owner**: Architect.
 
-### 11.4 Policy Envelope snapshot location: column vs separate table
+### 12.4 Policy Envelope snapshot location: column vs separate table — RESOLVED
 
-**Decision needed**: store as JSONB column on `agent_runs`, or as a separate `policy_envelope_snapshots` table keyed by `agent_run_id`?
+**Decision**: JSONB column on `agent_runs` (per §4.5.3 schema). A separate `policy_envelope_snapshots` table is a future migration option if scale forces it.
 
-**Discussion**: Column is simpler (single read with the run row), but increases `agent_runs` row size. Separate table is more flexible (could share snapshots across related runs in the future) but adds a join.
-
-**Recommendation**: JSONB column. Single-read semantic is the right trade for Phase 1; row size impact is bounded (2-5KB per run). Future migration to a separate table is straightforward if scale forces it.
+**Rationale**: Single-read semantic is the right trade for Phase 1; row size impact is bounded (2-5KB per run). Future migration to a separate table is straightforward.
 
 **Owner**: Architect.
 
-### 11.5 Should the Risk Tier CSV ship with this spec, or as a separate artefact?
+### 12.5 Should the Risk Tier CSV ship with this spec, or as a separate artefact? — RESOLVED
 
-**Decision needed**: where does the per-action Risk Tier assignment live?
+**Decision**: Separate CSV at `tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv` (per §4.2.6), linked from this spec.
 
-**Discussion**: Including in this spec makes it part of the architectural baseline. Storing as a separate CSV (`tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv`) keeps the spec focused on the architecture.
-
-**Recommendation**: separate CSV, per Section 4.2.6. Linked from this spec.
+**Rationale**: Keeps the spec focused on the architecture; the per-action assignments live as a reviewable artefact in the build directory.
 
 **Owner**: Architect.
 
-### 11.6 Do we ship the "Phase 2" placeholder rows in the Models and Identity tab, or hide them entirely?
+### 12.6 Do we ship the Phase-3 placeholder rows in the Models and Identity tab, or hide them entirely? — RESOLVED
 
-**Decision needed**: UI surface for Operator Session Identity (ChatGPT OAuth) and BYO API keys in Phase 1.
+**Decision**: Ship with placeholders, grayed out, label "Phase 3 — coming soon." (per §5.2.5 mockup).
 
-**Discussion**: Showing "Phase 2" placeholders signals roadmap to admins but adds clutter. Hiding entirely keeps the UI clean but operators may not know these are coming.
-
-**Recommendation**: ship with placeholders, grayed out, label "Phase 2 — coming soon." Operators benefit from visibility; the visual treatment makes clear they are not active.
+**Rationale**: Showing the row signals roadmap to admins; the grayed-out treatment makes clear the feature is not active.
 
 **Owner**: Product + Design.
 
-### 11.7 Does the foundation refactor need its own dedicated `feature-coordinator` run, or can each item ship via the standard Significant-task pipeline?
+### 12.7 Build invocation pattern — RESOLVED
 
-**Decision needed**: invocation pattern for the build.
+**Decision**: single `feature-coordinator` run on this spec, with the chunked plan covering all six items in the §8.1 phase order. Each item is a chunk; the coordinator handles the per-chunk gates.
 
-**Discussion**: The spec is large but each item is medium complexity. `feature-coordinator` orchestrates a chunked build with builder sub-agents; it is heavier than necessary for individual items but lighter than running each item as a separate Major task.
+**Rationale**: the spec is large but each item is medium complexity. `feature-coordinator` orchestrates a chunked build with builder sub-agents; it is heavier than necessary for any individual item but lighter than running each item as a separate Major task.
 
-**Recommendation**: single `feature-coordinator` run on this spec, with the chunked plan covering all six items in dependency order. Each item is a chunk; the coordinator handles the per-chunk gates.
-
-**Owner**: Operator.
+**Owner**: Operator (operator runs the coordinator; this is a process commitment, not implementation work).
 
 ---
 

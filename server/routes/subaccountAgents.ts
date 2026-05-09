@@ -105,6 +105,8 @@ router.patch(
       scheduleCron, scheduleEnabled, scheduleTimezone,
       skillSlugs, customInstructions,
       tokenBudgetPerRun, maxToolCallsPerRun, timeoutSeconds, maxCostPerRunCents, maxLlmCallsPerRun,
+      // Governance (spec §5.2.9) — Agent Config Governance tab fields.
+      controllerStyleAllowed, allowedEnvironments, maxRiskTier, requireApprovalAtTier,
     } = req.body as {
       isActive?: boolean;
       parentSubaccountAgentId?: string | null;
@@ -128,6 +130,10 @@ router.patch(
       timeoutSeconds?: number;
       maxCostPerRunCents?: number | null;
       maxLlmCallsPerRun?: number | null;
+      controllerStyleAllowed?: 'native_only' | 'native_and_operator';
+      allowedEnvironments?: ('api_tool' | 'headless' | 'browser' | 'terminal_repo')[];
+      maxRiskTier?: number;
+      requireApprovalAtTier?: number;
     };
 
     // Verify linkId ownership BEFORE touching the scheduler. Without this
@@ -170,6 +176,11 @@ router.patch(
       timeoutSeconds,
       ...('maxCostPerRunCents' in req.body ? { maxCostPerRunCents } : {}),
       ...('maxLlmCallsPerRun' in req.body ? { maxLlmCallsPerRun } : {}),
+      // Governance (spec §5.2.9)
+      controllerStyleAllowed,
+      allowedEnvironments,
+      maxRiskTier,
+      requireApprovalAtTier,
     });
     res.json(updated);
   })

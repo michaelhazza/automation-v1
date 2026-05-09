@@ -1,0 +1,1023 @@
+ort Desk Canonical) â€” new `support.*` actions assign their tier per the rubric in 4.2.3 as part of their own PR; this spec does not enumerate them.
+
+### 4.3 CredentialBrokerService facade
+
+ succeeded in 1025ms:
+
+#### 5.2.1 Current state
+
+`client/src/pages/admin/SubaccountAgentEditPage.tsx` (or equivalent) has tabs: Skills, Instructions, Budget, Scheduling, Beliefs, Identity, Activity. The page is the admin surface for configuring an agent within a subaccount.
+
+#### 5.2.2 Target state
+
+Add four new tabs that expose the foundation primitives:
+
+1. **Execution** â€” controllerStyle, allowed environments
+2. **Governance** â€” Risk Tier limits, approval rules
+3. **Models and Identity** â€” default model selection (existing surface, formalised)
+4. **Integrations** â€” connection toggles (existing surface, formalised)
+
+Some existing tabs may be merged or moved (e.g., Scheduling rolls into Execution). The page navigation stays familiar.
+
+#### 5.2.3 Execution tab (new)
+
+```
+â”Œâ”€ Execution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                                                     â”‚
+â”‚ Allow Operator mode for this agent?    [ ] Yes      â”‚
+â”‚   (default: off; Native mode only for predictable   â”‚
+â”‚    deterministic workflows)                          â”‚
+â”‚                                                     â”‚
+â”‚ Allowed environments:                               â”‚
+â”‚   [âœ“] Browser (iee_browser)                         â”‚
+â”‚   [âœ“] API and Tool                                  â”‚
+â”‚   [ ] Sandbox (Phase 2)                              â”‚
+â”‚   [ ] Terminal and Repo (system agents only)        â”‚
+â”‚                                                     â”‚
+â”‚ â–¸ Advanced scheduling                               â”‚
+â”‚   (collapsible: existing scheduling fields)         â”‚
+â”‚                                                     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+The "Advanced scheduling" disclosure preserves the existing scheduling fields without cluttering the primary surface.
+
+#### 5.2.4 Governance tab (new)
+
+```
+â”Œâ”€ Governance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                                                     â”‚
+â”‚ Risk Tier limit for this agent:    [Tier 3 â–¾]       â”‚
+â”‚   (highest tier this agent may invoke without       â”‚
+â”‚    explicit approval; default: 3)                   â”‚
+â”‚                                                     â”‚
+â”‚ Require approval for Tier 4+ actions?  [âœ“] Yes      â”‚
+â”‚   (uncheck only if you trust this agent for         â”‚
+â”‚    higher-risk operations)                          â”‚
+â”‚                                                     â”‚
+â”‚ Escalation rules:                                   â”‚
+â”‚   (Phase 1.5 â€” comes after first showcase MVP)      â”‚
+â”‚                                                     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+#### 5.2.5 Models and Identity tab (new)
+
+```
+â”Œâ”€ Models and Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                                                     â”‚
+â”‚ Default model:                  [Claude Sonnet â–¾]   â”‚
+â”‚   (only models already connected are shown)         â”‚
+â”‚                                                     â”‚
+â”‚ Use Operator Session Identity?   [grayed out]       â”‚
+â”‚   ChatGPT OAuth â€” Phase 3                            â”‚
+â”‚                                                     â”‚
+â”‚ Bring-your-own API keys:        [Phase 1.5]          â”‚
+â”‚                                                     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+Most of this is placeholder; the model dropdown is the only live control in Phase 1.
+
+#### 5.2.6 Integrations tab (new)
+
+```
+â”Œâ”€ Integrations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                                                     â”‚
+â”‚ Slack            [âœ“] Connected   [Configure]         â”‚
+â”‚ Gmail            [âœ“] Connected   [Configure]         â”‚
+â”‚ HubSpot          [ ] Not connected   [Connect]       â”‚
+â”‚ GoHighLevel      [ ] Not connected   [Connect]       â”‚
+â”‚                                                     â”‚
+â”‚ Credentials this agent can use:                     â”‚
+â”‚   (managed at Subaccount level)  [Manage]           â”‚
+â”‚                                                     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+The "Credentials this agent can use" disclosure links to the Subaccount-level credential management screen.
+
+#### 5.2.7 Tabs deferred to Phase 1.5+
+
+- Beliefs tab: defer (it's already there but it's a Phase 2 conceptual fit).
+- Per-agent cost limits separate from subaccount-level: defer (subaccount-level is enough for Phase 1).
+- Escalation rules matrix: Phase 1.5.
+- BYO API keys: Phase 1.5.
+
+#### 5.2.8 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `client/src/pages/admin/SubaccountAgentEditPage.tsx` | Add four new tabs; reorganise existing | +/-100 |
+| `client/src/components/agent-config/ExecutionTab.tsx` | New tab component | +120 |
+| `client/src/components/agent-config/GovernanceTab.tsx` | New tab component | +100 |
+| `client/src/components/agent-config/ModelsIdentityTab.tsx` | New tab component | +80 |
+| `client/src/components/agent-config/IntegrationsTab.tsx` | New tab component (may reuse existing) | +60 |
+| `server/db/schema/subaccountAgents.ts` | Add fields if not present: `controllerStyleAllowed`, `allowedEnvironments`, `maxRiskTier`, `requireApprovalAtTier` | +20 |
+| `migrations/NNNN_subaccount_agents_governance.sql` | Migration for new fields | +30 |
+
+**Total: ~500 LOC** (test files are listed in Â§7.2; per framing, no component tests are added).
+
+#### 5.2.9 Schema additions
+
+```sql
+-- Migration NNNN_subaccount_agents_governance.sql
+ALTER TABLE subaccount_agents
+  ADD COLUMN controller_style_allowed text NOT NULL DEFAULT 'native_only'
+    CHECK (controller_style_allowed IN ('native_only', 'native_and_operator')),
+  ADD COLUMN allowed_environments text[] NOT NULL DEFAULT ARRAY['browser', 'api_tool'],
+  ADD COLUMN max_risk_tier integer NOT NULL DEFAULT 3
+    CHECK (max_risk_tier BETWEEN 0 AND 6),
+  ADD COLUMN require_approval_at_tier integer NOT NULL DEFAULT 4
+    CHECK (require_approval_at_tier BETWEEN 0 AND 6);
+```
+
+### 5.3 Approval UX: risk tier and policy reason context
+
+#### 5.3.1 Current state
+
+`client/src/pages/admin/ReviewQueuePage.tsx` shows review items with action type, reasoning, proposed payload, run timestamp, run trace link. Slack approval cards show similar context plus Approve/Reject buttons.
+
+#### 5.3.2 Target state
+
+Add a two-line context header to each review item showing the Risk Tier and the policy reason for the approval requirement.
+
+#### 5.3.3 Review item card design
+
+```
+Action: Send email to client (Tier 6 Â· requires approval per policy)
+Context: Using Gmail support@example.com; customer database read
+
+  [reasoning text]
+  [proposed payload preview]
+
+  [View Run Trace]  [Approve]  [Reject]  [Edit and re-submit]
+```
+
+#### 5.3.4 Slack approval card
+
+```
+[Block: Header]
+Tier 6 Â· Approval required
+Send email to client
+
+[Block: Section]
+Reasoning: [first 200 chars of agent's reasoning]
+Context: Using Gmail support@example.com
+
+[Block: Actions]
+[Approve]  [Reject]  [View Run Trace]
+```
+
+#### 5.3.5 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `client/src/components/review/ApprovalRiskContext.tsx` | New component | +50 |
+| `client/src/pages/admin/ReviewQueuePage.tsx` | Render context header | +15 |
+| `server/services/slackConversationService.ts` | Update Block Kit template to include tier + policy | +30 |
+
+**Total: ~95 LOC.**
+
+### 5.4 Credentials: audit log section
+
+#### 5.4.1 Current state
+
+`client/src/components/CredentialsTab.tsx` (existing) shows OAuth provider dropdown, connection status badges, web login modal, Slack channel config modal. No audit trail surface.
+
+#### 5.4.2 Target state
+
+Add an Audit Log section at the bottom of the Credentials tab showing recent credential events (issued, revoked, refreshed). Read-only. Most users do not need this; it's a "Default to hidden" panel that admins can expand.
+
+#### 5.4.3 Audit log design
+
+```
+â–¸ Audit log (last 30 days)
+   sarah.smith connected Gmail (support@example.com)            2 hours ago
+   â”€ Refreshed (auto)                                            1 hour ago
+   john.doe revoked HubSpot                                      Yesterday
+   sarah.smith connected Slack (#support-internal)               3 days ago
+   â”€ Refreshed (auto)                                            3 days ago
+```
+
+Defaulted-collapsed disclosure. Expanding shows the last 30 days of credential events scoped to the current subaccount.
+
+#### 5.4.4 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `client/src/components/CredentialsAuditLog.tsx` | New component | +80 |
+| `client/src/components/CredentialsTab.tsx` | Add audit log section | +20 |
+| `server/routes/credentials.ts` | New endpoint `GET /api/subaccounts/:id/credential-audit`. Route stack: `authenticate`, `resolveSubaccount`, `requirePermission('credentials:audit:read')`, principal-scoped DB context. Backed by `auditEvents` (already in `RLS_PROTECTED_TABLES`). Read-only; idempotency = safe. | +40 |
+| Tests | Pure-function tests for any new formatters; route handler covered by existing route-test conventions | +30 |
+
+**Total: ~170 LOC.**
+
+### 5.5 UI changes summary
+
+| Surface | Effort | Priority |
+|---|---|---|
+| Run Trace headline | Small (~170 LOC) | Must have |
+| Agent Config tabs | Medium (~500 LOC plus migration) | Must have |
+| Approval UX context | Small (~95 LOC) | Should have |
+| Credentials audit log | Small (~170 LOC) | Should have |
+
+**Total UI effort: ~935 LOC plus one migration. Roughly 4 to 6 dev-days.**
+
+UI work runs in parallel with foundation work in Section 4. Both ship together.
+
+---
+
+## 6. Schema Migrations Summary
+
+### 6.1 Migrations introduced by this spec
+
+| # | File | Purpose | Reversible | Locks table? |
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content tasks/builds/synthetos-foundation-refactor/spec.md | Select-Object -Skip 628 -First 194' in C:\Files\Projects\automation-v1
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content tasks/builds/synthetos-foundation-refactor/spec.md | Select-Object -Skip 1081 -First 230' in C:\Files\Projects\automation-v1
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content tasks/builds/synthetos-foundation-refactor/spec.md | Select-Object -Skip 1311 -First 155' in C:\Files\Projects\automation-v1
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content tasks/builds/synthetos-foundation-refactor/spec.md | Select-Object -Skip 1794 -First 60' in C:\Files\Projects\automation-v1
+ succeeded in 1019ms:
+
+#### 4.5.1 Current state
+
+Constraint enforcement is mature but distributed across multiple sources:
+
+- `policy_rules` table + `policyEngineService.ts` (357 lines) â€” action-level allow/deny/escalate with confidence thresholds and guidance text.
+- `actions.gateLevel` (registry) â€” per-action default approval level.
+- `subaccountAgents.{tokenBudgetPerRun, maxToolCallsPerRun, maxCostPerRunCents, allowedSkillSlugs}` â€” per-agent runtime constraints.
+- `spendingPolicies` table â€” per-org and per-subaccount cost guardrails.
+- `toolRestrictionMiddleware`, `proposeActionMiddleware`, `loopDetectionMiddleware`, `confidenceEscapeMiddleware` â€” runtime enforcement points.
+- `integration_connections` (filtered by status, scope) â€” credential availability.
+
+Each enforcement point queries its source on-demand. There is no single record of "what policy was in force when this run executed." Consumers wanting to replay the constraint set (eval, audit export, debugging) must reconstruct it from the originating tables, which may have changed since the run.
+
+#### 4.5.2 Target state
+
+A `policy_envelope_snapshot` JSONB column on `agent_runs`, written at run creation (before the first tool call) with the resolved constraint set. The snapshot is **immutable after run start** (INV-9). Consumers (Run Trace, eval, audit) read the snapshot directly; the snapshot is the source of truth for **what was in force at run start**, used for replay and audit. Per Â§4.5.7, runtime enforcement reads live policy sources, not the snapshot â€” live policy sources win for enforcement, the snapshot wins for replay/audit.
+
+#### 4.5.3 Schema changes
+
+```sql
+-- Migration NNNN_agent_runs_policy_envelope.sql
+ALTER TABLE agent_runs
+  ADD COLUMN policy_envelope_snapshot jsonb;
+-- NULL is valid (legacy runs predate the snapshot).
+-- Reads must tolerate NULL; new runs always populate it.
+```
+
+```sql
+-- Migration NNNN_agent_runs_policy_envelope.down.sql
+ALTER TABLE agent_runs DROP COLUMN policy_envelope_snapshot;
+```
+
+No index. The snapshot is read with the run row, never queried independently.
+
+#### 4.5.4 Snapshot type
+
+```ts
+// shared/types/policyEnvelope.ts (new file)
+
+export interface PolicyEnvelopeSnapshot {
+  schemaVersion: 1;
+  resolvedAt: string; // ISO8601
+
+  // Identity context
+  runId: string;
+  agentId: string;
+  subaccountAgentId: string | null;
+  organisationId: string;
+  subaccountId: string | null;
+
+  // Style and capability
+  controllerStyle: ControllerStyle;
+  executionMode: ExecutionMode;
+  controllerLimits: ControllerLimits; // resolved from CONTROLLER_LIMITS lookup
+
+  // Permitted operations
+  allowedControllers: ControllerStyle[];          // future-proof: today often ['native', 'operator'] both
+  allowedEnvironments: ExecutionEnvironment[];    // ['browser', 'api_tool', 'terminal_repo', ...]
+  allowedSkillSlugs: string[];                    // from subaccountAgents.allowedSkillSlugs
+  allowedIntegrationSlugs: string[];              // from active integration_connections
+
+  // Risk constraints
+  maxRiskTier: RiskTier;                          // ceiling for this run; tools above this require explicit policy
+  riskTierApprovalDefaults: Record<RiskTier, GateLevel>; // tier -> gateLevel default for this run
+
+  // Budget constraints
+  budgets: {
+    tokenBudget: number;
+    maxToolCalls: number;
+    maxCostCents: number;
+    maxLlmCalls: number;
+  };
+
+  // Approval requirements
+  approvalDefaults: {
+    sendEmailToClient: GateLevel;
+    sendSlackToClient: GateLevel;
+    deployOrFundsTransfer: GateLevel;
+    // future: extensible map keyed by capability category
+  };
+
+  // Credential availability snapshot (id list, not material)
+  availableCredentialIds: string[]; // from credentialBrokerService.resolveAvailableCredentials
+
+  // Active policy rules at run start (slugs only; full rules looked up live if needed)
+  activePolicyRuleIds: string[];
+
+  // Source manifest for debugging
+  sources: {
+    subaccountAgentVersion: string | null; // hash or updatedAt
+    spendingPoliciesVersion: string | null;
+    activePolicyRulesVersion: string | null;
+    capabilityMapVersion: string | null;
+  };
+}
+```
+
+The schema version field allows future evolution of the snapshot shape without breaking readers. v1 is the only supported version at this spec.
+
+#### 4.5.5 Resolver function
+
+```ts
+// server/services/policyEnvelopeResolver.ts (new file)
+
+export interface RunCreationContext {
+  runId: string;
+  agentId: string;
+  subaccountAgentId: string | null;
+  organisationId: string;
+  subaccountId: string | null;
+  controllerStyle: ControllerStyle;
+  executionMode: ExecutionMode;
+  override?: Partial<PolicyEnvelopeSnapshot>; // explicit overrides (rare; debugging only)
+}
+
+export async function resolvePolicyEnvelope(
+  ctx: RunCreationContext,
+): Promise<PolicyEnvelopeSnapshot> {
+  // 1. Resolve subaccountAgent constraints (budgets, allowedSkillSlugs)
+  // 2. Resolve org and subaccount spending policies
+  // 3. Resolve active policy rules for this scope
+  // 4. Resolve available credentials via credentialBrokerService.resolveAvailableCredentials
+  // 5. Resolve capability map (allowedIntegrationSlugs)
+  // 6. Compute controllerLimits from CONTROLLER_LIMITS[controllerStyle]
+  // 7. Compute riskTierApprovalDefaults using deriveGateLevel for each tier
+  // 8. Apply explicit overrides (if any)
+  // 9. Stamp resolvedAt; return snapshot
+
+  // Emits foundation.policy_envelope.resolved event
+}
+```
+
+The resolver is **pure relative to its inputs** but reads from the database to gather constraint sources. It is tested with seeded constraint data.
+
+#### 4.5.6 Write site
+
+In `server/services/agentExecutionService.ts`, at run creation (before the first tool call):
+
+```ts
+// after creating agent_runs row, before runAgenticLoop
+const snapshot = await resolvePolicyEnvelope({
+  runId: run.id,
+  agentId: run.agentId,
+  subaccountAgentId: run.subaccountAgentId,
+  organisationId: run.organisationId,
+  subaccountId: run.subaccountId,
+  controllerStyle: run.controllerStyle,
+  executionMode: run.executionMode,
+});
+
+// State-based concurrency guard (INV-9): immutable after first write.
+const result = await db.update(agentRuns)
+  .set({ policyEnvelopeSnapshot: snapshot })
+  .where(and(
+    eq(agentRuns.id, run.id),
+    isNull(agentRuns.policyEnvelopeSnapshot),
+  ));
+
+if (result.rowCount === 0) {
+  // Already resolved (e.g. retry). Return the persisted snapshot.
+  return readPersistedSnapshot(run.id);
+}
+
+emitEvent('foundation.policy_envelope.resolved', {
+  runId: run.id,
+  schemaVersion: snapshot.schemaVersion,
+  sourceCounts: {
+    activePolicyRules: snapshot.activePolicyRuleIds.length,
+    availableCredentials: snapshot.availableCredentialIds.length,
+    allowedIntegrations: snapshot.allowedIntegrationSlugs.length,
+  },
+});
+```
+
+Mid-run constraint changes (e.g., a credential is revoked) do NOT rewrite the snapshot. They surface as separate Run Trace events. The snapshot answers "what was in force at run start"; live state changes are tracked separately.
+
+#### 4.5.7 Read sites
+
+- Run Trace API (Section 4.4) returns the snapshot in the response envelope.
+- `RunTracePage.tsx` headline (Section 5) reads the snapshot for the one-line summary.
+- Eval harness reads the snapshot to replay the constraint set during regression testing.
+- Audit export reads the snapshot for compliance reports.
+
+Middleware does **not** read the snapshot for runtime decisions. Runtime enforcement reads the live constraint sources because mid-run changes (credential revoked, policy rule updated) must take effect immediately. The snapshot is for replay and audit, not for enforcement.
+
+#### 4.5.8 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `migrations/NNNN_agent_runs_policy_envelope.sql` + `.down.sql` | New migration | +25 |
+| `server/db/schema/agentRuns.ts` | Add column to Drizzle schema | +5 |
+| `shared/types/policyEnvelope.ts` | New type | +120 |
+| `shared/types/__tests__/policyEnvelope.test.ts` | Pure tests for type integrity | +40 |
+| `server/services/policyEnvelopeResolver.ts` | New resolver | +200 |
+| `server/services/policyEnvelopeResolverPure.ts` | Pure helpers (extracted for testability) | +80 |
+| `server/services/__tests__/policyEnvelopeResolver.test.ts` | Integration tests | +120 |
+| `server/services/agentExecutionService.ts` | Wire resolver call at run creation | +15 |
+
+**Total: ~600 LOC.**
+
+#### 4.5.9 Migration strategy
+
+Existing runs have `policy_envelope_snapshot = NULL`. Readers must tolerate NULL (legacy run, snapshot unavailable). Run Trace UI shows "Snapshot unavailable (legacy run)" for these.
+
+No backfill. Backfilling historical runs would require reconstructing constraints from change history, which is unreliable. Forward-only is the correct trade.
+
+#### 4.5.10 Observability
+
+- Event: `foundation.policy_envelope.resolved` with payload `{ runId, schemaVersion, sourceCounts }`.
+- Span: `agent.run.policy_envelope.resolved` Langfuse span around the resolver call.
+- Latency budget: resolver should complete in under 100ms p95. Above that triggers investigation (likely DB query optimisation or indexing).
+
+#### 4.5.11 Tests
+
+- Pure: type integrity, derivation rules within the snapshot.
+- Integration: seed a subaccount-agent with known constraints; create a run; assert snapshot fields match expected values.
+- Mid-run mutation: create a run, change a constraint mid-run, assert snapshot is unchanged.
+- NULL tolerance: legacy run with NULL snapshot renders correctly in Run Trace UI.
+
+#### 4.5.12 Effort estimate
+
+**3 to 4 dev-days.** Resolver is the bulk: aggregating six constraint sources into one shape requires care to avoid missing a source. The implementation checklist (in the PR) enumerates each source for sign-off. Risk: medium; mitigations are the test seeding and the source manifest in the snapshot.
+
+#### 4.5.13 Dependencies
+
+- Blocks: Run Trace API (Section 4.4) returns the snapshot in its response envelope.
+- Blocked by: Section 4.1 (controllerStyle), Section 4.2 (riskTier in actionRegistry), Section 4.3 (credentialBrokerService.resolveAvailableCredentials).
+
+### 4.6 Naming pass and glossary document
+
+ succeeded in 1039ms:
+
+#### 4.3.1 Current state
+
+Credential infrastructure is mature but exposed across multiple services with no single named entry point:
+
+- `server/db/schema/integrationConnections.ts` â€” `integration_connections` table with org/subaccount/agent scoping, OAuth + web_login + api_key auth_types, AES-256-GCM encryption.
+- `server/services/connectionTokenService.ts` (655 lines) â€” token refresh logic, advisory locks, drop-after-use for web login, OAuth refresh with 15-min early refresh buffer.
+- `server/services/integrationConnectionService.ts` (655 lines) â€” CRUD, sanitisation, per-scope resolution.
+- `server/db/schema/auditEvents.ts` â€” credential audit logging.
+
+Call sites (current scattered usage):
+
+- Routes: `server/routes/integrationConnections.ts`, `server/routes/webLoginConnections.ts`.
+- Services: `server/services/ieeExecutionService.ts` (credential injection at IEE worker dispatch).
+- Worker: `worker/src/browser/login.ts` (web login credential consumption).
+- Middleware: token refresh middleware on connection-using requests.
+
+Each call site reaches into `connectionTokenService` or `integrationConnectionService` directly. There is no single named primitive.
+
+#### 4.3.2 Target state
+
+A `CredentialBrokerService` facade exposed as `server/services/credentialBrokerService.ts`. The facade is the only documented entry point for new code; existing code is migrated. The facade delegates to existing services internally; mechanics are unchanged.
+
+#### 4.3.3 Facade API
+
+```ts
+// server/services/credentialBrokerService.ts (new file)
+
+export interface CredentialScope {
+  organisationId: string;
+  subaccountId?: string | null;
+  agentId?: string | null;
+  agentRunId?: string | null;
+  purpose: string; // "iee_browser_login", "send_email", "support_reply", etc.
+}
+
+export interface IssuedCredential {
+  credentialId: string;
+  authType: 'oauth2' | 'api_key' | 'web_login'; // forward-compatible: 'operator_session' added in Phase 3
+  providerSlug: string;
+  scope: CredentialScope;
+  // Decrypted material is returned only via injectIntoEnvironment; never on this object.
+}
+
+export interface CredentialAuditEntry {
+  credentialId: string;
+  action: 'issued' | 'refreshed' | 'revoked' | 'used';
+  scope: CredentialScope;
+  occurredAt: Date;
+  metadata?: Record<string, unknown>;
+}
+
+export const credentialBrokerService = {
+  /**
+   * Issue a credential reference for the given scope and purpose.
+   * Returns an opaque credential id; decrypted material is not returned here.
+   */
+  async issueCredential(scope: CredentialScope, ttlMs?: number): Promise<IssuedCredential>,
+
+  /**
+   * Inject credential material into an environment dict for runtime use.
+   * Decrypted material is short-lived and dropped at the end of the call site's lifecycle.
+   */
+  async injectIntoEnvironment(
+    env: Record<string, string>,
+    credentialId: string,
+  ): Promise<Record<string, string>>,
+
+  /**
+   * Revoke a credential. Existing in-flight uses continue until completion;
+   * new requests fail.
+   */
+  async revoke(credentialId: string, organisationId: string): Promise<void>,
+
+  /**
+   * Query credential audit log for a given scope.
+   */
+  async audit(query: {
+    organisationId: string;
+    subaccountId?: string;
+    credentialId?: string;
+    sinceTimestamp?: Date;
+    limit?: number;
+  }): Promise<CredentialAuditEntry[]>,
+
+  /**
+   * Resolve the available credentials for a run context.
+   * Used by Policy Envelope (Section 4.5) to capture credential availability
+   * at run start.
+   */
+  async resolveAvailableCredentials(scope: CredentialScope): Promise<IssuedCredential[]>,
+};
+```
+
+#### 4.3.4 Implementation strategy
+
+The facade is **structural, not policy**. Each method delegates to existing services:
+
+```ts
+// server/services/credentialBrokerService.ts (sketch)
+import { connectionTokenService } from './connectionTokenService.js';
+import { integrationConnectionService } from './integrationConnectionService.js';
+import { db } from '../db/index.js';
+
+export const credentialBrokerService = {
+  async issueCredential(scope, ttlMs) {
+    // Delegates to integrationConnectionService.findActiveConnection + connectionTokenService.refreshIfNeeded
+    // Emits foundation.credential_broker.issued event
+    // Returns IssuedCredential
+  },
+
+  async injectIntoEnvironment(env, credentialId) {
+    // Delegates to connectionTokenService.decryptForUse
+    // Caller is responsible for dropping the decrypted material at end of use
+    // Existing drop-after-use semantics preserved
+  },
+
+  async revoke(credentialId, organisationId) {
+    // Delegates to integrationConnectionService.revoke
+    // Emits foundation.credential_broker.revoked event
+  },
+
+  async audit(query) {
+    // Reads from auditEvents table with scope filter
+  },
+
+  async resolveAvailableCredentials(scope) {
+    // Lists active connections matching scope; does NOT decrypt
+  },
+};
+```
+
+#### 4.3.5 Call site migration
+
+Every existing call to `connectionTokenService.*` or `integrationConnectionService.*` from outside those services migrates to `credentialBrokerService.*`. The two underlying services remain as private implementations; they are not deprecated, but new code does not call them directly.
+
+| Existing call site | Migrated to |
+|---|---|
+| `server/routes/integrationConnections.ts` | `credentialBrokerService.audit`, `revoke`, `resolveAvailableCredentials` |
+| `server/routes/webLoginConnections.ts` | `credentialBrokerService.issueCredential`, `revoke` |
+| `server/services/ieeExecutionService.ts` | `credentialBrokerService.injectIntoEnvironment` |
+| `worker/src/browser/login.ts` | (worker-side; consumes injected env, no facade call) |
+| Future: Spec B Teamwork adapter | `credentialBrokerService.injectIntoEnvironment` |
+| Future: Phase 3 Operator Session Identity | `credentialBrokerService.issueCredential` with new `auth_type` |
+
+#### 4.3.6 Forward-compatibility for Phase 3
+
+`IssuedCredential.authType` includes a forward-comment for `'operator_session'` (Phase 3 ChatGPT OAuth). The facade does not implement this auth_type today, but the type union signals where it lands.
+
+When Phase 3 adds `auth_type: 'operator_session'` (per `docs/openclaw-strategic-analysis.md` Phase 3), the facade signature does not change. Only the underlying `connectionTokenService` gains support for the new auth_type.
+
+#### 4.3.7 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `server/services/credentialBrokerService.ts` | New facade | +150 |
+| `server/services/__tests__/credentialBrokerService.test.ts` | Unit tests with mocks | +80 |
+| `server/routes/integrationConnections.ts` | Migrate to facade calls | +/-20 (mostly replacements) |
+| `server/routes/webLoginConnections.ts` | Migrate to facade calls | +/-15 |
+| `server/services/ieeExecutionService.ts` | Migrate to facade calls | +/-10 |
+| `architecture.md` | Reference facade in Credentials section | +10 |
+| `docs/synthetos-nomenclature.md` | Reference facade as canonical name (Section 4.6) | +5 |
+
+**Total: ~250 to 290 LOC, mostly the facade and tests; call site migrations are net-zero refactors.**
+
+#### 4.3.8 Migration strategy
+
+No database migration. Code-only refactor. The facade is added; call sites migrate; underlying services preserved.
+
+Rollout: the facade ships alongside its first migrated call site. Subsequent migrations land in follow-up PRs. The grace period is one sprint: by end of foundation refactor, every call site outside `connectionTokenService` and `integrationConnectionService` uses the facade.
+
+#### 4.3.9 Observability
+
+- Event: `foundation.credential_broker.issued` with payload `{ credentialId, scope, ttlMs }`.
+- Event: `foundation.credential_broker.revoked` with payload `{ credentialId, scope, revokedBy }`.
+- Existing audit events from `connectionTokenService` continue unchanged.
+
+#### 4.3.10 Tests
+
+- Unit: facade methods tested with mocked underlying services (verify delegation correctness).
+- Integration: end-to-end credential issuance, injection, revocation, audit on a test integration connection.
+- Regression: existing connection tests pass unchanged.
+
+#### 4.3.11 Effort estimate
+
+**1 to 2 dev-days.** Facade is structural; underlying mechanics are reused. Risk: low. Backward compatibility is straightforward because the underlying services keep working.
+
+#### 4.3.12 Dependencies
+
+- Blocks: Section 4.5 Policy Envelope (envelope captures `resolveAvailableCredentials` at run start).
+- Blocked by: none.
+- Coordinates with: Spec B (Support Desk Canonical) â€” Teamwork adapter consumes the facade for credential injection.
+
+### 4.4 Run Trace canonical API contract
+
+ succeeded in 1066ms:
+
+#### 4.6.1 Current state
+
+The codebase uses several names that do not match the v1.2 brief vocabulary:
+
+- `Capability-Aware Orchestrator` (file prefix `orchestratorFromTaskJob`) is the brief's "Router and Execution Planner".
+- `executionMode` enum is the brief's "Execution Environment".
+- `iee_*` schema names refer to the narrow definition (browser plus dev worker); the brief's "IEE Execution Plane" is broader.
+- `policyRules` is one component of the brief's "Policy Envelope".
+- `actions.gateLevel` is now derived from "Risk Tier" plus policy.
+
+Per INV-13, **no service-wide rename is in scope**. The naming pass is documentation only.
+
+#### 4.6.2 Target state
+
+A single glossary document at `docs/synthetos-nomenclature.md` that locks canonical names per v1.2 brief Section 4.0. Five to ten high-traffic files receive awareness comments. `architecture.md` cross-references the glossary.
+
+#### 4.6.3 Glossary document structure
+
+```markdown
+# SynthetOS Nomenclature
+
+This document is the single source of truth for canonical names used across the
+SynthetOS architecture. It is the operationalisation of v1.2 brief Section 4.0
+(Naming Map).
+
+## Canonical names
+
+For each concept, three values: the v1.2 brief name (canonical), the existing
+code name(s), and a meaning.
+
+| v1.2 Brief Name | Existing Code Name | Meaning |
+|---|---|---|
+| Router and Execution Planner | Capability-Aware Orchestrator (`orchestratorFromTaskJob`) | The dynamic decision engine that performs intent understanding, task decomposition, capability matching, controller selection, environment selection, and dispatch. |
+| Execution Environment | `executionMode` enum (`api`, `headless`, `claude-code`, `iee_browser`, `iee_dev`) | The capability surface invoked by a controller. |
+| Controller | `controllerStyle` field (new in Phase 1 foundation) | The execution style: deterministic Native or adaptive Operator. |
+| IEE Execution Plane | IEE worker (browser plus dev worker today; expanded scope per v1.2) | The execution substrate that manages sessions, workers, environments, queues, isolation, credentials, artifacts, telemetry, and Run Trace event publication. |
+| Approval Level | `actions.gateLevel` (`auto`, `review`, `block`) | The approval requirement for an action; derived from Risk Tier plus Policy Envelope. |
+| Risk Tier | (new in Phase 1 foundation) | The capability risk classification (0 to 6) per v1.2 brief Section 11. |
+| Policy Engine | `policy_rules` plus `policyEngineService` | The runtime enforcement of declared policy rules; one component of the broader Policy Envelope. |
+| Policy Envelope | (new in Phase 1 foundation) | The resolved constraint set captured per run; aggregates Policy Engine, budgets, credentials, environments, etc. |
+| Run Trace | `agent_execution_events` plus 4 sibling tables (Phase 1 virtual view); `RunTracePage.tsx` UI surface | The governed execution observability layer: ordered, queryable, decision-aware event stream per run. |
+| Credential Broker and Identity Boundary | `CredentialBrokerService` facade over `connectionTokenService` plus `integrationConnectionService` | The named primitive for credential issuance, injection, audit, revocation, and tenant isolation. |
+| Capability Matching | `list_platform_capabilities`, `check_capability_gap`, `list_connections`, `request_feature` skills | The Router's mechanism for resolving available capabilities at routing time. |
+| Agent Capability Map | `subaccountAgents.capabilityMap` (JSONB) | Per-agent snapshot of resolved integrations, read capabilities, write capabilities, skills, primitives. |
+| Three-tier Agent Model | `system_agents`, `agents`, `subaccount_agents` | Unchanged; brief and code agree. |
+| Agent Hierarchy | Root agent contract + `DelegationScope` enum + delegation graph | Hierarchical delegation primitive. |
+| Model Invocation Capability | `llmRouter.routeCall` (single entry point) | The runtime act of calling a model. Statically and runtime-enforced contract. |
+| Billing and Usage | `llm_requests` plus `cost_aggregates` | Cost ledger and aggregated usage. |
+
+## When to use which name
+
+- **In specs and architecture documents**: use the v1.2 brief name (canonical).
+- **In code identifiers**: keep the existing code name. Service prefixes, file names, table names, and exports stay as they are.
+- **In code comments and docstrings**: use the v1.2 brief name when describing a concept; reference the code name when describing a specific implementation.
+- **In user-facing UI**: use plain English, not either name. The user does not need to know about Routers, Orchestrators, or Capability Maps. The user sees "When this agent gets a task" and "What this agent can do."
+
+## Why we are not renaming code
+
+Per Phase 1 foundation refactor INV-13, no service-wide rename is in scope. Renaming `orchestratorFromTaskJob` to `routerFromTaskJob` (or similar) is a high-cost, low-value refactor:
+
+- 217+ references across the codebase to the existing name.
+- Every rename is a merge-conflict generator for in-flight branches.
+- The functional behaviour does not change; only the label changes.
+- Reviewers cannot tell at a glance if a rename PR introduced a logic bug.
+
+The glossary plus awareness comments achieve the goal (consistent vocabulary across docs and specs) without the rename cost. A future spec may revisit the rename when a clear refactor benefit emerges (e.g., a substantial restructuring of orchestration code that justifies the rename as part of the larger change).
+
+## Cross-references
+
+- `docs/synthetos-governed-agentic-os-brief-v1.2.md` Section 4.0 (Naming Map source of truth)
+- `docs/synthetos-brief-v1.1-to-v1.2-changes.md` Part 1 (terminology mapping for diagram and brief)
+- `architecture.md` Section "Orchestrator Capability-Aware Routing" (existing implementation reference)
+```
+
+The full glossary document is roughly 200 to 300 lines.
+
+#### 4.6.4 Awareness comments
+
+Five to ten high-traffic files receive a brief comment at the top of file or above the relevant export. Pattern:
+
+```ts
+/**
+ * Capability-Aware Orchestrator (aka "Router and Execution Planner" per v1.2 brief).
+ * See docs/synthetos-nomenclature.md for the full naming map.
+ */
+export async function processOrchestratorFromTask(payload: OrchestratorFromTaskPayload) {
+  // existing implementation
+}
+```
+
+Files receiving awareness comments:
+
+| File | Comment about |
+|---|---|
+| `server/jobs/orchestratorFromTaskJob.ts` | Orchestrator = Router and Execution Planner |
+| `server/services/agentExecutionService.ts` | executionMode = Execution Environment; controllerStyle = Controller |
+| `server/services/policyEngineService.ts` | Policy Engine is one component of Policy Envelope |
+| `server/services/credentialBrokerService.ts` | Credential Broker and Identity Boundary primitive |
+| `server/services/runTraceService.ts` | Run Trace virtual view; canonical ledger Phase 3+ |
+| `worker/src/handlers/browserTask.ts` | IEE narrow scope today; expanded per v1.2 |
+| `worker/src/handlers/devTask.ts` | Same |
+| `client/src/pages/operate/RunTracePage.tsx` | Run Trace UI; consumes new API contract |
+| `architecture.md` Section "Orchestrator Capability-Aware Routing" | Cross-reference glossary at top |
+| `architecture.md` Section "IEE Integrated Execution Environment" | Cross-reference glossary at top |
+
+#### 4.6.5 Future spec convention
+
+Every new spec from this point on opens with a paragraph in Section 0 stating:
+
+> Naming follows `docs/synthetos-nomenclature.md`. Where this spec uses a v1.2 brief term that has a different code-level name, the glossary applies.
+
+This is a process convention, not a CI gate. Compliance is a spec-reviewer responsibility.
+
+#### 4.6.6 Code changes
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `docs/synthetos-nomenclature.md` | New glossary doc | +250 |
+| `architecture.md` | Add cross-reference at relevant section headers | +15 |
+| `server/jobs/orchestratorFromTaskJob.ts` | Awareness comment | +5 |
+| `server/services/agentExecutionService.ts` | Awareness comment | +5 |
+| `server/services/policyEngineService.ts` | Awareness comment | +5 |
+| `server/services/credentialBrokerService.ts` | Awareness comment | +3 (already in the new file) |
+| `server/services/runTraceService.ts` | Awareness comment | +3 (already in the new file) |
+| `worker/src/handlers/browserTask.ts` | Awareness comment | +5 |
+| `worker/src/handlers/devTask.ts` | Awareness comment | +5 |
+| `client/src/pages/operate/RunTracePage.tsx` | Awareness comment | +5 |
+
+**Total: ~300 LOC, mostly in the glossary doc.**
+
+#### 4.6.7 Migration strategy
+
+Documentation-only. No schema, no migrations, no backfill, no rollback.
+
+#### 4.6.8 Observability
+
+None. Documentation does not emit telemetry.
+
+#### 4.6.9 Tests
+
+None. Documentation does not have unit tests. The glossary is reviewed by the architect.
+
+#### 4.6.10 Effort estimate
+
+**1 to 2 dev-days.** Glossary doc roughly 4 hours; awareness comments roughly 1 hour; cross-reference updates in `architecture.md` roughly 1 hour. Risk: low. Documentation-only; no functional risk.
+
+#### 4.6.11 Dependencies
+
+- Depends on: Sections 4.1 to 4.5 to complete so the glossary entries reflect the locked names of new primitives.
+- Blocks: future specs that need to use canonical names.
+
+---
+
+## 5. UI Changes
+
+ succeeded in 1158ms:
+
+### 7.1 Posture
+
+Test posture follows the project framing in `docs/spec-context.md`:
+
+- `testing_posture: static_gates_primary` â€” primary correctness assurance is via static gates and pure-function unit tests.
+- `runtime_tests: pure_function_only` â€” runtime tests are pure-function unit tests authored alongside the resolver / derivation modules.
+- `frontend_tests: none_for_now`, `e2e_tests_of_own_app: none_for_now`, `performance_baselines: defer_until_production`, `composition_tests: defer_until_stabilisation` â€” none of these are added by this spec.
+
+This spec adds: (a) one new CI static gate (`verify-risk-tier-assigned.sh`), (b) pure-function unit tests for the new derivation / resolver modules, and (c) a small number of carved-out integration tests for two genuinely hot-path concerns (the `policyEnvelopeResolver` aggregation and the multi-table `runTraceService` UNION). No new frontend, E2E, performance, or composition tests are added.
+
+### 7.2 Test inventory (canonical)
+
+| Test file | Kind | Coverage |
+|---|---|---|
+| `server/services/controllerStyleResolverPure.test.ts` | pure unit | Derivation rule for all `executionMode` values, override path, forward-compatible default |
+| `shared/types/__tests__/riskTier.test.ts` | pure unit | `deriveGateLevel` with all combinations of tier, preserved gateLevel, policy override |
+| `shared/types/__tests__/policyEnvelope.test.ts` | pure unit | Snapshot shape integrity (schemaVersion, required-field presence) |
+| `shared/types/__tests__/runTraceEvent.test.ts` | pure unit | Discriminated-union exhaustiveness; cursor encode / decode round-trip |
+| `server/services/__tests__/credentialBrokerService.test.ts` | pure unit | Facade delegation correctness with mocked underlying services |
+| `server/services/policyEnvelopeResolverPure.test.ts` | pure unit | Pure helpers (tier-default mapping, source-version hashing) |
+| `server/services/__tests__/policyEnvelopeResolver.test.ts` | integration | Resolver aggregates all constraint sources (subaccount agent, spending policies, active policy rules, credential availability, capability map, controller limits, risk tier defaults) into a valid v1 snapshot â€” one of the carved-out integration tests permitted by framing for hot-path concerns |
+| `server/services/__tests__/runTraceService.test.ts` | integration | Multi-table UNION query correctness, pagination cursor stability across requests â€” second carved-out integration test (multi-table SQL UNION is a correctness-critical path that pure-function tests cannot cover) |
+| `client/src/components/__tests__/credentialsAuditLogFormatters.test.ts` | pure unit | Audit-log formatter functions (provider names, action labels, timestamps) â€” adds only if Â§5.4 ships new formatter functions. The route handler itself relies on existing route-test conventions and adds no new test file. |
+
+### 7.3 Existing test regression
+
+Every existing test must continue to pass without modification. Specifically:
+
+- All `agentExecutionService` tests pass with `controllerStyle` defaulting to `native`.
+- All `policyEngineService` tests pass with `riskTier` derivation preserving existing `gateLevel` per INV-8.
+- All credential connection tests pass with calls migrated to the facade.
+- Existing Run Trace UI behaviour is preserved when the client switches to the new endpoint.
+
+### 7.4 New CI gate
+
+`scripts/verify-risk-tier-assigned.sh` (Section 4.2.7) is registered with the existing CI gate runner. The gate fails the build if any action in `actionRegistry.ts` is missing a `riskTier`. Test gates run in CI only â€” implementers do not run gate suites locally (see CLAUDE.md, "Test gates are CI-only").
+
+### 7.5 Performance posture
+
+Performance baselines for new primitives are deferred per `performance_baselines: defer_until_production`. Latency budgets live as alerting thresholds in observability (Section 4.4.11 names the Run Trace endpoint p95 < 500ms threshold; Section 4.5.10 names the resolver p95 < 100ms threshold), but no synthetic performance tests are authored as part of this spec.
+
+### 7.6 Acceptance scenarios (verification checklist)
+
+These five scenarios are the run-correctness criteria the spec must satisfy. They are not staging or production smoke tests â€” CI runs the existing test suite as the pre-merge gate, and the pure-function and carved-out integration tests in Â§7.2 are the durable assertions. The scenarios below are restated as acceptance items the implementer verifies during PR review:
+
+1. **Native run with auto-approved actions** â€” `controller_style = 'native'`, `policy_envelope_snapshot` populated, Tier 0 to 2 actions auto-approve, Run Trace headline reads "Native run Â· auto-approved Â· ...".
+2. **Operator run with review-required action** â€” `controller_style = 'operator'`, Tier 4 action routes to review queue, reviewer approves, run completes, Run Trace headline reads "Operator run Â· approved by [reviewer] Â· ...".
+3. **Tier 6 action blocked by default** â€” action without explicit policy override is blocked, run terminates with policy block reason, Run Trace headline reads "blocked by policy".
+4. **Credential broker facade** â€” credentials issued via facade, used by IEE worker, audit log entry visible in Credentials tab.
+5. **Run Trace endpoint** â€” query the endpoint for the runs above, event ordering and payloads match expectations.
+
+---
+
+## 8. Rollout Plan
+
+### 8.1 Sequencing within Phase 1A to 1D
+
+Per v1.2 brief Section 18.1 and the phasing recommendation in `docs/synthetos-v1.2-codebase-gap-analysis.md`, foundation work runs in four sub-phases over 3 to 4 weeks.
+
+
+codex
+1. **Terminal status value mismatch** — §3.6 and §4.4.4  
+The spec lists `compute_budget_exceeded`, but `shared/runStatus.ts` defines the terminal status value as `budget_exceeded`.  
+Severity: High.  
+Suggested fix: Replace `compute_budget_exceeded` with `budget_exceeded` everywhere the terminal values are enumerated.
+
+2. **Controller-style validation depends on Phase 1D schema** — §4.1.6, §5.2.9, §8.1, §6.3  
+`controller_style_allowed` is required by the Phase 1A controller-style create path, but the column is introduced under the UI/Agent Config work that ships in Phase 1D.  
+Severity: High.  
+Suggested fix: Move `NNNN_subaccount_agents_governance.sql` into the Phase 1A prerequisite set and update §4.1.12 / §8.1 / §6.3 accordingly.
+
+3. **Default `native_only` conflicts with derived Operator defaults** — §4.1.6 and §5.2.9  
+Runs with `executionMode` of `claude-code`, `iee_browser`, or `iee_dev` derive `operator`, while existing agents default to `controller_style_allowed = 'native_only'`, creating an unclear reject-or-allow path for existing run creation.  
+Severity: High.  
+Suggested fix: State that validation applies to the final resolved style, then either backfill existing operator-capable agents to `native_and_operator` or derive `native` unless the agent explicitly allows Operator.
+
+4. **Governance columns lack enforcement wiring** — §5.2.9, §4.5.4, §4.5.7  
+`allowed_environments`, `max_risk_tier`, and `require_approval_at_tier` are introduced as governance controls, but no named runtime service/middleware enforces them; the Policy Envelope explicitly is not used for enforcement.  
+Severity: High.  
+Suggested fix: Add explicit enforcement points, e.g. controller/run creation validates `executionMode` against `allowed_environments`, and `policyEngineService` applies `max_risk_tier` / `require_approval_at_tier`.
+
+5. **Risk Tier default claims contradict preserved-gate precedence** — §2.1 G2, §4.2.4, §7.6 scenario 1  
+G2 and the acceptance scenario say Tier 0-2 auto-approve by default, but §4.2.4 gives `preservedExistingGateLevel` precedence over tier defaults for existing actions.  
+Severity: Medium.  
+Suggested fix: Reword to “Tier defaults apply only when no preserved existing gate level or policy override exists,” and make the acceptance scenario use actions whose preserved gate is `auto`.
+
+6. **Run Trace cursor contract missing `source_id` in SQL projection** — §4.4.4 and §4.4.5  
+The event type and ordering contract require `sourceId/source_id`, but the SQL sketch does not project `source_id` in the UNION arms before using it in cursor ordering.  
+Severity: Medium.  
+Suggested fix: Add `source_id` to every UNION arm, sourced from each table’s primary key, and include it in the common SELECT list.
+
+7. **`toolSlug` filter declared but not specified in query logic** — §4.4.3, §4.4.5, §4.4.6  
+The endpoint contract and service interface expose `toolSlug`, but the query strategy does not define how that filter is applied across heterogeneous source tables.  
+Severity: Medium.  
+Suggested fix: Add the SQL predicate and per-source payload/column mapping for `toolSlug`, including which event types are included or ignored.
+
+8. **Stale Run Trace source count in glossary** — §4.4.1 and §4.6.3  
+§4.4.1 locks the canonical Run Trace source set as nine tables, while the glossary says “`agent_execution_events` plus 4 sibling tables.”  
+Severity: Low.  
+Suggested fix: Update the glossary entry to “nine source tables listed in §4.4.1” or enumerate the same nine tables.
+
+9. **Subaccount governance down migration missing from inventory** — §5.2.8, §5.2.9, §6.1  
+The spec requires reversible migrations, but the Agent Config file table only lists `NNNN_subaccount_agents_governance.sql`, not its `_down` counterpart.  
+Severity: Medium.  
+Suggested fix: Add `migrations/_down/NNNN_subaccount_agents_governance.down.sql` to §5.2.8 and include the down SQL snippet in §5.2.9.
+
+10. **New credential-audit permission has no registry/seed owner** — §5.4.4  
+The route requires `credentials:audit:read`, but the file inventory does not include the permission registry, seed, role mapping, or policy location that makes the permission valid.  
+Severity: Medium.  
+Suggested fix: Add the concrete permission-definition file(s) to §5.4.4 or change the route to reuse an existing named permission.
+
+11. **Test posture contradicts integration-test inventory** — §7.1 and §7.2  
+§7.1 says `runtime_tests: pure_function_only`, but §7.2 adds carved-out integration tests for `policyEnvelopeResolver` and `runTraceService`.  
+Severity: Low.  
+Suggested fix: Rewrite §7.1 to explicitly say the project default is pure-function-only, with two named integration exceptions permitted by this spec.
+
+12. **Controller-style test filename drift** — §4.1.7, §4.1.10, §7.2  
+The file inventory and canonical test inventory use `controllerStyleResolverPure.test.ts`, while §4.1.10 refers to `controllerStyleResolver.test.ts`.  
+Severity: Low.  
+Suggested fix: Standardize on one filename, preferably the canonical §7.2 path.
+
+13. **Open decision remains after verdict-conversion pass** — §12.7  
+§12.7 is still marked `OPEN`, despite the iteration goal saying open decisions were converted to verdicts.  
+Severity: Medium.  
+Suggested fix: Convert §12.7 to `RESOLVED` with a concrete invocation pattern, or remove it from the spec and leave build invocation to operator procedure outside the implementation contract.
+2026-05-09T07:28:25.428465Z ERROR codex_core::session: failed to record rollout items: thread 019e0ba1-b19b-7203-bd7f-04642ba82735 not found
+tokens used
+50,171
+1. **Terminal status value mismatch** — §3.6 and §4.4.4  
+The spec lists `compute_budget_exceeded`, but `shared/runStatus.ts` defines the terminal status value as `budget_exceeded`.  
+Severity: High.  
+Suggested fix: Replace `compute_budget_exceeded` with `budget_exceeded` everywhere the terminal values are enumerated.
+
+2. **Controller-style validation depends on Phase 1D schema** — §4.1.6, §5.2.9, §8.1, §6.3  
+`controller_style_allowed` is required by the Phase 1A controller-style create path, but the column is introduced under the UI/Agent Config work that ships in Phase 1D.  
+Severity: High.  
+Suggested fix: Move `NNNN_subaccount_agents_governance.sql` into the Phase 1A prerequisite set and update §4.1.12 / §8.1 / §6.3 accordingly.
+
+3. **Default `native_only` conflicts with derived Operator defaults** — §4.1.6 and §5.2.9  
+Runs with `executionMode` of `claude-code`, `iee_browser`, or `iee_dev` derive `operator`, while existing agents default to `controller_style_allowed = 'native_only'`, creating an unclear reject-or-allow path for existing run creation.  
+Severity: High.  
+Suggested fix: State that validation applies to the final resolved style, then either backfill existing operator-capable agents to `native_and_operator` or derive `native` unless the agent explicitly allows Operator.
+
+4. **Governance columns lack enforcement wiring** — §5.2.9, §4.5.4, §4.5.7  
+`allowed_environments`, `max_risk_tier`, and `require_approval_at_tier` are introduced as governance controls, but no named runtime service/middleware enforces them; the Policy Envelope explicitly is not used for enforcement.  
+Severity: High.  
+Suggested fix: Add explicit enforcement points, e.g. controller/run creation validates `executionMode` against `allowed_environments`, and `policyEngineService` applies `max_risk_tier` / `require_approval_at_tier`.
+
+5. **Risk Tier default claims contradict preserved-gate precedence** — §2.1 G2, §4.2.4, §7.6 scenario 1  
+G2 and the acceptance scenario say Tier 0-2 auto-approve by default, but §4.2.4 gives `preservedExistingGateLevel` precedence over tier defaults for existing actions.  
+Severity: Medium.  
+Suggested fix: Reword to “Tier defaults apply only when no preserved existing gate level or policy override exists,” and make the acceptance scenario use actions whose preserved gate is `auto`.
+
+6. **Run Trace cursor contract missing `source_id` in SQL projection** — §4.4.4 and §4.4.5  
+The event type and ordering contract require `sourceId/source_id`, but the SQL sketch does not project `source_id` in the UNION arms before using it in cursor ordering.  
+Severity: Medium.  
+Suggested fix: Add `source_id` to every UNION arm, sourced from each table’s primary key, and include it in the common SELECT list.
+
+7. **`toolSlug` filter declared but not specified in query logic** — §4.4.3, §4.4.5, §4.4.6  
+The endpoint contract and service interface expose `toolSlug`, but the query strategy does not define how that filter is applied across heterogeneous source tables.  
+Severity: Medium.  
+Suggested fix: Add the SQL predicate and per-source payload/column mapping for `toolSlug`, including which event types are included or ignored.
+
+8. **Stale Run Trace source count in glossary** — §4.4.1 and §4.6.3  
+§4.4.1 locks the canonical Run Trace source set as nine tables, while the glossary says “`agent_execution_events` plus 4 sibling tables.”  
+Severity: Low.  
+Suggested fix: Update the glossary entry to “nine source tables listed in §4.4.1” or enumerate the same nine tables.
+
+9. **Subaccount governance down migration missing from inventory** — §5.2.8, §5.2.9, §6.1  
+The spec requires reversible migrations, but the Agent Config file table only lists `NNNN_subaccount_agents_governance.sql`, not its `_down` counterpart.  
+Severity: Medium.  
+Suggested fix: Add `migrations/_down/NNNN_subaccount_agents_governance.down.sql` to §5.2.8 and include the down SQL snippet in §5.2.9.
+
+10. **New credential-audit permission has no registry/seed owner** — §5.4.4  
+The route requires `credentials:audit:read`, but the file inventory does not include the permission registry, seed, role mapping, or policy location that makes the permission valid.  
+Severity: Medium.  
+Suggested fix: Add the concrete permission-definition file(s) to §5.4.4 or change the route to reuse an existing named permission.
+
+11. **Test posture contradicts integration-test inventory** — §7.1 and §7.2  
+§7.1 says `runtime_tests: pure_function_only`, but §7.2 adds carved-out integration tests for `policyEnvelopeResolver` and `runTraceService`.  
+Severity: Low.  
+Suggested fix: Rewrite §7.1 to explicitly say the project default is pure-function-only, with two named integration exceptions permitted by this spec.
+
+12. **Controller-style test filename drift** — §4.1.7, §4.1.10, §7.2  
+The file inventory and canonical test inventory use `controllerStyleResolverPure.test.ts`, while §4.1.10 refers to `controllerStyleResolver.test.ts`.  
+Severity: Low.  
+Suggested fix: Standardize on one filename, preferably the canonical §7.2 path.
+
+13. **Open decision remains after verdict-conversion pass** — §12.7  
+§12.7 is still marked `OPEN`, despite the iteration goal saying open decisions were converted to verdicts.  
+Severity: Medium.  
+Suggested fix: Convert §12.7 to `RESOLVED` with a concrete invocation pattern, or remove it from the spec and leave build invocation to operator procedure outside the implementation contract.

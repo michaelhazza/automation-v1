@@ -2471,6 +2471,10 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 - [ ] CI gate: "no raw DB writes outside transaction helpers" — Phase 4 candidate. Source: chatgpt-spec-review round 1 finding F6. Forbids `db.insert/update/delete` outside `withOrgTx` / explicit `db.transaction(...)` blocks. Allowlist for system bootstrap, migrations, RLS policy enforcement queries, admin tooling. Aligns with org-scoping invariants but outside Phase 3's deferred-backlog charter. Co-locate with R3-2 `AppError` taxonomy backfill (also Phase 4) — both items "tighten the write surface." [user]
 - [ ] Author OAuth-enrol + connection-token failure runbooks — post-launch task. Source: chatgpt-spec-review round 4 finding F11. Build a 1-page operational playbook covering `auditEvent.oauth.enrolFailed`, `auditEvent.oauth.enrolPartial`, `auditEvent.security.crossTenantAttempt`, `auditEvent.security.missingPrincipalContext` — what each event means, what to check, expected operator action. Defer until first-agency monitoring + on-call rotation are in place so the runbook is grounded in real signal patterns, not speculation. Lives at `docs/runbooks/oauth-enrol-failures.md` (or similar) — separate from the spec. [user]
 
+### synthetos-foundation-refactor (2026-05-09)
+
+- [ ] `verify-no-direct-credential-service-calls.sh` — author the advisory CI gate sketched in `tasks/builds/synthetos-foundation-refactor/spec.md` §11. Mirrors `verify-no-direct-adapter-calls.sh`; scans non-test source files outside the broker/token/connection services for direct imports. Phase 1 advisory; promote to a hard CI gate in Phase 1.5 if any drift is observed post-merge. Source: chatgpt-spec-review round 1 finding F7. [auto]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
@@ -3592,3 +3596,67 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Spec section: §6.7 retention policy row "Working Time aggregates".
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
+
+## Deferred spec decisions — synthetos-foundation-refactor
+
+Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These are AUTO-DECIDED items the human can address at leisure; the spec is mechanically tight without them.
+
+- [ ] **R-G — Add a "why-not-reuse `policyEngineService`" rationale paragraph in §4.5.5.** The new `policyEnvelopeResolver` does aggregation-at-run-start, while `policyEngineService` does per-action evaluation. The two have genuinely different responsibilities and the spec's existing prose implies it, but the spec-authoring-checklist §1 expects the rationale to be stated explicitly. Decision: **accept** — add a one-paragraph "Why a new resolver instead of extending `policyEngineService`" in §4.5.5 explaining the aggregation-vs-evaluation split. Low priority; not load-bearing.
+
+## Deferred from spec-conformance review — synthetos-foundation-refactor (2026-05-09)
+
+**Captured:** 2026-05-09T12:45:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-synthetos-foundation-refactor-2026-05-09T12-45-00Z.md`
+**Spec:** `tasks/builds/synthetos-foundation-refactor/spec.md`
+
+- [ ] **SCD-1 — `ControllerLimits` interface uses different field names than spec §4.1.5**
+  - Spec section: §4.1.5 (Shared TypeScript types)
+  - Gap: spec specifies `defaultMaxToolCalls` / `approvalDefaultMin`; implementation ships `maxToolCallsPerRun` / `approvalDefault`. Semantic intent identical; identifiers differ.
+  - Suggested approach: either rename the interface fields in `shared/types/controllerStyle.ts` and propagate through `server/config/controllerLimits.ts` and consumers, OR update spec §4.1.5 to canonicalise the shipped names. Cross-cutting but mechanical once direction is set.
+
+- [x] **SCD-2 — `controller_style_allowed` enum value `'operator_allowed'` diverges from spec `'native_and_operator'`** — CLOSED by chatgpt-pr-review Round 2 finding F1 (operator-decided: rename code to match spec). Migration 0307 + Drizzle schema + Zod + tests + 2 UI components all updated to `'native_and_operator'`. See `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` Round 2.
+
+## Adversarial review findings — synthetos-foundation-refactor (2026-05-09)
+
+**Captured:** 2026-05-09T13:15:00Z
+**Source log:** `tasks/review-logs/adversarial-review-log-synthetos-foundation-refactor-2026-05-09T13-15-00Z.md`
+**Verdict:** HOLES_FOUND (1 confirmed-hole closed in-branch + 2 likely-holes deferred below)
+
+- [x] **ADV-B — `credentialBrokerService.injectIntoEnvironment` fetches connection by `connectionId` alone (no org/subaccount guard)** — CLOSED 2026-05-09 in PR #279 auto-fix iteration 2. `organisationId` added to `IssuedCredential` (set from `conn.organisationId` in `credentialFromConnection`), and `injectIntoEnvironment` now filters on `and(eq(id), eq(organisationId))`. Forced by `verify-org-scoped-writes.sh` blocking gate.
+
+- [ ] **ADV-C — `credentialBrokerService.audit` filters subaccountId in application memory after a SQL `LIMIT`**
+  - File: `server/services/credentialBrokerService.ts:191-237`
+  - Issue 1 (correctness): in a high-event org the first 50 rows can all be from other subaccounts, returning zero entries for the requesting subaccount.
+  - Issue 2 (trust): the subaccount filter reads `metadata.subaccountId` (JSONB), which trusts every caller of `auditService.log` for `entityType: 'integration_connection'` to set that field from a server-validated `subaccount.id`.
+  - Suggested fix: push the subaccount filter into SQL (e.g., `eq(sql\`metadata->>'subaccountId'\`, $)`), or add a first-class `subaccount_id` column on `audit_events` for credential events. Audit existing `auditService.log` call sites where `entityType = 'integration_connection'` to confirm they set `metadata.subaccountId` from validated server-side data only.
+
+- [ ] **ADV-OBS-1 — `claude-code` executionMode derives `native` not `operator`**
+  - File: `server/services/controllerStyleResolver.ts` (switch in `deriveControllerStyle`)
+  - Spec §4.1.6 maps `claude-code → operator`; implementation only maps `iee_browser` and `iee_dev`. Conservative-but-divergent. Correctness, not security.
+
+- [ ] **ADV-OBS-2 — `controllerStyle` route param not validated against closed enum**
+  - File: `server/routes/agentRuns.ts:39`
+  - A non-`'native' | 'operator'` value silently maps to `default` in `deriveControllerStyle`. Should return HTTP 400 at the route layer. Correctness only.
+
+- [x] **ADV-OBS-3 — `require_approval_at_tier` CHECK 0-7 vs spec text 0-6** — CLOSED by chatgpt-pr-review Round 2 finding F3 (operator-decided: REMOVE sentinel, revert to 0-6). Migration 0307 CHECK now `BETWEEN 0 AND 6`; Zod max=6; "Never require approval" UI option removed; tests inverted. See `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` Round 2.
+
+## PR re-review findings — synthetos-foundation-refactor (2026-05-10)
+
+**Captured:** 2026-05-10T00:30:00Z
+**Source log:** `tasks/review-logs/pr-review-log-synthetos-foundation-refactor-2026-05-10T00-30-00Z.md`
+**Verdict:** APPROVED with 2 strong + 2 nits deferred.
+
+- [ ] **SFR-S7 — Stale comment + redundant `aeeToolPredicate` in `runTraceService.ts`**
+  - Files: `server/services/runTraceService.ts:113-119, 152`
+  - After dual-reviewer fix #5, the `agent_execution_events` UNION arm's inner WHERE restricts to the three foundation log codes; the legacy `aeeToolPredicate` and header comment no longer match. Behaviorally correct by empty intersection. Cosmetic cleanup.
+  - Suggested: replace `aeeToolPredicate` with `excludeWhenToolSlug` for that arm and update the header comment to say tool_call/tool_result rows flow through the `actions` arm instead.
+
+- [ ] **SFR-S8 — Add `subaccountAgentService.updateLink` governance-fields persistence test**
+  - File: `server/services/__tests__/subaccountAgentService.test.ts` (new)
+  - Given an existing link, when updateLink is called with the four governance fields, then the row reflects all four; partial updates do not clobber unspecified fields.
+
+- [x] **SFR-N8 — Zod `allowedEnvironments` accepts empty array (lockout risk)** — CLOSED by chatgpt-pr-review Round 3 finding S2. `.min(1)` added to `z.array(z.enum([...]))` in `server/schemas/subaccountAgents.ts`; new test in `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts` asserts empty-array rejection. Spec §9.1 + architecture.md updated. UI-side guard left as future enhancement (server-side rejection now provides the backstop).
+
+- [ ] **SFR-N9 — Future-only: functional index on `audit_events ((metadata->>'subaccountId'))`**
+  - File: `server/db/schema/auditEvents.ts`
+  - Current `(organisation_id, created_at)` index is sufficient at current scale. Add only if subaccount-scoped audit queries grow large enough that the current narrow-org-partition path slows.

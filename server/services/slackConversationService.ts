@@ -83,6 +83,78 @@ export async function resolveSlackUser(
   return { userId: rows[0]!.id, orgId: rows[0]!.organisationId };
 }
 
+// ── Block Kit approval template ───────────────────────────────────────────────
+
+interface ApprovalBlockContext {
+  actionLabel: string;
+  riskTier?: number | null;
+  requiresApproval?: boolean;
+  policyReason?: string | null;
+  reasoning?: string | null;
+}
+
+/**
+ * Build Block Kit blocks for an approval message. Includes risk tier and
+ * policy reason per §5.3.4 design. No em-dashes in any copy.
+ */
+export function buildApprovalBlocks(ctx: ApprovalBlockContext): unknown[] {
+  const tierPart = ctx.riskTier != null ? `, Tier ${ctx.riskTier}` : '';
+  const policyPart = ctx.requiresApproval !== false ? ', requires approval per policy' : '';
+  const actionLine = `Action: ${ctx.actionLabel}${tierPart}${policyPart}`;
+
+  const blocks: unknown[] = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${actionLine}*`,
+      },
+    },
+  ];
+
+  if (ctx.policyReason) {
+    blocks.push({
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `Context: ${ctx.policyReason}`,
+        },
+      ],
+    });
+  }
+
+  if (ctx.reasoning) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Agent reasoning*\n${ctx.reasoning}`,
+      },
+    });
+  }
+
+  blocks.push({
+    type: 'actions',
+    elements: [
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Approve' },
+        style: 'primary',
+        action_id: 'review_approve',
+      },
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Reject' },
+        style: 'danger',
+        action_id: 'review_reject',
+      },
+    ],
+  });
+
+  return blocks;
+}
+
 /**
  * Post a review item as an interactive Block Kit message to Slack.
  * Only posts if the org has a Slack connector with a configured reviewChannel.

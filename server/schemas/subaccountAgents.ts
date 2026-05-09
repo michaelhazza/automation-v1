@@ -32,6 +32,16 @@ const updateLinkBase = z.object({
   timeoutSeconds: z.number().int().positive(),
   maxCostPerRunCents: z.number().int().nonnegative().nullable(),
   maxLlmCallsPerRun: z.number().int().positive().nullable(),
+  // Governance (spec §5.2.9)
+  controllerStyleAllowed: z.enum(['native_only', 'native_and_operator']),
+  // `.min(1)` rejects an empty array — an empty `allowedEnvironments` would deny
+  // every executionMode at run start (spec §3.6 / §4.5), bricking the agent.
+  // Persisted defaults (`['api_tool','headless','browser']`) already provide a
+  // safe baseline; the closed enum + non-empty constraint enforce the same
+  // invariant on PATCH.
+  allowedEnvironments: z.array(z.enum(['api_tool', 'headless', 'browser', 'terminal_repo'])).min(1),
+  maxRiskTier: z.number().int().min(0).max(6),
+  requireApprovalAtTier: z.number().int().min(0).max(6),
 });
 export const updateLinkBody = updateLinkBase.partial().refine(
   obj => Object.keys(obj).length > 0,

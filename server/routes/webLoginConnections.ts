@@ -27,6 +27,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { webLoginConnectionService } from '../services/webLoginConnectionService.js';
+import { credentialBrokerService } from '../services/credentialBrokerService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { auditService } from '../services/auditService.js';
 
@@ -183,11 +184,16 @@ router.delete(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const ok = await webLoginConnectionService.revoke(req.params.id, req.orgId!, subaccount.id);
-    if (!ok) {
+    const existing = await webLoginConnectionService.getById(req.params.id, req.orgId!, subaccount.id);
+    if (!existing) {
       res.status(404).json({ error: 'web_login connection not found' });
       return;
     }
+    await credentialBrokerService.revoke({
+      organisationId: req.orgId!,
+      credentialId: req.params.id,
+      subaccountId: subaccount.id,
+    });
     auditService.log({
       organisationId: req.orgId,
       actorId: req.user!.id,

@@ -1,6 +1,7 @@
 ﻿// @principal-context-import-only — reason: registry references canonicalDataService only in handler-classification documentation; future handlers that invoke it must pass fromOrgId(organisationId, subaccountId).
 import { z } from 'zod';
 import type { RuntimeCheckKind, RuntimeCheckBlastRadius } from '../../shared/types/runtimeCheck.js';
+import type { RiskTier } from '../../shared/types/riskTier.js';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.
@@ -77,6 +78,8 @@ export interface ActionDefinition {
   actionCategory: 'api' | 'worker' | 'browser' | 'devops' | 'mcp';
   isExternal: boolean;
   defaultGateLevel: 'auto' | 'review' | 'block';
+  /** Risk tier classification (spec §4.2.3). Required on every entry; enforced by verify-risk-tier-assigned.sh CI gate. */
+  riskTier: RiskTier;
   createsBoardTask: boolean;
   /** @deprecated Use parameterSchema instead. Kept for backward compat. */
   payloadFields: string[];
@@ -222,6 +225,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['filter', 'include_schema_meta'],
     parameterSchema: z.object({
@@ -249,6 +253,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['scope', 'orgId', 'subaccountId', 'include_inactive'],
     parameterSchema: z.object({
@@ -273,6 +278,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['orgId', 'subaccountId', 'required_capabilities'],
     parameterSchema: z.object({
@@ -305,6 +311,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: [
       'category', 'summary', 'user_intent', 'required_capabilities', 'missing_capabilities',
@@ -349,6 +356,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: client-messaging actions that land in a customer
+    // inbox/feed → Tier 6 (max-tier rule §4.2.3 line 493). defaultGateLevel
+    // remains 'review' so existing-org behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: true,
     payloadFields: ['to', 'subject', 'body', 'thread_id', 'provider'],
     parameterSchema: z.object({
@@ -385,6 +396,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — email inbox data not yet migrated to canonical',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API reads → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['provider', 'since'],
     parameterSchema: z.object({
@@ -409,6 +422,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'brief', 'status', 'priority', 'assigned_agent_id'],
     parameterSchema: z.object({
@@ -440,6 +454,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   triage_intake: {
     actionType: 'triage_intake',
+    riskTier: 1,
     description:
       "Capture and route incoming ideas, feature requests, or bugs into the task board. " +
       "Two modes: 'capture' creates a single structured task in the 'inbox' (untriaged) column " +
@@ -512,6 +527,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['task_id', 'status'],
     parameterSchema: z.object({
@@ -540,6 +556,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['op', 'id', 'offset', 'limit'],
     parameterSchema: z.object({
@@ -588,6 +605,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['task_id', 'assigned_agent_id'],
     parameterSchema: z.object({
@@ -611,6 +629,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['task_id', 'title', 'content', 'deliverable_type'],
     parameterSchema: z.object({
@@ -636,6 +655,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['provider', 'record_type', 'record_id', 'fields'],
     parameterSchema: z.object({
@@ -668,6 +688,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Generic HTTP fetch — inherently live, not canonical data',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API reads → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body'],
     parameterSchema: z.object({
@@ -702,6 +724,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Web scraping — inherently live, not canonical data',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487-488: external scrape reads/extraction → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['url', 'extract', 'output_format', 'css_selectors'],
     parameterSchema: z.object({
@@ -736,6 +760,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Web scraping — inherently live, not canonical data',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487-488: external structured-data extraction → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['url', 'fields', 'remember', 'selector_group'],
     parameterSchema: z.object({
@@ -762,6 +788,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Web monitoring — inherently live, not canonical data',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['url', 'watch_for', 'frequency', 'fields'],
     parameterSchema: z.object({
@@ -787,6 +814,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'context', 'options'],
     parameterSchema: z.object({
@@ -821,6 +849,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['task_id', 'spec_content', 'user_stories_count', 'ac_count', 'has_high_risk_questions', 'reasoning'],
     parameterSchema: z.object({
@@ -852,6 +881,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['file_path'],
     parameterSchema: z.object({
@@ -874,6 +904,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['query', 'search_type', 'file_pattern', 'max_results'],
     parameterSchema: z.object({
@@ -902,6 +933,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['test_filter'],
     parameterSchema: z.object({
@@ -925,6 +957,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Generic HTTP endpoint analysis — inherently live',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API read → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body', 'expected_status'],
     parameterSchema: z.object({
@@ -952,6 +986,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: true,
     payloadFields: ['title', 'description', 'severity', 'confidence', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior'],
     parameterSchema: z.object({
@@ -984,6 +1019,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['file', 'diff', 'reasoning', 'base_commit', 'intent'],
     parameterSchema: z.object({
@@ -1011,6 +1047,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 4,
     createsBoardTask: false,
     payloadFields: ['command'],
     parameterSchema: z.object({
@@ -1035,6 +1072,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'branch'],
     parameterSchema: z.object({
@@ -1061,6 +1099,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['worker_agent_slug', 'task_description', 'context'],
     parameterSchema: z.object({
@@ -1087,6 +1126,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: true,
     payloadFields: ['projectId', 'slug', 'pageType', 'title', 'html', 'meta', 'formConfig'],
     parameterSchema: z.object({
@@ -1122,6 +1162,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: true,
     payloadFields: ['pageId', 'projectId', 'html', 'meta', 'formConfig', 'changeNote'],
     parameterSchema: z.object({
@@ -1156,6 +1197,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: true,
     payloadFields: ['pageId', 'projectId'],
     parameterSchema: z.object({
@@ -1182,6 +1224,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['tag_filters'],
     parameterSchema: z.object({
@@ -1199,6 +1242,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -1216,6 +1260,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['content', 'entry_type'],
     parameterSchema: z.object({
@@ -1235,6 +1280,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['account_id'],
     parameterSchema: z.object({
@@ -1253,6 +1299,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['account_id', 'metric_name', 'current_value'],
     parameterSchema: z.object({
@@ -1273,6 +1320,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['account_id'],
     parameterSchema: z.object({
@@ -1291,6 +1339,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['subaccount_id'],
     parameterSchema: z.object({
@@ -1310,6 +1359,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['subaccount_id'],
     parameterSchema: z.object({
@@ -1329,6 +1379,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -1347,6 +1398,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: high-impact client-affecting action (intervention
+    // reaches the account holder) → Tier 6. defaultGateLevel remains 'review'
+    // so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['account_id', 'intervention_type', 'evidence_summary'],
     parameterSchema: z.object({
@@ -1371,6 +1426,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['question'],
     parameterSchema: z.object({
@@ -1396,6 +1452,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['question', 'urgency'],
     parameterSchema: z.object({
@@ -1422,6 +1479,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['key'],
     parameterSchema: z.object({
@@ -1443,6 +1501,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['block_name', 'new_content'],
     parameterSchema: z.object({
@@ -1462,6 +1521,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Web search — inherently live, not canonical data',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API read → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['query'],
     parameterSchema: z.object({
@@ -1484,6 +1545,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['query', 'intent_category', 'max_results'],
     parameterSchema: z.object({
@@ -1511,6 +1573,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: client-messaging that lands in a customer feed → Tier 6.
+    // (Both immediate-publish and scheduled-publish paths land on the live feed.)
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['platform', 'post_content', 'schedule_at', 'campaign_tag', 'reasoning'],
     parameterSchema: z.object({
@@ -1541,6 +1607,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — social analytics not yet migrated to canonical',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API read → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['platforms', 'date_from', 'date_to', 'metrics', 'campaign_tag'],
     parameterSchema: z.object({
@@ -1571,6 +1639,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — ads campaign data not yet migrated to canonical',
     defaultGateLevel: 'auto',
+    // Spec §4.2.3 line 487: external API read → Tier 2.
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_ids', 'include_ad_groups', 'date_from', 'date_to'],
     parameterSchema: z.object({
@@ -1598,6 +1668,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3: paid-ads spend mutation (state change to billed budget) → Tier 5.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 5,
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'current_bid', 'proposed_bid', 'change_direction', 'change_percentage', 'reasoning'],
     parameterSchema: z.object({
@@ -1629,6 +1702,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3: paid-ads state change (live customer-facing copy) → Tier 5.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 5,
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'ad_format', 'copy_content', 'reasoning'],
     parameterSchema: z.object({
@@ -1659,6 +1735,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491 ("pause campaign" → Tier 6 example) interpreted in
+    // operator scope as Tier 5 — campaign state change without material spend
+    // commitment (the action stops spending; budget changes are increase_budget).
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 5,
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'pause_reason', 'performance_evidence', 'reasoning'],
     parameterSchema: z.object({
@@ -1687,6 +1768,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: material spend changes (paid-ads budget mutation
+    // commits the agency / customer to additional spend) → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'current_daily_budget', 'proposed_daily_budget', 'change_percentage', 'performance_evidence', 'reasoning'],
     parameterSchema: z.object({
@@ -1720,6 +1805,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — contact enrichment requires real-time external lookup',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['contact_email', 'contact_name', 'company_name', 'crm_contact_id', 'fields_requested'],
     parameterSchema: z.object({
@@ -1747,6 +1833,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['record_type', 'record_id', 'record_identifier', 'updates', 'update_reason', 'reasoning'],
     parameterSchema: z.object({
@@ -1778,6 +1865,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['date_from', 'date_to', 'breakdown_by', 'include_comparison', 'currency'],
     parameterSchema: z.object({
@@ -1806,6 +1894,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — expense data not yet migrated to canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['date_from', 'date_to', 'categories', 'include_comparison', 'currency'],
     parameterSchema: z.object({
@@ -1833,6 +1922,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: financial record material change → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['record_type', 'record_description', 'updates', 'period', 'reasoning'],
     parameterSchema: z.object({
@@ -1863,6 +1955,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['asset_type', 'topic', 'target_audience', 'value_promise', 'reasoning'],
     parameterSchema: z.object({
@@ -1893,6 +1986,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: client-messaging that lands in the customer's
+    // inbox/portal → Tier 6. defaultGateLevel remains 'review' so existing
+    // behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['report_title', 'client_name', 'client_email', 'report_content', 'delivery_channel', 'reasoning'],
     parameterSchema: z.object({
@@ -1925,6 +2022,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['integration_type', 'provider_name', 'configuration', 'reasoning'],
     parameterSchema: z.object({
@@ -1954,6 +2052,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['query_type', 'filters', 'limit', 'include_activity_history'],
     parameterSchema: z.object({
@@ -1982,6 +2081,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['tableFilter', 'includeExamples'],
     parameterSchema: z.object({
@@ -2008,6 +2108,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['page_id', 'page_title', 'section', 'include_metadata'],
     parameterSchema: z.object({
@@ -2034,6 +2135,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['page_title', 'current_content', 'proposed_changes', 'change_type', 'reasoning'],
     parameterSchema: z.object({
@@ -2067,6 +2169,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['page_title', 'full_updated_content', 'change_summary', 'reasoning'],
     parameterSchema: z.object({
@@ -2097,6 +2200,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     isUniversal: true,
+    riskTier: 1,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['op', 'source', 'itemId', 'limit', 'ttlMinutes'],
@@ -2128,6 +2232,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'none',
     isUniversal: true,
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['op', 'query', 'memoryId'],
     parameterSchema: z.object({
@@ -2192,6 +2297,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     readPath: 'none' as const,
     isMethodology: true,
     defaultGateLevel: 'auto' as const,
+    riskTier: 0 as const,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({}),
@@ -2211,6 +2317,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2247,6 +2354,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2277,6 +2385,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2299,6 +2408,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2322,6 +2432,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2357,6 +2468,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2380,6 +2492,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2403,6 +2516,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2431,6 +2545,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2458,6 +2573,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2480,6 +2596,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2510,6 +2627,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2541,6 +2659,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2571,6 +2690,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2597,6 +2717,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2618,6 +2739,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: [],
     parameterSchema: z.object({
@@ -2647,6 +2769,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'canonical',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['subaccountId'],
     parameterSchema: z.object({
@@ -2666,7 +2789,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     topics: ['playbook', 'delivery'],
     isExternal: false,
     readPath: 'none',
+    // defaultGateLevel='auto' is preserved (existing behaviour, INV-8). The
+    // tier reflects the audience-impact rule (spec §4.2.3 line 491): when the
+    // delivery channel reaches a customer (email, portal), this lands → Tier 6.
     defaultGateLevel: 'auto',
+    riskTier: 6,
     createsBoardTask: true,
     payloadFields: ['subaccountId', 'artefactTitle', 'artefactContent'],
     parameterSchema: z.object({
@@ -2697,6 +2824,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 2,
     createsBoardTask: false,
     payloadFields: ['runId', 'playbookSlug', 'title', 'bullets', 'detailMarkdown'],
     parameterSchema: z.object({
@@ -2724,6 +2852,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 3,
     createsBoardTask: true,
     payloadFields: ['workflow_template_id', 'template_version_id', 'initial_inputs'],
     parameterSchema: z.object({
@@ -2748,6 +2877,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: client-messaging that lands in the customer's
+    // inbox → Tier 6. defaultGateLevel remains 'review' so existing behaviour
+    // is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['runId', 'to', 'subject', 'bodyMarkdown'],
     parameterSchema: z.object({
@@ -2776,6 +2909,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: triggers a CRM automation that emits to the
+    // contact (typically email/SMS landing). The action launches a sequence
+    // rather than a single send — Tier 6 because the messaging will land.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['automationId', 'contactId', 'scheduleHint', 'scheduledFor', 'provider'],
     parameterSchema: z.object({
@@ -2809,6 +2947,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: "Send email to client" → Tier 6 (lands in inbox).
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['from', 'toContactId', 'subject', 'body', 'scheduleHint', 'scheduledFor', 'provider'],
     parameterSchema: z.object({
@@ -2845,6 +2986,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: SMS to client lands on customer phone → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['fromNumber', 'toContactId', 'body', 'scheduleHint', 'scheduledFor', 'provider'],
     parameterSchema: z.object({
@@ -2879,6 +3023,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['assigneeUserId', 'relatedContactId', 'title', 'notes', 'dueAt', 'priority', 'provider'],
     parameterSchema: z.object({
@@ -2914,6 +3059,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['path', 'value', 'reason', 'sourceSession'],
     parameterSchema: z.object({
@@ -2939,6 +3085,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['title', 'message', 'severity', 'recipients', 'channels'],
     parameterSchema: z.object({
@@ -2976,6 +3123,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['briefId', 'briefText', 'orchestratorConfidence', 'ambiguityDimensions'],
     parameterSchema: z.object({
@@ -3001,6 +3149,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['briefId', 'runtimeConfidence', 'stakesDimensions'],
     parameterSchema: z.object({
@@ -3020,6 +3169,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionCategory: 'api',
     isExternal: false,
     defaultGateLevel: 'auto',
+    riskTier: 0,
     createsBoardTask: false,
     payloadFields: ['rawIntent', 'subaccountId'],
     parameterSchema: z.object({
@@ -3064,6 +3214,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'block',
+    riskTier: 3,
     createsBoardTask: false,
     readPath: 'none',
     payloadFields: ['thresholdBreached', 'budgetUsed', 'budgetAllowed', 'topContributors', 'suggestedActions'],
@@ -3106,6 +3257,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'auto',
+    riskTier: 1,
     createsBoardTask: false,
     payloadFields: ['decisions', 'tasks', 'approach'],
     parameterSchema: z.object({
@@ -3186,6 +3338,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: funds transfer → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['invoiceId', 'amount', 'currency', 'merchant', 'intent'],
     parameterSchema: z.object({
@@ -3235,6 +3390,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: funds transfer (commits agency money) → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['resourceId', 'amount', 'currency', 'merchant', 'intent'],
     parameterSchema: z.object({
@@ -3282,6 +3440,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: recurring funds transfer → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['serviceId', 'amount', 'currency', 'merchant', 'intent'],
     parameterSchema: z.object({
@@ -3329,6 +3490,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: funds transfer → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['accountId', 'amount', 'currency', 'merchant', 'intent'],
     parameterSchema: z.object({
@@ -3376,6 +3540,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: true,
     readPath: 'none',
     defaultGateLevel: 'review',
+    // Spec §4.2.3 line 491: funds transfer (out, to customer) → Tier 6.
+    // defaultGateLevel remains 'review' so existing behaviour is unchanged (INV-8).
+    riskTier: 6,
     createsBoardTask: false,
     payloadFields: ['parentChargeId', 'amount', 'currency', 'merchant', 'intent'],
     parameterSchema: z.object({
@@ -3430,6 +3597,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     readPath: 'none',
     defaultGateLevel: 'review',
+    riskTier: 3,
     createsBoardTask: false,
     payloadFields: ['spendingBudgetId', 'requesterId'],
     parameterSchema: z.object({
