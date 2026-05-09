@@ -1,6 +1,6 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** DRAFT v3 — incorporates two rounds of review feedback. Spec-ready pending the eight decisions in §9.
+**Status:** DRAFT v4 — incorporates three rounds of review feedback. Locked. Spec-ready pending the eight decisions in §9.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
 **Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, and the entities required. No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
@@ -136,6 +136,34 @@ Incremental sync cursors and sync phase state live in the existing connector pol
 
 Provider-facing actions (sends, internal notes, status changes, assignments, tag mutations) must be idempotent across retries. Each action carries a stable **action idempotency key** derived from `(connector_config_id, ticket_id, action_type, source_id)`, where `source_id` is the draft ID for sends and a deterministic hash of the action payload for in-place mutations. Retrying an approved draft after a timeout, network blip, or process restart must never create a duplicate customer-visible reply. Adapters either pass the idempotency key through to the provider's native idempotency mechanism (where supported) or maintain a local action-attempt ledger keyed by it.
 
+### 5.8 Draft approval is a three-phase dispatch
+
+Approving a draft and sending it is a three-phase operation, in order:
+
+1. **Preflight checks** — collision-window policy (§6.3 `agent_config`), inbox mode, draft validity, ticket status not quarantined, customer identity resolution if required by policy.
+2. **Durable transition** — within a single transaction, mark the draft `dispatching` and persist its `action_idempotency_key`. After this point the operation is committed; subsequent attempts re-use the same key.
+3. **Adapter call** — the adapter is invoked with the idempotency key. The provider's accepted response, or a subsequent webhook/poll, reconciles the confirmed message into `canonical_ticket_messages` and transitions the draft to `sent`.
+
+A process crash between phases 2 and 3, or after the adapter call but before local confirmation, must resume by re-issuing the same idempotency key, not by creating a second send. This is the single most dangerous path in the system; the invariant is non-negotiable.
+
+### 5.9 Tenant isolation is denormalised, not joined
+
+Every canonical support table is organisation-scoped and protected by the existing three-layer RLS model (Postgres policies, service-layer principal context, explicit `organisation_id` filters). `organisation_id` is denormalised onto every child table (`canonical_ticket_messages`, `canonical_ticket_drafts`, `canonical_inboxes`, `canonical_support_agents`) so RLS never depends on a join back to the parent ticket. This is especially important for `canonical_ticket_drafts`, which carry agent-generated content and customer-identifying data, and for `canonical_ticket_messages`, which carry the customer's own words. Cross-tenant leakage at the message layer is the worst possible outcome; the invariant is structural.
+
+### 5.10 Observability is part of the contract
+
+Every operational anomaly emits a structured log with a stable code, not a free-text message. The required field set on every event: `organisation_id`, `connector_config_id`, `ticket_id` (where applicable), `provider`, `event_type`, `code`, plus event-specific context. Reserved codes for v1:
+
+- `support.status.unknown_provider_status` — quarantined ticket per §6.1.
+- `support.ingest.duplicate_collapsed` — webhook + poll convergence collapsed a duplicate per §5.3.
+- `support.action.retry_idempotent` — outbound action retried using an existing idempotency key.
+- `support.action.provider_conflict` — concurrent human edit detected during adapter write.
+- `support.attachment.resolve_failed` — adapter `resolveAttachment` returned an error.
+- `support.ticket.human_collision_blocked` — agent action blocked by inbox collision-window policy.
+- `support.ingest.contact_unmatched` — inbound ticket has customer email with no canonical contact match.
+
+This list is the floor, not the ceiling. The spec defines the channel (log sink, metrics, optional UI surface); the brief locks in the requirement that "we logged it somewhere" is not acceptable.
+
 ## 6. Proposed Canonical Entities (For Stress-Testing)
 
 This is the data model proposal at concept level: names and intent, not column lists.
@@ -158,16 +186,16 @@ Fields the agent needs to reason about:
 
 **Canonical status model.** Deliberately small. Provider-specific statuses live in `external_metadata`.
 
-| Canonical status | Actionable? | Meaning |
+| Canonical status | In default actionable queue? | Meaning |
 |---|---|---|
 | `open` | Yes | Active, agent attention required, no party currently waiting. |
 | `pending_internal` | Yes | Waiting on internal action (engineering, finance, another team). Customer is not blocked. |
 | `waiting_on_customer` | Yes | Reply has gone out, awaiting customer response. |
-| `resolved` | Yes | Support outcome completed. The ticket can be reopened by a customer reply. |
+| `resolved` | No (opt-in) | Support outcome completed. Excluded from default agent queues; included only when an inbox `agent_config` explicitly enables post-resolution follow-up workflows. Customer reply reopens to `open`. |
 | `closed` | No | Terminal/archive state. Not expected to receive normal agent action; reopening is an explicit operation. |
 | `unknown_provider_status` | **No (quarantined)** | Provider returned a status the adapter has not mapped. Fail-closed: ticket is excluded from all actionable agent queues until the mapping is resolved. |
 
-The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). Mapping each provider's status vocabulary into the first five is part of the adapter contract; `unknown_provider_status` is the quarantine bucket for anything else (see §7).
+The split between `resolved` and `closed` matters: `resolved` is an outcome ("we answered it"), `closed` is a lifecycle terminus ("the ticket is no longer in active circulation"). The reason `resolved` is opt-in actionable is to prevent the agent repeatedly touching tickets that are already done; follow-up automations (CSAT prompts, post-resolution check-ins) must explicitly opt in via inbox policy. Mapping each provider's status vocabulary into the first five canonical values is part of the adapter contract; `unknown_provider_status` is the quarantine bucket for anything else (see §7).
 
 **Relationship to `canonical_conversations`.** `canonical_tickets` is the source of truth for support workflows. Tickets do not flow through `canonical_conversations`. The generic conversations table remains for non-ticket messaging channels (SMS, chat, phone). A future unified-activity-feed concern may link the two; v1 does not. This avoids overloading `canonical_conversations` with ticket semantics.
 
@@ -227,7 +255,7 @@ The home for agent-generated replies that are not yet sent. Required because the
 - `proposed_actions` JSONB: optional companion state changes the agent intends to apply alongside the reply (e.g., `{ status: "waiting_on_customer", tags_add: ["billing"] }`).
 - `created_by_agent_run_id`: FK to the agent run that produced the draft (provenance for evals).
 - `model_version`, `prompt_version` (provenance for replay and regression testing).
-- `status`: `draft` | `awaiting_review` | `approved` | `dispatching` | `sent` | `rejected` | `failed` | `expired` | `superseded`. The `dispatching` state covers the window between adapter call and provider confirmation; this is where pending outbound intent lives, **not** in `canonical_ticket_messages`.
+- `status`: `draft` | `awaiting_review` | `dispatching` | `sent` | `rejected` | `failed` | `expired` | `superseded`. There is intentionally no durable `approved` resting state — approval is the trigger for the §5.8 three-phase dispatch and transitions immediately into `dispatching`. The `dispatching` state covers the window between adapter call and provider confirmation; this is where pending outbound intent lives, **not** in `canonical_ticket_messages`.
 - `action_idempotency_key`: stable key per §5.7, set when the draft is approved and reused on every retry.
 - `reviewer_user_id`, `reviewed_at`, `review_notes` (set on approval or rejection).
 - `sent_message_id`: FK to `canonical_ticket_messages` once the provider confirms. Null until then.
@@ -297,7 +325,7 @@ Approve the canonical approach. Approve the **five** entities as the v1 surface:
 4. `canonical_support_agents`
 5. `canonical_ticket_drafts` (added in v2 of the brief; necessary for assisted mode)
 
-Approve the seven design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions) as non-negotiable constraints for the spec.
+Approve the ten design invariants in §5 (Foundry alignment, provider-confirmed message finality, idempotent dual-path ingestion, collision avoidance, write-only-through-adapters, cursors-in-polling-infra, idempotent outbound actions, three-phase dispatch sequencing, denormalised tenant isolation, structured observability with stable codes) as non-negotiable constraints for the spec.
 
 Park CSAT, KB articles, custom fields, multi-thread per ticket, and attachment mirroring for later.
 
@@ -310,3 +338,4 @@ Resolve the eight decisions in §9, then go to spec. The spec should be drafted 
 - The Support Agent itself (prompts, tools, eval harness); separate brief, depends on this one.
 - Email-only providers (Gmail, IMAP) as a fallback when there is no helpdesk; defer.
 - Real-time co-presence ("the bot is typing..."); defer.
+- **Provider-side deletion and redaction.** v1 does not hard-delete canonical rows when a provider deletes or redacts a ticket or message, except where existing platform privacy rules require it. The spec must define tombstone or redaction handling (soft-delete column, content nulling, retention semantics) if provider webhooks expose deletion or redaction events; the canonical layer should not silently retain content the provider has removed.
