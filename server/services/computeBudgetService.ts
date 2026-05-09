@@ -21,7 +21,7 @@ import {
   classifyPace,
 } from './computeBudgetServicePure.js';
 
-export { ComputeBudgetContext, ComputeBudgetExceededError, isComputeBudgetExceededError } from './computeBudgetServicePure.js';
+export { type ComputeBudgetContext, ComputeBudgetExceededError, isComputeBudgetExceededError } from './computeBudgetServicePure.js';
 
 // Transaction-aware db handle: either the root db or a transaction context
 type TxOrDb = DB | Parameters<Parameters<DB['transaction']>[0]>[0];

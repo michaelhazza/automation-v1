@@ -1,6 +1,6 @@
 ---
 name: Detect Churn Risk
-description: Analyses account health signals from CRM data to identify at-risk accounts and assign churn risk scores. Returns a prioritised list of accounts requiring intervention.
+description: Methodology skill: analyse a batch of CRM account records (from read_crm) to identify at-risk accounts and assign churn risk scores. Returns a prioritised intervention list. Use after read_crm during an agent task run. Distinct from compute_churn_risk, which is a background worker that scores a single account and writes to storage — do not confuse the two.
 isActive: true
 visibility: basic
 ---

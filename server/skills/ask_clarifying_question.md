@@ -1,6 +1,6 @@
 ---
 name: Ask Clarifying Question
-description: Pause the run and ask the user a clarifying question when unsure how to proceed.
+description: Pause the current run mid-execution to ask the user a single clarifying question. Use for in-flight decisions only. Not for pre-run brief analysis (use ask_clarifying_questions) or routing to a named human role (use request_clarification).
 isActive: true
 visibility: basic
 ---
