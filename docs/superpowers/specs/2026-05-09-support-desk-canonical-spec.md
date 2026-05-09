@@ -77,7 +77,7 @@ Inherited verbatim from brief §6.6 + §8.7 + §12. Listing here for spec-review
 Inherited from `docs/spec-context.md` (last reviewed 2026-05-05):
 
 - `pre_production: yes`. No live agency clients yet. `commit_and_revert` rollout posture, no feature flags for new migrations, no staged rollout.
-- `testing_posture: static_gates_primary`. `runtime_tests: pure_function_only`. The spec proposes pure-function tests at decision boundaries (status mapping, idempotency-key derivation, draft state-machine transition guard, collision-window evaluation) and **no** vitest/E2E/API-contract/frontend tests.
+- `testing_posture: static_gates_primary`. `runtime_tests: pure_function_only`. The spec proposes pure-function Vitest tests at the decision boundaries enumerated in §20 (status mapping, draft transition guard, ticket transition guard, reconciliation decision module, customer-identity resolution; idempotency-key derivation rolls into the draft-transition test). **No** non-pure Vitest/E2E/API-contract/frontend tests are added.
 - The Support Agent itself is not in scope; the spec ships the substrate and the Teamwork validation. Skill registration declares the contract the agent will consume.
 
 **Foundry-runtime drift guard.** Per brief §5.1 + §8.1, any field that exists in one and not the other is enumerated below in §22 Open questions, with a documented reason. Default is parity. The spec author has not verified Foundry's current ticket schema against this spec — that confirmation is enumerated as open question OQ-1 and is closed by the operator before this spec moves to `accepted`.
@@ -132,7 +132,7 @@ The PR is broken into ordered build chunks for the implementer (`feature-coordin
 | C9 | Webhook ingestion — convergent dual-path with `(connector_config_id, external_id)` dedupe and `(connector_config_id, ticket_external_id, external_id)` for messages; dispatcher updates | `server/services/webhookAdapterService.ts` extension; new dispatcher case for ticket events; manual smoke test against real Teamwork sandbox for duplicate-event collapse (per §17.1 + §20) |
 | C10 | `supportTicketService` (read-only canonical reads + thread assembly) and `supportInboxService` (config CRUD with `agent_config` JSONB) | new service files; principal-scoped methods; pure thread-ordering helper + test |
 | C11 | Three-phase dispatch service (`supportDraftDispatchService`) — preflight → durable transition → adapter call — with `needs_reconciliation` reconciler worker | new service file + pg-boss worker (`createWorker`); pure state-machine transition guard + test; reconciliation policy module + test |
-| C12 | Skill registrations (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) | `server/skills/support/` directory; one markdown skill definition per skill; `actionRegistry` updates |
+| C12 | Skill registrations (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.reject_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) | `server/skills/support/` directory; one markdown skill definition per skill; `actionRegistry` updates |
 | C13 | UI surfaces — connection setup screen integration, tickets list, ticket detail (thread + draft overlay), draft review queue, inbox config | `client/src/pages/support/`; reuses primitives from `consolidation-foundation` (PageShell, SortableTable, FormFooter, etc.); references `prototypes/support-desk-canonical/` as design source of truth |
 | C14 | Operational state surfaces — sync-health pill on tickets list, connection-health on connection setup success page, `needs_reconciliation` callout in draft review queue, status pills on inbox config | extends C13 surfaces; reuses existing health/sync state from `connector_configs` |
 | C15 | Documentation, ADR, and `architecture.md` doc-sync — adds canonical Support Desk section, updates "Key files per domain", adds ADR for the canonical-not-conversations boundary decision | `architecture.md`; `docs/decisions/`; `docs/capabilities.md` (new capabilities); `KNOWLEDGE.md` patterns once the build settles |
@@ -928,13 +928,17 @@ Drafts whose reconciliation budget is exhausted appear in the draft review queue
 
 The surface offers three operator actions:
 
-- **Mark sent** — operator confirms the provider accepted it (because they checked Teamwork directly and saw the message). Transitions draft to `sent`. **Does NOT insert a row into `canonical_ticket_messages`** — the provider-confirmed message ledger only accepts rows that carry the provider's message ID (§5.2 `external_id` NOT NULL invariant), and the operator does not have one to provide. The confirmed message will land via webhook or the next poll cycle, where the existing convergence rule (§7) will dedupe-or-insert it and set `source_draft_id` from the still-pending draft → message link. Audit-event written.
+- **Mark sent** — operator confirms the provider accepted it (because they checked Teamwork directly and saw the message). Transitions draft to terminal `sent`. **Does NOT insert a row into `canonical_ticket_messages`** — the provider-confirmed message ledger only accepts rows that carry the provider's message ID (§5.2 `external_id` NOT NULL invariant), and the operator does not have one to provide. The confirmed message will land via webhook or the next poll cycle. Once `sent` is written, the draft is terminal and the `support.draft.sent` event has fired (§14.4); the post-terminal prohibition applies. Audit-event written.
 - **Mark failed** — operator confirms the provider rejected it. Transitions to `failed`. No canonical message inserted. Audit-event written.
 - **Retry reconciliation** — resets the budget and re-enqueues. Useful when the operator suspects a transient provider issue has resolved.
 
-This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a "Mark sent" action that turns out to have been wrong is corrected at the next webhook delivery (the provider message lands and is linked via `source_draft_id`; if the provider never accepted, no message ever arrives and the operator can switch to Mark failed later). Operator-triggered retries reuse the same key.
+**Late linking of the provider-confirmed message after Mark sent.** When ingestion subsequently lands the provider's confirmed message via webhook or poll, the message-upsert path (§7 convergence) runs a "back-link" check after a successful insert/update: for every newly-landed `canonical_ticket_messages` row with `direction = 'outbound'` and `source_draft_id IS NULL`, look up drafts on the same ticket in terminal `sent` state with `sent_message_id IS NULL`, then attempt a body + timestamp match (same proposed_body_text and the message's `created_at_external` near `dispatching_started_at`). If a unique match is found, set `source_draft_id` on the message row and `sent_message_id` on the draft in the same transaction. **This back-link is bookkeeping only; no draft state transition occurs and no new dispatch event is emitted.** Match logic and disambiguation rules are colocated in `supportDraftReconciliationPure.ts` (the same module that drives §8.4) and pure-tested. This preserves §11.4's "source_draft_id is set only by the dispatch service or the reconciliation worker — never by raw ingestion" invariant — the reconciliation pure module (driven from the upsert path, not the dispatch service) does the linking.
 
-**Why Mark sent is fire-and-forget on the message side.** The alternative — capturing a synthetic provider message ID at Mark-sent time — would either fabricate an ID (violates §5.2 provider-confirmed-only invariant) or require the operator to copy the ID from the provider UI (high error rate for an action the operator only takes when reconciliation has already failed). The cleaner contract is: Mark sent transitions the draft only; the canonical message ledger is populated by ingestion, exactly as for every other confirmed message in the system.
+If the provider ultimately did not accept the message (no provider message ever lands), the draft stays in `sent` per the operator's manual confirmation. There is no automatic switch back to `failed` after Mark sent — Mark sent is the operator's confirmed terminal answer. The operator is responsible for choosing Mark sent vs Mark failed correctly when they exhaust reconciliation; the surface is built specifically so they verify provider state in the helpdesk UI before deciding.
+
+This surface never causes a duplicate reply: phase 3 already used `action_idempotency_key`, so a future webhook for the same send finds the row dedupe-collapsed by the UNIQUE index. Operator-triggered Retry reconciliation reuses the same key.
+
+**Why Mark sent is fire-and-forget on the message side.** The alternative — capturing a synthetic provider message ID at Mark-sent time — would either fabricate an ID (violates §5.2 provider-confirmed-only invariant) or require the operator to copy the ID from the provider UI (high error rate for an action the operator only takes when reconciliation has already failed). The cleaner contract is: Mark sent transitions the draft only; the canonical message ledger is populated by ingestion plus the back-link pass above, exactly the path every other confirmed message takes.
 
 ### 8.6 Manual collision override (brief §5.4)
 
@@ -985,8 +989,8 @@ Skill registration adds a typed entry to `actionRegistry` with the new `'support
 
 ### Permission keys introduced
 
-- `support.draft.approve` — can press Approve on a draft. **Also gates the Edit action** on the draft review queue (`POST /api/support/drafts/:id/edit`): editing the proposed body before approving is a mutation toward approve and shares the approve key. Inbox-scoped via `canonical_inboxes.agent_config` (an inbox in `mode='disabled'` blocks even admins from approving).
-- `support.draft.reject` — can press Reject.
+- `support.draft.approve` — can press Approve on a draft. **Also gates the Edit action** on the draft review queue (`POST /api/support/drafts/:id/edit`): editing the proposed body before approving is a mutation toward approve and shares the approve key. **Also gates the manual-resolve `mark_sent` and `retry_reconciliation` sub-actions** on `POST /api/support/drafts/:id/manual-resolve` (§8.5) — both are operator confirmations on the dispatch path. Inbox-scoped via `canonical_inboxes.agent_config` (an inbox in `mode='disabled'` blocks even admins from approving).
+- `support.draft.reject` — can press Reject. **Also gates the manual-resolve `mark_failed` sub-action** on `POST /api/support/drafts/:id/manual-resolve` (§8.5).
 - `support.draft.override_collision` — can override `human_collision_blocked` (§8.6). Strictly stronger than `support.draft.approve`.
 - `support.inbox.configure` — can edit `canonical_inboxes.agent_config`.
 
@@ -1049,6 +1053,7 @@ Phase 2 build retains these properties. The provenance block on the draft review
 
 - Tickets list, ticket detail, draft review queue: gated by org membership + sub-account scope. Read access does not require a permission key.
 - Approve / Reject / Edit on the draft review queue: requires `support.draft.approve` / `support.draft.reject`.
+- Manual-resolve actions on `needs_reconciliation` drafts: Mark sent and Retry reconciliation require `support.draft.approve`; Mark failed requires `support.draft.reject` (per §9).
 - Override-collision: requires `support.draft.override_collision`. Visually hidden (NOT disabled) for users without it (per `docs/frontend-design-principles.md` § Admin-only controls).
 - Inbox config edit: requires `support.inbox.configure`. Read-only for everyone else.
 
@@ -1572,7 +1577,7 @@ Each is a binary, testable criterion. The PR is not merge-ready until all are de
 - [ ] Attachment resolver returns a usable URL (or stream) for at least one real Teamwork attachment.
 - [ ] An unmapped Teamwork status quarantines the ticket as `unknown_provider_status` and excludes it from agent-actionable queues; the original provider value is preserved in `external_metadata.provider_status_raw`; the `support.status.unknown_provider_status` log code fires.
 - [ ] Action idempotency retry path is tested: simulated post-dispatch failure resumes via the same key without producing a duplicate customer-visible reply (the `(connector_config_id, action_idempotency_key)` UNIQUE constraint plus the reconciliation worker prevents duplicate insertion).
-- [ ] All ten reserved observability codes from §15 fire in their respective conditions.
+- [ ] All ten operational observability codes from §15 fire in their respective conditions, plus the five draft-lifecycle terminal events from §14.4 (`support.draft.sent`, `support.draft.failed`, `support.draft.rejected`, `support.draft.expired`, `support.draft.superseded`).
 - [ ] Manual collision override (§8.6) emits an audit event, requires `support.draft.override_collision`, and is unavailable to autonomous agent execution.
 
 The acceptance bar is verified during Phase 2 by a combination of pure-function tests (status mapping, transition guard, reconciliation decision module, idempotency-key derivation) and an operator-driven manual smoke test against a real Teamwork sandbox.
@@ -1687,7 +1692,7 @@ Per spec-authoring-checklist §2 — every file/column/migration/service/route m
   - `POST /api/support/drafts/:id/approve` — `support.draft.approve` (optional `override_collision: true` body field requires `support.draft.override_collision`)
   - `POST /api/support/drafts/:id/reject` — `support.draft.reject`
   - `POST /api/support/drafts/:id/edit` — operator edits proposed body before approving (`support.draft.approve` per §9)
-  - `POST /api/support/drafts/:id/manual-resolve` — for `needs_reconciliation` exhausted-budget surface (`mark_sent` / `mark_failed` / `retry_reconciliation`)
+  - `POST /api/support/drafts/:id/manual-resolve` — for `needs_reconciliation` exhausted-budget surface; sub-actions `mark_sent` and `retry_reconciliation` require `support.draft.approve`, `mark_failed` requires `support.draft.reject` (per §9)
 
 ### Permission keys
 
