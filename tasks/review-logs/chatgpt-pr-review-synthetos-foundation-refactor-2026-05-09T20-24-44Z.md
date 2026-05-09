@@ -248,3 +248,29 @@ INV-8 invariant preserved: `defaultGateLevel` was not changed for any row. Exist
 `chore(chatgpt-pr-review): synthetos-foundation-refactor round 2 — close 8 findings (F1-F6, N1, N3)` — see git history for hash + push status.
 
 ---
+
+## Round 3 — 2026-05-10 (operator-authorised follow-up close)
+
+ChatGPT Round 2 verdict: **APPROVED with follow-ups** — all six Round 1 blockers (F1–F6) closed; three small items remained (S1, S2, N1). Operator authorised applying all three as a single Round 3 commit.
+
+### Per-finding status
+
+| Finding | Status | Files touched |
+|---------|--------|---------------|
+| S1 — Document 14-event deviation as accepted spec deviation | APPLIED | `tasks/builds/synthetos-foundation-refactor/spec.md` (new §11.0 "Accepted Implementation Deviation" subsection — explicit Phase 3 deferral note, references finding F5; existing §4.4.4 already says 14 members), `tasks/builds/synthetos-foundation-refactor/plan.md` (Post-review change #1 amended from "15 members" to "14 members (Phase 1)" with cross-reference to spec §11.0 + chatgpt-pr-review-log finding F5), `architecture.md` (already said 14-member; no further change needed) |
+| S2 — Add `.min(1)` to `allowedEnvironments` Zod validator | APPLIED | `server/schemas/subaccountAgents.ts` (`z.array(z.enum([...]))` → `z.array(z.enum([...])).min(1)` with comment citing §3.6 / §4.5), `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts` (new test asserts empty array is rejected), `tasks/builds/synthetos-foundation-refactor/spec.md` §9.1 acceptance item updated to mention non-empty constraint, `architecture.md` SynthetOS Phase 1 Foundation Primitives §Schema additions amended to mention `.min(1)` |
+| N1 — Sweep stale "15-member" / `routing_path_chosen` references | APPLIED | Fixed `tasks/builds/synthetos-foundation-refactor/plan.md` line 14 (15 → 14). Verified all user-facing surfaces (architecture.md, docs/, references/, shared/, server/, client/, tests/, KNOWLEDGE.md, CLAUDE.md, DEVELOPMENT_GUIDELINES.md) already use 14-member language. Implementation comments in `shared/types/runTraceEvent.ts:10` and `server/services/runTraceService.ts:6` legitimately describe the deferral with Phase 3 marker (allowed per operator instruction). Remaining `routing_path_chosen` references in `tasks/review-logs/*.md` and the build's `chatgpt-pr-review-log.md` Round 1 section are immutable historical artefacts (review log records the finding as raised). |
+
+### Gate results
+
+- `npm run lint`: PASS (0 errors; 886 pre-existing warnings, none new).
+- `npm run typecheck`: PASS (clean — both `tsconfig.json` and `server/tsconfig.json`).
+- `npx vitest run server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`: 17/17 PASS (including the new "rejects an empty allowedEnvironments array" test).
+
+### Commit
+
+`chore(chatgpt-pr-review): synthetos-foundation-refactor round 3 — close S1+S2+N1 follow-ups, APPROVED` — see git history for hash + push status.
+
+### Final ChatGPT verdict
+
+**APPROVED.** All six Round 1 blockers closed in Round 2; all three Round 2 follow-ups closed in Round 3. Loop closed at operator's explicit signal.

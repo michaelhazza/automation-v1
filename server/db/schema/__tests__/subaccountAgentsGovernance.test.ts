@@ -66,6 +66,13 @@ describe('updateLinkBody Zod schema — allowedEnvironments closure (spec §3.6)
     expect(result.success).toBe(true);
   });
 
+  it('rejects an empty allowedEnvironments array (spec §3.6 — agent must be runnable in at least one environment)', () => {
+    const result = updateLinkBody.safeParse({
+      allowedEnvironments: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('accepts valid controllerStyleAllowed values', () => {
     const native = updateLinkBody.safeParse({ controllerStyleAllowed: 'native_only' });
     const operator = updateLinkBody.safeParse({ controllerStyleAllowed: 'native_and_operator' });

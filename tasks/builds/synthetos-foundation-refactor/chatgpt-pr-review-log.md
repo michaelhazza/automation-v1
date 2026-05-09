@@ -179,3 +179,25 @@ INV-8 holds: every row whose `defaultGateLevel` was previously 'review' or 'bloc
 
 Architect sign-off: this matches the v1.2 brief Section 11 rubric one-for-one. The split between Tier 5 (state changes) and Tier 6 (material spend / lands in customer surface / funds) tracks the operator's locked interpretation. CSV regenerated to mirror the registry; the CSV is now an audit artefact, not a contract.
 
+
+## Round 3 — 2026-05-10 (operator-authorised follow-up close — APPROVED)
+
+ChatGPT Round 2 verdict: **APPROVED with follow-ups**. Three small items (S1, S2, N1). Operator authorised applying all three as a single Round 3 commit, then proceeding to finalisation.
+
+### Per-finding status
+
+| Finding | Status | Files touched |
+|---------|--------|---------------|
+| S1 — Document 14-event deviation as accepted spec deviation | APPLIED | `spec.md` (new §11.0 "Accepted Implementation Deviation" subsection); `plan.md` (Post-review change #1 corrected from 15 → 14 with cross-ref to spec §11.0); `architecture.md` already said 14-member — no further change |
+| S2 — Add `.min(1)` to `allowedEnvironments` Zod validator | APPLIED | `server/schemas/subaccountAgents.ts` (added `.min(1)` with comment); `server/db/schema/__tests__/subaccountAgentsGovernance.test.ts` (new test for empty-array rejection); `spec.md` §9.1 + `architecture.md` updated |
+| N1 — Sweep stale "15-member" / `routing_path_chosen` references | APPLIED | `plan.md` line 14 fixed. All user-facing surfaces verified clean (14-member). Implementation comments allowed to retain `routing_path_chosen` (they describe Phase 3 deferral). Review-log historical references kept as-is. |
+
+### Gate results
+
+- `npm run lint`: PASS (0 errors; 886 pre-existing warnings, none new).
+- `npm run typecheck`: PASS (clean — both root and server tsconfigs).
+- `npx vitest run server/db/schema/__tests__/subaccountAgentsGovernance.test.ts`: 17/17 PASS.
+
+### Final verdict
+
+**APPROVED.** All Round 1 + Round 2 + Round 3 findings closed. Build proceeds to Phase 3 finalisation per operator instruction.

@@ -3986,7 +3986,7 @@ Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation
 
 - `agent_runs.controller_style` (text, NOT NULL, DEFAULT `'native'`, CHECK in `('native','operator')`). Partial index `agent_runs_controller_style_idx ON agent_runs(controller_style) WHERE controller_style = 'operator'`. Migration `0308`.
 - `agent_runs.policy_envelope_snapshot` (jsonb, nullable). Migration `0309`. Immutable after run start (INV-9). State-based UPDATE-WHERE-NULL persist pattern in `policyEnvelopeResolver.persist`.
-- `subaccount_agents` four governance columns: `controller_style_allowed` (text, default `'native_only'`, CHECK in `('native_only','native_and_operator')`), `allowed_environments` (text[], default `['api_tool','headless','browser']`, app-layer Zod-closed enum over `'api_tool'|'headless'|'browser'|'terminal_repo'`), `max_risk_tier` (int 0-6, default 3), `require_approval_at_tier` (int 0-6, default 4). Migration `0307`.
+- `subaccount_agents` four governance columns: `controller_style_allowed` (text, default `'native_only'`, CHECK in `('native_only','native_and_operator')`), `allowed_environments` (text[], default `['api_tool','headless','browser']`, app-layer Zod-closed enum over `'api_tool'|'headless'|'browser'|'terminal_repo'` with `.min(1)` non-empty constraint — an empty array would deny every executionMode at run start), `max_risk_tier` (int 0-6, default 3), `require_approval_at_tier` (int 0-6, default 4). Migration `0307`.
 
 ### New shared types
 

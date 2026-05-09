@@ -2134,7 +2134,7 @@ The foundation refactor is **accepted** when all of the following are true.
 - [ ] `agent_runs.controller_style text NOT NULL DEFAULT 'native'` column exists in production.
 - [ ] `agent_runs.policy_envelope_snapshot jsonb` column exists in production.
 - [ ] `subaccount_agents.controller_style_allowed`, `allowed_environments`, `max_risk_tier`, `require_approval_at_tier` columns exist.
-- [ ] Application-layer validation (e.g., Zod or equivalent on the create/update routes for `subaccount_agents`) rejects any `allowed_environments` element outside the closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`. Closure is enforced in code per §3.6 because the column is `text[]` rather than a Postgres enum; this acceptance item is the durable check that the prose-only closure has a runtime backstop.
+- [ ] Application-layer validation (e.g., Zod or equivalent on the create/update routes for `subaccount_agents`) rejects any `allowed_environments` element outside the closed enum `'api_tool' | 'headless' | 'browser' | 'terminal_repo'`, AND rejects an empty array (`.min(1)` — an empty list would deny every executionMode at run start, bricking the agent). Closure is enforced in code per §3.6 because the column is `text[]` rather than a Postgres enum; this acceptance item is the durable check that the prose-only closure has a runtime backstop.
 - [ ] All migrations have `.down.sql` counterparts that successfully reverse them on staging.
 - [ ] All 110 actions in `actionRegistry.ts` have `riskTier` assigned (CI gate passes).
 - [ ] `CredentialBrokerService` exists at `server/services/credentialBrokerService.ts` with the five methods specified in Section 4.3.3 (`issueCredential`, `injectIntoEnvironment`, `revoke`, `audit`, `resolveAvailableCredentials`).
@@ -2195,6 +2195,14 @@ The foundation refactor is **accepted** when all of the following are true.
 ## 11. Deferred Items
 
 Per spec-authoring-checklist §7, every deferred concern in this spec is enumerated below. The non-goals list (§2.2 NG1-NG10) is the canonical scope boundary; this section gathers the smaller per-feature deferrals that surfaced in the Implementation and UI sections.
+
+### 11.0 Accepted Implementation Deviation — `routing_path_chosen` event deferred to Phase 3
+
+The original Phase 1 contract specified a 15-member `RunTraceEventType` union including `routing_path_chosen`, sourced from `routing_outcomes` joined to runs via `agent_run_id`. The shipped implementation exposes **14 event types**; `routing_path_chosen` is **deferred to Phase 3** because `routing_outcomes` has no `run_id` / `agent_run_id` column today, so the join is impossible without a schema change. The Phase 1 Run Trace UNION joins **seven** ledger tables (`agent_execution_events`, `delegation_outcomes`, `tool_call_security_events`, `review_audit_records`, `actions`, `llm_requests`, `iee_steps`) plus a synthesised `run_terminated` event from `agent_runs`. `routing_outcomes` is excluded.
+
+This is an accepted deviation — applied via chatgpt-pr-review Round 2 (operator decision: DROP `routing_path_chosen` from Phase 1 union, roadmap to Phase 3) recorded in `tasks/builds/synthetos-foundation-refactor/chatgpt-pr-review-log.md` (finding F5 / N2). Reintroduction lands in Phase 3 alongside canonical Run Trace ledger consolidation, when either `routing_outcomes` gains a `run_id`/`agent_run_id` linkage or the canonical `run_trace_events` table absorbs routing events directly. The discriminated-union API contract is forward-compatible with the Phase 3 reintroduction (new event types are additive per INV-3).
+
+### 11.1 Deferred follow-ups
 
 - **Per-task sandbox isolation primitive (NG1).** Phase 2. Today's `iee_dev` mode collapses sandbox-style execution and terminal/repo execution; splitting them requires a sandbox isolation primitive (Docker-per-task, gVisor, Firecracker, or hosted execution provider). Reason: design and infra investment outside Phase 1 scope.
 - **ExecutionBackend adapter contract (NG2).** Phase 3 prerequisite per `docs/openclaw-strategic-analysis.md`. Reason: sequenced after foundation primitives stabilise.

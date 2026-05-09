@@ -11,7 +11,7 @@
 **Build invocation pattern:** single `feature-coordinator` run, eleven chunks below, executed in declared order (per spec §12.7).
 
 **Post-review changes (locked-in, do not re-litigate during build):**
-1. RunTraceEventType union: 15 members (not 13).
+1. RunTraceEventType union: 14 members (Phase 1). The plan-review round originally locked 15 members; `routing_path_chosen` was subsequently dropped from Phase 1 in chatgpt-pr-review Round 2 (operator decision: defer to Phase 3 because `routing_outcomes` has no run linkage). See spec §11.0 "Accepted Implementation Deviation" and `chatgpt-pr-review-log.md` finding F5.
 2. Chunk 2 = governance migration (was chunk 3); Chunk 3 = controllerStyle field (was chunk 2). Migration numbers re-flowed: 0307 = governance, 0308 = controller_style, 0309 = policy envelope.
 3. Sibling `.down.sql` convention reinforced in migration table and each migration chunk; spec body's `migrations/_down/` references are explicitly overridden.
 4. Chunk 7 missing-index path: escalate to operator/architect; do not silently add migrations.
