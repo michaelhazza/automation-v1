@@ -4,6 +4,7 @@ import { connectionTokenService } from '../services/connectionTokenService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import type {
   IntegrationAdapter,
+  AdapterError,
   NormalisedEvent,
   TicketCreateInput,
   TicketUpdateInput,
@@ -220,6 +221,38 @@ export const teamworkAdapter: IntegrationAdapter = {
       } catch (err) {
         return { replyId: '', success: false, error: classifyAdapterError(err, 'teamwork', 'addReply') };
       }
+    },
+
+    async addInternalNote(
+      connection: IntegrationConnection,
+      ticketId: string,
+      body: string,
+      _options?: { idempotencyKey?: string },
+    ): Promise<TicketReplyResult> {
+      const baseUrl = getBaseUrl(connection);
+      const headers = getAuthHeaders(connection);
+      await getProviderRateLimiter('teamwork').acquire(connection.id);
+
+      try {
+        const response = await axios.post(
+          `${baseUrl}/tickets/${ticketId}/customerReplies.json`,
+          { reply: { body, type: 'note' } },
+          { headers, timeout: TIMEOUT_MS },
+        );
+        const replyId = String((response.data as { reply?: { id?: unknown } })?.reply?.id ?? '');
+        return { replyId, success: true };
+      } catch (err) {
+        return { replyId: '', success: false, error: classifyAdapterError(err, 'teamwork', 'addInternalNote') };
+      }
+    },
+
+    async resolveAttachment(
+      _connection: IntegrationConnection,
+      _ticketId: string,
+      _messageId: string,
+      _attachmentExternalId: string,
+    ): Promise<{ url?: string; stream?: NodeJS.ReadableStream; mimeType?: string; success: boolean; error?: AdapterError }> {
+      return { success: false, error: { code: 'unknown', retryable: false, message: 'resolveAttachment not implemented for Teamwork' } };
     },
 
     async getTicket(
