@@ -140,7 +140,7 @@ Phase 2 plan generation, build chunks, branch-level review pass, and Phase 3 han
 
 **Plan path:** `tasks/builds/support-desk-canonical/plan.md`
 **Chunks built:** 15 (C1–C15)
-**Branch HEAD at handoff:** `<TBD on commit>`
+**Branch HEAD at handoff:** `41a314a0`
 **G1 attempts (per chunk):** 1 each (architect + builder pre-checks held; no plan gaps surfaced)
 **G2 attempts:** 1 (lint 0 errors / typecheck clean on first attempt)
 
