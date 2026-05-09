@@ -1,6 +1,6 @@
-**Status:** draft
+**Status:** reviewing
 **Spec date:** 2026-05-09
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-09 (post spec-reviewer Codex 5/5 — READY_FOR_BUILD; chatgpt-spec-review in flight)
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
