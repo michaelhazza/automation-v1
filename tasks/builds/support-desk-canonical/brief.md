@@ -1,6 +1,6 @@
 # Support Desk Canonical: Development Brief
 
-**Status:** LOCKED v5.1 — adds Teamwork Desk as first validating implementation, plus provider-neutrality invariant, drift guard, acceptance bar, and capability-matrix requirement. Spec-ready pending the fourteen decisions in §10.
+**Status:** LOCKED v5.2 — locks adapter-only scope (native Synthetos ticketing deferred per §12). Spec-ready pending the fourteen decisions in §10.
 **Author:** Claude (audit-driven), 2026-05-09
 **Branch:** `claude/support-ticket-structure-xMcy8`
 **Purpose:** Define why we are adding a canonical Support Desk layer, why canonical (vs. alternatives), the benefits, the design invariants, the entities required, and the scope of the first validating provider integration (Teamwork Desk). No SQL, no signatures, no chunk plan yet; that comes after this is signed off.
@@ -438,5 +438,6 @@ Resolve the fourteen decisions in §10 (eight canonical, six Teamwork-specific),
 - Knowledge base or help-centre integration; separate brief.
 - The Support Agent itself (prompts, tools, eval harness); separate brief, depends on this one.
 - Email-only providers (Gmail, IMAP) as a fallback when there is no helpdesk; defer.
+- **Native Synthetos Support Desk** (a `synthetos_native` adapter analogous to the native CRM, where Synthetos itself receives customer email and owns the helpdesk surface). Symmetric in concept with native CRM, but the cost shape is different: native ticketing requires inbound and outbound email infrastructure, threading, deliverability, attachment storage, and a customer submission surface — that is "build a Zendesk-lite", not "add another adapter". The canonical layer is provider-agnostic and would support a `synthetos_native` adapter cleanly when the time comes; v1 stays adapter-only with Teamwork as the validating implementation. If a no-helpdesk customer cohort emerges, native ticketing gets its own brief.
 - Real-time co-presence ("the bot is typing..."); defer.
 - **Provider-side deletion and redaction.** v1 does not hard-delete canonical rows when a provider deletes or redacts a ticket or message, except where existing platform privacy rules require it. The spec must define tombstone or redaction handling (soft-delete column, content nulling, retention semantics) if provider webhooks expose deletion or redaction events; the canonical layer should not silently retain content the provider has removed.
