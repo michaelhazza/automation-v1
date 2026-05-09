@@ -1,7 +1,7 @@
 // Credential Broker and Identity Boundary primitive per v1.2 brief. See docs/synthetos-nomenclature.md
 // 'operator_session' is Phase-3 forward-compatible — do NOT add the literal yet
 
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull as isNullExpr } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { auditEvents, integrationConnections } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -143,24 +143,32 @@ export const credentialBrokerService = {
   /**
    * Revoke a credential (connection) by its ID.
    * Delegates to integrationConnectionService for org-level connections;
-   * performs a direct org-scoped DB update for subaccount-scoped connections.
+   * performs a direct org+subaccount-scoped DB update for subaccount-scoped connections.
+   * Callers MUST pass `subaccountId` for subaccount-scoped revokes (or `null` for
+   * org-level) so the fallback UPDATE cannot cross subaccount boundaries within an org.
    * Emits foundation.credential_broker.revoked on success.
    */
   async revoke(params: {
     organisationId: string;
     credentialId: string;
+    subaccountId: string | null;
   }): Promise<void> {
     // Attempt org-level revoke first; if the row has a subaccountId the
     // integrationConnectionService.revokeOrgConnection WHERE clause (subaccountId IS NULL)
-    // will find nothing — fall back to a direct org-scoped update.
+    // will find nothing — fall back to a direct org+subaccount-scoped update.
     const revoked = await integrationConnectionService.revokeOrgConnection(
       params.credentialId,
       params.organisationId,
     );
 
     if (!revoked) {
-      // Subaccount-scoped connection: revoke directly, still org-scoped for tenant safety.
+      // Subaccount-scoped connection: revoke directly with subaccount predicate so
+      // a subaccount-A actor cannot revoke a subaccount-B connection within the same org.
       // Clears accessToken, refreshToken, and secretsRef (web_login password storage).
+      const subaccountPredicate = params.subaccountId === null
+        ? isNullExpr(integrationConnections.subaccountId)
+        : eq(integrationConnections.subaccountId, params.subaccountId);
+
       await db
         .update(integrationConnections)
         .set({
@@ -174,6 +182,7 @@ export const credentialBrokerService = {
           and(
             eq(integrationConnections.id, params.credentialId),
             eq(integrationConnections.organisationId, params.organisationId),
+            subaccountPredicate,
           ),
         );
     }
@@ -181,6 +190,7 @@ export const credentialBrokerService = {
     logger.info('foundation.credential_broker.revoked', {
       credentialId: params.credentialId,
       organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
     });
   },
 

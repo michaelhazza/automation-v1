@@ -286,6 +286,7 @@ describe('revoke', () => {
     await credentialBrokerService.revoke({
       organisationId: ORG_ID,
       credentialId: CONNECTION_ID,
+      subaccountId: null,
     });
 
     expect(integrationConnectionService.revokeOrgConnection).toHaveBeenCalledWith(
@@ -298,6 +299,7 @@ describe('revoke', () => {
     await credentialBrokerService.revoke({
       organisationId: ORG_ID,
       credentialId: CONNECTION_ID,
+      subaccountId: null,
     });
 
     expect(logger.info).toHaveBeenCalledWith(
@@ -314,7 +316,7 @@ describe('revoke', () => {
       .mockRejectedValueOnce({ statusCode: 404, message: 'Connection not found' });
 
     await expect(
-      credentialBrokerService.revoke({ organisationId: ORG_ID, credentialId: CONNECTION_ID }),
+      credentialBrokerService.revoke({ organisationId: ORG_ID, credentialId: CONNECTION_ID, subaccountId: null }),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 });

@@ -192,6 +192,7 @@ router.delete(
     await credentialBrokerService.revoke({
       organisationId: req.orgId!,
       credentialId: req.params.id,
+      subaccountId: subaccount.id,
     });
     auditService.log({
       organisationId: req.orgId,

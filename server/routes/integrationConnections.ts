@@ -148,11 +148,12 @@ router.delete(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     await credentialBrokerService.revoke({
       organisationId: req.orgId!,
       credentialId: req.params.id,
+      subaccountId: subaccount.id,
     });
 
     res.json({ success: true });

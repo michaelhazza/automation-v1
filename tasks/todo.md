@@ -3618,3 +3618,32 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - Spec section: §3.6 (State machine closure), §4.1.6 (Default derivation rule), §5.2.9 (Subaccount governance schema)
   - Gap: spec specifies closed enum `'native_only' | 'native_and_operator'`; implementation ships `'native_only' | 'operator_allowed'` consistently across migration 0307, Drizzle schema, Zod validator, tests, and 2 UI components. The DB CHECK constraint already encodes `'operator_allowed'`, so a follow-up migration would be needed to switch.
   - Suggested approach: operator decision — rename code to spec (write a follow-up migration to broaden CHECK + UPDATE existing rows + rename Drizzle/Zod/UI), OR update the spec text in §3.6, §4.1.6, §5.2.9, §6 (and inline references) to canonicalise `'operator_allowed'`. Recommend the latter given the migration is already shipped and `'operator_allowed'` is arguably more readable in the agent-allow-list context.
+
+## Adversarial review findings — synthetos-foundation-refactor (2026-05-09)
+
+**Captured:** 2026-05-09T13:15:00Z
+**Source log:** `tasks/review-logs/adversarial-review-log-synthetos-foundation-refactor-2026-05-09T13-15-00Z.md`
+**Verdict:** HOLES_FOUND (1 confirmed-hole closed in-branch + 2 likely-holes deferred below)
+
+- [ ] **ADV-B — `credentialBrokerService.injectIntoEnvironment` fetches connection by `connectionId` alone (no org/subaccount guard)**
+  - File: `server/services/credentialBrokerService.ts:118-141`
+  - Likelihood today: low — only the unit-test file calls it. Severity: medium when first production caller lands.
+  - Suggested fix: add `organisationId` and `subaccountId` to params; add `eq(integrationConnections.organisationId, params.organisationId)` and the matching subaccount predicate to the WHERE clause. Defense-in-depth before the first production caller deserializes an `IssuedCredential` from a queue payload, request body, or cache.
+
+- [ ] **ADV-C — `credentialBrokerService.audit` filters subaccountId in application memory after a SQL `LIMIT`**
+  - File: `server/services/credentialBrokerService.ts:191-237`
+  - Issue 1 (correctness): in a high-event org the first 50 rows can all be from other subaccounts, returning zero entries for the requesting subaccount.
+  - Issue 2 (trust): the subaccount filter reads `metadata.subaccountId` (JSONB), which trusts every caller of `auditService.log` for `entityType: 'integration_connection'` to set that field from a server-validated `subaccount.id`.
+  - Suggested fix: push the subaccount filter into SQL (e.g., `eq(sql\`metadata->>'subaccountId'\`, $)`), or add a first-class `subaccount_id` column on `audit_events` for credential events. Audit existing `auditService.log` call sites where `entityType = 'integration_connection'` to confirm they set `metadata.subaccountId` from validated server-side data only.
+
+- [ ] **ADV-OBS-1 — `claude-code` executionMode derives `native` not `operator`**
+  - File: `server/services/controllerStyleResolver.ts` (switch in `deriveControllerStyle`)
+  - Spec §4.1.6 maps `claude-code → operator`; implementation only maps `iee_browser` and `iee_dev`. Conservative-but-divergent. Correctness, not security.
+
+- [ ] **ADV-OBS-2 — `controllerStyle` route param not validated against closed enum**
+  - File: `server/routes/agentRuns.ts:39`
+  - A non-`'native' | 'operator'` value silently maps to `default` in `deriveControllerStyle`. Should return HTTP 400 at the route layer. Correctness only.
+
+- [ ] **ADV-OBS-3 — `require_approval_at_tier` CHECK 0-7 vs spec text 0-6**
+  - File: `migrations/0307_subaccount_agents_governance.sql:14`
+  - Implementation uses 7 as a sentinel ("never require"); spec §5.2.9 SQL block says 0-6. Update spec text to canonicalise the sentinel, or tighten CHECK and use NULL for "never require".

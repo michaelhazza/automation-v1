@@ -25,7 +25,7 @@
 
 ## Review pass
 - spec-conformance: NON_CONFORMANT (2 directional gaps deferred — SCD-1 ControllerLimits field names; SCD-2 controller_style_allowed enum value `'operator_allowed'` vs spec `'native_and_operator'`). Log: tasks/review-logs/spec-conformance-log-synthetos-foundation-refactor-2026-05-09T12-45-00Z.md
-- adversarial-reviewer: pending
+- adversarial-reviewer: HOLES_FOUND (1 confirmed-hole ADV-A FIXED in-branch — credentialBrokerService.revoke now requires subaccountId; 2 likely-holes ADV-B / ADV-C + 3 observations deferred to tasks/todo.md). Log: tasks/review-logs/adversarial-review-log-synthetos-foundation-refactor-2026-05-09T13-15-00Z.md
 - pr-reviewer: pending
 - fix-loop: pending
 - dual-reviewer: pending
