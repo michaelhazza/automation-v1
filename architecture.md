@@ -3502,6 +3502,86 @@ Everything else in `.env` is portable.
 
 ---
 
+<a id="canonical-support-desk"></a>
+## Canonical Support Desk (spec: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md`)
+
+A provider-agnostic support-ticket layer that mirrors helpdesk data into five canonical tables and exposes ten skills for reading, drafting, approving, and managing support tickets. Shipped as PR on `claude/support-ticket-structure-xMcy8`. ADR: `docs/decisions/0009-support-desk-canonical-not-conversations.md`.
+
+### Domain model
+
+Five tenant-isolated tables (all carry `organisation_id` + RLS):
+- `canonical_inboxes` — one row per connected provider mailbox/queue; holds `provider_type`, `external_id`, `display_name`, `last_synced_at`, `sync_cursor`, `sync_health`.
+- `canonical_support_agents` — helpdesk agent identity; `external_id`, `display_name`, `email`, `is_active`. Read-only mirror; no write-back to provider.
+- `canonical_tickets` — core support ticket; FK to `canonical_inboxes` + nullable FK to `canonical_support_agents` (assignee); columns: `status` (open/pending/solved/closed/spam/quarantine), `priority`, `subject`, `customer_email`, `tags` (text[]), `provider_deleted`, `sla_breach_at`. `status='quarantine'` is a fail-closed sentinel for unknown provider statuses.
+- `canonical_ticket_messages` — messages and internal notes on a ticket. **Polymorphic-FK split:** `author_type IN ('customer','agent','bot','system')` discriminator + `author_contact_id` (→ `canonical_contacts`) + `author_support_agent_id` (→ `canonical_support_agents`) + CHECK constraint. `source_draft_id` UUID column (no inline FK in migration 0310; FK + partial index added in migration 0311 after the drafts table exists — deferred-FK pattern).
+- `canonical_ticket_drafts` — AI-proposed replies; status state machine `draft → awaiting_review → dispatching → dispatched | rejected | manual_resolved`; `dispatch_action_id` FK to `actions`.
+
+### Identity model
+
+Inboxes are created during provider registration (one per connector config) and linked via `connector_configs.canonical_inbox_id`. The Teamwork adapter auto-creates the `canonical_support_agents` row for each Teamwork user on first encounter during ingestion. Tickets are keyed by `(organisation_id, provider_type, external_id)` — the canonical-data deduplication invariant shared with contacts and companies.
+
+### Lifecycle — read paths
+
+`server/services/supportTicketService.ts` provides two read surfaces:
+- `readThreadForAgent(ticketId, orgId)` — raw thread, no draft overlay; used by skill execution context.
+- `readThreadForHumanUi(ticketId, orgId)` — thread + `draftOverlay: CanonicalTicketDraft[]` for the UI; renders pending drafts inline.
+
+`server/services/supportInboxService.ts` provides `listInboxes` / `getInbox` with a left-join to `connector_configs` for sync health; `classifyHealth` is a pure function.
+
+### Lifecycle — write paths (three-phase dispatch invariant)
+
+All provider-write operations go through `server/services/supportDraftDispatchService.ts::approveDraft`:
+
+1. **Preflight** — verify draft is in `awaiting_review`; check collision (same ticket, another draft already `dispatching`).
+2. **Durable gate** — `UPDATE canonical_ticket_drafts SET status='dispatching' WHERE id=? AND status IN ('draft','awaiting_review')`. This single atomic write is the point-of-no-return. Any crash after this is handled by the reconciliation worker.
+3. **Adapter call** — provider write (Teamwork reply creation). On success: `status='dispatched'`. On failure: worker reconciles.
+
+This three-phase pattern prevents duplicate customer-visible replies regardless of crash, retry, or concurrent approval attempts.
+
+### Execution model — ingestion
+
+**Poll path:** `server/adapters/teamwork/teamworkSupportIngestAdapter.ts` — incremental cursor-based ingestion of tickets + messages into canonical tables. **Deletion-by-poll precondition:** incremental polls must NEVER set `provider_deleted=true`; only a qualifying full-reconciliation pass (all pages complete, no rate-limit interruption) may tombstone.
+
+**Webhook path:** `server/adapters/teamwork/teamworkSupportWebhookHandler.ts` — real-time event ingestion + back-link writer. Deletion events from webhooks are unconditional (deterministic signal).
+
+**Status map:** `server/adapters/teamwork/teamworkSupportStatusMap.ts` — fail-closed: unknown Teamwork statuses map to `'quarantine'` rather than silently becoming `'open'`.
+
+### Execution model — reconciliation
+
+`server/jobs/supportDraftReconciliationWorker.ts` (pg-boss queue `support-draft-reconciliation`) runs the reconciliation loop. Pure decision logic in `server/services/supportDraftReconciliationPure.ts::decideOutcome`. Boot-time stalled-dispatch recovery: `server/lib/supportDispatchBootRecovery.ts`.
+
+**OQ-1 deferral (operator-acknowledged):** Foundry-trained model wiring into the dispatch path is deferred. Future wiring is gated on operator-driven OQ-1 close per `tasks/todo.md § Deferred`. See ADR-0009 Consequences.
+
+### Routes (mounted at `/api/support`)
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /tickets` | `server/routes/support/supportTicketsRoutes.ts` | List tickets; filter by status, inbox, assignee |
+| `GET /tickets/:id` | `server/routes/support/supportTicketsRoutes.ts` | Ticket + thread read (with draft overlay) |
+| `GET /drafts` | `server/routes/support/supportDraftsRoutes.ts` | List drafts awaiting review |
+| `GET /drafts/:id` | `server/routes/support/supportDraftsRoutes.ts` | Single draft detail |
+| `POST /drafts/:id/approve` | `server/routes/support/supportDraftsRoutes.ts` | Three-phase dispatch |
+| `POST /drafts/:id/reject` | `server/routes/support/supportDraftsRoutes.ts` | Mark draft rejected |
+| `POST /drafts/:id/edit` | `server/routes/support/supportDraftsRoutes.ts` | Edit draft body before approval |
+| `POST /drafts/:id/manual-resolve` | `server/routes/support/supportDraftsRoutes.ts` | Operator override resolve |
+| `GET /inboxes` | `server/routes/support/supportInboxesRoutes.ts` | List inboxes with sync health |
+| `PATCH /inboxes/:id` | `server/routes/support/supportInboxesRoutes.ts` | Update inbox config |
+
+Aggregated router: `server/routes/support/index.ts`.
+
+### Permissions reference
+
+| Permission key | Scope | Description |
+|----------------|-------|-------------|
+| `support.draft.approve` | Subaccount | Approve and dispatch a draft reply |
+| `support.draft.reject` | Subaccount | Reject a draft reply |
+| `support.draft.override_collision` | Subaccount | Approve when another draft is already dispatching |
+| `support.inbox.configure` | Subaccount | Modify inbox configuration |
+
+Standard `subaccount_admin` bypass applies. Read actions (`GET /tickets`, `GET /drafts`) use the existing authenticated-user gate without a dedicated permission key — consistent with the read-permission posture across canonical tables.
+
+---
+
 <a id="key-files-per-domain"></a>
 ## Key files per domain
 
@@ -3582,6 +3662,11 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Modify canonical Support Desk ingestion (Teamwork) | `server/adapters/teamwork/teamworkSupportIngestAdapter.ts` (poll) + `teamworkSupportWebhookHandler.ts` (webhook) + `teamworkSupportStatusMap.ts` (fail-closed status map) + `teamworkProviderRegistration.ts` (connector config schema) |
+| Modify support ticket read path | `server/services/supportTicketService.ts` (`readThreadForAgent` / `readThreadForHumanUi`) + `server/services/supportInboxService.ts` (`listInboxes` / `getInbox` / `classifyHealth`) |
+| Modify support draft lifecycle or dispatch | `server/services/supportDraftDispatchService.ts` (three-phase dispatch: approveDraft / listDraftsForReview / getDraftById / editDraft / rejectDraft / manualResolveDraft) + `server/services/supportDraftDispatchServicePure.ts` (pure helpers: `isValidDraftStatusTransition`, `deriveActionIdempotencyKey`, `planSameRunSupersession`) |
+| Modify support draft reconciliation | `server/jobs/supportDraftReconciliationWorker.ts` (pg-boss worker for `support-draft-reconciliation`) + `server/services/supportDraftReconciliationPure.ts` (pure `decideOutcome`) + `server/lib/supportDispatchBootRecovery.ts` (boot-time stalled-dispatch recovery) |
+| Modify support desk UI | `client/src/pages/support/TicketsListPage.tsx` + `client/src/pages/support/TicketDetailPage.tsx` + `client/src/pages/support/DraftReviewQueue.tsx` + `client/src/pages/support/InboxConfigPage.tsx` + `client/src/components/support/SyncHealthPill.tsx` |
 | Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
 | Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
 | Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |

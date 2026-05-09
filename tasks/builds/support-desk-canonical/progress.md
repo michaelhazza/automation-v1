@@ -49,4 +49,18 @@ Open a new Claude Code session and type `launch feature coordinator`.
 | 1 — TodoWrite (12 items) | done | per playbook §Step 1 |
 | 2 — Branch-sync S1 + freshness | done | 0 behind main, 22 ahead, no merge needed; no migration collisions; no overlapping files |
 | 2a — Hard gate: OQ-1 + OQ-2 | done | OQ-2 closed inline (Teamwork Desk inventory: 6 default system statuses Active/Waiting on customer/On hold/Solved/Closed/Spam + custom-status fall-through; spec §11.2 now carries full locked mapping table with 3 judgment calls captured); OQ-1 deferred per operator override (brief §5.1 spec-drift risk acknowledged, backlog entry SDC-OVERRIDE-1 in `tasks/todo.md`); spec status `reviewing` → `accepted` |
-| 3 — architect invocation | pending | next |
+| 3 — architect invocation | done | plan.md generated; 15 chunks C1–C15 |
+| 4 — C1–C15 implementation | done | all chunks committed; see commit log on branch |
+| 5 — C15 doc-sync | done | see below |
+
+## C15 — Documentation complete (2026-05-10)
+
+**What C15 delivered:**
+
+- `architecture.md` — new "Canonical Support Desk" section inserted before "Key files per domain": domain model, identity model, read/write lifecycle, three-phase dispatch invariant, ingestion (poll + webhook), reconciliation, OQ-1 deferral note, routes table, permissions reference. Six new rows added to the Key files per domain table.
+- `docs/decisions/0009-support-desk-canonical-not-conversations.md` — ADR accepted; documents the decision to use dedicated canonical tables over `canonical_conversations`; includes alternatives-considered (per-provider tables, canonical_conversations), consequences, and OQ-1 deferral risk (R1 mitigation). `docs/decisions/README.md` index updated.
+- `docs/capabilities.md` — new "Support Desk Skills" subsection under "Customer Support Automation" with 10 skills (read tickets, read thread, propose reply, approve reply, reject draft, set status, assign, tag, find customer history, add internal note). Editorial Rules applied: vendor-neutral, no model names, no infrastructure language.
+- `KNOWLEDGE.md` — confirmed already current. All three patterns (polymorphic-FK split, deferred-FK migration, deletion-by-poll precondition) were recorded during Phase 1 spec review. No duplicate entries added.
+- `docs/doc-sync.md` — confirmed already correct. `architecture.md` and `docs/decisions/` are both registered with their update triggers. No new rows needed.
+
+**Branch status:** All 15 chunks complete. Branch `claude/support-ticket-structure-xMcy8` is ready for Phase 3 (finalisation-coordinator).
