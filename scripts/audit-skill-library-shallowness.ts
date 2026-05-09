@@ -24,7 +24,18 @@
  *
  * Usage:
  *   ANTHROPIC_API_KEY=… OPENAI_API_KEY=… DATABASE_URL=… \
+ *     EXPECTED_ACTIVE_SYSTEM_SKILLS=159 \
  *     npx tsx scripts/audit-skill-library-shallowness.ts
+ *
+ * EXPECTED_ACTIVE_SYSTEM_SKILLS is required and guards against partial seeds
+ * or stale DB state — the audit refuses to write findings if the live count
+ * differs from the expected. Update the value when the library grows; the
+ * abort message tells you the current count so the next run is a one-liner.
+ *
+ * Inherited env surface: this script imports server/lib/embeddings.ts, which
+ * loads the full server env validator (JWT_SECRET, EMAIL_FROM, …). Run from
+ * a shell that has the same .env as local dev. The Anthropic call is direct
+ * (no ledger pollution); the embedding call is not — that's the trade-off.
  *
  * Output: tasks/builds/skill-shallowness-audit/findings-<ISO>.md
  */
@@ -152,6 +163,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const EXPECTED_COUNT_ENV = 'EXPECTED_ACTIVE_SYSTEM_SKILLS';
+  const expectedCountRaw = process.env[EXPECTED_COUNT_ENV];
+  if (!expectedCountRaw) {
+    console.error(
+      `${EXPECTED_COUNT_ENV} not set. Set it to the expected count of active ` +
+      `system skills (e.g. ${EXPECTED_COUNT_ENV}=159) so the audit refuses to ` +
+      `write findings from a partial or drifted library.`,
+    );
+    process.exit(1);
+  }
+  const expectedCount = Number(expectedCountRaw);
+  if (!Number.isInteger(expectedCount) || expectedCount < 2) {
+    console.error(
+      `${EXPECTED_COUNT_ENV} must be a positive integer >= 2; got ${JSON.stringify(expectedCountRaw)}.`,
+    );
+    process.exit(1);
+  }
+
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const db = drizzle(pool);
 
@@ -169,6 +198,15 @@ async function main(): Promise<void> {
     .where(eq(systemSkills.isActive, true));
 
   console.error(`[audit-shallowness] loaded ${rows.length} active system skills.`);
+  if (rows.length !== expectedCount) {
+    console.error(
+      `[audit-shallowness] expected ${expectedCount} active system skills, got ${rows.length}. ` +
+      `Refusing to write findings from a partial or drifted library. ` +
+      `If ${rows.length} is the correct count, re-run with ${EXPECTED_COUNT_ENV}=${rows.length}.`,
+    );
+    await pool.end();
+    process.exit(1);
+  }
   if (rows.length < 2) {
     console.error('[audit-shallowness] need at least 2 skills to compare. Exiting.');
     await pool.end();
