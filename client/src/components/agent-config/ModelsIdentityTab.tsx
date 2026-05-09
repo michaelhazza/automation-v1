@@ -49,8 +49,8 @@ export default function ModelsIdentityTab({ modelProvider, modelId }: ModelsIden
 
       <Section title="Identity and Keys">
         <div>
-          <PlaceholderRow label="Operator Session Identity" badge="Phase 3 — coming soon" />
-          <PlaceholderRow label="BYO API Keys" badge="Phase 1.5 — coming soon" />
+          <PlaceholderRow label="Operator Session Identity" badge="Phase 3 (coming soon)" />
+          <PlaceholderRow label="BYO API Keys" badge="Phase 1.5 (coming soon)" />
         </div>
       </Section>
     </div>

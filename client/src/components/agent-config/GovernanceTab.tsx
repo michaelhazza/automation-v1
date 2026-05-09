@@ -13,13 +13,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 const RISK_TIER_LABELS: Record<number, string> = {
-  0: 'Tier 0 — Read-only, no side effects',
-  1: 'Tier 1 — Safe writes (own workspace only)',
-  2: 'Tier 2 — Low-risk external reads',
-  3: 'Tier 3 — External writes (reversible)',
-  4: 'Tier 4 — Significant external writes',
-  5: 'Tier 5 — High-impact or irreversible actions',
-  6: 'Tier 6 — Critical or destructive actions',
+  0: 'Tier 0: Read-only, no side effects',
+  1: 'Tier 1: Safe writes (own workspace only)',
+  2: 'Tier 2: Low-risk external reads',
+  3: 'Tier 3: External writes (reversible)',
+  4: 'Tier 4: Significant external writes',
+  5: 'Tier 5: High-impact or irreversible actions',
+  6: 'Tier 6: Critical or destructive actions',
 };
 
 export interface GovernanceTabProps {
@@ -87,7 +87,7 @@ export default function GovernanceTab({
             Configure automated escalation paths when approval is required.
           </div>
           <div className="inline-block text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-1 rounded">
-            Phase 1.5 — coming soon
+            Phase 1.5 (coming soon)
           </div>
         </div>
       </Section>

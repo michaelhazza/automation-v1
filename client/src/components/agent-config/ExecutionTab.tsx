@@ -44,7 +44,7 @@ const ENVIRONMENT_OPTIONS: { value: AllowedEnvironment; label: string; systemAge
   { value: 'terminal_repo', label: 'Terminal and Repo', systemAgentOnly: true },
 ];
 
-const SANDBOX_PLACEHOLDER = { label: 'Sandbox', comingSoon: 'Phase 2 — coming soon' };
+const SANDBOX_PLACEHOLDER = { label: 'Sandbox', comingSoon: 'Phase 2 (coming soon)' };
 
 export default function ExecutionTab({
   controllerStyleAllowed,

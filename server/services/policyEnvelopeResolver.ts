@@ -58,11 +58,15 @@ export class PolicyEnvelopePersistFailedError extends Error {
 export async function resolvePolicyEnvelope(
   ctx: PolicyEnvelopeContext,
 ): Promise<PolicyEnvelopeSnapshot> {
-  // Source 1: subaccountAgent constraints (governance columns from chunk 2)
+  // Source 1: subaccountAgent constraints (governance columns from chunk 2).
+  // App-layer org filter required even with RLS (DEVELOPMENT_GUIDELINES §1).
   const [saRow] = await db
     .select()
     .from(subaccountAgents)
-    .where(eq(subaccountAgents.id, ctx.subaccountAgentId))
+    .where(and(
+      eq(subaccountAgents.id, ctx.subaccountAgentId),
+      eq(subaccountAgents.organisationId, ctx.organisationId),
+    ))
     .limit(1);
 
   const maxRiskTier: RiskTier = (saRow?.maxRiskTier ?? 3) as RiskTier;
@@ -191,10 +195,17 @@ export async function persist(
   runId: string,
   snapshot: PolicyEnvelopeSnapshot,
 ): Promise<void> {
+  // App-layer org filter required even with RLS (DEVELOPMENT_GUIDELINES §1).
+  // The snapshot already encodes the run's organisationId; use it as the predicate.
+  const organisationId = snapshot.organisationId;
   const updated = await db
     .update(agentRuns)
     .set({ policyEnvelopeSnapshot: snapshot })
-    .where(and(eq(agentRuns.id, runId), isNull(agentRuns.policyEnvelopeSnapshot)))
+    .where(and(
+      eq(agentRuns.id, runId),
+      eq(agentRuns.organisationId, organisationId),
+      isNull(agentRuns.policyEnvelopeSnapshot),
+    ))
     .returning({ id: agentRuns.id });
 
   if (updated.length > 0) {
@@ -206,7 +217,10 @@ export async function persist(
   const [existing] = await db
     .select({ policyEnvelopeSnapshot: agentRuns.policyEnvelopeSnapshot })
     .from(agentRuns)
-    .where(eq(agentRuns.id, runId))
+    .where(and(
+      eq(agentRuns.id, runId),
+      eq(agentRuns.organisationId, organisationId),
+    ))
     .limit(1);
 
   if (existing?.policyEnvelopeSnapshot != null) {

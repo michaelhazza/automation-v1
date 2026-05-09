@@ -430,7 +430,10 @@ export const agentExecutionService = {
       const [saGovRow] = await db
         .select({ controllerStyleAllowed: subaccountAgents.controllerStyleAllowed })
         .from(subaccountAgents)
-        .where(eq(subaccountAgents.id, request.subaccountAgentId));
+        .where(and(
+          eq(subaccountAgents.id, request.subaccountAgentId),
+          eq(subaccountAgents.organisationId, request.organisationId),
+        ));
       if (saGovRow) {
         resolvedControllerStyleAllowed = saGovRow.controllerStyleAllowed;
       }
@@ -575,7 +578,10 @@ export const agentExecutionService = {
         const [link] = await db
           .select()
           .from(subaccountAgents)
-          .where(eq(subaccountAgents.id, request.subaccountAgentId!));
+          .where(and(
+            eq(subaccountAgents.id, request.subaccountAgentId!),
+            eq(subaccountAgents.organisationId, request.organisationId),
+          ));
 
         if (!link) throw Object.assign(new Error('Subaccount agent link not found'), { statusCode: 404, errorCode: 'SUBACCOUNT_AGENT_NOT_FOUND' });
         saLink = link;

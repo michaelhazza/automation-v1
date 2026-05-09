@@ -317,11 +317,17 @@ async function query(q: RunTraceQuery, orgId: string): Promise<RunTraceResult> {
     : null;
 
   // ── Execute UNION query (fetch limit+1 for hasMore detection) ─────────────
+  // No silent fallback: a DB error here must surface so observability and the
+  // caller's error envelope can distinguish "no events yet" from a query failure.
   let rawRows: UnionRow[];
   try {
     rawRows = await fetchUnionRows(q.runId, limit + 1);
-  } catch {
-    rawRows = [];
+  } catch (err) {
+    logger.error('foundation.run_trace.query_failed', {
+      runId: q.runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 
   // ── Apply cursor predicate ─────────────────────────────────────────────────

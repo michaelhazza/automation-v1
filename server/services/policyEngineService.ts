@@ -2,6 +2,7 @@
 
 import { eq, and, asc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { logger } from '../lib/logger.js';
 import { policyRules } from '../db/schema/index.js';
 import { spendingBudgets } from '../db/schema/spendingBudgets.js';
 import { spendingPolicies } from '../db/schema/spendingPolicies.js';
@@ -349,7 +350,7 @@ export const policyEngineService = {
           rule.confidenceThreshold,
         );
         const constrained = applySubaccountConstraintsPure(upgraded.decision, 'policy_override', riskTier, subaccountGov);
-        console.log('foundation.risk_tier.gate_derived', {
+        logger.info('foundation.risk_tier.gate_derived', {
           actionSlug: ctx.toolSlug,
           riskTier,
           gateLevel: constrained.decision,
