@@ -3388,3 +3388,44 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 **Resolution.** All new stable log codes route through `import { logger } from '../lib/logger.js'`. Sibling new services (`credentialBrokerService.ts`, `runTraceService.ts`) had it correct from chunk 5; `policyEngineService.ts` regressed because it pre-existed and the chunk-4 patch didn't add the import. Lint/typecheck don't catch this — the contract is "downstream consumes the stable code", which is observability, not type-system.
 
 **Detection heuristic.** When introducing a new namespaced log code (`<feature>.<event>`), grep the file for both `console.log('<code>` and `logger.info('<code>` — only the structured form should appear.
+
+
+## Pattern: chatgpt-spec-review automated mode saturates around round 3 — stop on re-raise majority
+
+**Context.** Running automated chatgpt-spec-review on `phase-1-showcase-mvps/spec.md` with `gpt-4.1`: round 1 produced 10 findings (6 real applies + 4 already-deferred/rejected). Round 2 produced 8 findings (6 real applies + 2 re-raises). Round 3 produced 10 findings of which 6 were re-raises of items already addressed in rounds 1-2, 1 was a project-policy rejection (frontend tests forbidden), 2 were already-deferred Open Decisions, 1 was a real low-severity apply.
+
+**Resolution.** The agent contract says "Run automated rounds until APPROVED or 3 rounds elapse without APPROVED, then finalise." That's the saturation cap. Practical stopping rule: if round N produces 50%+ re-raises of already-addressed items, the loop has converged regardless of verdict — stop. Verdicts can stay CHANGES_REQUESTED indefinitely because the model rewords concerns the spec already handled.
+
+**Detection heuristic.** Track findings by `evidence` text and rationale across rounds. A round where most rationales reference sections you edited in prior rounds is saturation. The model is generating noise, not finding new gaps.
+
+## Pattern: Two-ledger artifact designs (worker-internal + customer-facing) need explicit drift-handling subsection
+
+**Context.** Spec described `iee_artifacts` (worker-internal) and `run_artifacts` (customer-delivery) as separate by-design ledgers. ChatGPT spec-review raised "no canonical source of truth" three rounds in a row — once with the original framing, once after the round-1 drift-handling fix, once after the round-2 fix. The reviewer wanted a single source of truth even when the design intentionally has two.
+
+**Resolution.** Document the two-ledger split with: (1) what each ledger covers, (2) what happens when one has a row the other doesn't (each direction's failure mode and self-healing path), (3) the explicit "no reconciliation worker" decision with rationale. Reviewers stop re-raising once the failure modes are enumerated.
+
+**Detection heuristic.** Any spec that describes two ledgers/tables for the "same" data (worker vs main, internal vs external, ledger vs cache) needs an explicit drift-handling subsection up front, not deferred to "see Open Decision."
+
+## Pattern: Prompt-injection prevention in MVP specs — defence-in-depth beats programmatic enforcement
+
+**Context.** Spec exposed `agent_config.promptOverride` as a freeform 500-char textarea per inbox. ChatGPT spec-review flagged "no programmatic prompt-injection prevention" three rounds running. There is no proven programmatic prompt-injection prevention at scale today — the field is an open research problem.
+
+**Resolution.** The MVP posture is dev-discipline (length cap + forbidden-token scan + composition rules + audit trail) plus defence-in-depth via the architecture (fixed agent tool surface + HITL approval still gates customer-facing replies). State explicitly in the spec that the controls "are dev-discipline, not a security boundary" and that the defence-in-depth comes from the agent's locked tool surface plus the approval flow. Even a successful prompt-injection cannot send a customer-facing reply in `assisted` mode without passing the HITL gate.
+
+**Detection heuristic.** When a spec exposes any LLM-input-from-customer-config surface, the security review pass will flag prompt injection. Pre-empt by writing the four-line defence-in-depth posture into the spec itself.
+
+## Pattern: PG advisory_xact_lock + partial unique index for singleton-per-tenant install
+
+**Context.** Spec asserted "singleton-per-subaccount" enforcement at install time but didn't address the race where two concurrent installs both pass the existence check before either commits. Standard SELECT-then-INSERT can interleave under read-committed isolation.
+
+**Resolution.** Two-layer defence: (1) `pg_advisory_xact_lock(hashtextextended(<subaccount_id::text || system_agent_id::text>))` taken at install transaction start — second concurrent transaction blocks until first commits/rolls back; (2) partial unique index on `subaccount_agents (subaccount_id, applied_template_id) WHERE is_active = true` filtered to the system-agent-template — even if both transactions race past the advisory lock, the second insert fails with `23505`. Map `23505` to HTTP 409.
+
+**Detection heuristic.** Any "singleton-per-X" install / enable / activate flow needs both: advisory lock for clean error path AND partial unique index as the safety net. Check for whether the existing schema's unique index actually filters by the right scope (active rows only, correct linkage column) — broader indexes don't enforce singleton.
+
+## Pattern: Eval gate fail-open with Activity-feed signal beats fail-closed for sub-2-row state
+
+**Context.** Spec required Foundry-derived regression set for the support-agent eval gate. If Foundry export is unavailable at gate time (export hiccup, data stale), fail-closed would block all unrelated PRs from merging until the data is restored.
+
+**Resolution.** Two-tier policy: (1) CI gate fails open (exits 0) when fewer than two `support_eval_runs` rows exist, AND emits `phase1.support.eval_drift_detected` to the Activity feed so the operator sees the silence. Sub-2-row state happens whenever the daily eval job has not yet run twice, including legitimate fresh-CI scenarios. (2) Lock-in gate (per production-verification step at §8.5) is fail-closed: lock-in cannot proceed without a fresh regression set within 30 days, and Open Decision escalates if the data is permanently unavailable. Ad-hoc CI doesn't block; lock-in does.
+
+**Detection heuristic.** Any acceptance criterion that depends on eternally-available external data needs a two-tier "ad-hoc fail-open + lock-in fail-closed" split, with the fail-open clearly logged so the operator can see it.

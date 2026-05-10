@@ -91,7 +91,14 @@ This spec follows `docs/synthetos-nomenclature.md`. Where a v1.2 brief term diff
 | Support Inbox MVP (this spec §5) | Support Desk Canonical (now done) + Foundation refactor | NOT STARTED | 18 to 28 dev-days (lower than original estimate because canonical layer is complete) |
 | Phase 1 lock-in | Both showcase MVPs | NOT STARTED | 1 week |
 
-The two showcase MVPs can build in parallel once their dependencies are met. File delivery infrastructure is shared and must complete first or alongside.
+**Sequencing posture (resolves the apparent "build in parallel" / "file delivery is a gating dependency" contradiction).** File delivery (§6) is a hard predecessor to the customer-facing surface of 42 Macro and to any Support Inbox feature that delivers customer-visible attachments. Concretely:
+
+- **Phase A (serial, ~1 to 2 weeks).** File delivery infrastructure ships first — the schema, `fileDeliveryService`, the worker upload path (§6.1.4), and the read endpoint. Both MVPs are blocked on §6 reaching a "ready for consumers" state (the schema is in main, the service interface is stable, S3 IAM is in place). Build work on the MVPs that does NOT depend on file delivery (Support Agent classification skill + cache-decision-pending; 42 Macro's existing browser run path) MAY run in parallel with §6, but neither MVP closes its acceptance criteria until §6 is consumable.
+- **Phase B (parallel, ~3 to 5 weeks).** Once §6 is consumable, the two MVPs proceed independently and can land in either order. They share §6 but have no other cross-dependencies.
+
+This is the canonical reading of §0.6 and §8.1. Where prior wording said "build in parallel," that applies to Phase B; Phase A is serial on §6.
+
+The two showcase MVPs can build in parallel once their dependencies are met. File delivery infrastructure is shared and is built in Phase A first; the MVPs proceed in parallel during Phase B.
 
 ---
 
@@ -386,6 +393,18 @@ If `@react-pdf/renderer` is later swapped (Open Decision 11.1), the determinism 
 
 **Total: ~490 LOC.**
 
+#### 4.4.4 PDF rendering — idempotency and retry semantics
+
+The `ieeRunCompletedHandler` invokes `renderMacroReportPdf` followed by `fileDeliveryService.upload`; either step can fail. The MVP's posture:
+
+- **Idempotency key.** The PDF row in `run_artifacts` is keyed on `(content_hash, agent_run_id, artifact_kind='report')`. Re-rendering the same input produces the same content hash by design (PDF byte determinism per §4.4.1) so a retried render maps to the same row via the unique index on `(storage_provider, storage_key)` (the storage key is derived from the content hash).
+- **Retry classification.** `safe`. The handler can be invoked unconditionally for the same `agent_run_id`; a duplicate invocation finds the existing `run_artifacts` row, emits `phase1.file_delivery.uploaded` with `wasReplay: true`, and returns. No work is duplicated, no row is overwritten.
+- **Failure path — render fails.** The handler bubbles the error to pg-boss, which retries up to 3 times with exponential backoff (existing pg-boss policy); on exhaustion the agent run completes with a `phase1.macro.report_rendering_failed` event and no `run_artifacts.report` row. The transcript artifact is still delivered (it does not depend on the report). The Run Trace headline shows "Transcript ready · Download · Report unavailable (rendering failed)".
+- **Failure path — render succeeds, upload fails.** Same retry posture; the unique index ensures we never get a duplicate row. On exhaustion, the run completes without the report row and emits `phase1.macro.artifact_upload_failed` per §4.6.1.
+- **No partial state.** A successful render that fails to upload leaves NO row in `run_artifacts`; the handler does not insert the row until upload returns 200. The customer-facing UI never sees a "report exists but cannot be downloaded" state.
+
+This treats PDF rendering identically to the §6.1.4 worker-side artifact upload: the backing store is the source of truth; the row is inserted only after the bytes land.
+
 ### 4.5 Gap design — artifact viewer UI
 
 #### 4.5.1 Run Trace headline addition
@@ -534,6 +553,13 @@ A new row in `system_agents` (column names per `server/db/schema/systemAgents.ts
 
 **Singleton-per-subaccount.** `system_agents` does not have an `is_singleton` column. "One Support Agent per subaccount" is enforced at install time by the install-flow code path: when installing the system Support Agent into a subaccount, the install service checks for an existing active subaccount-level installation that references this `system_agent_id` (via the `applied_template_id` linkage on `subaccount_agents`) and refuses if one already exists. No new schema change required for the MVP.
 
+**Concurrency under racing installs.** Two concurrent install attempts for the same subaccount could both pass the existence check before either commits. The MVP defends against this with two layers:
+
+1. **PG advisory transaction lock keyed on `(subaccount_id, system_agent_id)`** taken at the start of the install transaction (`pg_advisory_xact_lock(hashtextextended(...))`). The second concurrent transaction blocks until the first commits or rolls back; on resume it re-runs the existence check and refuses with a 409.
+2. **Partial unique index on `subaccount_agents`** filtering on `is_active = true AND applied_template_id = <system-agent-template-id>`. Even if both transactions somehow proceeded past the advisory lock, the index would reject the second insert with `23505`; the install service maps this to a 409 with body `{ error: 'already_installed' }`. The existing `subaccount_agents_unique_idx` covers `(subaccount_id, agent_id)` but not the system-agent-template; the MVP adds the system-agent-template-scoped partial index in the same migration that adds the install-flow code.
+
+The advisory lock is the primary defence (clean error path); the partial index is the safety net (serialisation guarantee).
+
 The agent is system-managed: customers cannot edit the master prompt; they can only configure per-inbox `agent_config` (mode, collision window, draft expiry, prompt overrides).
 
 #### 5.3.2 Master prompt structure
@@ -635,11 +661,47 @@ WHERE  id = :ticketId
 
 **Claim TTL.** Default 15 minutes. Long enough that a single ticket's classify-draft cycle never bumps against it, short enough that a crashed run does not block subsequent runs for long.
 
+**Clock-skew safety.** The `now()` and `bot_claimed_at` comparison runs server-side in PostgreSQL on a single row, not across distributed worker clocks. The agent worker never compares its local clock to the database; the optimistic predicate is evaluated entirely inside the database with `now()` resolving to the database's transaction clock. Even if the worker's wall clock is wrong, the claim is correct. The 15-minute TTL is large enough that NTP drift between database replicas (under the 100ms Postgres replication budget on this infra) is irrelevant to the claim's correctness boundary.
+
 **Claim release.** On terminal verdict (draft_proposed, escalated, or skipped) the agent clears the claim by setting `bot_claimed_at = NULL`. On run abort, the claim ages out via the TTL — no recovery worker is required for Phase 1.
 
 **Per-ticket terminal verdicts.** Each ticket within a single agent run reaches exactly one terminal verdict from the set: `drafted_for_review` | `drafted_and_dispatched` | `escalated_to_human` | `skipped_collision` | `skipped_low_confidence` | `skipped_no_action_needed`. Exactly one terminal Run Trace event fires per ticket per agent run (per checklist §10.4): the draft branches emit `phase1.support.draft_proposed` (with `perTicketVerdict` ∈ {`drafted_for_review`, `drafted_and_dispatched`}); the collision branch emits `phase1.support.collision_skipped` (with `perTicketVerdict: 'skipped_collision'`); the remaining three branches (`escalated_to_human`, `skipped_low_confidence`, `skipped_no_action_needed`) emit `phase1.support.ticket_terminal` with the `perTicketVerdict` payload field. No further events fire for that ticket+run after the terminal.
 
-#### 5.3.5 Why this is Native Controller, not Operator
+**Run-loop (cross-ticket) idempotency.** A single Support Agent run iterates over N tickets; partial completion (worker crash, deploy restart, pg-boss retry) is possible. The MVP's posture is per-ticket retryable, not run-level transactional:
+
+- **No outer-loop idempotency key.** A retried agent run does NOT attempt to "resume" the prior run. It enqueues a fresh run and lets the per-ticket atomic claim (above) absorb the duplication: any ticket the prior run already terminated will either still hold a non-stale claim (the new run skips with `concurrent_claim`) or have already received its terminal Run Trace event (the new run sees no eligible tickets in `support.list_open_tickets` because the canonical `bot_handled_at` watermark or terminal-event audit trail filters it out).
+- **`support.list_open_tickets` is the idempotency boundary.** The query that selects tickets for processing must filter out tickets that already have a terminal `phase1.support.*` event for the current `(inbox_id, claim_window)`. The canonical layer's `last_human_activity_at` and `bot_claimed_at` columns plus the run-trace event store give us all the inputs; the filter is a left-join on the event store. No new persistence is needed.
+- **pg-boss retry policy on the agent-run handler is `singleton: true` per (subaccount_id, inbox_id)`.** The handler claims a per-(subaccount, inbox) advisory lock at run start; a duplicate run for the same inbox enqueued by both schedule and webhook simply waits for the lock and then sees no eligible tickets. The lock is released on run termination (success or fail).
+- **What this does NOT cover.** Cross-inbox parallel runs for the same subaccount ARE allowed (different inboxes, different lock keys). That is by design — inbox A's processing must not block on inbox B's queue depth. Cross-subaccount parallelism is naturally bounded by RLS scope.
+
+The result: the agent run itself does not need to be idempotent; the per-ticket claim plus the `list_open_tickets` filter make duplicate runs safe by elimination, not by transaction.
+
+#### 5.3.5 Master prompt lifecycle (versioning, update, rollback)
+
+The `system_agents.master_prompt` value is system-managed (not editable by org admins). Updates to it follow a constrained lifecycle so customer voice and compliance posture cannot drift silently:
+
+- **Version pinned to `system_agents.version`.** Each non-trivial change to the master prompt bumps `system_agents.version` (existing column). Subaccount installations record the `applied_template_version` they were installed against (existing column on `subaccount_agents`); upgrades to a new master-prompt version are explicit, not implicit.
+- **Update path.** Master prompt edits land via standard PR review (architect + pr-reviewer + chatgpt-pr-review for any user-facing wording change). The prompt is treated as a frontmatter-style markdown file under `server/prompts/support-agent-master.md` with a header `version: N` line; the migration that bumps `system_agents.version` lives in the same PR.
+- **Eval gate before bump.** A prompt-version bump runs the eval harness (§5.5) on the regression set in CI; if classification accuracy or draft-quality scores drop below the prior version's results by more than the drift threshold (§5.5.2), the bump is blocked. This prevents an "improvement" from regressing customer-visible output.
+- **Rollback.** Each version is keyed in `system_agents` history; rollback is a `system_agents.version = N-1` revert via migration, plus the corresponding `master_prompt` revert. Subaccounts on the new version are auto-rolled-back to N-1; the eval harness re-runs to confirm.
+- **Per-inbox `promptOverride` does not stack with master-prompt versions.** The override is a small voice-tone string (max 500 chars, see §5.3.7), composed onto whatever master-prompt version the inbox's `subaccount_agent.applied_template_version` resolves to. Operators do not see the master-prompt body; the override is purely additive.
+
+**Out of scope for the MVP:** customer-visible prompt-change notifications (Phase 2), per-org branching of the master prompt (Phase 3 multi-tenant tone control).
+
+#### 5.3.6 Per-inbox promptOverride safety (input handling for freeform voice profile)
+
+`canonical_inboxes.agent_config.promptOverride` is a freeform textarea exposed to org admins (per §5.6.2). Without controls, this is a prompt-injection surface: a malicious or careless override could make the Support Agent leak internal context, invoke skills outside its allowed set, or impersonate a different role. The MVP applies four narrow controls:
+
+1. **Length cap** — server-side validation rejects overrides longer than 500 characters. Voice-tone calibration does not need long blocks; long overrides are almost always misuse.
+2. **Allowed-section composition** — the override is injected as a labelled section (`### Inbox voice override (non-authoritative)`) AFTER the master prompt's ### Rules section, never inline. The master prompt explicitly instructs the model to disregard any instruction in the override section that would change tool use, redirect output to a different recipient, or bypass approval policies. The exact wording is part of the master prompt, not the override.
+3. **Forbidden-token scan** — server-side `validatePromptOverride()` (a pure helper) rejects overrides containing common injection markers: `</?system>`, `</?user>`, `<<SYS>>`, `### Rules`, `BEGIN SYSTEM`, `ignore previous`, `disregard`, raw role-switching tokens, or runs of three or more backticks. Failure surfaces inline on the config form. List is conservative; expand based on attempted overrides observed in production.
+4. **Audit trail** — every change to `agent_config.promptOverride` is logged to the existing audit-event stream with the diff of the prior and new value, the actor's user id, and the inbox id. No silent edits.
+
+These controls are dev-discipline, not a security boundary. The defence in depth is that the agent's tool surface is fixed (the 13-skill list in §5.3.1) and customer-facing replies still go through three-phase dispatch with HITL approval in `assisted` mode. A successful prompt injection still cannot send a reply without passing those gates.
+
+**File inventory addition (§5.4.3 / §5.6.4):** `server/services/promptOverridePure.ts` (validator) — +60 LOC; route-handler integration in `supportInboxesRoutes.ts` — +20 LOC; tests for forbidden-token scan + length cap — +60 LOC.
+
+#### 5.3.7 Why this is Native Controller, not Operator
 
 Per v1.2 brief Section 5.2, Native is "deterministic, structured, short-lived". The Support Agent loop above is structured (always classify → draft → route) and short-lived (one pass through N tickets). It is NOT an autonomous reasoning loop that explores ambiguity or persists across hours. It is a triage pipeline.
 
@@ -691,6 +753,8 @@ output_schema:
 ```
 
 The skill uses platform Anthropic (Claude Sonnet 4.x) via the LLM router. Prompt template lives alongside the markdown file.
+
+**Runtime contract enforcement.** The output is parsed through a Zod schema (`shared/types/supportClassifyTicketResult.ts`, +35 LOC) before the agent acts on it. The schema mirrors the YAML shape above with strict enums, `confidence: z.number().min(0).max(1)`, and `escalate_reason: z.string().nullable()`. Parse failure (model returns null for a required field, returns a value outside the enum, returns a non-numeric confidence) maps to: emit `phase1.support.classify_failed` with the raw model output stored under a redacted-PII payload field, treat the ticket as low-confidence, route to `add_internal_note + assign(human)`. The skill never proceeds to drafting on a malformed classification. Tested in `supportClassifyTicketPure.test.ts` with three malformed-output fixtures (null intent, out-of-range confidence, missing recommended_action).
 
 **Caching:** classification results are cached by content hash of `(ticket_id, last_message_external_id)` in a new lightweight cache table or in `agent_run_messages` reuse. See Open Decision 11.4.
 
@@ -765,6 +829,15 @@ A support agent that drafts customer-facing replies cannot ship without an eval 
 | Draft quality | LLM-as-judge scoring against rubric (helpfulness, tone match, factual accuracy); **initial threshold: >= 4.0 / 5.0 average**, tunable during pilot before lock-in |
 | Drift detection | Daily run of regression set against current model + prompt; alert if scores drop > 10% week over week (drift threshold tunable post-pilot once a baseline is established) |
 | Failure-mode coverage | Tickets that should escalate (confidence below threshold) are escalated; tickets where the agent should NOT act (collision window) are skipped |
+
+**Prompt + model version pinning per eval run.** Every row in `support_eval_runs` records the exact `system_agents.version` (master prompt version) AND the model id (e.g., `claude-sonnet-4-6`) AND the skill prompt template hash for `propose_reply`, `classify_ticket`, `find_customer_history`. Comparison across runs is only meaningful when these three identity fields match. The drift detector splits its time-series view per `(prompt_version, model_id, skill_template_hashes)` triple — drift across versions is INFORMATIONAL (a prompt bump is expected to move scores), drift WITHIN a version against the same regression set is the alerting condition. The CI gate on prompt-version bumps (§5.3.5) consumes this same comparison.
+
+**Regression-set availability fallback.** The acceptance gate depends on the Foundry-derived regression set being present (per support-desk-canonical OQ-1). If the export is unavailable, stale, or empty at gate time, the MVP's posture is fail-open with explicit operator visibility, NOT fail-closed:
+
+- **Sub-2-row state.** Per §7.3 the `verify-support-agent-eval-thresholds.sh` gate exits 0 (fail-open) when the regression set has fewer than two rows, AND emits `phase1.support.eval_drift_detected` with payload `{ reason: 'regression_set_unavailable', rowCount: <N> }` so the operator sees the silence in the Activity feed. This prevents a one-off Foundry-export hiccup from blocking unrelated PRs.
+- **Stale-data state.** A regression set older than 90 days (per `created_at` of the latest export row) emits an Activity-feed warning at every CI run but does not block. The acceptance gate at lock-in time (per §8.5 production verification step 5) requires a fresh export within the last 30 days.
+- **Manual seed path.** If Foundry is permanently unavailable for the MVP, the support lead seeds 50 to 200 hand-curated tickets directly into `support_eval_runs.regression_set` via a one-shot script. The eval surface (§5.5.3) shows "Manually seeded — last refreshed YYYY-MM-DD" so the source of the regression set is unambiguous to operators.
+- **Acceptance criterion adjustment.** §9.2 acceptance "classification accuracy >= 85% per intent" is measured against whatever regression set is current at lock-in time; if neither Foundry nor the manual seed is available at lock-in, lock-in is held and Open Decision 11.5 is escalated to Product. The gate cannot be bypassed by saying "the data wasn't available."
 
 #### 5.5.3 Eval surface
 
@@ -912,9 +985,24 @@ CREATE UNIQUE INDEX run_artifacts_storage_key_unique
 
 `run_artifacts` is RLS-protected; registered in `server/config/rlsProtectedTables.ts`.
 
+**Migration failure recovery.** The migration creates the table, the indexes, and the RLS policies in a single transaction; postgres' DDL is transactional, so a partial-state mid-migration is impossible — the migration either fully applies or fully rolls back. Three external-state failure modes are worth calling out:
+
+- **External state (S3 bucket / IAM) not provisioned at migrate time.** The migration creates the database row only; it does NOT touch S3. The MVP's deploy runbook lists S3 bucket + IAM provisioning as a precondition; if missed, the migration applies cleanly and the first artifact upload returns the S3 client error visibly via the existing `phase1.macro.artifact_upload_failed` event. Recovery is "provision S3 + IAM, retry the next agent run." No data corruption.
+- **Migration applies but seed data (system Support Agent row) fails.** The Support Agent install seed is a separate idempotent step (per §5.3.1, the install service uses `INSERT ... ON CONFLICT DO NOTHING` keyed on `slug = 'support-agent'`). Retrying the seed is safe.
+- **Migration fails mid-deploy.** `.down.sql` reverts the table + indexes + RLS policies; the deploy aborts with the standard pg-boss / migrate runner error path. No application code that references `run_artifacts` is shipped without the table, because the migration runs before the application deploys (existing deploy ordering — see `replit.md`).
+
+The retention sweep (§6.1.2b) does not reference `agent_runs`, so a deploy that fails after `run_artifacts` lands but before the sweeper job ships is safe (rows accumulate; the sweeper picks them up on its first scheduled run). No application-side reconciliation is required.
+
 **Idempotency posture (per checklist §10.1):** key-based on `(storage_provider, storage_key)`. **Retry classification (per checklist §10.2):** `safe` — the worker can retry uploads unconditionally; the unique index guarantees exactly-once row creation. **HTTP mapping for `23505` on the artifact upload endpoint:** 200 with the existing row id (idempotent hit), never bubbled as 500.
 
 **Source-of-truth precedence vs `iee_artifacts`.** `iee_artifacts` remains the worker-internal ledger of raw artifacts produced during IEE execution (used by IEE progress UI, transcription cache, dedup-by-content-hash inside the worker). `run_artifacts` is the customer-delivery ledger — only entries the customer can download via signed URL. When an IEE artifact is promoted to customer delivery, the worker copies the bytes to S3 and inserts a new `run_artifacts` row referencing the same `iee_run_id` plus the same `content_hash`; the original `iee_artifacts` row is never moved. Customer-facing UI reads `run_artifacts` only; the worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.
+
+**Drift handling between the two ledgers.** Promotion is not transactional across worker-internal `iee_artifacts` and customer-facing `run_artifacts`, so partial failure can leave a row in one and not the other. The MVP's posture:
+
+- **`iee_artifacts` row exists, `run_artifacts` row missing.** Outcome: customer-facing UI shows nothing; worker UI/cache continues to function. Cause: S3 upload succeeded but `run_artifacts` insert failed, OR run completed before the promotion step ran. The promotion step is idempotent (keyed on `(content_hash, agent_run_id, artifact_kind)`); on the next run-completed handler invocation the missing row is created. No special detection job is required — the next happy path re-promotes.
+- **`run_artifacts` row exists, `iee_artifacts` row missing.** Outcome: customer-facing UI shows the artifact; worker has no record. Cause: should not happen for MVP-produced artifacts (worker writes `iee_artifacts` first); only possible for artifacts inserted via paths other than the IEE worker (e.g., the main-app PDF renderer, which writes `run_artifacts` directly without an `iee_artifacts` row). This is by design: not every customer artifact has an IEE provenance. `run_artifacts.iee_run_id` is nullable for exactly this case.
+- **Detection of orphaned `run_artifacts` rows after run deletion.** When an `agent_runs` row is hard-deleted by retention, `run_artifacts.agent_run_id` SET NULL fires; the orphaned `run_artifacts` rows continue to honour `retain_until` and are swept by §6.1.2b. The `listForRun` query naturally returns nothing for the deleted run.
+- **No backfill, no reconciliation worker.** Drift between the two ledgers is bounded (only the promotion-failure case above), self-healing via the next happy path, and visible to the operator via the `phase1.file_delivery.uploaded` event. A reconciliation worker can be added in Phase 2 if drift becomes operationally visible.
 
 #### 6.1.2b Retention sweep (hard-delete)
 
@@ -1086,6 +1174,13 @@ Five scenarios before merge:
 3. **Support Agent assisted-mode triage**: seeded inbox with 3 tickets; agent classifies all 3; drafts replies for 2; flags 1 for human; review queue shows the 2 drafts; approving sends through three-phase dispatch; messages appear in `canonical_ticket_messages`.
 4. **Support Agent autonomous-mode**: same setup but inbox `mode=autonomous`; agent auto-approves drafts; replies dispatch without human; Run Trace shows the policy-override decisions.
 5. **Support Agent collision avoidance**: human edits a ticket within the collision window; agent run skips the ticket; emits `phase1.support.collision_skipped`; review queue is empty.
+
+**Existing-flow regression smoke tests (no new code; explicit reference to confirm coverage).** The Support Agent assumes the existing review queue + Slack Block Kit HITL flow continues to work unchanged when fed Support Agent–authored drafts. The PR #277 (Support Desk Canonical) test suite already covers the dispatch contract; this MVP adds two narrow smoke checks to confirm the Support Agent's payload shape matches what those existing tests expect:
+
+6. **Slack Block Kit HITL — Support-Agent-authored draft**: a Support Agent run produces a draft in `canonical_ticket_drafts.awaiting_review`; the existing Slack Block Kit notification fires with the standard buttons (Approve / Reject / Edit); pressing Approve in the Slack thread triggers the existing three-phase dispatch and writes a customer-facing reply via Teamwork. Confirms that no payload-shape drift exists between PR #277's draft producer and this MVP's draft producer.
+7. **Review queue UI — Support-Agent-authored draft**: a draft authored by the Support Agent appears in the existing review queue UI with the same affordances (preview, edit, approve, reject) as drafts authored via the existing rule-based candidate drafter. Confirms no UI-layer divergence.
+
+These two smoke checks pass at lock-in time; if either fails, the failure indicates a payload-shape mismatch between the new Support Agent and the locked PR #277 contract — root-cause the agent's draft writer, not the dispatch layer.
 
 ---
 
