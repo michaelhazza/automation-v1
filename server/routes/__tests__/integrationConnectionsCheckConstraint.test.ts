@@ -1,8 +1,8 @@
-// guard-ignore-file: pure-helper-convention reason="DB-level integration test — verifies the 0315 CHECK constraint fires at the Postgres layer; no pure helper extraction possible."
+// guard-ignore-file: pure-helper-convention reason="DB-level integration test — verifies the 0320 CHECK constraint fires at the Postgres layer; no pure helper extraction possible."
 /**
  * integrationConnectionsCheckConstraint.test.ts
  *
- * Verifies that migration 0315 installs a Postgres CHECK constraint on
+ * Verifies that migration 0320 installs a Postgres CHECK constraint on
  * integration_connections.connection_status that rejects out-of-enum values
  * at the DB layer, independent of the route's Zod validation.
  *
@@ -10,17 +10,17 @@
  * to prove the constraint fires even if Zod is circumvented.
  *
  * Section:
- *   Integration only (requires DATABASE_URL with migration 0315 applied).
+ *   Integration only (requires DATABASE_URL with migration 0320 applied).
  *
  * Runnable via:
  *   npx vitest run server/routes/__tests__/integrationConnectionsCheckConstraint.test.ts
  *
- * NOTE: Migration 0315 preflight test (seed a 'foo' row, run migration, assert RAISE)
+ * NOTE: Migration 0320 preflight test (seed a 'foo' row, run migration, assert RAISE)
  * is CI/manual only. To verify it manually:
  *   1. Insert a row: INSERT INTO integration_connections (..., connection_status) VALUES (..., 'foo');
  *      (requires temporarily disabling the constraint with ALTER TABLE ... DROP CONSTRAINT ...)
- *   2. Run: psql $DATABASE_URL < migrations/0315_connections_status_check.sql
- *   3. Confirm the exception message: "0315 preflight failed: 1 rows have invalid connection_status..."
+ *   2. Run: psql $DATABASE_URL < migrations/0320_connections_status_check.sql
+ *   3. Confirm the exception message: "0320 preflight failed: 1 rows have invalid connection_status..."
  * The preflight guard cannot be automated in Vitest without a pg superuser DDL harness.
  */
 export {};
@@ -33,7 +33,7 @@ const SKIP_DB = !process.env.DATABASE_URL ||
 
 describe('integration_connections CHECK constraint (DB-level)', () => {
   test.skipIf(SKIP_DB)(
-    'after migration 0315, direct DB insert with connection_status="foo" raises Postgres error 23514',
+    'after migration 0320, direct DB insert with connection_status="foo" raises Postgres error 23514',
     async () => {
       const { drizzle } = await import('drizzle-orm/postgres-js');
       const postgres = (await import('postgres')).default;
@@ -75,7 +75,7 @@ describe('integration_connections CHECK constraint (DB-level)', () => {
 
         // If we reach here, the constraint is missing — record the id for cleanup
         insertedId = row?.id;
-        expect.fail('Expected Postgres CHECK constraint violation (error code 23514) but insert succeeded. Confirm migration 0315 has been applied.');
+        expect.fail('Expected Postgres CHECK constraint violation (error code 23514) but insert succeeded. Confirm migration 0320 has been applied.');
       } catch (err: unknown) {
         // Postgres error 23514 = check_violation
         const pgErr = err as { code?: string; message?: string };

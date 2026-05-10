@@ -6,7 +6,7 @@
 **Build slug:** `pre-test-hardening`
 **Source spec:** [`spec.md`](./spec.md)
 **Source brief:** [`brief.md`](./brief.md)
-**Migration range reserved:** `0313–0315`
+**Migration range reserved:** `0318–0320`
 **Class:** Major
 
 ---
@@ -23,14 +23,14 @@
   4. T3 `taskService.createTask` caller audit
   5. S1 source-rule snapshot (status×action eligibility + customer-match policy)
   6. `withOrgTx` primitive
-  7. Migration sequence (0313 / 0314 / 0315)
+  7. Migration sequence (0318 / 0319 / 0320)
 - C1 — W1 (HMAC fail-closed) + W2 (recordIncident on 5xx)
 - C2 — W3 (cross-tenant attribution + persistent dedup)
 - C3 — T1 (support read-path subaccount scoping)
 - C4 — T2 (reference-document promote: cross-org scope-ID rejection)
 - C5 — T3 (`taskService.createTask` write-path scoping)
 - C6 — S1 (preflight checks 4–7) + S2 (agent-run principal cannot set `overrideCollision`)
-- C7 — V1 (PATCH /api/connections enum validation + migration 0315)
+- C7 — V1 (PATCH /api/connections enum validation + migration 0320)
 - C8 — V2 (knowledge override concurrent-write serialisation)
 - C9 — O1 (rollup compact SQL fix) + O3 (reseed env guard) + O4 (reseed transaction wrap)
 - C10 — O2 runbook + O5 branch-protection record
@@ -116,11 +116,11 @@ WHERE connector_type = 'teamwork'
 **Registry path:** `server/config/rlsProtectedTables.ts`. Latest registered migration in the file at plan time is `0312_action_attempts.sql`. Append a new entry for `webhook_replay_nonces`:
 
 ```ts
-// 0313 — Pre-Test Hardening: persistent webhook replay nonces (W3)
+// 0318 — Pre-Test Hardening: persistent webhook replay nonces (W3)
 {
   tableName: 'webhook_replay_nonces',
   schemaFile: 'webhookReplayNonces.ts',
-  policyMigration: '0313_webhook_replay_nonces.sql',
+  policyMigration: '0318_webhook_replay_nonces.sql',
   rationale: 'Per-org webhook replay nonces (deliveryId from provider) — cross-tenant leak would reveal which webhook events any other org has received; UNIQUE constraint is the dedup invariant.',
 },
 ```
@@ -431,17 +431,17 @@ The advisory lock for V2 (`pg_advisory_xact_lock(hashtextextended($1::text, 0))`
 
 **This build's migrations:**
 
-- `0313_webhook_replay_nonces.sql` — W3 dedup table + RLS policy.
-- `0314_connector_configs_webhook_token.sql` — W3 token column + partial UNIQUE index.
-- `0315_connections_status_check.sql` — V1 CHECK constraint with preflight.
+- `0318_webhook_replay_nonces.sql` — W3 dedup table + RLS policy.
+- `0319_connector_configs_webhook_token.sql` — W3 token column + partial UNIQUE index.
+- `0320_connections_status_check.sql` — V1 CHECK constraint with preflight.
 
-Each migration ships with a `.down.sql` companion. Builder verifies no other branch has claimed these numbers before merge by running `ls migrations/0313* migrations/0314* migrations/0315*` and confirming only this branch's files are present at merge time.
+Each migration ships with a `.down.sql` companion. Builder verifies no other branch has claimed these numbers before merge by running `ls migrations/0318* migrations/0319* migrations/0320*` and confirming only this branch's files are present at merge time.
 
 **Drizzle schema files updated alongside each migration (per DEVELOPMENT_GUIDELINES §6.4):**
 
-- `0313` → new `server/db/schema/webhookReplayNonces.ts` + register in `server/db/schema/index.ts` + `RLS_PROTECTED_TABLES` entry.
-- `0314` → add `webhookToken: uuid('webhook_token')` to `server/db/schema/connectorConfigs.ts`.
-- `0315` → no schema-shape change; the column already exists (`connectionStatus: text('connection_status')` with the typed union). The migration is constraint-only.
+- `0318` → new `server/db/schema/webhookReplayNonces.ts` + register in `server/db/schema/index.ts` + `RLS_PROTECTED_TABLES` entry.
+- `0319` → add `webhookToken: uuid('webhook_token')` to `server/db/schema/connectorConfigs.ts`.
+- `0320` → no schema-shape change; the column already exists (`connectionStatus: text('connection_status')` with the typed union). The migration is constraint-only.
 
 ---
 
@@ -521,8 +521,8 @@ npm run lint
 
 **Files to touch:**
 
-- `migrations/0313_webhook_replay_nonces.sql` (new) + `.down.sql`.
-- `migrations/0314_connector_configs_webhook_token.sql` (new) + `.down.sql`.
+- `migrations/0318_webhook_replay_nonces.sql` (new) + `.down.sql`.
+- `migrations/0319_connector_configs_webhook_token.sql` (new) + `.down.sql`.
 - `server/db/schema/webhookReplayNonces.ts` (new).
 - `server/db/schema/connectorConfigs.ts` — add `webhookToken: uuid('webhook_token')` column.
 - `server/db/schema/index.ts` — export the new schema.
@@ -543,8 +543,8 @@ npm run lint
 
 **Approach:**
 
-1. Migration `0313`: `CREATE TABLE webhook_replay_nonces (organisation_id uuid NOT NULL, webhook_source text NOT NULL, nonce text NOT NULL, seen_at timestamptz NOT NULL DEFAULT now(), UNIQUE (organisation_id, webhook_source, nonce))`. Add secondary index `(organisation_id, webhook_source, seen_at)` for the prune scan. Add canonical org-isolation RLS policy (FORCE ROW LEVEL SECURITY + CREATE POLICY using `current_setting('app.organisation_id', true)::uuid`). Down migration drops the table.
-2. Migration `0314`: `ALTER TABLE connector_configs ADD COLUMN webhook_token uuid NULL`; `CREATE UNIQUE INDEX IF NOT EXISTS connector_configs_webhook_token_unique ON connector_configs (webhook_token) WHERE webhook_token IS NOT NULL`; data step `UPDATE connector_configs SET webhook_token = gen_random_uuid() WHERE connector_type = 'teamwork' AND webhook_token IS NULL`. Down migration drops the index and the column. **Per spec §2.3 `gen_random_uuid()` preflight (locked):** do NOT add `CREATE EXTENSION IF NOT EXISTS pgcrypto`. Rely on the repo convention.
+1. Migration `0318`: `CREATE TABLE webhook_replay_nonces (organisation_id uuid NOT NULL, webhook_source text NOT NULL, nonce text NOT NULL, seen_at timestamptz NOT NULL DEFAULT now(), UNIQUE (organisation_id, webhook_source, nonce))`. Add secondary index `(organisation_id, webhook_source, seen_at)` for the prune scan. Add canonical org-isolation RLS policy (FORCE ROW LEVEL SECURITY + CREATE POLICY using `current_setting('app.organisation_id', true)::uuid`). Down migration drops the table.
+2. Migration `0319`: `ALTER TABLE connector_configs ADD COLUMN webhook_token uuid NULL`; `CREATE UNIQUE INDEX IF NOT EXISTS connector_configs_webhook_token_unique ON connector_configs (webhook_token) WHERE webhook_token IS NOT NULL`; data step `UPDATE connector_configs SET webhook_token = gen_random_uuid() WHERE connector_type = 'teamwork' AND webhook_token IS NULL`. Down migration drops the index and the column. **Per spec §2.3 `gen_random_uuid()` preflight (locked):** do NOT add `CREATE EXTENSION IF NOT EXISTS pgcrypto`. Rely on the repo convention.
 3. New schema file `webhookReplayNonces.ts` with Drizzle table definition matching the migration. Add to `server/db/schema/index.ts`.
 4. Add `webhookToken: uuid('webhook_token')` to the existing `connector_configs` Drizzle schema.
 5. Add `webhook_replay_nonces` entry to `RLS_PROTECTED_TABLES` (exact entry shape in plan-time builder contract item 2).
@@ -570,7 +570,7 @@ npm run lint
 - `webhookReplayNonceStore.recordIfNew(orgId: string, source: string, nonce: string): Promise<{ inserted: boolean }>`.
 - `connectorConfigService.findByWebhookToken(token: string, connectorType: 'teamwork'): Promise<ConnectorConfig | null>`.
 - HTTP error codes from the new Teamwork route: `webhook.token_unknown` (401), `webhook.signature_invalid` (401), `webhook.delivery_id_required` (400), `webhook.teamwork.replay_deduped` (200 + log event).
-- Migration 0313 RLS policy name: `webhook_replay_nonces_org_isolation` (matches the canonical 0079/0200 naming pattern).
+- Migration 0318 RLS policy name: `webhook_replay_nonces_org_isolation` (matches the canonical 0079/0200 naming pattern).
 
 **Error handling:**
 
@@ -976,14 +976,14 @@ npm run lint
 
 ---
 
-## C7 — V1 (PATCH /api/connections enum validation + migration 0315)
+## C7 — V1 (PATCH /api/connections enum validation + migration 0320)
 
 **Goal:** route-layer Zod rejects unknown `connectionStatus`; DB-layer CHECK constraint catches any code path that bypasses the route; migration aborts on existing invalid data.
 
 **Files to touch:**
 
 - `server/routes/integrationConnections.ts:123` — wrap `connectionStatus` in a Zod enum.
-- `migrations/0315_connections_status_check.sql` (new) + `.down.sql`.
+- `migrations/0320_connections_status_check.sql` (new) + `.down.sql`.
 - `server/routes/__tests__/integrationConnectionsValidation.test.ts` (new).
 
 **Module shape:**
@@ -994,7 +994,7 @@ npm run lint
 **Approach:**
 
 1. Define a Zod schema for the PATCH body. Add `connectionStatus: z.enum(['active','revoked','error']).optional()`. Reject failures with 400 `connection.status_invalid`. Note: the existing schema/route uses the `'key' in req.body` pattern for explicit `null` writes — verify whether `null` is a legitimate value for `connectionStatus`. The Drizzle schema declares the column as `.notNull()`, so `null` should NOT be accepted; the Zod schema uses `.optional()` (omit-only), not `.nullable()`.
-2. Migration `0315_connections_status_check.sql`:
+2. Migration `0320_connections_status_check.sql`:
    ```sql
    -- Preflight: abort if any row carries an out-of-enum value.
    DO $$
@@ -1007,7 +1007,7 @@ npm run lint
        FROM integration_connections
       WHERE connection_status NOT IN ('active','revoked','error');
      IF bad_count > 0 THEN
-       RAISE EXCEPTION '0315 preflight failed: % rows have invalid connection_status. Sample: %. Aborting; clean up before re-running.', bad_count, sample;
+       RAISE EXCEPTION '0320 preflight failed: % rows have invalid connection_status. Sample: %. Aborting; clean up before re-running.', bad_count, sample;
      END IF;
    END;
    $$;
@@ -1047,7 +1047,7 @@ npm run lint
   - "PATCH with connectionStatus='revoked' → 200; subsequent GET returns the row with status='revoked'".
   - "PATCH without connectionStatus key → other fields update normally".
 - `server/routes/__tests__/integrationConnectionsCheckConstraint.test.ts` (new — DB-level):
-  - "after migration 0315, direct DB insert into `integration_connections` with `connection_status='foo'` raises Postgres error 23514" (test runs against the test DB which has 0315 applied; uses raw drizzle insert, NOT the route, to bypass the Zod guard and prove the CHECK fires).
+  - "after migration 0320, direct DB insert into `integration_connections` with `connection_status='foo'` raises Postgres error 23514" (test runs against the test DB which has 0320 applied; uses raw drizzle insert, NOT the route, to bypass the Zod guard and prove the CHECK fires).
 
 **Migration-execution preflight test (CI-only, recorded in `progress.md`):**
 
@@ -1351,7 +1351,7 @@ The plan does NOT run gates locally. CI runs the full gate suite as a pre-merge 
 
 - **Goals vs implementation.** Every spec acceptance criterion in §9 is mapped to at least one chunk's "Tests to author" section. Cross-checked: W1, W2 → C1; W3 → C2; T1 → C3; T2 → C4; T3 → C5; S1, S2 → C6; V1 → C7; V2 → C8; O1, O3, O4 → C9; O2, O5 → C10. No orphan acceptance criteria.
 - **Locked invariants.** Every §0.7 invariant is covered:
-  - Migration range 0313–0315: C2 (0313, 0314), C7 (0315). No additional numbers used.
+  - Migration range 0318–0320: C2 (0318, 0319), C7 (0320). No additional numbers used.
   - Webhook replay dedup correctness: C2's `webhookReplayNonceStore.recordIfNew` + the regression test for nonce-row-existence-not-wall-clock.
   - Webhook token storage on shared `connector_configs` + partial UNIQUE: C2 plan-time builder contract item 2 names the table and index expression.
   - Support read scoping: C3 grep gate is the contract.
@@ -1373,7 +1373,7 @@ The plan does NOT run gates locally. CI runs the full gate suite as a pre-merge 
 | C5 transitional 4-arg overload becomes a permanent compatibility shim | The overload is `@deprecated`, runtime-traps with a clear error, and is grep-gated (see plan-time builder contract item 4 → "Grep gate") to be unreachable from any code outside the 2 known sister-branch sites. Sister branch is required to remove it when its callers migrate; the integration branch enforces removal at merge. Builder MUST NOT extend the overload's behaviour beyond the runtime trap. |
 | Sister-branch (`workflowEngineService.ts`) typecheck breaks on this branch after C5's signature change | Resolved at plan time: the transitional 4-arg overload preserves typecheck on this branch without touching the sister-branch file (§0.2 respected). The 2 known sites at `:2716` and `:2962` remain unchanged on this branch and continue to compile against the legacy overload. Sister branch reconciles when it lands its own `withOrgTx` wrappers and removes the overload. |
 | 11 client call sites in C3 may live under different routing contexts | Plan names every site (in plan-time builder contract item 3). Builder verifies each is reachable from a subaccount-scoped route shell at chunk start. Any page that isn't moves under the existing subaccount-routing tree before the URL rewrite. |
-| `gen_random_uuid()` unavailable in some target environment for migration 0314 | Locked: spec §2.3 says do NOT add `CREATE EXTENSION` here. If the migration fails in a fresh-DB boot, the fix lives in the schema-bootstrap migration (out of scope for this build). |
+| `gen_random_uuid()` unavailable in some target environment for migration 0319 | Locked: spec §2.3 says do NOT add `CREATE EXTENSION` here. If the migration fails in a fresh-DB boot, the fix lives in the schema-bootstrap migration (out of scope for this build). |
 | TTL prune job failure extends dedup coverage indefinitely (storage growth) | Acceptable per spec §2.3 "Replay correctness invariant". Storage growth is monitored by the existing infra; correctness is unaffected. |
 | Operator forgets to apply O5 branch protection before merge-ready | Spec §9 item 6-c blocks merge-ready signoff without the `gh api` output in `progress.md`. C10 reflects this. |
 | `customer-match policy` (Check 6) reads from a flag (`requireCustomerMatch`) that does not exist in the `SupportInboxAgentConfig` Zod schema | Plan-time builder contract item 5 locks the no-op-in-v1 behaviour AND the future-on test row. The Zod schema is NOT changed in this build; adding the flag is a future spec amendment. |

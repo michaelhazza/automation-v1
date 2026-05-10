@@ -256,6 +256,8 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'support.assign',
   'support.tag',
   'support.find_customer_history',
+  // Added in phase-1-showcase-mvps (PR #283)
+  'support.classify_ticket',
 ];
 
 // ---------------------------------------------------------------------------
@@ -291,11 +293,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 203 keys', () => {
+test('SKILL_HANDLERS has exactly 204 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 203) {
+  if (count !== 204) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 203. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 204. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

@@ -44,6 +44,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@playwright/test": "^1.59.1",
+    "@react-pdf/renderer": "4.5.1",
     "@sendgrid/mail": "^8.1.0",
     "@tiptap/pm": "^3.22.3",
     "@tiptap/react": "^3.22.3",
@@ -91,6 +92,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
@@ -110,16 +112,15 @@
     "autoprefixer": "^10.4.27",
     "concurrently": "^8.2.2",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.5.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.59.1",
     "vite": "^5.4.21",
-    "vitest": "^2.1.9",
-    "@eslint/js": "^10.0.1",
-    "eslint": "^10.2.1",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "globals": "^17.5.0",
-    "typescript-eslint": "^8.59.1"
+    "vitest": "^2.1.9"
   }
 }

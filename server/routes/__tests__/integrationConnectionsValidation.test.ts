@@ -99,9 +99,9 @@ describe('patchConnectionBodySchema (pure)', () => {
 
 // ─── Section 2: Integration (requires DATABASE_URL) ───────────────────────────
 //
-// NOTE: Migration 0315 preflight test (seed a 'foo' row, run migration, assert abort)
+// NOTE: Migration 0320 preflight test (seed a 'foo' row, run migration, assert abort)
 // is CI/manual only. The migration's DO $$ block will RAISE EXCEPTION on dirty data —
-// this must be verified by running: psql < migrations/0315_connections_status_check.sql
+// this must be verified by running: psql < migrations/0320_connections_status_check.sql
 // against a DB containing an invalid row, and confirming the abort message is printed.
 // This cannot be automated in Vitest without a pg superuser test harness.
 

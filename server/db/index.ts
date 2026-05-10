@@ -21,3 +21,16 @@ export type DB = typeof db;
  * avoid an import cycle with `server/instrumentation.ts`.
  */
 export type OrgScopedTx = Parameters<Parameters<DB['transaction']>[0]>[0];
+
+/**
+ * Drizzle transaction handle type — the same shape passed into the
+ * `db.transaction((tx) => ...)` callback. Re-exported as the canonical name
+ * for adapter / service code that participates in a caller-owned transaction
+ * (see ExecutionBackend contract — `BackendFinalisationInput.tx`,
+ * `loadTerminalState(tx, ...)`).
+ *
+ * Structurally identical to `OrgScopedTx`; declared as a named alias so
+ * adapter / contract code can import a name that reads as "the tx handle"
+ * without the orgScoped framing.
+ */
+export type Transaction = Parameters<Parameters<DB['transaction']>[0]>[0];

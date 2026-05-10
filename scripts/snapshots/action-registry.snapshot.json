@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-05-10T03:43:51.404Z",
+  "capturedAt": "2026-05-10T21:48:32.906Z",
   "entries": {
     "add_deliverable": {
       "actionCategory": "worker",
@@ -7335,6 +7335,50 @@
         "ticketId": {
           "type": "ZodString",
           "describe": "Canonical ticket UUID"
+        }
+      }
+    },
+    "support.classify_ticket": {
+      "actionCategory": "worker",
+      "actionType": "support.classify_ticket",
+      "blastRadius": "self",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Classify a support ticket by intent, urgency, and recommended action.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": false,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        }
+      },
+      "payloadFields": [
+        "ticketId"
+      ],
+      "readPath": "canonical",
+      "retryPolicy": {
+        "maxRetries": 2,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error"
+        ],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 1,
+      "topics": [
+        "support"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "ticketId": {
+          "type": "ZodString",
+          "describe": "Canonical ticket UUID to classify"
         }
       }
     },

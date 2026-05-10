@@ -641,6 +641,46 @@ export const JOB_CONFIG = {
     deadLetter: 'support-draft-reconciliation__dlq',
     idempotencyStrategy: 'payload-key' as const,
   },
+
+  // ── Phase 1 Showcase — Support Agent execution loop ─────────────────
+  // Triggered on schedule or Teamwork webhook. Processes one inbox at a
+  // time per (subaccount_id, inbox_id) advisory lock. Each tick is a
+  // full loop over open tickets; idempotency is enforced by the
+  // terminal-event predicate in list_open_tickets.
+  'support-agent-run': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'support-agent-run__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey = subaccountId:inboxId
+  },
+
+  // ── Phase 1 Showcase — run_artifacts retention sweep ────────────────
+  // Daily admin-bypass job that hard-deletes S3 objects + DB rows where
+  // retain_until < now(). Processes in pages of 100. Each tick re-reads
+  // the current DB state so duplicate deliveries are safe no-ops.
+  'run-artifacts-retention-sweep': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'run-artifacts-retention-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Phase 1 Showcase — Support Agent eval daily run ─────────────────
+  // Daily eval harness: runs classify + judge scoring over the fixture set
+  // and inserts one support_eval_runs row per org. singletonKey deduplicates
+  // per organisationId so concurrent cron ticks collapse into one run.
+  'support-eval-daily': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'support-eval-daily__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

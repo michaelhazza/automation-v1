@@ -831,20 +831,30 @@ export const queueService = {
         }
       });
 
-      // IEE Phase 0 — main-app reconciliation for "Class 2" stuck runs.
-      // See docs/iee-delegation-lifecycle-spec.md Step 4. The worker-side
-      // cleanup-orphans sweep already handles Class 1 (unemitted events) and
-      // Class 3 (worker death). This sweep catches the remaining case: a
-      // parent agent_run stuck in 'delegated' while its iee_runs row is
-      // already terminal (event handler crashed post-DB-write, or DLQ
-      // exhaustion).
-      await (boss as any).work('maintenance:iee-main-app-reconciliation', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      // ExecutionBackend reconciliation — generic main-app sweep for stuck
+      // delegated runs across every registered delegated adapter.
+      //
+      // Originally `maintenance:iee-main-app-reconciliation` (IEE-only,
+      // wired to the legacy alias). Renamed in Chunk 5 of the
+      // ExecutionBackend Adapter Contract refactor to
+      // `maintenance:backend-reconciliation` and re-pointed at
+      // `reconcileBackends()`, which walks every delegated adapter via
+      // the registry. The IEE adapters are still the only delegated
+      // backends in V1, so the runtime behaviour is unchanged.
+      //
+      // See docs/iee-delegation-lifecycle-spec.md Step 4 for the
+      // pre-rename context. Class 1 (unemitted events) and Class 3
+      // (worker death) are handled by the worker's cleanup-orphans
+      // sweep; this sweep catches Class 2 — a parent agent_run stuck in
+      // 'delegated' while the canonical backend row is already terminal
+      // (event handler crashed post-DB-write, or DLQ exhaustion).
+      await (boss as any).work('maintenance:backend-reconciliation', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
-          const { reconcileStuckDelegatedRuns } = await import('./agentRunFinalizationService.js');
-          await withTimeout(reconcileStuckDelegatedRuns().then(() => undefined), 60_000);
+          const { reconcileBackends } = await import('./agentRunFinalizationService.js');
+          await withTimeout(reconcileBackends().then(() => undefined), 60_000);
         } catch (err) {
           if (isTimeoutError(err)) {
-            logger.error('job_timeout', { queue: 'maintenance:iee-main-app-reconciliation', jobId: job.id });
+            logger.error('job_timeout', { queue: 'maintenance:backend-reconciliation', jobId: job.id });
           }
           throw err;
         }
@@ -1169,8 +1179,20 @@ export const queueService = {
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
       // Chunk E — integration block expiry sweep (every 5 minutes)
       await boss.schedule('maintenance:blocked-run-expiry', '*/5 * * * *', {});
-      // IEE Phase 0 — main-app reconciliation for stuck 'delegated' runs (every 2 minutes)
-      await boss.schedule('maintenance:iee-main-app-reconciliation', '*/2 * * * *', {});
+      // ExecutionBackend reconciliation — generic main-app sweep across
+      // every registered delegated adapter (every 2 minutes). Renamed
+      // from `maintenance:iee-main-app-reconciliation` in Chunk 5 of the
+      // ExecutionBackend Adapter Contract refactor; runtime behaviour
+      // unchanged because the IEE adapters are still the only delegated
+      // backends in V1.
+      //
+      // One-cycle unschedule shim — pg-boss will keep firing the old
+      // schedule indefinitely if we leave the row in `pgboss.schedule`,
+      // even though no worker subscribes to the old queue any more.
+      // Best-effort unschedule of the old name first; remove this line
+      // after the first deploy has drained the previous schedule row.
+      await boss.unschedule('maintenance:iee-main-app-reconciliation').catch(() => undefined);
+      await boss.schedule('maintenance:backend-reconciliation', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
       // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)

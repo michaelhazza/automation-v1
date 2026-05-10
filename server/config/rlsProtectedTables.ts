@@ -1194,11 +1194,25 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0312_action_attempts.sql',
     rationale: 'Action idempotency ledger — records in-flight and completed provider write attempts. Cross-tenant leak exposes which actions were attempted and their outcomes.',
   },
-  // 0313 — Pre-Test Hardening: persistent webhook replay nonces (W3)
+  // 0313 — Phase 1 Showcase: customer-facing file delivery ledger
+  {
+    tableName: 'run_artifacts',
+    schemaFile: 'runArtifacts.ts',
+    policyMigration: '0313_run_artifacts.sql',
+    rationale: 'Customer-visible artifact delivery ledger — file hashes, S3 keys, and download counts are scoped per org. Cross-tenant leak exposes artifact content and delivery patterns.',
+  },
+  // 0315 — Phase 1 Showcase: Support Agent eval harness run records
+  {
+    tableName: 'support_eval_runs',
+    schemaFile: 'supportEvalRuns.ts',
+    policyMigration: '0315_support_eval_runs.sql',
+    rationale: 'Per-org support agent evaluation run records — contains eval configurations, agent outputs, and quality verdicts. Cross-tenant leak exposes agent behavior patterns and quality assessment data.',
+  },
+  // 0318 — Pre-Test Hardening: persistent webhook replay nonces (W3) — renumbered from 0313 post-S2 to avoid collision with PR #283
   {
     tableName: 'webhook_replay_nonces',
     schemaFile: 'webhookReplayNonces.ts',
-    policyMigration: '0313_webhook_replay_nonces.sql',
+    policyMigration: '0318_webhook_replay_nonces.sql',
     rationale: 'Per-org webhook replay nonces (deliveryId from provider) — cross-tenant leak would reveal which webhook events any other org has received; UNIQUE constraint is the dedup invariant.',
   },
 ];

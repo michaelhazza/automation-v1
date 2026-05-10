@@ -3,7 +3,7 @@
 **Slug:** `pre-test-hardening`
 **Branch:** `pre-test-hardening`
 **Class:** Major
-**Migration range reserved:** `0313–0315`
+**Migration range reserved:** `0318–0320`
 **Source brief:** [`brief.md`](./brief.md)
 **Authored:** 2026-05-10
 
@@ -42,12 +42,12 @@ A scope-out grep gate runs in CI; the build is rejected if any file under those 
 
 ### §0.3 Migration sequencing
 
-Reserved range: `0313–0315`. Three slots cover:
+Reserved range: `0318–0320`. Three slots cover:
 
-- Phase 1: 2 migrations (W3 — webhook replay nonces, Teamwork connector token) → `0313`, `0314`.
+- Phase 1: 2 migrations (W3 — webhook replay nonces, Teamwork connector token) → `0318`, `0319`.
 - Phase 2: 0 migrations (route/service-only).
 - Phase 3: 0 migrations.
-- Phase 4: 1 migration (V1 — connection status CHECK constraint) → `0315`.
+- Phase 4: 1 migration (V1 — connection status CHECK constraint) → `0320`.
 - Phase 5: 0 migrations (O2 phased swap deferred per DEC-3).
 
 Builder must follow the canonical migration shape: `.sql` + matching `.down.sql`, idempotent where the operation permits it, no `CONCURRENTLY` inside a transaction.
@@ -71,7 +71,7 @@ Per `references/test-gate-policy.md`: targeted vitest only locally; CI runs the 
 
 Each chunk in §8 must be independently revertible:
 
-- Migrations `0313`–`0315` ship with matching `.down.sql` files; revert is `npm run db:rollback` against the specific migration timestamp. The down migrations restore the prior schema shape exactly (drop new tables, drop new columns, drop new constraints).
+- Migrations `0318`–`0320` ship with matching `.down.sql` files; revert is `npm run db:rollback` against the specific migration timestamp. The down migrations restore the prior schema shape exactly (drop new tables, drop new columns, drop new constraints).
 - Runtime route changes (T1, V1, T3 caller migrations) and their corresponding client-side URL/argument changes must land in the same commit so a `git revert` of that commit is sufficient to restore the prior shape on both ends.
 - Service-layer additions (S1 preflight checks, S2 guard, V2 advisory lock) are additive within an existing function; revert via `git revert` of the chunk commit.
 - Operator-action items (O5 branch protection) are reverted at the GitHub UI; the spec's `progress.md` records the prior state (pre-build branch-protection settings) before the change is applied so the operator can restore exactly that state if needed.
@@ -82,7 +82,7 @@ This is not a change-management process — it is a precondition for the build. 
 
 Locked invariants the implementation plan must respect. Any deviation requires a spec update before code is written.
 
-- **Migration range:** `0313–0315`. No additional migration numbers may be used without amending the spec.
+- **Migration range:** `0318–0320`. No additional migration numbers may be used without amending the spec.
 - **Webhook replay dedup:** correctness is enforced by `UNIQUE (organisation_id, webhook_source, nonce)` on `webhook_replay_nonces` plus `INSERT ... ON CONFLICT DO NOTHING`. Duplicate delivery returns `200` with no side effects and emits `webhook.teamwork.replay_deduped`. TTL pruning is storage hygiene only and must not affect correctness.
 - **Webhook token storage:** the Teamwork webhook token lives on the shared `connector_configs` table (column `webhook_token uuid NULL`, partial UNIQUE index `WHERE webhook_token IS NOT NULL`). The implementation plan must name the table and the partial-index expression before any code is written.
 - **Support read scoping:** every support read endpoint moves under `/api/subaccounts/:subaccountId/support/...`. Zero remaining frontend or API-client callers of the unscoped paths; verified by grep at acceptance.
@@ -168,10 +168,10 @@ Locked invariants the implementation plan must respect. Any deviation requires a
 - The Teamwork-specific data migration (see migrations below) populates `webhook_token` only on rows where `connector_type = 'teamwork'`; other providers are untouched.
 
 **Migrations:**
-- `0313_webhook_replay_nonces.sql` — creates `webhook_replay_nonces (organisation_id, webhook_source text NOT NULL, nonce text NOT NULL, seen_at timestamptz NOT NULL DEFAULT now())` with `UNIQUE (organisation_id, webhook_source, nonce)` (this is the dedup invariant — the unique constraint alone enforces correctness) plus a secondary index on `(organisation_id, webhook_source, seen_at)` for the prune scan; RLS policy registering `webhook_replay_nonces` in `rlsProtectedTables.ts`. Down migration drops the table.
-- `0314_connector_configs_webhook_token.sql` — adds `webhook_token uuid NULL` to `connector_configs`; partial UNIQUE index `(webhook_token) WHERE webhook_token IS NOT NULL`; data step populates `webhook_token = gen_random_uuid()` for rows where `connector_type = 'teamwork' AND webhook_token IS NULL`. Down migration drops the index and the column.
+- `0318_webhook_replay_nonces.sql` — creates `webhook_replay_nonces (organisation_id, webhook_source text NOT NULL, nonce text NOT NULL, seen_at timestamptz NOT NULL DEFAULT now())` with `UNIQUE (organisation_id, webhook_source, nonce)` (this is the dedup invariant — the unique constraint alone enforces correctness) plus a secondary index on `(organisation_id, webhook_source, seen_at)` for the prune scan; RLS policy registering `webhook_replay_nonces` in `rlsProtectedTables.ts`. Down migration drops the table.
+- `0319_connector_configs_webhook_token.sql` — adds `webhook_token uuid NULL` to `connector_configs`; partial UNIQUE index `(webhook_token) WHERE webhook_token IS NOT NULL`; data step populates `webhook_token = gen_random_uuid()` for rows where `connector_type = 'teamwork' AND webhook_token IS NULL`. Down migration drops the index and the column.
 
-**`gen_random_uuid()` preflight (locked):** repo convention is to rely on `gen_random_uuid()` being available (used unconditionally in migrations 0012, 0013, 0018, 0022, 0025 with no preceding `CREATE EXTENSION`). Migration 0314 follows that convention — it does **not** add `CREATE EXTENSION IF NOT EXISTS pgcrypto`. Builder must not introduce a `CREATE EXTENSION` statement here without a corresponding repo-wide convention change (out of scope for this build). If a fresh-database boot ever fails on `gen_random_uuid()`, the fix lives in the schema-bootstrap migration, not in this build's migrations.
+**`gen_random_uuid()` preflight (locked):** repo convention is to rely on `gen_random_uuid()` being available (used unconditionally in migrations 0012, 0013, 0018, 0022, 0025 with no preceding `CREATE EXTENSION`). Migration 0319 follows that convention — it does **not** add `CREATE EXTENSION IF NOT EXISTS pgcrypto`. Builder must not introduce a `CREATE EXTENSION` statement here without a corresponding repo-wide convention change (out of scope for this build). If a fresh-database boot ever fails on `gen_random_uuid()`, the fix lives in the schema-bootstrap migration, not in this build's migrations.
 
 **Replay correctness invariant (locked):** Replay rejection correctness depends solely on the `UNIQUE (organisation_id, webhook_source, nonce)` constraint and `INSERT ... ON CONFLICT DO NOTHING`. Replay protection is guaranteed **only while the corresponding nonce row exists in the table.** The hourly TTL prune job's purpose is bounded storage growth, not correctness: prune *failure* extends dedup coverage (more rows retained, more duplicates rejected); prune *success* after the 10-minute retention window deletes old nonce rows, after which a duplicate delivery of the same `deliveryId` would be accepted as a fresh delivery. This is acceptable given Teamwork's at-least-once retry semantics — providers do not retry the same delivery 10+ minutes later in normal operation. The 10-minute retention window is therefore the **storage-retention horizon**, not a correctness boundary; choosing to retain longer (or partition/archive) is a future operational decision, not a correctness fix.
 
@@ -292,11 +292,11 @@ When `overrideCollision=true` and the principal is human (S2 holds), check 5 is 
 **Target:**
 
 1. **Route layer:** Zod schema rejects unknown `connectionStatus` strings: `connectionStatus: z.enum(['active','revoked','error']).optional()`. Reject → 400 `connection.status_invalid`.
-2. **DB layer:** new migration `0315_connections_status_check.sql` adds a CHECK constraint on `integration_connections.connection_status` matching the enum. Idempotent.
+2. **DB layer:** new migration `0320_connections_status_check.sql` adds a CHECK constraint on `integration_connections.connection_status` matching the enum. Idempotent.
 
 The two layers are deliberately redundant: the route guard prevents the bad write at runtime; the CHECK constraint ensures any future code path that bypasses the route can't poison the column.
 
-**Migration preflight (locked):** before adding the CHECK constraint, `0315` runs a preflight `SELECT` against `integration_connections` for any existing `connection_status` value not in the enum. If the preflight returns any row, the migration aborts with an explicit diagnostic listing the offending row count and a sample of distinct invalid values. The migration MUST NOT silently coerce, NULL out, or rewrite the bad data — pre-prod posture means an explicit halt is preferable to a silent mutation, and the operator decides the cleanup path before re-running.
+**Migration preflight (locked):** before adding the CHECK constraint, `0320` runs a preflight `SELECT` against `integration_connections` for any existing `connection_status` value not in the enum. If the preflight returns any row, the migration aborts with an explicit diagnostic listing the offending row count and a sample of distinct invalid values. The migration MUST NOT silently coerce, NULL out, or rewrite the bad data — pre-prod posture means an explicit halt is preferable to a silent mutation, and the operator decides the cleanup path before re-running.
 
 **Acceptance:**
 - Negative test: PATCH with `connectionStatus: 'foo'` → 400.
@@ -419,12 +419,12 @@ The guard module `scripts/lib/prod-db-guard.ts` (new) is reused by O4 and any fu
 The architect agent decomposes this spec into builder-sized chunks. Recommended boundaries:
 
 - **C1 — W1, W2** (webhook auth + 5xx incidents). Co-locates webhook stack changes.
-- **C2 — W3** (cross-tenant attribution + persistent dedup). Includes migrations 0313, 0314.
+- **C2 — W3** (cross-tenant attribution + persistent dedup). Includes migrations 0318, 0319.
 - **C3 — T1** (support read scoping). Co-locates the three route files + service helpers.
 - **C4 — T2** (promote endpoint).
 - **C5 — T3** (`taskService.createTask` rewrite). Largest chunk — runs solo to keep the diff reviewable.
 - **C6 — S1, S2** (support draft preflight + agent guard). Co-locates because S2 is a guard inside S1's call path.
-- **C7 — V1** (connection status enum + migration 0315).
+- **C7 — V1** (connection status enum + migration 0320).
 - **C8 — V2** (knowledge override race).
 - **C9 — O1, O3, O4** (operational scripts + job SQL fix).
 - **C10 — O2 runbook + O5 branch-protection record.**

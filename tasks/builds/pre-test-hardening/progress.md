@@ -230,7 +230,7 @@ client/src/pages/support/TicketDetailPage.tsx:71                api.get(`/api/su
 
 Run by `spec-conformance` agent, full-spec scope. All 14 implementation items (W1, W2, W3, T1, T2, T3, S1, S2, V1, V2, O1, O2, O3, O4, O5) verified against `spec.md`.
 
-- **PASS:** W1, W2 (Slack + Teamwork), W3 (route shape, migrations 0313+0314, persistent dedup, TTL prune job), T1, T2, T3, S1, S2, V1, V2, O1, O2 (runbook), O3, O4.
+- **PASS:** W1, W2 (Slack + Teamwork), W3 (route shape, migrations 0318+0319, persistent dedup, TTL prune job), T1, T2, T3, S1, S2, V1, V2, O1, O2 (runbook), O3, O4.
 - **MECHANICAL_GAP fixed in-session:** progress.md DEC-1..4 re-statement (this section); progress.md T1 grep-gate paste (above section).
 - **OUT_OF_SCOPE:** O5 (operator action — applied at merge-ready).
 

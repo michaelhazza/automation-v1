@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-08 (§8.30 SQL CASE enum mappers use ELSE NULL — govern surface review; §8.31 non-durable async PLAN_GAP documentation — consolidation-build, merged from main during S2 sync)
+**Last updated:** 2026-05-10 (§8.32 cycle-prevention assertions must cover all files in the import chain — execution-backend-adapter-contract)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -232,6 +232,10 @@ When a SQL `CASE` expression maps a DB enum column to a typed value for consumpt
 ### 8.31 Non-durable async operations must carry an explicit durability comment
 
 Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durable queue must carry a comment naming the residual risk (e.g. orphaned `agent_runs` rows on process restart) and a `tasks/builds/*/migration-gaps.md` PLAN_GAP entry. Silently non-durable is worse than explicitly deferred — a future developer cannot tell whether the omission was deliberate.
+
+### 8.32 Cycle-prevention assertions must cover all files in the import chain
+
+When adding a no-circular-import assertion (e.g. a test that reads file source and asserts no import of module X), extend the assertion to cover every file in the chain that could reintroduce the cycle — not only the root file. A gap at any downstream node leaves the cycle risk undetected by the test.
 
 ---
 
