@@ -35,6 +35,15 @@ import type {
   TokenBudget,
 } from '../agentExecutionTypes.js';
 
+/**
+ * The full closed-union shape lives in `./options.ts`. Imported as a type
+ * here (and re-exported) so consumers can import a single name from this
+ * module without reaching for both files. Re-export is type-only — there
+ * is no runtime symbol crossing the boundary.
+ */
+import type { BackendOptions } from './options.js';
+export type { BackendOptions };
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -106,35 +115,6 @@ export type SandboxRequirement =
 // ---------------------------------------------------------------------------
 
 /**
- * Backend-specific options carried on a single dispatch call.
- *
- * Declared here as an opaque marker type so `types.ts` does not require a
- * forward reference to `options.ts`. The concrete closed discriminated
- * union lives in `server/services/executionBackends/options.ts` and is the
- * type adapters and dispatch callers use at the value level.
- *
- * Adapters reach into `options.ts` for the discriminated union; this slot
- * exists purely to keep the contract interface declarable without circular
- * imports.
- */
-export interface BackendOptionsBase {
-  /**
-   * Discriminant — MUST equal the resolving adapter's `ExecutionBackend.id`.
-   * Mismatch is rejected by `dispatch()` with `BackendOptionsMismatch`.
-   */
-  backendId: ExecutionBackendId;
-}
-
-/**
- * The full closed-union shape lives in `./options.ts`. Imported as a type
- * here (and re-exported) so consumers can import a single name from this
- * module without reaching for both files. Re-export is type-only — there
- * is no runtime symbol crossing the boundary.
- */
-import type { BackendOptions } from './options.js';
-export type { BackendOptions };
-
-/**
  * Input shape every adapter's `dispatch()` receives. Identical fields to
  * the existing `runAgenticLoop` parameter list — the dispatch contract
  * does not invent new inputs, it just relocates them behind a stable
@@ -149,10 +129,10 @@ export interface BackendDispatchInput {
   /** Resolved system prompt — same shape today's runAgenticLoop receives. */
   promptAssembly: PromptAssembly;
   tokenBudget: TokenBudget;
-  /** Hard cap; null = "no cap, use the loop default". */
-  maxToolCalls: number | null;
-  /** Wall-clock cap in ms; null = "no cap, use the loop default". */
-  timeoutMs: number | null;
+  /** Hard cap; always populated by the dispatch site, which resolves defaults before calling dispatch. */
+  maxToolCalls: number;
+  /** Wall-clock cap in ms; always populated by the dispatch site, which resolves defaults before calling dispatch. */
+  timeoutMs: number;
   /** Backend-specific options. Discriminated union per adapter. */
   backendOptions: BackendOptions;
 }
