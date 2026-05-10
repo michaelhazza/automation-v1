@@ -8,7 +8,7 @@
 import { Router, type Request } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { db } from '../../db/index.js'; // guard-ignore: rls-contract-compliance reason="internal finalize route opens an org-scoped tx with set_config GUC using the organisationId from the authenticated worker payload — no HTTP auth context exists for getOrgScopedDb on this worker-facing endpoint"
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { withOrgTx } from '../../instrumentation.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';

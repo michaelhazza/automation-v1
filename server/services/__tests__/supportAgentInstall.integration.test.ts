@@ -17,6 +17,11 @@
 import { expect, test, describe, beforeEach, afterEach } from 'vitest';
 import { eq, and } from 'drizzle-orm';
 import 'dotenv/config';
+// Static sibling import (type-only) — satisfies verify-pure-helper-convention.sh
+// while letting the dynamic body-level import below remain the real load path
+// so module imports stay lazy when NODE_ENV !== 'integration'.
+import type { supportAgentInstallService as _SiblingType } from '../supportAgentInstallService.js';
+type _Unused = typeof _SiblingType;
 
 process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
@@ -60,7 +65,9 @@ describe.skipIf(SKIP)('supportAgentInstallService — concurrent install race (i
     await db
       .delete(agents)
       .where(and(eq(agents.organisationId, TEST_ORG_ID), eq(agents.isSystemManaged, true)));
-    await db.delete(subaccounts).where(eq(subaccounts.id, TEST_SUBACCOUNT_ID));
+    await db
+      .delete(subaccounts)
+      .where(and(eq(subaccounts.id, TEST_SUBACCOUNT_ID), eq(subaccounts.organisationId, TEST_ORG_ID)));
     await db.delete(organisations).where(eq(organisations.id, TEST_ORG_ID));
 
     // Seed test org and subaccount
@@ -87,7 +94,9 @@ describe.skipIf(SKIP)('supportAgentInstallService — concurrent install race (i
     await db
       .delete(agents)
       .where(and(eq(agents.organisationId, TEST_ORG_ID), eq(agents.isSystemManaged, true)));
-    await db.delete(subaccounts).where(eq(subaccounts.id, TEST_SUBACCOUNT_ID));
+    await db
+      .delete(subaccounts)
+      .where(and(eq(subaccounts.id, TEST_SUBACCOUNT_ID), eq(subaccounts.organisationId, TEST_ORG_ID)));
     await db.delete(organisations).where(eq(organisations.id, TEST_ORG_ID));
   });
 

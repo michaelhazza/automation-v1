@@ -256,7 +256,7 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
     ? await orgDb
         .select({ name: subaccounts.name })
         .from(subaccounts)
-        .where(eq(subaccounts.id, subaccountId))
+        .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
         .limit(1)
     : [{ name: 'default' }];
 
