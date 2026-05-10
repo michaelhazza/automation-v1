@@ -82,7 +82,7 @@ The fix is the abstraction the brief Decision 2 specifies: every per-run executi
 3. Generalise `finaliseAgentRunFromIeeRun` → `finaliseAgentRunFromBackend` so any delegated backend can finalise via one shared code path.
 4. Generalise the existing `maintenance:iee-main-app-reconciliation` cron into a backend-iterating reconciliation that walks every registered adapter declaring a delegated lifecycle.
 5. Declare `capabilities`, `costModel`, and `sandboxRequirements` metadata on every adapter so downstream specs (Sandbox, Operator Session Identity, future routing) consume metadata rather than introspecting `executionMode` strings.
-6. Add a per-organisation backend preference field (`organisations.preferredBackends`) so customer-pinning is possible *without* a router. Used by adapter resolution as a tie-break when an organisation is configured to a specific backend variant.
+6. Add a per-organisation backend preference field (`organisations.preferredBackends`) as **schema-only forward-compat metadata** so customer-pinning is possible *without* a router once routing lands. **V1 does not read this column at runtime** — `executionBackendRegistry.resolve()` ignores it; identity mapping is hard-coded. The schema lands now so Phase 3.5+ routing does not need a fresh migration.
 7. Forward-compat the contract for `auth_type: 'operator_session'` (Spec C) and `sandboxRequirements: ['code_execution']` (Spec B) without naming either explicitly in V1 dispatch logic.
 
 ### Non-goals (V1)
@@ -121,7 +121,7 @@ Per `docs/spec-authoring-checklist.md` § 1, every new primitive proposed below 
 | Denormalised reference | `agent_runs.ieeRunId` (uuid, nullable; migration 0176) | **Generalise via second column.** Add `agent_runs.backendTaskId text` (nullable) and `agent_runs.backendId text` (nullable). The existing `ieeRunId` column stays as the IEE adapter's persistence (kept for index continuity); new adapters use the generic columns. |
 | Capability declaration | None — capabilities are inferred from `executionMode` strings today | **New.** Adapter exposes `readonly capabilities: ExecutionCapability[]`. Defined in §4. |
 | Cost-model declaration | None — `agent_runs` cost columns + `iee_runs` cost columns are read site-by-site | **New.** Adapter exposes `readonly costModel: CostModel`. Defined in §4. Consumed by the cost ledger in Spec C and by future routing. |
-| Per-org backend preference | None | **New column.** `organisations.preferred_backends jsonb` with default `{}`. Consulted by adapter resolution; absence means "use the default for this `executionMode`". Defined in §4. |
+| Per-org backend preference | None | **New column (schema-only V1).** `organisations.preferred_backends jsonb` with default `{}`. Lands now as forward-compat metadata for Phase 3.5+ routing; V1 adapter resolution does not read it. Defined in §4 / §10.3. |
 
 The `executionMode` column itself is **not** removed. It remains the persisted adapter selector — the contract is layered on top, not a replacement for the field. Long-term the column may be renamed to `backend_id`, but that rename is explicitly deferred (§19).
 
@@ -133,10 +133,26 @@ The `executionMode` column itself is **not** removed. It remains the persisted a
 
 The contract every adapter implements. New file: `server/services/executionBackends/types.ts`.
 
+#### Type origins
+
+The interface signature below references several types — explicit citations so implementers do not re-invent them:
+
+| Type | Origin | New / existing |
+|---|---|---|
+| `ExecutionMode` | `shared/types/executionEnvironment.ts` (existing closed union: `'api' \| 'headless' \| 'claude-code' \| 'iee_browser' \| 'iee_dev'`) | existing |
+| `PromptAssembly` | `server/services/agentRunPromptService.ts` (existing — same shape `runAgenticLoop` consumes today) | existing |
+| `TokenBudget` | `server/services/agentExecutionService.ts` (existing internal type) | existing |
+| `AgentRunTerminalStatus` | `shared/runStatus.ts` (existing — `TERMINAL_RUN_STATUSES` set) | existing |
+| `LoopResult` | `server/services/agentExecutionService.ts` (existing internal type returned by `runAgenticLoop`) | existing |
+| `Transaction` | `server/db/index.ts` (existing — Drizzle transaction handle) | existing |
+| `BackendDispatchInput` / `BackendDispatchResult` / `BackendFinalisationInput` / `BackendFinalisationResult` / `BackendTerminalState` / `BackendOptions` / `ExecutionCapability` / `CostModel` / `SandboxRequirement` | `server/services/executionBackends/types.ts` (new file authored in Chunk 1) | **new** |
+| `BackendProgressEvent` / `UnsubscribeFn` | reserved type aliases for the deferred `onProgress` capability — declared as `unknown` placeholders in `types.ts` and refined when streaming lands (§19) | **new (placeholder)** |
+
 ```ts
 import type { ZodSchema } from 'zod';
 import type { IeeRun } from '../../db/schema/ieeRuns.js';
 import type { AgentRun } from '../../db/schema/agentRuns.js';
+import type { Transaction } from '../../db/index.js';
 
 /**
  * Capability declarations describe what an adapter supports beyond bare dispatch.
@@ -216,6 +232,13 @@ export interface BackendFinalisationInput {
   terminalState: BackendTerminalState;
   /** Re-loaded from DB at finaliser entry; not trusted from event payload. */
   parentRun: AgentRun;
+  /**
+   * Caller-owned transaction. The adapter MUST use this transaction for any DB
+   * writes; it MUST NOT open its own transaction. The caller (finaliseAgentRunFromBackend)
+   * commits or rolls back atomically across the adapter writes and the parent-run
+   * terminal update.
+   */
+  tx: Transaction;
 }
 
 export interface BackendFinalisationResult {
@@ -246,11 +269,28 @@ export interface ExecutionBackend {
    * Null for non-delegated adapters.
    */
   readonly completedEventQueue: string | null;
+  /**
+   * Name of the canonical terminal-state table this adapter owns. Used by
+   * registry validation to enforce the rule "adapters sharing a queue MUST
+   * share storage" (§13.4). Null for non-delegated adapters.
+   */
+  readonly terminalStateTable: string | null;
   /** Zod schema for the terminal event payload. Used by the handler to validate. */
   readonly completedEventPayload: ZodSchema | null;
   /**
-   * Map a backend-side terminal state to the agent_runs terminal status.
-   * Called by finaliseAgentRunFromBackend. Pure — must not touch DB.
+   * Load the adapter's canonical terminal-state row inside the caller-owned
+   * transaction. Must take a row-level lock (`FOR UPDATE`) so the shared
+   * finaliser can serialise concurrent handler+cron entry on the same row.
+   * Returns null when the row does not exist (treated as no-op terminal).
+   */
+  loadTerminalState?(tx: Transaction, backendTaskId: string): Promise<BackendTerminalState | null>;
+  /**
+   * Apply the adapter's backend-specific terminal mapping and write any
+   * adapter-owned columns inside the caller-owned transaction (`input.tx`).
+   * MUST NOT open its own transaction. MUST NOT trust event-payload data —
+   * the caller has already re-loaded the canonical row via `loadTerminalState`.
+   * The shared caller writes the parent `agent_runs` terminal update
+   * atomically alongside whatever the adapter writes.
    */
   finalise?(input: BackendFinalisationInput): Promise<BackendFinalisationResult>;
   /**
@@ -299,11 +339,25 @@ Future adapters extend the union; the contract has no implicit "any" path.
 
 For a delegated backend, the same logical fact (terminal state) lives in three places: the backend's terminal-state row (e.g., `iee_runs`), the parent `agent_runs` row, and any pg-boss event payload. Per `docs/spec-authoring-checklist.md` § 3, the precedence is declared explicitly:
 
-1. **Backend's terminal-state row (canonical source).** The IEE adapter's source-of-truth row is `iee_runs`. Future adapters declare their own (e.g., `openclaw_runs` for OpenClaw). Always re-loaded at finaliser entry.
+1. **Backend's terminal-state row (canonical source).** The IEE adapter's source-of-truth row is `iee_runs`. Future adapters declare their own (e.g., `openclaw_runs` for OpenClaw). Always re-loaded at finaliser entry via the adapter's `loadTerminalState()`.
 2. **Parent `agent_runs` row (derived).** Status, cost rollup, summary derived from #1 by `finaliseAgentRunFromBackend`. Treated as cached projection.
-3. **Pg-boss event payload (hint only).** Used for routing the event to the correct adapter; never trusted as data. Contains only `{ backendId, backendTaskId }` plus the queue's required envelope.
+3. **Pg-boss event payload (hint only).** Used for routing the event to the correct adapter; never trusted as data. New delegated backends authored after this spec emit `{ backendId, backendTaskId }` plus the queue's required envelope. **The existing IEE queue (`iee-run-completed`) keeps its current `{ ieeRunId, ... }` payload shape unchanged in V1**; `ieeRunCompletedHandler` loads `iee_runs`, derives `backendId` from `iee_runs.task_type` (`'browser_use' → 'iee_browser'`, `'dev_runner' → 'iee_dev'`), and calls `finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRunId })`. This preserves the no-behaviour-change claim for V1; future generic delegated backends adopt the new payload shape from day one.
 
 The handler always re-loads the canonical row before calling the finaliser. Existing IEE handler already does this (`server/jobs/ieeRunCompletedHandler.ts:78–86`); the pattern continues.
+
+#### Adapter selector precedence (executionMode vs backend_id vs adapter id)
+
+Three adjacent identifiers exist:
+
+- `agent_runs.executionMode` (existing column) — the persisted adapter selector. Canonical at dispatch time.
+- `agent_runs.backend_id` (new column, §4.4) — a derived snapshot written at dispatch time for delegated reconciliation and trace joins. In V1, **always equal to `executionMode`**. Future adapters with internal variants may diverge from `executionMode` (e.g., `openclaw_managed` vs `openclaw_external` could share an `executionMode = 'openclaw'` while `backend_id` distinguishes them). That divergence does not exist in V1.
+- `ExecutionBackend.id` (new contract field, §4.1) — the in-memory key the registry resolves on. Equals `backend_id` once a delegated row is in flight; equals `executionMode` at dispatch time.
+
+V1 precedence rule:
+
+1. **Dispatch path:** `request.executionMode` → `registry.resolve(executionMode)`. The dispatch site never reads `backend_id` (the parent row does not have a `backend_id` value yet).
+2. **Finalisation / reconciliation path:** `agent_runs.backend_id` → `registry.resolve(backend_id)`. Finalisation runs after dispatch wrote the snapshot, so `backend_id` is always populated for delegated rows.
+3. **Divergence between `executionMode` and `backend_id` on a single row is invalid in V1.** Adapter dispatch writes both columns to the same value in the same UPDATE that transitions the parent run to `'delegated'`. A reconciliation query that observes a mismatch logs `backend.selector_mismatch` and skips the row (the operator can repair manually). No automated repair in V1.
 
 ### 4.4 New columns
 
@@ -320,7 +374,7 @@ The existing `agent_runs.iee_run_id` (uuid) stays for index continuity. The IEE 
 
 | Column | Type | Notes |
 |---|---|---|
-| `preferred_backends` | `jsonb NOT NULL DEFAULT '{}'` | Map of `{ executionMode: backendId }` overrides. V1 uses identity mapping (each `executionMode` resolves to one adapter), so the column is unused at dispatch time but present at the schema level. Adapter resolution function reads it; future adapters with internal variants (e.g., `openclaw_managed` vs `openclaw_external`) gain a routing seam without further migrations. |
+| `preferred_backends` | `jsonb NOT NULL DEFAULT '{}'` | Map of `{ executionMode: backendId }` overrides. **Schema-only in V1** — adapter resolution does NOT read this column at dispatch time (V1 uses pure identity mapping). Column lands now so Phase 3.5+ routing — when adapters with internal variants such as `openclaw_managed` vs `openclaw_external` arrive — has a populated migration to read against without a fresh schema change. |
 
 Both migrations are additive, nullable / defaulted, and reversible. No data backfill.
 
@@ -335,14 +389,20 @@ export const ieeBrowserBackend: ExecutionBackend = {
   costModel: 'per_token',
   sandboxRequirement: 'browser',
   completedEventQueue: 'iee-run-completed',
+  terminalStateTable: 'iee_runs',
   completedEventPayload: ieeRunCompletedPayloadSchema, // existing zod
   async dispatch(input) {
     // Body = current lines 1413–1473 of agentExecutionService.ts, lifted unchanged.
     // Returns { lifecycle: 'delegated', backendTaskId: enqueueResult.ieeRunId, loopResult: null, deduplicated }.
   },
+  async loadTerminalState(tx, backendTaskId) {
+    // tx.select().from(ieeRuns).where(eq(ieeRuns.id, backendTaskId)).for('update')
+    // → mapped into BackendTerminalState shape. Returns null if no row.
+  },
   async finalise(input) {
-    // Body = current finaliseAgentRunFromIeeRun, with the row-loading + tx envelope
-    // moved into the shared finaliseAgentRunFromBackend caller.
+    // Body = current finaliseAgentRunFromIeeRun mapping logic, lifted into here.
+    // Receives input.tx — uses it for any iee_runs writes (e.g. eventEmittedAt).
+    // Does NOT open its own transaction.
   },
   async reconcile() {
     // Body = current reconcileStuckDelegatedRuns filtered to ieeRuns; identical SQL.
@@ -422,7 +482,7 @@ class ExecutionBackendRegistry {
   private readonly backends = new Map<ExecutionMode, ExecutionBackend>();
 
   register(backend: ExecutionBackend): void;
-  resolve(mode: ExecutionMode, organisationId: string): ExecutionBackend;
+  resolve(mode: ExecutionMode): ExecutionBackend;
   forEach(callback: (backend: ExecutionBackend) => void): void;
   forDelegated(): ExecutionBackend[]; // backends declaring 'delegated' capability
 }
@@ -430,16 +490,19 @@ class ExecutionBackendRegistry {
 export const executionBackendRegistry = new ExecutionBackendRegistry();
 ```
 
-`resolve()` takes `organisationId` so future internal-variant routing (e.g., `openclaw_managed` vs `openclaw_external`) can read `organisations.preferred_backends`. V1 uses identity mapping; the parameter is plumbed through but the lookup is `this.backends.get(mode)` plus the preferred-backends override.
+`resolve()` is **synchronous and parameterless beyond the mode** in V1. The lookup is `this.backends.get(mode)`. Throws `BackendNotRegistered` if the mode has no registered adapter (treated as a startup-validation bug — every `ExecutionMode` value MUST resolve).
+
+Phase 3.5+ routing (§19) will extend `resolve()` to accept a preloaded `PreferredBackends` shape (read once per request from `organisations.preferred_backends` and threaded through the dispatch context). That extension is deliberately out of scope for V1; adding the parameter now would force every dispatch caller to plumb an unused value through. The extension point is named here so the future signature change is anticipated.
 
 ### 8.2 Boot-time validation
 
 The registry validates each adapter at registration:
 
 - `id` is a valid `ExecutionMode` value (TypeScript enforces this at the type level).
-- If `capabilities` includes `'delegated'`, then `completedEventQueue`, `completedEventPayload`, `finalise`, and `reconcile` are all defined. Missing any throws `BackendCapabilityViolation`.
+- If `capabilities` includes `'delegated'`, then `completedEventQueue`, `completedEventPayload`, `loadTerminalState`, `finalise`, and `reconcile` are all defined. Missing any throws `BackendCapabilityViolation`.
 - If `capabilities` includes `'cancellation'`, then `cancel` is defined.
 - `sandboxRequirement` is one of the known values.
+- Two adapters MAY share `completedEventQueue` if and only if they share their underlying terminal-state storage (e.g., `iee_browser` and `iee_dev` both share `iee_runs`). Two adapters declaring the same queue but different storage tables fail registration with `BackendQueueOwnershipViolation`. The rule is enforced declaratively via an optional `terminalStateTable: string` field on each delegated adapter; same-queue adapters MUST share the same `terminalStateTable` value.
 
 Validation runs at boot in `server/index.ts` after registering each adapter; failure is a fatal startup error with a specific log line. Adapters that fail validation never reach dispatch.
 
@@ -460,19 +523,22 @@ export async function finaliseAgentRunFromBackend(args: {
   backendId: ExecutionMode;
   backendTaskId: string;
 }): Promise<boolean> {
-  const backend = executionBackendRegistry.resolve(args.backendId, /* org context */);
-  if (!backend.finalise) {
-    throw new Error(`backend ${args.backendId} declared 'delegated' but provides no finalise()`);
+  const backend = executionBackendRegistry.resolve(args.backendId);
+  if (!backend.loadTerminalState || !backend.finalise) {
+    throw new Error(`backend ${args.backendId} declared 'delegated' but missing loadTerminalState/finalise`);
   }
 
   // Re-load the adapter's terminal-state row + parent agent_run, transactionally.
-  // The adapter exposes a loadTerminalState() helper — see §9.3.
+  // loadTerminalState takes FOR UPDATE on the canonical row; loadParentRun takes
+  // FOR UPDATE on agent_runs. First commit wins on cross-process races.
   return await db.transaction(async (tx) => {
-    const terminalState = await backend.loadTerminalState(tx, args.backendTaskId);
+    const terminalState = await backend.loadTerminalState!(tx, args.backendTaskId);
     if (!terminalState) return false;
     const parentRun = await loadParentRun(tx, terminalState.agentRunId);
     if (!parentRun) return false;
-    const result = await backend.finalise!({ terminalState, parentRun });
+    // Adapter writes adapter-owned columns (e.g. iee_runs.eventEmittedAt) through tx.
+    // Caller writes the parent agent_runs terminal update through tx after finalise resolves.
+    const result = await backend.finalise!({ terminalState, parentRun, tx });
     return result.finalised;
   });
 }
@@ -534,7 +600,7 @@ Every adapter declares `costModel`. V1 does not read it. Spec C cost surfaces an
 
 ### 10.3 Per-org backend preference — see §4.4
 
-`organisations.preferred_backends jsonb DEFAULT '{}'`. V1 reads it during `registry.resolve()` but identity-resolves every value (the JSON shape is `{ executionMode: backendId }`; in V1 these are equal). Spec C / Phase 3.5+ adapter-variant routing reads non-trivial entries.
+`organisations.preferred_backends jsonb DEFAULT '{}'`. **Schema-only in V1** — `executionBackendRegistry.resolve()` does not read it. The column exists so Phase 3.5+ adapter-variant routing has a populated migration to read against (spec C / future routing). The intended JSON shape is `{ executionMode: backendId }`; V1 always identity-resolves at the registry level so no consumer needs to read this column yet.
 
 ### Why include these in V1
 
@@ -554,14 +620,15 @@ Per `docs/spec-authoring-checklist.md` § 1, each is justified as an extension o
 | Adapter — claude-code | `server/services/executionBackends/claudeCodeBackend.ts` (new) | Lifts `agentExecutionService.ts:1474–1521`. |
 | Adapter — iee_browser | `server/services/executionBackends/ieeBrowserBackend.ts` (new) | Lifts `agentExecutionService.ts:1413–1473` (browser branch) + IEE `finalise`/`reconcile`. |
 | Adapter — iee_dev | `server/services/executionBackends/ieeDevBackend.ts` (new) | Lifts the dev branch + shares finaliser logic with iee_browser. |
-| Service — dispatch | `server/services/agentExecutionService.ts` | Replace lines 1408–1521 dispatch ladder with `executionBackendRegistry.resolve(effectiveMode, organisationId).dispatch(input)`. Post-completion block stays for in-process / subprocess lifecycles. |
+| Service — dispatch | `server/services/agentExecutionService.ts` | Replace lines 1408–1521 dispatch ladder with `executionBackendRegistry.resolve(effectiveMode).dispatch(input)`. Post-completion block stays for in-process / subprocess lifecycles. Delegated adapters' `dispatch()` writes `backend_id` + `backend_task_id` on the parent run as part of the same UPDATE that sets `status = 'delegated'` (see § 13.1.1). |
 | Service — finaliser | `server/services/agentRunFinalizationService.ts` | Add `finaliseAgentRunFromBackend`. Keep `finaliseAgentRunFromIeeRun` as thin alias during transition; remove in cutover. |
 | Service — reconciliation | `server/services/agentRunFinalizationService.ts` | Add `reconcileBackends`; existing `reconcileStuckDelegatedRuns` becomes alias for one phase, removed in cutover. |
 | Schema | `server/db/schema/agentRuns.ts` | Add `backendId text` and `backendTaskId text` columns. No status enum change. |
+| Schema | `server/db/schema/ieeRuns.ts` | Extend `iee_runs.failureReason` TS union to include `'parent_orphaned'` (§ 13.1.1). No SQL migration — text column. |
 | Schema | `server/db/schema/organisations.ts` | Add `preferredBackends jsonb` column with `default '{}'`. |
 | Migration | `server/db/migrations/0310_execution_backend_columns.sql` (new — number contingent on main) | Two columns on `agent_runs`, one on `organisations`. Two partial indexes on `agent_runs`. |
 | Job handler | `server/jobs/ieeRunCompletedHandler.ts` | Internally delegate to `finaliseAgentRunFromBackend({ backendId: 'iee_browser' or 'iee_dev', backendTaskId })`. Behaviour unchanged. |
-| Job handler | `server/jobs/index.ts` (or `server/index.ts` boot block) | Register adapters in registry post-boot. |
+| Boot registration | `server/index.ts` | Register adapters in `executionBackendRegistry` immediately after the existing IEE handler registration block (lines 648–659). Sync, no I/O — see § 8.3. |
 | Cron | `server/services/queueService.ts:1160` | Rename `maintenance:iee-main-app-reconciliation` → `maintenance:backend-reconciliation`. Call `reconcileBackends`. Add boot-time unregister of the old name. |
 | Telemetry | `server/services/ieeUsageService.ts` | No change in V1 — reads continue against `iee_runs` and the `delegated` count. (A future generalisation to per-backend dashboards is § 19 deferred.) |
 | Tests | `server/services/executionBackends/__tests__/contractPure.test.ts` (new) | Contract tests against an in-memory mock adapter; runs first per § 14. |
@@ -578,7 +645,7 @@ No new tenant-scoped tables. No new routes. Per `docs/spec-authoring-checklist.m
 
 - `agent_runs` and `organisations` are existing tenant-scoped tables; their RLS policies remain in force. The two new columns on `agent_runs` and one on `organisations` add no new access surface.
 - The adapter registry is a process-local singleton; adapters do not access the DB except via the existing services they wrap. No new principal-scoped contexts needed.
-- `organisations.preferred_backends` is read by adapter resolution. The read is scoped by the organisation already loaded into the run context — no additional RLS work.
+- `organisations.preferred_backends` is **not read by V1 code** (schema-only metadata; see § 4.4 / § 10.3). When Phase 3.5+ routing reads it, the read will be scoped by the organisation already loaded into the run context — no additional RLS work needed at that point either.
 - `executionBackendRegistry.resolve()` does not bypass any guard. The dispatch site already checks `agent.allowedExecutionModes` and the policy envelope before calling resolve.
 
 No opt-out documentation needed; no new tenant-scoped table.
@@ -593,10 +660,21 @@ Per `docs/spec-authoring-checklist.md` § 10:
 
 | Operation | Posture | Mechanism |
 |---|---|---|
-| `dispatch()` for delegated backend (parent run → `'delegated'`) | **state-based** | Existing UPDATE predicate: `WHERE agent_runs.id = ? AND status IN ('pending', 'running')`. 0-rows-affected = caller already saw a terminal state, abort with diagnostic. Same predicate as today. |
-| `finaliseAgentRunFromBackend()` | **state-based + key-based** | Existing IEE pattern preserved: parent row loaded `FOR UPDATE`; finaliser exits without writes if `parent.status !== 'delegated' && terminalState.eventEmittedAt`. Plus key on `iee_runs.id` (or future adapter's id). |
-| `reconcile()` per adapter | **safe (read-only filter + idempotent finalisation)** | Reconciliation reads candidate rows then calls the same finaliser. Each call is state-based-idempotent. Re-running the cron is safe. |
+| `dispatch()` for delegated backend (parent run → `'delegated'`) | **state-based + key-based** | Two-step contract — see § 13.1.1 for the exact ordering. (1) Backend task created/enqueued first with the adapter's idempotency key; existing IEE pattern uses `iee_runs.idempotency_key` UNIQUE — re-dispatch deduplicates onto the existing in-flight task. (2) Parent UPDATE: `WHERE agent_runs.id = ? AND status IN ('pending', 'running')`. 0-rows-affected on step 2 → adapter writes the orphan-cancellation row in step 3 (see below). |
+| `finaliseAgentRunFromBackend()` | **state-based + key-based** | Existing IEE pattern preserved: parent row loaded `FOR UPDATE` via `loadParentRun(tx, ...)`; canonical row loaded `FOR UPDATE` via `loadTerminalState(tx, ...)`. Finaliser exits without writes if `parent.status !== 'delegated' && terminalState.eventEmittedAt`. Plus key on `iee_runs.id` (or future adapter's id). |
+| `reconcile()` per adapter | **safe (read-only filter + idempotent finalisation)** | Reconciliation reads candidate rows then calls the same finaliser. Each call is state-based-idempotent. Re-running the cron is safe. Reconciliation MUST also filter out orphaned backend tasks (terminal-state row exists but parent is already terminal) — see § 13.1.1. |
 | `cancel()` | **state-based** | Existing IEE pattern: writes `agent_runs.status = 'cancelling'`, then `iee_runs.status = 'cancelled'`. Worker's per-step check sees the cancel and exits. Re-cancel is no-op. |
+
+#### 13.1.1 Delegated dispatch sequence — orphan-task contract
+
+Two writes are needed to dispatch a delegated run: create the backend task and update the parent. They cannot both happen atomically across the two storage systems (pg-boss + adapter table vs `agent_runs`). The contract names the order and the orphan-cleanup behaviour:
+
+1. **Step 1 — adapter creates / enqueues backend task.** The adapter's idempotency key is the existing per-adapter key (IEE: `iee_runs.idempotency_key` UNIQUE; future adapters declare their own). Re-dispatch with the same key dedupes onto the in-flight task and returns `{ deduplicated: true }` — see § 4.1 `BackendDispatchResult.deduplicated`.
+2. **Step 2 — caller updates parent run** with `WHERE id = ? AND status IN ('pending', 'running') ... SET status = 'delegated', backend_id = ?, backend_task_id = ?`. If 0 rows affected, the caller has already moved past the delegation window (terminal status reached via cancellation, etc.).
+3. **Step 3 (only on 0-rows step 2) — orphan cleanup.** The adapter's `dispatch()` MUST mark the just-created backend task as orphaned in adapter storage (IEE: write `iee_runs.status = 'cancelled', failureReason = 'parent_orphaned'`) and return a diagnostic error to the caller. The parent run is already in a terminal state, so no further finalisation is needed.
+4. **Reconciliation rule.** `reconcile()` for any delegated adapter MUST skip backend-task rows whose parent `agent_runs.status` is already terminal. Filter via `WHERE NOT EXISTS (SELECT 1 FROM agent_runs WHERE agent_runs.id = backend_task.agent_run_id AND agent_runs.status IN ('completed', 'failed', 'cancelled', 'timeout', 'budget_exceeded'))`. Existing IEE reconciliation already filters this way.
+
+The `'parent_orphaned'` failure reason is added to the IEE adapter's `failureReason` TS union as part of Chunk 3. No SQL migration needed (text column).
 
 ### 13.2 Retry classification
 
@@ -626,7 +704,7 @@ Each delegated adapter has exactly one terminal pg-boss event per backend task:
 - `iee_dev` → `iee-run-completed` (shared queue with `iee_browser` — see note)
 - Future: `openclaw_managed` → `openclaw-run-completed`
 
-**Shared-queue note (IEE):** the two IEE adapters share `iee-run-completed` because they share `iee_runs` storage. The handler routes by reading `iee_runs.task_type` from the loaded row. Future adapters that share storage may share queues; the rule is one queue per terminal-state table, not per adapter id. Documented at the registry validation step so a future adapter that violates the rule fails registration.
+**Shared-queue note (IEE):** the two IEE adapters share `iee-run-completed` because they share `iee_runs` storage. The handler routes by reading `iee_runs.task_type` from the loaded row, then derives `backendId` (`'browser_use' → 'iee_browser'`, `'dev_runner' → 'iee_dev'`) before calling `finaliseAgentRunFromBackend`. Future adapters that share storage may share queues; the rule — *one queue per terminal-state table, not per adapter id* — is enforced declaratively via the `terminalStateTable` field on each delegated adapter (§ 4.1, § 8.2). A future adapter declaring `completedEventQueue: 'iee-run-completed'` with a different `terminalStateTable` value fails registration with `BackendQueueOwnershipViolation`.
 
 Post-terminal prohibition: the worker's `finalizeRun()` writes `iee_runs.eventEmittedAt = now()` after the event; the cleanup-orphan reconciliation never re-fires for rows where `eventEmittedAt IS NOT NULL && parent.status` is terminal. Existing behaviour.
 
@@ -698,9 +776,11 @@ One spec, one Phase 2 build slug. Five chunks, in this order. Each chunk is inde
 - Replace `agentExecutionService.ts` lines 1408–1521 with:
 
   ```ts
-  const backend = executionBackendRegistry.resolve(effectiveMode, request.organisationId);
+  const backend = executionBackendRegistry.resolve(effectiveMode);
   const dispatchResult = await backend.dispatch({ /* mapped from request */ });
   if (dispatchResult.lifecycle === 'delegated') {
+    // Adapter has already updated parent: status='delegated', backend_id, backend_task_id.
+    // (See §13.1.1 — adapter writes both columns in the same UPDATE that transitions status.)
     return { runId: run.id, status: 'delegated', ... };
   }
   loopResult = dispatchResult.loopResult!;
@@ -730,7 +810,7 @@ Per `docs/spec-context.md` and `docs/spec-authoring-checklist.md` § 9: pure-fun
 ### Pure tests (new)
 
 - `executionBackends/__tests__/contractPure.test.ts` — capability-validation rules, dispatch-result shape exhaustiveness, options union closure. Uses an in-memory mock adapter implementing every capability shape.
-- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters, rejects malformed, resolves correctly with and without `preferredBackends` overrides.
+- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters; rejects adapters declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`; rejects same-queue + different-`terminalStateTable` pairs (`BackendQueueOwnershipViolation`); resolves every `ExecutionMode` value to its registered adapter.
 - `agentRunFinalizationServicePure.test.ts` (existing) — mapping table coverage stays; calls renamed to `finaliseAgentRunFromBackend`.
 
 ### Integration tests (existing, kept)
@@ -772,7 +852,7 @@ The work is complete when:
 4. Existing IEE integration test (`agentRunDelegationFlow.test.ts`) passes unchanged.
 5. Existing finalisation pure test (`agentRunFinalizationServicePure.test.ts`) passes after the rename to `finaliseAgentRunFromBackend`.
 6. New contract pure tests pass (`contractPure.test.ts`, `registryPure.test.ts`).
-7. Boot-time validation rejects an adapter declaring `'delegated'` without `finalise` / `reconcile` / `completedEventQueue` (asserted by registry pure test).
+7. Boot-time validation rejects an adapter declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`, and rejects same-queue + different-`terminalStateTable` pairs as `BackendQueueOwnershipViolation` (asserted by registry pure test).
 8. Cron `maintenance:backend-reconciliation` is registered post-deploy; cron `maintenance:iee-main-app-reconciliation` is unregistered.
 9. `agent_runs.backend_id` and `agent_runs.backend_task_id` columns exist with the partial indexes; `organisations.preferred_backends` exists with default `'{}'`.
 10. `architecture.md § Execution modes` describes the registry pattern; `docs/openclaw-strategic-analysis.md` Phase 1 marker updated.
@@ -786,7 +866,7 @@ The work is complete when:
 
 2. **Cron rename causes duplicate scheduling.** *Mitigation:* Chunk 5 includes a boot-time `boss.unschedule('maintenance:iee-main-app-reconciliation')` call to clean up the old schedule entry. After one release cycle, the unschedule call is removed. Documented in Chunk 5 verifier.
 
-3. **Per-org `preferred_backends` adds a JSONB column with implicit shape.** *Mitigation:* the column is documented in `architecture.md` as `Map<ExecutionMode, string>` with V1 identity-mapping. Phase 3.5+ routing introduces a Zod schema for the value; today the column is unused at runtime so a missing schema is not a blocker.
+3. **Per-org `preferred_backends` adds a JSONB column with implicit shape.** *Mitigation:* the column is **schema-only in V1** — no V1 code path reads it (registry resolution uses identity mapping). The column is documented in `architecture.md` as the intended `Map<ExecutionMode, string>` shape. Phase 3.5+ routing introduces the Zod schema for the value at the same time it introduces the read; until then the column accepts only the default `'{}'` and any non-default writes are rejected at the API layer (no V1 endpoint writes this column).
 
 4. **Two adapters (`iee_browser`, `iee_dev`) share `iee-run-completed` queue.** *Mitigation:* registry validation rejects adapters that share a queue without sharing storage; the rule is documented in §13.4. The existing IEE handler reads `iee_runs.task_type` to discriminate; this preserves today's behaviour.
 
@@ -800,6 +880,7 @@ The work is complete when:
 - `server/services/agentExecutionService.ts` (Chunk 5 — replaces dispatch ladder)
 - `server/services/agentRunFinalizationService.ts` (Chunk 3 — adds `finaliseAgentRunFromBackend`, `reconcileBackends`)
 - `server/db/schema/agentRuns.ts` (Chunk 2 — `backendId`, `backendTaskId` columns)
+- `server/db/schema/ieeRuns.ts` (Chunk 3 — extend `failureReason` TS union with `'parent_orphaned'`; no SQL migration)
 - `server/db/schema/organisations.ts` (Chunk 2 — `preferredBackends` column)
 - `server/services/queueService.ts` (Chunk 5 — cron rename + unschedule)
 - `server/jobs/ieeRunCompletedHandler.ts` (Chunk 3 — delegate to `finaliseAgentRunFromBackend`)
