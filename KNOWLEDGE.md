@@ -3623,3 +3623,27 @@ server/config/actionRegistry/
 **Rule.** When a runtime check covers a case the registry's invariants make impossible, the right outcome is a typed throw, not a silent boolean false. False says "this is a recoverable no-op state"; throw says "the system is in an invalid configuration the registry promised wouldn't happen". Calling finalisation on `api`, `headless`, or `claude-code` is a programmer error, not a recoverable case — the typed `FinaliseRequiresDelegatedAdapter` error makes the misuse loud at every layer (logs, sentry, route 500).
 
 **Detection heuristic.** When implementing a runtime guard that "shouldn't" be reachable per the registry's invariants, ask: "if this branch fires, is the system still in a valid state?" If no, throw a typed error so the failure is loud. If yes, return a typed result that distinguishes "recoverable no-op" from "actual success". Don't conflate the two by returning a generic false — the caller can't tell which branch fired and bug-hunting takes longer.
+
+## Pattern: UI pct() helper applied to wrong scale produces 400% — use scale-specific formatters
+
+**Context.** Phase-1-showcase-mvps finalisation (2026-05-11) — `SupportEvalsPage.tsx` had a shared `pct(value)` helper that multiplied by 100 and appended `%`. Classification accuracy (0–1 scale) rendered correctly: `pct(0.87) = "87.0%"`. Draft judge score (0–5 scale) rendered wrong: `pct(4.0) = "400.0%"`. Both the score and its threshold used `pct()`, so the mismatch was consistent (both showed 400%) and made it harder to spot.
+
+**Rule.** When a page displays two metrics with different scales (0–1 vs 0–5, or percentage vs score), each scale needs its own formatting helper. A single generic `pct()` is only safe when every value it formats is truly 0–1. The moment one metric is on a different scale, extract `judgeScoreDisplay()` (or equivalent) rather than overloading the 0–1 helper. The formatter name should encode the scale contract (`judgeScoreDisplay` is explicit; `pct` is ambiguous).
+
+**Detection heuristic.** Whenever a page renders two metrics side by side and one uses `pct()` while the other is documented as a 0–N scale elsewhere (column comment, spec, constant name), grep the UI for every `pct()` call and verify all inputs are genuinely 0–1.
+
+## Pattern: Components built in Phase 2 but never imported = dead UI — wire the registration at definition time
+
+**Context.** Phase-1-showcase-mvps chatgpt-pr-review (2026-05-11) — ChatGPT identified three run-trace UI components (`RunTraceArtifactsPanel`, `SupportEventRenderers` map, `MacroFailureRenderers`) that were fully implemented and exported but never imported in their entry-point files (`RunTracePage.tsx`, `RunTraceEventRenderer.tsx`). They were correct implementations of the spec but produced zero visible UI.
+
+**Rule.** When building a new panel, renderer, or map that must be registered or imported somewhere to take effect, write the registration (import statement + wiring line) in the same commit as the component definition. "The component is done" is not done — it's done when it's visible in the UI. For run-trace renderers specifically: a new `*Renderer` component must be (1) exported from its file and (2) imported + either registered in a lookup map or returned from a lookup function in `RunTraceEventRenderer.tsx`.
+
+**Detection heuristic.** After building any component intended for the run-trace event stream, grep `RunTraceEventRenderer.tsx` and `RunTracePage.tsx` for the component or its module path. If neither file imports it, the component is dead. Same applies to any registry pattern: grep the registry's file for the new handler's symbol.
+
+## Pattern: Pure helper encapsulates a policy — always call it, never hardcode the constant at the call site
+
+**Context.** Phase-1-showcase-mvps chatgpt-pr-review (2026-05-11) — `fileDeliveryServicePure.ts::deriveSignedUrlExpiry(artifactKind)` existed and correctly returned 604800s (7d) for `report` and 86400s (24h) for everything else. The signed-URL route in `runArtifacts.ts` built `expiresAt` with `const sevenDays = 7 * 24 * 60 * 60 * 1000` — always 7d regardless of artifact kind.
+
+**Rule.** When a pure helper encapsulates a policy (expiry, TTL, limit, threshold), callers MUST call the helper — never inline the magic number. The pure helper is the policy; inlining the number at the call site creates a second policy that silently diverges the moment the pure helper is updated. The fix is also a useful template: add the artifact kind to the select query, type it via the shared type, pass it to the pure helper.
+
+**Detection heuristic.** When writing any code that encodes a duration, limit, or threshold as a numeric literal, grep the codebase for a pure helper that returns the same kind of value. If a helper exists — use it. Common offenders: signed URL TTL (use `deriveSignedUrlExpiry`), eval thresholds (use the DB-stored values), score clamps (use `Math.min(MAX_SCALE, ...)`).
