@@ -6,7 +6,8 @@
 - PR: [#280](https://github.com/michaelhazza/automation-v1/pull/280) (MERGED — retrospective review)
 - Mode: manual
 - Started: 2026-05-10T02-43-55Z
-- Spec line count at start: 1394
+- **Verdict:** APPROVED (2 rounds — implementation-ready)
+- Spec line count at start: 1394; at finalisation: 1498
 - Predecessor sessions:
   - spec-reviewer (Codex) — 3 iterations, 30 mechanical fixes, 2 directional defers
   - chatgpt-spec-review (automated) — 3 rounds, ended CHANGES_REQUESTED. Log: `tasks/review-logs/chatgpt-spec-review-phase-1-showcase-mvps-2026-05-10T02-14-06Z.md`
@@ -155,8 +156,48 @@ Net: 4 surgical edits across 4 sections. Spec line count 1485 → 1498 (+13).
 
 ---
 
-## Final Summary (pending — awaiting operator "done" signal)
+## Final Summary
 
-ChatGPT recommended lock after Round 2. Operator decides whether to:
-- Say `done` to finalise (run consistency check, implementation-readiness checklist, doc-sync sweep, deferred-backlog routing)
-- Run a Round 3 pressure-test (recommended only if Round 2's small additions warrant another pass — they shouldn't, per ChatGPT)
+**Verdict: APPROVED — spec is implementation-ready.**
+
+Operator signalled finalise after Round 2 ("finalise spec after these updates").
+
+### Cross-round counters
+- Rounds: 2 (manual; second pass after the prior automated 3-round close on the same day)
+- Auto-accepted (technical): 15 applied · 0 rejected · 0 deferred
+- User-decided: 0 applied · 0 rejected · 0 deferred (zero user-facing escalations across both rounds)
+- Index write failures: 0 (the JSONL index exists and is appendable; no failures observed during this session)
+
+### Consistency check across rounds
+- Zero same-finding-type contradictions detected.
+- Round 2 fixes are purely additive extensions of Round 1 contracts (wasReplay extends the §6.1.5b payload table introduced in Round 1; COALESCE refines the §5.3.4 predicate introduced in Round 1; slug-stability invariant pins the slug column introduced in Round 1).
+- No Resolution lines required.
+
+### Implementation readiness checklist
+- [PASS] All inputs defined — every event has a payload schema (§3.5 registry); every skill has input/output schema (§5.4.1).
+- [PASS] All outputs defined — same.
+- [PASS] Failure modes covered — §4.4.4 PDF retry, §4.6.1 macro retry exhaustion, §5.4.1 classify Zod-parse failure, §5.5.2 eval drift, §6.1.2 migration failure recovery, §5.3.1 install race.
+- [PASS] Ordering guarantees explicit — §0.6 Phase A → Phase B sequencing, §5.3.4 atomic claim ordering, §6.1.4 worker-vs-main-app upload-and-row-insert ordering.
+- [PASS] No unresolved forward references — verified by post-edit integrity checks in both rounds (zero remaining bare references to renamed constructs).
+
+### Doc sync sweep verdicts (per `docs/doc-sync.md`)
+- KNOWLEDGE.md updated: yes (2 entries appended at lines ~3433-3445: "Stable-slug discriminator beats UUID literal in partial unique indexes" + "COALESCE optional canonical-layer watermarks in NOT-EXISTS predicates"; 5 patterns from prior automated session retained, including the existing PG-advisory + partial-index entry which the new slug-discriminator pattern refines)
+- architecture.md updated: no — checked grep for `run_artifacts`, `applied_template_slug`, `phase1.macro`, `phase1.support`, `phase1.file_delivery`, `run_kind_hash_unique`, `support_eval_runs`; zero stale references; spec is at the right altitude (architecture-level for two MVPs, not a global service-boundary or RLS-pattern change)
+- capabilities.md updated: n/a — capabilities.md describes shipped behaviour; the 42 Macro Full MVP and Support Agent MVP are forward-looking specs, not yet implemented. Existing 42 Macro mentions (line 592 capability narrative; line 811 `analyse_42macro_transcript` skill row) describe the partially-built state and remain accurate; capabilities.md will be updated in the same PR that ships each MVP.
+- integration-reference.md updated: n/a — no new integration introduced; spec uses existing Teamwork integration only.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — no new build-discipline rule, convention, or class-level invariant introduced; the slug-stability invariant is project-specific (binds the spec's install-flow code), not class-level enough to graduate to DEVELOPMENT_GUIDELINES.
+- spec-context.md updated: yes — bumped `last_reviewed_at` to 2026-05-10 and the prose-as-of date; framing constants verified still current (pre-production, static_gates_primary, no live users, all primitives still preferred).
+- frontend-design-principles.md updated: no — the new Run Trace artifact panel and Support Agent dashboard are described at the affordance level only (Preview / Download / Copy link buttons; status pill per inbox); they instantiate existing principles (single primary action, deferred detail) without introducing a new pattern or hard rule.
+
+### Deferred items
+None. All 15 findings across both rounds were applied as auto-accepted technical fixes; zero user-facing escalations; zero defers (auto or user). No entries appended to `tasks/todo.md`.
+
+### Pattern-extraction summary
+- Two new patterns appended to KNOWLEDGE.md (slug-discriminator, COALESCE null-safety).
+- One existing pattern at line 3417 (PG advisory_xact_lock + partial unique index) is refined by the new slug-discriminator entry — the existing entry stays per CLAUDE.md "never edit, only append" rule; the new entry references it explicitly as a refinement.
+
+### PR
+PR #280 — already MERGED 2026-05-10. This was a retrospective review session; the spec lives on `main`. Round 1 commit `0f405fa9` and Round 2 commit `f81d0c00` extend the spec on `main` directly (operator-authorised review-agent flow per CLAUDE.md User Preferences).
+
+### Recommended next step
+Hand off to architect for plan generation. Invoke `architect: produce implementation plan for tasks/builds/phase-1-showcase-mvps/spec.md` to decompose into chunks per the §0.6 Phase A → Phase B sequencing.
