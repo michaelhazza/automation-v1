@@ -222,7 +222,7 @@ test('system admin in workspace mode sees platform group alongside workspace gro
 });
 
 // ── Test 7: group emission order matches canonical sequence ──
-test('group emission order: top → work → projects → agents → company → clientpulse → organisation → footer (no platform for non-sysadmin)', () => {
+test('group emission order: top → work → projects → agents → company → clientpulse → support → organisation → footer (no platform for non-sysadmin)', () => {
   const ctx = baseCtx({
     hasOrgContext: true,
     hasAnyOrgPerm: true,
@@ -244,7 +244,7 @@ test('group emission order: top → work → projects → agents → company →
     }
   }
 
-  const expectedOrder = ['top', 'work', 'projects', 'agents', 'company', 'clientpulse', 'organisation', 'footer'];
+  const expectedOrder = ['top', 'work', 'projects', 'agents', 'company', 'clientpulse', 'support', 'organisation', 'footer'];
   let lastIdx = -1;
   for (const group of seen) {
     const idx = expectedOrder.indexOf(group);
