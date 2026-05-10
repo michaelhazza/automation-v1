@@ -200,7 +200,7 @@ export type SandboxRequirement =
  * Mandatory fields drive shared idempotency / orchestration; the adapter is
  * free to populate optional fields and is required to populate `raw` so its
  * own `finalise()` can read columns the structural type does not name (e.g.,
- * IEE adapter reads cost columns and `task_type` from `raw`).
+ * IEE adapter reads cost columns and `type` from `raw`).
  */
 export interface BackendTerminalState {
   /** Foreign key to the parent `agent_runs.id`. Mandatory. */
@@ -231,7 +231,7 @@ export interface BackendTerminalState {
   /**
    * Opaque slot for the adapter's own row. The adapter's `finalise()` casts
    * this to its real row type (e.g., IEE adapter casts to `IeeRun` to access
-   * `task_type`, cost columns, etc.). Other consumers MUST NOT reach into `raw`.
+   * `type`, cost columns, etc.). Other consumers MUST NOT reach into `raw`.
    */
   raw: unknown;
 }
@@ -742,7 +742,7 @@ Per `docs/spec-authoring-checklist.md` § 10:
 | Operation | Posture | Mechanism |
 |---|---|---|
 | `dispatch()` for delegated backend (parent run → `'delegated'`) | **state-based + key-based** | Two-step contract — see § 13.1.1 for the exact ordering. (1) Backend task created/enqueued first with the adapter's idempotency key; existing IEE pattern uses `iee_runs.idempotency_key` UNIQUE — re-dispatch deduplicates onto the existing in-flight task. (2) Parent UPDATE: `WHERE agent_runs.id = ? AND status IN ('pending', 'running')`. 0-rows-affected on step 2 → adapter writes the orphan-cancellation row in step 3 (see below). |
-| `finaliseAgentRunFromBackend()` | **state-based + key-based** | Existing IEE pattern preserved: parent row loaded `FOR UPDATE` via `loadParentRun(tx, ...)`; canonical row loaded `FOR UPDATE` via `loadTerminalState(tx, ...)`. Finaliser exits without writes if `parent.status !== 'delegated' && terminalState.eventEmittedAt`. Plus key on `iee_runs.id` (or future adapter's id). |
+| `finaliseAgentRunFromBackend()` | **state-based + key-based** | Existing IEE pattern preserved: parent row loaded `FOR UPDATE` via `loadParentRun(tx, ...)`; canonical row loaded `FOR UPDATE` via `loadTerminalState(tx, ...)`. The adapter's `finalise()` exits without writes only when BOTH `parentRun.status` is already terminal (∈ `TERMINAL_RUN_STATUSES` from `shared/runStatus.ts`) AND `terminalState.eventEmittedAt !== null` — see § 4.1 for the exact predicate. Any other state (parent in `'delegated'` / `'cancelling'`, eventEmittedAt null, etc.) is a normal first-completion path and the adapter writes through. Plus key on `iee_runs.id` (or future adapter's id). |
 | `reconcile()` per adapter | **safe (read-only filter + idempotent finalisation)** | Reconciliation reads candidate rows then calls the same finaliser. Each call is state-based-idempotent. Re-running the cron is safe. Reconciliation MUST also filter out orphaned backend tasks (terminal-state row exists but parent is already terminal) — see § 13.1.1. |
 | `cancel()` | **state-based** | Existing IEE pattern: writes `agent_runs.status = 'cancelling'`, then `iee_runs.status = 'cancelled'`. Worker's per-step check sees the cancel and exits. Re-cancel is no-op. |
 
@@ -775,7 +775,7 @@ The `'parent_orphaned'` failure reason is added to the IEE adapter's `failureRea
 Two callers can race on:
 
 - **Same `dispatch()` for the same `runId`.** Today: the route handler holds the run id; double-dispatch is impossible at the route boundary. The dispatch path does not add a guard. Existing behaviour preserved.
-- **`finaliseAgentRunFromBackend()` from the event handler racing the cron.** Guard: parent agent_run loaded `FOR UPDATE` inside the transaction. First commit wins; second sees `parent.status !== 'delegated'` and exits no-op. Existing IEE behaviour preserved.
+- **`finaliseAgentRunFromBackend()` from the event handler racing the cron.** Guard: parent agent_run loaded `FOR UPDATE` inside the transaction; canonical adapter-state row also loaded `FOR UPDATE`. First commit wins. The second commit's adapter `finalise()` then observes `parentRun.status` is already terminal AND `terminalState.eventEmittedAt !== null` (the first commit set both) — it returns the race-loser shape without writing per the § 4.1 predicate. Existing IEE behaviour preserved.
 - **Two reconciliation cron ticks overlap.** Guard: pg-boss's `teamSize: 1, teamConcurrency: 1` on the `maintenance:backend-reconciliation` queue (same as current IEE cron). At most one tick at a time per process; multi-process safety is by way of the per-row `FOR UPDATE` lock inside finalisation.
 
 Loser response in every case: silent no-op, with a `logger.debug` line for observability. No HTTP status involved (the conflicting flows are internal).
