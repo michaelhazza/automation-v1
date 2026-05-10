@@ -245,6 +245,9 @@ skills:
   - slug: support.find_customer_history
     aliases: [find_customer_history_skill, support_customer_lookup]
     description: Look up a customer's full support and CRM history by email address
+  - slug: support.classify_ticket
+    aliases: [classify_ticket_skill, support_classify]
+    description: Classify a support ticket by intent, urgency, and recommended action without drafting a reply
 
 primitives:
   - slug: scheduled_run
@@ -912,6 +915,7 @@ skills_enabled:
   - support.tag
   - support.find_customer_history
   - support.add_internal_note
+  - support.classify_ticket
 primitives_required:
   - api_key_connection
   - webhook_receiver

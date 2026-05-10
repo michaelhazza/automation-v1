@@ -3621,6 +3621,7 @@ Support Agent eval harness: `server/services/supportEvalHarness.ts` / `supportEv
 | `support.draft.override_collision` | Subaccount | Approve when another draft is already dispatching |
 | `support.inbox.configure` | Subaccount | Modify inbox configuration |
 | `support.inbox.view` | Org | View Support Agent dashboard and inbox list |
+| `support.evals.view` | Org | View Support Agent eval results (SupportEvalsPage) |
 
 Standard `subaccount_admin` bypass applies. Read actions (`GET /tickets`, `GET /drafts`) use the existing authenticated-user gate without a dedicated permission key — consistent with the read-permission posture across canonical tables.
 
@@ -3718,6 +3719,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify Support Agent eval admin page | `client/src/pages/operate/SupportEvalsPage.tsx` + `server/routes/support/supportEvalsRoutes.ts` |
 | Modify Run Trace artifact panel | `client/src/components/run-trace/RunTraceArtifactsPanel.tsx` (Preview/Download via download proxy; Copy-link via signed URL) + `server/routes/runArtifacts.ts` |
 | Add a Run Trace event renderer (Support Agent) | `client/src/components/run-trace/SupportEventRenderers.tsx` — 7 renderers for `phase1.support.*` events; register in `SUPPORT_EVENT_RENDERERS` map |
+| Add a Run Trace event renderer (42 Macro failure) | `client/src/components/run-trace/MacroFailureRenderers.tsx` — `MacroReportRenderingFailedRenderer` + `MacroArtifactUploadFailedRenderer` for `phase1.macro.report_rendering_failed` / `phase1.macro.artifact_upload_failed`; registered in `RunTraceEventRenderer.tsx` via `getSupportEventRenderer` / explicit type guards |
 | Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
 | Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
 | Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry/core.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |

@@ -760,6 +760,7 @@ Structured access to connected helpdesk inboxes. All read skills are non-destruc
 - **Tag a support ticket** — add or remove labels on a ticket for routing, reporting, or workflow purposes.
 - **Find customer history across support and CRM** — surface the full interaction history for a customer, spanning support tickets and CRM contact records, without switching between tools.
 - **Add internal note to a support ticket** — post a note visible only to the support team, not the customer. Used for handoff context, escalation detail, or coordination.
+- **Classify a support ticket** — determine the intent category, urgency level, and recommended routing action for a ticket without drafting a reply. Returns structured classification data for downstream triage or reporting.
 
 ### Landing Page Management
 
