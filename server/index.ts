@@ -211,6 +211,8 @@ import governQualityRouter from './routes/governQuality.js';
 import correctionsRouter from './routes/corrections.js';
 // Agent Workspace — presence SSE stream (Chunk 9)
 import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
+// Support Desk canonical substrate (C13)
+import supportRouter from './routes/support/index.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -467,6 +469,8 @@ app.use(governQualityRouter);
 app.use(correctionsRouter);
 // Agent Workspace — presence SSE stream (Chunk 9)
 app.use(agentPresenceStreamRouter);
+// Support Desk canonical substrate (C13)
+app.use('/api/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -707,6 +711,23 @@ async function start() {
     } catch (err) {
       console.error('[boot] failed to register document-promotion-finalise worker', err);
     }
+  }
+  // Support draft reconciliation worker
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportDraftReconciliationWorker } = await import('./jobs/supportDraftReconciliationWorker.js');
+      registerSupportDraftReconciliationWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-draft-reconciliation worker', err);
+    }
+  }
+  // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)
+  try {
+    const { runSupportDispatchBootRecovery } = await import('./lib/supportDispatchBootRecovery.js');
+    await runSupportDispatchBootRecovery();
+  } catch (err) {
+    console.error('[boot] support dispatch boot recovery failed', err);
   }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.

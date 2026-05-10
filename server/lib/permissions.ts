@@ -110,6 +110,11 @@ export const ORG_PERMISSIONS = {
   SCORECARDS_BENCH_RUN:  'org.scorecards.bench_run',
   // ── Agent Workspace — presence stream (Chunk 9) ──────────────────────────
   AGENTS_PRESENCE_STREAM_SUBSCRIBE: 'org.agents.presence.stream.subscribe',
+  // ── Support desk — draft review and inbox config (support-desk-canonical) ─
+  SUPPORT_DRAFT_APPROVE: 'support.draft.approve',
+  SUPPORT_DRAFT_REJECT: 'support.draft.reject',
+  SUPPORT_DRAFT_OVERRIDE_COLLISION: 'support.draft.override_collision',
+  SUPPORT_INBOX_CONFIGURE: 'support.inbox.configure',
 } as const;
 
 // ─── System-level permissions (sysadmin-only surfaces) ───────────────────────
@@ -355,6 +360,11 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_VIEW,    description: 'List subaccount-visible scorecards',                               groupName: 'subaccount.scorecards' },
   { key: SUBACCOUNT_PERMISSIONS.SCORECARDS_MANAGE,  description: 'Create, edit, and delete subaccount-scope scorecards; attach/detach suggested scorecards', groupName: 'subaccount.scorecards' },
   { key: SUBACCOUNT_PERMISSIONS.CORRECTIONS_CREATE, description: 'Use the Correct action on Run-trace to submit a correction',       groupName: 'subaccount.corrections' },
+  // org.support (support-desk-canonical)
+  { key: ORG_PERMISSIONS.SUPPORT_DRAFT_APPROVE,            description: 'Approve and send support reply drafts',                groupName: 'org.support' },
+  { key: ORG_PERMISSIONS.SUPPORT_DRAFT_REJECT,             description: 'Reject support reply drafts',                         groupName: 'org.support' },
+  { key: ORG_PERMISSIONS.SUPPORT_DRAFT_OVERRIDE_COLLISION, description: 'Override collision check on draft approval',           groupName: 'org.support' },
+  { key: ORG_PERMISSIONS.SUPPORT_INBOX_CONFIGURE,          description: 'Configure support inbox agent settings',              groupName: 'org.support' },
   // subaccount.credentials (SynthetOS Phase 1)
   { key: SUBACCOUNT_PERMISSIONS.CREDENTIALS_AUDIT_READ, description: 'View the credential audit log for this subaccount', groupName: 'subaccount.credentials' },
 ];

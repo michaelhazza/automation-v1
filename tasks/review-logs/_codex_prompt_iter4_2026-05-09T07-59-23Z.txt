@@ -1,0 +1,29 @@
+You are reviewing a specification document for implementation-readiness, iteration 4.
+
+The spec is at: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (commit a1ec6502).
+
+Iterations 1, 2, and 3 surfaced and resolved 18 mechanical findings total. The most recent edits (iter 3) addressed:
+- F13: §11.4 source-of-truth precedence now enumerates three writers of `source_draft_id`: dispatch service, reconciliation worker, and the post-upsert back-link routine; raw ingestion still never sets it.
+- F14: §12 RLS row for canonical_ticket_drafts now spells out per-route permission keys and explicit sub-action enforcement on `/manual-resolve`.
+
+Iteration 4 task: confirm convergence. Re-review the spec for any remaining mechanical issues. Pay particular attention to whether the iter 3 edits (writer contract, per-route guard) introduced new contradictions.
+
+The source brief is LOCKED v5.3. Findings that change brief-locked decisions are out of scope.
+
+Five open questions exist in §22 (OQ-1..OQ-5). Findings whose work is captured by an OQ should be skipped.
+
+Project framing context:
+- Pre-production, no live agency clients.
+- Testing posture: static_gates_primary, runtime_tests: pure_function_only. No vitest/E2E/playwright/supertest/frontend tests for non-pure code.
+- Rollout: commit_and_revert. No feature flags. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Output findings in the same structured format. If you find no NEW mechanical issues, say "No new mechanical findings — spec is mechanically tight."
+
+Do NOT raise:
+- The 18 issues already resolved in iterations 1-3.
+- Adding tests beyond the pure-function set.
+- Adding feature flags or staged rollout.
+- New primitives that duplicate existing ones.
+- Anything covered by OQ-1..OQ-5.
+- Brief-locked decisions.

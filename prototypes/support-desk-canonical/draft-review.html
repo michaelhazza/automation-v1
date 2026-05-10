@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support Desk — Draft Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* Two-panel layout */
+  .review-layout { display: flex; flex: 1; overflow: hidden; }
+  .draft-list-panel {
+    width: 300px; flex-shrink: 0;
+    border-right: 1px solid var(--sl-200);
+    background: white; overflow-y: auto;
+  }
+  .draft-detail-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; background: var(--sl-50); }
+
+  /* Draft list items */
+  .draft-item {
+    padding: 13px 16px; border-bottom: 1px solid var(--sl-100);
+    cursor: pointer; transition: background 80ms;
+  }
+  .draft-item:hover { background: var(--sl-50); }
+  .draft-item.active { background: var(--indigo-50); border-left: 3px solid var(--indigo-600); padding-left: 13px; }
+  .draft-item.blocked { border-left: 3px solid var(--red-500); padding-left: 13px; background: var(--red-50); }
+  .draft-item .di-subject { font-size: 13px; font-weight: 500; color: var(--sl-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .draft-item .di-preview { font-size: 12px; color: var(--sl-500); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .draft-item .di-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+
+  /* Detail area */
+  .detail-inner { padding: 20px 24px; flex: 1; }
+  .detail-head {
+    background: white; border-bottom: 1px solid var(--sl-200);
+    padding: 14px 24px; flex-shrink: 0;
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  .detail-head .dh-title { font-size: 15px; font-weight: 600; color: var(--sl-900); }
+  .detail-head .dh-sub { font-size: 12px; color: var(--sl-500); margin-top: 3px; }
+
+  /* Context thread (collapsed) */
+  .thread-context { margin-bottom: 16px; }
+  .thread-toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 12px; color: var(--sl-500); font-weight: 500;
+    border: 0; background: transparent; font-family: inherit; padding: 0; margin-bottom: 10px;
+  }
+  .thread-toggle:hover { color: var(--sl-800); }
+  .thread-toggle .chev { transition: transform 200ms; }
+  .thread-toggle.open .chev { transform: rotate(90deg); }
+  .thread-collapsed-hint { padding: 10px 14px; border-radius: 8px; background: var(--sl-100); font-size: 12px; color: var(--sl-600); }
+  .thread-messages { display: none; }
+  .thread-messages.open { display: block; }
+
+  .mini-msg { padding: 10px 14px; border-radius: 8px; font-size: 12px; line-height: 1.55; margin-bottom: 8px; }
+  .mini-msg.inbound { background: var(--sl-100); }
+  .mini-msg.outbound { background: white; border: 1px solid var(--sl-200); }
+  .mini-msg .mini-from { font-size: 11px; font-weight: 600; color: var(--sl-500); margin-bottom: 4px; }
+
+  /* Draft proposed reply */
+  .proposed-reply {
+    background: white; border: 1px solid var(--sl-200);
+    border-radius: 10px; overflow: hidden; margin-bottom: 16px;
+  }
+  .proposed-reply-head {
+    padding: 10px 14px; background: var(--indigo-50); border-bottom: 1px solid var(--indigo-100);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .proposed-reply-head .label { font-size: 12px; font-weight: 600; color: var(--indigo-700); }
+  .proposed-reply-body { padding: 16px; font-size: 13px; line-height: 1.65; color: var(--sl-800); }
+  .proposed-reply-body.editing { padding: 0; }
+  .proposed-reply-body textarea { width: 100%; border: 0; padding: 16px; font-family: inherit; font-size: 13px; line-height: 1.65; outline: none; resize: none; min-height: 140px; box-sizing: border-box; }
+
+  /* Provenance block */
+  .provenance-card {
+    background: white; border: 1px solid var(--sl-200);
+    border-radius: 10px; padding: 14px; margin-bottom: 16px;
+  }
+  .provenance-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--sl-400); margin-bottom: 10px; }
+  .prov-row { display: flex; align-items: flex-start; gap: 10px; padding: 4px 0; font-size: 12px; }
+  .prov-row .pk { color: var(--sl-500); flex-shrink: 0; width: 90px; }
+  .prov-row .pv { color: var(--sl-800); font-weight: 500; }
+  .prov-row .pv code { font-size: 11px; font-family: 'JetBrains Mono', monospace; background: var(--sl-100); padding: 1px 5px; border-radius: 4px; color: var(--sl-700); }
+
+  /* Policy checks */
+  .policy-card {
+    background: white; border: 1px solid var(--sl-200);
+    border-radius: 10px; padding: 14px; margin-bottom: 16px;
+  }
+  .policy-card.blocked { border-color: var(--red-300); background: var(--red-50); }
+
+  /* Action bar */
+  .action-bar {
+    background: white; border-top: 1px solid var(--sl-200);
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  }
+  .action-bar .left { margin-right: auto; font-size: 12px; color: var(--sl-500); }
+
+  /* Approved state */
+  .approved-overlay {
+    display: none; position: absolute; inset: 0;
+    background: rgba(255,255,255,0.92);
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px;
+    text-align: center; z-index: 10;
+    border-radius: 10px;
+  }
+  .approved-overlay.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span>
+    <a href="tickets-list.html">Support Desk</a>
+    <span class="sep">/</span>
+    <span style="color: var(--sl-900);">Draft review</span>
+  </span>
+  <span class="right">
+    <span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span>
+  </span>
+</div>
+
+<div class="shell">
+  <nav class="sidenav">
+    <div class="sidenav-section">Support Desk</div>
+    <a href="tickets-list.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Tickets
+      <span class="badge">307</span>
+    </a>
+    <a href="draft-review.html" class="sidenav-item active">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Draft review
+      <span class="badge-red badge">4</span>
+    </a>
+    <a href="inbox-config.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Inboxes
+    </a>
+    <div class="sidenav-divider"></div>
+    <div class="sidenav-section">Settings</div>
+    <a href="integration-setup.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41M19.07 19.07l-1.41-1.41M20 12h-2M6 12H4M12 20v-2M12 6V4"/></svg>
+      Connection setup
+    </a>
+  </nav>
+
+  <div class="content" style="overflow: hidden;">
+    <div class="detail-head">
+      <div>
+        <div class="dh-title">Draft review queue</div>
+        <div class="dh-sub">4 drafts awaiting your approval before the agent sends them.</div>
+      </div>
+    </div>
+
+    <div class="review-layout">
+
+      <!-- Left: draft list -->
+      <div class="draft-list-panel">
+
+        <!-- Draft 1: active, no block -->
+        <div class="draft-item active" id="draftItem1" onclick="selectDraft(1)">
+          <div class="di-subject">Billing address update bug</div>
+          <div class="di-preview">Hi James, the engineering fix is scheduled to deploy at 6 PM...</div>
+          <div class="di-meta">
+            <span class="draft-badge draft-awaiting">Awaiting review</span>
+            <span class="text-xs muted">2m ago</span>
+          </div>
+          <div style="font-size: 11px; color: var(--sl-500); margin-top: 5px;">james.walsh@acmecorp.com &middot; Billing</div>
+        </div>
+
+        <!-- Draft 2: feature request -->
+        <div class="draft-item" id="draftItem2" onclick="selectDraft(2)">
+          <div class="di-subject">Bulk CSV export — feature request</div>
+          <div class="di-preview">Hi, thanks for the suggestion. Bulk CSV export is on our roadmap...</div>
+          <div class="di-meta">
+            <span class="draft-badge draft-awaiting">Awaiting review</span>
+            <span class="text-xs muted">14m ago</span>
+          </div>
+          <div style="font-size: 11px; color: var(--sl-500); margin-top: 5px;">m.okoye@fintech.ng &middot; General Support</div>
+        </div>
+
+        <!-- Draft 3: blocked by human collision -->
+        <div class="draft-item blocked" id="draftItem3" onclick="selectDraft(3)">
+          <div class="di-subject">API rate limits for enterprise plan</div>
+          <div class="di-preview">Hi Priya, I can see your enterprise plan includes a higher...</div>
+          <div class="di-meta">
+            <span class="draft-badge draft-rejected" style="background: var(--red-50); color: var(--red-700);">Blocked</span>
+            <span class="text-xs" style="color: var(--red-600);">Human collision</span>
+          </div>
+          <div style="font-size: 11px; color: var(--sl-500); margin-top: 5px;">priya.sharma@globalcorp.io &middot; General Support</div>
+        </div>
+
+        <!-- Draft 4: onboarding -->
+        <div class="draft-item" id="draftItem4" onclick="selectDraft(4)">
+          <div class="di-subject">Adding team members to workspace</div>
+          <div class="di-preview">Hi Sophie, great question. You can invite team members from...</div>
+          <div class="di-meta">
+            <span class="draft-badge draft-awaiting">Awaiting review</span>
+            <span class="text-xs muted">31m ago</span>
+          </div>
+          <div style="font-size: 11px; color: var(--sl-500); margin-top: 5px;">sophie.tan@newco.sg &middot; Onboarding</div>
+        </div>
+
+      </div>
+
+      <!-- Right: draft detail (changes per draft selection) -->
+      <div class="draft-detail-panel" id="detailPanel" style="position: relative;">
+
+        <!-- Draft 1 detail (default shown) -->
+        <div id="detail1" class="detail-inner" style="display: flex; flex-direction: column; min-height: 100%;">
+
+          <!-- Thread context -->
+          <div class="thread-context">
+            <button class="thread-toggle" id="threadToggle1" onclick="toggleThread('1')">
+              <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              Thread context (4 messages)
+            </button>
+            <div class="thread-messages" id="threadMsgs1">
+              <div class="mini-msg inbound">
+                <div class="mini-from">James Walsh, 09:14</div>
+                Hi, I updated my payment card this morning but now when I try to change the billing address on my account it just spins and never saves...
+              </div>
+              <div class="mini-msg outbound">
+                <div class="mini-from">Support Agent (bot), 09:17</div>
+                Hi James, thanks for getting in touch. I can see there's a known issue affecting billing address updates for accounts that recently changed payment methods...
+              </div>
+              <div class="mini-msg inbound">
+                <div class="mini-from">James Walsh, 11:02</div>
+                Thanks for the quick update. Any ETA on the fix? Our accounting team is asking...
+              </div>
+            </div>
+          </div>
+
+          <!-- Proposed reply -->
+          <div class="proposed-reply" id="proposedReply1" style="position: relative;">
+            <div class="proposed-reply-head">
+              <span class="label">Proposed reply</span>
+              <span class="text-xs muted">Reply to james.walsh@acmecorp.com</span>
+            </div>
+            <div class="proposed-reply-body" id="replyBody1">
+              Hi James, the engineering fix is scheduled to deploy at 6 PM today (UTC). I'll send you a confirmation once the address update is live for your account. If you'd prefer a manual invoice in the meantime, please let me know the address you need and I'll arrange it with our billing team right away.
+            </div>
+            <div id="approvedOverlay1" class="approved-overlay">
+              <div style="width: 48px; height: 48px; border-radius: 999px; background: var(--green-100); display: flex; align-items: center; justify-content: center; color: var(--green-700);">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600; color: var(--sl-900); margin-bottom: 4px;">Reply approved and sent</div>
+                <div style="font-size: 12px; color: var(--sl-500);">The reply was dispatched via Teamwork Desk.</div>
+              </div>
+              <a href="tickets-list.html" class="btn btn-secondary btn-sm" style="margin-top: 4px;">Back to tickets</a>
+            </div>
+          </div>
+
+          <!-- Provenance -->
+          <div class="provenance-card">
+            <div class="provenance-title">Draft provenance</div>
+            <div class="prov-row">
+              <span class="pk">Agent run</span>
+              <span class="pv"><code>run_4f9d2a</code></span>
+            </div>
+            <div class="prov-row">
+              <span class="pk">Model</span>
+              <span class="pv">claude-3-7-sonnet-20250219</span>
+            </div>
+            <div class="prov-row">
+              <span class="pk">Prompt</span>
+              <span class="pv">support-reply-v2.3</span>
+            </div>
+            <div class="prov-row">
+              <span class="pk">Created</span>
+              <span class="pv">9 May 2026, 11:09</span>
+            </div>
+          </div>
+
+          <!-- Policy checks (passing) -->
+          <div class="policy-card" id="policyCard1">
+            <div class="provenance-title">Pre-send checks</div>
+            <div class="policy-row policy-ok">
+              <div class="icon">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div>
+                <span class="label">Collision window clear</span>
+                <div class="text-xs muted" style="margin-top: 2px;">No human activity in the last 30 minutes</div>
+              </div>
+            </div>
+            <div class="policy-row policy-ok">
+              <div class="icon">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div><span class="label">Ticket not quarantined</span></div>
+            </div>
+            <div class="policy-row policy-ok">
+              <div class="icon">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div><span class="label">Inbox in assisted mode</span></div>
+            </div>
+            <div class="policy-row policy-ok">
+              <div class="icon">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div><span class="label">Draft not expired</span></div>
+            </div>
+          </div>
+
+          <div style="flex: 1;"></div>
+        </div>
+
+        <!-- Draft 3 detail (blocked) - hidden by default -->
+        <div id="detail3" class="detail-inner" style="display: none; flex-direction: column; min-height: 100%;">
+          <div class="callout callout-danger" style="margin-bottom: 16px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <div>
+              <strong>Human collision detected.</strong> Tom K. replied to this ticket 5 minutes ago. The agent's send policy requires 30 minutes of no human activity before it can reply. You can override this and send anyway, or wait.
+              <br><br>
+              <strong>Policy code:</strong> <code style="font-size: 11px; background: var(--red-100); padding: 1px 5px; border-radius: 4px;">support.ticket.human_collision_blocked</code>
+            </div>
+          </div>
+
+          <div class="thread-context">
+            <button class="thread-toggle" id="threadToggle3" onclick="toggleThread('3')">
+              <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              Thread context (3 messages)
+            </button>
+            <div class="thread-messages" id="threadMsgs3">
+              <div class="mini-msg inbound">
+                <div class="mini-from">Priya Sharma, 10:30</div>
+                Our enterprise plan limits are way too low. We're hitting the API rate limit every day. This is blocking our production workflows...
+              </div>
+              <div class="mini-msg outbound" style="border-left: 3px solid #f59e0b;">
+                <div class="mini-from">Tom K. (human agent), 11:55 &mdash; 5 min ago</div>
+                Hi Priya, I've escalated this to our enterprise team. We can offer a temporary rate limit increase while we review your plan. Can you share your typical daily call volume?
+              </div>
+            </div>
+          </div>
+
+          <div class="proposed-reply" style="opacity: 0.7;">
+            <div class="proposed-reply-head">
+              <span class="label" style="color: var(--sl-500);">Proposed reply (blocked)</span>
+            </div>
+            <div class="proposed-reply-body" style="color: var(--sl-600);">
+              Hi Priya, I can see your enterprise plan includes a higher rate limit tier that might not be correctly applied to your account. Let me check your account configuration and get this resolved for you today. Could you share the API endpoint you're hitting most frequently?
+            </div>
+          </div>
+
+          <!-- Provenance -->
+          <div class="provenance-card">
+            <div class="provenance-title">Draft provenance</div>
+            <div class="prov-row"><span class="pk">Agent run</span><span class="pv"><code>run_8b1c3e</code></span></div>
+            <div class="prov-row"><span class="pk">Model</span><span class="pv">claude-3-7-sonnet-20250219</span></div>
+            <div class="prov-row"><span class="pk">Prompt</span><span class="pv">support-reply-v2.3</span></div>
+            <div class="prov-row"><span class="pk">Created</span><span class="pv">9 May 2026, 11:51</span></div>
+          </div>
+
+          <!-- Policy checks (failing) -->
+          <div class="policy-card blocked">
+            <div class="provenance-title" style="color: var(--red-700);">Pre-send checks</div>
+            <div class="policy-row policy-fail">
+              <div class="icon">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </div>
+              <div>
+                <span class="label">Collision window blocked</span>
+                <div class="detail">Tom K. replied 5 minutes ago. Window requires 30 minutes of no human activity.</div>
+              </div>
+            </div>
+            <div class="policy-row policy-ok">
+              <div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div><span class="label">Ticket not quarantined</span></div>
+            </div>
+            <div class="policy-row policy-ok">
+              <div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div><span class="label">Inbox in assisted mode</span></div>
+            </div>
+          </div>
+
+          <div style="flex: 1;"></div>
+        </div>
+
+        <!-- Generic detail panels for drafts 2 and 4 -->
+        <div id="detail2" class="detail-inner" style="display: none; flex-direction: column; min-height: 100%;">
+          <div class="thread-context">
+            <button class="thread-toggle" id="threadToggle2" onclick="toggleThread('2')">
+              <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              Thread context (1 message)
+            </button>
+            <div class="thread-messages" id="threadMsgs2">
+              <div class="mini-msg inbound"><div class="mini-from">M. Okoye, 10:15</div>Would love a bulk export to CSV from the dashboard. Any chance this is on the roadmap?</div>
+            </div>
+          </div>
+          <div class="proposed-reply">
+            <div class="proposed-reply-head"><span class="label">Proposed reply</span><span class="text-xs muted">Reply to m.okoye@fintech.ng</span></div>
+            <div class="proposed-reply-body" id="replyBody2">Hi, thanks for the suggestion. Bulk CSV export is on our roadmap and is planned for Q3 this year. I'll make a note that you're interested, which helps us prioritise. In the meantime, you can export individual reports using the Download button on each chart. Let me know if you have any other questions.</div>
+            <div id="approvedOverlay2" class="approved-overlay"><div style="width: 48px; height: 48px; border-radius: 999px; background: var(--green-100); display: flex; align-items: center; justify-content: center; color: var(--green-700);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size: 14px; font-weight: 600; color: var(--sl-900); margin-bottom: 4px;">Reply approved and sent</div><div style="font-size: 12px; color: var(--sl-500);">The reply was dispatched via Teamwork Desk.</div></div><a href="tickets-list.html" class="btn btn-secondary btn-sm" style="margin-top: 4px;">Back to tickets</a></div>
+          </div>
+          <div class="provenance-card"><div class="provenance-title">Draft provenance</div><div class="prov-row"><span class="pk">Agent run</span><span class="pv"><code>run_2a9f1c</code></span></div><div class="prov-row"><span class="pk">Model</span><span class="pv">claude-3-7-sonnet-20250219</span></div><div class="prov-row"><span class="pk">Prompt</span><span class="pv">support-reply-v2.3</span></div><div class="prov-row"><span class="pk">Created</span><span class="pv">9 May 2026, 10:16</span></div></div>
+          <div class="policy-card"><div class="provenance-title">Pre-send checks</div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Collision window clear</span></div></div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Ticket not quarantined</span></div></div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Draft not expired</span></div></div></div>
+          <div style="flex: 1;"></div>
+        </div>
+
+        <div id="detail4" class="detail-inner" style="display: none; flex-direction: column; min-height: 100%;">
+          <div class="thread-context">
+            <button class="thread-toggle" id="threadToggle4" onclick="toggleThread('4')">
+              <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              Thread context (1 message)
+            </button>
+            <div class="thread-messages" id="threadMsgs4">
+              <div class="mini-msg inbound"><div class="mini-from">Sophie Tan, 06:30</div>How do I add more people to my workspace? I can't find the option anywhere.</div>
+            </div>
+          </div>
+          <div class="proposed-reply">
+            <div class="proposed-reply-head"><span class="label">Proposed reply</span><span class="text-xs muted">Reply to sophie.tan@newco.sg</span></div>
+            <div class="proposed-reply-body" id="replyBody4">Hi Sophie, great question. You can invite team members from the Settings page: go to Settings, then Team, then click Invite people. Enter their email addresses and choose their role. They'll receive an email invitation to join your workspace. Let me know if you run into any trouble.</div>
+            <div id="approvedOverlay4" class="approved-overlay"><div style="width: 48px; height: 48px; border-radius: 999px; background: var(--green-100); display: flex; align-items: center; justify-content: center; color: var(--green-700);"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size: 14px; font-weight: 600; color: var(--sl-900); margin-bottom: 4px;">Reply approved and sent</div><div style="font-size: 12px; color: var(--sl-500);">The reply was dispatched via Teamwork Desk.</div></div><a href="tickets-list.html" class="btn btn-secondary btn-sm" style="margin-top: 4px;">Back to tickets</a></div>
+          </div>
+          <div class="provenance-card"><div class="provenance-title">Draft provenance</div><div class="prov-row"><span class="pk">Agent run</span><span class="pv"><code>run_7d4b9a</code></span></div><div class="prov-row"><span class="pk">Model</span><span class="pv">claude-3-7-sonnet-20250219</span></div><div class="prov-row"><span class="pk">Prompt</span><span class="pv">support-reply-v2.3</span></div><div class="prov-row"><span class="pk">Created</span><span class="pv">9 May 2026, 06:31</span></div></div>
+          <div class="policy-card"><div class="provenance-title">Pre-send checks</div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Collision window clear</span></div></div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Ticket not quarantined</span></div></div><div class="policy-row policy-ok"><div class="icon"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><span class="label">Draft not expired</span></div></div></div>
+          <div style="flex: 1;"></div>
+        </div>
+
+      </div><!-- /draft-detail-panel -->
+    </div><!-- /review-layout -->
+
+    <!-- Action bar (context-aware) -->
+    <div class="action-bar" id="actionBar1">
+      <span class="left">Draft will expire in 23h 51m if not acted on.</span>
+      <button class="btn btn-secondary" onclick="rejectDraft()">Reject</button>
+      <button class="btn btn-secondary" id="editBtn1" onclick="toggleEdit(1)">Edit</button>
+      <button class="btn btn-success" onclick="approveDraft(1)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Approve and send
+      </button>
+    </div>
+
+    <div class="action-bar" id="actionBar2" style="display: none;">
+      <span class="left">Draft will expire in 23h 37m if not acted on.</span>
+      <button class="btn btn-secondary" onclick="rejectDraft()">Reject</button>
+      <button class="btn btn-secondary" onclick="toggleEdit(2)">Edit</button>
+      <button class="btn btn-success" onclick="approveDraft(2)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Approve and send
+      </button>
+    </div>
+
+    <div class="action-bar" id="actionBar3" style="display: none;">
+      <span class="left" style="color: var(--red-700);">Send blocked due to human collision. Clears automatically in 25 minutes.</span>
+      <button class="btn btn-secondary btn-sm" onclick="rejectDraft()">Dismiss draft</button>
+      <button class="btn btn-danger" onclick="approveDraft(3)" title="Override the collision window and send now">Override and send</button>
+    </div>
+
+    <div class="action-bar" id="actionBar4" style="display: none;">
+      <span class="left">Draft will expire in 23h 20m if not acted on.</span>
+      <button class="btn btn-secondary" onclick="rejectDraft()">Reject</button>
+      <button class="btn btn-secondary" onclick="toggleEdit(4)">Edit</button>
+      <button class="btn btn-success" onclick="approveDraft(4)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Approve and send
+      </button>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+<script>
+  let currentDraft = 1;
+  let editMode = {};
+
+  function selectDraft(n) {
+    currentDraft = n;
+    [1,2,3,4].forEach(i => {
+      const item = document.getElementById('draftItem' + i);
+      const detail = document.getElementById('detail' + i);
+      const bar = document.getElementById('actionBar' + i);
+      if (item) item.classList.toggle('active', i === n);
+      if (detail) detail.style.display = (i === n) ? 'flex' : 'none';
+      if (bar) bar.style.display = (i === n) ? 'flex' : 'none';
+    });
+  }
+
+  function toggleThread(id) {
+    const btn = document.getElementById('threadToggle' + id);
+    const msgs = document.getElementById('threadMsgs' + id);
+    btn.classList.toggle('open');
+    msgs.classList.toggle('open');
+  }
+
+  function toggleEdit(n) {
+    const body = document.getElementById('replyBody' + n);
+    const btn = document.getElementById('editBtn' + n);
+    if (!body) return;
+    if (!editMode[n]) {
+      const text = body.innerText.trim();
+      body.classList.add('editing');
+      body.innerHTML = '<textarea style="width:100%;border:0;padding:16px;font-family:inherit;font-size:13px;line-height:1.65;outline:none;resize:none;min-height:140px;box-sizing:border-box;">' + text + '</textarea>';
+      editMode[n] = true;
+      if (btn) btn.textContent = 'Save edit';
+    } else {
+      const ta = body.querySelector('textarea');
+      const newText = ta ? ta.value : '';
+      body.classList.remove('editing');
+      body.textContent = newText;
+      editMode[n] = false;
+      if (btn) btn.textContent = 'Edit';
+    }
+  }
+
+  function approveDraft(n) {
+    const overlay = document.getElementById('approvedOverlay' + n);
+    if (overlay) { overlay.classList.add('show'); }
+  }
+
+  function rejectDraft() {
+    // Simple toggle visual for demo — mark as rejected
+    const item = document.getElementById('draftItem' + currentDraft);
+    if (item) {
+      item.innerHTML = '<div style="font-size:12px;color:var(--sl-400);font-style:italic;">Draft rejected</div>';
+      item.style.cursor = 'default';
+      item.onclick = null;
+    }
+  }
+</script>
+</body>
+</html>

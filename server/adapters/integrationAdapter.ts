@@ -109,7 +109,7 @@ export interface TicketUpdateInput {
   subject?: string;
   status?: string;
   priority?: string;
-  assignedTo?: string;
+  assignedTo?: string | null;
   tags?: string[];
 }
 
@@ -230,6 +230,92 @@ export interface CanonicalRevenueData {
 }
 
 // ---------------------------------------------------------------------------
+// Canonical entity types — Support Desk
+// ---------------------------------------------------------------------------
+
+export type SupportCanonicalStatus =
+  | 'open'
+  | 'pending_internal'
+  | 'waiting_on_customer'
+  | 'resolved'
+  | 'closed'
+  | 'unknown_provider_status';
+
+// The Exclude prevents mapping TO the quarantine value — it must be a fallthrough only
+export type SupportStatusMap = Record<string, Exclude<SupportCanonicalStatus, 'unknown_provider_status'>>;
+
+export interface CanonicalInboxData {
+  externalId: string;
+  name: string;
+  emailAddress?: string;
+  isActive: boolean;
+  externalMetadata?: Record<string, unknown>;
+}
+
+export interface CanonicalSupportAgentData {
+  externalId: string;
+  displayName: string;
+  email?: string;
+  agentKind: 'human' | 'bot';
+  isActive: boolean;
+  externalMetadata?: Record<string, unknown>;
+}
+
+export interface CanonicalTicketData {
+  externalId: string;
+  inboxExternalId: string;
+  customerEmail?: string;
+  customerName?: string;
+  customerExternalId?: string;
+  subject: string;
+  status: SupportCanonicalStatus;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  assigneeAgentExternalId?: string;
+  tags?: string[];
+  category?: string;
+  sourceChannel: 'email' | 'chat' | 'form' | 'api';
+  openedAt: Date;
+  firstResponseAt?: Date;
+  lastCustomerMessageAt?: Date;
+  lastAgentMessageAt?: Date;
+  closedAt?: Date;
+  resolutionAt?: Date;
+  slaDueAt?: Date;
+  slaBreached?: boolean;
+  slaPolicyExternalId?: string;
+  externalMetadata?: Record<string, unknown>;
+}
+
+export interface CanonicalTicketMessageData {
+  externalId: string;
+  ticketExternalId: string;
+  direction: 'inbound' | 'outbound' | 'internal_note';
+  visibility: 'public' | 'internal';
+  authorType: 'customer' | 'agent' | 'bot' | 'system';
+  authorExternalId?: string;
+  bodyText: string;
+  bodyHtml?: string;
+  attachments?: Array<{
+    externalId: string;
+    filename: string;
+    providerUrl: string;
+    mimeType?: string;
+    size?: number;
+  }>;
+  createdAtExternal: Date;
+  externalMetadata?: Record<string, unknown>;
+}
+
+// Shared result wrapper for paginated ingestion methods
+export interface FetchSupportResult<T> {
+  rows: T[];
+  partial: boolean;        // true if any page failed before completion
+  error?: AdapterError;    // last page-level error, if partial=true
+  pagesCompleted?: number; // used by deletion-by-poll precondition check
+  rateLimited?: boolean;   // true if a 429 truncated the result set
+}
+
+// ---------------------------------------------------------------------------
 // Canonical Metric Data — returned by adapter computeMetrics()
 // ---------------------------------------------------------------------------
 
@@ -301,7 +387,9 @@ export interface IntegrationAdapter {
   ticketing?: {
     createTicket(connection: IntegrationConnection, fields: TicketCreateInput): Promise<TicketCreateResult>;
     updateTicket(connection: IntegrationConnection, ticketId: string, fields: TicketUpdateInput): Promise<TicketUpdateResult>;
-    addReply(connection: IntegrationConnection, ticketId: string, body: string, options?: { status?: string }): Promise<TicketReplyResult>;
+    addReply(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string; status?: string }): Promise<TicketReplyResult>;
+    addInternalNote(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string }): Promise<TicketReplyResult>;
+    resolveAttachment(connection: IntegrationConnection, ticketId: string, messageId: string, attachmentExternalId: string): Promise<{ url?: string; stream?: NodeJS.ReadableStream; mimeType?: string; success: boolean; error?: AdapterError }>;
     getTicket(connection: IntegrationConnection, ticketId: string): Promise<TicketData>;
   };
 
@@ -325,6 +413,10 @@ export interface IntegrationAdapter {
       accountExternalId: string,
       entityCounts: { contacts: number; opportunities: number; conversations: number; revenue: number }
     ): Promise<CanonicalMetricData[]>;
+    listInboxes?(connection: IntegrationConnection): Promise<CanonicalInboxData[]>;
+    listSupportAgents?(connection: IntegrationConnection): Promise<CanonicalSupportAgentData[]>;
+    fetchTickets?(connection: IntegrationConnection, inboxExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketData>>;
+    fetchTicketMessages?(connection: IntegrationConnection, ticketExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketMessageData>>;
   };
 
   /** Webhook handling — verify and normalise inbound webhook events */

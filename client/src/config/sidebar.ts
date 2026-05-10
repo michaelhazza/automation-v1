@@ -21,6 +21,7 @@ export type NavGroup =
   | 'company'       // company items
   | 'clientpulse'
   | 'organisation'
+  | 'support'       // Support Desk section
   | 'platform'      // system-admin section
   | 'footer';       // profile, sign-out
 
@@ -465,6 +466,14 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         iconKey: 'settings',
       });
     }
+  }
+
+  // ── support group — Support Desk canonical substrate (C13) ─────────────
+  if (hasOrgContext && (hasOrgPerm('support.draft.approve') || hasOrgPerm('support.draft.reject') || hasOrgPerm('support.inbox.configure'))) {
+    items.push({ group: 'support', kind: 'section-header', key: 'support-header', label: 'Support Desk' });
+    items.push({ group: 'support', kind: 'link', key: 'support-tickets', label: 'Tickets', to: staticRoute('/support/tickets'), iconKey: 'inbox' });
+    items.push({ group: 'support', kind: 'link', key: 'support-drafts', label: 'Draft Review', to: staticRoute('/support/drafts'), iconKey: 'tasks' });
+    items.push({ group: 'support', kind: 'link', key: 'support-inboxes', label: 'Inboxes', to: staticRoute('/support/inboxes'), iconKey: 'settings' });
   }
 
   // ── platform group — system admin ────────────────────────────────────────

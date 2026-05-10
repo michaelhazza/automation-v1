@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support Desk — Tickets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .quarantine-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 24px; background: var(--red-50); border-bottom: 1px solid #fecaca;
+    font-size: 12px; color: var(--red-700);
+  }
+  .quarantine-bar a { color: var(--red-700); font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+  .ticket-row td:first-child { padding-left: 20px; }
+  .ticket-row td:last-child { padding-right: 20px; }
+
+  .subject-cell { max-width: 280px; }
+  .subject-cell .subject { font-size: 13px; font-weight: 500; color: var(--sl-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subject-cell .from { font-size: 11px; color: var(--sl-500); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .assignee-cell { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sl-600); }
+  .unassigned { color: var(--sl-400); font-size: 12px; font-style: italic; }
+
+  .last-activity { font-size: 12px; color: var(--sl-500); white-space: nowrap; }
+
+  /* Filter group labels */
+  .filter-group { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sl-400); padding: 0 6px; align-self: center; }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--sl-500); }
+  .empty-state h3 { font-size: 15px; font-weight: 600; color: var(--sl-700); margin-bottom: 6px; }
+  .empty-state p { font-size: 13px; }
+
+  /* Row states */
+  tr.quarantined-row { background: var(--red-50); }
+  tr.quarantined-row:hover { background: #fee2e2; }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span>
+    <a href="#">Support Desk</a>
+    <span class="sep">/</span>
+    <span style="color: var(--sl-900);">Tickets</span>
+  </span>
+  <span class="right">
+    <span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span>
+  </span>
+</div>
+
+<div class="shell">
+  <nav class="sidenav">
+    <div class="sidenav-section">Support Desk</div>
+    <a href="tickets-list.html" class="sidenav-item active">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Tickets
+      <span class="badge">307</span>
+    </a>
+    <a href="draft-review.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Draft review
+      <span class="badge-red badge">4</span>
+    </a>
+    <a href="inbox-config.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      Inboxes
+    </a>
+    <div class="sidenav-divider"></div>
+    <div class="sidenav-section">Settings</div>
+    <a href="integration-setup.html" class="sidenav-item">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41M19.07 19.07l-1.41-1.41M20 12h-2M6 12H4M12 20v-2M12 6V4"/></svg>
+      Connection setup
+    </a>
+  </nav>
+
+  <div class="content">
+
+    <!-- Quarantine notice -->
+    <div class="quarantine-bar" id="quarantineBar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>2 tickets are <strong>quarantined</strong> due to an unknown status from Teamwork. The agent will not act on them until the mapping is resolved.</span>
+      <span onclick="filterQuarantined()" style="cursor: pointer; margin-left: 4px; text-decoration: underline; font-weight: 600;">Show quarantined</span>
+      <button onclick="document.getElementById('quarantineBar').style.display='none'" style="margin-left: auto; background: transparent; border: 0; color: var(--red-700); cursor: pointer; font-size: 16px; line-height: 1;">&#x2715;</button>
+    </div>
+
+    <div class="page-head">
+      <div>
+        <div class="title">Tickets</div>
+        <div class="sub">307 open across 3 inboxes</div>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <span class="filter-group">Inbox</span>
+      <button class="filter-pill active" id="f-all-inbox" onclick="filterInbox('all')">All inboxes</button>
+      <button class="filter-pill" id="f-general" onclick="filterInbox('general')">General Support</button>
+      <button class="filter-pill" id="f-billing" onclick="filterInbox('billing')">Billing</button>
+      <button class="filter-pill" id="f-onboarding" onclick="filterInbox('onboarding')">Onboarding</button>
+
+      <span style="width: 1px; height: 20px; background: var(--sl-200); margin: 0 4px;"></span>
+      <span class="filter-group">Status</span>
+      <button class="filter-pill active" id="f-actionable" onclick="filterStatus('actionable')">Actionable <span class="count">(214)</span></button>
+      <button class="filter-pill" id="f-waiting" onclick="filterStatus('waiting')">Waiting on customer <span class="count">(76)</span></button>
+      <button class="filter-pill" id="f-resolved" onclick="filterStatus('resolved')">Resolved <span class="count">(15)</span></button>
+      <button class="filter-pill" id="f-quarantined" onclick="filterStatus('quarantined')" style="color: var(--red-700); border-color: var(--red-200);">Quarantined <span class="count">(2)</span></button>
+
+      <div class="search-field" style="margin-left: auto;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input placeholder="Search tickets..." />
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div style="flex: 1; overflow-y: auto;">
+      <div class="card" style="border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; margin: 0;">
+        <table class="table" id="ticketTable">
+          <thead>
+            <tr>
+              <th style="padding-left: 20px; width: 36%;">Subject</th>
+              <th style="width: 12%;">Inbox</th>
+              <th style="width: 14%;">Status</th>
+              <th style="width: 9%;">Priority</th>
+              <th style="width: 14%;">Assignee</th>
+              <th style="width: 15%; padding-right: 20px;">Last activity</th>
+            </tr>
+          </thead>
+          <tbody id="ticketBody">
+
+            <!-- Open tickets -->
+            <tr class="ticket-row" data-inbox="billing" data-status="open" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Cannot update billing address after card change</div>
+                <div class="from">james.walsh@acmecorp.com</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">Billing</span></td>
+              <td><span class="status-badge status-open"><span class="dot"></span>Open</span></td>
+              <td><span class="priority-badge priority-urgent">Urgent</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-bot" title="Support Agent">SA</span>
+                  Support Agent
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">2m ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="general" data-status="open" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">API rate limits too low for our enterprise plan</div>
+                <div class="from">priya.sharma@globalcorp.io</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">General Support</span></td>
+              <td><span class="status-badge status-open"><span class="dot"></span>Open</span></td>
+              <td><span class="priority-badge priority-high">High</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-human">TK</span>
+                  Tom K.
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">18m ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="general" data-status="open" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Feature request: bulk export to CSV</div>
+                <div class="from">m.okoye@fintech.ng</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">General Support</span></td>
+              <td><span class="status-badge status-open"><span class="dot"></span>Open</span></td>
+              <td><span class="priority-badge priority-medium">Medium</span></td>
+              <td class="unassigned">Unassigned</td>
+              <td class="last-activity" style="padding-right: 20px;">45m ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="onboarding" data-status="pending_internal" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">SSO setup stuck at identity provider step</div>
+                <div class="from">lin.chen@startupxyz.com</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">Onboarding</span></td>
+              <td><span class="status-badge status-pending_internal"><span class="dot"></span>Pending internal</span></td>
+              <td><span class="priority-badge priority-high">High</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-human">AR</span>
+                  Aisha R.
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">1h ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="general" data-status="waiting" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Dashboard loading very slowly since Monday</div>
+                <div class="from">fred.dupont@euroclient.fr</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">General Support</span></td>
+              <td><span class="status-badge status-waiting_on_customer"><span class="dot"></span>Waiting on customer</span></td>
+              <td><span class="priority-badge priority-medium">Medium</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-bot">SA</span>
+                  Support Agent
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">3h ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="onboarding" data-status="open" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">How do I add team members to my workspace?</div>
+                <div class="from">sophie.tan@newco.sg</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">Onboarding</span></td>
+              <td><span class="status-badge status-open"><span class="dot"></span>Open</span></td>
+              <td><span class="priority-badge priority-low">Low</span></td>
+              <td class="unassigned">Unassigned</td>
+              <td class="last-activity" style="padding-right: 20px;">5h ago</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="billing" data-status="waiting" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Invoice #INV-2026-0441 missing from portal</div>
+                <div class="from">accounts@medcorp.uk</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">Billing</span></td>
+              <td><span class="status-badge status-waiting_on_customer"><span class="dot"></span>Waiting on customer</span></td>
+              <td><span class="priority-badge priority-low">Low</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-bot">SA</span>
+                  Support Agent
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">Yesterday</td>
+            </tr>
+
+            <tr class="ticket-row" data-inbox="general" data-status="resolved" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Webhook signature validation failing on retry</div>
+                <div class="from">dev@techpartner.io</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">General Support</span></td>
+              <td><span class="status-badge status-resolved"><span class="dot"></span>Resolved</span></td>
+              <td><span class="priority-badge priority-high">High</span></td>
+              <td>
+                <div class="assignee-cell">
+                  <span class="avatar avatar-sm avatar-human">TK</span>
+                  Tom K.
+                </div>
+              </td>
+              <td class="last-activity" style="padding-right: 20px;">Yesterday</td>
+            </tr>
+
+            <!-- Quarantined tickets (hidden by default) -->
+            <tr class="ticket-row quarantined-row" data-inbox="general" data-status="quarantined" id="qrow1" style="display: none;" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Custom domain routing not working</div>
+                <div class="from">admin@legacyco.com</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">General Support</span></td>
+              <td><span class="status-badge status-unknown"><span class="dot"></span>Unknown status</span></td>
+              <td><span class="priority-badge priority-medium">Medium</span></td>
+              <td class="unassigned">Unassigned</td>
+              <td class="last-activity" style="padding-right: 20px;">2 days ago</td>
+            </tr>
+
+            <tr class="ticket-row quarantined-row" data-inbox="billing" data-status="quarantined" id="qrow2" style="display: none;" onclick="window.location='ticket-detail.html'">
+              <td class="subject-cell">
+                <div class="subject">Refund for duplicate charge in February</div>
+                <div class="from">finance@oldenterprise.com</div>
+              </td>
+              <td><span style="font-size: 12px; color: var(--sl-700);">Billing</span></td>
+              <td><span class="status-badge status-unknown"><span class="dot"></span>Unknown status</span></td>
+              <td><span class="priority-badge priority-high">High</span></td>
+              <td class="unassigned">Unassigned</td>
+              <td class="last-activity" style="padding-right: 20px;">3 days ago</td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+<script>
+  let currentInbox = 'all';
+  let currentStatus = 'actionable';
+
+  function filterInbox(inbox) {
+    currentInbox = inbox;
+    document.querySelectorAll('[id^="f-all-inbox"], [id^="f-general"], [id^="f-billing"], [id^="f-onboarding"]').forEach(el => el.classList.remove('active'));
+    document.getElementById('f-' + (inbox === 'all' ? 'all-inbox' : inbox)).classList.add('active');
+    applyFilters();
+  }
+
+  function filterStatus(status) {
+    currentStatus = status;
+    ['f-actionable','f-waiting','f-resolved','f-quarantined'].forEach(id => document.getElementById(id).classList.remove('active'));
+    document.getElementById('f-' + status).classList.add('active');
+    if (status === 'quarantined') showQuarantined();
+    applyFilters();
+  }
+
+  function filterQuarantined() {
+    filterStatus('quarantined');
+  }
+
+  function showQuarantined() {
+    document.getElementById('qrow1').style.display = '';
+    document.getElementById('qrow2').style.display = '';
+  }
+
+  function applyFilters() {
+    const rows = document.querySelectorAll('.ticket-row');
+    rows.forEach(row => {
+      const inbox = row.dataset.inbox;
+      const status = row.dataset.status;
+      const inboxOk = currentInbox === 'all' || inbox === currentInbox;
+      let statusOk = false;
+      if (currentStatus === 'actionable') statusOk = (status === 'open' || status === 'pending_internal');
+      else if (currentStatus === 'waiting') statusOk = (status === 'waiting');
+      else if (currentStatus === 'resolved') statusOk = (status === 'resolved');
+      else if (currentStatus === 'quarantined') statusOk = (status === 'quarantined');
+      row.style.display = (inboxOk && statusOk) ? '' : 'none';
+    });
+  }
+</script>
+</body>
+</html>

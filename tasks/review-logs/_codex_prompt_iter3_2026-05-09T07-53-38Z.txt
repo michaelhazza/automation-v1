@@ -1,0 +1,32 @@
+You are reviewing a specification document for implementation-readiness, iteration 3.
+
+The spec is at: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (commit 7147fec7).
+
+Iterations 1 and 2 surfaced and resolved 16 mechanical findings total. The most recent edits (iter 2) addressed:
+- F8: §8.5 "Mark sent" rewritten — `sent` is now strictly terminal, no auto-switch to failed; added a "Late linking" paragraph for back-link bookkeeping driven by the message-upsert path (§7) using `supportDraftReconciliationPure.ts`.
+- F9: §9 + §10 + §18 now pin manual-resolve sub-action permissions (`mark_sent`/`retry_reconciliation` → approve, `mark_failed` → reject).
+- F10: §3 C12 chunk row now includes `support.reject_draft`.
+- F11: §1 framing wording reconciled with §20 testing-posture inventory.
+- F12: §17.1 acceptance bar count reworded ("ten operational + five lifecycle terminals").
+
+Iteration 3 task: re-review the spec for any remaining mechanical issues. Pay particular attention to whether the iter 2 edits introduced new contradictions (especially the §8.5 late-link paragraph and the §9 permission key extensions).
+
+The source brief is LOCKED v5.3. Findings that change brief-locked decisions are out of scope.
+
+Five open questions exist in §22 (OQ-1..OQ-5). Findings whose work is captured by an OQ should be skipped.
+
+Project framing context:
+- Pre-production, no live agency clients.
+- Testing posture: static_gates_primary, runtime_tests: pure_function_only. No vitest/E2E/playwright/supertest/frontend tests for non-pure code.
+- Rollout: commit_and_revert. No feature flags for migrations. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Output findings in the same structured format. If you find no NEW mechanical issues, say "No new mechanical findings — spec is mechanically tight."
+
+Do NOT raise:
+- The 16 issues already resolved in iterations 1 and 2.
+- Adding tests beyond the pure-function set.
+- Adding feature flags or staged rollout.
+- New primitives that duplicate existing ones.
+- Anything covered by OQ-1..OQ-5.
+- Brief-locked decisions.

@@ -713,6 +713,21 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Intent classification and urgency routing ensures the right priority
 - Backlog triage processes accumulations systematically, not ad hoc
 
+#### Support Desk Skills
+
+Structured access to connected helpdesk inboxes. All read skills are non-destructive; write skills require human approval before any reply reaches the customer.
+
+- **Read open support tickets** — retrieve the current list of open, pending, or quarantined tickets from a connected inbox. Supports filtering by status, assignee, and tags.
+- **Read a support ticket thread** — retrieve the full message history and internal notes for a specific ticket, including any pending draft replies.
+- **Propose a support reply** — draft a reply to an open ticket using context from the conversation thread and the knowledge base. The draft enters a review queue; nothing is sent to the customer until approved.
+- **Approve and send a support reply** — approve a pending draft and dispatch it to the customer through the connected helpdesk. A three-step gate ensures no duplicate replies are sent even under retry conditions.
+- **Reject a draft reply** — discard a pending draft and return the ticket to open status for re-drafting or manual handling.
+- **Set support ticket status** — update the status of a ticket (open, pending, solved, or closed) directly through the connected helpdesk.
+- **Assign a support ticket** — reassign a ticket to a specific helpdesk agent.
+- **Tag a support ticket** — add or remove labels on a ticket for routing, reporting, or workflow purposes.
+- **Find customer history across support and CRM** — surface the full interaction history for a customer, spanning support tickets and CRM contact records, without switching between tools.
+- **Add internal note to a support ticket** — post a note visible only to the support team, not the customer. Used for handoff context, escalation detail, or coordination.
+
 ### Landing Page Management
 
 | | |

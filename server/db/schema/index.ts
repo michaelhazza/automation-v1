@@ -297,3 +297,13 @@ export * from './ieeSessions.js';
 export * from './agentPresenceProjections.js';
 export * from './agentWorkingTimeRollups.js';
 export * from './agentWorkingTimeEventLedger.js';
+
+// Support Desk canonical tables — inboxes, support agents, tickets, messages, drafts (migrations 0307–0311)
+export * from './canonicalInboxes.js';
+export * from './canonicalSupportAgents.js';
+export * from './canonicalTickets.js';
+export * from './canonicalTicketMessages.js';
+export * from './canonicalTicketDrafts.js';
+
+// Support Desk action idempotency ledger (migration 0312)
+export * from './actionAttempts.js';

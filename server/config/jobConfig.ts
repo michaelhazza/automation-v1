@@ -626,6 +626,21 @@ export const JOB_CONFIG = {
     deadLetter: 'document:promotion-finalise__dlq',
     idempotencyStrategy: 'one-shot' as const,
   },
+  // ── Support Desk — draft dispatch reconciliation (C11) ───────────
+  // Fired when a draft enters needs_reconciliation (dispatch stalled).
+  // Payload carries draftId + organisationId. The handler calls decideOutcome
+  // and either resolves the draft, surfaces it for manual review, or
+  // re-enqueues with exponential backoff. retryLimit 5 matches the
+  // max_attempts budget in decideOutcome. payload-key: draftId is the
+  // deterministic dedup token (one reconciliation sweep per draft per attempt).
+  'support-draft-reconciliation': {
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'support-draft-reconciliation__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

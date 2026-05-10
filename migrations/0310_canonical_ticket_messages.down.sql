@@ -1,0 +1,2 @@
+DROP POLICY IF EXISTS canonical_ticket_messages_org_isolation ON canonical_ticket_messages;
+DROP TABLE IF EXISTS canonical_ticket_messages;

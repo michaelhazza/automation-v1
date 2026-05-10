@@ -1154,6 +1154,46 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0305_agent_workspace_presence_and_sessions.sql',
     rationale: 'Idempotency ledger for working-time event folding — reveals which execution events have been billed. Cross-tenant leak exposes financial audit trail.',
   },
+  // 0307 — Support Desk canonical tables
+  {
+    tableName: 'canonical_inboxes',
+    schemaFile: 'canonicalInboxes.ts',
+    policyMigration: '0307_canonical_inboxes.sql',
+    rationale: 'Per-inbox agent configuration including mode, collision window, draft expiry, and model overrides — cross-tenant leak exposes support automation strategy.',
+  },
+  {
+    tableName: 'canonical_support_agents',
+    schemaFile: 'canonicalSupportAgents.ts',
+    policyMigration: '0308_canonical_support_agents.sql',
+    rationale: 'Helpdesk agent roster per organisation — cross-tenant leak exposes staffing and assignment data.',
+  },
+  {
+    tableName: 'canonical_tickets',
+    schemaFile: 'canonicalTickets.ts',
+    policyMigration: '0309_canonical_tickets.sql',
+    rationale: 'Per-ticket support state including customer identity, status, priority, and collision primitives — cross-tenant leak exposes customer support data and agent operations.',
+  },
+  // 0310 — Support Desk canonical messages
+  {
+    tableName: 'canonical_ticket_messages',
+    schemaFile: 'canonicalTicketMessages.ts',
+    policyMigration: '0310_canonical_ticket_messages.sql',
+    rationale: 'Support ticket message bodies — contain customer communications, internal notes, and agent replies. Cross-tenant leak exposes customer PII and business-sensitive support content.',
+  },
+  // 0311 — Support Desk AI-proposed reply drafts
+  {
+    tableName: 'canonical_ticket_drafts',
+    schemaFile: 'canonicalTicketDrafts.ts',
+    policyMigration: '0311_canonical_ticket_drafts.sql',
+    rationale: 'AI-proposed support reply drafts with state machine and dispatch history — cross-tenant leak exposes AI reasoning, draft content, and operator review decisions.',
+  },
+  // 0312 — Support Desk action idempotency ledger
+  {
+    tableName: 'action_attempts',
+    schemaFile: 'actionAttempts.ts',
+    policyMigration: '0312_action_attempts.sql',
+    rationale: 'Action idempotency ledger — records in-flight and completed provider write attempts. Cross-tenant leak exposes which actions were attempted and their outcomes.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
