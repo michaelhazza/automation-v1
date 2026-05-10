@@ -93,3 +93,61 @@ architecture, error_handling, scope
 - `npm run lint` — 0 errors (warnings unchanged from baseline, none in our edits).
 - `npm run typecheck` — clean.
 
+---
+
+## Round 2 — 2026-05-10T11-30-00Z
+
+### ChatGPT Feedback (raw)
+
+Round 2 verdict: approved, with one small optional polish item. The 5 Round 1 findings are closed cleanly.
+
+What changed correctly:
+
+B1 closed: backend registration is now unconditional, in deterministic spec order, and fatal on registration failure via throw err. That fixes the partial-registry boot hazard.
+B2 closed: claudeCodeBackend now keeps backendTaskId: null, with sessionId retained only in toolCallsLog[0].sessionId, matching the adapter contract.
+T1 closed: ParentRunNotDispatchable no longer returns a synthetic zeroed response. It logs and rethrows because no pre-cutover race-loser shape exists.
+T2 closed: finalisation now throws FinaliseRequiresDelegatedAdapter for non-delegated misuse instead of silently returning false.
+T3 closed: registration order now matches api, headless, claude-code, iee_browser, iee_dev.
+Optional polish, not a blocker
+P1. Clarify one comment that claims typed errors render as 4xx
+
+The ParentRunNotDispatchable comment says the route layer's existing error envelope renders typed errors as a 4xx. I have not seen evidence in the diff that ParentRunNotDispatchable carries statusCode or that the route layer maps this class to 4xx. The safer wording is:
+
+Rethrow with a structured warn line so operators see the race in logs. The route layer will surface the typed error according to the existing error-envelope behaviour. A deliberate AgentRunResult shape for this case can be added later once the desired client-visible shape is decided.
+
+This avoids overclaiming the HTTP status behaviour in a code comment.
+
+Recommendation
+
+No further review round needed. Merge once CI is green.
+
+### Verdict
+**Verdict:** APPROVED
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| P1 — comment overclaims that typed errors render as 4xx | technical | implement | auto (implement) | low | Investigation: `ParentRunNotDispatchable` (server/services/executionBackends/types.ts:421) extends `Error` and has NO `statusCode` field. `normaliseRouteError` (server/lib/asyncHandlerNormalisationPure.ts:25-51) checks for `instanceof AppError`, then duck-typed `statusCode: number`, then falls through to `kind: 'unknown'` with statusCode 500. So this error today actually maps to a 500 envelope, not a 4xx — the comment is verifiably wrong. Applied ChatGPT's suggested rewording verbatim. |
+
+### Investigation notes for P1
+
+- Verified `ParentRunNotDispatchable` class definition (`server/services/executionBackends/types.ts:421-430`): `extends Error`, fields are `runId` and `reason`, NO `statusCode`.
+- Verified the route layer error envelope (`server/lib/asyncHandler.ts` + `server/lib/asyncHandlerNormalisationPure.ts`):
+  - `asyncHandler` calls `normaliseRouteError(err)` for all caught errors.
+  - `normaliseRouteError` returns `kind: 'unknown'` with `statusCode: 500, code: 'LEGACY_ERROR'` for any `Error` that lacks both `instanceof AppError` and a numeric `statusCode` field.
+  - `ParentRunNotDispatchable` matches neither AppError nor the duck-shape — it would currently be rendered as a 500.
+- Verified the route call site (`server/routes/agentRuns.ts:55-90`): only `ControllerStyleNotAllowedForAgentError` has explicit handling; everything else falls through to `asyncHandler`'s 500 path.
+- Conclusion: ChatGPT's claim is correct — the comment overclaimed 4xx behaviour. The suggested rewording is more accurate ("according to the existing error-envelope behaviour" — neutral on the actual status code). Implemented as recommended.
+
+### Implemented (auto-applied technical)
+
+- [auto] P1 — `server/services/agentExecutionService.ts:1629-1634` — Reworded the comment block to remove the unsupported "renders typed errors as a 4xx" claim. Now reads: "Rethrow with a structured warn line so operators see the race in logs. The route layer will surface the typed error according to the existing error-envelope behaviour. A deliberate AgentRunResult shape for this case can be added later once the desired client-visible shape is decided — that is a behaviour change, out of scope here."
+
+### Top themes
+documentation, error_handling
+
+### Verification
+- `npm run lint` — 0 errors.
+- `npm run typecheck` — clean.
+

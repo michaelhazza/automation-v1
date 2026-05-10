@@ -1627,11 +1627,11 @@ export const agentExecutionService = {
           // invent a silent success response (no 5xx, no panic)."
           //
           // Rethrow with a structured warn line so operators see the race
-          // in logs. The route layer's existing error envelope renders
-          // typed errors as a 4xx (this is a client-observable race, not a
-          // 5xx server fault). A deliberate AgentRunResult shape for this
-          // case can be added later once the desired client-visible shape
-          // is decided — that is a behaviour change, out of scope here.
+          // in logs. The route layer will surface the typed error
+          // according to the existing error-envelope behaviour. A
+          // deliberate AgentRunResult shape for this case can be added
+          // later once the desired client-visible shape is decided — that
+          // is a behaviour change, out of scope here.
           logger.warn('agentExecutionService.parent_not_dispatchable', {
             runId: run.id,
             mode: effectiveMode,
