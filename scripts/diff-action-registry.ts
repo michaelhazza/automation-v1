@@ -1,15 +1,13 @@
 /**
  * diff-action-registry.ts
  *
- * One-shot diff CLI. Loads the compiled ACTION_REGISTRY from
- * dist/server/config/actionRegistry.js, serialises it the same way
- * snapshot-action-registry.ts does, then compares it deeply against the
- * committed snapshot at scripts/snapshots/action-registry.snapshot.json.
+ * One-shot diff CLI. Loads ACTION_REGISTRY via source (tsx) and serialises it
+ * the same way snapshot-action-registry.ts does, then compares it deeply
+ * against the committed snapshot at scripts/snapshots/action-registry.snapshot.json.
  *
  * Reports every mismatch as { slug, field, expected, actual } on stderr.
  *
  * Usage:
- *   npm run build:server   # compile first (after any change to the registry)
  *   npx tsx scripts/diff-action-registry.ts
  *
  * Exit codes:
@@ -20,12 +18,15 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { serialiseRegistry, type SerialisedRegistry, type SerialisedEntry } from './registrySerialiserPure.js';
+import { ACTION_REGISTRY as _ACTION_REGISTRY } from '../server/config/actionRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REGISTRY_PATH = resolve(__dirname, '../dist/server/config/actionRegistry.js');
 const SNAPSHOT_PATH = resolve(__dirname, 'snapshots/action-registry.snapshot.json');
+
+// Widen to the shape serialiseRegistry expects.
+const ACTION_REGISTRY = _ACTION_REGISTRY as Record<string, Record<string, unknown>>;
 
 // ---------------------------------------------------------------------------
 // Prerequisite checks
@@ -39,14 +40,6 @@ if (!existsSync(SNAPSHOT_PATH)) {
   process.exit(2);
 }
 
-if (!existsSync(REGISTRY_PATH)) {
-  process.stderr.write(
-    'run `npm run build:server` first\n' +
-    `(expected: ${REGISTRY_PATH})\n`,
-  );
-  process.exit(1);
-}
-
 // ---------------------------------------------------------------------------
 // Load snapshot
 // ---------------------------------------------------------------------------
@@ -56,21 +49,6 @@ try {
   snapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf8')) as SerialisedRegistry;
 } catch (err) {
   process.stderr.write(`Failed to parse snapshot file: ${String(err)}\n`);
-  process.exit(1);
-}
-
-// ---------------------------------------------------------------------------
-// Load runtime registry
-// ---------------------------------------------------------------------------
-
-let ACTION_REGISTRY: Record<string, Record<string, unknown>>;
-try {
-  const mod = await import(pathToFileURL(REGISTRY_PATH).href) as {
-    ACTION_REGISTRY: Record<string, Record<string, unknown>>;
-  };
-  ACTION_REGISTRY = mod.ACTION_REGISTRY;
-} catch (err) {
-  process.stderr.write(`Failed to import compiled registry: ${String(err)}\n`);
   process.exit(1);
 }
 

@@ -3,7 +3,7 @@
  *
  * One-shot CSV-vs-runtime risk-tier drift detector.
  *
- * Loads dist/server/config/actionRegistry.js and parses
+ * Loads ACTION_REGISTRY via source (tsx) and parses
  * tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv, then
  * cross-checks every CSV row against ACTION_REGISTRY[slug].riskTier.
  *
@@ -15,17 +15,18 @@
  * Exit codes:
  *   0 — every CSV-listed slug matches its registered riskTier (registry-only slugs are reported but do not fail)
  *   1 — one or more CSV-only or mismatched slugs found
- *
- * Requires: npm run build:server (loads from dist/).
  */
 
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { ACTION_REGISTRY as _ACTION_REGISTRY } from '../server/config/actionRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const REGISTRY_PATH = resolve(__dirname, '../dist/server/config/actionRegistry.js');
+// Widen to allow bracket-access by slug + field name.
+const ACTION_REGISTRY = _ACTION_REGISTRY as Record<string, Record<string, unknown>>;
+
 const CSV_PATH = resolve(
   __dirname,
   '../tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv',
@@ -35,34 +36,11 @@ const CSV_PATH = resolve(
 // Prerequisite checks
 // ---------------------------------------------------------------------------
 
-if (!existsSync(REGISTRY_PATH)) {
-  process.stderr.write(
-    'run `npm run build:server` first\n' +
-      `(expected: ${REGISTRY_PATH})\n`,
-  );
-  process.exit(1);
-}
-
 if (!existsSync(CSV_PATH)) {
   process.stderr.write(
     `CSV not found: ${CSV_PATH}\n` +
       'Expected tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv\n',
   );
-  process.exit(1);
-}
-
-// ---------------------------------------------------------------------------
-// Load runtime registry
-// ---------------------------------------------------------------------------
-
-let ACTION_REGISTRY: Record<string, Record<string, unknown>>;
-try {
-  const mod = (await import(pathToFileURL(REGISTRY_PATH).href)) as {
-    ACTION_REGISTRY: Record<string, Record<string, unknown>>;
-  };
-  ACTION_REGISTRY = mod.ACTION_REGISTRY;
-} catch (err) {
-  process.stderr.write(`Failed to import compiled registry: ${String(err)}\n`);
   process.exit(1);
 }
 

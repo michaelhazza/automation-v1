@@ -1,5 +1,6 @@
 export * from './types.js';
 import type { ActionDefinition } from './types.js';
+import { logger } from '../../lib/logger.js';
 import { coreActions } from './core.js';
 import { intelligenceActions } from './intelligence.js';
 import { agentsActions } from './agents.js';
@@ -133,9 +134,7 @@ export function resolveActionSlug(slug: string): string {
   if (!loggedAliasHits.has(slug)) {
     loggedAliasHits.add(slug);
 
-    console.warn(
-      `[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`,
-    );
+    logger.warn(`[action-registry] legacy slug consumed: '${slug}' → '${canonical}'. Update the caller.`);
   }
   return canonical;
 }
