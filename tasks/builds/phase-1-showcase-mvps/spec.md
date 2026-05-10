@@ -265,11 +265,15 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 ### 3.5 Observability constraints
 
-**INV-16. Stable log codes and Run Trace event discriminators are the same string.** New log codes follow the `phase1.<area>.<event>` pattern. Each event below appears as both a structured log code AND an `agent_execution_events.event_type` discriminator, with a single payload shape:
+**INV-16. Stable log codes; Run Trace discriminators map 1:1 with log codes for events emitted from agent runs.** New log codes follow the `phase1.<area>.<event>` pattern. Events emitted from inside an agent run appear as both a structured log code AND an `agent_execution_events.event_type` discriminator with a single payload shape (the "run-rendered" set). Events emitted from non-run paths (background jobs, sweeper jobs) are log-only — they do not appear as `agent_execution_events.event_type` because there is no run to attach them to.
 
+**Run-rendered events** (emitted from agent runs; surface in Run Trace):
 - `phase1.macro.run_started`, `phase1.macro.run_completed`, `phase1.macro.artifact_delivered`, `phase1.macro.login_failed`, `phase1.macro.run_stuck`
-- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.ticket_terminal`, `phase1.support.eval_drift_detected`
-- `phase1.file_delivery.uploaded`, `phase1.file_delivery.downloaded`, `phase1.file_delivery.signed_url_issued`, `phase1.file_delivery.expired`
+- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.ticket_terminal`
+
+**Log-only events** (emitted from non-run paths; surface in structured logs + the Activity feed only):
+- `phase1.support.eval_drift_detected` (emitted by the daily eval job)
+- `phase1.file_delivery.uploaded`, `phase1.file_delivery.signed_url_issued`, `phase1.file_delivery.downloaded`, `phase1.file_delivery.expired` (emitted by main-app endpoints + sweeper job; not bound to a single agent run)
 
 **INV-17. Both MVPs surface in Run Trace.** Run Trace virtual view (foundation Item 4) already aggregates events; new event types from this spec emit through the same channels.
 
@@ -364,6 +368,14 @@ The PDF has a fixed shape; it does not adapt per run. Future variations: add a "
 #### 4.4.3 Implementation
 
 PDF rendering runs server-side in the main app (not the worker), keeping the worker's responsibilities narrow (browser automation + transcription) and letting `@react-pdf/renderer` reuse the main app's React + tooling. The worker hands off the transcript artifact and structured analysis to the main app via the existing run-completed event; the main app renders the PDF and uploads it via `fileDeliveryService` (Section 6.1.3). No PDF rendering happens in the worker.
+
+**Determinism contract.** `@react-pdf/renderer` raw output is NOT byte-deterministic out of the box — embedded creation timestamps, object-ordering nondeterminism, and library-version metadata vary across runs. The acceptance criterion in §9.1 ("byte-deterministic across re-runs") is satisfied via a small post-render normalization step in `reportRenderingService`:
+
+1. Pin `@react-pdf/renderer` to an exact version in `package.json` (no caret); record the version in the rendered PDF metadata (`Producer` field).
+2. After render, normalise: zero out the `/CreationDate` and `/ModDate` PDF metadata fields, sort the object stream's xref table deterministically, strip the `/ID` array.
+3. The hash recorded in `run_artifacts.content_hash` is the SHA-256 of the normalised bytes; the bytes uploaded to S3 are also the normalised bytes. Re-running the same input through the same library version against the same React component tree produces an identical hash.
+
+If `@react-pdf/renderer` is later swapped (Open Decision 11.1), the determinism contract has to be re-validated against the new library; the contract itself does not change.
 
 | File | Change | Rough LOC |
 |---|---|---|
@@ -699,11 +711,16 @@ Per `INV-9`, every `support.*` action carries a Risk Tier; the foundation refact
 | `support.tag` | 2 | auto |
 | `support.assign` | 1 | auto |
 | `support.propose_reply` | 2 | auto (writes a draft, not a customer-facing message) |
-| `support.approve_draft` | 6 | block unless inbox `mode=autonomous` policy override |
+| `support.approve_draft` (agent-callable, in autonomous mode only) | 6 | block unless inbox `mode=autonomous` policy override |
 | `support.reject_draft` | 1 | auto |
 | `ask_clarifying_question` (universal) | 0 | auto (existing entry, listed for completeness) |
 
-Risk Tier 6 on `approve_draft` is the gating control: in `assisted` mode the action is blocked, kicking the draft to the review queue. In `autonomous` mode the per-inbox `agent_config.mode` policy override lowers it to `auto`.
+**Two distinct approval paths.** Risk Tier 6 on `support.approve_draft` gates the **agent-called auto-approval path** only:
+
+- In `assisted` mode the agent's call to `support.approve_draft` is blocked; the draft sits in `awaiting_review` and the existing review queue + Slack Block Kit flow takes over. The human's approval is recorded through the existing review-queue / `reviewItems` / `reviewAuditRecords` path — NOT through `support.approve_draft`. The three-phase dispatch in `supportDraftDispatchService` consumes the human approval signal directly per the support-desk-canonical contract.
+- In `autonomous` mode the per-inbox `agent_config.mode = 'autonomous'` policy override lowers the gate to `auto`, allowing the agent's call to `support.approve_draft` to proceed and trigger dispatch without human intervention.
+
+In both modes the dispatch pathway is the same (`supportDraftDispatchService.dispatchDraft` → three-phase dispatch); only the trigger differs.
 
 #### 5.4.3 Code changes
 
@@ -899,6 +916,17 @@ CREATE UNIQUE INDEX run_artifacts_storage_key_unique
 
 **Source-of-truth precedence vs `iee_artifacts`.** `iee_artifacts` remains the worker-internal ledger of raw artifacts produced during IEE execution (used by IEE progress UI, transcription cache, dedup-by-content-hash inside the worker). `run_artifacts` is the customer-delivery ledger — only entries the customer can download via signed URL. When an IEE artifact is promoted to customer delivery, the worker copies the bytes to S3 and inserts a new `run_artifacts` row referencing the same `iee_run_id` plus the same `content_hash`; the original `iee_artifacts` row is never moved. Customer-facing UI reads `run_artifacts` only; the worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.
 
+#### 6.1.2b Retention sweep (hard-delete)
+
+Phase 1 hard-deletes expired artifacts. The schema has `retain_until` but intentionally has no soft-delete columns (`deleted_at`, `storage_deleted_at`) — adding them costs schema complexity that this MVP does not need. The daily sweeper job:
+
+1. Selects rows with `retain_until < now()` ordered by `retain_until ASC`, in batches.
+2. Deletes the S3 object via `DeleteObject`.
+3. Deletes the `run_artifacts` row.
+4. Emits `phase1.file_delivery.expired` with the row's last-known metadata.
+
+Because the row is hard-deleted, `listForRun` does not need to filter on a deletion column — expired rows simply do not appear. Signed URLs that were issued before deletion will return 403 from S3 once the object is gone; that is acceptable for Phase 1 (signed URLs are short-lived). Phase 2 may add a soft-delete tombstone column if download attribution after expiry becomes a customer requirement.
+
 #### 6.1.3 Service API
 
 ```ts
@@ -936,14 +964,16 @@ export const fileDeliveryService = {
 
 #### 6.1.4 Worker integration
 
-The IEE worker produces artifact bytes (transcripts, source media) and delivers them to `fileDeliveryService.upload`. PDF reports are rendered in the main app per §4.4.3 (the worker does not render PDFs), so the worker's only direct upload responsibilities are the transcript and source media.
+The IEE worker produces artifact bytes (transcripts, source media) and delivers them to the `fileDeliveryService.upload` contract. PDF reports are rendered in the main app per §4.4.3 (the worker does not render PDFs), so the worker's only direct upload responsibilities are the transcript and source media.
 
-There are two viable upload paths from the worker:
+**Single contract, two physical paths.** Regardless of where the bytes physically transit to S3, the row-insertion into `run_artifacts` and the `phase1.file_delivery.uploaded` event emission ALWAYS happen in the main app (not the worker). This keeps the audit trail single-sourced and aligned with the §6.1.1 IAM model (worker write-only on bytes; main app row-insert + signed-URL issuance).
 
-- **Direct S3 upload** with worker-scoped IAM credentials (lower latency, no main-app round trip).
-- **Main-app proxy** where the worker streams to a main-app endpoint that does the S3 write (centralised auditing, single IAM trust boundary).
+The two physical-transit options are gated on Open Decision 11.2; both bind to the same logical contract:
 
-Choice depends on whether the worker already has scoped IAM credentials in production. **Open Decision:** see Section 11.2.
+- **Option A — direct upload + finalize.** Worker uploads object bytes directly to S3 with worker-scoped IAM (write-only); after the PUT succeeds the worker calls a main-app endpoint `POST /api/internal/run-artifacts/finalize` with the upload metadata; main app verifies the object exists, inserts the `run_artifacts` row, emits `phase1.file_delivery.uploaded`, returns the artifact id.
+- **Option B — main-app proxy.** Worker streams bytes to a main-app endpoint `POST /api/internal/run-artifacts/upload`; main app does the S3 write, the row insert, and event emission inside the same request handler.
+
+Option A is the steady-state target; Option B is a viable Phase 1 fallback if worker-scoped IAM is not yet provisioned. The choice does not change the row shape, the event payload, or the signed-URL issuance flow downstream — only where the bytes physically transit.
 
 #### 6.1.5 UI integration
 
@@ -955,12 +985,12 @@ INV-16 lists four `phase1.file_delivery.*` events. Their payload contracts and e
 
 | Event | Emitter | Emit point | Payload |
 |---|---|---|---|
-| `phase1.file_delivery.uploaded` | `fileDeliveryService.upload` (after successful S3 PUT + row insert) | After the `run_artifacts` insert returns | `{artifactId, organisationId, agentRunId?, ieeRunId?, contentHash, sizeBytes, storageProvider, storageKey, mimeType, artifactKind}` |
-| `phase1.file_delivery.signed_url_issued` | `fileDeliveryService.issueSignedUrl` | After signing (before returning to caller) | `{artifactId, organisationId, expiresAt, inlineDisposition, requestSource: 'run_trace_panel' \| 'pdf_embed' \| 'copy_link' \| 'api_consumer'}` |
-| `phase1.file_delivery.downloaded` | The download proxy / signed-URL redirect endpoint | When the bytes are actually fetched (not on URL issuance — that's the previous event) | `{artifactId, organisationId, downloaderUserId?, byteCount, durationMs}` |
-| `phase1.file_delivery.expired` | A daily sweeper job that runs against `run_artifacts` rows where `retain_until < now()` | When the sweeper deletes the S3 object and either marks the row deleted or removes it (Phase 1 marks deleted; Phase 2 may hard-delete) | `{artifactId, organisationId, retainUntil, ageDays}` |
+| `phase1.file_delivery.uploaded` | Main app `fileDeliveryService.upload` (Option B) or finalize endpoint (Option A); never the worker | After the `run_artifacts` insert returns | `{artifactId, organisationId, agentRunId?, ieeRunId?, contentHash, sizeBytes, storageProvider, storageKey, mimeType, artifactKind}` |
+| `phase1.file_delivery.signed_url_issued` | Main app `fileDeliveryService.issueSignedUrl` | After signing (before returning to caller) | `{artifactId, organisationId, expiresAt, inlineDisposition, requestSource: 'run_trace_panel' \| 'pdf_embed' \| 'copy_link' \| 'api_consumer'}` |
+| `phase1.file_delivery.downloaded` | Main-app download proxy at `GET /api/run-artifacts/:id/download` (the proxy follows the signed-URL exchange and streams bytes back) | When the bytes are actually fetched (not on URL issuance — that's the previous event) | `{artifactId, organisationId, downloaderUserId?, byteCount, durationMs}` |
+| `phase1.file_delivery.expired` | Main-app daily sweeper job that runs against `run_artifacts` rows where `retain_until < now()` | When the sweeper deletes the S3 object and removes the row (Phase 1 hard-deletes per §6.1.6b) | `{artifactId, organisationId, retainUntil, ageDays}` |
 
-`uploaded` and `signed_url_issued` are emitted from the main app. `downloaded` requires either an app proxy (where the main app serves the bytes after signed-URL exchange) OR a CloudFront signed-URL delivery-log scrape — for Phase 1 use the app proxy because it gives accurate per-download attribution without infrastructure work. `expired` is best-effort observability; the spec does not gate any behaviour on it.
+All four events emit from the main app. The download proxy is the only practical route to per-download attribution without infrastructure work, so Phase 1 mandates it. `expired` is best-effort observability; the spec does not gate any behaviour on it.
 
 #### 6.1.6 Code changes
 
@@ -1113,7 +1143,7 @@ After merge:
 ### 9.1 42 Macro Full MVP
 
 - [ ] Scheduled 42 Macro run completes end-to-end on a real Teamwork-style portal.
-- [ ] PDF report renders correctly for the smoke-test scenario, byte-deterministic across re-runs.
+- [ ] PDF report renders correctly for the smoke-test scenario, byte-deterministic across re-runs after the §4.4.3 normalization step (timestamps zeroed, xref sorted, `/ID` stripped, library version pinned).
 - [ ] PDF + transcript artifacts uploaded to S3 with signed URLs.
 - [ ] Run Trace headline shows "Report ready · Download".
 - [ ] Artifacts panel renders below the tool tree with Preview / Download / Copy link affordances.
