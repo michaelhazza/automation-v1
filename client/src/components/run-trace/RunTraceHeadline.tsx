@@ -12,6 +12,8 @@ export interface RunTraceHeadlineProps {
   approvalStatus: string | null;
   durationMs: number | null;
   costCents: number | null;
+  /** When true, shows a green "Report ready · Download" badge (spec §4.5.1). */
+  artifactReady?: boolean;
 }
 
 // Badge colors by semantic meaning.
@@ -36,6 +38,7 @@ export function RunTraceHeadline({
   approvalStatus,
   durationMs,
   costCents,
+  artifactReady,
 }: RunTraceHeadlineProps) {
   return (
     <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -63,6 +66,11 @@ export function RunTraceHeadline({
         <span className={BADGE_SLATE}>
           {formatCost(costCents)}
         </span>
+      )}
+
+      {/* Artifact-ready badge — shown when a report is available for download */}
+      {artifactReady === true && (
+        <span className={BADGE_GREEN}>Report ready · Download</span>
       )}
     </div>
   );

@@ -1201,6 +1201,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0313_run_artifacts.sql',
     rationale: 'Customer-visible artifact delivery ledger — file hashes, S3 keys, and download counts are scoped per org. Cross-tenant leak exposes artifact content and delivery patterns.',
   },
+  // 0315 — Phase 1 Showcase: Support Agent eval harness run records
+  {
+    tableName: 'support_eval_runs',
+    schemaFile: 'supportEvalRuns.ts',
+    policyMigration: '0315_support_eval_runs.sql',
+    rationale: 'Per-org support agent evaluation run records — contains eval configurations, agent outputs, and quality verdicts. Cross-tenant leak exposes agent behavior patterns and quality assessment data.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

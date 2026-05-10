@@ -122,6 +122,9 @@ const ScorecardCreatePage = lazy(() => import('./pages/govern/ScorecardCreatePag
 const ModelBenchPage = lazy(() => import('./pages/govern/ModelBenchPage'));
 const SubaccountApprovalChannelsPage = lazy(() => import('./pages/SubaccountApprovalChannelsPage'));
 const OrgApprovalChannelsPage = lazy(() => import('./pages/OrgApprovalChannelsPage'));
+// Phase 1 Showcase — Support Agent operate surfaces
+const SupportAgentDashboard = lazy(() => import('./pages/operate/SupportAgentDashboard').then(m => ({ default: m.SupportAgentDashboard })));
+const SupportEvalsPage = lazy(() => import('./pages/operate/SupportEvalsPage').then(m => ({ default: m.SupportEvalsPage })));
 // Support Desk canonical substrate (C13)
 const TicketsListPage = lazy(() => import('./pages/support/TicketsListPage'));
 const TicketDetailPage = lazy(() => import('./pages/support/TicketDetailPage'));
@@ -525,6 +528,9 @@ export default function App() {
             <Route path="/admin/spending-budgets"                        element={<Navigate to="/spending" replace />} />
             <Route path="/admin/spending-budgets/:budgetId"             element={<Navigate to="/spending" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/spend-ledger" element={<Navigate to="/spending" replace />} />
+            {/* Phase 1 Showcase — Support Agent operate surfaces */}
+            <Route path="/operate/agents/support" element={<SupportAgentDashboard />} />
+            <Route path="/operate/agents/support/evals" element={<SupportEvalsPage />} />
             {/* Support Desk canonical substrate (C13) */}
             <Route path="/support/tickets" element={<TicketsListPage />} />
             <Route path="/support/tickets/:id" element={<TicketDetailPage />} />
