@@ -3425,3 +3425,59 @@ server/config/actionRegistry/
 5. **Direct-object exceptions.** Roughly 25-30 entries don't fit any factory and stay as direct object literals in the relevant domain module. Common reasons: `actionCategory: 'api'` for internal reads (factories hardcode `'worker'`), entries with no `mcp` field (factories pre-populate it), unique `defaultGateLevel: 'block'`, dotted slugs, non-standard fields like `scopeRequirements`/`onFailure`, and customer-messaging-shaped entries whose IIFE-derived `blastRadius: 'tenant'` would shift to `'external'` under `defineCustomerMessagingWrite`. Each direct-object entry carries an inline comment naming the divergence.
 
 **Why this matters.** The shim pattern is zero-cost for callers: `import { ACTION_REGISTRY } from 'server/config/actionRegistry.js'` still works. Adding a new skill means editing only the relevant domain module (e.g. `core.ts` for a new capability skill). The diff-test gate catches semantic drift without manual inspection of 3000-line diffs.
+
+## Pattern: chatgpt-spec-review automated mode saturates around round 3 — stop on re-raise majority
+
+**Context.** Running automated chatgpt-spec-review on `phase-1-showcase-mvps/spec.md` with `gpt-4.1`: round 1 produced 10 findings (6 real applies + 4 already-deferred/rejected). Round 2 produced 8 findings (6 real applies + 2 re-raises). Round 3 produced 10 findings of which 6 were re-raises of items already addressed in rounds 1-2, 1 was a project-policy rejection (frontend tests forbidden), 2 were already-deferred Open Decisions, 1 was a real low-severity apply.
+
+**Resolution.** The agent contract says "Run automated rounds until APPROVED or 3 rounds elapse without APPROVED, then finalise." That's the saturation cap. Practical stopping rule: if round N produces 50%+ re-raises of already-addressed items, the loop has converged regardless of verdict — stop. Verdicts can stay CHANGES_REQUESTED indefinitely because the model rewords concerns the spec already handled.
+
+**Detection heuristic.** Track findings by `evidence` text and rationale across rounds. A round where most rationales reference sections you edited in prior rounds is saturation. The model is generating noise, not finding new gaps.
+
+## Pattern: Two-ledger artifact designs (worker-internal + customer-facing) need explicit drift-handling subsection
+
+**Context.** Spec described `iee_artifacts` (worker-internal) and `run_artifacts` (customer-delivery) as separate by-design ledgers. ChatGPT spec-review raised "no canonical source of truth" three rounds in a row — once with the original framing, once after the round-1 drift-handling fix, once after the round-2 fix. The reviewer wanted a single source of truth even when the design intentionally has two.
+
+**Resolution.** Document the two-ledger split with: (1) what each ledger covers, (2) what happens when one has a row the other doesn't (each direction's failure mode and self-healing path), (3) the explicit "no reconciliation worker" decision with rationale. Reviewers stop re-raising once the failure modes are enumerated.
+
+**Detection heuristic.** Any spec that describes two ledgers/tables for the "same" data (worker vs main, internal vs external, ledger vs cache) needs an explicit drift-handling subsection up front, not deferred to "see Open Decision."
+
+## Pattern: Prompt-injection prevention in MVP specs — defence-in-depth beats programmatic enforcement
+
+**Context.** Spec exposed `agent_config.promptOverride` as a freeform 500-char textarea per inbox. ChatGPT spec-review flagged "no programmatic prompt-injection prevention" three rounds running. There is no proven programmatic prompt-injection prevention at scale today — the field is an open research problem.
+
+**Resolution.** The MVP posture is dev-discipline (length cap + forbidden-token scan + composition rules + audit trail) plus defence-in-depth via the architecture (fixed agent tool surface + HITL approval still gates customer-facing replies). State explicitly in the spec that the controls "are dev-discipline, not a security boundary" and that the defence-in-depth comes from the agent's locked tool surface plus the approval flow. Even a successful prompt-injection cannot send a customer-facing reply in `assisted` mode without passing the HITL gate.
+
+**Detection heuristic.** When a spec exposes any LLM-input-from-customer-config surface, the security review pass will flag prompt injection. Pre-empt by writing the four-line defence-in-depth posture into the spec itself.
+
+## Pattern: PG advisory_xact_lock + partial unique index for singleton-per-tenant install
+
+**Context.** Spec asserted "singleton-per-subaccount" enforcement at install time but didn't address the race where two concurrent installs both pass the existence check before either commits. Standard SELECT-then-INSERT can interleave under read-committed isolation.
+
+**Resolution.** Two-layer defence: (1) `pg_advisory_xact_lock(hashtextextended(<subaccount_id::text || system_agent_id::text>))` taken at install transaction start — second concurrent transaction blocks until first commits/rolls back; (2) partial unique index on `subaccount_agents (subaccount_id, applied_template_id) WHERE is_active = true` filtered to the system-agent-template — even if both transactions race past the advisory lock, the second insert fails with `23505`. Map `23505` to HTTP 409.
+
+**Detection heuristic.** Any "singleton-per-X" install / enable / activate flow needs both: advisory lock for clean error path AND partial unique index as the safety net. Check for whether the existing schema's unique index actually filters by the right scope (active rows only, correct linkage column) — broader indexes don't enforce singleton.
+
+## Pattern: Eval gate fail-open with Activity-feed signal beats fail-closed for sub-2-row state
+
+**Context.** Spec required Foundry-derived regression set for the support-agent eval gate. If Foundry export is unavailable at gate time (export hiccup, data stale), fail-closed would block all unrelated PRs from merging until the data is restored.
+
+**Resolution.** Two-tier policy: (1) CI gate fails open (exits 0) when fewer than two `support_eval_runs` rows exist, AND emits `phase1.support.eval_drift_detected` to the Activity feed so the operator sees the silence. Sub-2-row state happens whenever the daily eval job has not yet run twice, including legitimate fresh-CI scenarios. (2) Lock-in gate (per production-verification step at §8.5) is fail-closed: lock-in cannot proceed without a fresh regression set within 30 days, and Open Decision escalates if the data is permanently unavailable. Ad-hoc CI doesn't block; lock-in does.
+
+**Detection heuristic.** Any acceptance criterion that depends on eternally-available external data needs a two-tier "ad-hoc fail-open + lock-in fail-closed" split, with the fail-open clearly logged so the operator can see it.
+
+## Pattern: Stable-slug discriminator beats UUID literal in partial unique indexes (refinement of PG advisory + partial index pattern above)
+
+**Context.** Round 2 of the phase-1-showcase-mvps chatgpt-spec-review (2026-05-10) raised that the original "partial unique index on `subaccount_agents (subaccount_id, applied_template_id) WHERE is_active = true AND applied_template_id = <system-agent-template-id>`" wording could not be implemented as written: a partial index cannot reference a runtime UUID placeholder (the system_agent_id is a `gen_random_uuid()` generated at seed time, not a stable literal), and a partial index cannot reference another table to look up the slug.
+
+**Resolution.** Add a stable-slug column to the table the partial index keys on (in this case `subaccount_agents.applied_template_slug text`, INV-5-allowed additive), backfilled from `system_agents.slug` in the same migration. The partial unique index then filters on the slug literal (`WHERE is_active = true AND applied_template_slug = 'support-agent'`). Pin the slug stability invariant explicitly: future system-agent renames must NOT rewrite historical slugs — the slug is identity, not display copy. Successor-identifier migrations are deliberate corrective migrations per `DEVELOPMENT_GUIDELINES.md § 6` rule 5, never casual updates.
+
+**Detection heuristic.** Any partial unique index whose `WHERE` clause needs to scope to a foreign-key target's identity (system-template, system-agent, system-skill) cannot use the FK UUID as the literal — UUIDs are seed-time-generated. Add a denormalised stable-slug column on the indexed table, populate at write time, and filter on the literal. Trips up reviewers when the spec says "filtering on `applied_template_id = <UUID>`" without explaining how the literal becomes stable.
+
+## Pattern: COALESCE optional canonical-layer watermarks in NOT-EXISTS predicates (silent UNKNOWN bug)
+
+**Context.** Round 2 of the phase-1-showcase-mvps chatgpt-spec-review (2026-05-10) caught a real correctness bug: the support-agent run-loop terminal-event predicate compared `e.created_at >= canonical_tickets.last_customer_message_at`. When `last_customer_message_at` is NULL (no inbound customer message ingested yet, or legacy ingestion paths predated the column), the comparison evaluates to UNKNOWN, the inner subquery returns no rows, the outer NOT EXISTS returns TRUE, and old tickets with terminal events get reprocessed forever. Silent failure mode — easy to miss in code review because the predicate looks fine for non-null cases.
+
+**Resolution.** Wrap any optional canonical-layer watermark in `COALESCE(<watermark>, <safe-floor>)` so the predicate degrades to a known-good comparison rather than UNKNOWN. For the support-agent case: `COALESCE(last_customer_message_at, created_at)` pins the lower bound to ticket creation time as a degenerate safe floor. Pair the COALESCE with an explicit ingestion-contract paragraph naming the writers (`connectorPollingService`, `webhookAdapterService`) so future developers know who is responsible for keeping the watermark fresh. Add test fixtures specifically for the null-timestamp degenerate cases — null + earlier-created (excluded) and null + later-created (eligible).
+
+**Detection heuristic.** Any predicate of shape `<event_column> >= <optional_canonical_column>` inside a NOT EXISTS / WHERE NOT IN / aggregate filter is a silent-UNKNOWN landmine when the optional column is nullable. Reviewer prompt: "Is this column ALWAYS populated by every ingestion path that touches the parent row, including legacy paths?" If the answer is "should be" or "the writer is supposed to", COALESCE the comparison. The cost of the COALESCE is one extra column read; the cost of the bug is silently re-processing data forever.
