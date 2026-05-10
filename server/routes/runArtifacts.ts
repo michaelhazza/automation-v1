@@ -163,10 +163,14 @@ router.get(
     const bucket = getBucketName();
     const safeDisplayName = artifact.displayName.replace(/[\r\n]/g, '').replace(/"/g, '\\"');
 
+    // ?disposition=inline renders the file in-browser (PDFs, images) instead of triggering a download.
+    const inlineMode = req.query.disposition === 'inline';
+    const disposition = inlineMode ? `inline; filename="${safeDisplayName}"` : `attachment; filename="${safeDisplayName}"`;
+
     const command = new GetObjectCommand({
       Bucket: bucket,
       Key: artifact.storageKey,
-      ResponseContentDisposition: `attachment; filename="${safeDisplayName}"`,
+      ResponseContentDisposition: disposition,
       ResponseContentType: artifact.mimeType,
     });
 
@@ -185,7 +189,7 @@ router.get(
     }
 
     res.setHeader('Content-Type', artifact.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${safeDisplayName}"`);
+    res.setHeader('Content-Disposition', disposition);
 
     const startMs = Date.now();
     let byteCount = 0;

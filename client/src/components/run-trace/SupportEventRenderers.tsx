@@ -38,13 +38,63 @@ function EventRow({ badge, text }: { badge: React.ReactNode; text: string }) {
 
 // ── Exported renderers ────────────────────────────────────────────────────────
 
-// phase1.support.execution_loop_started
-export function SupportExecutionLoopStartedRenderer({ event }: SupportEventProps) {
-  const ticketCount = String(event.payload?.ticketCount ?? '?');
+// phase1.support.ticket_classified
+export function SupportTicketClassifiedRenderer({ event }: SupportEventProps) {
+  const intent = String(event.payload?.intent ?? '?');
+  const urgency = String(event.payload?.urgency ?? '?');
+  const confidence = event.payload?.confidence !== undefined
+    ? `${Math.round(Number(event.payload.confidence) * 100)}%`
+    : '?';
   return (
     <EventRow
-      badge={<Badge label="Loop started" variant="neutral" />}
-      text={`Inbox scan started, ${ticketCount} tickets`}
+      badge={<Badge label="Classified" variant="neutral" />}
+      text={`Classified: ${intent} / ${urgency} (${confidence})`}
+    />
+  );
+}
+
+// phase1.support.classify_failed
+export function SupportClassifyFailedRenderer({ event }: SupportEventProps) {
+  const ticketId = String(event.payload?.ticketId ?? '?');
+  return (
+    <EventRow
+      badge={<Badge label="Classify failed" variant="red" />}
+      text={`Classification failed for ticket ${ticketId}`}
+    />
+  );
+}
+
+// phase1.support.draft_proposed
+export function SupportDraftProposedRenderer({ event }: SupportEventProps) {
+  const perTicketVerdict = String(event.payload?.perTicketVerdict ?? '');
+  return (
+    <EventRow
+      badge={<Badge label="Draft proposed" variant="green" />}
+      text={`Draft proposed${perTicketVerdict ? ` (${perTicketVerdict})` : ''}`}
+    />
+  );
+}
+
+// phase1.support.draft_dispatched
+export function SupportDraftDispatchedRenderer({ event }: SupportEventProps) {
+  const draftId = String(event.payload?.draftId ?? '?');
+  const dispatchPhase = String(event.payload?.dispatchPhase ?? '?');
+  return (
+    <EventRow
+      badge={<Badge label="Dispatched" variant="green" />}
+      text={`Draft ${draftId} dispatched (phase: ${dispatchPhase})`}
+    />
+  );
+}
+
+// phase1.support.draft_blocked_by_policy
+export function SupportDraftBlockedByPolicyRenderer({ event }: SupportEventProps) {
+  const blockingPolicy = String(event.payload?.blockingPolicy ?? '?');
+  const draftId = String(event.payload?.draftId ?? '?');
+  return (
+    <EventRow
+      badge={<Badge label="Blocked by policy" variant="red" />}
+      text={`Draft ${draftId} blocked: ${blockingPolicy}`}
     />
   );
 }
@@ -61,32 +111,6 @@ export function SupportCollisionSkippedRenderer({ event }: SupportEventProps) {
   );
 }
 
-// phase1.support.ticket_classified
-export function SupportTicketClassifiedRenderer({ event }: SupportEventProps) {
-  const intent = String(event.payload?.intent ?? '?');
-  const urgency = String(event.payload?.urgency ?? '?');
-  const confidence = event.payload?.confidence !== undefined
-    ? `${Math.round(Number(event.payload.confidence) * 100)}%`
-    : '?';
-  return (
-    <EventRow
-      badge={<Badge label="Classified" variant="neutral" />}
-      text={`Classified: ${intent} / ${urgency} (${confidence})`}
-    />
-  );
-}
-
-// phase1.support.draft_proposed
-export function SupportDraftProposedRenderer({ event }: SupportEventProps) {
-  const perTicketVerdict = String(event.payload?.perTicketVerdict ?? '');
-  return (
-    <EventRow
-      badge={<Badge label="Draft proposed" variant="green" />}
-      text={`Draft proposed${perTicketVerdict ? ` (${perTicketVerdict})` : ''}`}
-    />
-  );
-}
-
 // phase1.support.ticket_terminal
 export function SupportTicketTerminalRenderer({ event }: SupportEventProps) {
   const perTicketVerdict = String(event.payload?.perTicketVerdict ?? '');
@@ -99,40 +123,18 @@ export function SupportTicketTerminalRenderer({ event }: SupportEventProps) {
   );
 }
 
-// phase1.support.execution_loop_completed
-export function SupportExecutionLoopCompletedRenderer({ event }: SupportEventProps) {
-  const ticketCount = String(event.payload?.ticketCount ?? '?');
-  return (
-    <EventRow
-      badge={<Badge label="Loop complete" variant="neutral" />}
-      text={`Scan complete, ${ticketCount} tickets processed`}
-    />
-  );
-}
-
-// phase1.support.classify_failed
-export function SupportClassifyFailedRenderer({ event }: SupportEventProps) {
-  const ticketId = String(event.payload?.ticketId ?? '?');
-  return (
-    <EventRow
-      badge={<Badge label="Classify failed" variant="red" />}
-      text={`Classification failed for ticket ${ticketId}`}
-    />
-  );
-}
-
 // ── Lookup function ───────────────────────────────────────────────────────────
 
 type SupportEventRendererComponent = React.ComponentType<SupportEventProps>;
 
 const SUPPORT_EVENT_RENDERERS: Record<string, SupportEventRendererComponent> = {
-  'phase1.support.execution_loop_started': SupportExecutionLoopStartedRenderer,
-  'phase1.support.collision_skipped': SupportCollisionSkippedRenderer,
   'phase1.support.ticket_classified': SupportTicketClassifiedRenderer,
-  'phase1.support.draft_proposed': SupportDraftProposedRenderer,
-  'phase1.support.ticket_terminal': SupportTicketTerminalRenderer,
-  'phase1.support.execution_loop_completed': SupportExecutionLoopCompletedRenderer,
   'phase1.support.classify_failed': SupportClassifyFailedRenderer,
+  'phase1.support.draft_proposed': SupportDraftProposedRenderer,
+  'phase1.support.draft_dispatched': SupportDraftDispatchedRenderer,
+  'phase1.support.draft_blocked_by_policy': SupportDraftBlockedByPolicyRenderer,
+  'phase1.support.collision_skipped': SupportCollisionSkippedRenderer,
+  'phase1.support.ticket_terminal': SupportTicketTerminalRenderer,
 };
 
 export function getSupportEventRenderer(eventType: string): SupportEventRendererComponent | null {

@@ -49,6 +49,18 @@ const result = evaluateGateDecision(snapshots);
 
 console.log(`eval gate verdict: ${result.verdict} — ${result.reason}`);
 
+// Emit phase1.support.eval_drift_detected on fail_open (regression set unavailable)
+// per spec §5.5.2.
+if (result.verdict === 'fail_open') {
+  const payload = JSON.stringify({
+    event: 'phase1.support.eval_drift_detected',
+    reason: 'regression_set_unavailable',
+    rowCount: snapshots.length,
+    verdict: result.verdict,
+  });
+  console.log(payload);
+}
+
 await client.end();
 
 if (result.verdict === 'fail') {

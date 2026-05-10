@@ -10,10 +10,10 @@ interface InboxAgentConfigTabProps {
 }
 
 const ESCALATION_CATEGORY_OPTIONS = [
-  { value: 'account_question', label: 'Account question' },
-  { value: 'billing_question', label: 'Billing question' },
   { value: 'cancellation_request', label: 'Cancellation request' },
   { value: 'complaint', label: 'Complaint' },
+  { value: 'sales_inquiry', label: 'Sales inquiry' },
+  { value: 'other', label: 'Other' },
 ] as const;
 
 export function InboxAgentConfigTab({ inboxId, initialConfig, onSaved }: InboxAgentConfigTabProps) {

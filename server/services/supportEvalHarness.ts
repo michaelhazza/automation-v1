@@ -81,8 +81,8 @@ const EVAL_FIXTURES: EvalFixture[] = [
 // Configuration
 // ---------------------------------------------------------------------------
 
-const THRESHOLD_CLASSIFICATION_MIN = 0.75;
-const THRESHOLD_JUDGE_MIN = 0.70;
+const THRESHOLD_CLASSIFICATION_MIN = 0.85;
+const THRESHOLD_JUDGE_MIN = 4.0; // 0–5 scale per spec §5.5.2 ("initial threshold: >= 4.0 / 5.0")
 const PROMPT_VERSION = 1;
 const MODEL_ID = 'claude-sonnet-4-5';
 const DRIFT_ACCURACY_ALERT_THRESHOLD = 0.10; // >10% drop triggers emit
@@ -158,7 +158,7 @@ export async function runOnce(organisationId: string): Promise<{ evalRunId: stri
       });
       const judgeJson = JSON.parse(judgeResponse.content ?? '{"overall": 0}') as { overall?: number };
       const overallScore = typeof judgeJson.overall === 'number' ? judgeJson.overall : 0;
-      judgeScores.push(Math.max(0, Math.min(1, overallScore)));
+      judgeScores.push(Math.max(0, Math.min(5, overallScore))); // 0–5 scale per spec §5.5.2
     } catch {
       partial = true;
       judgeScores.push(0);

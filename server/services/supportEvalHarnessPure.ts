@@ -192,7 +192,7 @@ ${voiceProfile}
 ${draftReply}
 
 ## Task
-Rate the draft reply on the following criteria (each 0.0–1.0):
+Rate the draft reply on the following criteria (each 0.0–5.0):
 1. accuracy: Does it correctly address the customer's intent?
 2. tone: Does it match the specified voice profile?
 3. helpfulness: Will the customer find this reply useful and complete?
@@ -200,5 +200,5 @@ Rate the draft reply on the following criteria (each 0.0–1.0):
 Respond with ONLY valid JSON in this exact shape:
 {"accuracy": <float>, "tone": <float>, "helpfulness": <float>, "overall": <float>}
 
-The "overall" score is the average of the three criteria. Do not include any other text.`;
+The "overall" score is the average of the three criteria. Use the full 0.0 to 5.0 range. Do not include any other text.`;
 }

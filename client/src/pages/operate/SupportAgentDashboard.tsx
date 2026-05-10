@@ -18,6 +18,45 @@ interface InboxDashboardRow {
   evalDriftStatus: EvalDriftStatus;
 }
 
+// ── Inline mode toggle ────────────────────────────────────────────────────────
+
+const MODE_SEQUENCE: AgentMode[] = ['disabled', 'assisted', 'autonomous'];
+
+function ModeToggle({ inboxId, mode, onModeChange }: { inboxId: string; mode: AgentMode; onModeChange: (m: AgentMode) => void }) {
+  const [saving, setSaving] = useState(false);
+
+  async function setMode(nextMode: AgentMode) {
+    if (nextMode === mode || saving) return;
+    setSaving(true);
+    try {
+      await api.patch(`/api/support/inboxes/${inboxId}/agent-config`, { mode: nextMode });
+      onModeChange(nextMode);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[11px] font-medium">
+      {MODE_SEQUENCE.map((m) => (
+        <button
+          key={m}
+          type="button"
+          disabled={saving}
+          onClick={() => void setMode(m)}
+          className={`px-2.5 py-1 capitalize transition-colors ${
+            m === mode
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          } disabled:opacity-50`}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Mode pill ────────────────────────────────────────────────────────────────
 
 const MODE_STYLES: Record<AgentMode, string> = {
@@ -76,6 +115,12 @@ export function SupportAgentDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  function handleModeChange(inboxId: string, newMode: AgentMode) {
+    setInboxes((prev) =>
+      prev ? prev.map((r) => r.inboxId === inboxId ? { ...r, mode: newMode } : r) : prev,
+    );
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -121,7 +166,7 @@ export function SupportAgentDashboard() {
                 <th className="text-right px-4 py-3 font-medium text-slate-600">Sent today</th>
                 <th className="text-right px-4 py-3 font-medium text-slate-600">Escalations</th>
                 <th className="text-center px-4 py-3 font-medium text-slate-600">Eval drift</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 font-medium text-slate-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -138,7 +183,11 @@ export function SupportAgentDashboard() {
                   <tr key={row.inboxId} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{row.inboxName}</td>
                     <td className="px-4 py-3">
-                      <ModePill mode={row.mode} />
+                      <ModeToggle
+                        inboxId={row.inboxId}
+                        mode={row.mode}
+                        onModeChange={(m) => handleModeChange(row.inboxId, m)}
+                      />
                     </td>
                     <td className="px-4 py-3 text-right text-slate-600">{row.draftsPending}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{row.sentToday}</td>
@@ -146,13 +195,21 @@ export function SupportAgentDashboard() {
                     <td className="px-4 py-3 text-center">
                       <EvalDriftDot status={row.evalDriftStatus} />
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        to="/support/inboxes"
-                        className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800"
-                      >
-                        Configure
-                      </Link>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Link
+                          to="/activity"
+                          className="text-[12px] font-medium text-indigo-600 hover:text-indigo-800"
+                        >
+                          Run history
+                        </Link>
+                        <Link
+                          to="/support/inboxes"
+                          className="text-[12px] font-medium text-slate-500 hover:text-slate-700"
+                        >
+                          Configure
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))

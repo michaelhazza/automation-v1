@@ -1,6 +1,10 @@
 // client/src/components/run-trace/RunTraceArtifactsPanel.tsx
 // Lists artifacts for a run with Preview / Download / Copy link affordances.
 // Spec §4.5.1, §4.5.2, §4.5.3.
+//
+// Preview and Download both route through the main-app download proxy
+// (GET /api/run-artifacts/:id/download) to emit phase1.file_delivery.downloaded
+// per §4.5.2 / §6.1.5b. Copy-link mints a signed URL (phase1.file_delivery.signed_url_issued).
 
 import { useEffect, useState } from 'react';
 import { listArtifacts, issueSignedUrl } from '../../lib/api/runArtifacts';
@@ -59,44 +63,23 @@ function ArtifactRow({ artifact }: { artifact: RunArtifact }) {
 
   const isPdf = artifact.mimeType === 'application/pdf';
 
-  async function handlePreview() {
+  function handlePreview() {
     setRowError(null);
-    setActionLoading('preview');
-    // Open a blank window synchronously within the user gesture trust window;
-    // popup blockers reject window.open() called after an async suspension.
-    const win = window.open('', '_blank');
-    try {
-      const { url } = await issueSignedUrl(artifact.id, 'pdf_embed');
-      if (win) {
-        win.location.href = url;
-      } else {
-        setRowError('Popup blocked. Allow popups for this site to preview files.');
-      }
-    } catch {
-      win?.close();
-      setRowError('Could not open preview. Please try again.');
-    } finally {
-      setActionLoading(null);
+    // Route through the download proxy with ?disposition=inline so the PDF renders
+    // in-browser and phase1.file_delivery.downloaded is emitted (spec §4.5.2 / §6.1.5b).
+    const win = window.open(`/api/run-artifacts/${artifact.id}/download?disposition=inline`, '_blank');
+    if (!win) {
+      setRowError('Popup blocked. Allow popups for this site to preview files.');
     }
   }
 
-  async function handleDownload() {
+  function handleDownload() {
     setRowError(null);
-    setActionLoading('download');
-    // Open synchronously before await — same popup-blocker reason as handlePreview.
-    const win = window.open('', '_blank');
-    try {
-      const { url } = await issueSignedUrl(artifact.id, 'run_trace_panel');
-      if (win) {
-        win.location.href = url;
-      } else {
-        setRowError('Popup blocked. Allow popups for this site to download files.');
-      }
-    } catch {
-      win?.close();
-      setRowError('Could not start download. Please try again.');
-    } finally {
-      setActionLoading(null);
+    // Route through the download proxy so phase1.file_delivery.downloaded is emitted
+    // (spec §4.5.2 / §6.1.5b). Content-Disposition: attachment triggers a browser download.
+    const win = window.open(`/api/run-artifacts/${artifact.id}/download`, '_blank');
+    if (!win) {
+      setRowError('Popup blocked. Allow popups for this site to download files.');
     }
   }
 
@@ -136,13 +119,13 @@ function ArtifactRow({ artifact }: { artifact: RunArtifact }) {
             <ActionButton
               label="Preview"
               onClick={handlePreview}
-              loading={actionLoading === 'preview'}
+              loading={false}
             />
           )}
           <ActionButton
             label="Download"
             onClick={handleDownload}
-            loading={actionLoading === 'download'}
+            loading={false}
           />
           <ActionButton
             label="Copy link"
