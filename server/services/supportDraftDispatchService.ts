@@ -365,7 +365,7 @@ export async function approveDraft(
   const [connection] = await db
     .select()
     .from(integrationConnections)
-    .where(eq(integrationConnections.id, config.connectionId))
+    .where(and(eq(integrationConnections.id, config.connectionId), eq(integrationConnections.organisationId, principalCtx.organisationId)))
     .limit(1);
 
   const adapter = adapters[config.connectorType];
