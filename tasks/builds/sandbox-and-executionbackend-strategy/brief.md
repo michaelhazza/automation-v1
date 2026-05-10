@@ -1,45 +1,48 @@
-# Sandbox Isolation Strategy + ExecutionBackend Adapter Contract — Strategy Brief
+# Sandbox Isolation + ExecutionBackend Adapter + ChatGPT OAuth Posture — Strategy Brief
 
-**Status:** Draft v1.0  
+**Status:** Draft v1.1 (added Decision 3 — ChatGPT OAuth Operator Session Identity Posture)  
 **Date:** 2026-05-10  
 **Type:** Strategy brief (DECISION document, not implementation spec)  
 **Build slug:** `sandbox-and-executionbackend-strategy`  
 **Authoritative parent:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` Sections 18.2 (Phase 2) and 18.3 (Phase 3)  
 **OpenClaw context:** `docs/openclaw-strategic-analysis.md` Phase 1 (ExecutionBackend adapter) and Phase 3 (Operator Session Identity)  
-**Reviewer required:** Architect (sign-off on each decision)
+**Reviewer required:** Architect (sign-off on each decision); product/legal sign-off on Decision 3
 
-This brief covers two related but distinct architectural decisions that must be made before their respective phases can begin. They are bundled in one brief because both involve picking a pluggable abstraction for execution backends, and resolving them together prevents drift between the two answers.
+This brief covers three related but distinct architectural decisions that must be made before their respective phases can begin. They are bundled in one brief because all three involve choosing the abstraction shape for delegated execution and resolving them together prevents drift between the answers.
 
 The decisions:
 
 1. **Sandbox Isolation Strategy** — what primitive isolates per-task code execution. Phase 2 prerequisite.
 2. **ExecutionBackend Adapter Contract** — what shape of pluggable interface lets OpenClaw, future internal backends, and any other operator runtime plug in. Phase 3 prerequisite.
+3. **ChatGPT OAuth Operator Session Identity Posture** — how SynthetOS positions ChatGPT-subscription-as-a-backend across customer plan tiers (Plus / Pro / Team / Enterprise) given OpenAI ToS uncertainty. Phase 3 prerequisite; requires product + legal sign-off, not just architecture.
 
-Each is a decision document, not a build plan. The output of this brief is two locked decisions plus their rationale; implementation specs come later.
+Each is a decision document, not a build plan. The output of this brief is three locked decisions plus their rationale; implementation specs come later.
 
 ---
 
 ## Contents
 
 - [0. Document Purpose](#0-document-purpose)
-- [1. Why these two decisions go together](#1-why-these-two-decisions-go-together)
+- [1. Why these three decisions go together](#1-why-these-three-decisions-go-together)
 - [2. Decision 1 — Sandbox Isolation Strategy](#2-decision-1--sandbox-isolation-strategy)
 - [3. Decision 2 — ExecutionBackend Adapter Contract](#3-decision-2--executionbackend-adapter-contract)
-- [4. Cross-cutting concerns](#4-cross-cutting-concerns)
-- [5. What gets unblocked](#5-what-gets-unblocked)
-- [6. Suggested next steps](#6-suggested-next-steps)
-- [7. Out of scope](#7-out-of-scope)
+- [4. Decision 3 — ChatGPT OAuth Operator Session Identity Posture](#4-decision-3--chatgpt-oauth-operator-session-identity-posture)
+- [5. Cross-cutting concerns](#5-cross-cutting-concerns)
+- [6. What gets unblocked](#6-what-gets-unblocked)
+- [7. Suggested next steps](#7-suggested-next-steps)
+- [8. Out of scope](#8-out-of-scope)
 
 ---
 
 ## 0. Document Purpose
 
-This is a **decision brief**, not an implementation spec. The output of working through it is two locked decisions:
+This is a **decision brief**, not an implementation spec. The output of working through it is three locked decisions:
 
 1. Which sandbox isolation primitive SynthetOS uses for per-task code execution in Phase 2 onward (Docker-per-task, gVisor, Firecracker microVMs, hosted execution provider, or a hybrid).
 2. What shape the `ExecutionBackend` adapter contract takes so OpenClaw, future internal backends, and any other operator runtime become participating implementations behind a single pluggable interface.
+3. How SynthetOS positions ChatGPT-subscription-as-a-backend across customer plan tiers (Plus / Pro / Team / Enterprise), given that OpenAI ToS posture for SaaS-mediated subscription use is uncertain. The natural answer ("just take the customer's OAuth token and use it") has hidden customer-account-suspension risk that needs an explicit posture, not a default.
 
-Each decision has trade-offs across security, cost, operational complexity, latency, and developer experience. This brief lays out the options, the criteria, and a recommendation per decision, but it does **not** prescribe a build plan. Implementation specs follow each locked decision.
+Each decision has trade-offs across security, cost, operational complexity, latency, customer trust, and contractual posture. This brief lays out the options, the criteria, and a recommendation per decision, but it does **not** prescribe a build plan. Implementation specs follow each locked decision.
 
 ### 0.1 How to use this brief
 
@@ -63,24 +66,27 @@ The brief is intentionally CEO-readable at the top of each section and engineeri
 
 ---
 
-## 1. Why these two decisions go together
+## 1. Why these three decisions go together
 
-The two decisions are about different parts of the stack but share three structural concerns:
+The three decisions are about different parts of the stack but share four structural concerns:
 
-1. **Both define a pluggable abstraction.** Sandbox isolation needs an interface that lets the worker request "give me a clean isolated environment for this task" without knowing whether the answer is a Docker container, a gVisor sandbox, a Firecracker microVM, or a remote hosted environment. ExecutionBackend needs an interface that lets the agentic loop request "execute this task on an operator backend" without knowing whether the backend is OpenClaw, a future internal backend, or something else.
+1. **All three define a pluggable abstraction or posture.** Sandbox isolation needs an interface that lets the worker request "give me a clean isolated environment" without knowing the underlying primitive. ExecutionBackend needs an interface that lets the agentic loop dispatch to OpenClaw / future internal backend / something else without hardcoded branching. ChatGPT OAuth posture defines how the Credential Broker treats subscription-based model identities across plan tiers — a policy abstraction layered on top of the credential primitive.
 
-2. **Both involve a build-vs-buy choice.** Sandbox isolation can be in-house (Docker, gVisor, Firecracker) or hosted (e2b, Modal, Daytona). ExecutionBackend can be in-house (we adapt OpenClaw ourselves) or buy-only (we only support managed integrations).
+2. **All three involve a build-vs-buy or build-vs-disclose choice.** Sandbox isolation: in-house (Docker, gVisor, Firecracker) vs hosted (e2b, Modal, Daytona). ExecutionBackend: in-house adapter for OpenClaw vs buy-only managed integrations. ChatGPT OAuth: technical-only path (just inject credentials) vs disclosed-and-tiered path (default to sanctioned plans, opt-in for Plus tier with risk acknowledgement).
 
-3. **Both feed into Phase 3.** Phase 3 (Autonomous Operators) is where Operator Controller backends become real. An autonomous operator running for hours will need both: a sandbox to run code and an ExecutionBackend contract through which the agentic loop dispatches work. If the two abstractions are designed independently, they can collide at the Phase 3 boundary (e.g., the ExecutionBackend signature does not name the sandbox primitive it expects).
+3. **All three feed into Phase 3.** Phase 3 (Autonomous Operators) is where Operator Controller backends become real. An autonomous operator running for hours needs all three: a sandbox to run code, an ExecutionBackend contract to dispatch work, and a model-identity posture for whichever subscription / API key the customer chose. If the three abstractions are designed independently they collide at the Phase 3 boundary.
 
-Bundling the two decisions in one brief is the cheapest way to make the abstractions consistent. It does not mean both must be implemented at the same time; Decision 1 lands in Phase 2, Decision 2 lands in Phase 3.
+4. **All three carry customer-trust risk if mishandled.** Sandbox: customer-uploaded code escapes and breaches a sibling tenant. ExecutionBackend: opaque dispatch breaks customer's expectations of where their work runs. ChatGPT OAuth: customer's ChatGPT account gets suspended because we silently used it outside ToS, and they blame us. The customer-trust dimension is the throughline; engineering elegance alone does not resolve it.
+
+Bundling the three decisions in one brief is the cheapest way to make the abstractions consistent. It does not mean all three must be implemented at the same time; Decision 1 lands in Phase 2, Decisions 2 and 3 land in Phase 3.
 
 ### 1.1 What's not bundled
 
-- Operator Session Identity (ChatGPT OAuth) lifecycle and ToS posture: that's a separate decision in `docs/openclaw-strategic-analysis.md` Phase 3. It's adjacent to Decision 2 but not the same.
 - Per-task observability granularity (logs, traces, artifact retention per sandbox or backend): inherited from existing observability infrastructure.
 - Multi-region / data residency / sovereign workloads: deferred to Phase 4+.
 - BYO / customer-owned compute (private clouds, on-prem): deferred to Phase 4+.
+- Specific vendor due diligence (e2b vs Modal vs Daytona for Decision 1): Phase 2 implementation spec.
+- Specific OpenAI ToS clause-by-clause review: a follow-on legal exercise that informs Decision 3's implementation, not the posture itself.
 
 ---
 
@@ -453,11 +459,172 @@ Rationale:
 
 ---
 
-## 4. Cross-cutting concerns
+## 4. Decision 3 — ChatGPT OAuth Operator Session Identity Posture
 
-The two decisions interact at three places.
+### 4.1 Background — what's in place today
 
-### 4.1 OpenClaw needs a sandbox
+Nothing. ChatGPT OAuth as a model identity does not exist in the codebase. The Credential Broker facade (PR #279) is forward-compatible with `auth_type: 'operator_session'`, but no auth_type, no UI flow, no policy is built.
+
+The OpenClaw community is using ChatGPT-subscription-via-Codex-harness today, primarily on the Plus plan ($20/month). Their narrative: "free with your subscription, no API key, no extra cost." The approach is technically opaque to OpenAI for any single user at low scale.
+
+### 4.2 Why a posture decision is needed
+
+Three concerns make the natural answer ("just store the customer's OAuth token and inject it") inadequate for SynthetOS:
+
+1. **Customer account suspension risk.** OpenAI ToS for ChatGPT Plus restricts personal use, prohibits automation, prohibits third-party access. SaaS-mediated subscription consumption is at minimum a grey zone and at worst an explicit ToS violation. If OpenAI suspends a customer's ChatGPT account because of how SynthetOS used it, the customer loses access to ChatGPT entirely — for their personal work, their custom GPTs, their conversation history. **Even if 95% of customers are fine, the 5% who get suspended become churn risk plus public complaints.** The blast radius is the customer's whole ChatGPT account, not just SynthetOS.
+
+2. **Detection at scale.** A single customer's OAuth-via-our-worker is technically opaque; a SaaS routing thousands of customer subscriptions through datacenter IPs at high volume is not. Volume signals, IP fingerprinting, behavioural patterns (24/7 traffic, concurrent sessions, automated tool-use cadence) make detection straightforward when OpenAI cares to look. The Anthropic precedent — they shut down third-party Claude.ai access after tolerating it for months — is the script we should expect OpenAI to follow when subscription cannibalisation of API revenue becomes material.
+
+3. **Enterprise procurement posture.** Sophisticated customers (mid-market and enterprise) have procurement and legal teams. Any of them looking at "use SynthetOS with your ChatGPT Plus subscription" will ask: "Does this violate OpenAI's ToS?" If the honest answer is "yes, but enforcement is light," they will not buy. SynthetOS cannot sign a SaaS contract that requires the customer to violate a third party's ToS as a condition of using us — that's not enforceable and it's bad faith.
+
+The OpenAI sanctioned path exists: ChatGPT Pro ($200/month) explicitly includes Codex CLI rights; Team and Enterprise tiers extend this with admin controls. **The cost arbitrage at the Pro tier is still strong** (a customer burning $1000/month on API is paying $200 instead — 80% saving) but the "free with $20 Plus subscription" pitch is the part with ToS exposure.
+
+### 4.3 Options
+
+#### Option A: Don't ship ChatGPT OAuth at all (API-only)
+
+Customers connect API keys (BYO or platform-mediated). No subscription routing. No cost arbitrage story.
+
+- Build effort: zero (it's the do-nothing option)
+- Customer-trust risk: zero
+- Cost story: weak (we lose the OpenClaw cost arbitrage entirely)
+- Strategic competitiveness: weak; OpenClaw eats the cost-conscious market
+
+#### Option B: Plus-tier opt-in with no disclosure (silent BYO)
+
+Customer connects their Plus subscription via OAuth; we use it transparently. No warnings, no acceptance flow, no fallback.
+
+- Build effort: low
+- Customer-trust risk: high (silent ToS violation; customer suspended without warning blames us)
+- Cost story: strongest (matches OpenClaw's pitch)
+- Strategic competitiveness: high in the short term, structurally fragile
+- Legal exposure: real (we knew or should have known)
+
+#### Option C: Plus-tier opt-in with explicit disclosure
+
+Customer connects their Plus subscription, but the connection flow shows a clear acknowledgement: "OpenAI's Plus subscription is intended for personal use. Using it through SynthetOS may violate their ToS. Your subscription could be suspended. Type 'I accept the risk' to proceed."
+
+- Build effort: low (UI + terms language)
+- Customer-trust risk: medium (we disclosed; customer accepted)
+- Cost story: strong (cost arbitrage available with informed consent)
+- Strategic competitiveness: high
+- Legal exposure: lower than B (informed consent in record)
+
+#### Option D: Sanctioned path only (Pro / Team / Enterprise tiers; reject Plus)
+
+Customer must connect a Pro / Team / Enterprise plan that has explicit Codex CLI rights. Plus subscriptions are rejected at the connection step with a clear "use Pro tier or higher" message.
+
+- Build effort: low (UI tier-detection + rejection flow)
+- Customer-trust risk: zero (sanctioned path)
+- Cost story: medium-strong (cost arbitrage real but at $200/month vs $20/month entry point)
+- Strategic competitiveness: clean for enterprise; loses the prosumer market to OpenClaw
+- Legal exposure: zero
+
+#### Option E: Layered posture — sanctioned default + Plus opt-in + disclosure + monitor
+
+Combines D as the default with C as the explicit opt-in path. Default UX recommends Pro / Team / Enterprise. Sophisticated customers can opt into Plus-tier connection with full disclosure of risk. Monitor OpenAI's posture continuously; adapt the default when posture shifts.
+
+- Build effort: medium (two paths to build)
+- Customer-trust risk: graduated (zero on default path; medium on opt-in path with disclosure)
+- Cost story: strongest (covers prosumer to enterprise without dropping either)
+- Strategic competitiveness: highest (every customer segment served)
+- Legal exposure: low (layered defaults plus informed consent)
+
+### 4.4 Trade-off matrix
+
+| Criterion | A. Skip | B. Silent BYO | C. Plus opt-in disclosed | D. Sanctioned only | E. Layered |
+|---|---|---|---|---|---|
+| Build effort | **None** | Low | Low | Low | Medium |
+| Customer-trust risk | **Zero** | High | Medium | **Zero** | Graduated |
+| Customer-account-suspension risk | **Zero** | High | Disclosed | **Zero** | Disclosed at opt-in only |
+| Cost story strength | Weak | **Strongest** | Strong | Medium-strong | **Strong** |
+| Enterprise procurement clean | Yes | No | Mixed | **Yes** | **Yes (default path)** |
+| Prosumer / solo-developer fit | Bad | **Best** | Good | Bad | **Good (via opt-in)** |
+| Legal exposure | None | High | Low (informed) | None | **Low (layered)** |
+| Future flex if OpenAI posture shifts | Easy | Hard | Easy | Easy | **Easy (already layered)** |
+| Differentiation vs OpenClaw | Weak | Parity | Slight edge | Strong (governance) | **Strong (governance + cost)** |
+
+### 4.5 Decision criteria
+
+1. **Does our customer keep working if OpenAI shuts down third-party Plus use?** Options A, D, and E pass. B and C have customers stranded.
+2. **Does our enterprise sales motion require the default path to be ToS-clean?** Yes. A, D, E pass.
+3. **Do we cede the cost-arbitrage narrative to OpenClaw entirely?** A and D do. B, C, E do not.
+4. **Can we adapt without re-architecture if OpenAI changes posture?** A, C, D, E can. B requires rewrite.
+5. **Is the engineering complexity of two paths (E) worth the segment coverage?** Yes if both segments matter. Probably yes for SynthetOS given our positioning.
+
+### 4.6 Recommendation
+
+**Option E (Layered posture).** Specifically four layers:
+
+1. **Architecture** — the Credential Broker facade (PR #279) treats ChatGPT OAuth as one `auth_type` among several. The ExecutionBackend adapter (Decision 2) consumes it via the standard credential injection path. **Build the abstraction regardless of the policy choice.** This work happens in Phase 3 alongside the OpenClaw adapter.
+
+2. **Default offering — sanctioned plans** — the connection UX defaults to ChatGPT Pro / Team / Enterprise. The connection flow detects the plan tier (via OpenAI's published API or first-call probe) and passes immediately for Pro/Team/Enterprise. Marketing positions this as the default: "Connect your ChatGPT Pro plan; cost saving on heavy autonomous workflows."
+
+3. **Plus-tier opt-in with disclosure** — if a customer chooses to connect a Plus subscription, the UX presents a clear, single-screen consent flow:
+
+   > "OpenAI's ChatGPT Plus subscription is intended for personal use. Using it through SynthetOS for automated work may violate OpenAI's Terms of Service. Your subscription could be suspended without notice. SynthetOS is not liable for OpenAI account actions taken in response to this use. Type 'I accept the risk' below to proceed."
+
+   Plus a clause in our own ToS: "If your third-party model provider account (OpenAI ChatGPT, etc.) is suspended due to use through SynthetOS, you remain responsible for service continuity. We recommend a sanctioned plan tier (Pro / Team / Enterprise) for production use."
+
+4. **Monitor and adapt** — a quarterly review of OpenAI's posture (ToS changes, public statements, observable enforcement patterns, OpenClaw community signals). If OpenAI explicitly endorses third-party SaaS use of Codex harness on Plus tier, lift the disclosure (the layered architecture supports this). If OpenAI shuts it down (Anthropic-style), customers on the default path are unaffected; customers on the opt-in path move to the sanctioned default. The architecture supports both transitions without rewrite.
+
+**Hard constraints:**
+
+1. The default connection flow for new customers is the sanctioned path. The Plus opt-in is one step deeper, not the default.
+2. The disclosure language is reviewed by legal before ship. Not architect-drafted alone.
+3. SynthetOS ToS includes the third-party-account-suspension clause described in layer 3.
+4. The ExecutionBackend adapter (Decision 2) carries **no** plan-tier-specific code. The plan tier is a Credential Broker concern; the adapter just consumes credentials. Otherwise the abstraction leaks.
+5. Customer-facing marketing pitches the sanctioned-plan cost story, not the Plus-tier loophole. We do not lead with "free with your $20 ChatGPT subscription" because that is not the durable story.
+6. **Quarterly posture review** is a real meeting on someone's calendar. Not a "we'll get to it." If posture changes between reviews, the layered architecture handles it; the review is for proactive comms to customers, not architectural change.
+
+**What we get:**
+
+- Clean enterprise sales (default path is ToS-compliant).
+- Strong cost story for the customer segment that wants it (Pro plan saves 80% vs API for heavy users).
+- Optional access to the Plus-tier cost arbitrage for customers willing to accept the risk (with disclosure record).
+- Architectural flex when OpenAI posture shifts in either direction.
+- Differentiation from OpenClaw: they pitch one tier ("free with Plus"), we offer all three with informed choice.
+
+**What we give up:**
+
+- The simplicity of "just connect any ChatGPT subscription, we'll figure it out." Customers see a tier choice during connection.
+- The aggressive prosumer pitch that OpenClaw uses ("free, no API key, just sign in"). We can match it on the opt-in path but it's not our default.
+- A small amount of engineering complexity (two connection paths instead of one).
+
+### 4.7 What gets locked at the brief level
+
+- The decision: Option E (Layered posture, four layers).
+- The hard constraints in 4.6.
+- The default vs opt-in distinction: default is sanctioned plans; opt-in is Plus tier with disclosure.
+- The quarterly posture review cadence.
+
+### 4.8 What gets deferred to the Phase 3 implementation spec
+
+- The exact disclosure language (legal-reviewed).
+- The exact SynthetOS ToS clause (legal-reviewed).
+- Plan-tier detection mechanism (OpenAI plan-introspection API vs first-call probe vs customer self-declaration).
+- The Credential Broker `auth_type: 'operator_session'` schema and connection flow.
+- The OpenAI account-status monitoring (do we ping OpenAI to detect customer-side suspensions before they affect runs?).
+- The Operator Session Identity UI surface (per v1.2 brief Section 22.2).
+
+### 4.9 Open question for product / legal (resolve before locking)
+
+Before this decision can be locked, the following needs product or legal input:
+
+1. **Does our standard SaaS contract template need amendment** to include the third-party-account-suspension clause described in layer 3? (Likely yes; legal sign-off needed.)
+2. **What's the OpenAI ToS clause-by-clause posture** on SaaS-mediated subscription use? Specifically: is layer 2 (sanctioned plans) genuinely clean, or are there gotchas in Pro/Team ToS we're missing? (Legal review needed; ~1 week.)
+3. **Do enterprise procurement teams** (specifically: any procurement processes our pipeline customers use) treat Pro-plan-as-the-default as ToS-clean? (Sales-team or customer-advisor input; sample of 3-5 procurement contacts.)
+4. **What's our incident response** if OpenAI suspends a customer's ChatGPT account that was connected through SynthetOS? Specifically: customer comms template, run-failure surfaces, fallback-to-API behaviour. (Product + ops sign-off.)
+
+These four resolve in 1-2 weeks of product/legal work; they do not block the architectural lock (layers 1 and 4 of the recommendation).
+
+---
+
+## 5. Cross-cutting concerns
+
+The three decisions interact at four places.
+
+### 5.1 OpenClaw needs a sandbox
 
 When OpenClaw runs in `openclaw_managed` mode (Phase 3), it executes code (shell, file edits, builds, tests). The sandbox primitive from Decision 1 applies: OpenClaw's per-task execution should run inside the chosen sandbox, not in the OpenClaw worker process directly.
 
@@ -467,7 +634,7 @@ If Decision 1 were Option A or C (Docker or Firecracker in-house), the OpenClaw 
 
 **Implication for the contract**: the ExecutionBackend adapter (Decision 2) names the sandbox primitive in its inputs or relies on a shared sandbox service injected at startup. The Phase 3 implementation spec resolves this; the brief flags it.
 
-### 4.2 Sandbox provisioning cost is a per-backend concern
+### 5.2 Sandbox provisioning cost is a per-backend concern
 
 Different ExecutionBackend implementations have different sandbox needs:
 
@@ -479,20 +646,27 @@ Different ExecutionBackend implementations have different sandbox needs:
 
 The ExecutionBackend contract should declare which sandbox capability each backend requires (e.g., `sandboxRequirements: ['code_execution', 'browser', 'none']`). This lets the registry validate at startup that a backend's sandbox dependency is satisfied.
 
-### 4.3 Cost reporting is end-to-end
+### 5.3 Cost reporting is end-to-end across all three decisions
 
-Both decisions affect cost reporting:
+All three decisions affect cost reporting:
 
-- Decision 1: hosted vendor billing per execution-second flows into `llm_requests` + `cost_aggregates` as a non-LLM cost row. Schema additions are minor; the existing `sourceType` taxonomy extends.
-- Decision 2: each ExecutionBackend may carry its own cost model (LLM-per-token vs subscription-per-month vs worker-hour). The contract declares `costModel`; the cost ledger consumes it.
+- **Decision 1**: hosted vendor billing per execution-second flows into `llm_requests` + `cost_aggregates` as a non-LLM cost row. Schema additions are minor; the existing `sourceType` taxonomy extends.
+- **Decision 2**: each ExecutionBackend may carry its own cost model (LLM-per-token vs subscription-per-month vs worker-hour). The contract declares `costModel`; the cost ledger consumes it.
+- **Decision 3**: ChatGPT-OAuth-routed runs have an unusual cost shape — the customer pays a flat monthly subscription to OpenAI, and the per-run "cost" to SynthetOS is zero on the model-invocation side. The cost surface needs a special row type ("subscription-mediated") so dashboards do not under-report total cost-of-ownership for the customer.
 
-The Phase 2 and Phase 3 specs each carry their own cost-reporting subsection; the brief flags that the two cost surfaces share infrastructure (`llm_requests`, `cost_aggregates`).
+The Phase 2 and Phase 3 specs each carry their own cost-reporting subsection; the brief flags that the three cost surfaces share infrastructure (`llm_requests`, `cost_aggregates`).
+
+### 5.4 Decision 2 and Decision 3 share the credential injection seam
+
+The ExecutionBackend adapter (Decision 2) consumes credentials via the Credential Broker facade. The ChatGPT OAuth posture (Decision 3) is a Credential Broker concern: it determines which `auth_type` values are permitted at which customer plan tier and what disclosure fired at connection time.
+
+**Important separation**: the adapter does NOT need to know about plan tiers or ToS disclosure. It receives a credential reference and uses it. The adapter stays simple; the policy lives at the Credential Broker boundary. This separation is what allows OpenAI posture to shift (Decision 3) without rewriting the adapter (Decision 2). Hard constraint #4 in Section 4.6 enforces this.
 
 ---
 
-## 5. What gets unblocked
+## 6. What gets unblocked
 
-### 5.1 Locking Decision 1 unblocks
+### 6.1 Locking Decision 1 unblocks
 
 - **Phase 2 implementation spec drafting** can begin: sandbox isolation is the prerequisite.
 - **Sandbox vs Terminal/Repo split** in `iee_dev` mode (today's collapsed implementation) becomes specifiable.
@@ -501,41 +675,51 @@ The Phase 2 and Phase 3 specs each carry their own cost-reporting subsection; th
 - **Phase 1.5 Research Intelligence** can use the sandbox for document parsing pipelines.
 - **Phase 2 Dev Agent partial MVP** (sandbox-assisted scripts and tests) can begin.
 
-### 5.2 Locking Decision 2 unblocks
+### 6.2 Locking Decision 2 unblocks
 
 - **Phase 3 implementation spec drafting** can begin: ExecutionBackend adapter contract is the prerequisite.
 - **OpenClaw integration** can begin once the adapter contract is locked.
 - **Future internal backend** has a clean home and a clear contract to fill.
 - **Refactor of existing four modes** into adapter implementations (a structural improvement worth doing as a small standalone PR before Phase 3).
-- **Operator Session Identity** (ChatGPT OAuth) integration has a clear adapter boundary.
+- **Operator Session Identity** (Decision 3 layered approach) plugs in cleanly because the adapter contract stays simple.
 
-### 5.3 Locking both unblocks
+### 6.3 Locking Decision 3 unblocks
 
-- **Phase 3 with code execution** (Operator Controller + sandbox + ExecutionBackend) becomes coherent rather than three independent moving parts.
-- **BYO compute roadmap** (Phase 4+) becomes describable: customers provide a sandbox provider plus an ExecutionBackend implementation.
+- **Customer-facing ChatGPT-Plan tier UX** can be designed (sanctioned default + Plus opt-in flow).
+- **Marketing positioning** for Phase 3 can lead with the sanctioned-plan cost story rather than the fragile Plus-tier loophole.
+- **Enterprise sales motion** has a ToS-clean default to point procurement at.
+- **SynthetOS standard SaaS contract template** can be amended for the third-party-account-suspension clause.
+- **Quarterly OpenAI posture review** becomes a real recurring meeting on the operator's calendar.
+
+### 6.4 Locking all three unblocks
+
+- **Phase 3 with code execution AND customer subscription routing** (Operator Controller + sandbox + ExecutionBackend + ChatGPT OAuth posture) becomes coherent rather than four independent moving parts.
+- **BYO compute roadmap** (Phase 4+) becomes describable: customers provide a sandbox provider plus an ExecutionBackend implementation plus their own model identities.
+- **OpenClaw competitive narrative** (cost story for prosumers, governance story for agencies) becomes ours to claim, with the cost story extending to enterprise via the sanctioned-plan path.
 
 ---
 
-## 6. Suggested next steps
+## 7. Suggested next steps
 
 In priority order:
 
-1. **Operator review of this brief.** Lock or push back on each decision in Sections 2.6 and 3.6. Anything ambiguous becomes a follow-up question.
-2. **Vendor due diligence for Decision 1 (Option D).** Pick three (e2b, Modal, Daytona) and run a 1-day evaluation per: SDK ergonomics, pricing for our task profile, SLA, security posture documentation. Output: vendor recommendation in Phase 2 spec.
-3. **Phase 2 implementation spec drafting.** Once Decision 1 is locked, draft `tasks/builds/phase-2-extended-capabilities/spec.md` with the chosen vendor and the `SandboxExecutionService` interface. Goes through `spec-reviewer` + `chatgpt-spec-review`.
-4. **ExecutionBackend adapter contract spec drafting.** Once Decision 2 is locked, draft `tasks/builds/execution-backend-adapter-contract/spec.md` (this could be a Phase 1.5 or Phase 3 spec; the refactor of existing modes is small enough to land in Phase 1.5 if the team has bandwidth). Goes through `spec-reviewer` + `chatgpt-spec-review`.
-5. **OpenClaw integration spec drafting.** Phase 3 child spec; depends on Decision 2 being locked.
-6. **Operator Session Identity (ChatGPT OAuth) ToS clarity.** Independent track; product or legal owns it. Block Phase 3 OpenClaw rollout if ToS posture is unfavourable.
+1. **Operator review of this brief.** Lock or push back on each decision in Sections 2.6, 3.6, and 4.6. Anything ambiguous becomes a follow-up question.
+2. **Product + legal review of Decision 3 specifically.** Section 4.9 lists four open questions that need product or legal input before Decision 3 can be fully locked (SaaS contract amendment, OpenAI ToS clause review, enterprise procurement posture, customer-account-suspension incident response). Roughly 1 to 2 weeks.
+3. **Vendor due diligence for Decision 1 (Option D).** Pick three (e2b, Modal, Daytona) and run a 1-day evaluation per: SDK ergonomics, pricing for our task profile, SLA, security posture documentation. Output: vendor recommendation in Phase 2 spec.
+4. **Phase 2 implementation spec drafting.** Once Decision 1 is locked, draft `tasks/builds/phase-2-extended-capabilities/spec.md` with the chosen vendor and the `SandboxExecutionService` interface. Goes through `spec-reviewer` + `chatgpt-spec-review`.
+5. **ExecutionBackend adapter contract spec drafting.** Once Decision 2 is locked, draft `tasks/builds/execution-backend-adapter-contract/spec.md` (this could be a Phase 1.5 or Phase 3 spec; the refactor of existing modes is small enough to land in Phase 1.5 if the team has bandwidth). Goes through `spec-reviewer` + `chatgpt-spec-review`.
+6. **Operator Session Identity implementation spec drafting.** Once Decision 3 is locked, draft `tasks/builds/operator-session-identity/spec.md` covering the Credential Broker `auth_type: 'operator_session'` schema, the connection-tier-detection flow, the Plus-tier disclosure UX, the SaaS contract clause, and the OpenAI account-status monitoring. Phase 3 spec.
+7. **OpenClaw integration spec drafting.** Phase 3 child spec; depends on Decisions 2 and 3 being locked.
+8. **Quarterly OpenAI posture review.** First instance scheduled within 30 days of Decision 3 lock; subsequent reviews quarterly. Owner: Product. Output: posture-review note in `docs/openclaw-strategic-analysis.md` Phase 3 section.
 
 Each next step is a follow-on artefact; this brief is the upstream lock.
 
 ---
 
-## 7. Out of scope
+## 8. Out of scope
 
 **Explicitly not in this brief:**
 
-- **Operator Session Identity lifecycle and ToS posture.** Adjacent to Decision 2 but a separate decision; lives in `docs/openclaw-strategic-analysis.md` Phase 3.
 - **Multi-region / data residency / sovereign workloads.** Phase 4+; tracked in v1.2 brief Section 18.4.
 - **Customer-hosted workers (BYO compute).** Phase 4+ or Phase 5; tracked in OpenClaw Strategic Analysis Phase 5.
 - **Marketplace of agents, skills, tools.** Phase 4+; tracked in v1.2 brief Section 18.4.
@@ -543,18 +727,27 @@ Each next step is a follow-on artefact; this brief is the upstream lock.
 - **Per-task observability granularity, cost transparency surfaces, "saved vs API" dashboards.** Phase 3+ implementation concerns; flagged in OpenClaw Strategic Analysis Phase 3.
 - **Specific vendor choice for Decision 1.** Recommendation is Option D (hosted); the specific vendor (e2b vs Modal vs Daytona vs other) is a Phase 2 spec deliverable.
 - **The TypeScript interface for the ExecutionBackend contract.** Recommendation is Option D (IEE pattern generalisation); the exact field names and payload schemas are a Phase 3 spec deliverable.
+- **The exact disclosure language for Decision 3 layer 3.** Recommendation is Option E (layered); the legal-reviewed wording of the Plus-tier consent flow is a Phase 3 spec deliverable.
+- **Other model providers' subscription-vs-API postures.** This brief is OpenAI / ChatGPT specific. Anthropic Claude.ai, Google Gemini, Mistral, etc. are different ecosystems; their postures are tracked separately if and when they become relevant.
 
 ---
 
 ## End of brief
 
-This brief produces two locked decisions plus rationale. Implementation specs follow.
+This brief produces three locked decisions plus rationale. Implementation specs follow.
 
-The two decisions:
+The three decisions:
 
 | # | Decision | Recommendation | Phase | Owner |
 |---|---|---|---|---|
 | 1 | Sandbox Isolation Strategy | Option D (Hosted execution provider) for V1, with vendor adapter pattern preserving swap-out | Phase 2 prerequisite | Architect (sign-off), Ops (vendor evaluation) |
-| 2 | ExecutionBackend Adapter Contract | Option D (IEE pattern generalisation), minimal V1 scope (dispatch + event + reconciliation) | Phase 3 prerequisite | Architect (sign-off) |
+| 2 | ExecutionBackend Adapter Contract | Option D (IEE pattern generalisation), minimal V1 scope (dispatch + completion event + reconciliation) | Phase 3 prerequisite | Architect (sign-off) |
+| 3 | ChatGPT OAuth Operator Session Identity Posture | Option E (Layered: sanctioned-plan default + Plus opt-in with disclosure + monitor) | Phase 3 prerequisite | Architect (sign-off on layers 1 + 4); Product + Legal (sign-off on layers 2 + 3 plus the four open questions in §4.9) |
 
-Lock both, then proceed to Phase 2 spec drafting (Decision 1 first, since it's the closer phase).
+Lock all three, then proceed in this order:
+
+1. Decision 1 unblocks Phase 2 spec drafting (sandbox isolation).
+2. Decision 2 unblocks Phase 3 spec drafting (ExecutionBackend adapter contract).
+3. Decision 3 unblocks Phase 3 customer-facing UX + sales motion (ChatGPT OAuth tier strategy).
+
+Decision 3 is the longest pole because of the product/legal review on its four open questions; start it first even though Decision 1 ships first.

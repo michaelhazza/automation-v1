@@ -207,7 +207,7 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 **NG5. No additional CRM integrations beyond what's in the codebase today.** The Support Inbox uses Teamwork Desk for tickets and Gmail-via-Teamwork for inbound. No new HubSpot, Salesforce, or Zendesk adapters in this spec.
 
-**NG6. No Operator Session Identity.** ChatGPT OAuth as a session-based model identity: Phase 3 per OpenClaw Strategic Analysis. The Support Inbox MVP uses platform Anthropic API only.
+**NG6. No Operator Session Identity.** ChatGPT OAuth as a session-based model identity: Phase 3. The posture (sanctioned-plan default + Plus-tier opt-in with disclosure + monitor) is locked in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Section 4 as Decision 3. The Support Inbox MVP in this spec uses platform Anthropic API only; the ChatGPT-OAuth-as-Operator-Session-Identity work is its own Phase 3 spec.
 
 **NG7. No new product features beyond the two showcase MVPs.** Phase 1.5 use cases (Revenue Ops, Research Intelligence, Paid Ads Monitoring) are separate specs.
 
