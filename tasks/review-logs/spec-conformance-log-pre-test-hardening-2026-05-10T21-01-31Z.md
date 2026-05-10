@@ -7,6 +7,7 @@
 **Scope:** All 14 items — W1, W2, W3, T1, T2, T3, S1, S2, V1, V2, O1, O2, O3, O4, O5 (full-spec verification per caller's invocation)
 **Changed-code set:** ~50 files (committed in 2b5e52fa)
 **Run at:** 2026-05-10T21:01:31Z
+**Commit at finish:** 22061abc
 
 ---
 

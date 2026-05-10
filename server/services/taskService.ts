@@ -1,4 +1,4 @@
-import { eq, and, isNull, desc, asc, ilike, inArray } from 'drizzle-orm';
+import { eq, and, isNull, desc, asc, ilike, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { OrgScopedTx } from '../db/index.js';
 import {
@@ -96,9 +96,22 @@ async function _createTask(
   arg4?: string,
 ): Promise<Task> {
   if (typeof arg1 === 'string') {
-    throw new Error(
-      'taskService.createTask called via legacy 4-arg shape — caller must migrate to (input, tx) and wrap in withOrgTx (DEC-4 / spec §3.3). Sister-branch transitional path; runtime-unreachable from in-scope callers.',
-    );
+    // Transitional shim for sister-branch callers (workflowEngineService) that have not yet
+    // migrated to (input, tx). Opens its own transaction and sets the org GUC so RLS passes.
+    // DEC-4 / spec §3.3 — remove once sister branch lands its withOrgTx wrappers.
+    const organisationId = arg1;
+    const subaccountId = arg2 as string;
+    const data = arg3!;
+    const userId = arg4;
+    logger.warn('taskService.createTask_legacy_4arg', {
+      event: 'legacy_4arg_createTask',
+      organisationId,
+      note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
+    });
+    return db.transaction(async (innerTx) => {
+      await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+      return _createTask({ organisationId, subaccountId, data, userId }, innerTx);
+    });
   }
 
   // Canonical implementation — arg1 is CreateTaskInput, arg2 is OrgScopedTx

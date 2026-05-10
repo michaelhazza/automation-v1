@@ -74,6 +74,9 @@ router.post('/drafts/:id/manual-resolve', authenticate, asyncHandler(async (req,
       res.status(403).json({ message: 'support.draft.reject permission required' });
       return;
     }
+  } else {
+    res.status(400).json({ message: 'support.draft.invalid_action' });
+    return;
   }
 
   await manualResolveDraft(req.params.id, action, await makePrincipal(req), { notes });

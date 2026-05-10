@@ -286,7 +286,10 @@ export const systemIncidentService = {
 
     // Create task + update incident inside a single transaction to prevent orphan tasks on rollback.
     // taskService.createTask receives the savepoint tx directly so all writes are atomic.
+    // The org GUC must be set explicitly here because this path does not go through the
+    // orgScoping HTTP middleware — without it, the FORCE-RLS policy on `tasks` rejects the INSERT.
     const updated = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${sysOps.organisationId}, true)`);
       const task = await taskService.createTask(
         {
           organisationId: sysOps.organisationId,
