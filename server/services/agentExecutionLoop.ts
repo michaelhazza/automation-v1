@@ -108,6 +108,12 @@ import { SPEND_ACTION_ALLOWED_SLUGS, getActionDefinition } from '../config/actio
 import { evaluate as evaluateRuntimeCheck } from './runtimeCheckService.js';
 import { checkRequiredIntegration } from './integrationBlockService.js';
 
+// `AgentRunRequest` stays in agentExecutionService.ts (30+ call-site imports).
+// Using `import type` here is safe because TypeScript erases type-only imports
+// from emitted JS — no runtime cycle is introduced.
+// Migration trigger: if any adapter ever needs AgentRunRequest as a *runtime*
+// value (not just a type annotation), relocate it to agentExecutionTypes.ts
+// first to avoid a runtime cycle.
 import type { AgentRunRequest } from './agentExecutionService.js';
 import type { LoopResult } from './agentExecutionTypes.js';
 
@@ -230,12 +236,9 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
     configVersion, agentDomain, hierarchyContext,
   } = params;
-  // saLink, timeoutMs are surfaced for parity with the executeRun
-  // call-site contract; the loop body itself does not consume them
-  // directly (cancellation / timeout enforcement happens via middleware
-  // and the per-iteration cancel-observation read).
-  void saLink;
-  void timeoutMs;
+  // Both saLink and timeoutMs are consumed within this function:
+  //   - timeoutMs -> skillExecutionContext (skill call timeout cap)
+  //   - saLink    -> buildMiddlewareContext (passed to per-iteration middleware)
   const startingIteration = params.startingIteration ?? 0;
 
   // Sprint 5 P4.1 — mutable tool list; topic filter may narrow it on iteration 0
