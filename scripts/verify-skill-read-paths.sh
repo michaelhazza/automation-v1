@@ -1,50 +1,43 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
+# ---------------------------------------------------------------------------
+# verify-skill-read-paths.sh
+#
 # Gate: Every ActionDefinition entry in ACTION_REGISTRY must have readPath.
 # liveFetch actions must have liveFetchRationale.
+#
+# Hardened in refactor-action-registry Chunk 2: the awk/grep text-counting
+# body (with its fragile calibration constant) has been replaced by a
+# TypeScript runtime-loading harness (scripts/verify-skill-read-paths.ts)
+# that loads the registry directly from source via tsx and checks the
+# invariant per-entry. The calibration constant is removed entirely. No
+# `npm run build:server` step required (matches verify-risk-tier-assigned.ts).
+# ---------------------------------------------------------------------------
 
-FILE="server/config/actionRegistry.ts"
+set -euo pipefail
 
-# Count literal action entries (actionType: '<name>') — excludes the interface
-# definition, the methodology template variable, and function parameters.
-ACTION_COUNT=$(grep -cE "actionType: '[a-z_]+'" "$FILE" || true)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+GUARD_ID="skill-read-paths"
+GUARD_NAME="Action Registry readPath declared on every entry"
 
-# Count readPath entries, subtracting 8 non-entry occurrences (calibration constant = 8):
-#   1. Pattern: "readPath: 'canonical' | 'liveFetch' | 'none'"  — interface definition (ActionDefinition type body)
-#   2. Pattern: "readPath: 'none' as const"                     — methodology template variable (Object.fromEntries block)
-#   3. Pattern: "actionType: 'crm.fire_automation'"             — crm.* entry; readPath real but actionType dot-namespaced, not matched by ACTION_COUNT pattern '[a-z_]+'
-#   4. Pattern: "actionType: 'crm.send_email'"                  — crm.* entry; same reason as #3
-#   5. Pattern: "actionType: 'crm.send_sms'"                    — crm.* entry; same reason as #3
-#   6. Pattern: "actionType: 'crm.create_task'"                 — crm.* entry; same reason as #3
-#   7. Pattern: "actionType: 'crm.query'"                       — crm.* entry; same reason as #3
-#   8. Pattern: "actionType: 'workflow.run.start'"              — workflows-v1 entry; same reason as #3 (added 2026-05-04)
-# Items 3-8: these are valid action entries but their actionType names contain dots, so they are
-# not counted by ACTION_COUNT (grep pattern '[a-z_]+' requires only lowercase letters and underscores).
-# Subtracting their readPath occurrences keeps ENTRY_READ_PATH aligned with ACTION_COUNT.
-RAW_READ_PATH=$(grep -c "readPath:" "$FILE" || true)
-ENTRY_READ_PATH=$((RAW_READ_PATH - 8))
+source "$SCRIPT_DIR/lib/guard-utils.sh"
 
-# For the summary, count the methodology block as 1 entry on each side.
-TOTAL_ACTIONS=$((ACTION_COUNT + 1))
+VIOLATIONS=0
+FILES_SCANNED=1
 
-if [ "$ACTION_COUNT" -ne "$ENTRY_READ_PATH" ]; then
-  echo "FAIL: $((ACTION_COUNT - ENTRY_READ_PATH)) actions missing readPath tag"
-  echo "Literal action entries: $ACTION_COUNT, with readPath: $ENTRY_READ_PATH"
-  echo "[GATE] skill-read-paths: violations=$((ACTION_COUNT - ENTRY_READ_PATH))"
-  exit 1
+emit_header "$GUARD_NAME"
+
+gate_failed=0
+npx tsx "$ROOT_DIR/scripts/verify-skill-read-paths.ts" || gate_failed=1
+
+if [ "$gate_failed" -eq 1 ]; then
+  emit_violation "$GUARD_ID" "error" "server/config/actionRegistry" "0" \
+    "One or more entries missing or invalid readPath / liveFetchRationale (see stderr above)" \
+    "Every ACTION_REGISTRY entry must have readPath: 'canonical' | 'liveFetch' | 'none'. liveFetch entries must also have a non-empty liveFetchRationale."
+  VIOLATIONS=$((VIOLATIONS + 1))
 fi
 
-# Check liveFetch actions have rationale
-LIVE_FETCH_COUNT=$(grep -c "readPath: 'liveFetch'" "$FILE" || true)
-RATIONALE_COUNT=$(grep -c "liveFetchRationale:" "$FILE" || true)
+emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-if [ "$LIVE_FETCH_COUNT" -gt "$RATIONALE_COUNT" ]; then
-  echo "FAIL: $((LIVE_FETCH_COUNT - RATIONALE_COUNT)) liveFetch actions missing liveFetchRationale"
-  echo "[GATE] skill-read-paths: violations=$((LIVE_FETCH_COUNT - RATIONALE_COUNT))"
-  exit 1
-fi
-
-# +1 for the methodology block (generated, not literal)
-echo "PASS: verify-skill-read-paths ($TOTAL_ACTIONS actions tagged, $LIVE_FETCH_COUNT liveFetch with rationale)"
-echo "[GATE] skill-read-paths: violations=0"
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
+exit "$exit_code"

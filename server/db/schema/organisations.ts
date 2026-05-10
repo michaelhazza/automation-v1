@@ -71,6 +71,14 @@ export const organisations = pgTable(
     // Scorecard slugs mandated for all org-linked agents. Always-array;
     // DB CHECK enforces jsonb_typeof = 'array'.
     orgMandatoryScorecardSlugs: jsonb('org_mandatory_scorecard_slugs').notNull().default([]).$type<string[]>(),
+    // ── Execution Backend Adapter Contract (migration 0313) ───────────────
+    // Per-org backend routing preferences. Keys are backend IDs; values are
+    // opaque routing hints (e.g. region, tier). Schema-only in V1 — no Zod
+    // validator or resolver reads this column yet.
+    preferredBackends: jsonb('preferred_backends')
+      .notNull()
+      .default({})
+      .$type<Record<string, string>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

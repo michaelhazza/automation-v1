@@ -24,6 +24,9 @@ export const canonicalInboxes = pgTable(
         collisionWindow: { minMinutesSinceHumanActivity: 30, respectHumanAssignee: true },
         draftExpiry: { awaitingReviewHours: 72, draftHours: 24 },
         optIns: { autonomousReplyOnWaitingOnCustomer: false, postResolutionFollowUp: false },
+        minConfidence: 0.8,
+        voiceProfile: 'neutral',
+        escalationCategories: [],
       })
       .notNull(),
     externalMetadata: jsonb('external_metadata').$type<Record<string, unknown>>(),

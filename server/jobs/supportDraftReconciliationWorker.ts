@@ -30,11 +30,19 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
       const { draftId, organisationId } = job.data;
       const db = getOrgScopedDb('supportDraftReconciliationWorker');
 
-      // 1. Load the draft — idempotent early exit if not found or wrong status
+      // 1. Load the draft — idempotent early exit if not found or wrong status.
+      // Defence-in-depth: explicit organisationId predicate alongside the
+      // org-scoped tx's RLS policy. If a future change relaxes the policy or
+      // the GUC is unset, this filter still scopes the read.
       const [draft] = await db
         .select()
         .from(canonicalTicketDrafts)
-        .where(eq(canonicalTicketDrafts.id, draftId))
+        .where(
+          and(
+            eq(canonicalTicketDrafts.id, draftId),
+            eq(canonicalTicketDrafts.organisationId, organisationId),
+          ),
+        )
         .limit(1);
 
       if (!draft || draft.status !== 'needs_reconciliation') {

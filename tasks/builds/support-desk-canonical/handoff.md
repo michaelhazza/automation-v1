@@ -226,3 +226,27 @@ launch finalisation
 `finalisation-coordinator` will read this Phase 2 handoff, restore context, and proceed with its playbook (S2 sync, G4 regression guard, chatgpt-pr-review manual rounds, doc-sync sweep, KNOWLEDGE.md pattern extraction, MERGE_READY transition, ready-to-merge label).
 
 Phase 2 status: **PHASE_2_COMPLETE**.
+
+---
+
+## Phase 3 (FINALISATION) — SKIPPED (retroactive note, 2026-05-10)
+
+**PR:** [#277](https://github.com/michaelhazza/automation-v1/pull/277) — **MERGED** 2026-05-10T00:41:39Z, squash-commit `35a5bfb6`.
+
+**What happened:** PR #277 was merged to `main` without `finalisation-coordinator` ever being invoked. As a result:
+
+- `chatgpt-pr-review` was **never run** for this build. No `tasks/review-logs/chatgpt-pr-review-support-desk-canonical-*.md` log exists.
+- The Phase 3 doc-sync sweep, KNOWLEDGE.md pattern extraction cross-check, and `tasks/todo.md` cleanup steps were not executed by `finalisation-coordinator` (the equivalent doc-sync work that DID land was done inline during Phase 2 chunk C15 — see `## Phase 2 (BUILD) — complete > Doc-sync gate` above).
+- `tasks/current-focus.md` was not transitioned from `REVIEWING` → `MERGE_READY` → `NONE` and remained stale until retroactively patched on 2026-05-10.
+
+**Pre-merge review coverage actually applied** (from Phase 2):
+- spec-conformance — CONFORMANT_AFTER_FIXES (2 rounds)
+- adversarial-reviewer — HOLES_FOUND (6 items routed to backlog SDC-ADV-1..6)
+- pr-reviewer — APPROVED (4 rounds + 2 fix-loop iterations)
+- dual-reviewer — Codex APPROVED (3 iterations, 6 [ACCEPT] decisions including 2 P1 runtime bugs caught)
+
+**Recommended follow-up:** if the build's risk profile warrants it, run `chatgpt-pr-review` retrospectively against squash-commit `35a5bfb6` on `main`. Otherwise the four Phase 2 reviewers are the full review coverage of record for this PR.
+
+**Deferred-items state at merge:** 14 SDC-PR-1..14 + 6 SDC-ADV-1..6 routed to `tasks/todo.md` for post-merge backlog. SDC-OVERRIDE-1 (OQ-1 Foundry parity) remains an operator-owned post-merge item.
+
+Phase 3 status: **PHASE_3_SKIPPED_RETROACTIVE_NOTE**.

@@ -3795,3 +3795,231 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
 - [ ] **SFR-N9 — Future-only: functional index on `audit_events ((metadata->>'subaccountId'))`**
   - File: `server/db/schema/auditEvents.ts`
   - Current `(organisation_id, created_at)` index is sufficient at current scale. Add only if subaccount-scoped audit queries grow large enough that the current narrow-org-partition path slows.
+
+---
+
+## Deferred spec decisions — phase-1-showcase-mvps (2026-05-10)
+
+**Captured:** 2026-05-10T01-36-17Z
+**Source log:** `tasks/review-logs/spec-review-log-phase-1-showcase-mvps-1-2026-05-10T01-36-17Z.md`
+**Context:** spec-reviewer iteration 1 surfaced two directional findings that the operator may want to revisit before build planning. Neither blocks the spec.
+
+- [ ] **PSM-D1 — Tighten Support Agent eval acceptance threshold before lock-in?**
+  - Spec: `tasks/builds/phase-1-showcase-mvps/spec.md` §9.2 + §10 Risk Register entry "Eval threshold too strict"
+  - Codex iteration 1 finding C15: "≥85% per intent OR a tuned-during-pilot threshold" makes the merge gate movable.
+  - **Spec-reviewer decision:** AUTO-DECIDED reject — operator pre-pass deliberately tagged the threshold as tunable during pilot. Tightening pre-build forces Product sign-off into the build flow which conflicts with rapid-evolution posture. Eval harness is Phase 1 instrumentation, not a regulated launch gate.
+  - **For human review:** if you want a hard gate ahead of Phase 1.5 use-case fan-out, decide here and update §9.2 / §10 in a separate small spec edit.
+
+- [ ] **PSM-D2 — Resolve §11.1–§11.4 open decisions before build planning, or carry them into the architect's plan breakdown?**
+  - Spec: `tasks/builds/phase-1-showcase-mvps/spec.md` §11.1 (PDF library), §11.2 (worker-to-S3 upload path), §11.3 (default model + routing), §11.4 (classification cache strategy)
+  - Codex iteration 1 finding C16: these decisions affect dependencies, schema, services, sequencing.
+  - **Spec-reviewer decision:** AUTO-DECIDED reject — caller framing said the spec is intentionally architecture-level. The four decisions all carry explicit recommendations in the spec; the architect-agent can resolve them during plan breakdown. Forcing pre-build resolution is over-constraint at this stage.
+  - **For human review:** if you want to lock the four decisions before invoking architect, edit §11 to record each as Resolved with the recommendation chosen. Otherwise expect the architect's plan to carry one chunk per decision.
+
+---
+
+## Deferred from spec-conformance review - phase-1-showcase-mvps (2026-05-10)
+
+**Captured:** 2026-05-10T10:00:17Z
+**Source log:** `tasks/review-logs/spec-conformance-log-phase-1-showcase-mvps-2026-05-10T10-00-17Z.md`
+**Spec:** `tasks/builds/phase-1-showcase-mvps/spec.md`
+
+The branch implements substantial portions of the spec but several integration gaps prevent end-to-end functioning. All items below need human design judgement (where to call register*Job from, how to substitute master_prompt placeholders at install time, which inbox config page should compose InboxAgentConfigTab, whether to add agent_execution_events double-write infrastructure) and were not auto-fixed because each represents a directional choice rather than a mechanical addition. Numbered REQ ids correspond to the conformance log.
+
+### High priority (blocks end-to-end functionality)
+
+- [ ] REQ #4 - Internal finalize route never registered
+  - Spec section: §6.1.4
+  - Gap: `server/routes/internal/runArtifactsFinalize.ts` exists but no `app.use(...)` for it in `server/index.ts`. The worker uploadArtifact helper POSTs to `/api/internal/run-artifacts/finalize`, which would 404 in production.
+  - Suggested approach: import and mount the router in `server/index.ts` next to other internal routes; pick the path prefix that matches existing internal-route convention.
+
+- [ ] REQ #5 - Run artifacts retention sweep job never wired
+  - Spec section: §6.1.2b
+  - Gap: `registerRunArtifactsRetentionSweepJob(boss)` is exported but never called from `server/index.ts`. Expired artifacts will not be swept; S3 storage costs grow unbounded.
+  - Suggested approach: add the call alongside other pg-boss handler registrations (after line 619 in `server/index.ts`); ensure cron triggering is configured per the existing job-config pattern.
+
+- [ ] REQ #40 - registerSupportAgentRunJob never called
+  - Spec section: §5.3.3
+  - Gap: pg-boss handler for the support agent run is declared but the registration is never invoked. The agent will not run on schedule or webhook in production.
+  - Suggested approach: register inside the same boot block as other handlers; confirm scheduling source (cron + Teamwork webhook trigger) is wired.
+
+- [ ] REQ #41 - registerSupportEvalDailyJob never called
+  - Spec section: §5.5.4
+  - Gap: daily eval job is not wired into the boot sequence. `phase1.support.eval_drift_detected` will never fire; CI gate `verify-support-agent-eval-thresholds.sh` will always see fewer than 2 rows and fail open silently.
+  - Suggested approach: same pattern as REQ #40 / #5.
+
+- [ ] REQ #27 - Master prompt seeded as literal placeholder
+  - Spec section: §5.3.2
+  - Gap: migration 0314 inserts `system_agents.master_prompt = '{{MASTER_PROMPT_PLACEHOLDER}}'` (a literal string). The actual prompt at `server/prompts/support-agent-master.md` is never loaded by any code path. Acceptance §9.2 "Support Agent record exists with locked master prompt" technically passes (a row exists with some master_prompt value) but functionally the agent runs with the placeholder.
+  - Suggested approach: two options. (a) Load `support-agent-master.md` content into the migration's INSERT at migrate-time via a small helper. (b) Substitute `{{MASTER_PROMPT_PLACEHOLDER}}` at agent-execution time by reading the file from disk and templating placeholders ({{org_name}}, {{subaccount_name}}, etc.) with inbox/run context. Option (b) matches spec §5.3.5 ("Master prompt edits land via standard PR review... loaded at agent run start"). Pick (b) and add the loader in supportAgentExecutionService.
+
+- [ ] REQ #49 - InboxAgentConfigTab orphaned
+  - Spec section: §5.6.2
+  - Gap: `client/src/components/support/InboxAgentConfigTab.tsx` exists with all spec fields but is never imported. The existing `client/src/pages/support/InboxConfigPage.tsx` does not include it. Operators have no UI to configure the agent per inbox.
+  - Suggested approach: locate the active inbox-config UI surface from PR #277 (the canonical layer) and add a tab or section that composes `InboxAgentConfigTab`. Wire the existing `agent-config` PATCH endpoint to it.
+
+- [ ] REQ #52 - Events logged only; agent_execution_events double-write missing
+  - Spec section: §3.5, INV-16
+  - Gap: All `phase1.*` events are emitted via `logger.info`/`logger.warn` only. None write rows to `agent_execution_events`. The Support Agent's outer-loop idempotency (REQ #38, spec §5.3.4) depends on a NOT EXISTS predicate against `agent_execution_events.event_type` — without the double-write the predicate finds no terminal events and the agent will re-process the same tickets every run.
+  - Suggested approach: add a small emitRunTraceEvent helper that writes both a structured log AND an `agent_execution_events` row when the event is a "run-rendered" event per the §3.5 registry. Apply at all support-agent emit sites and the file-delivery emit sites.
+
+### Medium priority
+
+- [ ] REQ #28 - default_system_skill_slugs has set_custom_field instead of ask_clarifying_question
+  - Spec section: §5.3.1, §9.2
+  - Gap: spec §5.3.1 lists 12 default skills, the 12th being the universal `ask_clarifying_question`. Migration 0314 seeds 12 slugs, all `support.*`, with `support.set_custom_field` in the 12th slot. Acceptance §9.2 explicitly references "11 support.* + ask_clarifying_question".
+  - Suggested approach: confirm with operator whether the swap is intentional (in which case update spec §5.3.1) or accidental (in which case update the seed migration and add a positive presence check to `verify-support-agent-skill-set.sh`).
+
+- [ ] REQ #30 - install route mounted under /api/support/...
+  - Spec section: §5.3.1
+  - Gap: spec quotes the route as `POST /api/subaccounts/:subaccountId/support-agent/install`. Implementation mounts under `supportRouter` at `/api/support` so the actual path is `/api/support/subaccounts/:subaccountId/support-agent/install`.
+  - Suggested approach: align spec with codebase convention (most likely correct: keep route under /api/support, edit spec) or split the install route out of the support router so it lives at /api/subaccounts/...
+
+- [ ] REQ #18 - phase1.macro.run_started/run_completed/artifact_delivered never emitted
+  - Spec section: §3.5
+  - Gap: three event types declared in shared/types/runTraceEvent.ts as discriminator members but no emitter site exists in code. Run Trace coverage for 42 Macro is incomplete.
+  - Suggested approach: emit run_started at agent-run create (server/services/agentExecutionService or wherever the macro agent run gets its row), run_completed at agentRunFinalizationService, artifact_delivered after the happy-path upload in ieeRunCompletedHandler.
+
+- [ ] REQ #19 - phase1.macro.run_stuck logged from worker not detector
+  - Spec section: §3.5, §4.6.2
+  - Gap: spec §3.5 says emitter is `staleMacroRunDetector`. Code emits the log code from `worker/src/browser/executor.ts:425` instead. The detector only returns WorkspaceHealthFinding objects without emitting the event.
+  - Suggested approach: move the emit to `staleMacroRunDetector.detectStaleMacroRuns` so the canonical event registry matches reality; remove the worker emit (or repurpose to a different event name).
+
+- [ ] REQ #42 - phase1.support.draft_dispatched and draft_blocked_by_policy never emitted
+  - Spec section: §5.6.3
+  - Gap: spec lists 7 Run Trace events for Support Agent runs; 5 are emitted, these 2 are not. draft_dispatched is supposed to come from supportDraftDispatchService dispatch phases; draft_blocked_by_policy from preflight failures.
+  - Suggested approach: thread the emits through supportDraftDispatchService (or its callers) at the dispatch-phase and preflight-block points. Acceptance §9.2 references "All 7 Run Trace event types render correctly".
+
+- [ ] REQ #33 - promptOverride forbidden-token list far narrower than spec
+  - Spec section: §5.3.6
+  - Gap: spec lists `</?system>`, `</?user>`, `<<SYS>>`, `### Rules`, `BEGIN SYSTEM`, `ignore previous`, `disregard`, raw role-switching tokens, runs of three or more backticks. Implementation only catches `{{(inject|system|override|ignore|disregard)}}`.
+  - Suggested approach: expand the regex set in `server/services/promptOverridePure.ts` to cover the full spec list; add unit-test fixtures per token category.
+
+### Low priority / process discipline
+
+- [ ] REQ #12 - PDF determinism: xref-sort step omitted
+  - Spec section: §4.4.3
+  - Gap: spec mandates "sort the object stream's xref table deterministically" alongside CreationDate/ModDate zeroing and /ID stripping. Implementation only does the latter two.
+  - Suggested approach: research whether `@react-pdf/renderer` 4.5.1 produces non-deterministic xref tables in practice; if so, post-process the PDF byte stream to canonicalise xref ordering. May be unnecessary if pinned version + the existing two normalisations already produce byte-deterministic output across re-runs (verify with the existing golden-byte test).
+
+- [ ] REQ #25 - system_skills row for support.classify_ticket not seeded
+  - Spec section: §5.4.3
+  - Gap: spec lists `server/db/schema/systemSkills.ts | Register the new support.classify_ticket skill row | +5`. Code has only a comment block describing the seed and explicitly defers it to "Phase 1.5".
+  - Suggested approach: add a small migration that seeds the row with the values from the comment block. Or formally accept the deferral and update spec §5.4.3 to mark this as deferred.
+
+- [ ] REQ #36 - controller_style 'native' enforcement at run-create not visible (AMBIGUOUS)
+  - Spec section: §5.3.7, INV-8
+  - Gap: agent run rows must carry `controller_style = 'native'` for every Support Agent run. The execution service logs `controllerStyleAtPropose: 'native'` but the actual run-create site is not in this changeset and it is unclear whether the existing infra reliably defaults Support Agent runs to native.
+  - Suggested approach: locate the agent-run-create site for support agents (likely in the existing agent-execution path or a new orchestrator site) and confirm a unit test asserts the controller_style value.
+
+- [ ] REQ #34 - Master-prompt eval-gate before bump (process discipline)
+  - Spec section: §5.3.5
+  - Gap: spec describes a CI gate that re-runs the eval harness before allowing system_agents.version bumps. No such gate is implemented; it is informational / process discipline today.
+  - Suggested approach: add a `verify-support-agent-prompt-version-bump.sh` gate that detects PR-level diffs to `server/prompts/support-agent-master.md` and conditionally runs the eval harness against the regression set. Phase 1.5 candidate.
+
+## Deferred from pr-reviewer (branch-level) - phase-1-showcase-mvps (2026-05-10)
+
+**Captured:** 2026-05-10T11:17:44Z
+**Source log:** `tasks/review-logs/pr-review-log-phase-1-showcase-mvps-2026-05-10T*.md`
+
+P0 Blockers and 3 of 7 Strong recommendations were closed in commit `910236f0`'s follow-up.
+The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
+
+### Strong (post-merge)
+
+- [ ] PR-S3 — Finalize endpoint body cap will reject base64 PDF / media > 10MB
+  - Spec section: §6.1.4 / DEVELOPMENT_GUIDELINES.md §8.29
+  - Gap: `/api/internal/run-artifacts/finalize` relies on the global `express.json({ limit: '10mb' })` parser. Worker-uploaded base64-encoded PDFs / media will hit the limit (33% inflation over raw bytes).
+  - Suggested approach: install a path-scoped `express.json({ limit: '50mb' })` BEFORE the global parser in `server/index.ts`. Or refactor the finalize endpoint to accept multipart upload (preferred — avoids base64 inflation).
+
+- [ ] PR-S4 — `phase1RunTraceEventEmitter.ts` is a parallel write path that bypasses canonical `appendEvent`
+  - Spec section: §3.5 / INV-16
+  - Gap: even with the GUC fix landed, the helper still bypasses `agentExecutionEventService.appendEvent`, missing websocket envelope emission, presence projection, working-time tracking, observation forwarding, payload validation, and event-cap metric counters.
+  - Suggested approach: extend `AgentExecutionEventType` and `AgentExecutionEventPayload` discriminated unions in `shared/types/agentExecutionLog.ts` with the 14 Phase 1 run-rendered event types; route through `appendEvent` / `insertExecutionEventSafe`; delete `phase1RunTraceEventEmitter.ts`.
+
+- [ ] PR-S5 — `runArtifactsRetentionSweepJob.ts` uses single shared admin tx across all orgs
+  - Spec section: DEVELOPMENT_GUIDELINES.md §2
+  - Gap: maintenance jobs that advertise per-org partial-success must use one admin tx per org or SAVEPOINT subtxs. Current code opens one shared admin tx — fragile under non-caught failures.
+  - Suggested approach: group expired rows by `organisation_id`, open one `withAdminConnection` per org. Or wrap each per-artifact DELETE in a SAVEPOINT subtx.
+
+- [ ] PR-S6 — Escalation + add-note paths lack their action skills
+  - Spec section: §5.4.1
+  - Gap: four spots in `supportAgentExecutionService.ts` release the claim and emit the terminal event but never call the spec-required action skills:
+    - low-confidence branch (Step 4 confidence-check) → needs `support.add_internal_note + support.assign(human)`
+    - skill-error catch branch → needs `support.add_internal_note + support.assign(human)`
+    - `recommended_action: 'escalate_to_human'` branch (Step 4b) → needs `support.add_internal_note + support.assign(human)`
+    - `recommended_action: 'add_internal_note_only'` branch (Step 4b) → needs `support.add_internal_note`
+  - `phase1.support.escalation_action_pending` warn-log is currently the only signal humans see; no internal note lands on the ticket and no human assignee is set. The `close_as_no_action` branch correctly needs no side effect.
+  - Suggested approach: implement `support.add_internal_note` and `support.assign` skill handlers (currently only classify, propose, find-customer-history exist). Wire from all four branches above in `supportAgentExecutionService.ts`. Phase 1.5 candidate.
+
+- [ ] PR-S7 — No runtime tests for `phase1RunTraceEventEmitter.ts`
+  - Gap: the helper has complex behaviour (raw-SQL JSONB binding, atomic seq allocation, FK-violation handling, SAVEPOINT semantics) but no tests.
+  - Suggested approach: author `server/services/__tests__/phase1RunTraceEventEmitter.integration.test.ts` covering the seq allocation race, JSONB round-trip with embedded quotes / unicode, FK-violation rollback path, and missing-org-context fail-closed path.
+
+### Non-blocking
+
+- [ ] PR-N1 — `supportAgentMasterPrompt.ts` resolves prompt path via `process.cwd()` (env-fragile)
+- [ ] PR-N2 — `supportAgentMasterPrompt.ts` module-level cache lacks justification comment per §8.24
+- [ ] PR-N3 — `processInbox` `subaccountId: string | null` could tighten to `string`
+- [ ] PR-N4 — `InboxConfigPage.tsx` legacy form `<button>` lacks `type="button"`
+- [ ] PR-N5 — `supportAgentInstallService.ts` does not set `appliedTemplateId` / `appliedTemplateVersion`
+- [ ] PR-N6 — `runArtifacts.ts` artifacts-list endpoint relies on org-scope only (per-spec, but worth code comment)
+- [ ] PR-N7 — Confirm `dist/` is gitignored or remove committed artifacts
+## Deferred from spec-conformance review — execution-backend-adapter-contract (2026-05-10)
+
+**Captured:** 2026-05-10T08-46-26Z
+**Source log:** `tasks/review-logs/spec-conformance-log-execution-backend-adapter-contract-2026-05-10T08-46-26Z.md`
+**Spec:** `tasks/builds/execution-backend-adapter-contract/spec.md` (locked 2026-05-10)
+
+- [ ] **EBAC-DG-1 — Restore F2 legacy-fallback behavioural assertion (acceptance §16 #14)**
+  - Spec section: §15 (Pure tests) + §16 #14 (Legacy in-flight fallback).
+  - Gap: the F2 test in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` was removed in Chunk 5 (commit `1d948ecc`) on the rationale that the legacy alias `finaliseAgentRunFromIeeRun` was deleted. The spec criterion is about the BEHAVIOUR — the IEE handler path finalising a pre-cutover run with `agent_runs.backend_id IS NULL` correctly — not about the alias. The behaviour still holds (handler derives `backendId` from `iee_runs.type`, orchestrator never reads `agent_runs.backend_id`), but the regression-protection test is gone.
+  - Suggested approach: add a fixture-level test that mocks `executionBackendRegistry.resolve` and `db.transaction` to capture the `backendId` argument that `finaliseAgentRunFromBackend` receives when called from a code path equivalent to `ieeRunCompletedHandler`'s body, with an `agent_runs` parent fixture whose `backendId` is left NULL. Alternatively, push this assertion to the (future) DB-touching orchestrator integration test — but record the trade-off so a future reviewer doesn't re-remove it.
+
+- [ ] **EBAC-DG-2 — Reconcile `CostModel` value-set narrowing with spec §4.1**
+  - Spec section: §4.1 (CostModel type) + §10.2 (Cost-model declaration).
+  - Gap: spec §4.1 declares `'per_token' | 'subscription' | 'per_worker_second' | 'per_session_hour' | 'mixed'` (5 values). Implementation in `server/services/executionBackends/types.ts:99` declares `'per_token' | 'subscription' | 'none'` (3 values — adds `'none'`, drops three deferred slots). Spec §10.2 explicitly says: *"Declared now so the adapters are self-describing for those specs without amendment."* — the narrowed surface means future adapter authors will need to amend `types.ts` before declaring the dropped values.
+  - Suggested approach: either (a) widen the implemented union to match the spec (low cost, restores the contract surface), or (b) amend the spec to record that `'none'` was added and the three speculative values were dropped (the spec is the source of truth and should reflect what V1 actually shipped). Either way, the implementation and spec should agree.
+
+## Deferred from adversarial-reviewer — execution-backend-adapter-contract (2026-05-10)
+
+**Captured:** 2026-05-10T09:13:06Z
+**Source log:** `tasks/review-logs/adversarial-review-log-execution-backend-adapter-contract-2026-05-10T09-13-06Z.md`
+**Verdict:** HOLES_FOUND (1 confirmed-hole fixed inline; 2 deferred)
+
+> Note: **EBAC-ADV-1 (confirmed-hole, missing org predicates on IEE dispatch UPDATEs in `_ieeShared.ts`)** was fixed inline during the Phase 2 review pass — see commit alongside the pr-reviewer changes.
+
+- [ ] **EBAC-ADV-2 — Confirm IEE worker orphan-cleanup covers `(pending, pending)` stuck-pair scenario**
+  - Category: Race conditions / silent run leak.
+  - Location: `server/services/executionBackends/_ieeShared.ts:149-206` (dispatch sequence) and the IEE worker's task-cleanup sweep (separate repo).
+  - Concern: Steps 1 (enqueue `iee_runs` INSERT) and 2 (parent `agent_runs` UPDATE to `'delegated'`) are non-transactional. If the IEE worker also dies before picking up the task, both rows stay in `'pending'`. `ieeReconcile` only matches `agentRuns.status IN ('delegated', 'cancelling')` — invisible.
+  - Suggested approach: read the IEE worker repo's "cleanup orphaned tasks" sweep and verify it emits `iee-run-completed` for tasks enqueued but never picked up. If it does not, either (a) extend the worker sweep, or (b) widen `ieeReconcile` to match `(pending iee_run, pending/running parent)` pairs older than the IEE task TTL.
+
+- [ ] **EBAC-ADV-3 — Confirm `claudeCodeRunner.execute` uses `execFile`/`spawn` not `exec`**
+  - Category: Injection (prompt-injection-to-shell-injection pivot).
+  - Location: `server/services/agentExecutionService.ts:1570` and `server/services/executionBackends/claudeCodeBackend.ts:76-83`.
+  - Concern: `taskPrompt = workspaceContext || '...'` is LLM-generated content from workspace memory. If `claudeCodeRunner.ts` uses `child_process.exec` with a concatenated shell string, workspace-memory content with shell metacharacters could inject shell commands.
+  - Suggested approach: read `server/services/claudeCodeRunner.ts`. If it uses `execFile` or `spawn` with an argument array — close as non-finding. If it uses `exec` with a string — fix to use `execFile`/`spawn` with arg array.
+
+- [ ] **EBAC-PR3-S1 — Add integration test for orphan-stamp path in `_ieeShared.ts::ieeFinalise`**
+  - Source: `tasks/review-logs/pr-review-log-execution-backend-adapter-contract-2026-05-10T09-59-40Z.md` Strong S-1.
+  - Why: dual-reviewer fix `44ac0cab` restored `eventEmittedAt` stamping when `parentRun === null` (orphaned `iee_runs` rows whose parent `agent_runs` was deleted). The regression Codex caught had no automated coverage — the mock adapter test in `contractPure.test.ts` only exercises the happy path with non-null `parentRun`.
+  - Given/When/Then:
+    - *Given* an `iee_runs` row in status `'completed'` with `event_emitted_at = NULL` whose `agent_run_id` references a deleted `agent_runs` row,
+    - *When* `finaliseAgentRunFromBackend({ backendId: 'iee_browser', backendTaskId: <ieeRunId> })` runs,
+    - *Then* function returns `false`, row's `event_emitted_at` is non-null, no `agent_runs` UPDATE attempted, no websocket emission fires.
+  - Place under `server/services/__tests__/` as a Vitest integration spec; CI handles full-suite execution.
+
+
+
+## Deferred from chatgpt-pr-review — phase-1-showcase-mvps (2026-05-11)
+
+**Captured:** 2026-05-11
+**Source log:** `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`
+**PR:** #283
+
+- [ ] **PHASE1-N1 — Tighten phase1.* event filter in RunTraceEventRenderer**
+  - Location: `client/src/pages/operate/components/RunTraceEventRenderer.tsx`
+  - Current: `e.eventType.startsWith('phase1.')` includes all future phase1 events in `filteredSystemEvents`, which fall through to `SystemEventRow` returning `null` (silently unrendered).
+  - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
+  - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.

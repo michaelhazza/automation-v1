@@ -79,6 +79,18 @@ read_capabilities:
   - slug: charge_status
     aliases: [charge_read, get_charge, charge_detail]
     description: Read a single agent_charges ledger row by id (status + state-machine snapshot)
+  - slug: support_inbox_list
+    aliases: [list_inboxes, inbox_list, support_inboxes_read]
+    description: List support inboxes configured for the helpdesk integration
+  - slug: support_agent_list
+    aliases: [list_support_agents, support_agents_read, helpdesk_agents_list]
+    description: List support agents (human and bot) in the helpdesk system
+  - slug: support_ticket_list
+    aliases: [list_tickets, tickets_read, open_tickets_list]
+    description: List support tickets with filtering by status, inbox, assignee, or date range
+  - slug: support_ticket_thread_read
+    aliases: [read_ticket_thread, ticket_messages_read, thread_read]
+    description: Read the full message thread for a single support ticket
 
 write_capabilities:
   - slug: send_email
@@ -138,6 +150,24 @@ write_capabilities:
   - slug: balance_topup
     aliases: [topup_balance, agent_balance_topup, prepaid_topup]
     description: Top up a prepaid balance (e.g. ad-spend account) via an agent-driven charge
+  - slug: support_reply_send
+    aliases: [send_support_reply, ticket_reply, reply_to_ticket]
+    description: Send a public reply to a support ticket via the helpdesk provider
+  - slug: support_internal_note_add
+    aliases: [add_internal_note, ticket_note, internal_note_post]
+    description: Add an internal (agent-only) note to a support ticket
+  - slug: support_ticket_assign
+    aliases: [assign_ticket, ticket_reassign, helpdesk_assign]
+    description: Assign or reassign a support ticket to a specific support agent
+  - slug: support_ticket_status_set
+    aliases: [set_ticket_status, ticket_resolve, ticket_close, ticket_reopen]
+    description: Change the status of a support ticket (e.g. open, resolved, closed)
+  - slug: support_ticket_tag_set
+    aliases: [tag_ticket, ticket_label, add_ticket_tag]
+    description: Add or remove tags on a support ticket
+  - slug: support_attachment_resolve
+    aliases: [resolve_attachment, fetch_attachment_url, ticket_attachment_read]
+    description: Resolve a signed/temporary URL for a ticket message attachment
 
 skills:
   - slug: classify_email
@@ -185,6 +215,39 @@ skills:
   - slug: issue_refund
     aliases: [refund_issue_skill, agent_refund_skill]
     description: Agent-driven refund issuance against a previously-succeeded agent charge (Stripe SPT; respects refund-policy gating)
+  - slug: support.list_open_tickets
+    aliases: [list_open_tickets_skill, support_list_tickets]
+    description: List open tickets in a helpdesk inbox with priority and SLA context
+  - slug: support.read_thread
+    aliases: [read_ticket_thread_skill, support_read_messages]
+    description: Fetch the full message thread for a specific support ticket
+  - slug: support.propose_reply
+    aliases: [propose_reply_skill, support_draft_reply]
+    description: Generate an AI-proposed reply draft for a support ticket, routed to operator review
+  - slug: support.add_internal_note
+    aliases: [add_note_skill, support_internal_note]
+    description: Post an internal agent note on a support ticket (not visible to the customer)
+  - slug: support.approve_draft
+    aliases: [approve_draft_skill, support_approve_reply]
+    description: Approve a pending AI reply draft and dispatch it to the helpdesk provider
+  - slug: support.reject_draft
+    aliases: [reject_draft_skill, support_reject_reply]
+    description: Reject a pending AI reply draft with optional feedback notes
+  - slug: support.set_status
+    aliases: [set_ticket_status_skill, support_change_status]
+    description: Change the status of a support ticket (resolve, close, reopen)
+  - slug: support.assign
+    aliases: [assign_ticket_skill, support_reassign]
+    description: Assign or reassign a support ticket to a support agent
+  - slug: support.tag
+    aliases: [tag_ticket_skill, support_add_tag]
+    description: Add or remove tags on a support ticket
+  - slug: support.find_customer_history
+    aliases: [find_customer_history_skill, support_customer_lookup]
+    description: Look up a customer's full support and CRM history by email address
+  - slug: support.classify_ticket
+    aliases: [classify_ticket_skill, support_classify]
+    description: Classify a support ticket by intent, urgency, and recommended action without drafting a reply
 
 primitives:
   - slug: scheduled_run
@@ -217,6 +280,9 @@ primitives:
   - slug: spend_ledger
     aliases: [agent_charge_ledger, agent_spend_ledger]
     description: Append-only agent_charges ledger primitive — every spend attempt with full policy decision trace, idempotency key, and status lifecycle (DB-trigger-enforced append-only)
+  - slug: api_key_connection
+    aliases: [api_key, api_key_auth, key_based_connection]
+    description: API-key-based integration connection (static key stored in vault; no OAuth handshake required)
 ```
 
 ---
@@ -823,7 +889,7 @@ owner: platform-team
 ```yaml integration
 slug: teamwork
 name: Teamwork Desk
-provider_type: api_key
+provider_type: native
 status: fully_supported
 visibility: public
 read_capabilities:
@@ -849,6 +915,7 @@ skills_enabled:
   - support.tag
   - support.find_customer_history
   - support.add_internal_note
+  - support.classify_ticket
 primitives_required:
   - api_key_connection
   - webhook_receiver
