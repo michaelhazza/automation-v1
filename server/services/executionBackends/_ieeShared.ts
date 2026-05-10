@@ -15,25 +15,23 @@
  * well above that threshold so the helper is justified.
  *
  * Cycle prevention — same rule as `executionBackends/types.ts`: this file
- * MUST NOT import from `agentExecutionService.ts`. It DOES import from
- * `agentRunFinalizationServicePure.ts` (pure helpers) and the
- * `agentRunFinalizationService.ts` non-pure entry points are inverted —
- * the orchestrator calls into the adapter, not the other way round.
+ * MUST NOT import from `agentExecutionService.ts`. It imports pure helpers
+ * from `agentRunFinalizationServicePure.ts` and `updateMeaningfulRunTracking`
+ * from `agentRunFinalizationService.ts`. No cycle exists: the orchestrator
+ * (`agentRunFinalizationService.ts`) imports the registry which imports only
+ * `types.ts` — there is no path back to `_ieeShared.ts`.
  *
  * Spec: tasks/builds/execution-backend-adapter-contract/spec.md § 4.5,
  *       § 9.2, § 13.1.1.
  */
 
 import { z } from 'zod';
-import { eq, sql, and, isNull, inArray, count } from 'drizzle-orm';
+import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 
 import { db } from '../../db/index.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
-import { actions } from '../../db/schema/actions.js';
-import { memoryBlocks } from '../../db/schema/memoryBlocks.js';
-import { subaccountAgents } from '../../db/schema/subaccountAgents.js';
 import { emitAgentRunUpdate, emitOrgUpdate, emitSubaccountUpdate } from '../../websocket/emitters.js';
 import { logger } from '../../lib/logger.js';
 import { assertValidTransition } from '../../../shared/stateMachineGuards.js';
@@ -41,8 +39,8 @@ import { TERMINAL_RUN_STATUSES } from '../../../shared/runStatus.js';
 import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
-  computeMeaningfulOutputPure,
 } from '../agentRunFinalizationServicePure.js';
+import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 
 import type { Transaction } from '../../db/index.js';
@@ -126,7 +124,7 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
   // Mismatch check — every adapter's dispatch() first statement. Pinning
   // the discriminator narrows `opts` to the IEE variant of the union so
   // `opts.ieeTask` is reachable below without a cast.
-  if (opts.backendId !== adapterId || (opts.backendId !== 'iee_browser' && opts.backendId !== 'iee_dev')) {
+  if (opts.backendId !== adapterId) {
     throw new BackendOptionsMismatch(adapterId, opts.backendId);
   }
 
@@ -268,63 +266,6 @@ async function aggregateTokensForIeeRun(tx: Transaction, ieeRunId: string): Prom
     totalTokens: Number(row?.totalTokens ?? 0),
     llmCallCount: Number(row?.llmCallCount ?? 0),
   };
-}
-
-/**
- * F22 meaningful-run tracking. Identical body to
- * `agentRunFinalizationService.updateMeaningfulRunTracking`; lifted here so
- * the adapter's post-commit hook is self-contained. Best-effort — errors
- * caught by the caller.
- */
-async function updateMeaningfulRunTracking(
-  agentRunId: string,
-  status: string,
-): Promise<void> {
-  const [actionsRow] = await db
-    .select({ c: count() })
-    .from(actions)
-    .where(eq(actions.agentRunId, agentRunId));
-  const actionProposedCount = Number(actionsRow?.c ?? 0);
-
-  const [memoryRow] = await db
-    .select({ c: count() })
-    .from(memoryBlocks)
-    .where(and(eq(memoryBlocks.sourceRunId, agentRunId), isNull(memoryBlocks.deletedAt)));
-  const memoryBlockWrittenCount = Number(memoryRow?.c ?? 0);
-
-  const isMeaningful = computeMeaningfulOutputPure({
-    status,
-    actionProposedCount,
-    memoryBlockWrittenCount,
-  });
-
-  const [run] = await db
-    .select({ subaccountAgentId: agentRuns.subaccountAgentId })
-    .from(agentRuns)
-    .where(eq(agentRuns.id, agentRunId))
-    .limit(1);
-
-  const subaccountAgentId = run?.subaccountAgentId;
-  if (!subaccountAgentId) return;
-
-  if (isMeaningful) {
-    await db
-      .update(subaccountAgents)
-      .set({
-        lastMeaningfulTickAt: new Date(),
-        ticksSinceLastMeaningfulRun: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(subaccountAgents.id, subaccountAgentId));
-  } else {
-    await db
-      .update(subaccountAgents)
-      .set({
-        ticksSinceLastMeaningfulRun: sql`${subaccountAgents.ticksSinceLastMeaningfulRun} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(subaccountAgents.id, subaccountAgentId));
-  }
 }
 
 const TERMINAL_SET: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);

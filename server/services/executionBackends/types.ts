@@ -261,8 +261,8 @@ export interface BackendFinalisationResult {
    * / `live:agent_completed` emissions and to run the F22 meaningful-output
    * hook — work that previously lived in the post-`db.transaction()`
    * tail of `finaliseAgentRunFromIeeRun`. The orchestrator awaits the
-   * callback (or no-ops if undefined) on the `finalised: true` path; on
-   * the race-loser path it is omitted.
+   * callback (or no-ops if undefined) whenever it is set; typically only
+   * set on the `finalised: true` path.
    */
   postCommit?: () => Promise<void>;
 }

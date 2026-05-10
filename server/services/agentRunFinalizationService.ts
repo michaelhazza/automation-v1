@@ -216,16 +216,9 @@ export async function finaliseAgentRunFromBackend(args: {
         backendTaskId,
         agentRunId: terminalState.agentRunId,
       });
-      // Still let the adapter stamp eventEmittedAt — the iee_runs row exists
-      // even though the parent is gone. Pass a sentinel parent so the
-      // adapter takes its "missing parent" branch.
-      const result = await adapter.finalise!({
-        tx,
-        terminalState,
-        parentRun: { id: terminalState.agentRunId, status: '' },
-      });
-      finalised = result.finalised;
-      postCommit = result.postCommit;
+      // Parent row is gone — nothing to transition. Return early without
+      // calling the adapter. The adapter's finalise() contract only applies
+      // when a loaded parent row exists.
       return;
     }
 
@@ -239,8 +232,8 @@ export async function finaliseAgentRunFromBackend(args: {
   });
 
   // Run post-commit emissions OUTSIDE the transaction so a tx rollback
-  // never produces ghost websocket events. Adapter-supplied; only set on
-  // the `finalised: true` path.
+  // never produces ghost websocket events. Fires whenever the adapter
+  // returns a non-undefined callback (typically the finalised: true path).
   if (postCommit) {
     await postCommit();
   }
