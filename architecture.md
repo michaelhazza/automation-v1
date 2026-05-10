@@ -3592,8 +3592,21 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 | `GET /inboxes` | `server/routes/support/supportInboxesRoutes.ts` | List inboxes with sync health |
 | `PATCH /inboxes/:id` | `server/routes/support/supportInboxesRoutes.ts` | Update inbox config |
 | `POST /subaccounts/:subaccountId/support-agent/install` | `server/routes/support/supportAgentInstallRoute.ts` | Install Support Agent for a subaccount (singleton; 409 if already installed) |
+| `GET /agent/dashboard` | `server/routes/support/supportAgentRoutes.ts` | Per-inbox agent mode + stub counts for the Support Agent dashboard |
+| `PATCH /inboxes/:inboxId/agent-config` | `server/routes/support/supportAgentRoutes.ts` | Partial-update `canonical_inboxes.agent_config` (deep-merges nested objects; validates via `SupportInboxAgentConfigSchema`) |
+| `GET /evals` | `server/routes/support/supportEvalsRoutes.ts` | List latest eval runs (admin) |
+| `POST /evals/run` | `server/routes/support/supportEvalsRoutes.ts` | Trigger an on-demand eval harness run (admin) |
 
 Aggregated router: `server/routes/support/index.ts`.
+
+Run-artifact read surface (mounted at `/api`):
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /run-artifacts/:id/download` | `server/routes/runArtifacts.ts` | Download proxy — streams S3 bytes; emits `phase1.file_delivery.downloaded`. `?disposition=inline` serves inline (PDF preview) instead of as attachment. |
+| `POST /run-artifacts/:id/signed-url` | `server/routes/runArtifacts.ts` | Mint a presigned S3 URL; emits `phase1.file_delivery.signed_url_issued`. `requestSource` must be one of `run_trace_panel`, `pdf_embed`, `copy_link`, `api_consumer`. |
+
+Support Agent eval harness: `server/services/supportEvalHarness.ts` / `supportEvalHarnessPure.ts`. Runs a 5-fixture regression set (Phase 1 MVP; Foundry-sourced data in Phase 1.5), scores classify accuracy per intent + draft judge quality (0–5 scale), inserts a `support_eval_runs` row, and detects drift vs. the previous row. Daily job: `server/jobs/supportEvalDailyJob.ts`. CI gate: `server/scripts/evalGateRunner.ts` + `scripts/gates/verify-support-agent-eval-thresholds.sh` (fail-open when fewer than 2 rows; emits `phase1.support.eval_drift_detected` on fail-open per §5.5.2).
 
 ### Permissions reference
 
@@ -3603,6 +3616,7 @@ Aggregated router: `server/routes/support/index.ts`.
 | `support.draft.reject` | Subaccount | Reject a draft reply |
 | `support.draft.override_collision` | Subaccount | Approve when another draft is already dispatching |
 | `support.inbox.configure` | Subaccount | Modify inbox configuration |
+| `support.inbox.view` | Org | View Support Agent dashboard and inbox list |
 
 Standard `subaccount_admin` bypass applies. Read actions (`GET /tickets`, `GET /drafts`) use the existing authenticated-user gate without a dedicated permission key — consistent with the read-permission posture across canonical tables.
 
@@ -3693,6 +3707,13 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify support draft lifecycle or dispatch | `server/services/supportDraftDispatchService.ts` (three-phase dispatch: approveDraft / listDraftsForReview / getDraftById / editDraft / rejectDraft / manualResolveDraft) + `server/services/supportDraftDispatchServicePure.ts` (pure helpers: `isValidDraftStatusTransition`, `deriveActionIdempotencyKey`, `planSameRunSupersession`) |
 | Modify support draft reconciliation | `server/jobs/supportDraftReconciliationWorker.ts` (pg-boss worker for `support-draft-reconciliation`) + `server/services/supportDraftReconciliationPure.ts` (pure `decideOutcome`) + `server/lib/supportDispatchBootRecovery.ts` (boot-time stalled-dispatch recovery) |
 | Modify support desk UI | `client/src/pages/support/TicketsListPage.tsx` + `client/src/pages/support/TicketDetailPage.tsx` + `client/src/pages/support/DraftReviewQueue.tsx` + `client/src/pages/support/InboxConfigPage.tsx` + `client/src/components/support/SyncHealthPill.tsx` |
+| Modify the Support Agent operate dashboard | `client/src/pages/operate/SupportAgentDashboard.tsx` (mode toggle, eval drift dot, run history link) + `server/routes/support/supportAgentRoutes.ts` |
+| Modify inbox agent config tab | `client/src/components/support/InboxAgentConfigTab.tsx` (mode, collision window, voice profile, escalation categories) + `server/routes/support/supportAgentRoutes.ts` (PATCH `/inboxes/:inboxId/agent-config`) |
+| Modify Support Agent eval harness | `server/services/supportEvalHarness.ts` + `server/services/supportEvalHarnessPure.ts` (gate decision, drift math, judge prompt) + `server/db/schema/supportEvalRuns.ts` + `migrations/0315_support_eval_runs.sql` |
+| Modify Support Agent eval CI gate | `server/scripts/evalGateRunner.ts` + `scripts/gates/verify-support-agent-eval-thresholds.sh` |
+| Modify Support Agent eval admin page | `client/src/pages/operate/SupportEvalsPage.tsx` + `server/routes/support/supportEvalsRoutes.ts` |
+| Modify Run Trace artifact panel | `client/src/components/run-trace/RunTraceArtifactsPanel.tsx` (Preview/Download via download proxy; Copy-link via signed URL) + `server/routes/runArtifacts.ts` |
+| Add a Run Trace event renderer (Support Agent) | `client/src/components/run-trace/SupportEventRenderers.tsx` — 7 renderers for `phase1.support.*` events; register in `SUPPORT_EVENT_RENDERERS` map |
 | Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
 | Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
 | Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |

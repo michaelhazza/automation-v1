@@ -3473,3 +3473,27 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 **Context.** Phase 1 Showcase MVPs Chunk 7 (2026-05-10). The `applied_template_slug` column on `subaccount_agents` is the value the partial unique index keys on for the singleton guard.
 
 **Convention.** Once a `subaccount_agents` row carries `applied_template_slug = 'support-agent'`, that value MUST NOT be rewritten by future system-agent renames or any other code path. Rewriting would either reopen the singleton race or invalidate the index's coverage. Mutating `applied_template_slug` outside `supportAgentInstallService.ts` is a CI gate failure (`scripts/gates/verify-support-agent-skill-set.sh`). The slug is the install identity, not a display string — it is decoupled from the system agent's `name` field on purpose.
+
+## Pattern: window.open() for authenticated download endpoints — call sync, not after await
+
+**Context.** Phase-1-showcase-mvps Chunk 4 (RunTraceArtifactsPanel). Preview and Download buttons need to open an authenticated platform download URL in a new tab. An early implementation called `issueSignedUrl()` (async) before the `window.open()`, which silently fails popup-blocker checks: browsers only allow `window.open()` called synchronously inside a user gesture handler — any `await` before the call severs the gesture link, the browser blocks the popup, and the user sees nothing.
+
+**Resolution.** Route Preview and Download directly to the authenticated endpoint URL (`/api/run-artifacts/:id/download`) — no async call needed, the URL is computed from the artifact ID already in state. Call `window.open(url, '_blank')` synchronously. Reserve async issueSignedUrl only for Copy-link, where the signed URL is the actual payload rather than a navigation target. Check the return value (`const win = window.open(...); if (!win) { setRowError('Popup blocked...'); }`) to surface the popup-blocker case.
+
+**Detection heuristic.** Any `await X; window.open(...)` pattern in a click handler is a popup-blocker trap. If the URL can be computed synchronously, remove the await. If async is genuinely needed, the only fix is user-education (popup permission prompt, or a fallback link element).
+
+## Pattern: Inline Content-Disposition for browser PDF preview via download proxy
+
+**Context.** Phase-1-showcase-mvps Chunk 4. A single route (`GET /api/run-artifacts/:id/download`) serves both Preview (inline, browser renders PDF) and Download (attachment, browser saves file) by reading a `?disposition=inline` query parameter. The default (no param) is `attachment`; `?disposition=inline` sets `Content-Disposition: inline; filename="..."` which causes Chrome/Firefox to render PDFs in the built-in viewer instead of downloading.
+
+**File:** `server/routes/runArtifacts.ts`
+
+**Detection heuristic.** When a route needs to serve the same binary with different browser behaviour, a single query-param-controlled disposition is simpler than two separate routes and keeps the event-emission logic (the `phase1.file_delivery.downloaded` audit event) in one place.
+
+## Gotcha: Judge score scale is 0–5, not 0–1 — threshold and clamp must match
+
+**Context.** Phase-1-showcase-mvps Chunk 9 (eval harness). The spec §5.5.2 documents the draft judge prompt as scoring on a 0–5 scale (`draftJudgeScoreAvg` column comment: "0..5"). An early implementation used a 0–1 scale throughout (threshold 0.70, clamp `Math.min(1, score)`), which made the gate pass trivially for any non-zero score.
+
+**Resolution.** Three places must all agree: (1) the judge prompt's scoring rubric ("Score from 0.0 to 5.0"), (2) `THRESHOLD_JUDGE_MIN = 4.0`, (3) `Math.min(5, overallScore)` clamp. If any one of these is on a different scale the gate silently becomes meaningless. The DB column `numeric(4,2)` stores 0–5 correctly.
+
+**Detection heuristic.** Whenever a judge or rubric score threshold appears, explicitly state the scale (0–N) in the constant name or comment. "0.70 threshold" is ambiguous; "4.0 threshold (0–5 scale)" is not.
