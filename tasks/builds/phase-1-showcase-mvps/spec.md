@@ -249,7 +249,7 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 **INV-9. Approval defaults derive from Risk Tier.** Per foundation spec INV-8, this spec must not silently change the existing `gateLevel` for any action. New `support.*` actions inherit Risk Tier per the rubric in `tasks/builds/synthetos-foundation-refactor/spec.md` Section 4.2.3.
 
-**INV-10. Customer-facing communication is Tier 6 by default.** Sending a reply to a customer (via Teamwork Desk) is Tier 6 (audience impact: client messaging). Default `gateLevel` is `block` unless explicit policy allows. Per inbox, the inbox `agent_config.mode = 'autonomous'` is the policy override that lowers approval to `auto`. Default for new inboxes is `assisted` (always require approval).
+**INV-10. Customer-facing communication is Tier 6 by default.** Sending a reply to a customer (via Teamwork Desk) is Tier 6 (audience impact: client messaging). Default `gateLevel` is `block` unless explicit policy allows. Per inbox, the inbox `agent_config.mode = 'autonomous'` is the policy override that lowers approval to `auto`. **Default mode by lifecycle:** brand-new canonical_inboxes rows default to `agent_config.mode = 'disabled'` (existing schema default — the inbox is not yet wired to a Support Agent). Once the operator enables the Support Agent against an inbox, the install / enablement code path bumps the mode to `'assisted'` (HITL approval required for every customer-facing reply). The operator may then flip a single inbox to `'autonomous'` from the Inbox Agent Configuration tab (§5.6.2).
 
 **INV-11. Three-phase dispatch for all customer-facing replies.** Per the support-desk-canonical spec §5.8, every customer-facing reply goes through preflight checks → durable transition → adapter call. The Support Agent in this spec consumes `supportDraftDispatchService.dispatchDraft` and never writes to `canonical_ticket_messages` directly.
 
@@ -268,7 +268,7 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 **INV-16. Stable log codes and Run Trace event discriminators are the same string.** New log codes follow the `phase1.<area>.<event>` pattern. Each event below appears as both a structured log code AND an `agent_execution_events.event_type` discriminator, with a single payload shape:
 
 - `phase1.macro.run_started`, `phase1.macro.run_completed`, `phase1.macro.artifact_delivered`, `phase1.macro.login_failed`, `phase1.macro.run_stuck`
-- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.eval_drift_detected`
+- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.ticket_terminal`, `phase1.support.eval_drift_detected`
 - `phase1.file_delivery.uploaded`, `phase1.file_delivery.downloaded`, `phase1.file_delivery.signed_url_issued`, `phase1.file_delivery.expired`
 
 **INV-17. Both MVPs surface in Run Trace.** Run Trace virtual view (foundation Item 4) already aggregates events; new event types from this spec emit through the same channels.
@@ -590,9 +590,9 @@ This MVP needs three additive fields on the schema: `minConfidence: number` (def
 2. `support.list_open_tickets(inbox_id)` returns N tickets needing attention.
 3. For each ticket, in order:
    - **Atomic claim** (§5.3.4): acquire `canonical_tickets.bot_claimed_at` via optimistic predicate; on conflict, emit `phase1.support.collision_skipped` (reason `concurrent_claim`) and skip.
+   - **Human-activity collision check** (immediately after claim, BEFORE thread read or classification): if `last_human_activity_at` is fresh (within inbox `agent_config.collisionWindow.minMinutesSinceHumanActivity`), the agent releases the claim, emits `phase1.support.collision_skipped` (reason `human_active`), and skips. Classification is agent work and must not run while a human is active. The check is a single SQL fetch on the same row the claim acquired, so it costs nothing relative to the LLM call it gates.
    - `support.read_thread(ticket_id)` loads the conversation history.
    - `support.classify_ticket(ticket_id)` returns `{intent, urgency, recommended_action, confidence}`.
-   - **Human-activity collision check**: if `last_human_activity_at` is fresh (within inbox `agent_config.collisionWindow.minMinutesSinceHumanActivity`), the agent releases the claim, emits `phase1.support.collision_skipped` (reason `human_active`), and skips.
    - **Confidence check**: if confidence below `min_confidence`, the agent calls `support.add_internal_note` with classification reasoning + `support.assign(human)` and skips drafting.
    - **Account-issue check**: if classified as account/billing/escalation, call `support.find_customer_history` and incorporate into draft.
    - **Drafting**: call `support.propose_reply` to write a `canonical_ticket_drafts` row.
@@ -625,7 +625,7 @@ WHERE  id = :ticketId
 
 **Claim release.** On terminal verdict (draft_proposed, escalated, or skipped) the agent clears the claim by setting `bot_claimed_at = NULL`. On run abort, the claim ages out via the TTL — no recovery worker is required for Phase 1.
 
-**Per-ticket terminal verdicts.** Each ticket within a single agent run reaches exactly one terminal verdict from the set: `drafted_for_review` | `drafted_and_dispatched` | `escalated_to_human` | `skipped_collision` | `skipped_low_confidence` | `skipped_no_action_needed`. The verdict is written into the Run Trace event payload so the per-ticket decision is auditable from the UI.
+**Per-ticket terminal verdicts.** Each ticket within a single agent run reaches exactly one terminal verdict from the set: `drafted_for_review` | `drafted_and_dispatched` | `escalated_to_human` | `skipped_collision` | `skipped_low_confidence` | `skipped_no_action_needed`. Exactly one terminal Run Trace event fires per ticket per agent run (per checklist §10.4): the draft branches emit `phase1.support.draft_proposed` (with `perTicketVerdict` ∈ {`drafted_for_review`, `drafted_and_dispatched`}); the collision branch emits `phase1.support.collision_skipped` (with `perTicketVerdict: 'skipped_collision'`); the remaining three branches (`escalated_to_human`, `skipped_low_confidence`, `skipped_no_action_needed`) emit `phase1.support.ticket_terminal` with the `perTicketVerdict` payload field. No further events fire for that ticket+run after the terminal.
 
 #### 5.3.5 Why this is Native Controller, not Operator
 
@@ -714,7 +714,7 @@ Risk Tier 6 on `approve_draft` is the gating control: in `assisted` mode the act
 | `server/services/skillHandlers/supportClassifyTicketPure.ts` | Pure helpers (intent enum, scoring, prompt construction) | +90 |
 | `server/services/__tests__/supportClassifyTicketPure.test.ts` | Pure-function tests with fixture tickets | +120 |
 | `server/config/actionRegistry.ts` | Register the new skill with `riskTier: 1` | +15 |
-| `server/db/schema/agentSkills.ts` (or wherever skill registration lives) | Register skill | +5 |
+| `server/db/schema/systemSkills.ts` | Register the new `support.classify_ticket` skill row | +5 |
 | Cache table + service | See Open Decision 11.4; LOC pending decision | (gated) |
 
 **Total: ~520 LOC for the new skill (excluding cache, gated on Open Decision 11.4).**
@@ -803,13 +803,18 @@ Extends the existing inbox config UI (PR #277 `inbox-config.html` mockup) with t
 
 #### 5.6.3 Run Trace surfacing
 
-Support Agent runs surface in the Run Trace UI (foundation Item 4). The existing virtual view aggregates the agent's events; this spec adds a new event type discriminator. Event names align with the INV-16 stable log code namespace (`phase1.support.*`) so the Run Trace event discriminator and the structured log code are the same string per event:
+Support Agent runs surface in the Run Trace UI (foundation Item 4). The existing virtual view aggregates the agent's events; this spec adds new event type discriminators. Event names align with the INV-16 stable log code namespace (`phase1.support.*`) so the Run Trace event discriminator and the structured log code are the same string per event.
 
-- `phase1.support.ticket_classified` — payload: `{ticketId, intent, urgency, confidence}`
-- `phase1.support.draft_proposed` — payload: `{ticketId, draftId, controllerStyleAtPropose, riskTierResolved, perTicketVerdict}`
-- `phase1.support.draft_dispatched` — payload: `{draftId, dispatchPhase, idempotencyKey}`
-- `phase1.support.draft_blocked_by_policy` — payload: `{ticketId, draftId, blockingPolicy}`
-- `phase1.support.collision_skipped` — payload: `{ticketId, reason: 'concurrent_claim' | 'human_active', lastHumanActivityAgo?}`
+**Run Trace per-ticket events.** Six events render in Run Trace; every per-ticket terminal verdict fires exactly one terminal event:
+
+- `phase1.support.ticket_classified` — payload: `{ticketId, intent, urgency, confidence}`. Non-terminal.
+- `phase1.support.draft_proposed` — payload: `{ticketId, draftId, controllerStyleAtPropose, riskTierResolved, perTicketVerdict: 'drafted_for_review' | 'drafted_and_dispatched'}`. Terminal for the draft branches.
+- `phase1.support.draft_dispatched` — payload: `{draftId, dispatchPhase, idempotencyKey}`. Non-terminal at the per-ticket level (logs the three-phase dispatch step).
+- `phase1.support.draft_blocked_by_policy` — payload: `{ticketId, draftId, blockingPolicy}`. Non-terminal.
+- `phase1.support.collision_skipped` — payload: `{ticketId, reason: 'concurrent_claim' | 'human_active', lastHumanActivityAgo?, perTicketVerdict: 'skipped_collision'}`. Terminal.
+- `phase1.support.ticket_terminal` — payload: `{ticketId, perTicketVerdict: 'escalated_to_human' | 'skipped_low_confidence' | 'skipped_no_action_needed', reason, claimReleasedAt}`. Terminal for every non-draft, non-collision branch. Exactly one of the three Terminal events fires per ticket per agent run.
+
+**Admin alert event (NOT Run Trace).** `phase1.support.eval_drift_detected` is emitted by the daily eval job into the Activity feed and admin alerts only; it is not rendered in the per-run Run Trace virtual view (the eval job is not a Support Agent run). Its payload is `{evalRunId, accuracyDelta, judgeScoreDelta, threshold}`.
 
 These slot into the existing Run Trace event renderer with no new UI surface; the existing tree-of-decisions view shows them inline.
 
@@ -819,8 +824,8 @@ These slot into the existing Run Trace event renderer with no new UI surface; th
 |---|---|---|
 | `client/src/pages/operate/SupportAgentDashboard.tsx` | New page | +180 |
 | `client/src/components/support/InboxAgentConfigTab.tsx` | Extends PR #277 inbox config | +150 |
-| `client/src/components/run-trace/SupportEventRenderers.tsx` | New event renderers for the 5 new event types | +120 |
-| `server/routes/operate/supportAgentRoutes.ts` | Routes for dashboard + config | +60 |
+| `client/src/components/run-trace/SupportEventRenderers.tsx` | New event renderers for the 6 Run Trace event types in §5.6.3 (5 per-ticket events + `phase1.support.ticket_terminal`); the admin-only `phase1.support.eval_drift_detected` is not rendered here | +135 |
+| `server/routes/support/supportAgentRoutes.ts` | Routes for dashboard + config (placed under the existing `server/routes/support/` group; no new `routes/operate/` directory) | +60 |
 | `shared/types/supportInboxAgentConfig.ts` | Additive Zod fields: `minConfidence?`, `voiceProfile?`, `escalationCategories?` (per §5.3.2) | +15 |
 
 **Total: ~525 LOC.** No frontend component tests; the route module gets a single integration test alongside other support routes.
@@ -944,6 +949,19 @@ Choice depends on whether the worker already has scoped IAM credentials in produ
 
 The Run Trace artifacts panel (Section 4.5.2) calls `GET /api/agent-runs/:runId/artifacts` which internally calls `fileDeliveryService.listForRun` and returns artifacts with signed URLs. The existing PDF embed and download primitives in `consolidation-foundation` render the artifacts.
 
+#### 6.1.5b file_delivery event payload contracts
+
+INV-16 lists four `phase1.file_delivery.*` events. Their payload contracts and emit points:
+
+| Event | Emitter | Emit point | Payload |
+|---|---|---|---|
+| `phase1.file_delivery.uploaded` | `fileDeliveryService.upload` (after successful S3 PUT + row insert) | After the `run_artifacts` insert returns | `{artifactId, organisationId, agentRunId?, ieeRunId?, contentHash, sizeBytes, storageProvider, storageKey, mimeType, artifactKind}` |
+| `phase1.file_delivery.signed_url_issued` | `fileDeliveryService.issueSignedUrl` | After signing (before returning to caller) | `{artifactId, organisationId, expiresAt, inlineDisposition, requestSource: 'run_trace_panel' \| 'pdf_embed' \| 'copy_link' \| 'api_consumer'}` |
+| `phase1.file_delivery.downloaded` | The download proxy / signed-URL redirect endpoint | When the bytes are actually fetched (not on URL issuance — that's the previous event) | `{artifactId, organisationId, downloaderUserId?, byteCount, durationMs}` |
+| `phase1.file_delivery.expired` | A daily sweeper job that runs against `run_artifacts` rows where `retain_until < now()` | When the sweeper deletes the S3 object and either marks the row deleted or removes it (Phase 1 marks deleted; Phase 2 may hard-delete) | `{artifactId, organisationId, retainUntil, ageDays}` |
+
+`uploaded` and `signed_url_issued` are emitted from the main app. `downloaded` requires either an app proxy (where the main app serves the bytes after signed-URL exchange) OR a CloudFront signed-URL delivery-log scrape — for Phase 1 use the app proxy because it gives accurate per-download attribution without infrastructure work. `expired` is best-effort observability; the spec does not gate any behaviour on it.
+
 #### 6.1.6 Code changes
 
 | File | Change | Rough LOC |
@@ -1004,7 +1022,23 @@ No frontend unit tests, no React component tests, no E2E tests of the Automation
 
 ### 7.3 Eval-as-static-gate
 
-The Support Agent eval harness (Section 5.5) doubles as the only meaningful regression check for agent-quality drift. The CI gate `scripts/gates/verify-support-agent-eval-thresholds.sh` (authored as part of §5.5.4) reads the most recent `support_eval_runs` row and fails the build when classification accuracy or draft-judge score drops below the configured threshold for two consecutive runs. Single-run dips do not fail the build (avoids judge-variance noise). CI runs the gate; nobody runs it locally.
+The Support Agent eval harness (Section 5.5) doubles as the only meaningful regression check for agent-quality drift. The CI gate `scripts/gates/verify-support-agent-eval-thresholds.sh` (authored as part of §5.5.4) is CI-only and operates against the `support_eval_runs` table.
+
+**Minimal `support_eval_runs` row shape** (consumed by the gate; full schema lives in `server/db/schema/supportEvalRuns.ts`):
+
+| Column | Type | Purpose |
+|---|---|---|
+| `id` | uuid PK | row identity |
+| `organisation_id` | uuid (RLS) | tenant scope |
+| `run_at` | timestamptz | when the eval ran (used for "two consecutive" ordering: `ORDER BY run_at DESC LIMIT 2`) |
+| `classification_accuracy_per_intent` | jsonb | map of intent → accuracy (0..1); the gate fails if any intent value is below the configured min |
+| `draft_judge_score_avg` | numeric | average judge score (0..5); the gate fails if below the configured min |
+| `threshold_classification_min` | numeric | the threshold this row was scored against (snapshotted at eval time) |
+| `threshold_judge_min` | numeric | judge threshold snapshotted at eval time |
+
+**Gate logic.** The gate fetches the two most recent `support_eval_runs` rows ordered by `run_at DESC`. The build fails iff BOTH rows are below threshold for the same metric (classification or judge). Single-run dips do not fail the build (avoids judge-variance noise). **Fresh-CI / missing-rows behaviour:** if fewer than two rows exist, the gate exits 0 (fail-open). This matches Phase 1 posture — until the daily eval job runs at least twice we have no signal, and blocking CI during that window would block all merges to main. Once the second eval row exists the gate becomes effective. The fail-open is logged so the operator can spot a stuck eval job.
+
+CI runs the gate; nobody runs it locally per the project test-gate policy.
 
 ### 7.4 Existing tests
 
@@ -1097,7 +1131,7 @@ After merge:
 - [ ] Collision avoidance: agent skips tickets where `last_human_activity_at` is within the configured window; emits `phase1.support.collision_skipped`.
 - [ ] Eval harness runs daily; results visible at `/operate/agents/support/evals`.
 - [ ] Drift alert fires when classification accuracy drops > 10% week over week.
-- [ ] All 5 new event types render correctly in Run Trace.
+- [ ] All 6 Run Trace event types from §5.6.3 render correctly (the 5 per-ticket events plus `phase1.support.ticket_terminal`); the admin-only `phase1.support.eval_drift_detected` surfaces in the Activity feed but is not rendered in Run Trace.
 - [ ] Inbox Agent Configuration tab saves per-inbox `agent_config` correctly.
 
 ### 9.3 Shared
