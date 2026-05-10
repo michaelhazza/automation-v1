@@ -255,6 +255,14 @@ export const agentRuns = pgTable(
     // NULL = legacy run created before migration 0309. New runs always have this set.
     policyEnvelopeSnapshot: jsonb('policy_envelope_snapshot').$type<PolicyEnvelopeSnapshot | null>(),
 
+    // Execution Backend Adapter Contract (migration 0313) — identifies which
+    // backend handled this run and the backend's own task/job identifier.
+    // NULL for runs executed before this migration or by backends that do not
+    // assign external task IDs. backendId is string | null (not narrowed to
+    // ExecutionBackendId) to keep the schema layer independent of contract types.
+    backendId: text('backend_id'),
+    backendTaskId: text('backend_task_id'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -299,6 +307,14 @@ export const agentRuns = pgTable(
     inflightOrgIdx: index('agent_runs_inflight_org_idx')
       .on(table.organisationId)
       .where(sql`${table.status} IN ('pending', 'running', 'delegated')`),
+    // Execution Backend Adapter Contract (migration 0313) — lookup by backend
+    // and dedup guard for (backend_id, backend_task_id) pairs.
+    backendIdIdx: index('agent_runs_backend_id_idx')
+      .on(table.backendId)
+      .where(sql`${table.backendId} IS NOT NULL`),
+    backendTaskUniqueIdx: uniqueIndex('agent_runs_backend_task_unique_idx')
+      .on(table.backendId, table.backendTaskId)
+      .where(sql`${table.backendTaskId} IS NOT NULL`),
   })
 );
 
