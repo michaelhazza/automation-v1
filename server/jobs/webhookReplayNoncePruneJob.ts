@@ -72,6 +72,10 @@ export async function runWebhookReplayNoncePrune(): Promise<WebhookReplayNoncePr
       ...result,
       error: err instanceof Error ? err.message : String(err),
     });
-    return result;
+    // chatgpt-pr-review Round 1 R1: rethrow so pg-boss records the job as failed
+    // and retry per the SOURCE retry classification ("safe — pg-boss retry is
+    // acceptable"). Previously returning {status:'failed'} let the worker
+    // mark the job complete despite the error, masking persistent DB/RLS issues.
+    throw err;
   }
 }

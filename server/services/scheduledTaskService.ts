@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   scheduledTasks,
@@ -9,7 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
 import { taskService } from './taskService.js';
 import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
 import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
 
 // ---------------------------------------------------------------------------
 // Scheduled Task Service — CRUD + occurrence firing + retry logic
@@ -645,22 +645,33 @@ export const scheduledTaskService = {
       : `${st.title} #${occurrence}`;
 
     try {
-      const tx = getOrgScopedDb('service:scheduledTaskService.runDue');
-      const task = await taskService.createTask(
-        {
-          organisationId: st.organisationId,
-          subaccountId: st.subaccountId!,
-          data: {
-            title: taskTitle,
-            description: st.description ?? undefined,
-            brief: st.brief ?? undefined,
-            priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
-            status: 'inbox',
-            assignedAgentId: st.assignedAgentId,
-          },
+      // PTH-CGT-F2 defence-in-depth: if a non-HTTP caller (cron / setImmediate)
+      // invokes fireOccurrence outside withOrgTx, getOrgScopedDb() would throw
+      // missing_org_context. Detect ALS absence and open our own tx + GUC so the
+      // service is safe for all callers. When already inside withOrgTx (the
+      // common HTTP path), reuse the existing tx so we don't create a redundant
+      // savepoint.
+      const taskInput = {
+        organisationId: st.organisationId,
+        subaccountId: st.subaccountId!,
+        data: {
+          title: taskTitle,
+          description: st.description ?? undefined,
+          brief: st.brief ?? undefined,
+          priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+          status: 'inbox' as const,
+          assignedAgentId: st.assignedAgentId,
         },
-        tx,
-      );
+      };
+      const task = peekOrgTxContext()
+        ? await taskService.createTask(
+            taskInput,
+            getOrgScopedDb('service:scheduledTaskService.runDue'),
+          )
+        : await db.transaction(async (innerTx) => {
+            await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+            return taskService.createTask(taskInput, innerTx);
+          });
 
       // Update the run with the task reference
       await db.update(scheduledTaskRuns).set({

@@ -19,14 +19,14 @@
  */
 
 import { randomUUID } from 'crypto';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
 import {
   DELIVERY_RETRY_CONFIG,
   shouldDispatchChannel,
@@ -238,15 +238,23 @@ export const deliveryService = {
     // ── Step 1: Always write to inbox (system guarantee, §10.5) ─────────────
     // This write happens unconditionally regardless of config.email.
     // The inbox is the enforcement boundary — failure here is fatal and throws.
-    const tx = getOrgScopedDb('service:deliveryService.deliver');
-    const task = await taskService.createTask(
-      {
-        organisationId: orgId,
-        subaccountId,
-        data: { title: artefact.title, description: artefact.content, status: 'inbox', createdByAgentId: artefact.createdByAgentId },
-      },
-      tx,
-    );
+    //
+    // PTH-CGT-F2 defence-in-depth: deliveryService.deliver may be called from
+    // non-HTTP code paths (workflow steps, pg-boss jobs) that don't always
+    // pre-establish ALS context. Detect ALS absence via peekOrgTxContext() and
+    // open our own tx + GUC; when already inside withOrgTx, reuse the existing
+    // tx so we don't create a redundant savepoint.
+    const taskInput = {
+      organisationId: orgId,
+      subaccountId,
+      data: { title: artefact.title, description: artefact.content, status: 'inbox' as const, createdByAgentId: artefact.createdByAgentId },
+    };
+    const task = peekOrgTxContext()
+      ? await taskService.createTask(taskInput, getOrgScopedDb('service:deliveryService.deliver'))
+      : await db.transaction(async (innerTx) => {
+          await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+          return taskService.createTask(taskInput, innerTx);
+        });
 
     const channels: ChannelDispatchResult[] = [];
 
