@@ -1,4 +1,4 @@
-**Status:** Draft v2 (lock-ready pending operator sign-off)
+**Status:** Draft v3 (lock-ready pending operator sign-off)
 **Date:** 2026-05-10
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** operator-session-identity
@@ -9,7 +9,19 @@
 
 # Spec C — Operator Session Identity — Build Brief
 
-## 0a. v2 changelog (2026-05-10)
+## 0a. Changelog
+
+### v3 (2026-05-10) — second CEO-read pass
+
+Five additional tightenings before lock. Schema and lifecycle gain explicit non-happy-path states.
+
+- **Sanctioned-tier definitions per tier** — Pro/Team/Enterprise/Plus/unknown each get explicit posture (automation use, ownership model, rate-limit, business use, backend-agent eligibility); ambiguous tiers downgrade to "supported with disclosure".
+- **Credential ownership & offboarding** — connecting user removed/deactivated → credential becomes `disabled`; authorised operator may transfer or re-auth; no orphaned personal subscriptions powering business automation.
+- **Permission gates** — five explicit surfaces (connect, view metadata, revoke, re-auth, allow runtime use); raw token never user-visible at any level.
+- **Plan-tier `unknown` + `plan_verification_status`** added to schema — unverified detection is a non-happy path, not a silent pass.
+- **`usability_state` enum** added — `connected_usable | connected_needs_consent | connected_needs_reauth | connected_unverified | revoked | disabled`. Adapters may only receive `connected_usable`.
+
+### v2 (2026-05-10) — first CEO-read pass
 
 Tightened in response to CEO read. Core shape unchanged.
 
@@ -50,16 +62,26 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 
 ## 2. What Spec C must define
 
-1. **`auth_type: 'operator_session'` schema** in the Credential Broker. Fields: `provider` (`openai` initially, generic for future), `auth_token`, `refresh_token`, `token_expires_at`, `plan_tier` (`pro` / `team` / `enterprise` / `plus`), `consent_record_id` (FK to consent log if plan is `plus`). Field names are provider-agnostic; OAuth is one possible mechanism, not assumed.
+1. **`auth_type: 'operator_session'` schema** in the Credential Broker. Fields:
+   - `provider` (`openai` initially, generic for future)
+   - `auth_token`, `refresh_token`, `token_expires_at`
+   - `plan_tier`: `'pro' | 'team' | 'enterprise' | 'plus' | 'unknown'`
+   - `plan_verification_status`: `'verified' | 'self_declared' | 'unverified' | 'failed'`
+   - `plan_verified_at` (nullable timestamp)
+   - `consent_record_id` (FK to consent log if plan is `plus`, or if disclosure is otherwise required)
+   - `usability_state`: `'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled'`
+
+   Field names are provider-agnostic; OAuth is one possible mechanism, not assumed. **Adapters may only receive credentials in `connected_usable` state** — the broker refuses to hand out any other state, with the specific state surfaced to the connection UI for operator action.
 2. **Provider connection flow.** The spec MUST first verify the currently supported OpenAI account/session identity mechanism against current OpenAI documentation. Do not assume OAuth callback semantics, plan-introspection APIs, or rate-limit-header tier inference exist until verified. If a sanctioned mechanism exists, define both paths:
    - **Default (sanctioned tiers):** provider-supported handshake, plan-tier detected, credential stored, ready to use.
-   - **Plus tier (opt-in):** handshake detects `plan = plus` → disclosure screen → user types "I accept the risk" → consent row written → credential stored.
+   - **Plus tier (opt-in):** provider connection flow resolves `plan_tier = plus` → disclosure screen → user types "I accept the risk" → consent row written → credential stored.
    If no sanctioned mechanism exists, the spec MUST still define the broker schema, consent table, and disclosure UX, and mark the provider connection implementation as **blocked behind verified provider support** — the primitive ships, the connection wiring waits.
 3. **Plan-tier detection mechanism.** Three options to evaluate in the spec, conditional on provider support verified in §2:
    - Provider plan-introspection API (preferred if exposed)
    - First-call probe (trivial call, inspect rate-limit headers / model availability) — only if provider documentation supports this as a stable signal
    - Customer self-declaration (fallback only — easily lied about; gates Plus disclosure regardless)
    - Spec recommends one with rationale, or marks detection blocked if none is verifiable.
+   - **Unverified/failed detection is a non-happy path, not a silent pass.** A credential whose `plan_verification_status` resolves to `'unverified'` or `'failed'` MUST NOT proceed as if sanctioned. It is stored with `usability_state = 'connected_unverified'` and either blocks connection, requires explicit disclosure (treated as Plus-equivalent), or stays connected-but-not-usable until verified — spec picks one with rationale.
    - **Hard ban:** Spec C MUST NOT implement credential scraping, browser-cookie capture, password collection, session hijacking, headless-browser login automation, or any non-provider-sanctioned account extraction. Operator Session Identity may only use provider-supported authentication flows. This boundary protects future consumers (OpenClaw, others) from inheriting an unsafe primitive.
 4. **Consent-record table.** New table `operator_session_consents`: `id`, `org_id`, `subaccount_id`, `user_id`, `plan_tier`, `disclosure_version`, `accepted_at`, `disclosure_text_snapshot`, `consent_text_snapshot`. RLS-protected. **7-year retention minimum** — disclosure-as-evidence requires durable records.
    - **Append-only.** Consent rows are never updated or deleted. Revocation, supersession, and re-acceptance are modelled as new rows in a companion `operator_session_consent_events` event table (`event_type ∈ {granted, revoked, superseded}`, `consent_id`, `actor_user_id`, `at`, `superseded_by_consent_id` nullable). Revocation marks the linked credential unusable via the broker; the consent row itself stays immutable.
@@ -74,6 +96,23 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 10. **Adapter consumption contract.** When an adapter requests a credential and gets an `operator_session` back, it receives a *redacted envelope*; only the broker / token-lifecycle service may access raw token material.
     - **Redaction surface.** Redaction MUST apply to: logs, audit context, run traces, prompts, tool inputs, UI payloads, error objects, telemetry metadata, and test snapshots. Pin the redaction at the broker level — no consumer is trusted to redact correctly.
 11. **No-consumer enforcement (V1 acceptance criterion).** Spec C ships the primitive without rewiring any existing adapter. Acceptance MUST include a mechanical check (grep / test) proving no existing adapter (`api`, `headless`, `claude-code`, `iee_*`) requests or consumes `operator_session` credentials, and that all existing adapters continue using their previous auth paths. This prevents accidental runtime behaviour change before OpenClaw lands.
+12. **Sanctioned-tier definitions.** "Sanctioned" is per-tier, not blanket. Spec MUST define for each supported plan tier (Pro, Team, Enterprise, Plus, unknown):
+    - permitted automation use under provider terms
+    - account ownership model (individual vs. workspace vs. enterprise admin)
+    - rate-limit posture
+    - acceptable business use
+    - whether the tier can be used by backend agents acting for a subaccount
+
+    If provider terms are ambiguous for a tier, the spec MUST mark it **"supported with disclosure"** (treated as Plus-equivalent — opt-in + consent record) rather than assumed sanctioned. Pro / Team / Enterprise are sanctioned only after verification against current provider terms; default-sanctioned status is provisional.
+13. **Credential ownership & offboarding.** Spec MUST define what happens to an operator-session credential when the connecting user is removed from the org/subaccount, loses the relevant role permission, or is deactivated. Default posture: credential transitions to `usability_state = 'disabled'` and becomes unusable; an authorised operator (subaccount admin or above) may explicitly transfer ownership or trigger re-auth under their own identity, which writes a fresh consent row. **A personal subscription tied to a departed user never silently continues powering business automation.**
+14. **Permission gates.** Spec MUST define explicit permission surfaces, separate from generic admin access:
+    - `connect operator session`
+    - `view connection metadata` (plan tier, usability state, last refresh — never the raw token)
+    - `revoke connection`
+    - `trigger re-auth`
+    - `allow adapter/runtime use` (whether agents acting in this subaccount may consume this credential)
+
+    Raw token material remains broker-internal and is never user-visible at any permission level. Gates map to the existing RBAC; the spec names the role bindings.
 
 ---
 
