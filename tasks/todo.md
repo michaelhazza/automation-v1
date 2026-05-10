@@ -3815,3 +3815,23 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - Codex iteration 1 finding C16: these decisions affect dependencies, schema, services, sequencing.
   - **Spec-reviewer decision:** AUTO-DECIDED reject — caller framing said the spec is intentionally architecture-level. The four decisions all carry explicit recommendations in the spec; the architect-agent can resolve them during plan breakdown. Forcing pre-build resolution is over-constraint at this stage.
   - **For human review:** if you want to lock the four decisions before invoking architect, edit §11 to record each as Resolved with the recommendation chosen. Otherwise expect the architect's plan to carry one chunk per decision.
+
+---
+
+## Deferred from spec-conformance review — execution-backend-adapter-contract (2026-05-10)
+
+**Captured:** 2026-05-10T08-46-26Z
+**Source log:** `tasks/review-logs/spec-conformance-log-execution-backend-adapter-contract-2026-05-10T08-46-26Z.md`
+**Spec:** `tasks/builds/execution-backend-adapter-contract/spec.md` (locked 2026-05-10)
+
+- [ ] **EBAC-DG-1 — Restore F2 legacy-fallback behavioural assertion (acceptance §16 #14)**
+  - Spec section: §15 (Pure tests) + §16 #14 (Legacy in-flight fallback).
+  - Gap: the F2 test in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` was removed in Chunk 5 (commit `1d948ecc`) on the rationale that the legacy alias `finaliseAgentRunFromIeeRun` was deleted. The spec criterion is about the BEHAVIOUR — the IEE handler path finalising a pre-cutover run with `agent_runs.backend_id IS NULL` correctly — not about the alias. The behaviour still holds (handler derives `backendId` from `iee_runs.type`, orchestrator never reads `agent_runs.backend_id`), but the regression-protection test is gone.
+  - Suggested approach: add a fixture-level test that mocks `executionBackendRegistry.resolve` and `db.transaction` to capture the `backendId` argument that `finaliseAgentRunFromBackend` receives when called from a code path equivalent to `ieeRunCompletedHandler`'s body, with an `agent_runs` parent fixture whose `backendId` is left NULL. Alternatively, push this assertion to the (future) DB-touching orchestrator integration test — but record the trade-off so a future reviewer doesn't re-remove it.
+
+- [ ] **EBAC-DG-2 — Reconcile `CostModel` value-set narrowing with spec §4.1**
+  - Spec section: §4.1 (CostModel type) + §10.2 (Cost-model declaration).
+  - Gap: spec §4.1 declares `'per_token' | 'subscription' | 'per_worker_second' | 'per_session_hour' | 'mixed'` (5 values). Implementation in `server/services/executionBackends/types.ts:99` declares `'per_token' | 'subscription' | 'none'` (3 values — adds `'none'`, drops three deferred slots). Spec §10.2 explicitly says: *"Declared now so the adapters are self-describing for those specs without amendment."* — the narrowed surface means future adapter authors will need to amend `types.ts` before declaring the dropped values.
+  - Suggested approach: either (a) widen the implemented union to match the spec (low cost, restores the contract surface), or (b) amend the spec to record that `'none'` was added and the three speculative values were dropped (the spec is the source of truth and should reflect what V1 actually shipped). Either way, the implementation and spec should agree.
+
+
