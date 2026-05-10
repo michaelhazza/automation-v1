@@ -182,9 +182,10 @@ export async function finaliseAgentRunFromBackend(args: {
       const result = await adapter.finalise!({
         tx,
         terminalState,
-        // Sentinel parent — adapters MUST guard on `terminalState.agentRunId`
-        // before reading from `parentRun` when this branch fires.
-        parentRun: { id: '', status: '' },
+        // No parent FK on this row — adapters guard on the `null` parentRun
+        // and stamp their own terminal-event column without touching
+        // `agent_runs`.
+        parentRun: null,
       });
       finalised = result.finalised;
       postCommit = result.postCommit;
@@ -206,9 +207,18 @@ export async function finaliseAgentRunFromBackend(args: {
         backendTaskId,
         agentRunId: terminalState.agentRunId,
       });
-      // Parent row is gone — nothing to transition. Return early without
-      // calling the adapter. The adapter's finalise() contract only applies
-      // when a loaded parent row exists.
+      // Parent row is gone — nothing to transition. Still hand control to
+      // the adapter so it can stamp its own terminal-event column (e.g.
+      // `iee_runs.event_emitted_at`); without that, the worker's retry
+      // sweep would re-fire the terminal event indefinitely. The adapter
+      // MUST guard on `parentRun === null` and skip the parent UPDATE.
+      const result = await adapter.finalise!({
+        tx,
+        terminalState,
+        parentRun: null,
+      });
+      finalised = result.finalised;
+      postCommit = result.postCommit;
       return;
     }
 

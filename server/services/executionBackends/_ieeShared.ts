@@ -297,12 +297,15 @@ export async function ieeFinalise(
       ieeRunId: ieeRun.id,
       ieeStatus: ieeRun.status,
     });
-    return { finalised: false, parentTerminalStatus: parentRun.status };
+    return { finalised: false, parentTerminalStatus: parentRun?.status ?? '' };
   }
 
-  // Standalone IEE run with no parent agent_run. Stamp eventEmittedAt so
-  // the worker's retry sweep stops re-firing.
-  if (!ieeRun.agentRunId) {
+  // No parent run available — either standalone backend task
+  // (`!ieeRun.agentRunId`) or parent row was deleted between dispatch and
+  // finalisation (`parentRun === null`). In both cases the orchestrator
+  // has nothing to transition; we still stamp `eventEmittedAt` so the
+  // worker's retry sweep stops re-firing the terminal event.
+  if (!ieeRun.agentRunId || parentRun === null) {
     if (!ieeRun.eventEmittedAt) {
       await tx
         .update(ieeRuns)
@@ -312,7 +315,7 @@ export async function ieeFinalise(
           eq(ieeRuns.organisationId, ieeRun.organisationId),
         ));
     }
-    return { finalised: false, parentTerminalStatus: parentRun.status };
+    return { finalised: false, parentTerminalStatus: parentRun?.status ?? '' };
   }
 
   const parentAlreadyTerminal = TERMINAL_SET.has(parentRun.status);

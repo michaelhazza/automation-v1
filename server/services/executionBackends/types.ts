@@ -234,8 +234,16 @@ export interface BackendFinalisationInput {
    * the event-payload data — the orchestrator has already loaded the
    * canonical row from `loadTerminalState` and the parent from
    * `loadParentRun`.
+   *
+   * `null` indicates the orchestrator looked the parent up but no row
+   * exists (parent was deleted or `terminalState.agentRunId` is
+   * unpopulated). The adapter MUST handle the null case by stamping its
+   * own `eventEmittedAt` (or equivalent) on the terminal-state row so the
+   * worker's retry sweep stops re-firing, then return
+   * `{ finalised: false, ... }` without writing the parent UPDATE. See
+   * `_ieeShared.ts::ieeFinalise` for the canonical implementation.
    */
-  parentRun: { id: string; status: string; [key: string]: unknown };
+  parentRun: { id: string; status: string; [key: string]: unknown } | null;
 }
 
 /**
