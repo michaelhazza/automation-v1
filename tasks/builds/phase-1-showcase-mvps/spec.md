@@ -604,6 +604,8 @@ WHERE is_active = true
 
 Even if both transactions somehow proceeded past the advisory lock, the index rejects the second insert with `23505`; the install service maps this to a 409 with body `{ error: 'already_installed' }`. The existing `subaccount_agents_unique_idx` covers `(subaccount_id, agent_id)` but not the system-agent-template scope; this MVP adds the slug column + the partial index in the same migration that adds the install-flow code. The install service writes `applied_template_slug` on every new install (set from `system_agents.slug` after the existence check, before the INSERT), and the slug column has no other consumers in Phase 1.
 
+**Slug stability invariant.** `applied_template_slug` is a stable install discriminator, not display copy. Once a `subaccount_agents` row is written with `applied_template_slug = 'support-agent'`, the value MUST NOT be rewritten by future system-agent renames or display-name changes. The slug is the identity that the partial unique index keys on; rewriting historical slugs would either reopen the singleton race or invalidate the index's coverage. If a future Phase needs to retire `'support-agent'` and migrate to a successor identifier, that is a deliberate corrective migration (per §6 migration discipline rule 5) — never a casual update.
+
 The advisory lock is the primary defence (clean error path); the partial index is the safety net (serialisation guarantee). Acceptance criterion in §9.2 covers the race outcome (one success + one 409 under concurrent install).
 
 **File inventory addition (Support Agent install flow):**
@@ -741,11 +743,21 @@ WHERE NOT EXISTS (
            'phase1.support.collision_skipped',
            'phase1.support.ticket_terminal'
          )
-    AND  e.created_at >= canonical_tickets.last_customer_message_at
+    AND  e.created_at >= COALESCE(canonical_tickets.last_customer_message_at, canonical_tickets.created_at)
 )
 ```
 
-The `>= last_customer_message_at` anchor is the key: a ticket that received a new customer reply AFTER its prior terminal event becomes eligible again on the next run, because the predicate finds no qualifying terminal event in the new window. Without this anchor, a one-time terminal event would silently exclude the ticket forever even after the customer responds. The three terminal event types match the per-ticket terminal-verdict set documented above (`drafted_for_review` / `drafted_and_dispatched` and the three non-draft, non-collision branches all emit one of those three event names). Test fixture in `supportListOpenTicketsPure.test.ts` exercises the re-eligibility case (terminal event → new customer message → ticket re-appears).
+The `>= COALESCE(last_customer_message_at, created_at)` anchor is the key: a ticket that received a new customer reply AFTER its prior terminal event becomes eligible again on the next run, because the predicate finds no qualifying terminal event in the new window. Without this anchor, a one-time terminal event would silently exclude the ticket forever even after the customer responds. The three terminal event types match the per-ticket terminal-verdict set documented above (`drafted_for_review` / `drafted_and_dispatched` and the three non-draft, non-collision branches all emit one of those three event names).
+
+**Null-safety on `last_customer_message_at`.** If the column is NULL — because no inbound customer message has been ingested yet, or because legacy ingestion paths predated the column — the predicate falls back to `canonical_tickets.created_at` via `COALESCE`. Without the COALESCE, a bare `e.created_at >= NULL` evaluates to UNKNOWN, the NOT EXISTS clause returns TRUE for every terminal-event-tagged ticket, and the agent re-processes historical tickets forever. The COALESCE pins the lower bound to the ticket's creation time as a safe degenerate floor.
+
+**Ingestion contract (canonical layer obligation).** `connectorPollingService` and `webhookAdapterService` MUST update `canonical_tickets.last_customer_message_at` whenever a new inbound customer message is inserted into `canonical_ticket_messages` (`source = 'customer'`). The Support Agent MVP relies on this watermark; if the canonical-layer adapter regresses, the predicate falls back to `created_at` and the agent re-processes the ticket on the next run (safe failure mode — duplicate work, not customer harm).
+
+**Test fixtures in `supportListOpenTicketsPure.test.ts`:**
+- Terminal event exists, `last_customer_message_at` populated AFTER terminal event → ticket eligible (re-processing).
+- Terminal event exists, `last_customer_message_at` populated BEFORE terminal event → ticket excluded.
+- Terminal event exists, `last_customer_message_at` NULL, `created_at` BEFORE terminal event → ticket excluded (COALESCE fallback succeeds).
+- Terminal event exists, `last_customer_message_at` NULL, `created_at` AFTER terminal event → ticket eligible (degenerate but correct).
 - **pg-boss retry policy on the agent-run handler is `singleton: true` per (subaccount_id, inbox_id)`.** The handler claims a per-(subaccount, inbox) advisory lock at run start; a duplicate run for the same inbox enqueued by both schedule and webhook simply waits for the lock and then sees no eligible tickets. The lock is released on run termination (success or fail).
 - **What this does NOT cover.** Cross-inbox parallel runs for the same subaccount ARE allowed (different inboxes, different lock keys). That is by design — inbox A's processing must not block on inbox B's queue depth. Cross-subaccount parallelism is naturally bounded by RLS scope.
 
@@ -1158,7 +1170,7 @@ INV-16 lists four `phase1.file_delivery.*` events. Their payload contracts and e
 
 | Event | Emitter | Emit point | Payload |
 |---|---|---|---|
-| `phase1.file_delivery.uploaded` | Main app `fileDeliveryService.upload` (Option B) or finalize endpoint (Option A); never the worker | After the `run_artifacts` insert returns | `{artifactId, organisationId, agentRunId?, ieeRunId?, contentHash, sizeBytes, storageProvider, storageKey, mimeType, artifactKind}` |
+| `phase1.file_delivery.uploaded` | Main app `fileDeliveryService.upload` (Option B) or finalize endpoint (Option A); never the worker | After the `run_artifacts` insert returns (whether the row was newly created or already existed) | `{artifactId, organisationId, agentRunId?, ieeRunId?, contentHash, sizeBytes, storageProvider, storageKey, mimeType, artifactKind, wasReplay: boolean}` — `wasReplay: false` for the first successful upload of a given (org, run, kind, hash); `true` for every subsequent retry that hits the existing row via the §6.1.2 composite unique index. Default false. |
 | `phase1.file_delivery.signed_url_issued` | Main app `fileDeliveryService.issueSignedUrl` | After signing (before returning to caller) | `{artifactId, organisationId, expiresAt, inlineDisposition, requestSource: 'run_trace_panel' \| 'pdf_embed' \| 'copy_link' \| 'api_consumer'}` |
 | `phase1.file_delivery.downloaded` | Main-app download proxy at `GET /api/run-artifacts/:id/download` (the proxy follows the signed-URL exchange and streams bytes back) | When the bytes are actually fetched (not on URL issuance — that's the previous event) | `{artifactId, organisationId, downloaderUserId?, byteCount, durationMs}` |
 | `phase1.file_delivery.expired` | Main-app daily sweeper job that runs against `run_artifacts` rows where `retain_until < now()` | When the sweeper deletes the S3 object and removes the row (Phase 1 hard-deletes per §6.1.6b) | `{artifactId, organisationId, retainUntil, ageDays}` |
@@ -1354,6 +1366,7 @@ After merge:
 - [ ] `fileDeliveryService` is the only path for artifact upload + signed URL issuance.
 - [ ] **Download proxy attribution.** Preview / Download from the Run Trace artifacts panel emits `phase1.file_delivery.downloaded` (proxy path); Copy-link emits `phase1.file_delivery.signed_url_issued` only and downloads via the copied URL DO NOT emit `downloaded` (per §4.5.2 / §6.1.5b attribution trade-off).
 - [ ] **Retention sweep.** Daily sweeper job hard-deletes `run_artifacts` rows with `retain_until < now()`, deletes the corresponding S3 object, emits `phase1.file_delivery.expired`, and `fileDeliveryService.listForRun` no longer returns the swept artifact for the affected run.
+- [ ] **Duplicate upload idempotency.** Calling `fileDeliveryService.upload` a second time for the same (org, run, kind, hash) returns the existing `artifactId` (no new row) and emits `phase1.file_delivery.uploaded` with `wasReplay: true`. The first upload emits `wasReplay: false`. Covered by `fileDeliveryService.integration.test.ts`.
 - [ ] Both MVPs use `controllerStyle: 'native'`.
 - [ ] Both MVPs surface decisions through the foundation Run Trace virtual view.
 - [ ] All new CI gates pass.

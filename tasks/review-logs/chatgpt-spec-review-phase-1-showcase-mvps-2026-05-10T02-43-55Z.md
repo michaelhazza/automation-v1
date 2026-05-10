@@ -105,6 +105,58 @@ Net: 19 surgical edits across 12 sections. Spec line count 1394 → 1485 (+91).
 
 ---
 
-## Final Summary (pending — round 1 only; awaiting next round or operator finalisation)
+## Round 2 — 2026-05-10T02-58-00Z
 
-(Will be populated when operator says "done" or after Round 2.)
+ChatGPT verdict: "mostly clean, implementation-ready after 2 small tightenings". Two technical findings + one optional polish item; no direction changes.
+
+### ChatGPT Feedback (raw)
+
+> Round 2 verdict: mostly clean, implementation-ready after 2 small tightenings.
+>
+> The Round 1 fixes landed well. The updated spec now resolves the main contract drift: canonical event registry, artifact idempotency, singleton install race, support-ticket re-eligibility, download attribution, skill-count consistency, route permissions, and retention acceptance are all materially better.
+>
+> Remaining tightenings:
+>
+> F1. `phase1.file_delivery.uploaded` payload still drifts from the retry prose — PDF retry section says duplicate invocation emits `phase1.file_delivery.uploaded` with `wasReplay: true`, but the file-delivery payload contract shown later does not include `wasReplay`. Fix: add `wasReplay: boolean` to the payload contract, default false. Acceptance addition: duplicate upload returns existing row id and emits `phase1.file_delivery.uploaded` with `wasReplay: true`.
+>
+> F2. Support terminal-event predicate needs provider/customer-message anchoring to be explicit — predicate assumes `canonical_tickets.last_customer_message_at` is always present and reliably updated. Fix: add COALESCE fallback to `created_at`; document Teamwork ingestion obligation; add pure test fixtures for null-timestamp degenerate cases. This prevents `e.created_at >= NULL` evaluating to UNKNOWN and accidentally re-processing old tickets forever.
+>
+> Optional polish (not blocking): `applied_template_slug` stability note — future system-agent renames must not rewrite historical slugs. Treat as stable install discriminator, not display copy.
+>
+> Recommendation: Apply F1 and F2, then lock. Round 3 only needed if those edits introduce new schema or event names.
+
+### Recommendations and Decisions
+
+| ID | Title | Sev | Triage | My recommendation | Final decision | Rationale / notes |
+|---|---|---|---|---|---|---|
+| F1 | `wasReplay` field missing from `phase1.file_delivery.uploaded` payload contract | low | technical | apply | auto (apply) | Real contract drift between §4.4.4 retry prose and §6.1.5b payload table. Added `wasReplay: boolean` to the §6.1.5b payload schema with explicit `false` for first upload, `true` for subsequent retries hitting the existing row via the §6.1.2 composite unique index. Added §9.3 acceptance line: duplicate upload returns existing `artifactId` + emits `wasReplay: true`. |
+| F2 | Null-safety on `last_customer_message_at` in run-loop terminal-event predicate | medium | technical | apply | auto (apply) | Real correctness bug. `e.created_at >= NULL` evaluates to UNKNOWN, so NOT EXISTS returns TRUE, so old tickets with terminal events get reprocessed forever. Wrapped the column in `COALESCE(last_customer_message_at, created_at)` to pin the lower bound to a safe degenerate floor. Added "Null-safety" prose paragraph + "Ingestion contract (canonical layer obligation)" paragraph naming `connectorPollingService` and `webhookAdapterService` as the writers. Expanded test fixtures from 1 to 4 cases including both null-timestamp degenerate scenarios. |
+| Polish | `applied_template_slug` stability note | low | technical | apply | auto (apply) | Added "Slug stability invariant" paragraph to §5.3.1 stating slug is identity (partial unique index keys on it), not display copy. Future system-agent renames must NOT rewrite historical slugs; if a successor identifier is needed, it's a deliberate corrective migration per §6 rule 5. Tiny addition that prevents a class of silent breakage. |
+
+### Applied (auto-applied technical)
+
+- [auto] §3.5 / §6.1.5b: `phase1.file_delivery.uploaded` payload now includes `wasReplay: boolean` with explicit semantics; emit-point updated to clarify it fires on both fresh and replayed inserts (F1)
+- [auto] §5.3.4: terminal-event predicate now uses `COALESCE(last_customer_message_at, created_at)` to handle null timestamps; added ingestion-contract obligation + 4 test fixtures (was 1) (F2)
+- [auto] §5.3.1: added "Slug stability invariant" paragraph naming `applied_template_slug` as install discriminator, not display copy (Polish)
+- [auto] §9.3: added duplicate-upload `wasReplay` acceptance line (F1 follow-on)
+
+Net: 4 surgical edits across 4 sections. Spec line count 1485 → 1498 (+13).
+
+### Integrity check
+- 0 forward references unresolved
+- 0 contradictions detected after sweep
+- Verified post-edit: zero remaining bare `>= last_customer_message_at` references (all wrapped in COALESCE)
+- All 4 wasReplay references and all COALESCE references resolve to the same target
+
+### Top themes (Round 2)
+- **Payload-contract honesty** — the registry's authority depends on every payload being declared; `wasReplay` added.
+- **Null-safety on optional canonical columns** — the terminal-event predicate now degrades safely when ingestion lags.
+- **Identity vs display copy** — `applied_template_slug` is now explicitly an install discriminator, not a renamable label.
+
+---
+
+## Final Summary (pending — awaiting operator "done" signal)
+
+ChatGPT recommended lock after Round 2. Operator decides whether to:
+- Say `done` to finalise (run consistency check, implementation-readiness checklist, doc-sync sweep, deferred-backlog routing)
+- Run a Round 3 pressure-test (recommended only if Round 2's small additions warrant another pass — they shouldn't, per ChatGPT)
