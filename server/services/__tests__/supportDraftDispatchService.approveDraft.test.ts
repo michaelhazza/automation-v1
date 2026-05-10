@@ -19,18 +19,10 @@ process.env.TOKEN_ENCRYPTION_KEY ??= 'a'.repeat(64);
 // Module-level mocks — hoisted before dynamic imports of the tested module.
 // ---------------------------------------------------------------------------
 
-vi.mock('../orgScopedDb.js', () => ({
-  getOrgScopedDb: vi.fn(),
-  getOrgScopedOrgId: vi.fn(),
-  peekOrgTxContext: vi.fn(() => null),
-}));
-
-vi.mock('../lib/orgScopedDb.js', () => ({
-  getOrgScopedDb: vi.fn(),
-  getOrgScopedOrgId: vi.fn(),
-  peekOrgTxContext: vi.fn(() => null),
-}));
-
+// Only the third path resolves to the actual server/lib/orgScopedDb.js
+// from this test's location (server/services/__tests__/). The first two
+// were leftover speculative mocks that did not match production imports.
+// PTH-CGT-F2 (Round 2): chatgpt-pr-review flagged the mock-path mismatch.
 vi.mock('../../lib/orgScopedDb.js', () => ({
   getOrgScopedDb: vi.fn(),
   getOrgScopedOrgId: vi.fn(),
@@ -60,11 +52,13 @@ vi.mock('../../config/jobConfig.js', () => ({
   getJobConfig: vi.fn().mockReturnValue({}),
 }));
 
-vi.mock('../adapters/index.js', () => ({
+// PTH-CGT-F2 (Round 2): fixed path — production imports from server/adapters/ not server/services/adapters/.
+// From this test's location (server/services/__tests__/) the correct relative path is '../../adapters/...'.
+vi.mock('../../adapters/index.js', () => ({
   adapters: {},
 }));
 
-vi.mock('../adapters/integrationAdapter.js', () => ({
+vi.mock('../../adapters/integrationAdapter.js', () => ({
   classifyAdapterError: vi.fn().mockReturnValue({ retryable: false, code: 'test_error' }),
 }));
 

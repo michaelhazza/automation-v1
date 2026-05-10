@@ -4020,3 +4020,22 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Current: `e.eventType.startsWith('phase1.')` includes all future phase1 events in `filteredSystemEvents`, which fall through to `SystemEventRow` returning `null` (silently unrendered).
   - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
   - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.
+
+### PTH-CGT-R2 — taskService.createTask side effects fire before outer transaction commits
+
+**Origin:** chatgpt-pr-review Round 2 (PR #284 pre-test-hardening, 2026-05-10).
+**Surface:** `server/services/taskService.ts:174-212` — websocket emit (`emitSubaccountUpdate`), trigger fire (`triggerService.checkAndFire`), and orchestrator routing enqueue (`enqueueOrchestratorRoutingIfEligible`) all run INSIDE the canonical `createTask(input, tx)` body, before the supplied `tx` commits.
+
+**Risk:** if the caller's outer transaction rolls back, the task row rolls back too — but observers may have already received the websocket update or the trigger handler may have already fired downstream effects. This contradicts the "single transaction prevents orphan tasks" comment in `systemIncidentService.ts:286-287` and is a contract mismatch for any caller relying on createTask's atomicity.
+
+**Why deferred (not blocking):**
+- Pre-existing: these side effects were inline before pre-test-hardening; this PR did not introduce the race.
+- No `afterCommit` primitive: the codebase has no generic transaction-callback hook. Adding one is architectural scope-out for a hardening sprint.
+- Scope cost: a clean fix touches every caller of `createTask` and changes contract for systemIncidentService, scheduledTaskService, deliveryService, githubWebhook, route handlers, agent skill executors. Out of scope for this PR.
+
+**Fix options for the next sprint:**
+1. Add a `sideEffects?: 'inline' | 'defer' | 'none'` option to `createTask` so callers inside a transaction can opt out and emit side effects themselves after commit.
+2. Build a generic `afterCommit(fn)` primitive that queues callbacks on the current tx and fires them on commit. Drizzle doesn't expose this natively; would require a wrapper.
+3. Move side effects entirely to a pg-boss `task-created` queue that the worker fires AFTER the transaction commits (most consistent with the existing pattern but adds latency for synchronous observers).
+
+**Suggested classification:** P2 (correctness, not security; pre-existing).

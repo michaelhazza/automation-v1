@@ -52,5 +52,23 @@
 
 **Round 1 verdict:** all findings resolved (F1 rejected as false positive; R1 auto-applied; F2 applied per operator decision). CHANGES_REQUESTED → APPROVED.
 
-**Round 2 diff:** pending generation after commit.
+### Round 2 — 2026-05-10T23:40:00Z (post Round 1 commit `7a0efd71`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `knowledgeService.overrideEntry()` lost explicit transaction boundary — `pg_advisory_xact_lock` only protects work inside the same transaction; if `getOrgScopedDb()` returns a non-transaction handle, the lock releases at statement end before the read+insert | high (claimed blocker) | tenant-isolation / correctness | architecture | technical (scope_signal: architectural) | **implement** | auto (implement) — applied conditional `peekOrgTxContext()` pattern. If ALS context exists, use existing tx via `getOrgScopedDb` (current behaviour); otherwise open own `db.transaction` + set `app.organisation_id` GUC + delegate. Extracted body into `runOverrideInTx(tx, opts, canonical, bodyHash)` helper. Lock + read + version insert + memory-block update now all execute on the same real transaction handle in both branches. Verified: `npx tsc --noEmit -p server/tsconfig.json` 0 errors. **Note on claim accuracy:** ChatGPT's specific premise ("`getOrgScopedDb()` may return a request-scoped DB handle that is not an explicit transaction") is false in this codebase — `getOrgScopedDb()` only returns `ctx.tx` from ALS, which is always a real `db.transaction()` opened by the auth middleware (line 148). But the conditional defence-in-depth wrapper aligns with the Round 1 F2 pattern and protects against any future non-HTTP caller. |
+| F2 | Several new tests have wrong `vi.mock` paths that don't match production import paths; tests give false confidence | high (claimed blocker) | test-coverage | test_coverage | technical | **implement** | auto (implement) — fixed two test files: (a) `supportDraftsRoutesInvalidAction.test.ts` — corrected `../../../services/support/supportDraftDispatchService.js` (wrong) → `../../../services/supportDraftDispatchService.js` (right); (b) `supportDraftDispatchService.approveDraft.test.ts` — removed two dead `orgScopedDb.js` mocks at non-existent paths (`../orgScopedDb.js`, `../lib/orgScopedDb.js`), kept the correct `../../lib/orgScopedDb.js`; corrected two adapter mocks from `../adapters/*` (wrong — would resolve under server/services/adapters/) to `../../adapters/*` (right — resolves under server/adapters/). Comments added at each fix citing PTH-CGT-F2 Round 2 origin. All 7 + 7 + 5 + 1 = 20 tests still pass post-fix. |
+| R1 | `connectorConfigs.webhookToken` comment references migration 0314 but actual file is 0319 (post-S2 renumber) | low | doc-rot | naming | technical | **implement** | auto (implement) — updated comment in `server/db/schema/connectorConfigs.ts:38` to "migration 0319 — renumbered from 0314 post-S2 to clear collision with PR #283". |
+| R2 | `taskService.createTask` emits websocket/trigger/orchestrator side effects BEFORE the surrounding transaction commits; if the outer transaction rolls back, observers may have already seen task-created events for a row that was rolled back | medium | observability / transaction-correctness | architecture | technical (scope_signal: architectural) | **defer** | **deferred to backlog as PTH-CGT-R2**. ChatGPT's own recommendation: "Defer this if the current codebase has no afterCommit primitive yet, but document it as a known limitation." This codebase has no generic afterCommit primitive; adding one is architectural scope-out. The concern is also pre-existing — these side effects were inline in `taskService.createTask` before pre-test-hardening landed. Logged in `tasks/todo.md` with origin tag `PTH-CGT-R2`. |
+
+**Auto-applied:** F1, F2, R1 (3 findings).
+**Deferred to backlog:** R2 (1 finding) — `PTH-CGT-R2` in `tasks/todo.md`.
+
+**Verification after Round 2 fixes (commit pending):** server typecheck CLEAN (0 errors); all 20 affected regression tests pass (taskService.createTask 5/5, systemIncidentService.escalation 1/1, supportDraftsRoutesInvalidAction 7/7, supportDraftDispatchService.approveDraft 7/7).
+
+**Round 2 verdict:** CHANGES_REQUESTED → APPROVED with 1 deferred (PTH-CGT-R2).
+
+**Round 3 diff:** pending generation after commit.
 

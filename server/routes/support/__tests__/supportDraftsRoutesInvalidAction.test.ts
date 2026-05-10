@@ -63,7 +63,7 @@ const serviceCalls = vi.hoisted(() => ({
   manualResolveDraft: [] as Array<{ action: string }>,
 }));
 
-vi.mock('../../../services/support/supportDraftDispatchService.js', () => ({
+vi.mock('../../../services/supportDraftDispatchService.js', () => ({
   approveDraft: vi.fn(),
   rejectDraft: vi.fn(),
   editDraft: vi.fn(),

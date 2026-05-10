@@ -19,7 +19,8 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 import { db } from '../db/index.js';
 import { agentRuns, agents, memoryBlocks, memoryBlockVersions, workspaceMemoryEntries } from '../db/schema/index.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import {
   canonicaliseBody,
@@ -781,8 +782,38 @@ export async function overrideEntry(opts: {
   const canonical = canonicaliseBody(opts.body);
   const bodyHash = hashBody(canonical);
 
-  const tx = getOrgScopedDb('knowledgeService.overrideEntry');
+  // PTH-CGT-F1 defence-in-depth: ensure overrideEntry's advisory lock + version
+  // read + version insert + memory-block update all execute on the same real
+  // transaction handle. The advisory lock is acquired with pg_advisory_xact_lock
+  // (transaction-scoped, auto-released on commit/rollback) — but that semantic
+  // ONLY holds when the lock is acquired inside a real transaction. If a
+  // future caller invokes overrideEntry outside withOrgTx, getOrgScopedDb()
+  // would throw missing_org_context (safe failure mode), but the conditional
+  // here is an extra safety net: if ALS is established (the HTTP path),
+  // reuse the existing tx so we don't create a redundant savepoint; if ALS
+  // is absent (any non-HTTP caller), open our own db.transaction + set the
+  // GUC + run the override flow inside it. Either path satisfies the spec
+  // §V2 same-transaction requirement.
+  const inExistingTx = peekOrgTxContext() !== undefined;
+  return inExistingTx
+    ? runOverrideInTx(getOrgScopedDb('knowledgeService.overrideEntry'), opts, canonical, bodyHash)
+    : db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${opts.organisationId}, true)`);
+        return runOverrideInTx(innerTx, opts, canonical, bodyHash);
+      });
+}
 
+async function runOverrideInTx(
+  tx: OrgScopedTx,
+  opts: { organisationId: string; blockId: string; expectedEtag: string; actorUserId: string | null },
+  canonical: string,
+  bodyHash: string,
+): Promise<
+  | { ok: true; status: 'in_use'; etag: string; created: boolean }
+  | { ok: false; reason: 'state'; currentStatus: ContractStatus }
+  | { ok: false; reason: 'etag_mismatch'; currentEtag: string }
+  | { ok: false; reason: 'not_found' }
+> {
   // Serialise concurrent overrides on the same block via a per-block
   // transaction-scoped advisory lock. hashtextextended maps blockId → int8
   // deterministically; locks on distinct blockIds do NOT serialise each other.

@@ -35,7 +35,7 @@ export const connectorConfigs = pgTable(
     // Both columns updated by connectorPollingService on every successful sync.
     successfulPollCountTotal: integer('successful_poll_count_total').notNull().default(0),
     firstQualifyingPollAt: timestamp('first_qualifying_poll_at', { withTimezone: true }),
-    // Pre-Test Hardening W3 — per-connector webhook URL token (migration 0314).
+    // Pre-Test Hardening W3 — per-connector webhook URL token (migration 0319 — renumbered from 0314 post-S2 to clear collision with PR #283).
     // Used to route incoming webhooks to exactly one connector without scanning all active configs.
     webhookToken: uuid('webhook_token'),
   },
