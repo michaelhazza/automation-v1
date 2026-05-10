@@ -1,10 +1,12 @@
 # Phase 1 Showcase MVPs — Implementation Spec
 
-**Status:** Draft v1.0  
-**Date:** 2026-05-10  
-**Build slug:** `phase-1-showcase-mvps`  
-**Branch:** `claude/phase-1-showcase-mvps-{tbd}`  
-**Authoritative brief:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` Section 18.1 (Phase 1 showcase MVPs)  
+**Status:** reviewing
+**Spec date:** 2026-05-10
+**Last updated:** 2026-05-10
+**Author:** michaelhazza (operator) + spec-coordinator + spec-reviewer
+**Build slug:** `phase-1-showcase-mvps`
+**Branch:** `claude/phase-1-showcase-mvps-{tbd}`
+**Authoritative brief:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` Section 18.1 (Phase 1 showcase MVPs)
 **Predecessor specs (already built and merged):**
 - `tasks/builds/synthetos-foundation-refactor/spec.md` — Foundation refactor (BUILT, PR #279)
 - `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` — Support Desk Canonical (BUILT and MERGED; canonical_tickets / canonical_ticket_messages / canonical_ticket_drafts / canonical_inboxes / canonical_support_agents schemas, migrations 0307-0312, 10 `support.*` skill specs, 8 support services, support route group, 8 support UI components all in place)
@@ -36,6 +38,8 @@ Each MVP is substantively different: 42 Macro is a polish-and-harden exercise on
   - [5.1 Dependencies and current state](#51-dependencies-and-current-state)
   - [5.2 Target state](#52-target-state)
   - [5.3 Agent design](#53-agent-design)
+    - [5.3.4 Per-ticket concurrency guard](#534-per-ticket-concurrency-guard-atomic-claim)
+    - [5.3.5 Why Native Controller, not Operator](#535-why-this-is-native-controller-not-operator)
   - [5.4 Skills and execution flow](#54-skills-and-execution-flow)
   - [5.5 Eval and quality harness](#55-eval-and-quality-harness)
   - [5.6 UI surfaces](#56-ui-surfaces)
@@ -44,6 +48,7 @@ Each MVP is substantively different: 42 Macro is a polish-and-harden exercise on
 - [8. Rollout Plan](#8-rollout-plan)
 - [9. Acceptance Criteria](#9-acceptance-criteria)
 - [10. Risk Register](#10-risk-register)
+- [10.5 Deferred Items](#105-deferred-items)
 - [11. Open Decisions](#11-open-decisions)
 
 ---
@@ -56,7 +61,7 @@ The implementation spec for the two Phase 1 showcase MVPs. It defines code chang
 
 ### 0.2 What this spec is not
 
-This is not the foundation refactor spec (already locked, built, merged in PR #279). This is not the Support Desk Canonical spec (already locked, build pending in `tasks/builds/support-desk-canonical/plan.md` via separate `feature-coordinator` run). This is not the Phase 1.5 use case fan-out spec (Revenue Ops, Research, Paid Ads). This is not a Phase 2 sandbox or Phase 3 autonomous-operator spec.
+This is not the foundation refactor spec (already locked, built, merged in PR #279). This is not the Support Desk Canonical spec (already locked, built, merged 2026-05-10). This is not the Phase 1.5 use case fan-out spec (Revenue Ops, Research, Paid Ads). This is not a Phase 2 sandbox or Phase 3 autonomous-operator spec.
 
 ### 0.3 Authority
 
@@ -68,8 +73,7 @@ Where this spec contradicts the v1.2 brief, the v1.2 brief is authoritative for 
 |---|---|---|
 | v1.2 master brief | `docs/synthetos-governed-agentic-os-brief-v1.2.md` | Phase 1 scope and showcase MVP definitions |
 | Foundation refactor spec | `tasks/builds/synthetos-foundation-refactor/spec.md` | Locked primitives this MVP consumes |
-| Support Desk Canonical spec | `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` | Locked canonical layer the Support Inbox MVP consumes |
-| Support Desk Canonical plan | `tasks/builds/support-desk-canonical/plan.md` | 15-chunk build plan for Spec B; the Support Inbox MVP build cannot start until this finishes |
+| Support Desk Canonical spec | `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` | Locked canonical layer the Support Inbox MVP consumes (built and merged) |
 | Naming glossary | `docs/synthetos-nomenclature.md` | Canonical names for foundation primitives |
 
 ### 0.5 Naming convention
@@ -83,7 +87,7 @@ This spec follows `docs/synthetos-nomenclature.md`. Where a v1.2 brief term diff
 | Foundation refactor | none | DONE (PR #279) | (shipped) |
 | Support Desk Canonical | Foundation refactor | DONE (canonical schema, services, skills, routes, UI components all merged) | (shipped) |
 | File delivery infrastructure (this spec §6) | Foundation refactor | NOT STARTED | 8 to 12 dev-days |
-| 42 Macro Full MVP (this spec §4) | File delivery infrastructure | NOT STARTED; ~70% built before this spec | 23 to 36 dev-days |
+| 42 Macro Full MVP (this spec §4, excludes shared file delivery) | File delivery infrastructure | NOT STARTED; ~70% built before this spec | 15 to 24 dev-days |
 | Support Inbox MVP (this spec §5) | Support Desk Canonical (now done) + Foundation refactor | NOT STARTED | 18 to 28 dev-days (lower than original estimate because canonical layer is complete) |
 | Phase 1 lock-in | Both showcase MVPs | NOT STARTED | 1 week |
 
@@ -105,13 +109,13 @@ The showcase MVPs prove the foundation works end-to-end on real customer-facing 
 ### 1.2 Why these two MVPs
 
 - **42 Macro Task** is a deterministic browser automation reference workflow. It exercises Browser Environment, Native Controller, deterministic loop semantics, artifact production, and Run Trace surface. It is mostly built today (~70%) and requires polish + production hardening rather than new feature construction. Shipping it as Full MVP validates the foundation against existing Browser-Native execution patterns.
-- **Support Inbox Workflow** exercises a hybrid pattern: Native Controller for triage and template drafting, light Operator escalation for ambiguous cases, HITL approval for customer-facing replies, Slack Block Kit for the human-in-the-loop, Gmail-via-Teamwork for the inbound channel. It runs on the Support Desk Canonical layer (Spec B). Shipping it validates the foundation against an end-to-end agent workflow that touches every layer.
+- **Support Inbox Workflow** exercises a hybrid pattern: Native Controller for triage and template drafting, light Operator escalation (flag-for-human via `assign + internal note`) for ambiguous cases, HITL approval for customer-facing replies, Slack Block Kit for the human-in-the-loop, Gmail-via-Teamwork for the inbound channel. It runs on the Support Desk Canonical layer (Spec B). Shipping it validates the foundation against an end-to-end agent workflow that touches every layer.
 
-Together they cover: deterministic vs hybrid execution; Native vs Operator controller; Browser vs API+Tool environments; auto-approve vs HITL approval; one-shot artifact production vs ongoing inbox monitoring.
+Together they cover: deterministic vs structured-with-escalation execution; Browser vs API+Tool environments; auto-approve vs HITL approval; one-shot artifact production vs ongoing inbox monitoring. Both MVPs run as Native Controller throughout Phase 1; Operator Controller is Phase 3.
 
 ### 1.3 What is already in place from the foundation refactor
 
-- `agent_runs.controller_style` (Native vs Operator); 42 Macro defaults to Native, Support Inbox defaults to Native with Operator escalation per task
+- `agent_runs.controller_style` (Native vs Operator); both MVPs run as Native throughout Phase 1; Operator Controller is Phase 3
 - `agent_runs.policy_envelope_snapshot` (resolved at run start, surfaced in Run Trace UI headline)
 - 138-row Risk Tier classification across the action registry; new actions in this spec inherit the convention
 - `CredentialBrokerService` facade for credential issuance and audit
@@ -197,11 +201,11 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 ### 2.2 Non-Goals
 
-**NG1. No SLA tracking primitives.** SLA definitions, response-time commitments, escalation triggers based on age, SLA breach alerts: deferred. Acknowledged in Open Decisions; Phase 1.5 or Phase 2 spec.
+**NG1. No SLA tracking primitives.** SLA definitions, response-time commitments, escalation triggers based on age, SLA breach alerts: deferred. The canonical_tickets schema already carries `sla_due_at`, `sla_breached`, `sla_policy_external_id` columns synced from the provider; this MVP treats those columns as inert provider metadata only. The Support Agent does not classify on them, alert on them, surface them in dashboards, or trigger escalations from them. Phase 1.5 or Phase 2 will add the primitives that act on those columns.
 
 **NG2. No recurring-problem detection.** Clustering of similar tickets, "these 5 emails are all about the same bug" aggregation, vector embeddings of email bodies: deferred. Phase 2.
 
-**NG3. No vector search over the knowledge base.** The `search_knowledge_base` skill (deferred from the support-desk canonical spec) uses simple keyword search in this MVP. Vector search and semantic ranking: Phase 2.
+**NG3. No knowledge-base search in the Support Agent.** The Support Agent's default skill set does NOT include `search_knowledge_base` or `web_search` for Phase 1. Triage, classification, and drafting work from the ticket thread + customer history only. Vector search, semantic ranking, and broader knowledge-base lookup arrive in Phase 2.
 
 **NG4. No Operator Controller for Support Inbox.** The MVP runs on Native Controller with light Operator escalation only via re-classification (the agent flags a ticket for human investigation rather than running an autonomous loop). Full Operator Controller for support investigation: Phase 3.
 
@@ -241,7 +245,7 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 ### 3.3 Behavioural constraints
 
-**INV-8. Both MVPs use Native Controller by default.** Per v1.2 brief Section 6.3 ("Native Controller is default. Operator Controller is escalation and adaptive mode"), both MVPs default to `controllerStyle: 'native'`. The Support Agent may set `controllerStyle: 'operator'` per task only when its own classification labels the task as "investigative" — this is the light Operator escalation path; full Operator Controller is Phase 3.
+**INV-8. Both MVPs run as Native Controller throughout Phase 1.** Per v1.2 brief Section 6.3 ("Native Controller is default. Operator Controller is escalation and adaptive mode") and Section 5.2, every Support Agent run in this MVP sets `controllerStyle: 'native'`. There is no per-task switch to `'operator'` in this spec. The "light Operator escalation" referenced in the v1.2 brief is implemented as `support.assign(human) + support.add_internal_note(reason) + a Run Trace event` — a flag-for-human, not a long-running autonomous loop. Full Operator Controller for support investigation is Phase 3 and out of scope here.
 
 **INV-9. Approval defaults derive from Risk Tier.** Per foundation spec INV-8, this spec must not silently change the existing `gateLevel` for any action. New `support.*` actions inherit Risk Tier per the rubric in `tasks/builds/synthetos-foundation-refactor/spec.md` Section 4.2.3.
 
@@ -261,10 +265,10 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 ### 3.5 Observability constraints
 
-**INV-16. Stable log codes.** New log codes follow the `phase1.<area>.<event>` pattern:
+**INV-16. Stable log codes and Run Trace event discriminators are the same string.** New log codes follow the `phase1.<area>.<event>` pattern. Each event below appears as both a structured log code AND an `agent_execution_events.event_type` discriminator, with a single payload shape:
 
-- `phase1.macro.run_started`, `phase1.macro.run_completed`, `phase1.macro.artifact_delivered`
-- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.eval_drift_detected`
+- `phase1.macro.run_started`, `phase1.macro.run_completed`, `phase1.macro.artifact_delivered`, `phase1.macro.login_failed`, `phase1.macro.run_stuck`
+- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.eval_drift_detected`
 - `phase1.file_delivery.uploaded`, `phase1.file_delivery.downloaded`, `phase1.file_delivery.signed_url_issued`, `phase1.file_delivery.expired`
 
 **INV-17. Both MVPs surface in Run Trace.** Run Trace virtual view (foundation Item 4) already aggregates events; new event types from this spec emit through the same channels.
@@ -359,12 +363,14 @@ The PDF has a fixed shape; it does not adapt per run. Future variations: add a "
 
 #### 4.4.3 Implementation
 
+PDF rendering runs server-side in the main app (not the worker), keeping the worker's responsibilities narrow (browser automation + transcription) and letting `@react-pdf/renderer` reuse the main app's React + tooling. The worker hands off the transcript artifact and structured analysis to the main app via the existing run-completed event; the main app renders the PDF and uploads it via `fileDeliveryService` (Section 6.1.3). No PDF rendering happens in the worker.
+
 | File | Change | Rough LOC |
 |---|---|---|
 | `server/services/reportRenderingService.ts` | New service: `renderMacroReportPdf(input: MacroReportInput): Promise<Buffer>` | +200 |
 | `server/services/reportTemplates/MacroReport.tsx` | React component for the PDF template | +180 |
-| `server/services/__tests__/reportRenderingService.test.ts` | Pure tests (golden PDF byte check, content-hash determinism) | +80 |
-| `server/jobs/agentRunCompletedHandler.ts` | After 42 Macro run completes, call `reportRenderingService.renderMacroReportPdf` and persist via file-delivery service | +30 |
+| `server/services/__tests__/reportRenderingServicePure.test.ts` | Pure-function tests (golden PDF byte check, content-hash determinism) | +80 |
+| `server/jobs/ieeRunCompletedHandler.ts` | After IEE-mode 42 Macro run completes, call `reportRenderingService.renderMacroReportPdf` and persist via file-delivery service. Existing handler — extended; not new. | +30 |
 
 **Total: ~490 LOC.**
 
@@ -402,9 +408,9 @@ The "Preview" button opens an inline PDF viewer (existing `PDFEmbed` primitive i
 | `client/src/components/run-trace/RunTraceHeadline.tsx` | Add artifact-ready badge inline | +20 |
 | `client/src/lib/api/runArtifacts.ts` | New API client wrapper | +30 |
 | `server/routes/agentRuns.ts` | New route `GET /api/agent-runs/:runId/artifacts` returning artifact list with signed URLs | +40 |
-| Tests | Component and route tests | +100 |
+| `server/routes/__tests__/agentRunsArtifactsRoute.integration.test.ts` | Single integration test for the new route | +60 |
 
-**Total: ~310 LOC.**
+**Total: ~270 LOC.** No frontend component tests per the project's testing posture.
 
 ### 4.6 Production hardening
 
@@ -415,7 +421,7 @@ The "Preview" button opens an inline PDF viewer (existing `PDFEmbed` primitive i
 | Login change (selector miss, post-login probe fails) | `performLoginWithRetry` exhausted | Run terminates with `failureReason: 'login_failed'`; `phase1.macro.login_failed` log; admin notified via existing alert path |
 | Page structure change (extract returns no candidates) | Skill returns "no video found" | Run terminates with `failureReason: 'page_structure_change'`; admin notified |
 | Transcription failure | Whisper API retry exhausted | Run continues with `transcript: null`; report says "Transcription unavailable; raw audio file is attached" |
-| S3 upload failure | Signed URL fetch fails | Run continues; artifact metadata persisted; download UI shows "Retry upload" affordance |
+| S3 upload failure | `withBackoff` retry exhausted on the upload call | Run terminates with `failureReason: 'artifact_upload_failed'`; admin notified via existing alert path. No partial `run_artifacts` row is persisted. The transcript and PDF can be regenerated by re-running the macro task; this is preferable to a half-state with a "Retry upload" affordance the schema does not currently support. |
 | Provider rate limit | Existing `withBackoff` with capped retry window | Run pauses up to N minutes; surfaces as "rate-limited" in Run Trace |
 
 #### 4.6.2 Observability for stuck runs
@@ -428,18 +434,17 @@ A new `phase1.macro.run_stuck` log code fires when a 42 Macro run has been on th
 |---|---|---|
 | `worker/src/browser/macroExecutor.ts` (or equivalent existing file) | Add explicit failure-mode branches per the table above | +60 |
 | `server/services/systemMonitoring/detectors/staleMacroRunDetector.ts` | New detector | +80 |
-| Tests | Failure-mode integration tests | +120 |
+| `server/services/systemMonitoring/detectors/__tests__/staleMacroRunDetectorPure.test.ts` | Pure-function tests for stuck-step threshold logic | +80 |
 
-**Total: ~260 LOC.**
+**Total: ~220 LOC.**
 
 ### 4.7 Effort estimate for 42 Macro Full MVP
 
-- File delivery infrastructure (Section 6, shared): 8 to 12 dev-days
 - PDF report generation: 6 to 10 dev-days
 - Artifact viewer UI: 4 to 6 dev-days
 - Production hardening: 5 to 8 dev-days
 
-**Total: 23 to 36 dev-days (5 to 8 weeks).**
+**Total: 15 to 24 dev-days (3 to 5 weeks).** Excludes shared file delivery infrastructure (Section 6.1.7, 8 to 12 dev-days), which is counted once and consumed by both MVPs.
 
 ---
 
@@ -498,19 +503,24 @@ A Support Agent that:
 
 #### 5.3.1 Agent record
 
-A new row in `system_agents` with these properties:
+A new row in `system_agents` (column names per `server/db/schema/systemAgents.ts`):
 
-| Field | Value |
+| Column | Value |
 |---|---|
 | `slug` | `support-agent` |
-| `display_name` | "Support Agent" |
+| `name` | `"Support Agent"` |
 | `master_prompt` | locked, system-managed (Section 5.3.2 below) |
-| `default_system_skill_slugs` | `['support.list_open_tickets', 'support.read_thread', 'support.classify_ticket', 'support.propose_reply', 'support.add_internal_note', 'support.assign', 'support.set_status', 'support.tag', 'support.approve_draft', 'support.reject_draft', 'support.find_customer_history', 'ask_clarifying_question', 'web_search']` |
+| `default_system_skill_slugs` | `['support.list_open_tickets', 'support.read_thread', 'support.classify_ticket', 'support.propose_reply', 'support.add_internal_note', 'support.assign', 'support.set_status', 'support.tag', 'support.approve_draft', 'support.reject_draft', 'support.find_customer_history', 'ask_clarifying_question']` (12 skills: 11 `support.*` + 1 universal `ask_clarifying_question`; no `web_search` per NG3) |
 | `default_org_skill_slugs` | empty (org admins do not extend support skills) |
-| `default_execution_mode` | `'api'` (Native style) |
-| `default_controller_style` | `'native'` |
-| `default_model` | platform Anthropic (Claude Sonnet 4.x) |
-| `is_singleton` | `true` (one Support Agent per subaccount) |
+| `execution_mode` | `'api'` (Native style; existing column) |
+| `execution_scope` | `'subaccount'` (existing column) |
+| `model_provider` / `model_id` | `'anthropic'` / `'claude-sonnet-4-6'` (existing columns) |
+| `is_published` | `true` |
+| `status` | `'active'` |
+
+**Native Controller as default.** `system_agents` does not have a `default_controller_style` column today. The Support Agent's "Native by default" posture is enforced at runtime: when a Support Agent run is created, `agent_runs.controller_style` (added in the foundation refactor, migration 0308) is set to `'native'` by the agent-execution path. If we later need to make this a configurable default per system agent, add a `default_controller_style text` column on `system_agents` in a follow-up migration. Out of scope for this MVP.
+
+**Singleton-per-subaccount.** `system_agents` does not have an `is_singleton` column. "One Support Agent per subaccount" is enforced at install time by the install-flow code path: when installing the system Support Agent into a subaccount, the install service checks for an existing active subaccount-level installation that references this `system_agent_id` (via the `applied_template_id` linkage on `subaccount_agents`) and refuses if one already exists. No new schema change required for the MVP.
 
 The agent is system-managed: customers cannot edit the master prompt; they can only configure per-inbox `agent_config` (mode, collision window, draft expiry, prompt overrides).
 
@@ -537,18 +547,18 @@ and never act on tickets where humans are active.
 - support.set_status / support.tag
 - support.approve_draft / support.reject_draft  (only after human review unless inbox is autonomous)
 - support.find_customer_history  (cross-reference CRM)
-- ask_clarifying_question     (only when context is genuinely missing; not a default)
+- ask_clarifying_question     (universal skill; only when context is genuinely missing — not a default move)
 
 ## Rules
 1. Always classify before drafting.
-2. If `last_human_activity_at` is within {{collision_window_min}} minutes, DO NOT act.
-3. Customer-facing replies (visibility=public) are always Tier 6; approval policy comes from inbox config.
+2. If `last_human_activity_at` is within {{collision_window_minutes}} minutes, DO NOT act. (Sourced from `agent_config.collisionWindow.minMinutesSinceHumanActivity`.)
+3. Customer-facing replies (visibility=public) are always Tier 6; approval policy comes from inbox `agent_config.mode`.
 4. Internal notes (visibility=internal) are Tier 2; auto-approve.
 5. Status changes and tags are Tier 2; auto-approve.
 6. Reassignment to a human is Tier 1; auto-approve.
 7. Use customer history (find_customer_history) for any classified-as-account-issue ticket.
 8. Escalate to a human (assign + add_internal_note) when:
-   - Confidence below {{min_confidence}}
+   - Classification confidence below {{min_confidence}}
    - Ticket category in {{escalate_categories}}
    - Customer is high-priority (find_customer_history reports flag)
 
@@ -558,16 +568,31 @@ and never act on tickets where humans are active.
 - Always cite the source thread message id when referencing a customer's words
 ```
 
-The `{{ ... }}` placeholders are filled at run start from `canonical_inboxes.agent_config`. The voice profile is per-inbox overrideable.
+The `{{ ... }}` placeholders are filled at run start from `canonical_inboxes.agent_config`. The shape that exists today (per `shared/types/supportInboxAgentConfig.ts`) is:
+
+```ts
+{ version: 1,
+  mode: 'autonomous' | 'assisted' | 'disabled',
+  collisionWindow: { minMinutesSinceHumanActivity: number, respectHumanAssignee: boolean },
+  draftExpiry: { awaitingReviewHours: number, draftHours: number },
+  modelOverride?: string,
+  promptOverride?: string,
+  optIns: { autonomousReplyOnWaitingOnCustomer: boolean, postResolutionFollowUp: boolean } }
+```
+
+This MVP needs three additive fields on the schema: `minConfidence: number` (default 0.8), `voiceProfile: 'casual' | 'neutral' | 'formal' | 'custom'` (default `'neutral'`), `escalationCategories: string[]` (default `[]`). The Zod schema in `shared/types/supportInboxAgentConfig.ts` is updated additively (all three optional with documented defaults); no migration is required because `agent_config` is a JSONB column with a `.default` already applied. **File inventory addition (§5.6.4):** `shared/types/supportInboxAgentConfig.ts` — add three optional fields with defaults, +15 LOC.
+
+**Default mode for a newly-installed Support Agent.** The existing `canonical_inboxes.agent_config.mode` defaults to `'disabled'` for a brand-new inbox. When a Support Agent is wired to a subaccount and an inbox is enabled for the agent, the install / enablement code path bumps the mode to `'assisted'` (HITL approval required for every customer-facing reply). The operator may then flip a single inbox to `'autonomous'` from the Inbox Agent Configuration tab (§5.6.2).
 
 #### 5.3.3 Execution flow per ticket
 
 1. Agent run starts; loads inbox config, policy envelope, master prompt with placeholders filled.
 2. `support.list_open_tickets(inbox_id)` returns N tickets needing attention.
 3. For each ticket, in order:
+   - **Atomic claim** (§5.3.4): acquire `canonical_tickets.bot_claimed_at` via optimistic predicate; on conflict, emit `phase1.support.collision_skipped` (reason `concurrent_claim`) and skip.
    - `support.read_thread(ticket_id)` loads the conversation history.
    - `support.classify_ticket(ticket_id)` returns `{intent, urgency, recommended_action, confidence}`.
-   - **Collision check**: if `last_human_activity_at` is fresh (within inbox `min_minutes_since_human_activity`), the agent skips this ticket and emits `phase1.support.collision_skipped`.
+   - **Human-activity collision check**: if `last_human_activity_at` is fresh (within inbox `agent_config.collisionWindow.minMinutesSinceHumanActivity`), the agent releases the claim, emits `phase1.support.collision_skipped` (reason `human_active`), and skips.
    - **Confidence check**: if confidence below `min_confidence`, the agent calls `support.add_internal_note` with classification reasoning + `support.assign(human)` and skips drafting.
    - **Account-issue check**: if classified as account/billing/escalation, call `support.find_customer_history` and incorporate into draft.
    - **Drafting**: call `support.propose_reply` to write a `canonical_ticket_drafts` row.
@@ -576,7 +601,33 @@ The `{{ ... }}` placeholders are filled at run start from `canonical_inboxes.age
      - `assisted`: leave the draft in `awaiting_review` state; the existing review queue + Slack Block Kit flow takes over.
 4. Agent run terminates; Run Trace shows the per-ticket decision tree.
 
-#### 5.3.4 Why this is Native Controller, not Operator
+#### 5.3.4 Per-ticket concurrency guard (atomic claim)
+
+The agent wakes on schedule and on webhook (Teamwork ticket.created), so two concurrent runs CAN target the same ticket. The canonical layer already provides the primitives (`canonical_tickets.bot_claimed_at`, `canonical_tickets.bot_claimed_by_run_id`); this MVP wires them as the per-ticket concurrency guard.
+
+**Idempotency posture:** state-based, optimistic predicate.
+
+**Claim acquisition.** Before the agent reads the thread or classifies a ticket, it issues an optimistic claim:
+
+```sql
+UPDATE canonical_tickets
+SET    bot_claimed_at = now(),
+       bot_claimed_by_run_id = :runId
+WHERE  id = :ticketId
+  AND  organisation_id = :orgId
+  AND  (bot_claimed_at IS NULL
+        OR bot_claimed_at < now() - interval ':claimTtlMinutes minutes')
+```
+
+0 rows affected = another run is processing this ticket; the agent emits `phase1.support.collision_skipped` (with reason `concurrent_claim`) and moves on. 1 row affected = this run owns the ticket for the next `claimTtlMinutes`.
+
+**Claim TTL.** Default 15 minutes. Long enough that a single ticket's classify-draft cycle never bumps against it, short enough that a crashed run does not block subsequent runs for long.
+
+**Claim release.** On terminal verdict (draft_proposed, escalated, or skipped) the agent clears the claim by setting `bot_claimed_at = NULL`. On run abort, the claim ages out via the TTL — no recovery worker is required for Phase 1.
+
+**Per-ticket terminal verdicts.** Each ticket within a single agent run reaches exactly one terminal verdict from the set: `drafted_for_review` | `drafted_and_dispatched` | `escalated_to_human` | `skipped_collision` | `skipped_low_confidence` | `skipped_no_action_needed`. The verdict is written into the Run Trace event payload so the per-ticket decision is auditable from the UI.
+
+#### 5.3.5 Why this is Native Controller, not Operator
 
 Per v1.2 brief Section 5.2, Native is "deterministic, structured, short-lived". The Support Agent loop above is structured (always classify → draft → route) and short-lived (one pass through N tickets). It is NOT an autonomous reasoning loop that explores ambiguity or persists across hours. It is a triage pipeline.
 
@@ -650,6 +701,7 @@ Per `INV-9`, every `support.*` action carries a Risk Tier; the foundation refact
 | `support.propose_reply` | 2 | auto (writes a draft, not a customer-facing message) |
 | `support.approve_draft` | 6 | block unless inbox `mode=autonomous` policy override |
 | `support.reject_draft` | 1 | auto |
+| `ask_clarifying_question` (universal) | 0 | auto (existing entry, listed for completeness) |
 
 Risk Tier 6 on `approve_draft` is the gating control: in `assisted` mode the action is blocked, kicking the draft to the review queue. In `autonomous` mode the per-inbox `agent_config.mode` policy override lowers it to `auto`.
 
@@ -659,13 +711,13 @@ Risk Tier 6 on `approve_draft` is the gating control: in `assisted` mode the act
 |---|---|---|
 | `server/skills/support/classify-ticket.md` | New skill spec | +110 |
 | `server/services/skillHandlers/supportClassifyTicket.ts` | LLM-backed classify implementation | +180 |
-| `server/services/__tests__/supportClassifyTicket.test.ts` | Unit tests with fixture tickets | +120 |
+| `server/services/skillHandlers/supportClassifyTicketPure.ts` | Pure helpers (intent enum, scoring, prompt construction) | +90 |
+| `server/services/__tests__/supportClassifyTicketPure.test.ts` | Pure-function tests with fixture tickets | +120 |
 | `server/config/actionRegistry.ts` | Register the new skill with `riskTier: 1` | +15 |
 | `server/db/schema/agentSkills.ts` (or wherever skill registration lives) | Register skill | +5 |
-| `server/services/skillResultCache.ts` (NEW) | Lightweight cache for classification results | +90 |
-| Tests | Cache and dispatch tests | +80 |
+| Cache table + service | See Open Decision 11.4; LOC pending decision | (gated) |
 
-**Total: ~600 LOC for the new skill.**
+**Total: ~520 LOC for the new skill (excluding cache, gated on Open Decision 11.4).**
 
 #### 5.4.4 Existing skill prompt templates
 
@@ -692,9 +744,9 @@ A support agent that drafts customer-facing replies cannot ship without an eval 
 | Component | Purpose |
 |---|---|
 | Regression set | 50 to 200 historical tickets with golden classifications + golden draft replies (provided by Foundry export, per support-desk-canonical OQ-1) |
-| Classification accuracy | Per-intent precision + recall against the golden set; threshold: >= 85% per intent in v1 |
-| Draft quality | LLM-as-judge scoring against rubric (helpfulness, tone match, factual accuracy); threshold: >= 4.0 / 5.0 average |
-| Drift detection | Daily run of regression set against current model + prompt; alert if scores drop > 10% week over week |
+| Classification accuracy | Per-intent precision + recall against the golden set; **initial threshold: >= 85% per intent** in v1, tunable during pilot before lock-in |
+| Draft quality | LLM-as-judge scoring against rubric (helpfulness, tone match, factual accuracy); **initial threshold: >= 4.0 / 5.0 average**, tunable during pilot before lock-in |
+| Drift detection | Daily run of regression set against current model + prompt; alert if scores drop > 10% week over week (drift threshold tunable post-pilot once a baseline is established) |
 | Failure-mode coverage | Tickets that should escalate (confidence below threshold) are escalated; tickets where the agent should NOT act (collision window) are skipped |
 
 #### 5.5.3 Eval surface
@@ -711,15 +763,17 @@ A new admin page at `/operate/agents/support/evals` showing:
 | File | Change | Rough LOC |
 |---|---|---|
 | `server/services/supportEvalHarness.ts` | New service: load regression set, run classify, run draft, score | +250 |
-| `server/services/supportEvalHarnessPure.ts` | Pure helpers (judge prompt construction, threshold checks) | +120 |
+| `server/services/supportEvalHarnessPure.ts` | Pure helpers (judge prompt construction, threshold checks, drift math) | +120 |
+| `server/services/__tests__/supportEvalHarnessPure.test.ts` | Pure-function tests for thresholds, drift, judge-prompt construction | +160 |
 | `server/db/schema/supportEvalRuns.ts` | New table to persist eval results over time | +60 |
-| `migrations/0313_support_eval_runs.sql` + `.down.sql` | New migration | +40 |
+| `migrations/<next-available>_support_eval_runs.sql` + `.down.sql` | New migration (number assigned at chunk-build time to avoid collisions; do not pin); the migration creates the table, enables RLS, and applies the standard `org_isolation` policy | +40 |
+| `server/config/rlsProtectedTables.ts` | Register `support_eval_runs` per INV-6 | +1 |
+| `scripts/gates/verify-support-agent-eval-thresholds.sh` | New CI-only static gate (per §7.3) — fails build when two consecutive eval runs drop below thresholds | +60 |
 | `client/src/pages/operate/SupportEvalsPage.tsx` | New admin page | +200 |
 | `server/routes/support/supportEvalsRoutes.ts` | New route group | +80 |
 | `server/jobs/supportEvalDailyJob.ts` | pg-boss job for daily drift run | +80 |
-| Tests | Pure tests + integration | +200 |
 
-**Total: ~1,030 LOC.**
+**Total: ~1,050 LOC.**
 
 ### 5.6 UI surfaces
 
@@ -737,24 +791,25 @@ A dashboard page at `/operate/agents/support` showing:
 
 #### 5.6.2 Inbox Agent Configuration tab
 
-Extends the existing inbox config UI (PR #277 `inbox-config.html` mockup) with the agent's configuration:
+Extends the existing inbox config UI (PR #277 `inbox-config.html` mockup) with the agent's configuration. All fields write to `canonical_inboxes.agent_config` (`SupportInboxAgentConfig` Zod schema):
 
-- Mode: `assisted` (default) / `autonomous`
-- Collision window: 5 / 15 / 30 / 60 minutes
-- Min confidence: 0.7 / 0.8 / 0.9
-- Voice profile: dropdown (Casual / Neutral / Formal / Custom)
-- Custom voice prompt (textarea, only when Voice profile = Custom)
-- Escalation categories: multi-select (cancellation_request / complaint / sales_inquiry / other)
+- `mode`: `disabled` / `assisted` / `autonomous` (default `disabled`; bumped to `assisted` on agent enablement)
+- `collisionWindow.minMinutesSinceHumanActivity`: 5 / 15 / 30 / 60 minutes
+- `collisionWindow.respectHumanAssignee`: boolean toggle
+- `minConfidence` (additive, new this MVP): 0.7 / 0.8 / 0.9 (default 0.8)
+- `voiceProfile` (additive, new this MVP): dropdown (Casual / Neutral / Formal / Custom; default Neutral)
+- `promptOverride` (existing): freeform textarea, used as the custom voice prompt when `voiceProfile = Custom`
+- `escalationCategories` (additive, new this MVP): multi-select (cancellation_request / complaint / sales_inquiry / other)
 
 #### 5.6.3 Run Trace surfacing
 
-Support Agent runs surface in the Run Trace UI (foundation Item 4). The existing virtual view aggregates the agent's events; this spec adds a new event type discriminator:
+Support Agent runs surface in the Run Trace UI (foundation Item 4). The existing virtual view aggregates the agent's events; this spec adds a new event type discriminator. Event names align with the INV-16 stable log code namespace (`phase1.support.*`) so the Run Trace event discriminator and the structured log code are the same string per event:
 
-- `support.ticket_classified` — payload: `{ticketId, intent, urgency, confidence}`
-- `support.draft_proposed` — payload: `{ticketId, draftId, controllerStyleAtPropose, riskTierResolved}`
-- `support.draft_dispatched` — payload: `{draftId, dispatchPhase, idempotencyKey}`
-- `support.draft_blocked_by_policy` — payload: `{ticketId, draftId, blockingPolicy}`
-- `support.collision_skipped` — payload: `{ticketId, lastHumanActivityAgo}`
+- `phase1.support.ticket_classified` — payload: `{ticketId, intent, urgency, confidence}`
+- `phase1.support.draft_proposed` — payload: `{ticketId, draftId, controllerStyleAtPropose, riskTierResolved, perTicketVerdict}`
+- `phase1.support.draft_dispatched` — payload: `{draftId, dispatchPhase, idempotencyKey}`
+- `phase1.support.draft_blocked_by_policy` — payload: `{ticketId, draftId, blockingPolicy}`
+- `phase1.support.collision_skipped` — payload: `{ticketId, reason: 'concurrent_claim' | 'human_active', lastHumanActivityAgo?}`
 
 These slot into the existing Run Trace event renderer with no new UI surface; the existing tree-of-decisions view shows them inline.
 
@@ -766,9 +821,9 @@ These slot into the existing Run Trace event renderer with no new UI surface; th
 | `client/src/components/support/InboxAgentConfigTab.tsx` | Extends PR #277 inbox config | +150 |
 | `client/src/components/run-trace/SupportEventRenderers.tsx` | New event renderers for the 5 new event types | +120 |
 | `server/routes/operate/supportAgentRoutes.ts` | Routes for dashboard + config | +60 |
-| Tests | Component + route tests | +180 |
+| `shared/types/supportInboxAgentConfig.ts` | Additive Zod fields: `minConfidence?`, `voiceProfile?`, `escalationCategories?` (per §5.3.2) | +15 |
 
-**Total: ~690 LOC.**
+**Total: ~525 LOC.** No frontend component tests; the route module gets a single integration test alongside other support routes.
 
 ### 5.7 Effort estimate for Support Inbox MVP
 
@@ -806,7 +861,7 @@ Key requirements:
 CREATE TABLE run_artifacts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id uuid NOT NULL REFERENCES organisations(id),
-  agent_run_id uuid NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  agent_run_id uuid REFERENCES agent_runs(id) ON DELETE SET NULL,  -- nullable so artifacts can outlive a deleted run row up to retain_until; agent_run deletion clears the FK rather than cascading
   iee_run_id uuid,                              -- nullable; populated for IEE-mode runs
   artifact_kind text NOT NULL CHECK (artifact_kind IN ('report', 'transcript', 'media', 'attachment', 'log')),
   display_name text NOT NULL,                   -- "Report.pdf", "Transcript.srt"
@@ -824,9 +879,20 @@ CREATE TABLE run_artifacts (
 CREATE INDEX run_artifacts_org_run_idx ON run_artifacts(organisation_id, agent_run_id);
 CREATE INDEX run_artifacts_content_hash_idx ON run_artifacts(content_hash);
 CREATE INDEX run_artifacts_retain_until_idx ON run_artifacts(retain_until) WHERE retain_until IS NOT NULL;
+
+-- Idempotency: object-store keys are globally unique by construction (per-org bucket
+-- prefix + content-hash filename), so the storage_provider+storage_key pair is the
+-- natural idempotency key for upload retries. Inserts use ON CONFLICT DO NOTHING and
+-- return the existing row id, making upload safe to retry.
+CREATE UNIQUE INDEX run_artifacts_storage_key_unique
+  ON run_artifacts(storage_provider, storage_key);
 ```
 
 `run_artifacts` is RLS-protected; registered in `server/config/rlsProtectedTables.ts`.
+
+**Idempotency posture (per checklist §10.1):** key-based on `(storage_provider, storage_key)`. **Retry classification (per checklist §10.2):** `safe` — the worker can retry uploads unconditionally; the unique index guarantees exactly-once row creation. **HTTP mapping for `23505` on the artifact upload endpoint:** 200 with the existing row id (idempotent hit), never bubbled as 500.
+
+**Source-of-truth precedence vs `iee_artifacts`.** `iee_artifacts` remains the worker-internal ledger of raw artifacts produced during IEE execution (used by IEE progress UI, transcription cache, dedup-by-content-hash inside the worker). `run_artifacts` is the customer-delivery ledger — only entries the customer can download via signed URL. When an IEE artifact is promoted to customer delivery, the worker copies the bytes to S3 and inserts a new `run_artifacts` row referencing the same `iee_run_id` plus the same `content_hash`; the original `iee_artifacts` row is never moved. Customer-facing UI reads `run_artifacts` only; the worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.
 
 #### 6.1.3 Service API
 
@@ -865,9 +931,14 @@ export const fileDeliveryService = {
 
 #### 6.1.4 Worker integration
 
-The IEE worker writes artifacts to `/tmp`, then calls `fileDeliveryService.upload` via a worker-local path that proxies to the main app (since the worker doesn't have direct S3 credentials). Alternative: the worker uploads directly to S3 with worker-scoped IAM credentials. Choice depends on existing worker IAM setup.
+The IEE worker produces artifact bytes (transcripts, source media) and delivers them to `fileDeliveryService.upload`. PDF reports are rendered in the main app per §4.4.3 (the worker does not render PDFs), so the worker's only direct upload responsibilities are the transcript and source media.
 
-**Open Decision:** see Section 11.2.
+There are two viable upload paths from the worker:
+
+- **Direct S3 upload** with worker-scoped IAM credentials (lower latency, no main-app round trip).
+- **Main-app proxy** where the worker streams to a main-app endpoint that does the S3 write (centralised auditing, single IAM trust boundary).
+
+Choice depends on whether the worker already has scoped IAM credentials in production. **Open Decision:** see Section 11.2.
 
 #### 6.1.5 UI integration
 
@@ -880,13 +951,13 @@ The Run Trace artifacts panel (Section 4.5.2) calls `GET /api/agent-runs/:runId/
 | `migrations/NNNN_run_artifacts.sql` + `.down.sql` | New table | +60 |
 | `server/db/schema/runArtifacts.ts` | Drizzle schema | +50 |
 | `server/services/fileDeliveryService.ts` | Service + S3 client integration | +280 |
-| `server/services/__tests__/fileDeliveryService.test.ts` | Unit + integration tests | +180 |
+| `server/services/__tests__/fileDeliveryServicePure.test.ts` | Pure-function tests: storage-key derivation, signed-URL TTL math, retain-until calculation | +120 |
+| `server/services/__tests__/fileDeliveryService.integration.test.ts` | Single integration test: upload + signed URL + download round-trip against a local S3 mock | +120 |
 | `server/config/rlsProtectedTables.ts` | Register new table | +1 |
 | `worker/src/lib/uploadArtifact.ts` | Worker-side upload helper | +80 |
 | `server/routes/agentRuns.ts` | New `/artifacts` route handler (Section 4.5.3) | +40 |
-| Tests | E2E test: worker writes, main app issues signed URL, download succeeds | +120 |
 
-**Total: ~810 LOC.**
+**Total: ~750 LOC.**
 
 #### 6.1.7 Effort estimate
 
@@ -908,32 +979,32 @@ The Run Trace artifacts panel (Section 4.5.2) calls `GET /api/agent-runs/:runId/
 
 ## 7. Test Strategy
 
-### 7.1 Test pyramid
+### 7.1 Test posture (per `docs/spec-context.md`)
 
-Same as the foundation refactor (Vitest, scope-tagged):
+Static-gates-primary, pure-function unit tests, no frontend/E2E/API-contract tests for the app itself. This MVP follows the same posture as the foundation refactor:
 
-- **Pure tests**: PDF rendering determinism, classification function purity, eval harness scoring math, signed URL generation logic
-- **Integration tests**: end-to-end 42 Macro run, end-to-end Support Inbox triage cycle, file upload + download flow
-- **Component tests**: Run Trace artifacts panel, Support Agent dashboard, eval surface
-- **Smoke tests**: full run on staging before merge
+- **Pure-function unit tests** (Vitest): PDF rendering determinism, classification scoring math, eval harness threshold logic, signed-URL generation, optimistic-claim predicate construction, redaction in agent prompts.
+- **Targeted integration tests** (Vitest, narrow): one for the worker → S3 upload → signed URL round-trip; one for the per-ticket atomic-claim contention case (two simultaneous runs against the same ticket). These are the two hot paths where pure tests cannot exercise the contract.
+- **New static gates** (`scripts/gates/`): `verify-support-agent-eval-thresholds.sh` (added by §5.5.4) is a CI-only static gate that reads the most recent eval run row and fails the build when classification accuracy or draft-judge score drops below the configured threshold. CI runs the gate; nobody runs it locally per the project test-gate policy.
+- **Manual smoke tests** before merge (§7.5).
+
+No frontend unit tests, no React component tests, no E2E tests of the Automation OS app. The framing assumption (`frontend_tests: none_for_now`, `e2e_tests_of_own_app: none_for_now`) is unchanged.
 
 ### 7.2 New test files
 
 | Test file | Coverage |
 |---|---|
-| `server/services/__tests__/reportRenderingService.test.ts` | PDF byte determinism, content-hash stability |
-| `server/services/__tests__/fileDeliveryService.test.ts` | Upload, signed URL, list, delete |
-| `server/services/__tests__/supportClassifyTicket.test.ts` | Classification accuracy on fixture set |
-| `server/services/__tests__/supportEvalHarness.test.ts` | Threshold checks, drift detection |
-| `client/src/components/run-trace/__tests__/RunTraceArtifactsPanel.test.tsx` | Artifact list rendering, signed URL fetch, preview |
-| `client/src/pages/operate/__tests__/SupportAgentDashboard.test.tsx` | Inbox status pill, mode toggle |
-| `client/src/components/support/__tests__/InboxAgentConfigTab.test.tsx` | Per-inbox config save |
-| `tests/integration/macroRunEndToEnd.test.ts` | Full 42 Macro run with mocked browser + S3 |
-| `tests/integration/supportTriageEndToEnd.test.ts` | Full Support Agent triage cycle with seeded tickets |
+| `server/services/__tests__/reportRenderingServicePure.test.ts` | PDF rendering math: layout deterministic, content-hash stability across re-renders for the same input |
+| `server/services/__tests__/fileDeliveryServicePure.test.ts` | Storage-key derivation, signed-URL TTL math, retain-until calculation |
+| `server/services/__tests__/fileDeliveryService.integration.test.ts` | Single integration test: upload + signed URL + download round-trip against a local S3 mock |
+| `server/services/__tests__/supportClassifyTicketPure.test.ts` | Pure scoring helpers; intent enum coverage on a small fixture set |
+| `server/services/__tests__/supportEvalHarnessPure.test.ts` | Threshold checks, drift detection math, judge-prompt construction |
+| `server/services/__tests__/supportAgentClaimPure.test.ts` | Optimistic-claim predicate construction, TTL math, terminal-verdict enum coverage |
+| `server/services/__tests__/supportAgentClaim.integration.test.ts` | Single integration test: two concurrent agent runs targeting the same ticket; exactly one wins the claim, the other emits `phase1.support.collision_skipped` |
 
-### 7.3 Eval-as-test
+### 7.3 Eval-as-static-gate
 
-The Support Agent eval harness (Section 5.5) doubles as a regression test. Daily eval runs that drop below thresholds fail the build for that day's deploy candidate (CI gate `verify-support-agent-eval-thresholds.sh`).
+The Support Agent eval harness (Section 5.5) doubles as the only meaningful regression check for agent-quality drift. The CI gate `scripts/gates/verify-support-agent-eval-thresholds.sh` (authored as part of §5.5.4) reads the most recent `support_eval_runs` row and fails the build when classification accuracy or draft-judge score drops below the configured threshold for two consecutive runs. Single-run dips do not fail the build (avoids judge-variance noise). CI runs the gate; nobody runs it locally.
 
 ### 7.4 Existing tests
 
@@ -973,19 +1044,23 @@ Total: **6 to 8 weeks** if both MVPs run in parallel (one engineer per MVP plus 
 - One PR per logical chunk; suggest 8 to 12 PRs to keep each reviewable.
 - Each PR through spec-conformance, pr-reviewer, dual-reviewer (where Codex available) before merge.
 
-### 8.3 Feature flags
+### 8.3 Per-subaccount enablement (no feature flags)
 
-| Flag | Default | Cleanup |
+Per the project's pre-production posture, this MVP ships without feature flags. Per-subaccount enablement is achieved through existing behaviour-mode primitives, not boolean flags:
+
+| Control | Mechanism | Default |
 |---|---|---|
-| `RUN_ARTIFACTS_API_V1` | off until file delivery ships | on after one week of dogfooding |
-| `SUPPORT_AGENT_ENABLED_PER_SUBACCOUNT` | off (per-subaccount opt-in) | per-subaccount; permanent flag for customer rollout control |
-| `SUPPORT_AGENT_AUTONOMOUS_MODE_ALLOWED` | true (gated by inbox config anyway) | always on; flag for emergency disable |
+| Whether the Support Agent runs at all in a subaccount | `subaccount_agents.is_active` (existing column) | `false` until the operator opts the subaccount in |
+| Whether the agent dispatches replies autonomously vs always queues for review | `canonical_inboxes.agent_config.mode` ∈ {`disabled`, `assisted`, `autonomous`} (existing field) | `disabled` for new inboxes; bumped to `assisted` when the agent is wired to the inbox |
+
+The artifacts API ships with its migration; it cannot return rows before the migration runs and the read endpoint is harmless against an empty table.
 
 ### 8.4 Rollback plan
 
 - Each migration has `.down.sql`.
-- Feature flags allow per-customer rollback without code revert.
-- The Support Agent run can be paused per-subaccount by flipping the agent's `is_active=false` on `subaccount_agents`.
+- Per-subaccount disable: flip `subaccount_agents.is_active=false`. The Support Agent run pauses immediately on the next scheduled tick.
+- Per-inbox disable: set `canonical_inboxes.agent_config.mode='disabled'`. The agent skips that inbox on the next run.
+- Code revert: standard commit-and-revert; no feature-flag flush needed.
 
 ### 8.5 Production verification
 
@@ -1010,12 +1085,12 @@ After merge:
 - [ ] Artifacts panel renders below the tool tree with Preview / Download / Copy link affordances.
 - [ ] Login failure produces a clear failure mode in Run Trace and triggers an admin alert.
 - [ ] Stale-run detector (`staleMacroRunDetector`) fires when a run is stuck.
-- [ ] All performance baselines from the foundation refactor remain within tolerance.
+- [ ] No regression on existing 42 Macro run wall-clock duration: 95th percentile end-to-end run time after MVP changes is within 1.25x of the pre-MVP baseline, measured on the staging dogfood run for one week. Baseline captured at the start of the build phase and recorded in `tasks/builds/phase-1-showcase-mvps/progress.md`.
 
 ### 9.2 Support Inbox MVP
 
-- [ ] Support Agent record exists with locked master prompt and the 13 listed skills.
-- [ ] `support.classify_ticket` skill returns valid output for the regression set with >= 85% accuracy per intent.
+- [ ] Support Agent record exists with locked master prompt and the 12 listed default skills (11 `support.*` + `ask_clarifying_question`).
+- [ ] `support.classify_ticket` skill returns valid output for the regression set; classification accuracy meets the **initial threshold (>= 85% per intent)** OR a tuned-during-pilot threshold formally agreed with Product before lock-in. Threshold is tunable for the duration of the pilot per §10 Risk Register entry "Eval threshold too strict".
 - [ ] Support Agent run on a seeded inbox produces drafts in `canonical_ticket_drafts`.
 - [ ] Assisted mode: drafts route to review queue and Slack Block Kit; human approval triggers three-phase dispatch.
 - [ ] Autonomous mode: agent auto-approves drafts per inbox policy; three-phase dispatch fires without human.
@@ -1051,6 +1126,24 @@ After merge:
 | Support Agent runs eat token budget faster than expected | Medium | Medium | Per-subaccount budget on `subaccountAgents.tokenBudgetPerRun`; alert at 80% per-month spend |
 | `classify_ticket` cache invalidation issues (stale classifications) | Low | Low | Cache key includes last message external id; stale cache impossible by design |
 | Foundry-vs-runtime ticket-shape drift surfacing in agent | Low | High | Inherited risk from support-desk-canonical OQ-1; daily cross-check in eval |
+
+---
+
+## 10.5 Deferred Items
+
+Per the spec-authoring checklist § Section 7, every item that prose calls out as "deferred", "later", "Phase N+1 will", "future", or "out of scope" appears here. The Non-Goals in §2.2 and the deferral notes in §1.4 / §5.1.2 are summarised below.
+
+- **SLA tracking primitives.** Phase 1 MVP treats canonical_tickets `sla_due_at` / `sla_breached` / `sla_policy_external_id` as inert provider metadata only. Phase 1.5 or Phase 2 will add SLA classification, age-based escalation, breach alerts, and the supporting dashboards. Reason: §16.2 brief capability not in §18.1 showcase scope.
+- **Recurring-problem detection / clustering.** Phase 2 ships clustering of similar tickets, vector embeddings of email bodies, and "these N tickets are the same bug" aggregation. Reason: §16.2 brief capability not in §18.1 showcase scope.
+- **Knowledge-base search in the Support Agent.** Phase 1 Support Agent does NOT include `search_knowledge_base` or `web_search` in its default skill set. Phase 2 adds vector search, semantic ranking, and broader knowledge-base lookup. Reason: §16.2 brief capability not in §18.1 showcase scope.
+- **Operator Controller for the Support Agent.** Phase 3 will introduce full Operator Controller for support investigation. Phase 1 light Operator escalation = `assign + internal note + Run Trace event` (flag-for-human, not a long-running autonomous loop). Reason: brief §5.2 explicitly defers Operator Controller until Phase 3.
+- **Operator Session Identity (ChatGPT OAuth as session-based model identity).** Phase 3 spec, locked in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Section 4 Decision 3. Phase 1 uses platform Anthropic API only.
+- **PDF report run-over-run delta section.** Phase 2 adds "delta from yesterday" once we have run-over-run comparison data. Phase 1 PDF has a fixed shape per §4.4.2.
+- **Dedicated `agentRunCompletedHandler` job.** Phase 1 reuses the existing `server/jobs/ieeRunCompletedHandler.ts`. A dedicated handler may emerge later if non-IEE-mode runs need PDF output; not required for the MVP.
+- **Worker-direct S3 IAM.** Open Decision 11.2 — Phase 1 may proxy through the main app if worker-scoped IAM is not already configured; Phase 2 moves to direct upload regardless.
+- **Haiku-classify routing.** Open Decision 11.3 — Phase 1 uses Sonnet for both classify and draft; Phase 1.5 adds Haiku-classify routing once cost data is in.
+- **Generic skill-result cache.** Open Decision 11.4 ships a dedicated `support_skill_result_cache` if the cache decision lands. Phase 1.5 may merge it into a generic skill-result cache.
+- **Run-artifacts retry endpoint.** Phase 1 fails the run on S3 upload error and recovers via re-run. A `retry_after` / partial-state schema arrives only if the simpler approach proves insufficient in production.
 
 ---
 
