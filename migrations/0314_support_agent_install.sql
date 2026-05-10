@@ -35,4 +35,4 @@ INSERT INTO system_agents (
   'claude-sonnet-4-6',
   '["support.list_open_tickets","support.read_thread","support.classify_ticket","support.find_customer_history","support.propose_reply","support.add_internal_note","support.approve_draft","support.reject_draft","support.assign","support.set_status","support.tag","support.set_custom_field"]'::jsonb,
   'subaccount'
-) ON CONFLICT (slug) DO NOTHING;
+) ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING;

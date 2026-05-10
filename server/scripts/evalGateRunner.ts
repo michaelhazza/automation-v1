@@ -5,6 +5,8 @@
 //
 // Run via: node --import tsx/esm server/scripts/evalGateRunner.ts
 // Requires: DATABASE_URL and EVAL_ORG_ID environment variables.
+//
+// allowed-raw-console: standalone CI gate script, runs outside app boot — no structured logger context available.
 
 import { desc, eq, and } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
