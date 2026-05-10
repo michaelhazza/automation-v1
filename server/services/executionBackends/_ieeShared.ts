@@ -307,7 +307,10 @@ export async function ieeFinalise(
       await tx
         .update(ieeRuns)
         .set({ eventEmittedAt: new Date(), updatedAt: new Date() })
-        .where(eq(ieeRuns.id, ieeRun.id));
+        .where(and(
+          eq(ieeRuns.id, ieeRun.id),
+          eq(ieeRuns.organisationId, ieeRun.organisationId),
+        ));
     }
     return { finalised: false, parentTerminalStatus: parentRun.status };
   }
@@ -398,6 +401,7 @@ export async function ieeFinalise(
       })
       .where(and(
         eq(agentRuns.id, parentRun.id),
+        eq(agentRuns.organisationId, parentRun.organisationId as string),
         inArray(agentRuns.status, ['pending', 'running', 'delegated', 'cancelling'] as const),
         isNull(agentRuns.completedAt),
         isNull(agentRuns.runResultStatus),
@@ -418,7 +422,10 @@ export async function ieeFinalise(
     await tx
       .update(ieeRuns)
       .set({ eventEmittedAt: new Date(), updatedAt: new Date() })
-      .where(eq(ieeRuns.id, ieeRun.id));
+      .where(and(
+        eq(ieeRuns.id, ieeRun.id),
+        eq(ieeRuns.organisationId, ieeRun.organisationId),
+      ));
   }
 
   // Build the post-commit emit closure ONLY when the transition fired.

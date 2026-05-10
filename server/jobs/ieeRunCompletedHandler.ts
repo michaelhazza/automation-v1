@@ -20,12 +20,12 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { finaliseAgentRunFromBackend } from '../services/agentRunFinalizationService.js';
+import { deriveBackendIdFromIeeType } from '../services/agentRunFinalizationServicePure.js';
 import {
   ieeRunCompletedPayloadSchema,
   SUPPORTED_IEE_EVENT_VERSION,
   type IeeRunCompletedPayload,
 } from '../services/executionBackends/_ieeShared.js';
-import type { ExecutionBackendId } from '../services/executionBackends/types.js';
 import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -92,7 +92,7 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
       }
 
       try {
-        const backendId: ExecutionBackendId = ieeRun.type === 'browser' ? 'iee_browser' : 'iee_dev';
+        const backendId = deriveBackendIdFromIeeType(ieeRun.type);
         await finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRun.id });
       } catch (err) {
         logger.error('iee.run_completed.finalise_failed', {

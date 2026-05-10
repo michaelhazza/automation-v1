@@ -585,3 +585,24 @@ describe('ExecutionBackend mismatch invariant — api / headless / claude-code a
     });
   });
 });
+
+// Acceptance criterion §16 #14 — IEE event handler legacy fallback. When a
+// pre-cutover `agent_runs` row has `backend_id IS NULL`, the handler MUST
+// derive the backend id from `iee_runs.type` rather than reading
+// `agent_runs.backend_id`. The derivation is a pure mapping; this test
+// guards against a regression in the truth table without requiring a DB.
+describe('IEE handler — backend-id derivation (acceptance §16 #14)', () => {
+  it("maps ieeRun.type='browser' -> 'iee_browser'", async () => {
+    const { deriveBackendIdFromIeeType } = await import(
+      '../../agentRunFinalizationServicePure.js'
+    );
+    expect(deriveBackendIdFromIeeType('browser')).toBe('iee_browser');
+  });
+
+  it("maps ieeRun.type='dev' -> 'iee_dev'", async () => {
+    const { deriveBackendIdFromIeeType } = await import(
+      '../../agentRunFinalizationServicePure.js'
+    );
+    expect(deriveBackendIdFromIeeType('dev')).toBe('iee_dev');
+  });
+});

@@ -128,3 +128,17 @@ function formatObjectOutput(
   const reason = run.failureReason ?? 'unknown';
   return `IEE ${run.type} task failed (${reason})`;
 }
+
+/**
+ * Map an `iee_runs.type` discriminator to the corresponding execution-backend
+ * id. The IEE event handler routes via this mapping when finalising a parent
+ * `agent_runs` row that has `backend_id IS NULL` (pre-cutover legacy rows) —
+ * see acceptance criterion §16 #14 in the Execution Backend Adapter Contract
+ * spec. Pure so the legacy-fallback contract has unit-level coverage without
+ * requiring a DB.
+ */
+export function deriveBackendIdFromIeeType(
+  ieeType: 'browser' | 'dev',
+): 'iee_browser' | 'iee_dev' {
+  return ieeType === 'browser' ? 'iee_browser' : 'iee_dev';
+}

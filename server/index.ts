@@ -645,32 +645,43 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // Execution-backend adapter registration (Execution Backend Adapter Contract
+  // spec § 8.3). Every adapter MUST be registered against
+  // `executionBackendRegistry` at boot, regardless of the queue backend in
+  // use, because `executeRun` resolves `executionBackendRegistry.resolve(id)`
+  // on every dispatch — including the three non-delegated adapters
+  // (`api`, `headless`, `claude-code`) which have no pg-boss dependency.
+  // Coupling registration to `JOB_QUEUE_BACKEND === 'pg-boss'` would render
+  // dispatch broken for ALL modes when an alternate queue backend is
+  // selected. Registration is therefore unconditional; the IEE event handler
+  // (which DOES require pg-boss) is attached separately in the pg-boss block
+  // below.
+  try {
+    const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
+    const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
+    const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
+    const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
+    const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
+    executionBackendRegistry.register(ieeBrowserBackend);
+    executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(apiBackend);
+    executionBackendRegistry.register(headlessBackend);
+    executionBackendRegistry.register(claudeCodeBackend);
+  } catch (err) {
+    console.error('[boot] failed to register execution backends', err);
+  }
+
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
   // Consumes pg-boss events emitted by the worker after terminal iee_runs
-  // writes, and finalises the parent agent_runs row accordingly.
-  //
-  // Boot ordering invariant (Execution Backend Adapter Contract spec § 8.3):
-  // every delegated adapter MUST be registered against
-  // `executionBackendRegistry` BEFORE the pg-boss worker that consumes its
-  // terminal events starts pulling jobs. The handler resolves
+  // writes, and finalises the parent agent_runs row accordingly. Boot
+  // ordering invariant: adapter registration above must complete BEFORE the
+  // handler attaches, because the handler resolves
   // `finaliseAgentRunFromBackend` -> `executionBackendRegistry.resolve(id)`
-  // on every event; an unregistered id throws `BackendNotRegistered` and
-  // pg-boss DLQs the job. Registration is therefore done first, in the
-  // same `pg-boss` boot block, before `registerIeeRunCompletedHandler`.
+  // on every event and an unregistered id throws `BackendNotRegistered`.
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();
-      const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
-      const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
-      const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
-      const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
-      const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
-      const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
-      executionBackendRegistry.register(ieeBrowserBackend);
-      executionBackendRegistry.register(ieeDevBackend);
-      executionBackendRegistry.register(apiBackend);
-      executionBackendRegistry.register(headlessBackend);
-      executionBackendRegistry.register(claudeCodeBackend);
       const { registerIeeRunCompletedHandler } = await import('./jobs/ieeRunCompletedHandler.js');
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {

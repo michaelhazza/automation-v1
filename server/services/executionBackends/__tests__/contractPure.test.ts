@@ -218,8 +218,11 @@ describe('ExecutionBackend contract — module-source guard (acceptance § 16 #1
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
 
+    // Match `from '<path>/agentExecutionService.{js,ts}'` precisely. Excludes
+    // sibling pure files like `agentExecutionServicePure.{js,ts}` which legitimately
+    // share the prefix.
     const offendingImport =
-      /from\s+['"][^'"]*agentExecutionService[^'"]*['"]/.exec(sourceWithoutComments);
+      /from\s+['"][^'"]*agentExecutionService\.(?:js|ts)['"]/.exec(sourceWithoutComments);
 
     expect(
       offendingImport,
@@ -246,12 +249,12 @@ describe('ExecutionBackend contract — module-source guard (acceptance § 16 #1
       .replace(/^\s*\/\/.*$/gm, '');
 
     // Match any `import` line that:
-    //   - references agentExecutionService in the module specifier, AND
+    //   - references `agentExecutionService.{js,ts}` (precisely — NOT
+    //     `agentExecutionServicePure.{js,ts}` which legitimately shares the
+    //     filename prefix), AND
     //   - is NOT an `import type` line.
-    // Regex: starts with `import` (not `import type`), then eventually
-    // reaches a module specifier containing agentExecutionService.
     const runtimeImport =
-      /^import\s+(?!type\s)[\s\S]*?from\s+['"][^'"]*agentExecutionService[^'"]*['"]/m.exec(
+      /^import\s+(?!type\s)[\s\S]*?from\s+['"][^'"]*agentExecutionService\.(?:js|ts)['"]/m.exec(
         sourceWithoutComments,
       );
 
@@ -262,4 +265,53 @@ describe('ExecutionBackend contract — module-source guard (acceptance § 16 #1
         `(cycle prevention). Found: ${runtimeImport?.[0] ?? '<none>'}`,
     ).toBeNull();
   });
+
+  // DEVELOPMENT_GUIDELINES § 8.32 — cycle-prevention coverage rule. The
+  // dispatch chain after the Chunk-5 cutover is:
+  //
+  //   agentExecutionService.ts -> registry.ts -> {api,headless,claude-code,
+  //                                              iee_browser,iee_dev}Backend.ts
+  //                                            -> {_apiHeadlessShared.ts,
+  //                                               _ieeShared.ts}
+  //
+  // Any of these files could silently re-introduce the cycle in a future
+  // edit (for example, importing `executeRun` for a callback parameter, or
+  // pulling a helper that itself reaches back into agentExecutionService).
+  // The §8.32 rule requires the assertion cover every file in the chain,
+  // not only the leaf type files.
+  const cycleChainFiles = [
+    'registry.ts',
+    '_ieeShared.ts',
+    '_apiHeadlessShared.ts',
+    'apiBackend.ts',
+    'headlessBackend.ts',
+    'claudeCodeBackend.ts',
+    'ieeBrowserBackend.ts',
+    'ieeDevBackend.ts',
+  ] as const;
+
+  it.each(cycleChainFiles)(
+    '%s does NOT have a runtime (non-type) import from agentExecutionService.ts (cycle prevention)',
+    (filename) => {
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      const filePath = path.resolve(here, '..', filename);
+      const source = readFileSync(filePath, 'utf8');
+
+      const sourceWithoutComments = source
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+
+      const runtimeImport =
+        /^import\s+(?!type\s)[\s\S]*?from\s+['"][^'"]*agentExecutionService\.(?:js|ts)['"]/m.exec(
+          sourceWithoutComments,
+        );
+
+      expect(
+        runtimeImport,
+        `executionBackends/${filename} MUST NOT have a runtime import from ` +
+          `agentExecutionService.ts — use \`import type\` only ` +
+          `(DEVELOPMENT_GUIDELINES § 8.32). Found: ${runtimeImport?.[0] ?? '<none>'}`,
+      ).toBeNull();
+    },
+  );
 });
