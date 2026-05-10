@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-10
-last_merge_ready_pr: #281
-last_merge_ready_slug: execution-backend-adapter-contract
-last_merge_ready_branch: claude/sandbox-execution-provider-DLfjn
-last_merged_pr: #279
-last_merged_slug: synthetos-foundation-refactor
-last_merged_branch: claude/openclaw-worker-mode-VnjQT
-last_merged_at: 2026-05-09T23:39:33Z
-last_merged_commit: 53dabb69
+last_merged_pr: #281
+last_merged_slug: execution-backend-adapter-contract
+last_merged_branch: claude/sandbox-execution-provider-DLfjn
+last_merged_at: 2026-05-10T11:28:00Z
+last_merged_commit: 446cfcc9
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — PR #281 (`execution-backend-adapter-contract`) is ready to merge. Phase 3 finalisation complete: S2 sync (auto-resolved KNOWLEDGE.md union + current-focus.md ours; merged commits `2e6089ad` PR #282 actionRegistry + `18deec86` chore) → G4 regression guard PASS (lint 0 errors, typecheck clean) → chatgpt-pr-review 3 rounds (Round 1 CHANGES_REQUESTED — 5 findings B1/B2/T1/T2/T3 auto-applied in `33d724f6`; Round 2 APPROVED with 1 optional polish P1 in `f9588578`; Round 3 APPROVED with 0 findings + finalisation in `01051c78`) → doc-sync sweep complete (13 verdicts recorded; old `docs/iee-delegation-lifecycle-spec.md` marked superseded with rename pairs cited) → KNOWLEDGE.md +9 entries (5 from chatgpt-pr-review finalisation + 4 from Phase 2 build) → tasks/todo.md unchanged (5 EBAC-* deferred items remain open: EBAC-DG-1 F2 legacy-fallback test, EBAC-DG-2 CostModel value-set, EBAC-ADV-2 IEE worker stuck-pair, EBAC-ADV-3 claudeCodeRunner exec safety, EBAC-PR3-S1 orphan-stamp integration test). ready-to-merge label applied 2026-05-10T11:06:47Z. CI fires once on the final post-Phase-3 commit.
+**Status:** **NONE** — no build in flight.
+
+**Just merged:** PR #281 — `execution-backend-adapter-contract` (squash-commit `446cfcc9`, 2026-05-10T11:28:00Z). Generalised IEE delegation lifecycle into a named `ExecutionBackend` contract. Five existing `executionMode` values become typed adapter implementations; zero behaviour change in V1. Key deliverables: `server/services/executionBackends/` registry + 5 adapters, `server/services/agentExecutionTypes.ts` neutral types, `server/services/agentExecutionLoop.ts` extracted loop module, migration 0313 (`preferred_backends` JSONB + `execution_backend_id` on `agent_runs`), `finaliseAgentRunFromBackend` rename, `maintenance:backend-reconciliation` cron rename. Phase 3 finalisation: S2 merged `2e6089ad`+`18deec86` cleanly → G4 PASS → chatgpt-pr-review 3 rounds (B1 fatal boot, B2 backendTaskId null, T1 ParentRunNotDispatchable rethrow, T2 FinaliseRequiresDelegatedAdapter, T3+P1 comment polish) → doc-sync sweep 14 verdicts (iee-delegation-lifecycle-spec.md marked superseded) → KNOWLEDGE.md +9 entries → CI fix commit `3cd199eb` (3 console.warn → logger.warn, gate updated for loop extraction) → CI ALL GREEN → auto-merged. Squash SHA: `446cfcc9`. Phase 3 handoff: `tasks/builds/execution-backend-adapter-contract/handoff.md`. 5 EBAC-* items remain in `tasks/todo.md` (EBAC-DG-1/2, EBAC-ADV-2/3, EBAC-PR3-S1).
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 
@@ -89,7 +88,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-09T23:39:33Z (PR #279 `synthetos-foundation-refactor` MERGED; status → NONE; squash-commit `53dabb69` to be patched on main per Step 12.4)
+**Last updated:** 2026-05-10T11:28:00Z (PR #281 `execution-backend-adapter-contract` MERGED; status → NONE; squash-commit `446cfcc9`)
 
 ---
 
