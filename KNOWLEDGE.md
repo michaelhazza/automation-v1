@@ -3389,6 +3389,42 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 
 **Detection heuristic.** When introducing a new namespaced log code (`<feature>.<event>`), grep the file for both `console.log('<code>` and `logger.info('<code>` — only the structured form should appear.
 
+## Pattern: actionRegistry directory-shim split (refactor-action-registry, 2026-05-10)
+
+**Context.** The monolithic `server/config/actionRegistry.ts` (3971 lines) was split into per-domain modules under `server/config/actionRegistry/` as part of the refactor-action-registry build.
+
+**Directory shape:**
+
+```
+server/config/actionRegistry/
+  types.ts          — ActionDefinition type + factory helper types (unchanged)
+  factories.ts      — nine deep-module factory functions (unchanged)
+  core.ts           — capability discovery, email/tasks, devops, workflow entries
+  intelligence.ts   — cross-subaccount intelligence, universal skills, social media
+  agents.ts         — ads, CRM, finance, content/SEO, knowledge management
+  methodology.ts    — read_priority_feed, search_agent_history, 31 methodology skills
+  configuration.ts  — config-write skills, Phase G digest skills, workflow.run.start
+  clientpulse.ts    — crm.* actions, notify_operator, cached_context_budget_breach
+  commerce.ts       — spend skills, promote_spending_policy_to_live
+  support.ts        — support.* actions
+  index.ts          — assembles all domains, runs IIFE, exports all helpers/constants
+```
+
+`server/config/actionRegistry.ts` is a 3-line re-export shim (`export * from './actionRegistry/index.js'`). All callers resolve unchanged.
+
+**Key constraints:**
+
+1. **Insertion order.** The spread order in `index.ts` must match the original file's section order: `coreActions, intelligenceActions, agentsActions, methodologyActions, configurationActions, clientpulseActions, commerceActions, supportActions`. V8 preserves insertion order for non-integer string keys.
+
+2. **IIFE runs AFTER all spreads.** `applyRuntimeCheckCoverageDefaults` mutates `ACTION_REGISTRY` post-construction. It must appear in `index.ts` after the final spread, never in a domain module.
+
+3. **IIFE-target factories must not pre-populate IIFE-owned fields; inline-bucket factories must.** `verify`, `verifyNullJustification`, `reversible`, and `blastRadius` are set by the trailing IIFE sweep for entries that don't set them inline. The seven IIFE-target factories (`defineCanonicalRead`, `defineInternalRead`, `defineExternalRead`, `defineInternalStateWrite`, `defineExternalWrite`, `defineConfigWrite`, `defineMethodologySkill`) must leave these fields `undefined` so the IIFE can apply the bucket-correct defaults — pre-populating breaks the IIFE. The two inline-bucket factories (`defineCustomerMessagingWrite`, `defineSpendWrite`) DO pre-populate these because the original source's customer-messaging and spend entries carried inline justification strings that must be preserved byte-for-byte.
+
+4. **Diff-test gate is the correctness oracle.** `scripts/diff-action-registry.ts` compares the built registry against `scripts/snapshots/action-registry.snapshot.json`. A pure file relocation produces zero semantic diff. Never modify the snapshot file — CI maintains it.
+
+5. **Direct-object exceptions.** Roughly 25-30 entries don't fit any factory and stay as direct object literals in the relevant domain module. Common reasons: `actionCategory: 'api'` for internal reads (factories hardcode `'worker'`), entries with no `mcp` field (factories pre-populate it), unique `defaultGateLevel: 'block'`, dotted slugs, non-standard fields like `scopeRequirements`/`onFailure`, and customer-messaging-shaped entries whose IIFE-derived `blastRadius: 'tenant'` would shift to `'external'` under `defineCustomerMessagingWrite`. Each direct-object entry carries an inline comment naming the divergence.
+
+**Why this matters.** The shim pattern is zero-cost for callers: `import { ACTION_REGISTRY } from 'server/config/actionRegistry.js'` still works. Adding a new skill means editing only the relevant domain module (e.g. `core.ts` for a new capability skill). The diff-test gate catches semantic drift without manual inspection of 3000-line diffs.
 
 ## Pattern: chatgpt-spec-review automated mode saturates around round 3 — stop on re-raise majority
 
