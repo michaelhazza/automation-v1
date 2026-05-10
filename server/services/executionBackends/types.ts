@@ -496,3 +496,30 @@ export class BackendTaskAlreadyClaimed extends Error {
     this.backendTaskId = backendTaskId;
   }
 }
+
+/**
+ * Thrown by `finaliseAgentRunFromBackend` when the resolved adapter does not
+ * declare the `'delegated'` capability (or is missing `loadTerminalState`/
+ * `finalise`). Calling finalisation against `api`, `headless`, or
+ * `claude-code` is a programmer error — those adapters finalise inline via
+ * the post-completion block in `agentExecutionService.ts` and have no
+ * canonical terminal-state table for the orchestrator to read. The registry
+ * already validates delegated adapters at registration, so this only fires
+ * if a caller hands the orchestrator a non-delegated id (config drift,
+ * stale event payload, or a hand-written reconciliation invocation that
+ * picked the wrong id). Treating it as a silent no-op (returning `false`)
+ * makes a bad call look like an idempotent skip; throwing surfaces the
+ * misuse so callers fix it instead of accumulating ghost no-ops in the
+ * job logs.
+ */
+export class FinaliseRequiresDelegatedAdapter extends Error {
+  readonly backendId: string;
+  constructor(backendId: string) {
+    super(
+      `FinaliseRequiresDelegatedAdapter: adapter '${backendId}' does not declare the 'delegated' capability ` +
+        `(or is missing loadTerminalState / finalise). Finalisation is only valid for delegated adapters.`,
+    );
+    this.name = 'FinaliseRequiresDelegatedAdapter';
+    this.backendId = backendId;
+  }
+}

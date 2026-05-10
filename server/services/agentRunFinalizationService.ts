@@ -39,7 +39,10 @@ import {
   computeMeaningfulOutputPure,
 } from './agentRunFinalizationServicePure.js';
 import { executionBackendRegistry } from './executionBackends/registry.js';
-import type { ExecutionBackendId } from './executionBackends/types.js';
+import {
+  FinaliseRequiresDelegatedAdapter,
+  type ExecutionBackendId,
+} from './executionBackends/types.js';
 
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths.
@@ -136,10 +139,14 @@ export async function updateMeaningfulRunTracking(
  *
  * Errors:
  *   - `BackendNotRegistered` if the registry has no adapter for `backendId`.
- *   - Capability mismatch (resolved adapter is not delegated) is logged
- *     and treated as a no-op rather than thrown — pg-boss workers do not
- *     need to crash on a config drift, the cron will not call us with a
- *     non-delegated id, and a warn logline is sufficient signal.
+ *   - `FinaliseRequiresDelegatedAdapter` if the resolved adapter is not
+ *     delegated (or is missing `loadTerminalState` / `finalise`). The
+ *     registry already validates delegated adapters at registration, so
+ *     this only trips on caller misuse (stale event payload, wrong
+ *     `backendId` in a reconciliation invocation, etc.). Returning `false`
+ *     here would make a programmer error look like a recoverable
+ *     idempotent skip; throwing surfaces it so the caller is fixed
+ *     instead of accumulating silent no-ops in the worker logs.
  *   - Adapter-level throws propagate unchanged (the tx aborts, caller logs).
  */
 export async function finaliseAgentRunFromBackend(args: {
@@ -152,14 +159,17 @@ export async function finaliseAgentRunFromBackend(args: {
   // Capability-gate sanity check. The registry's `register()` already
   // enforces that 'delegated' adapters declare `loadTerminalState` /
   // `finalise`, so this can only trip if a caller hands us a
-  // non-delegated id (api/headless/claude-code).
+  // non-delegated id (api/headless/claude-code) — which is a programmer
+  // error, not a recoverable reconciliation result. Throw a typed error
+  // so the misuse is visible in worker logs and crashes the consumer
+  // (pg-boss retry / DLQ machinery handles the rest).
   if (
     !adapter.capabilities.includes('delegated') ||
     typeof adapter.loadTerminalState !== 'function' ||
     typeof adapter.finalise !== 'function'
   ) {
-    logger.warn('agentRunFinalization.non_delegated_adapter', { backendId });
-    return false;
+    logger.error('agentRunFinalization.non_delegated_adapter', { backendId });
+    throw new FinaliseRequiresDelegatedAdapter(backendId);
   }
 
   let postCommit: (() => Promise<void>) | undefined;

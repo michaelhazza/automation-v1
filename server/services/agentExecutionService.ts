@@ -1616,42 +1616,28 @@ export const agentExecutionService = {
           // The parent run moved past the delegation window before the
           // adapter could claim it (cancellation racing dispatch, or a
           // duplicate dispatch). The adapter has already written the
-          // backend-side orphan-cleanup row. Surface the parent's
-          // current terminal status so the caller sees a consistent
-          // result rather than a 5xx.
-          const [currentRow] = await db
-            .select({ status: agentRuns.status })
-            .from(agentRuns)
-            .where(eq(agentRuns.id, run.id))
-            .limit(1);
-          const observedStatus = currentRow?.status ?? 'failed';
+          // backend-side orphan-cleanup row.
+          //
+          // Plan § 8 / spec § 13.1.1 contract: this catch MUST map to the
+          // EXACT existing race-loser response shape currently returned by
+          // the pre-cutover dispatch path, if one exists. The pre-cutover
+          // codepath had no such shape — orphan-cleanup is a new lifecycle
+          // surface introduced by this contract — so the plan explicitly
+          // says: "rethrow and document the behaviour in the PR — do not
+          // invent a silent success response (no 5xx, no panic)."
+          //
+          // Rethrow with a structured warn line so operators see the race
+          // in logs. The route layer's existing error envelope renders
+          // typed errors as a 4xx (this is a client-observable race, not a
+          // 5xx server fault). A deliberate AgentRunResult shape for this
+          // case can be added later once the desired client-visible shape
+          // is decided — that is a behaviour change, out of scope here.
           logger.warn('agentExecutionService.parent_not_dispatchable', {
             runId: run.id,
             mode: effectiveMode,
-            observedStatus,
             reason: err.reason,
           });
-          // Map to the closed `AgentRunResult.status` union — non-terminal
-          // observed values fall back to 'failed' for the response (the
-          // row itself is unchanged).
-          const responseStatus: AgentRunResult['status'] =
-            observedStatus === 'completed' ? 'completed'
-            : observedStatus === 'failed' ? 'failed'
-            : observedStatus === 'timeout' ? 'timeout'
-            : observedStatus === 'loop_detected' ? 'loop_detected'
-            : observedStatus === 'budget_exceeded' ? 'budget_exceeded'
-            : 'failed';
-          return {
-            runId: run.id,
-            status: responseStatus,
-            summary: null,
-            totalToolCalls: 0,
-            totalTokens: 0,
-            durationMs: Date.now() - startTime,
-            tasksCreated: 0,
-            tasksUpdated: 0,
-            deliverablesCreated: 0,
-          };
+          throw err;
         }
         throw err;
       }

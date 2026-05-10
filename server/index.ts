@@ -656,20 +656,32 @@ async function start() {
   // selected. Registration is therefore unconditional; the IEE event handler
   // (which DOES require pg-boss) is attached separately in the pg-boss block
   // below.
+  // Adapter registration is fatal at boot. Spec § 8.2 makes registration
+  // validation a boot-time safety boundary: adapters that fail validation
+  // never reach dispatch. If validation throws (capability violation,
+  // queue/storage drift, sandbox-requirement enum drift), letting the app
+  // continue to start would leave the registry partial or empty — every
+  // later `executionBackendRegistry.resolve(id)` would throw at runtime,
+  // so a 500 on every dispatch is strictly worse than crashing on boot
+  // with a clear log line. Mirrors the same fatal-on-failure contract as
+  // the other required boot dependencies above. Order matches spec § 8.3:
+  // `api`, `headless`, `claude-code`, `iee_browser`, `iee_dev` — order is
+  // log-output only; the registry is a map.
   try {
     const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
-    const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
-    const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
     const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
     const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
     const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
-    executionBackendRegistry.register(ieeBrowserBackend);
-    executionBackendRegistry.register(ieeDevBackend);
+    const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
+    const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
     executionBackendRegistry.register(apiBackend);
     executionBackendRegistry.register(headlessBackend);
     executionBackendRegistry.register(claudeCodeBackend);
+    executionBackendRegistry.register(ieeBrowserBackend);
+    executionBackendRegistry.register(ieeDevBackend);
   } catch (err) {
     console.error('[boot] failed to register execution backends', err);
+    throw err;
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)

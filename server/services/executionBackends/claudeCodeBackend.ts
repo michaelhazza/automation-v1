@@ -84,12 +84,17 @@ export const claudeCodeBackend: ExecutionBackend = {
 
     return {
       lifecycle: 'subprocess',
-      // Intentional improvement over the plan spec (which specified
-      // `backendTaskId: null`): claudeCodeRunner surfaces the subprocess
-      // sessionId, so we record it as `backend_task_id` in `agent_runs`
-      // for observability. No code reads this value yet, but it provides
-      // a stable handle when debugging subprocess runs in production.
-      backendTaskId: ccResult.sessionId ?? null,
+      // Spec § 4.1 / § 7 contract: `backendTaskId` is the delegated-task
+      // reference (queue/storage handle for finalisation lookup). It is
+      // null for in-process AND subprocess adapters — the column
+      // `agent_runs.backend_task_id` is reserved for delegated runs that
+      // need a generic FK into a per-adapter terminal-state table.
+      // Recording the Claude Code subprocess sessionId here would be a
+      // contract drift hidden inside a refactor. The sessionId is still
+      // captured below in `toolCallsLog[0].sessionId` for observability;
+      // a deliberate `backendSessionId` field, if needed, lands as a
+      // separate observability change after the contract is locked.
+      backendTaskId: null,
       loopResult: {
         summary: ccResult.result,
         toolCallsLog: [
