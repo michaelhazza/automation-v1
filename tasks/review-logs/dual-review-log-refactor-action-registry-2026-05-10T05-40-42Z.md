@@ -3,6 +3,7 @@
 **Files reviewed:** `server/config/actionRegistry.ts` (shim), `server/config/actionRegistry/{types,factories,index,core,intelligence,agents,methodology,configuration,clientpulse,commerce,support}.ts`, `scripts/{audit-action-registry-risk-tiers,diff-action-registry,registrySerialiserPure,snapshot-action-registry,verify-action-registry-zod,verify-idempotency-strategy-declared,verify-skill-read-paths}.ts`, `scripts/verify-{action-registry-zod,idempotency-strategy-declared,skill-read-paths}.sh`, `scripts/snapshots/action-registry.snapshot.json`, `KNOWLEDGE.md`, `architecture.md`, `tasks/builds/refactor-action-registry/**`.
 **Iterations run:** 2/3
 **Timestamp:** 2026-05-10T05:40:42Z
+**Commit at finish:** c7872ac172514fc710ede608c6b1c979d95717a0
 
 ---
 
