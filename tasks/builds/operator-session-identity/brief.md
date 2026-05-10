@@ -1,4 +1,4 @@
-**Status:** Draft v4 (lock-ready pending operator sign-off)
+**Status:** **LOCKED v4** (final, 2026-05-10) — proceed to spec authoring
 **Date:** 2026-05-10
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** operator-session-identity
@@ -10,6 +10,15 @@
 # Spec C — Operator Session Identity — Build Brief
 
 ## 0a. Changelog
+
+### Lock (2026-05-10) — final wording polish
+
+Three non-substantive wording fixes; scope unchanged.
+
+- §5: "customers can connect ChatGPT plans" gated on provider-support verification; "ready to be consumed" → "ready for future authorised adapter consumption" (aligned with V1 no-consumer rule).
+- §4: "ChatGPT is the only provider" → "OpenAI / ChatGPT is the only targeted provider" (cleaner account/product/provider naming).
+
+Status moved from "lock-ready pending operator sign-off" → **LOCKED**. Brief is the input to spec authoring.
 
 ### v4 (2026-05-10) — third CEO-read pass
 
@@ -156,7 +165,7 @@ Cross-coordination points (be aware, not blocking):
 - **Actual use of the credential by an adapter.** Spec C ships the *credential primitive*. Adapters (OpenClaw, future ones) consume it — that's their spec's scope. Today, no existing adapter is rewired to consume `operator_session`.
 - **Operator-session → API-key fallback path when session fails mid-run.** OpenClaw adapter's responsibility (it has the run context). Spec C may expose a broker-level fallback-selection seam; OpenClaw spec decides whether and how to call it during runtime failure handling. The exact method shape is the spec author's call, not the brief's.
 - **Customer billing dashboards showing subscription-mediated zero-cost runs** — Phase 3.5+.
-- **Multi-provider posture framework** beyond the schema-level forward compat. ChatGPT is the only provider in V1; the schema is the seam for others (Anthropic Claude.ai, Google Gemini, etc.) regardless of their underlying auth mechanism.
+- **Multi-provider posture framework** beyond the schema-level forward compat. OpenAI / ChatGPT is the only targeted provider in V1; the schema is the seam for others (Anthropic Claude.ai, Google Gemini, etc.) regardless of their underlying auth mechanism.
 - **CS runbook for "OpenAI suspended my account."** Deferred to OpenClaw adapter scope (see `tasks/builds/openclaw-adapter/scope.md` § 3.5). Spec C surfaces the lifecycle event; the runbook is operational.
 - **Customer-self-service tier switching UI** — Phase 3.5+.
 - **Cost calculator / "should I be on Pro?" recommender** — Phase 3.5+.
@@ -165,7 +174,7 @@ Cross-coordination points (be aware, not blocking):
 
 ## 5. What unblocks when Spec C ships
 
-- **Customers can connect ChatGPT plans** — they appear in the connections list, plan tier detected, ready to be consumed.
+- **Customers can connect ChatGPT plans** once a provider-supported connection mechanism is verified — they appear in the connections list, plan tier detected, ready for future authorised adapter consumption. If provider support is not yet verified, the broker schema, consent model, and UI placeholders are in place and connection wiring lights up when the mechanism lands.
 - **No actual cost saving until OpenClaw adapter ships.** Spec C alone gives a stored, displayable, refreshable credential; it does not change any agent's runtime behaviour.
 - **The credential broker forward-compat slot is filled** — OpenClaw adapter spec can author against a real schema, not a placeholder.
 
