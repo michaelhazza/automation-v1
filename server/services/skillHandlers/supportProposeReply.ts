@@ -130,12 +130,5 @@ Write the reply body:`;
     principalCtx,
   );
 
-  logger.info('phase1.support.draft_proposed', {
-    ticketId,
-    draftId: draft.id,
-    voiceProfile,
-    intent,
-  });
-
   return { draftId: draft.id, bodyText: rawContent };
 }
