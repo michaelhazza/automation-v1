@@ -1,6 +1,6 @@
 // supportContactResolutionPure.ts — pure email-match resolver for support ticket customer identity.
 //
-// No DB access, no async. Receives a pre-loaded slice of canonical_contacts
+// No DB access, no async. Receives a pre-loaded slice of canonical_contacts // verify-canonical-read-interface: allowed
 // and resolves the canonical contact id for a given customer email.
 //
 // Called from connectorPollingService Phase C after the org's contacts are

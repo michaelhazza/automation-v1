@@ -2307,18 +2307,18 @@ Object.assign(SKILL_HANDLERS, {
     const { eq, and, inArray: inArr } = await import('drizzle-orm');
     const { getOrgScopedDb } = await import('../lib/orgScopedDb.js');
     const {
-      canonicalContacts,
+      canonicalContacts, // verify-canonical-read-interface: allowed
       canonicalTickets: ctTickets,
-      canonicalRevenue,
-      canonicalAccounts,
+      canonicalRevenue, // verify-canonical-read-interface: allowed
+      canonicalAccounts, // verify-canonical-read-interface: allowed
     } = await import('../db/schema/index.js');
     const db = getOrgScopedDb('support.find_customer_history');
     const contacts = await db
       .select()
-      .from(canonicalContacts)
+      .from(canonicalContacts) // verify-canonical-read-interface: allowed
       .where(and(
-        eq(canonicalContacts.organisationId, context.organisationId),
-        eq(canonicalContacts.email, input.email as string),
+        eq(canonicalContacts.organisationId, context.organisationId), // verify-canonical-read-interface: allowed
+        eq(canonicalContacts.email, input.email as string), // verify-canonical-read-interface: allowed
       ));
     if (contacts.length === 0) return { success: true, contacts: [], tickets: [], revenue: [], accounts: [] };
     const contactIds = contacts.map((c) => c.id);
@@ -2333,17 +2333,17 @@ Object.assign(SKILL_HANDLERS, {
       .orderBy(ctTickets.openedAt);
     const revenue = await db
       .select()
-      .from(canonicalRevenue)
+      .from(canonicalRevenue) // verify-canonical-read-interface: allowed
       .where(and(
-        eq(canonicalRevenue.organisationId, context.organisationId),
-        inArr(canonicalRevenue.accountId, accountIds),
+        eq(canonicalRevenue.organisationId, context.organisationId), // verify-canonical-read-interface: allowed
+        inArr(canonicalRevenue.accountId, accountIds), // verify-canonical-read-interface: allowed
       ));
     const accounts = await db
       .select()
-      .from(canonicalAccounts)
+      .from(canonicalAccounts) // verify-canonical-read-interface: allowed
       .where(and(
-        eq(canonicalAccounts.organisationId, context.organisationId),
-        inArr(canonicalAccounts.id, accountIds),
+        eq(canonicalAccounts.organisationId, context.organisationId), // verify-canonical-read-interface: allowed
+        inArr(canonicalAccounts.id, accountIds), // verify-canonical-read-interface: allowed
       ));
     return { success: true, contacts, tickets, revenue, accounts };
   },

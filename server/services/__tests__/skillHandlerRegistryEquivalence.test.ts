@@ -34,7 +34,7 @@ process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 const { SKILL_HANDLERS } = await import('../skillExecutor.js');
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (193 entries)
+// Canonical handler key set (203 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -245,6 +245,17 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'optimiser.scan_memory_citation',
   'optimiser.scan_routing_uncertainty',
   'optimiser.scan_cache_efficiency',
+  // Support Desk canonical handlers (PR #277)
+  'support.list_open_tickets',
+  'support.read_thread',
+  'support.propose_reply',
+  'support.add_internal_note',
+  'support.approve_draft',
+  'support.reject_draft',
+  'support.set_status',
+  'support.assign',
+  'support.tag',
+  'support.find_customer_history',
 ];
 
 // ---------------------------------------------------------------------------
@@ -280,11 +291,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 193 keys', () => {
+test('SKILL_HANDLERS has exactly 203 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 193) {
+  if (count !== 203) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 193. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 203. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

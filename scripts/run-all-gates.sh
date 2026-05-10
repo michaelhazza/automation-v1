@@ -74,6 +74,10 @@ run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 # ── synthetos-foundation-refactor: Risk Tier classification (§4.2.5, §9.1) ──
 run_gate "$SCRIPT_DIR/verify-risk-tier-assigned.sh"
 
+# ── refactor-action-registry: regression oracle + risk-tier drift (requires build:server) ──
+run_gate "$SCRIPT_DIR/verify-action-registry-snapshot.sh"
+run_gate "$SCRIPT_DIR/verify-risk-tier-drift.sh"
+
 # ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"

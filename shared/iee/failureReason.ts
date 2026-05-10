@@ -29,6 +29,14 @@ export const FailureReason = z.enum([
   // eviction, orphan detection) from user-initiated cancellation. The
   // latter sets iee_runs.status='cancelled' instead.
   'worker_terminated',
+  // ExecutionBackend Adapter Contract addition (spec § 13.1.1 step 3).
+  // Written by the IEE adapter's `dispatch()` orphan-cleanup path: backend
+  // task was created but the parent agent_run had already moved past the
+  // delegation window (terminal via cancellation race, etc.) by the time
+  // the parent UPDATE ran. The adapter writes
+  // `iee_runs.status = 'cancelled', failureReason = 'parent_orphaned'` and
+  // throws `ParentRunNotDispatchable`. No SQL migration — text column.
+  'parent_orphaned',
   // Sprint 2 — P1.1 three-layer fail-closed data isolation additions.
   // See docs/improvements-roadmap-spec.md §P1.1 Layer 2 / Layer 3.
   'scope_violation',    // tenant boundary crossed — organisation / subaccount mismatch

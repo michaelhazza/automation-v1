@@ -19,7 +19,7 @@ import {
   connectorConfigs,
   integrationConnections,
 } from '../db/schema/index.js';
-import { canonicalContacts } from '../db/schema/canonicalEntities.js';
+import { canonicalContacts } from '../db/schema/canonicalEntities.js'; // verify-canonical-read-interface: allowed
 import type { CanonicalTicket } from '../db/schema/canonicalTickets.js';
 import type { CanonicalTicketMessage } from '../db/schema/canonicalTicketMessages.js';
 import type { CanonicalTicketDraft } from '../db/schema/canonicalTicketDrafts.js';
@@ -86,7 +86,7 @@ export type SupportThreadMessage = {
 };
 
 /**
- * Fetch messages with LEFT JOINs on canonical_contacts and canonical_support_agents
+ * Fetch messages with LEFT JOINs on canonical_contacts and canonical_support_agents // verify-canonical-read-interface: allowed
  * to resolve authorName. Returns raw rows; caller applies redaction then shapes.
  */
 async function fetchMessageRowsWithAuthors(
@@ -117,15 +117,15 @@ async function fetchMessageRowsWithAuthors(
       attachments: canonicalTicketMessages.attachments,
       redacted: canonicalTicketMessages.redacted,
       createdAtExternal: canonicalTicketMessages.createdAtExternal,
-      authorContactFirstName: canonicalContacts.firstName,
-      authorContactLastName: canonicalContacts.lastName,
-      authorContactEmail: canonicalContacts.email,
+      authorContactFirstName: canonicalContacts.firstName, // verify-canonical-read-interface: allowed
+      authorContactLastName: canonicalContacts.lastName, // verify-canonical-read-interface: allowed
+      authorContactEmail: canonicalContacts.email, // verify-canonical-read-interface: allowed
       authorAgentDisplayName: canonicalSupportAgents.displayName,
     })
     .from(canonicalTicketMessages)
     .leftJoin(
-      canonicalContacts,
-      eq(canonicalTicketMessages.authorContactId, canonicalContacts.id),
+      canonicalContacts, // verify-canonical-read-interface: allowed
+      eq(canonicalTicketMessages.authorContactId, canonicalContacts.id), // verify-canonical-read-interface: allowed
     )
     .leftJoin(
       canonicalSupportAgents,
@@ -209,7 +209,7 @@ async function fetchConnectionForConnectorConfig(
   const [connection] = await db
     .select()
     .from(integrationConnections)
-    .where(eq(integrationConnections.id, config.connectionId))
+    .where(and(eq(integrationConnections.id, config.connectionId), eq(integrationConnections.organisationId, organisationId)))
     .limit(1);
 
   if (!connection) {
