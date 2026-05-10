@@ -165,4 +165,16 @@ export const supportActions: Record<string, ActionDefinition> = {
     }),
     retryPolicy: { maxRetries: 2, strategy: 'exponential_backoff', retryOn: ['timeout', 'network_error'], doNotRetryOn: [] },
   }),
+  'support.classify_ticket': defineCanonicalRead({
+    slug: 'support.classify_ticket',
+    description: 'Classify a support ticket by intent, urgency, and recommended action.',
+    topics: ['support'],
+    // INV-9: Risk Tier 1 per rubric for LLM-read-only classification.
+    riskTier: 1,
+    payloadFields: ['ticketId'],
+    parameterSchema: z.object({
+      ticketId: z.string().describe('Canonical ticket UUID to classify'),
+    }),
+    retryPolicy: { maxRetries: 2, strategy: 'exponential_backoff', retryOn: ['timeout', 'network_error'], doNotRetryOn: [] },
+  }),
 };

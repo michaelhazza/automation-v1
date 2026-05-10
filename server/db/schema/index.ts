@@ -307,3 +307,9 @@ export * from './canonicalTicketDrafts.js';
 
 // Support Desk action idempotency ledger (migration 0312)
 export * from './actionAttempts.js';
+
+// Phase 1 Showcase — run_artifacts customer-facing file delivery ledger (migration 0313)
+export * from './runArtifacts.js';
+
+// Support Agent eval harness (migration 0315)
+export * from './supportEvalRuns.js';

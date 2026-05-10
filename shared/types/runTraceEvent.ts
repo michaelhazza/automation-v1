@@ -28,7 +28,31 @@ export type RunTraceEventType =
   | 'review_decided'
   | 'iee_step'
   | 'run_started'
-  | 'run_terminated';
+  | 'run_terminated'
+  // Phase 1 Showcase — file delivery events (spec §3.5 / INV-16)
+  | 'phase1.file_delivery.uploaded'
+  | 'phase1.file_delivery.expired'
+  // Phase 1 Showcase — 42 Macro events (spec §3.5 / INV-16)
+  | 'phase1.macro.run_started'
+  | 'phase1.macro.run_completed'
+  | 'phase1.macro.artifact_delivered'
+  | 'phase1.macro.login_failed'
+  | 'phase1.macro.run_stuck'
+  // Phase 1 Showcase — Support Agent events (spec §3.5 / INV-16)
+  | 'phase1.support.ticket_classified'
+  | 'phase1.support.classify_failed'
+  | 'phase1.support.draft_proposed'
+  | 'phase1.support.draft_dispatched'
+  | 'phase1.support.draft_blocked_by_policy'
+  | 'phase1.support.collision_skipped'
+  | 'phase1.support.ticket_terminal'
+  | 'phase1.support.eval_drift_detected'
+  // Phase 1 Showcase — file delivery read-surface events (spec §3.5 / INV-16)
+  | 'phase1.file_delivery.signed_url_issued'
+  | 'phase1.file_delivery.downloaded'
+  // Phase 1 Showcase — 42 Macro failure events (spec §3.5 / INV-16)
+  | 'phase1.macro.report_rendering_failed'
+  | 'phase1.macro.artifact_upload_failed';
 
 // ---------------------------------------------------------------------------
 // RunTraceEventBase — fields common to every event
@@ -132,6 +156,152 @@ export type RunTraceEvent =
       finalStatus: string;
       failureReason: string | null;
       totalDurationMs: number;
+    })
+  // Phase 1 Showcase — file delivery events (spec §3.5 / INV-16)
+  | (RunTraceEventBase & {
+      eventType: 'phase1.file_delivery.uploaded';
+      artifactId: string;
+      organisationId: string;
+      agentRunId: string | null;
+      ieeRunId: string | null;
+      contentHash: string;
+      sizeBytes: number;
+      storageProvider: string;
+      storageKey: string;
+      mimeType: string;
+      artifactKind: string;
+      wasReplay: boolean;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.file_delivery.expired';
+      artifactId: string;
+      organisationId: string;
+      retainUntil: string;
+      ageDays: number;
+    })
+  // Phase 1 Showcase — 42 Macro events (spec §3.5 / INV-16)
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.run_started';
+      agentRunId: string;
+      ieeRunId: string;
+      organisationId: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.run_completed';
+      agentRunId: string;
+      ieeRunId: string;
+      organisationId: string;
+      durationMs: number;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.artifact_delivered';
+      agentRunId: string;
+      ieeRunId: string;
+      organisationId: string;
+      artifactId: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.login_failed';
+      agentRunId: string;
+      ieeRunId: string;
+      reason: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.run_stuck';
+      agentRunId: string;
+      ieeRunId: string;
+      organisationId: string;
+      currentStep: string;
+      stuckSinceMs: number;
+      thresholdMs: number;
+    })
+  // Phase 1 Showcase — Support Agent events (spec §3.5 / INV-16)
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.ticket_classified';
+      ticketId: string;
+      intent: string;
+      urgency: string;
+      confidence: number;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.classify_failed';
+      ticketId: string;
+      parseError: string;
+      rawModelOutputRedacted: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.draft_proposed';
+      ticketId: string;
+      draftId: string;
+      controllerStyleAtPropose: string;
+      riskTierResolved: number;
+      perTicketVerdict: 'drafted_for_review' | 'drafted_and_dispatched';
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.draft_dispatched';
+      ticketId: string;
+      draftId: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.draft_blocked_by_policy';
+      ticketId: string;
+      draftId: string;
+      blockingPolicy: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.collision_skipped';
+      ticketId: string;
+      reason: 'concurrent_claim' | 'human_active';
+      lastHumanActivityAgo?: number;
+      perTicketVerdict: 'skipped_collision';
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.ticket_terminal';
+      ticketId: string;
+      perTicketVerdict: 'escalated_to_human' | 'skipped_low_confidence' | 'skipped_no_action_needed';
+      reason: string;
+      claimReleasedAt: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.support.eval_drift_detected';
+      evalRunId?: string;
+      accuracyDelta?: number;
+      judgeScoreDelta?: number;
+      threshold?: number;
+      reason?: 'regression_set_unavailable';
+      rowCount?: number;
+    })
+  // Phase 1 Showcase — file delivery read-surface events (spec §3.5 / INV-16)
+  | (RunTraceEventBase & {
+      eventType: 'phase1.file_delivery.signed_url_issued';
+      artifactId: string;
+      organisationId: string;
+      expiresAt: string;
+      inlineDisposition: boolean;
+      requestSource: 'run_trace_panel' | 'pdf_embed' | 'copy_link' | 'api_consumer';
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.file_delivery.downloaded';
+      artifactId: string;
+      organisationId: string;
+      downloaderUserId: string | null;
+      byteCount: number;
+      durationMs: number;
+    })
+  // Phase 1 Showcase — 42 Macro failure events (spec §3.5 / INV-16)
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.report_rendering_failed';
+      agentRunId: string;
+      ieeRunId: string;
+      attemptCount: number;
+      lastError: string;
+    })
+  | (RunTraceEventBase & {
+      eventType: 'phase1.macro.artifact_upload_failed';
+      agentRunId: string;
+      ieeRunId: string;
+      artifactKind: string;
+      lastError: string;
     });
 
 // ---------------------------------------------------------------------------

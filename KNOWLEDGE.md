@@ -3501,6 +3501,57 @@ server/config/actionRegistry/
 
 **Detection heuristic.** Any predicate of shape `<event_column> >= <optional_canonical_column>` inside a NOT EXISTS / WHERE NOT IN / aggregate filter is a silent-UNKNOWN landmine when the optional column is nullable. Reviewer prompt: "Is this column ALWAYS populated by every ingestion path that touches the parent row, including legacy paths?" If the answer is "should be" or "the writer is supposed to", COALESCE the comparison. The cost of the COALESCE is one extra column read; the cost of the bug is silently re-processing data forever.
 
+## Pattern: Worker-internal `iee_artifacts` vs customer-delivery `run_artifacts` source-of-truth precedence
+
+**Context.** Phase 1 Showcase MVPs (2026-05-10). The IEE browser worker already has its own artifact table (`iee_artifacts`) used internally for IEE progress UI, transcription cache, and dedup-by-content-hash inside the worker loop. A naive design would reuse that table for customer-facing file delivery.
+
+**Resolution.** Two separate tables, distinct roles: `iee_artifacts` is the worker-internal ledger (write by worker; read by IEE progress UI + worker loop). `run_artifacts` is the customer-delivery ledger (write by `fileDeliveryService.upload` via main-app finalize route; read by customer-facing UI only). Promotion path: worker calls `uploadArtifact` helper → main-app `/api/internal/run-artifacts/finalize` → `fileDeliveryService.upload` inserts `run_artifacts` row. The original `iee_artifacts` row is NEVER moved or deleted by promotion. Customer-facing UI reads `run_artifacts` only; worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows.
+
+**Detection heuristic.** Whenever an internal-caching table and a customer-delivery table serve the same content, keep them separate. Conflating them couples customer-delivery SLAs to internal caching volatility and creates dual-write complexity. The promotion step (internal → delivery) is the explicit boundary.
+
+## Convention: Detector pattern path is workspaceHealth, not systemMonitoring
+
+**Context.** Phase 1 Showcase spec §4.6.2 referenced `server/services/systemMonitoring/detectors/` for the stale-macro-run detector. That path does not exist.
+
+**Convention.** The workspace health detector pattern lives at `server/services/workspaceHealth/detectors/`. All async detectors that perform their own DB reads are registered in `ASYNC_DETECTORS` in `server/services/workspaceHealth/detectors/index.ts`. Pure helper functions live in a `<name>Pure.ts` sibling file; the async wrapper imports the pure function and converts findings to `WorkspaceHealthFinding[]`. When a spec mentions `systemMonitoring/detectors/`, always use `workspaceHealth/detectors/` instead.
+
+## Pattern: Singleton-agent-per-subaccount — advisory lock + partial unique index on applied_template_slug
+
+**Context.** Phase 1 Showcase MVPs Chunk 7 (2026-05-10). The Support Agent must be installed at most once per subaccount. A naive `SELECT → INSERT` check is vulnerable to TOCTOU races under concurrent requests.
+
+**Resolution.** Two-layer defence: (1) `pg_advisory_xact_lock(hashtext(subaccountId || ':' || systemAgentId)::bigint)` acquired at the start of the install transaction serialises concurrent installs for the same (subaccount, system_agent) pair. (2) Partial unique index `subaccount_agents_support_agent_singleton_idx ON subaccount_agents(subaccount_id) WHERE is_active = true AND applied_template_slug = 'support-agent'` is the safety net — catches any race that bypasses the lock and maps `23505` to `409 already_installed`. The advisory lock produces the clean error path (checked before INSERT); the partial index is the serialisation guarantee. Migration `0314`.
+
+**Pattern location.** `server/services/supportAgentInstallService.ts`. CI gate: `scripts/gates/verify-support-agent-skill-set.sh`.
+
+## Convention: applied_template_slug is a stable install discriminator — never rewrite
+
+**Context.** Phase 1 Showcase MVPs Chunk 7 (2026-05-10). The `applied_template_slug` column on `subaccount_agents` is the value the partial unique index keys on for the singleton guard.
+
+**Convention.** Once a `subaccount_agents` row carries `applied_template_slug = 'support-agent'`, that value MUST NOT be rewritten by future system-agent renames or any other code path. Rewriting would either reopen the singleton race or invalidate the index's coverage. Mutating `applied_template_slug` outside `supportAgentInstallService.ts` is a CI gate failure (`scripts/gates/verify-support-agent-skill-set.sh`). The slug is the install identity, not a display string — it is decoupled from the system agent's `name` field on purpose.
+
+## Pattern: window.open() for authenticated download endpoints — call sync, not after await
+
+**Context.** Phase-1-showcase-mvps Chunk 4 (RunTraceArtifactsPanel). Preview and Download buttons need to open an authenticated platform download URL in a new tab. An early implementation called `issueSignedUrl()` (async) before the `window.open()`, which silently fails popup-blocker checks: browsers only allow `window.open()` called synchronously inside a user gesture handler — any `await` before the call severs the gesture link, the browser blocks the popup, and the user sees nothing.
+
+**Resolution.** Route Preview and Download directly to the authenticated endpoint URL (`/api/run-artifacts/:id/download`) — no async call needed, the URL is computed from the artifact ID already in state. Call `window.open(url, '_blank')` synchronously. Reserve async issueSignedUrl only for Copy-link, where the signed URL is the actual payload rather than a navigation target. Check the return value (`const win = window.open(...); if (!win) { setRowError('Popup blocked...'); }`) to surface the popup-blocker case.
+
+**Detection heuristic.** Any `await X; window.open(...)` pattern in a click handler is a popup-blocker trap. If the URL can be computed synchronously, remove the await. If async is genuinely needed, the only fix is user-education (popup permission prompt, or a fallback link element).
+
+## Pattern: Inline Content-Disposition for browser PDF preview via download proxy
+
+**Context.** Phase-1-showcase-mvps Chunk 4. A single route (`GET /api/run-artifacts/:id/download`) serves both Preview (inline, browser renders PDF) and Download (attachment, browser saves file) by reading a `?disposition=inline` query parameter. The default (no param) is `attachment`; `?disposition=inline` sets `Content-Disposition: inline; filename="..."` which causes Chrome/Firefox to render PDFs in the built-in viewer instead of downloading.
+
+**File:** `server/routes/runArtifacts.ts`
+
+**Detection heuristic.** When a route needs to serve the same binary with different browser behaviour, a single query-param-controlled disposition is simpler than two separate routes and keeps the event-emission logic (the `phase1.file_delivery.downloaded` audit event) in one place.
+
+## Gotcha: Judge score scale is 0–5, not 0–1 — threshold and clamp must match
+
+**Context.** Phase-1-showcase-mvps Chunk 9 (eval harness). The spec §5.5.2 documents the draft judge prompt as scoring on a 0–5 scale (`draftJudgeScoreAvg` column comment: "0..5"). An early implementation used a 0–1 scale throughout (threshold 0.70, clamp `Math.min(1, score)`), which made the gate pass trivially for any non-zero score.
+
+**Resolution.** Three places must all agree: (1) the judge prompt's scoring rubric ("Score from 0.0 to 5.0"), (2) `THRESHOLD_JUDGE_MIN = 4.0`, (3) `Math.min(5, overallScore)` clamp. If any one of these is on a different scale the gate silently becomes meaningless. The DB column `numeric(4,2)` stores 0–5 correctly.
+
+**Detection heuristic.** Whenever a judge or rubric score threshold appears, explicitly state the scale (0–N) in the constant name or comment. "0.70 threshold" is ambiguous; "4.0 threshold (0–5 scale)" is not.
 ## Pattern: Cycle-prevention regex must anchor on the exact filename, not a substring
 
 **Context.** Execution Backend Adapter Contract build (2026-05-10) added §8.32 cycle-prevention assertion coverage rule, then extended the assertion to 8 files in the dispatch chain. The new tests immediately failed against `_ieeShared.ts` even though it has no runtime cycle. Root cause: the original regex `[^'"]*agentExecutionService[^'"]*` matches `agentExecutionServicePure.js` as a false positive — `_ieeShared.ts:44` legitimately imports `computeRunResultStatus` from there.
@@ -3572,3 +3623,27 @@ server/config/actionRegistry/
 **Rule.** When a runtime check covers a case the registry's invariants make impossible, the right outcome is a typed throw, not a silent boolean false. False says "this is a recoverable no-op state"; throw says "the system is in an invalid configuration the registry promised wouldn't happen". Calling finalisation on `api`, `headless`, or `claude-code` is a programmer error, not a recoverable case — the typed `FinaliseRequiresDelegatedAdapter` error makes the misuse loud at every layer (logs, sentry, route 500).
 
 **Detection heuristic.** When implementing a runtime guard that "shouldn't" be reachable per the registry's invariants, ask: "if this branch fires, is the system still in a valid state?" If no, throw a typed error so the failure is loud. If yes, return a typed result that distinguishes "recoverable no-op" from "actual success". Don't conflate the two by returning a generic false — the caller can't tell which branch fired and bug-hunting takes longer.
+
+## Pattern: UI pct() helper applied to wrong scale produces 400% — use scale-specific formatters
+
+**Context.** Phase-1-showcase-mvps finalisation (2026-05-11) — `SupportEvalsPage.tsx` had a shared `pct(value)` helper that multiplied by 100 and appended `%`. Classification accuracy (0–1 scale) rendered correctly: `pct(0.87) = "87.0%"`. Draft judge score (0–5 scale) rendered wrong: `pct(4.0) = "400.0%"`. Both the score and its threshold used `pct()`, so the mismatch was consistent (both showed 400%) and made it harder to spot.
+
+**Rule.** When a page displays two metrics with different scales (0–1 vs 0–5, or percentage vs score), each scale needs its own formatting helper. A single generic `pct()` is only safe when every value it formats is truly 0–1. The moment one metric is on a different scale, extract `judgeScoreDisplay()` (or equivalent) rather than overloading the 0–1 helper. The formatter name should encode the scale contract (`judgeScoreDisplay` is explicit; `pct` is ambiguous).
+
+**Detection heuristic.** Whenever a page renders two metrics side by side and one uses `pct()` while the other is documented as a 0–N scale elsewhere (column comment, spec, constant name), grep the UI for every `pct()` call and verify all inputs are genuinely 0–1.
+
+## Pattern: Components built in Phase 2 but never imported = dead UI — wire the registration at definition time
+
+**Context.** Phase-1-showcase-mvps chatgpt-pr-review (2026-05-11) — ChatGPT identified three run-trace UI components (`RunTraceArtifactsPanel`, `SupportEventRenderers` map, `MacroFailureRenderers`) that were fully implemented and exported but never imported in their entry-point files (`RunTracePage.tsx`, `RunTraceEventRenderer.tsx`). They were correct implementations of the spec but produced zero visible UI.
+
+**Rule.** When building a new panel, renderer, or map that must be registered or imported somewhere to take effect, write the registration (import statement + wiring line) in the same commit as the component definition. "The component is done" is not done — it's done when it's visible in the UI. For run-trace renderers specifically: a new `*Renderer` component must be (1) exported from its file and (2) imported + either registered in a lookup map or returned from a lookup function in `RunTraceEventRenderer.tsx`.
+
+**Detection heuristic.** After building any component intended for the run-trace event stream, grep `RunTraceEventRenderer.tsx` and `RunTracePage.tsx` for the component or its module path. If neither file imports it, the component is dead. Same applies to any registry pattern: grep the registry's file for the new handler's symbol.
+
+## Pattern: Pure helper encapsulates a policy — always call it, never hardcode the constant at the call site
+
+**Context.** Phase-1-showcase-mvps chatgpt-pr-review (2026-05-11) — `fileDeliveryServicePure.ts::deriveSignedUrlExpiry(artifactKind)` existed and correctly returned 604800s (7d) for `report` and 86400s (24h) for everything else. The signed-URL route in `runArtifacts.ts` built `expiresAt` with `const sevenDays = 7 * 24 * 60 * 60 * 1000` — always 7d regardless of artifact kind.
+
+**Rule.** When a pure helper encapsulates a policy (expiry, TTL, limit, threshold), callers MUST call the helper — never inline the magic number. The pure helper is the policy; inlining the number at the call site creates a second policy that silently diverges the moment the pure helper is updated. The fix is also a useful template: add the artifact kind to the select query, type it via the shared type, pass it to the pure helper.
+
+**Detection heuristic.** When writing any code that encodes a duration, limit, or threshold as a numeric literal, grep the codebase for a pure helper that returns the same kind of value. If a helper exists — use it. Common offenders: signed URL TTL (use `deriveSignedUrlExpiry`), eval thresholds (use the DB-stored values), score clamps (use `Math.min(MAX_SCALE, ...)`).

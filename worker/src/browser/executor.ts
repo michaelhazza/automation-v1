@@ -184,6 +184,12 @@ export async function buildBrowserExecutor(
               screenshotArtifactId: persistedArtifactId,
             }
           : { message: err instanceof Error ? err.message.slice(0, 200) : String(err) };
+      // Phase 1 §4.6.1 — surface login exhaustion for 42 Macro runs in ops log
+      logger.warn('phase1.macro.login_failed', {
+        agentRunId: input.agentRunId ?? undefined,
+        ieeRunId: input.ieeRunId,
+        reason: err instanceof LoginFailedError ? 'login_failed_after_retries' : 'login_error',
+      });
       try { await context.close(); } catch { /* swallow */ }
       throw new FailureError(failure('auth_failure', 'login_failed', detail));
     } finally {
@@ -414,6 +420,18 @@ export async function buildBrowserExecutor(
         case 'extract': {
           const text = await page.evaluate(() => document.body?.innerText ?? '');
           const slice = text.slice(0, 4000);
+          // Phase 1 §4.6.1 — page structure change: no extractable content at all
+          if (slice.length === 0) {
+            logger.warn('phase1.macro.run_stuck', {
+              agentRunId: input.agentRunId ?? undefined,
+              ieeRunId: input.ieeRunId,
+              reason: 'page_structure_change',
+              query: action.query,
+            });
+            throw new FailureError(
+              failure('data_incomplete', 'page_structure_change', { ieeRunId: input.ieeRunId }),
+            );
+          }
           lastResult = `extracted ${slice.length} chars matching: ${action.query}`;
           return { output: { query: action.query, snippet: slice }, summary: lastResult };
         }

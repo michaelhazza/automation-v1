@@ -10,8 +10,9 @@
     "resolveJsonModule": true,
     "outDir": "../dist",
     "rootDir": "..",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx"
   },
-  "include": ["./**/*.ts", "../shared/**/*.ts"],
+  "include": ["./**/*.ts", "./**/*.tsx", "../shared/**/*.ts"],
   "exclude": ["node_modules"]
 }

@@ -203,6 +203,7 @@ Subaccount Agent (subaccountAgents table)
 | `heartbeatEnabled` / `heartbeatIntervalHours` / `heartbeatOffsetMinutes` | Per-subaccount schedule. Overrides the org agent's heartbeat so different clients can run at different cadences / offsets. |
 | `scheduleCron` / `scheduleEnabled` / `scheduleTimezone` | Cron-based schedule (alternative to heartbeat interval). Schedule changes go through `agentScheduleService.updateSchedule` — **never mutate these columns directly**, or the pg-boss cron registration drifts from the DB. |
 | `concurrencyPolicy` / `catchUpPolicy` / `catchUpCap` / `maxConcurrentRuns` | Concurrency and missed-run behaviour for the scheduler. |
+| `appliedTemplateSlug` | Stable install discriminator written once by `supportAgentInstallService` (migration 0314). Keyed by the partial unique index `subaccount_agents_support_agent_singleton_idx`. Never rewrite — rewriting would break the singleton guard and invalidate the index's coverage. |
 
 **Skill resolution cascade.** `skillService.getTools()` now falls back from the org `skills` table to `systemSkillService` (file-based system skills under `server/skills/*.md`) when a requested slug has no org-tier override. This means a subaccount link can reference system skills by slug directly without requiring an org to shadow-copy every platform skill.
 
@@ -453,6 +454,7 @@ Currently shipping detectors:
 | `subaccountAgentNoSchedule` | info | agents with no scheduled tasks AND no triggers |
 | `subaccountAgentNoSkills` | warning | agents with zero enabled skills |
 | `systemAgentLinkNeverSynced` | info | system-managed agents that never received their first masterPrompt sync |
+| `staleMacroRunDetector` (async) | warning | 42 Macro IEE browser runs with no heartbeat for >15 minutes (Phase 1 Showcase §4.6.2) |
 
 Detectors are registered via `server/services/workspaceHealth/detectors/index.ts` — adding a new detector means dropping a file in the detectors folder and re-exporting it from the index.
 
@@ -2201,6 +2203,23 @@ Single source of truth for the 13 agent run statuses: `pending`, `running`, `del
 
 Shared client-side money formatter. Values are in whole dollars (fractional), not cents. Default: 2dp. Opt-in `micro: true` renders sub-cent values at 4dp so costs below $0.01 are not shown as "$0.00". Handles null/undefined (returns "—"), zero, negatives. Used by `ScheduleCalendar` (per-occurrence micro, totals at standard 2dp) and available to any surface displaying dollar amounts.
 
+### File delivery — `server/services/fileDeliveryService.ts`
+
+Customer-facing artifact delivery ledger (Phase 1 Showcase, spec §6.1). Workers promote `iee_artifacts` → `run_artifacts` by calling `fileDeliveryService.upload`; the original `iee_artifacts` row is never moved. Customer-facing UI reads `run_artifacts` only.
+
+| Export | Purpose |
+|--------|---------|
+| `upload(input)` | Buffers content, SHA-256 hashes, PUTs to S3 with `withBackoff`, inserts `run_artifacts` row. `23505` → `wasReplay: true` (idempotent). |
+| `issueSignedUrl(artifactId, orgId, opts?)` | Generates a presigned S3 `GetObject` URL. TTL: 7 days for `report`, 24 h for others. |
+| `listForRun(agentRunId, orgId)` | Returns all artifacts for a run; RLS deny → empty array. |
+| `deleteByRun(agentRunId, orgId)` | Admin sweep — deletes DB rows for a run. |
+
+Pure helpers (testable, no DB/S3): `server/services/fileDeliveryServicePure.ts` — `deriveStorageKey`, `deriveSignedUrlExpiry`, `deriveRetainUntil`, `mimeToExt`. Storage key format: `orgs/{org_id}/runs/{run_id}/{artifact_kind}/{content_hash}.{ext}`.
+
+Daily retention sweep: `server/jobs/runArtifactsRetentionSweepJob.ts` — deletes S3 object then DB row in order; emits `phase1.file_delivery.expired` structured log after each delete.
+
+Worker upload proxy: `worker/src/lib/uploadArtifact.ts` POSTs base64 content to `POST /api/internal/run-artifacts/finalize`; auth via `x-worker-secret` header.
+
 ### Other shared primitives
 
 | Module | Purpose |
@@ -3576,8 +3595,22 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 | `POST /drafts/:id/manual-resolve` | `server/routes/support/supportDraftsRoutes.ts` | Operator override resolve |
 | `GET /inboxes` | `server/routes/support/supportInboxesRoutes.ts` | List inboxes with sync health |
 | `PATCH /inboxes/:id` | `server/routes/support/supportInboxesRoutes.ts` | Update inbox config |
+| `POST /subaccounts/:subaccountId/support-agent/install` | `server/routes/support/supportAgentInstallRoute.ts` | Install Support Agent for a subaccount (singleton; 409 if already installed) |
+| `GET /agent/dashboard` | `server/routes/support/supportAgentRoutes.ts` | Per-inbox agent mode + stub counts for the Support Agent dashboard |
+| `PATCH /inboxes/:inboxId/agent-config` | `server/routes/support/supportAgentRoutes.ts` | Partial-update `canonical_inboxes.agent_config` (deep-merges nested objects; validates via `SupportInboxAgentConfigSchema`) |
+| `GET /evals` | `server/routes/support/supportEvalsRoutes.ts` | List latest eval runs (admin) |
+| `POST /evals/run` | `server/routes/support/supportEvalsRoutes.ts` | Trigger an on-demand eval harness run (admin) |
 
 Aggregated router: `server/routes/support/index.ts`.
+
+Run-artifact read surface (mounted at `/api`):
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /run-artifacts/:id/download` | `server/routes/runArtifacts.ts` | Download proxy — streams S3 bytes; emits `phase1.file_delivery.downloaded`. `?disposition=inline` serves inline (PDF preview) instead of as attachment. |
+| `POST /run-artifacts/:id/signed-url` | `server/routes/runArtifacts.ts` | Mint a presigned S3 URL; emits `phase1.file_delivery.signed_url_issued`. `requestSource` must be one of `run_trace_panel`, `pdf_embed`, `copy_link`, `api_consumer`. |
+
+Support Agent eval harness: `server/services/supportEvalHarness.ts` / `supportEvalHarnessPure.ts`. Runs a 5-fixture regression set (Phase 1 MVP; Foundry-sourced data in Phase 1.5), scores classify accuracy per intent + draft judge quality (0–5 scale), inserts a `support_eval_runs` row, and detects drift vs. the previous row. Daily job: `server/jobs/supportEvalDailyJob.ts`. CI gate: `server/scripts/evalGateRunner.ts` + `scripts/gates/verify-support-agent-eval-thresholds.sh` (fail-open when fewer than 2 rows; emits `phase1.support.eval_drift_detected` on fail-open per §5.5.2).
 
 ### Permissions reference
 
@@ -3587,6 +3620,8 @@ Aggregated router: `server/routes/support/index.ts`.
 | `support.draft.reject` | Subaccount | Reject a draft reply |
 | `support.draft.override_collision` | Subaccount | Approve when another draft is already dispatching |
 | `support.inbox.configure` | Subaccount | Modify inbox configuration |
+| `support.inbox.view` | Org | View Support Agent dashboard and inbox list |
+| `support.evals.view` | Org | View Support Agent eval results (SupportEvalsPage) |
 
 Standard `subaccount_admin` bypass applies. Read actions (`GET /tickets`, `GET /drafts`) use the existing authenticated-user gate without a dedicated permission key — consistent with the read-permission posture across canonical tables.
 
@@ -3677,6 +3712,14 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify support draft lifecycle or dispatch | `server/services/supportDraftDispatchService.ts` (three-phase dispatch: approveDraft / listDraftsForReview / getDraftById / editDraft / rejectDraft / manualResolveDraft) + `server/services/supportDraftDispatchServicePure.ts` (pure helpers: `isValidDraftStatusTransition`, `deriveActionIdempotencyKey`, `planSameRunSupersession`) |
 | Modify support draft reconciliation | `server/jobs/supportDraftReconciliationWorker.ts` (pg-boss worker for `support-draft-reconciliation`) + `server/services/supportDraftReconciliationPure.ts` (pure `decideOutcome`) + `server/lib/supportDispatchBootRecovery.ts` (boot-time stalled-dispatch recovery) |
 | Modify support desk UI | `client/src/pages/support/TicketsListPage.tsx` + `client/src/pages/support/TicketDetailPage.tsx` + `client/src/pages/support/DraftReviewQueue.tsx` + `client/src/pages/support/InboxConfigPage.tsx` + `client/src/components/support/SyncHealthPill.tsx` |
+| Modify the Support Agent operate dashboard | `client/src/pages/operate/SupportAgentDashboard.tsx` (mode toggle, eval drift dot, run history link) + `server/routes/support/supportAgentRoutes.ts` |
+| Modify inbox agent config tab | `client/src/components/support/InboxAgentConfigTab.tsx` (mode, collision window, voice profile, escalation categories) + `server/routes/support/supportAgentRoutes.ts` (PATCH `/inboxes/:inboxId/agent-config`) |
+| Modify Support Agent eval harness | `server/services/supportEvalHarness.ts` + `server/services/supportEvalHarnessPure.ts` (gate decision, drift math, judge prompt) + `server/db/schema/supportEvalRuns.ts` + `migrations/0315_support_eval_runs.sql` |
+| Modify Support Agent eval CI gate | `server/scripts/evalGateRunner.ts` + `scripts/gates/verify-support-agent-eval-thresholds.sh` |
+| Modify Support Agent eval admin page | `client/src/pages/operate/SupportEvalsPage.tsx` + `server/routes/support/supportEvalsRoutes.ts` |
+| Modify Run Trace artifact panel | `client/src/components/run-trace/RunTraceArtifactsPanel.tsx` (Preview/Download via download proxy; Copy-link via signed URL) + `server/routes/runArtifacts.ts` |
+| Add a Run Trace event renderer (Support Agent) | `client/src/components/run-trace/SupportEventRenderers.tsx` — 7 renderers for `phase1.support.*` events; register in `SUPPORT_EVENT_RENDERERS` map |
+| Add a Run Trace event renderer (42 Macro failure) | `client/src/components/run-trace/MacroFailureRenderers.tsx` — `MacroReportRenderingFailedRenderer` + `MacroArtifactUploadFailedRenderer` for `phase1.macro.report_rendering_failed` / `phase1.macro.artifact_upload_failed`; registered in `RunTraceEventRenderer.tsx` via `getSupportEventRenderer` / explicit type guards |
 | Add or update an integration capability | `docs/integration-reference.md` (structured YAML block) + update `OAUTH_PROVIDERS` in `server/config/oauthProviders.ts` or `MCP_PRESETS` in `server/config/mcpPresets.ts` — `scripts/verify-integration-reference.mjs` catches drift in CI |
 | Modify Orchestrator routing logic | `migrations/0157_orchestrator_system_agent.sql` (masterPrompt), `server/jobs/orchestratorFromTaskJob.ts` (trigger handler), `server/tools/capabilities/` (discovery skill handlers) |
 | Add a capability discovery skill | `server/tools/capabilities/` + register in `server/config/actionRegistry/core.ts` + `server/services/skillExecutor.ts` + decrement `SkillExecutionContext.capabilityQueryCallCount` |
