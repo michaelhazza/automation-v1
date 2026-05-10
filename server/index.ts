@@ -645,9 +645,52 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // Execution-backend adapter registration (Execution Backend Adapter Contract
+  // spec § 8.3). Every adapter MUST be registered against
+  // `executionBackendRegistry` at boot, regardless of the queue backend in
+  // use, because `executeRun` resolves `executionBackendRegistry.resolve(id)`
+  // on every dispatch — including the three non-delegated adapters
+  // (`api`, `headless`, `claude-code`) which have no pg-boss dependency.
+  // Coupling registration to `JOB_QUEUE_BACKEND === 'pg-boss'` would render
+  // dispatch broken for ALL modes when an alternate queue backend is
+  // selected. Registration is therefore unconditional; the IEE event handler
+  // (which DOES require pg-boss) is attached separately in the pg-boss block
+  // below.
+  // Adapter registration is fatal at boot. Spec § 8.2 makes registration
+  // validation a boot-time safety boundary: adapters that fail validation
+  // never reach dispatch. If validation throws (capability violation,
+  // queue/storage drift, sandbox-requirement enum drift), letting the app
+  // continue to start would leave the registry partial or empty — every
+  // later `executionBackendRegistry.resolve(id)` would throw at runtime,
+  // so a 500 on every dispatch is strictly worse than crashing on boot
+  // with a clear log line. Mirrors the same fatal-on-failure contract as
+  // the other required boot dependencies above. Order matches spec § 8.3:
+  // `api`, `headless`, `claude-code`, `iee_browser`, `iee_dev` — order is
+  // log-output only; the registry is a map.
+  try {
+    const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
+    const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
+    const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
+    const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
+    const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
+    const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    executionBackendRegistry.register(apiBackend);
+    executionBackendRegistry.register(headlessBackend);
+    executionBackendRegistry.register(claudeCodeBackend);
+    executionBackendRegistry.register(ieeBrowserBackend);
+    executionBackendRegistry.register(ieeDevBackend);
+  } catch (err) {
+    console.error('[boot] failed to register execution backends', err);
+    throw err;
+  }
+
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
   // Consumes pg-boss events emitted by the worker after terminal iee_runs
-  // writes, and finalises the parent agent_runs row accordingly.
+  // writes, and finalises the parent agent_runs row accordingly. Boot
+  // ordering invariant: adapter registration above must complete BEFORE the
+  // handler attaches, because the handler resolves
+  // `finaliseAgentRunFromBackend` -> `executionBackendRegistry.resolve(id)`
+  // on every event and an unregistered id throws `BackendNotRegistered`.
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();

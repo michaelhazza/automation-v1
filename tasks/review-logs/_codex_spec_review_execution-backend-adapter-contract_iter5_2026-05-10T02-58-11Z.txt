@@ -1,0 +1,53 @@
+Reading additional input from stdin...
+2026-05-10T03:11:13.279649Z ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/models?client_version=0.125.0)
+2026-05-10T03:11:13.544207Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/wham/apps)")))
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-3rd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e0fde-158f-7293-b96c-4e5a779845aa
+--------
+user
+You are reviewing a markdown specification document for implementation-readiness — iteration 5 (LAST).
+
+The spec is `tasks/builds/execution-backend-adapter-contract/spec.md` (latest commit on the branch).
+
+This is the FINAL Codex round (5/5). After this, the spec is locked for implementation. Surface ONLY findings that are blockers — issues that an implementer would actually trip over during Phase 2. If everything is fine, the verdict is READY.
+
+Round-by-round summary (do not re-flag):
+- Round 1 (11 fixes): contract self-containment (loadTerminalState added), preferred_backends posture consolidated to schema-only V1, executionMode/backend_id precedence, IEE event-payload alias, orphan-task contract (§13.1.1), file inventory.
+- Round 2 (4 fixes): adapter owns ALL writes for both lifecycles, BackendTerminalState fully specified, registry validation lazy/per-call.
+- Round 3 (2 fixes): IEE discriminator column corrected to `iee_runs.type` `'browser'/'dev'`, shared-storage adapters' reconcile() scoped per-adapter.
+- Round 4 (2 fixes): uniform no-op predicate (terminal + eventEmittedAt), final task_type sweep.
+
+Logs at `tasks/review-logs/spec-review-log-execution-backend-adapter-contract-{1,2,3,4}-*.md`.
+
+Same framing rejection list: do NOT flag "add feature flag", "stage rollout", "add E2E / frontend / API contract / supertest tests", "introduce a new service that does X" if existing primitive fits, "add monitoring / circuit breaker / rate limiter".
+
+Be especially terse. If the spec is ready, say "READY — no remaining blockers" and stop. Do not invent issues.
+
+Format any findings as before: numbered, with **Title / Section / Issue / Suggested fix / Severity** fields. End with one-line VERDICT: READY / READY_WITH_NITS / NEEDS_REVISION.
+2026-05-10T03:11:13.943313Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+2026-05-10T03:11:14.093309Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+2026-05-10T03:11:14.318289Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+ERROR: Reconnecting... 2/5
+2026-05-10T03:11:14.753480Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+ERROR: Reconnecting... 3/5
+2026-05-10T03:11:15.642194Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+ERROR: Reconnecting... 4/5
+2026-05-10T03:11:17.323726Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+ERROR: Reconnecting... 5/5
+2026-05-10T03:11:20.737322Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: IO error: No such host is known. (os error 11001), url: wss://chatgpt.com/backend-api/codex/responses
+ERROR: Reconnecting... 1/5
+ERROR: Reconnecting... 2/5
+ERROR: Reconnecting... 3/5
+ERROR: Reconnecting... 4/5
+ERROR: Reconnecting... 5/5
+ERROR: stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)
+ERROR: stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)
+2026-05-10T03:11:45.819931Z ERROR codex_core::session: failed to record rollout items: thread 019e0fde-158f-7293-b96c-4e5a779845aa not found

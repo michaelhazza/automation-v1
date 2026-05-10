@@ -1574,7 +1574,7 @@ When a service does SELECT → UPDATE and a concurrent path can write a column b
 `agent_runs.status = 'cancelling'` is set once by `agentRunCancelService` and must resolve to a terminal value promptly:
 - In-process loops: exit at the next iteration, write `'cancelled'`.
 - IEE-delegated runs: `cancelIeeRun` writes `iee_runs='cancelled'` + enqueues `iee-run-completed`; finaliser parks the parent.
-- If the pg-boss event publish fails: `reconcileStuckDelegatedRuns` sweeps `status IN ('delegated','cancelling')` after 120 s and calls `finaliseAgentRunFromIeeRun`.
+- If the pg-boss event publish fails: `reconcileBackends` sweeps `status IN ('delegated','cancelling')` after 120 s and calls `finaliseAgentRunFromBackend`. (Pre-2026-05-10: `reconcileStuckDelegatedRuns` / `finaliseAgentRunFromIeeRun` — renamed under the execution-backend-adapter-contract build.)
 
 **Divergence case:** if the IEE worker completes before observing the cancel, the parent can transition `cancelling → completed` (not `cancelled`). This is logged as `agentRunFinalization.cancel_intent_divergence` and is expected best-effort behaviour, not a bug.
 
@@ -3389,6 +3389,25 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 
 **Detection heuristic.** When introducing a new namespaced log code (`<feature>.<event>`), grep the file for both `console.log('<code>` and `logger.info('<code>` — only the structured form should appear.
 
+## Pattern: Type seam for future variants — declare the wider type now, restrict registration at runtime
+
+**Context.** While locking the ExecutionBackend Adapter Contract spec (`tasks/builds/execution-backend-adapter-contract/spec.md`), ChatGPT-spec-review F1 caught that typing `ExecutionBackend.id` as `ExecutionMode` (a closed five-value union) would force a future cascading rename when OpenClaw lands and introduces internal variants like `openclaw_managed` vs `openclaw_external`. Renaming a contract type after it has propagated through the registry, finaliser, and reconcile signatures is exactly the kind of "expensive to retrofit" cost that's cheap to pre-empt at spec time.
+
+**Resolution.** Introduce the wider type now (`ExecutionBackendId = ExecutionMode | 'openclaw_managed' | 'openclaw_external'`) and key the registry, `resolve()`, finaliser, and reconcile on it. Keep dispatch keyed on the narrower `ExecutionMode` (subtype assignment is automatic). Restrict V1 by a runtime guard at registration time: a register-call carrying an OpenClaw `ExecutionBackendId` value throws `BackendCapabilityViolation('OpenClaw backend ids reserved for Phase 3')`. The guard is removed when the OpenClaw adapter lands.
+
+**Why this matters.** A type seam carries forward without code changes; a type rename touches every call site. The wider type costs nothing at runtime (V1 still only registers ExecutionMode values) but eliminates a future PR that exists solely to rename the parameter type at every dispatch / finalise / reconcile call site. Apply this pattern whenever a contract field will plausibly need to accept additional discriminant values within the next ~2 specs — the cost-to-add-now is one type definition; the cost-to-add-later is a contract-wide rename.
+
+**Detection heuristic.** During spec review, ask: "is this id/discriminant typed as a closed union that the spec itself already mentions might expand?" If yes, expand the type now and restrict at runtime.
+
+## Pattern: Service-layer circular import — extract shared types into a neutral file
+
+**Context.** Same spec session, F3. Adapter types (`executionBackends/types.ts`) needed `TokenBudget` and `LoopResult` from `agentExecutionService.ts`, while `agentExecutionService.ts` imports `executionBackends/registry.ts` (which imports `executionBackends/types.ts`). Result: `types.ts → agentExecutionService.ts → registry.ts → types.ts` cycle. This is the service-layer analogue of the 2026-04-25 schema-as-leaf finding (KNOWLEDGE.md), but the fix shape is different.
+
+**Resolution.** Extract the shared type aliases (`TokenBudget`, `LoopResult`) into a new neutral file (`server/services/agentExecutionTypes.ts`) — type aliases only, zero runtime code. Both consumers import directly from the neutral file. The original service file re-exports the types for backwards compatibility with existing consumers (so call sites do not churn). Acceptance test: `expect(typesModuleSource).not.toMatch(/from .+agentExecutionService/)` in the contract pure test.
+
+**Why this matters.** Schema-leaf and service-leaf cycles have the same root cause (a leaf depending upward) but different fix shapes — schema fix is to drop the import; service fix is to relocate the shared type. Don't try to fix a service-layer cycle by inverting one of the imports; the right move is to lift the shared shape into a neutral module that neither side owns.
+
+**Detection heuristic.** When a new file references a "private" type from a module that will eventually depend on the new file, treat the type as already-shared and lift it before authoring the new module. The cycle is preventable at design time; catching it at typecheck time is rework.
 ## Pattern: actionRegistry directory-shim split (refactor-action-registry, 2026-05-10)
 
 **Context.** The monolithic `server/config/actionRegistry.ts` (3971 lines) was split into per-domain modules under `server/config/actionRegistry/` as part of the refactor-action-registry build.
@@ -3481,3 +3500,75 @@ server/config/actionRegistry/
 **Resolution.** Wrap any optional canonical-layer watermark in `COALESCE(<watermark>, <safe-floor>)` so the predicate degrades to a known-good comparison rather than UNKNOWN. For the support-agent case: `COALESCE(last_customer_message_at, created_at)` pins the lower bound to ticket creation time as a degenerate safe floor. Pair the COALESCE with an explicit ingestion-contract paragraph naming the writers (`connectorPollingService`, `webhookAdapterService`) so future developers know who is responsible for keeping the watermark fresh. Add test fixtures specifically for the null-timestamp degenerate cases — null + earlier-created (excluded) and null + later-created (eligible).
 
 **Detection heuristic.** Any predicate of shape `<event_column> >= <optional_canonical_column>` inside a NOT EXISTS / WHERE NOT IN / aggregate filter is a silent-UNKNOWN landmine when the optional column is nullable. Reviewer prompt: "Is this column ALWAYS populated by every ingestion path that touches the parent row, including legacy paths?" If the answer is "should be" or "the writer is supposed to", COALESCE the comparison. The cost of the COALESCE is one extra column read; the cost of the bug is silently re-processing data forever.
+
+## Pattern: Cycle-prevention regex must anchor on the exact filename, not a substring
+
+**Context.** Execution Backend Adapter Contract build (2026-05-10) added §8.32 cycle-prevention assertion coverage rule, then extended the assertion to 8 files in the dispatch chain. The new tests immediately failed against `_ieeShared.ts` even though it has no runtime cycle. Root cause: the original regex `[^'"]*agentExecutionService[^'"]*` matches `agentExecutionServicePure.js` as a false positive — `_ieeShared.ts:44` legitimately imports `computeRunResultStatus` from there.
+
+**Resolution.** Tighten the regex to `agentExecutionService\.(?:js|ts)` so the file extension anchors the match. Both the original two assertions (on `types.ts` and `options.ts`) and the new chain-coverage assertion need the precise pattern. Pure-helper sibling files (`*Pure.js`, `*Pure.ts`) legitimately re-share the prefix and must not trip the cycle-prevention test.
+
+**Detection heuristic.** Any "MUST NOT import from `<filename>`" assertion regex must anchor on `<filename>\.(?:js|ts)` (not `<filename>[^'"]*`) so adjacent pure-helper modules sharing the prefix don't false-positive. The convention `xxx.ts` + `xxxPure.ts` is widespread in this codebase — every pure-helper extraction creates a regex landmine.
+
+## Pattern: Domain-primitive registration must not be gated on queue-backend choice
+
+**Context.** Execution Backend Adapter Contract build (2026-05-10) — pr-reviewer flagged that `server/index.ts` registered all five `ExecutionBackend` adapters inside `if (env.JOB_QUEUE_BACKEND === 'pg-boss') { ... }`. Three of the five (`api`, `headless`, `claude-code`) have no pg-boss dependency at all; the gating was a copy-paste hangover from when the block was originally just the IEE event handler attachment. With `JOB_QUEUE_BACKEND='bullmq'` (an env enum value the codebase still allows), the registry would be empty at HTTP-handler time and EVERY `executeRun` call would throw `BackendNotRegistered`, including the default `api` mode. Silent regression — no compile-time warning would surface it.
+
+**Resolution.** Split the boot block in two: (1) unconditional adapter registration in its own try/catch, (2) pg-boss-gated event-handler attachment that depends on registration completing first. Document the boot-ordering invariant inline so a future maintainer doesn't re-merge the blocks.
+
+**Detection heuristic.** Any boot-time `register*()` call sitting inside an env-conditional gate is suspicious. Ask: "Does the thing being registered actually depend on the env condition, or just one consumer of it?" If the registration is for a domain primitive (registry entry, dispatch table, capability map), it almost always belongs outside the env gate, with the env-conditional consumer attached separately.
+
+## Pattern: Lifting code into a generic orchestrator drops the leaf side-effects
+
+**Context.** Execution Backend Adapter Contract build (2026-05-10) — Chunk 3 lifted `finaliseAgentRunFromIeeRun`'s body into the new generic `finaliseAgentRunFromBackend` orchestrator. The legacy function had an early-return for the parent-row-missing case that ALSO stamped `iee_runs.event_emitted_at = now()` so the worker's `retryUnemittedEvents()` sweep would not re-fire forever. The lift moved the early-return into the orchestrator but dropped the stamp. The Codex dual-reviewer pass caught it; without the stamp, every orphaned `iee_runs` row would have re-emitted its terminal event indefinitely once deployed.
+
+**Resolution.** When lifting a special-case path (early return / null guard / failure branch) into a generic orchestrator, audit it for non-obvious side-effects baked into the original code path. The fix here was to widen the adapter contract to allow `parentRun: null` and have the adapter own the stamp, so the side-effect followed the lifecycle into the new abstraction. Generic orchestrators should not own concrete-row side-effects; lift them into the adapter that owns the row.
+
+**Detection heuristic.** Whenever a refactor extracts a generic shape from a concrete function with multiple early-return paths, diff the legacy function against the lift line by line. Side-effects in early-return branches (write a stamp, emit a metric, log an audit event, schedule a retry) are the easy ones to drop. The acceptance criterion should explicitly enumerate the side-effects the extraction must preserve, not just the happy-path return value.
+
+## Pattern: Capability-gated optional methods make adapter contract widenings cheap
+
+**Context.** Execution Backend Adapter Contract build (2026-05-10) — dual-reviewer fix needed to widen `BackendFinalisationInput.parentRun` from a non-null shape to nullable so the orchestrator could hand the orphan case to the adapter. Five adapters live behind the contract, but only the two delegated ones (`iee_browser`, `iee_dev`) implement `finalise()`. The api/headless/claude-code adapters declare `'in_process'` / `'subprocess'` capabilities and have no `finalise()` slot — the registry's Rule 2 only requires the delegated lifecycle methods when `capabilities.includes('delegated')`.
+
+**Resolution.** Capability-gated optional methods in the contract mean a widening that touches a delegated method only edits the delegated implementations. The api/headless/claude-code adapters were untouched. Both IEE adapters are thin forwarders to `_ieeShared.ts::ieeFinalise`, so the actual edit was to one shared body. The contract type signature change required no adapter-level edits beyond the shared helper.
+
+**Detection heuristic.** When considering a contract change against a registry-resolved adapter set: list the adapters and their declared capabilities. Methods gated by capability only need re-edits in adapters that declare the gating capability. Contract widenings (T → T | null, narrow union → wider union) flow through cleanly; contract narrowings (the reverse) require all gated implementations to re-validate. The DRY of the IEE pair via `_ieeShared.ts` reduces the per-edit cost from N×M to 1 — worth preserving when adding new delegated adapters.
+
+### [2026-05-10] Pattern — Boot-time registration validation must be FATAL, not log-and-continue
+
+**Context.** ChatGPT PR review (PR #281, Round 1, B1) — `server/index.ts` registered all five `ExecutionBackend` adapters in a try/catch that logged registration errors and continued startup. The spec made registration validation a boot-time safety boundary (adapters that fail validation must never reach dispatch); a partial-registry boot would surface as a 500 on every dispatch, strictly worse than a clean fatal-on-failure crash.
+
+**Rule.** When a spec says "registration validation must prevent dispatch", the implementation must rethrow after logging, matching the fatal-boot-failure pattern of other required boot dependencies. Catching-and-continuing produces a half-booted process where every consumer of the registry fails at runtime, the operator sees no boot-time signal, and "boot succeeded" is technically true but functionally misleading. The fix is two lines: keep the structured warn line for forensics, then `throw err`.
+
+**Detection heuristic.** Any boot-time `register*()` call wrapped in try/catch where the catch logs and proceeds is suspicious. The right shape is: log structured detail (error message, stack, context) FOR forensics, then rethrow. The exception is when the registration is truly optional (e.g., a feature-flagged plugin that's opt-in). For domain-primitive registries (dispatch tables, capability maps, finaliser routing), opt-in is rare and rethrow is the safe default.
+
+### [2026-05-10] Pattern — Adapter-contract field semantics must match the migration intent
+
+**Context.** ChatGPT PR review (PR #281, Round 1, B2) — `claudeCodeBackend.ts` returned `ccResult.sessionId` as `backendTaskId` for observability. The contract spec said `backendTaskId` is for delegated backends only and should be `null` for in-process and subprocess adapters. The migration `0313_execution_backend_columns.sql` introduced `(backend_id, backend_task_id)` as a generic delegated-task reference, with `backend_task_id` null for in-process/subprocess paths. Returning a Claude session ID in that field was hidden contract drift inside what looked like an observability improvement.
+
+**Rule.** When a migration introduces a typed contract field with a stated semantics ("delegated-task reference, null for non-delegated"), the adapter implementations must match the stated semantics — even when the adapter has another value that "fits" the field's shape. Observability identifiers belong in the typed log payload (`toolCallsLog[0].sessionId` already preserved this) or in a deliberately named future field (`backendSessionId`); never in a contract field whose semantics are documented elsewhere.
+
+**Detection heuristic.** Cross-check every adapter implementation against the migration that introduced the contract field. Grep the migration text for the field's column comment, then grep adapter code for the field name in returned objects. If an adapter populates the field with a value that doesn't match the migration's stated semantics, the implementation has drifted from the contract. The most common drift shape: an adapter has a "spare" identifier (session id, request id, trace id) that's tempting to surface through a contract field that happens to be the right type. Resist — add a deliberate observability field.
+
+### [2026-05-10] Pattern — Verify route-error envelope behaviour before documenting HTTP shape in code comments
+
+**Context.** ChatGPT PR review (PR #281, Round 2, P1) — A code comment near a `throw ParentRunNotDispatchable` claimed "the route layer's existing error envelope renders typed errors as a 4xx". Investigation showed: `ParentRunNotDispatchable` extends `Error` with no `statusCode` field; `normaliseRouteError` checks `instanceof AppError`, then duck-typed `statusCode`, then falls through to `kind: 'unknown'` with statusCode 500. The error today actually maps to a 500 envelope, not a 4xx — the comment was verifiably wrong, and would mislead future maintainers reasoning about the route surface.
+
+**Rule.** When a typed error is returned to a route layer, do NOT document its HTTP shape in code comments unless you've grep-verified the route mapping. The safe default is a neutral comment ("the route layer will surface the typed error according to the existing error-envelope behaviour") that doesn't claim a specific status code. A deliberate AgentRunResult shape can be added later if/when the desired client-visible shape is decided — that's a behaviour change, separate scope.
+
+**Detection heuristic.** Any inline comment that claims "renders as 4xx" / "renders as 5xx" / "returns N" near a `throw` site is a verification target. Grep the route layer for the typed error class name and check the envelope normalisation code. If the error class lacks `statusCode` AND doesn't extend the route layer's typed-error base, it falls through to the unknown-error branch — which is almost always a 500. Don't write status-code claims into code comments without that grep.
+
+### [2026-05-10] Pattern — When the plan says "rethrow if no existing race-loser shape exists", verify by searching origin/main first
+
+**Context.** ChatGPT PR review (PR #281, Round 1, T1) — The plan explicitly said: "map ParentRunNotDispatchable to the exact existing race-loser shape, or rethrow and document if no such shape exists". The implementation invented a synthetic zeroed `AgentRunResult` with `summary: null`, zero counters, and a coerced status. Verification against `origin/main` showed the pre-cutover dispatch had no such shape — the synthetic response was invented, not replicated.
+
+**Rule.** When a plan directs "match the existing X shape, or rethrow if X doesn't exist", verification is mandatory: grep `origin/main` for the shape's call sites BEFORE inventing one. The "or rethrow" branch exists precisely so the implementation doesn't invent a new shape during a refactor — synthetic shapes are silent contract additions that are hard to back out later. Rethrow + structured warn line is the spec-compliant path when no existing shape exists.
+
+**Detection heuristic.** Plans that mention "existing X" alongside "or do Y if X doesn't exist" are testing whether the implementer verified. The invented-shape failure mode looks like a normal refactor at first glance — the synthetic values often look reasonable in isolation. The tell is that those values weren't there before the refactor. The verification step is one grep against `origin/main` for the shape's signature; skipping it produces a class of bugs where downstream consumers receive plausible-but-wrong data.
+
+### [2026-05-10] Pattern — Capability mismatches that the registry should make impossible must THROW, not silently return false
+
+**Context.** ChatGPT PR review (PR #281, Round 1, T2) — `finaliseAgentRunFromBackend()` resolved an adapter and, if the adapter wasn't delegated or lacked finalisation methods, logged `agentRunFinalization.non_delegated_adapter` and returned `false`. The registry already validates delegated adapters at registration time (Rule 2 requires delegated lifecycle methods when `capabilities.includes('delegated')`), so reaching this branch indicates caller misuse (stale event payload, wrong reconciliation backendId, registry/config drift) — not a recoverable reconciliation result. Returning `false` made a bad call look like an idempotent no-op.
+
+**Rule.** When a runtime check covers a case the registry's invariants make impossible, the right outcome is a typed throw, not a silent boolean false. False says "this is a recoverable no-op state"; throw says "the system is in an invalid configuration the registry promised wouldn't happen". Calling finalisation on `api`, `headless`, or `claude-code` is a programmer error, not a recoverable case — the typed `FinaliseRequiresDelegatedAdapter` error makes the misuse loud at every layer (logs, sentry, route 500).
+
+**Detection heuristic.** When implementing a runtime guard that "shouldn't" be reachable per the registry's invariants, ask: "if this branch fires, is the system still in a valid state?" If no, throw a typed error so the failure is loud. If yes, return a typed result that distinguishes "recoverable no-op" from "actual success". Don't conflate the two by returning a generic false — the caller can't tell which branch fired and bug-hunting takes longer.

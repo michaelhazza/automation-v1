@@ -4,7 +4,9 @@
  * The IEE worker emits an 'iee-run-completed' pg-boss event after every
  * terminal iee_runs write (see worker/src/persistence/runs.ts::finalizeRun).
  * This handler consumes those events and finalises the parent agent_runs
- * row via finaliseAgentRunFromIeeRun.
+ * row via `finaliseAgentRunFromBackend({ backendId, backendTaskId })` —
+ * the generic registry orchestrator that resolves the IEE adapter and
+ * dispatches to its `finalise()` body.
  *
  * Idempotency: the finalisation service is idempotent, so duplicate event
  * deliveries (expected — worker retry sweep re-emits unemitted events) are
@@ -17,7 +19,13 @@ import type PgBoss from 'pg-boss';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
-import { finaliseAgentRunFromIeeRun } from '../services/agentRunFinalizationService.js';
+import { finaliseAgentRunFromBackend } from '../services/agentRunFinalizationService.js';
+import { deriveBackendIdFromIeeType } from '../services/agentRunFinalizationServicePure.js';
+import {
+  ieeRunCompletedPayloadSchema,
+  SUPPORTED_IEE_EVENT_VERSION,
+  type IeeRunCompletedPayload,
+} from '../services/executionBackends/_ieeShared.js';
 import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -25,49 +33,24 @@ import { createWorker } from '../lib/createWorker.js';
 export const QUEUE = 'iee-run-completed';
 
 /**
- * Current supported event payload version. Bump the worker-side emitter
- * and this constant together when the shape changes. Events arriving
- * with a different version are rejected (logged and acked) rather than
- * parsed blindly — external review Blocker 6.
- */
-const SUPPORTED_EVENT_VERSION = 1;
-
-interface IeeRunCompletedPayload {
-  version: number;
-  eventKey: string;
-  ieeRunId: string;
-  status: 'completed' | 'failed' | 'cancelled';
-  failureReason?: string | null;
-  totalCostCents?: number;
-  stepCount?: number;
-}
-
-/**
- * Shallow payload validation — enough to catch version mismatch and
- * gross shape drift before we hit the DB. The iee_runs row is the
- * source of truth, so we do not trust payload content beyond the
- * fields needed to locate the row.
+ * Shallow payload validation — wraps the canonical Zod schema declared on
+ * `ieeBrowserBackend.completedEventPayload` (and exported from
+ * `_ieeShared.ts`) so adapter and handler share one source of truth.
+ *
+ * Pre-versioning (no `version` field) events are treated as v1 for
+ * backwards compatibility with any in-flight pg-boss jobs at deploy
+ * time. Future version bumps must NOT accept a missing version — make
+ * the `version` field required on the schema and remove the fallback
+ * here at the same time.
  */
 function validatePayload(data: unknown): IeeRunCompletedPayload | null {
-  if (typeof data !== 'object' || data === null) return null;
-  const obj = data as Record<string, unknown>;
-  // Pre-versioning (no `version` field) events are treated as v1 for
-  // backwards compatibility with any in-flight pg-boss jobs at deploy
-  // time. Future bumps should NOT accept a missing version.
-  const version = typeof obj.version === 'number' ? obj.version : 1;
-  if (version !== SUPPORTED_EVENT_VERSION) return null;
-  if (typeof obj.ieeRunId !== 'string' || obj.ieeRunId.length === 0) return null;
-  if (typeof obj.eventKey !== 'string') return null;
-  if (obj.status !== 'completed' && obj.status !== 'failed' && obj.status !== 'cancelled') return null;
-  return {
-    version,
-    eventKey: obj.eventKey,
-    ieeRunId: obj.ieeRunId,
-    status: obj.status,
-    failureReason: typeof obj.failureReason === 'string' ? obj.failureReason : null,
-    totalCostCents: typeof obj.totalCostCents === 'number' ? obj.totalCostCents : undefined,
-    stepCount: typeof obj.stepCount === 'number' ? obj.stepCount : undefined,
-  };
+  const parsed = ieeRunCompletedPayloadSchema.safeParse(data);
+  if (!parsed.success) return null;
+  const payload = parsed.data;
+  const version = payload.version ?? 1;
+  if (version !== SUPPORTED_IEE_EVENT_VERSION) return null;
+  if (payload.ieeRunId.length === 0) return null;
+  return payload;
 }
 
 export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void> {
@@ -109,7 +92,8 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
       }
 
       try {
-        await finaliseAgentRunFromIeeRun(ieeRun);
+        const backendId = deriveBackendIdFromIeeType(ieeRun.type);
+        await finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRun.id });
       } catch (err) {
         logger.error('iee.run_completed.finalise_failed', {
           ieeRunId,

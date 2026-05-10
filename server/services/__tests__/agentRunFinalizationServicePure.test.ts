@@ -7,16 +7,19 @@
  *   - buildSummaryFromIeeRun fallbacks + truncation
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/agentRunFinalizationServicePure.test.ts
+ *   npx vitest run server/services/__tests__/agentRunFinalizationServicePure.test.ts
  *
  * Spec: docs/iee-delegation-lifecycle-spec.md §Tests, Appendix A.
  *
- * The DB-touching `finaliseAgentRunFromIeeRun` and `reconcileStuckDelegated
- * Runs` functions are not covered here — they require integration tests
- * against a test Postgres and are tracked as a remaining gap in the spec.
+ * Note: the F2 legacy-fallback test block (Execution Backend Adapter
+ * Contract spec § 16 #14) was removed alongside the legacy IEE-typed
+ * finaliser alias in Chunk 5 of that refactor. The orchestrator
+ * (`finaliseAgentRunFromBackend`) is the only public entry point
+ * post-Chunk-5 and is exercised by the DB-touching orchestrator tests
+ * (which require a test Postgres).
  */
 
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
