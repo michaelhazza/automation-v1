@@ -167,3 +167,73 @@ Per spec §6.5: O5 is recommended to be applied during the merge-ready phase to 
 npm run lint
   PASSED (docs-only chunk — no typecheck or vitest required)
 ```
+
+---
+
+## DEC-1 through DEC-4 resolutions (spec §0.4 — re-stated for §9 acceptance #6a)
+
+Re-stated from spec §0.4. **No in-build deviations from any of the four locked decisions.** Each was implemented as the spec directed; the `spec-conformance` audit on 2026-05-10 confirmed every code path matches the locked resolution.
+
+- **DEC-1 — Support read scoping shape: subaccount-required path.** All five support read endpoints moved under `/api/subaccounts/:subaccountId/support/...` (verified via `server/index.ts:473` + the three `Router({ mergeParams: true })` declarations in `server/routes/support/`). No sibling org-listing endpoints introduced.
+- **DEC-2 — Webhook attribution shape (W3): per-org URL path token.** New URL is `POST /api/webhooks/teamwork/:orgWebhookToken`; `connectorConfigService.findByWebhookToken` filters on `connector_type='teamwork' AND status='active' AND webhook_token=$1` (the locked three-filter conjunction). Token stored on shared `connector_configs.webhook_token uuid NULL` with partial UNIQUE `WHERE webhook_token IS NOT NULL`.
+- **DEC-3 — Migration 0240 phased swap: deferred to post-launch + ship runbook now.** No code change. Runbook landed at `docs/runbooks/migration-0240-phased-swap.md` covering trigger condition, two-step `CREATE UNIQUE INDEX CONCURRENTLY` migration, rollback plan, operator command sequence.
+- **DEC-4 — `taskService.createTask` signature: caller-supplied `tx`.** Compile-time enforced via the canonical overload `createTask(input: CreateTaskInput, tx: OrgScopedTx)`; the transitional 4-arg overload is `@deprecated`, throws at runtime, and is grep-gated to be unreachable from any in-scope caller. Sister-branch sites at `workflowEngineService.ts:2716` / `:2962` preserved untouched per §0.2.
+
+---
+
+## T1 grep-gate output (spec §3.1 acceptance — route inventory check)
+
+Run on 2026-05-10 against the integration branch. All four patterns return zero in-scope matches; the only matches are intentional 404-assertion tests under `__tests__/` which are excluded by the spec's scope rule.
+
+```bash
+# String-literal callers (single + double quoted) of the legacy unscoped paths.
+rg -n "['\"]/api/support/(tickets|drafts|inboxes)" \
+  --glob '!docs/**' --glob '!tasks/**' --glob '!*.md' \
+  --glob '!server/routes/support/**' \
+  -- server/ client/src/ shared/
+# Output: only matches under server/routes/support/__tests__/supportRouteScoping.test.ts
+#   asserting legacy paths return 404 (intentional, per spec §3.1 scope-out).
+
+# Template-literal callers.
+rg -n "\`/api/support/(tickets|drafts|inboxes)" \
+  --glob '!docs/**' --glob '!tasks/**' --glob '!*.md' \
+  --glob '!server/routes/support/**' \
+  -- server/ client/src/ shared/
+# Output: empty.
+
+# URL-builder helpers (apiUrl etc.) that interpolate the support segment.
+rg -n "apiUrl\(['\"]/support/(tickets|drafts|inboxes)" \
+  --glob '!docs/**' --glob '!tasks/**' --glob '!*.md' \
+  -- server/ client/src/ shared/
+# Output: empty.
+
+# Legacy unscoped mount check.
+rg -n "app\.use\(['\"]\/api\/support['\"]" -- server/
+# Output: empty (line 473 is the new subaccount-scoped mount).
+```
+
+Client call-site verification (the eleven sites named in plan-time builder contract item 3) — all rewritten to `/api/subaccounts/${subaccountId}/support/...`:
+
+```
+client/src/pages/integrations/SupportDeskSetupPage.tsx:25      api.get(`/api/subaccounts/${subaccountId}/support/inboxes`)
+client/src/pages/support/TicketsListPage.tsx:51,65,74           api.get(`/api/subaccounts/${subaccountId}/support/tickets…`)
+client/src/pages/support/DraftReviewQueue.tsx:37,73,87,101      api.get/post(`/api/subaccounts/${subaccountId}/support/drafts…`)
+client/src/pages/support/InboxConfigPage.tsx:104,272            api.patch/get(`/api/subaccounts/${subaccountId}/support/inboxes…`)
+client/src/pages/support/TicketDetailPage.tsx:71                api.get(`/api/subaccounts/${subaccountId}/support/tickets/${id}`)
+```
+
+(Internal React-Router `<Link to="/support/...">` matches are page-navigation routes, not API calls — out of scope for this gate.)
+
+---
+
+## Spec-conformance audit (2026-05-10)
+
+Run by `spec-conformance` agent, full-spec scope. All 14 implementation items (W1, W2, W3, T1, T2, T3, S1, S2, V1, V2, O1, O2, O3, O4, O5) verified against `spec.md`.
+
+- **PASS:** W1, W2 (Slack + Teamwork), W3 (route shape, migrations 0313+0314, persistent dedup, TTL prune job), T1, T2, T3, S1, S2, V1, V2, O1, O2 (runbook), O3, O4.
+- **MECHANICAL_GAP fixed in-session:** progress.md DEC-1..4 re-statement (this section); progress.md T1 grep-gate paste (above section).
+- **OUT_OF_SCOPE:** O5 (operator action — applied at merge-ready).
+
+`npx tsc --noEmit -p server/tsconfig.json` clean. `npm run lint` clean (0 errors, 903 warnings — pre-existing). Sister-branch scope-out gate: zero diff in §0.2 forbidden paths (`server/middleware/*`, `workflowEngineService.ts`, `workflowRunService.ts`, `agentExecutionService.ts`, `agentRuns` schema).
+
+Audit log: `tasks/review-logs/spec-conformance-log-pre-test-hardening-2026-05-10T21-01-31Z.md`.
