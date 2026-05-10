@@ -70,5 +70,26 @@
 
 **Round 2 verdict:** CHANGES_REQUESTED → APPROVED with 1 deferred (PTH-CGT-R2).
 
-**Round 3 diff:** pending generation after commit.
+### Round 3 — 2026-05-10T23:55:00Z (post Round 2 commit `48333766`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `connectorConfigService.ts` uses `withAdminConnection` but does not import it | high (claimed blocker) | typecheck | scope | technical | **reject** | auto (reject) — **duplicate false positive of Round 1 F1**. `withAdminConnection` imported at line 7 of `server/services/connectorConfigService.ts`; verified again. Local typecheck PASSED in all 3 rounds. ChatGPT only sees the diff hunk for the new method and misreads its import context. |
+| F2 | `knowledgeService.overrideEntry` uses `peekOrgTxContext() !== undefined` but mocks return `null`; tests would take wrong branch | high (claimed blocker) | tenant-isolation / test-mock-interaction | error_handling | technical | **implement** | auto (implement) — switched to truthy check (`const existingCtx = peekOrgTxContext(); return existingCtx ? ... : ...`) for consistency with `deliveryService.deliver` and `scheduledTaskService.fireOccurrence`. The truthy check treats both `null` (mock) and `undefined` (production no-ctx) as "no ctx", correctly routing to the `db.transaction` fallback in both. Added comment citing PTH-CGT-R3-F2 origin. |
+| F3 | `webhookReplayNonces.ts` Drizzle schema declares `.references(() => organisations.id)` but migration 0318 does not create the FK — schema/migration drift | high (claimed blocker) | schema | naming | technical | **implement** | auto (implement) — added `REFERENCES organisations(id) ON DELETE CASCADE` to migration `0318_webhook_replay_nonces.sql:2`. CASCADE matches the table's lifecycle (per-org durable dedupe state; deleted with the org). Pre-launch posture: migration has not been applied in any production environment, so modifying the file in place rather than authoring a follow-up alter migration is safe and idempotent for CI re-runs against a clean DB. |
+| R1 | `connectorConfigService.ts:145` comment references migration 0314 but actual file is 0319 (post-S2 rename) | low | doc-rot | naming | technical | **implement** | auto (implement) — updated to "Migration 0319 backfills existing rows (renumbered from 0314 post-S2 to clear collision with PR #283)". |
+| R2 | `supportRouteScoping.test.ts` 404 section creates a minimal Express app with no support routes and asserts 404 — proves Express default 404 behaviour, not production legacy-mount removal. Structural assertions above do the real work | low | test-quality | test_coverage | technical | **defer** | **deferred to backlog as PTH-CGT-R3-R2**. Non-blocking; the structural source-grep assertions in the same test (lines 36-54) already verify production removed the legacy mount. The 404 section is redundant but not misleading enough to block merge on. Logged in `tasks/todo.md` with rewrite suggestion (mount the production router and exercise the actual unsmounted paths). |
+| R3 | `webhookReplayNoncePruneJob.ts:36` uses `crypto.randomUUID()` without explicit import — works via global but inconsistent with codebase convention | low | imports / consistency | scope | technical | **implement** | auto (implement) — added `import { randomUUID } from 'crypto';` at the top of the file and changed call site to `randomUUID()`. Matches the convention used in `connectorConfigService.ts` and other files in the repo. |
+
+**Auto-applied:** F2, F3, R1, R3 (4 findings).
+**Auto-rejected:** F1 (1 finding — duplicate false positive).
+**Deferred to backlog:** R2 (1 finding) — `PTH-CGT-R3-R2` in `tasks/todo.md`.
+
+**Verification after Round 3 fixes (commit pending):** server typecheck CLEAN (0 errors); all 20 regression tests pass (taskService.createTask 5/5, systemIncidentService.escalation 1/1, supportDraftsRoutesInvalidAction 7/7, supportDraftDispatchService.approveDraft 7/7).
+
+**Round 3 verdict:** CHANGES_REQUESTED → APPROVED with 1 deferred (PTH-CGT-R3-R2).
+
+**Round 4 diff:** pending generation after commit.
 

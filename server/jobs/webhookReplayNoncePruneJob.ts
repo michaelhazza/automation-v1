@@ -20,6 +20,7 @@
  * Retry classification: safe (pg-boss retry is acceptable).
  */
 
+import { randomUUID } from 'crypto';
 import { sql } from 'drizzle-orm';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
@@ -33,7 +34,7 @@ export interface WebhookReplayNoncePruneResult {
 }
 
 export async function runWebhookReplayNoncePrune(): Promise<WebhookReplayNoncePruneResult> {
-  const jobRunId = crypto.randomUUID();
+  const jobRunId = randomUUID();
   const startedAt = Date.now();
 
   logger.info(`${SOURCE}.started`, { jobRunId, scheduledAt: new Date().toISOString() });

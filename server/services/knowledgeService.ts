@@ -794,8 +794,13 @@ export async function overrideEntry(opts: {
   // is absent (any non-HTTP caller), open our own db.transaction + set the
   // GUC + run the override flow inside it. Either path satisfies the spec
   // §V2 same-transaction requirement.
-  const inExistingTx = peekOrgTxContext() !== undefined;
-  return inExistingTx
+  // PTH-CGT-R3-F2: use truthy check (matches deliveryService + scheduledTaskService).
+  // peekOrgTxContext() returns OrgTxContext | undefined in production but tests
+  // sometimes mock it as () => null. `!== undefined` would treat null as "ctx present"
+  // and incorrectly route to getOrgScopedDb (which throws missing_org_context). A
+  // truthy check treats both undefined and null as "no ctx".
+  const existingCtx = peekOrgTxContext();
+  return existingCtx
     ? runOverrideInTx(getOrgScopedDb('knowledgeService.overrideEntry'), opts, canonical, bodyHash)
     : db.transaction(async (innerTx) => {
         await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${opts.organisationId}, true)`);

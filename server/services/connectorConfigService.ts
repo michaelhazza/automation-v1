@@ -142,7 +142,7 @@ export const connectorConfigService = {
     // webhook URL token at creation time. The tokenised webhook route
     // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
     // token; a null token means deliveries are silently dropped with 401.
-    // Migration 0314 backfills existing rows; this auto-generates for new ones.
+    // Migration 0319 backfills existing rows (renumbered from 0314 post-S2 to clear collision with PR #283); this auto-generates for new ones.
     const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
     const [config] = await db
       .insert(connectorConfigs)

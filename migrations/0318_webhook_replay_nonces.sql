@@ -1,5 +1,5 @@
 CREATE TABLE webhook_replay_nonces (
-  organisation_id uuid NOT NULL,
+  organisation_id uuid NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
   webhook_source text NOT NULL,
   nonce text NOT NULL,
   seen_at timestamptz NOT NULL DEFAULT now(),

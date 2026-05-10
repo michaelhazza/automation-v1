@@ -4039,3 +4039,19 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
 3. Move side effects entirely to a pg-boss `task-created` queue that the worker fires AFTER the transaction commits (most consistent with the existing pattern but adds latency for synchronous observers).
 
 **Suggested classification:** P2 (correctness, not security; pre-existing).
+
+### PTH-CGT-R3-R2 — supportRouteScoping.test.ts 404 section is weak
+
+**Origin:** chatgpt-pr-review Round 3 (PR #284 pre-test-hardening, 2026-05-10).
+**Surface:** `server/routes/support/__tests__/supportRouteScoping.test.ts:60-110`
+
+**Concern:** the "GET /api/support/* returns 404" section creates a minimal Express app with NO support routes mounted and asserts the catch-all returns 404. This proves Express's default 404 behaviour, not that production removed the legacy `/api/support` mount. The structural source-grep assertions in the same test (lines 36-54) already prove the production state.
+
+**Why deferred (not blocking):** the structural assertions do the real work; the 404 section is redundant rather than misleading. The 404 envelope shape `{ message: 'Not found' }` it pins is also intentional contract surface for the operator, so the section has minor non-zero signal.
+
+**Fix options:**
+1. Drop lines 60-110 entirely; rely on the structural section.
+2. Replace the minimal Express with a controlled harness that mounts the production `server/index.ts` router config (without lifecycle / DB) and exercises the unmounted legacy paths through real routing.
+3. Keep the section but rename to "404 envelope shape contract pin" and add an explanatory comment.
+
+**Suggested classification:** P3 (test quality, not correctness).
