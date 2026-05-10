@@ -1,4 +1,4 @@
-**Status:** Draft v3
+**Status:** Draft v4
 **Date:** 2026-05-10
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** sandbox-isolation
@@ -45,18 +45,18 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 1. **`SandboxExecutionService` interface.** The primitive adapters call. Shape: `runTask(input) → output`. Adapters (today `iee_dev`, future OpenClaw) consume it; the vendor implementation is hidden behind it.
 2. **Three implementations** of the interface:
    - `e2bSandbox` — production / staging
-   - `localDockerSandbox` — local dev
+   - `localDockerSandbox` — local dev. MUST use the same template Dockerfile and output contract as `e2bSandbox`. Spec B documents intentional parity gaps so local dev does not pass behaviours that production rejects.
    - `inlineSandbox` — unit tests only, no isolation, dangerous-but-explicit. **MUST fail fast outside `NODE_ENV=test` or an explicit pure-test harness.** Production, staging, preview, and local dev must never resolve to it; local dev uses `localDockerSandbox`.
    - Resolution via `SANDBOX_PROVIDER` env var, with the test-only guard above enforced at provider construction.
 3. **Output contract.** Inside the sandbox, conventional paths:
    - `/workspace/output.json` — structured result (mandatory, Zod-validated)
-   - `/workspace/artefacts/` — files to keep (uploaded to our object storage). Naming aligned with existing `artefact` usage in run-trace surfaces; if `artifact` appears anywhere in the codebase today, Spec B picks one spelling and migrates the other in the same change.
+   - `/workspace/artefacts/` — files to keep (uploaded to our object storage). Naming aligns with the existing run-trace `artefact` / `artifact` convention. Spec B MUST NOT introduce a second spelling in new sandbox-specific APIs. Any wider codebase naming migration is out of scope unless required for the sandbox interface.
    - `/workspace/logs/stdout.log` + `stderr.log` — captured logs
    - Anything outside these paths is discarded at sandbox close.
    - **Sandbox outputs are untrusted.** `output.json`, logs, and artefact manifests must be schema-validated, size-limited, redacted, and normalised before they influence run state, user-visible surfaces, billing, or downstream agent decisions. Isolation protects the worker from execution; this rule protects it from poisoned outputs.
 4. **Harvest mechanism.** After sandbox terminal, the adapter reads outputs via e2b SDK file API, uploads artefacts to existing object storage, writes log rows to existing log tables, writes cost row to ledger. **Harvest, artefact upload, log persistence, and cost-ledger writes MUST be idempotent by `sandboxExecutionId`** (and `runId` / `taskId` where applicable). Retrying after a worker crash must not duplicate artefacts, logs, or billing rows.
 5. **Redaction layer.** Harvested outputs, logs, and artefacts MUST pass through a redaction / safety layer before persistence. Known credential patterns, injected secret values, and provider tokens must not be written to logs, artefacts, object storage metadata, or run trace surfaces. Spec B pins the redaction contract: where it runs, which pattern set is enforced, and fail-closed behaviour when scanning itself fails.
-6. **Cost ledger — single canonical target.** Spec B chooses one cost-ledger write target and avoids parallel accounting paths. If `llm_requests` is reused, Spec B must justify why non-LLM compute belongs there and define the exact row shape (`source_type = 'sandbox_compute'`, `vcpu_seconds`, `wall_clock_ms`, `e2b_cost_cents`, indexes, aggregation contract). If a separate table is introduced, the spec must define its relationship to the existing ledger and the joined query shape used by metering.
+6. **Cost ledger — single canonical target.** Spec B chooses one cost-ledger write target and avoids parallel accounting paths. If `llm_requests` is reused, Spec B must justify why non-LLM compute belongs there and define the exact row shape (`source_type = 'sandbox_compute'`, `vcpu_seconds`, `wall_clock_ms`, `e2b_cost_cents`, indexes, aggregation contract). If a separate table is introduced, the spec must define its relationship to the existing ledger and the joined query shape used by metering. **Cost rows must be append-only or correction-based, not silently overwritten.** Spec B defines how retries, partial harvest failures, and provider cost reconciliation update billing state.
 7. **Wall-clock + cost ceiling per task.** Hard limits set at sandbox start; sandbox auto-terminates at either threshold. **Enforced provider-side where e2b supports it, with a worker-side fallback** — never enforced only in application logic. **V1 mandatory** — without it, runaway LLM loops burn real money.
 8. **Per-customer sandbox-minute metering.** Aggregations queryable from day one. **`subaccountId` is the minimum billing attribution grain; both `organisationId` and `subaccountId` rollups must be queryable.** UI dashboard NOT required in V1; the data must exist and be queryable from the first deploy.
 9. **Sub-account credential scoping.** The sandbox receives only task-scoped, sub-account-scoped credentials required for the specific operation. Secrets must be **short-lived where provider support allows**, **redacted from logs**, **excluded from harvested artefacts**, and **traceable through an audit event**. The sandbox never sees credentials belonging to a different sub-account.
@@ -66,6 +66,7 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
     - Credential injection mechanism (env var vs mounted file vs short-lived token)
     - Maximum artefact size and total artefact bytes per task
     - Runtime package install: **V1 prefers pre-baked template dependencies**. If runtime installation is allowed at all, it must be explicitly gated, logged, time- and cost-bounded, and unavailable to arbitrary customer input.
+    - **Preflight input validation:** maximum input bytes, allowed file types, MIME / type-sniffing posture, and failure behaviour BEFORE sandbox creation. Obviously invalid or oversized inputs must never reach a paid sandbox start.
 11. **Terminal-state taxonomy + retry posture.** Spec B defines terminal states and the retry / billing / visibility posture for each:
     - Completed successfully
     - Timed out (wall-clock ceiling)
@@ -77,9 +78,9 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
     - Provider unavailable
     Each terminal state declares whether it is user-visible, retryable, billable, and audit-worthy.
 12. **Observability.** Every sandbox execution MUST emit structured telemetry tied to `organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `sandboxExecutionId`, `provider`, `templateVersion`, `wallClockMs`, and `terminalState`. Required structured events at minimum: sandbox start, sandbox terminal, timeout, cost-ceiling termination, output validation failure, harvest failure, artefact upload failure, credential injection denied / missing, provider unavailable.
-13. **Template build pipeline + version pinning.** CI job that builds `synthetos-sandbox` (and `openclaw-session`) Docker images from `infra/sandbox-templates/`, pushes to e2b template registry on tag bump. Same Dockerfile used by `docker-compose` for local dev. **Every sandbox execution must record the template name, immutable template version / digest, build source commit, and provider project / environment.** Floating `latest` templates are not acceptable for production execution.
+13. **Template build pipeline + version pinning.** CI job that builds `synthetos-sandbox` (and `openclaw-session`) Docker images from `infra/sandbox-templates/`, pushes to e2b template registry on tag bump. Same Dockerfile used by `docker-compose` for local dev. **Every sandbox execution must record the template name, immutable template version / digest, build source commit, and provider project / environment.** Floating `latest` templates are not acceptable for production execution. **Template CI must define dependency update and vulnerability scanning posture, including what blocks a template publish.**
 14. **Provider availability and fallback posture.** Spec B must define behaviour when the sandbox provider is unavailable, rate-limited, slow to start, or returns an ambiguous terminal state. **V1 must fail closed for untrusted code execution. It must NOT silently fall back to worker execution or `inlineSandbox`.** Acceptable responses are: queue and retry with backoff, surface a typed failure to the agent run, or hard-fail the task with audit trail. Falling back to in-process execution is forbidden — it defeats the security premise of the entire spec.
-15. **Retention and deletion posture.** Spec B must define retention for harvested logs and artefacts (object-storage TTL / default retention), deletion behaviour when a run is deleted (cascade through artefacts, logs, ledger rows where appropriate), and guarantees on provider-side file deletion after sandbox terminal / close. Relevant because customer uploads may include sensitive CSVs, PDFs, and document content.
+15. **Retention and deletion posture.** Spec B must define retention for harvested logs and artefacts (object-storage TTL / default retention), deletion behaviour when a run is deleted (cascade through artefacts, logs, ledger rows where appropriate), and guarantees on provider-side file deletion after sandbox terminal / close. **Sandbox filesystems are ephemeral execution surfaces, not persistence layers — only explicitly harvested, validated, redacted outputs may be retained.** Relevant because customer uploads may include sensitive CSVs, PDFs, and document content.
 16. **Migration path from collapsed `iee_dev`.** Today `iee_dev` collapses untrusted code execution into the worker process. Spec B splits this: `iee_dev` adapter starts consuming `SandboxExecutionService` for the untrusted-execution portion; the trusted "Terminal / Repo" portion (Tier 5) stays in the worker. The split is pinned by the classification table below — there is no "small script" exception that lets customer-derived code back into the worker.
 
 ### 2a. Execution classification (Spec B must enforce this table)
@@ -154,6 +155,12 @@ Lock-ready invariants. The spec is non-conformant if any are violated.
 - Runtime package installation MUST be explicitly governed; pre-baked template dependencies are preferred for V1.
 - Sandbox outputs remain untrusted until schema-validated, size-limited, redacted, and normalised.
 - Harvested logs and artefacts MUST have defined retention and deletion behaviour.
+- Sandbox filesystems are ephemeral execution surfaces, not persistence layers; only explicitly harvested, validated, redacted outputs may be retained.
+- Inputs MUST be preflight-validated (size, type, MIME) before sandbox creation; invalid inputs never reach a paid sandbox start.
+- Cost rows are append-only or correction-based; never silently overwritten.
+- Template CI MUST define dependency update and vulnerability scanning posture, including publish-blocking criteria.
+- `localDockerSandbox` MUST share the template Dockerfile and output contract with `e2bSandbox`; parity gaps documented.
+- Spec B MUST NOT introduce a broad `artefact` / `artifact` naming migration unless required for the sandbox interface.
 
 ---
 
