@@ -3,8 +3,8 @@ active_spec: tasks/builds/phase-1-showcase-mvps/spec.md
 active_plan: tasks/builds/phase-1-showcase-mvps/plan.md
 build_slug: phase-1-showcase-mvps
 branch: feat/phase-1-showcase-mvps
-status: REVIEWING
-last_updated: 2026-05-10
+status: MERGE_READY
+last_updated: 2026-05-11
 last_merged_pr: #279
 last_merged_slug: synthetos-foundation-refactor
 last_merged_branch: claude/openclaw-worker-mode-VnjQT
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/phase-1-showcase-mvps/plan.md`
 **Active build slug:** phase-1-showcase-mvps
 **Branch:** feat/phase-1-showcase-mvps
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 10 chunks built + branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES re-verify, pr-reviewer 3 rounds APPROVED after closing 5 P0 + 3 spec-correctness strongs, adversarial-reviewer HOLES_FOUND with all 8 findings closed in-branch, dual-reviewer Codex APPROVED after 3 iterations / 5 [ACCEPT] decisions). 26 commits ahead of main. Two corrective migrations added (0316 default-skill swap, 0317 RLS-guard alignment). Handoff at `tasks/builds/phase-1-showcase-mvps/handoff.md`. **Next:** new Claude Code session, type `launch finalisation`. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) deferred to post-merge backlog in `tasks/todo.md`. **Note:** prior pointer for `support-desk-canonical` (PR #277) was replaced 2026-05-10 — that build is paused; resume separately.
+**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered in `RunTracePage.tsx` / `RunTraceEventRenderer.tsx`); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (N1 phase1.* filter posture deferred to `tasks/todo.md` as PHASE1-N1 — non-blocking). Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). PR #283. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`. **Next:** CI auto-fix loop if needed, then auto-merge. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) + 1 PHASE1-N1 deferred to post-merge backlog in `tasks/todo.md`.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Pointer was overwritten by the active `phase-1-showcase-mvps` work; recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
@@ -88,7 +88,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-09T23:39:33Z (PR #279 `synthetos-foundation-refactor` MERGED; status → NONE; squash-commit `53dabb69` to be patched on main per Step 12.4)
+**Last updated:** 2026-05-11 (PR #283 `phase-1-showcase-mvps` → MERGE_READY; Phase 3 finalisation complete)
 
 ---
 
