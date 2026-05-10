@@ -8,6 +8,7 @@
 **Scope:** re-verification of 7 high-priority blockers closed by fix commit `910236f0`
 **Prior run:** `tasks/review-logs/spec-conformance-log-phase-1-showcase-mvps-2026-05-10T10-00-17Z.md` (NON_CONFORMANT, 16 deferred)
 **Run at:** 2026-05-10T10:36:38Z
+**Commit at finish:** `3a87cc50`
 
 ---
 
