@@ -52,3 +52,20 @@ export const systemSkills = pgTable('system_skills', {
 
 export type SystemSkill = typeof systemSkills.$inferSelect;
 export type NewSystemSkill = typeof systemSkills.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Pending seed rows (Chunk 6 — phase-1-showcase-mvps)
+//
+// support.classify_ticket requires a system_skills row:
+//   slug:        'support.classify_ticket'
+//   name:        'Classify Ticket'
+//   description: 'Classify a support ticket by intent, urgency, and recommended action using LLM reasoning.'
+//   handlerKey:  'support.classify_ticket'
+//   sideEffects: false
+//   isActive:    true
+//   visibility:  'basic'
+//
+// This seed row belongs in a migration file — no seed data lives in the schema.
+// Phase 1.5 will add the migration; the skill is callable without the DB row
+// (skillExecutor routes by handler key without requiring a system_skills match).
+// ---------------------------------------------------------------------------

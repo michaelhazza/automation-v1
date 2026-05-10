@@ -211,6 +211,8 @@ import governQualityRouter from './routes/governQuality.js';
 import correctionsRouter from './routes/corrections.js';
 // Agent Workspace — presence SSE stream (Chunk 9)
 import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
+// Phase 1 Showcase — run artifact read surface (Chunk 2)
+import runArtifactsRouter from './routes/runArtifacts.js';
 // Support Desk canonical substrate (C13)
 import supportRouter from './routes/support/index.js';
 
@@ -469,6 +471,8 @@ app.use(governQualityRouter);
 app.use(correctionsRouter);
 // Agent Workspace — presence SSE stream (Chunk 9)
 app.use(agentPresenceStreamRouter);
+// Phase 1 Showcase — run artifact read surface (Chunk 2)
+app.use(runArtifactsRouter);
 // Support Desk canonical substrate (C13)
 app.use('/api/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *

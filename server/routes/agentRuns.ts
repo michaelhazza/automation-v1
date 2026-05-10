@@ -651,6 +651,20 @@ router.post(
   }),
 );
 
+// ─── Phase 1 — Run artifacts: list metadata (spec §4.5.2, §6.1.5) ───────────
+
+router.get(
+  '/api/agent-runs/:runId/artifacts',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { runId } = req.params;
+    const { listForRun } = await import('../services/fileDeliveryService.js');
+    const artifacts = await listForRun(runId, req.orgId!);
+    res.json({ artifacts });
+  }),
+);
+
 // ─── Run Trace: unified event stream (spec §4.4.3) ────────────────────────────
 //
 // GET /api/agent-runs/:runId/trace

@@ -3808,6 +3808,25 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only' as const,
   },
+  'support.classify_ticket': {
+    actionType: 'support.classify_ticket',
+    description: 'Classify a support ticket by intent, urgency, and recommended action.',
+    actionCategory: 'worker' as const,
+    topics: ['support'],
+    isExternal: false,
+    readPath: 'canonical' as const,
+    defaultGateLevel: 'auto' as const,
+    // INV-9: Risk Tier 1 per rubric for LLM-read-only classification.
+    riskTier: 1,
+    createsBoardTask: false,
+    payloadFields: ['ticketId'],
+    parameterSchema: z.object({
+      ticketId: z.string().describe('Canonical ticket UUID to classify'),
+    }),
+    retryPolicy: { maxRetries: 2, strategy: 'exponential_backoff' as const, retryOn: ['timeout', 'network_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only' as const,
+  },
 };
 
 // ─── Trust & Verification Layer §6.1 — runtime-check coverage backfill ────────

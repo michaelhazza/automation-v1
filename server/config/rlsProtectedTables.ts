@@ -1194,6 +1194,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0312_action_attempts.sql',
     rationale: 'Action idempotency ledger — records in-flight and completed provider write attempts. Cross-tenant leak exposes which actions were attempted and their outcomes.',
   },
+  // 0313 — Phase 1 Showcase: customer-facing file delivery ledger
+  {
+    tableName: 'run_artifacts',
+    schemaFile: 'runArtifacts.ts',
+    policyMigration: '0313_run_artifacts.sql',
+    rationale: 'Customer-visible artifact delivery ledger — file hashes, S3 keys, and download counts are scoped per org. Cross-tenant leak exposes artifact content and delivery patterns.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

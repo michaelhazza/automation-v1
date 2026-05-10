@@ -17,6 +17,9 @@ export const SupportInboxAgentConfigSchema = z.object({
     autonomousReplyOnWaitingOnCustomer: z.boolean(),
     postResolutionFollowUp: z.boolean(),
   }),
+  minConfidence: z.number().min(0).max(1).optional().default(0.8),
+  voiceProfile: z.enum(['casual', 'neutral', 'formal', 'custom']).optional().default('neutral'),
+  escalationCategories: z.array(z.string()).optional().default([]),
 });
 
 export type SupportInboxAgentConfig = z.infer<typeof SupportInboxAgentConfigSchema>;

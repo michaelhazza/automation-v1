@@ -837,6 +837,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
     }));
   },
+  'support.classify_ticket': async (input, context) => {
+    const { classifyTicket } = await import('./skillHandlers/supportClassifyTicket.js');
+    return classifyTicket({
+      organisationId: context.organisationId,
+      ticketId: String(input.ticketId ?? ''),
+      runId: context.runId,
+    });
+  },
 
   // ── Social Media Agent skills ────────────────────────────────────────
   draft_post: async (input) => {

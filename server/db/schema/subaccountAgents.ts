@@ -27,6 +27,7 @@ export const subaccountAgents = pgTable(
     // ── Applied template tracking ──────────────────────────────────────
     appliedTemplateId: uuid('applied_template_id'),
     appliedTemplateVersion: integer('applied_template_version'),
+    appliedTemplateSlug: text('applied_template_slug'),
 
     // ── Scheduling ──────────────────────────────────────────────────────
     scheduleCron: text('schedule_cron'), // e.g. "0 */2 * * *"
