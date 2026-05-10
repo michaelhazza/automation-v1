@@ -10,7 +10,8 @@
  *     iee_runs row to status='cancelled' (gated WHERE status IN
  *     ('pending','running') so the terminal-finality contract on
  *     iee_runs is preserved) and enqueues an iee-run-completed event so
- *     finaliseAgentRunFromIeeRun parks the parent on 'cancelled'.
+ *     the registry orchestrator (`finaliseAgentRunFromBackend`) parks
+ *     the parent on 'cancelled'.
  *  5. For non-IEE in-process runs, the running agentExecutionService
  *     loop reads agent_runs.status at the top of each iteration and
  *     exits cleanly on 'cancelling'. No further action required here.
@@ -126,8 +127,9 @@ export const agentRunCancelService = {
 
   /**
    * Write iee_runs.status='cancelled' and emit an iee-run-completed event so
-   * finaliseAgentRunFromIeeRun parks the parent. Gated on the iee_runs
-   * terminal-finality contract (only writes if currently pending/running).
+   * the registry orchestrator (`finaliseAgentRunFromBackend`) parks the
+   * parent. Gated on the iee_runs terminal-finality contract (only writes
+   * if currently pending/running).
    *
    * Exposed separately so tests and reconciliation jobs can call it without
    * going through cancelRun.
@@ -157,8 +159,9 @@ export const agentRunCancelService = {
       return;
     }
 
-    // Enqueue the iee-run-completed event so finaliseAgentRunFromIeeRun runs.
-    // Payload mirrors the worker's emitted shape (server/jobs/ieeRunCompletedHandler.ts).
+    // Enqueue the iee-run-completed event so the registry orchestrator
+    // (`finaliseAgentRunFromBackend`) parks the parent. Payload mirrors
+    // the worker's emitted shape (server/jobs/ieeRunCompletedHandler.ts).
     try {
       const boss = await getPgBoss();
       const config = getJobConfig(IEE_RUN_COMPLETED_QUEUE);

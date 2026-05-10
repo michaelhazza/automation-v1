@@ -69,13 +69,16 @@ import { executionModeToEnvironment } from '../../shared/types/executionEnvironm
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 // orgAgentConfigService import removed — deprecated post-migration 0106
 import { organisations } from '../db/schema/index.js';
-import { langfuse, withTrace } from '../instrumentation.js';
 import {
-  createSpan, createEvent, finalizeTrace,
-  generateRunFingerprint,
-  type FinalStatus, type ErrorType,
+  createEvent,
 } from '../lib/tracing.js';
-import { claudeCodeRunner } from './claudeCodeRunner.js';
+// `langfuse`, `withTrace`, `createSpan`, `finalizeTrace`, `generateRunFingerprint`,
+// `FinalStatus`, `ErrorType` and `claudeCodeRunner` were consumed by the
+// pre-Chunk-5 dispatch ladder. After the Chunk 5 cutover the api/headless
+// adapter (`executionBackends/_apiHeadlessShared.ts`) and the claude-code
+// adapter (`executionBackends/claudeCodeBackend.ts`) own those imports;
+// the dispatch site here resolves an adapter from
+// `executionBackendRegistry` and consumes the returned `BackendDispatchResult`.
 // Universal Brief — artefact validator (Phase 1 prep; active emission begins Phase 2)
 import { validateArtefactForPersistence } from './briefArtefactValidator.js';
 import { buildThreadContextReadModel } from './conversationThreadContextService.js';
@@ -90,11 +93,169 @@ import type { ServicePrincipal } from './principal/types.js';
 // are visible at a glance to readers of this file.
 // ---------------------------------------------------------------------------
 
-import { runAgenticLoop, type LoopParams } from './agentExecutionLoop.js';
+// `runAgenticLoop` is no longer called from this file after the Chunk 5
+// cutover — the api/headless adapter (`_apiHeadlessShared.ts`) is the
+// only direct caller now. `LoopParams` stays as a `import type` because
+// `ExecutionClosureContext` derives every field from it and the
+// re-export is consumed by historical importers of this module.
+import type { LoopParams } from './agentExecutionLoop.js';
 
-// `LoopParams` is re-exported for backwards compatibility with any
-// historical importer that read it from this module.
 export type { LoopParams };
+
+// ---------------------------------------------------------------------------
+// Execution backend registry — Chunk 5 cutover.
+//
+// The pre-Chunk-5 dispatch ladder (`if (mode === 'iee_*') … else if
+// (mode === 'claude-code') … else …`) is replaced by a single
+// `executionBackendRegistry.resolve(mode).dispatch(input)` call. Each
+// adapter owns its own dispatch body in `executionBackends/`; the dispatch
+// site here is responsible only for assembling the `BackendDispatchInput`
+// (including the closure-context bundle on `backendOptions.loopContext`)
+// and consuming the returned `BackendDispatchResult`.
+// ---------------------------------------------------------------------------
+
+import { executionBackendRegistry } from './executionBackends/registry.js';
+import { ParentRunNotDispatchable } from './executionBackends/types.js';
+import type { BackendOptions } from './executionBackends/types.js';
+import type { ExecutionMode } from '../../shared/types/executionEnvironment.js';
+
+/**
+ * Closure-context bundle assembled in `executeRun` and forwarded to each
+ * adapter on `BackendDispatchInput.backendOptions.loopContext`.
+ *
+ * The api / headless / claude-code adapters read different subsets of
+ * this bag — `buildBackendOptionsForMode` projects it onto the right
+ * adapter-specific shape (`ApiHeadlessLoopContext` /
+ * `ClaudeCodeLoopContext`). The IEE adapters do NOT consume any of these
+ * fields; their `BackendOptions` carries `ieeTask` only.
+ *
+ * Field set comes from the pre-Chunk-5 inline branches — the closure
+ * variables `runAgenticLoop` / `claudeCodeRunner.execute` previously read
+ * directly from `executeRun`'s scope.
+ */
+interface ExecutionClosureContext {
+  agent: LoopParams['agent'];
+  effectiveTools: LoopParams['tools'];
+  pipeline: LoopParams['pipeline'];
+  mcpClients: LoopParams['mcpClients'];
+  mcpLazyRegistry: LoopParams['mcpLazyRegistry'];
+  runContextData: LoopParams['runContextData'];
+  saLink: LoopParams['saLink'];
+  agentDomain: LoopParams['agentDomain'];
+  configVersion: LoopParams['configVersion'];
+  hierarchyContext: LoopParams['hierarchyContext'];
+  orgProcesses: LoopParams['orgProcesses'];
+  request: LoopParams['request'];
+  startTime: LoopParams['startTime'];
+  isOrgSubaccountRun: LoopParams['isOrgSubaccountRun'];
+  maxLoopIterations: LoopParams['maxLoopIterations'];
+  /** Pre-built router context (carries the inserted run id + agent name). */
+  routerCtx: LoopParams['routerCtx'];
+  /** Resolved task prompt forwarded to the Claude Code runner. */
+  taskPrompt: string;
+}
+
+/**
+ * Project the closure-context bundle onto the per-adapter
+ * `BackendOptions` discriminated-union variant. Exhaustive switch on
+ * `ExecutionMode` with a `never` exhaustiveness check on the default
+ * branch — adding a new mode breaks compilation here until the new
+ * variant is wired.
+ *
+ * Pure: no DB / I/O / closure mutations; only assembles the discriminated
+ * shape from the inputs.
+ */
+function buildBackendOptionsForMode(
+  mode: ExecutionMode,
+  request: AgentRunRequest,
+  ctx: ExecutionClosureContext,
+): BackendOptions {
+  // Derive the spec.options.RunSource from the request's runSource +
+  // runType. Mirrors the pre-Chunk-5 trace-metadata derivation.
+  const runSource: 'manual' | 'scheduled' | 'handoff' | 'sub_agent' =
+    request.runSource === 'handoff' ? 'handoff'
+    : request.runSource === 'sub_agent' ? 'sub_agent'
+    : request.runType === 'scheduled' ? 'scheduled'
+    : 'manual';
+
+  switch (mode) {
+    case 'api':
+      return {
+        backendId: 'api',
+        runSource,
+        allowedToolSlugs: request.allowedToolSlugs,
+        loopContext: {
+          agent: ctx.agent,
+          routerCtx: ctx.routerCtx,
+          tools: ctx.effectiveTools,
+          maxLoopIterations: ctx.maxLoopIterations,
+          startTime: ctx.startTime,
+          request: ctx.request,
+          orgProcesses: ctx.orgProcesses,
+          saLink: ctx.saLink,
+          pipeline: ctx.pipeline,
+          mcpClients: ctx.mcpClients,
+          mcpLazyRegistry: ctx.mcpLazyRegistry,
+          runContextData: ctx.runContextData,
+          isOrgSubaccountRun: ctx.isOrgSubaccountRun,
+          agentDomain: ctx.agentDomain,
+          hierarchyContext: ctx.hierarchyContext,
+          configVersion: ctx.configVersion,
+        },
+      };
+    case 'headless':
+      return {
+        backendId: 'headless',
+        runSource,
+        allowedToolSlugs: request.allowedToolSlugs,
+        loopContext: {
+          agent: ctx.agent,
+          routerCtx: ctx.routerCtx,
+          tools: ctx.effectiveTools,
+          maxLoopIterations: ctx.maxLoopIterations,
+          startTime: ctx.startTime,
+          request: ctx.request,
+          orgProcesses: ctx.orgProcesses,
+          saLink: ctx.saLink,
+          pipeline: ctx.pipeline,
+          mcpClients: ctx.mcpClients,
+          mcpLazyRegistry: ctx.mcpLazyRegistry,
+          runContextData: ctx.runContextData,
+          isOrgSubaccountRun: ctx.isOrgSubaccountRun,
+          agentDomain: ctx.agentDomain,
+          hierarchyContext: ctx.hierarchyContext,
+          configVersion: ctx.configVersion,
+        },
+      };
+    case 'claude-code':
+      return {
+        backendId: 'claude-code',
+        loopContext: {
+          taskPrompt: ctx.taskPrompt,
+          request: ctx.request,
+        },
+      };
+    case 'iee_browser':
+      // Pre-flight validation in the dispatch site narrowed
+      // `request.ieeTask.type === 'browser'`; the cast matches the
+      // BrowserTaskPayload shape the adapter expects. A runtime
+      // mismatch is caught by the adapter's own `dispatch()` guard.
+      return {
+        backendId: 'iee_browser',
+        ieeTask: request.ieeTask as never,
+      };
+    case 'iee_dev':
+      return {
+        backendId: 'iee_dev',
+        ieeTask: request.ieeTask as never,
+      };
+    default: {
+      const _exhaustive: never = mode;
+      void _exhaustive;
+      throw new Error(`buildBackendOptionsForMode: unknown executionMode '${mode}'`);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1342,252 +1503,156 @@ export const agentExecutionService = {
         .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
         .onConflictDoNothing();
 
-      // ── 8. Execute — branch by execution mode ─────────────────────────
-      const effectiveMode = request.executionMode ?? 'api';
+      // ── 8. Execute — dispatch through executionBackendRegistry ──────────
+      // Chunk 5 of the ExecutionBackend Adapter Contract refactor replaces
+      // the pre-Chunk-5 if/else ladder with a single registry resolve +
+      // dispatch. Each adapter owns its own dispatch body in
+      // `server/services/executionBackends/`. The post-completion
+      // finalisation block below consumes `loopResult` exactly as the
+      // inline branches produced it.
+      //
+      // Per-adapter validation (`IEE_TASK_REQUIRED`, `IEE_TASK_TYPE_MISMATCH`,
+      // and the `BackendOptionsMismatch` invariant) lives inside the
+      // adapter's own `dispatch()` body — see `_ieeShared.ts::ieeDispatch`.
+      // The dispatch site here neither knows nor cares which executionMode
+      // is in flight.
+      const effectiveMode: ExecutionMode = request.executionMode ?? 'api';
 
+      // agent_decision steps restrict the tool list to prevent side effects.
+      // allowedToolSlugs: [] means no tools (pure reasoning). When undefined,
+      // the full enhancedTools list is used (normal agent behavior).
+      // Built unconditionally — the api/headless adapters consume it via
+      // `loopContext.tools`; other adapters ignore it.
+      const effectiveTools =
+        request.allowedToolSlugs !== undefined
+          ? enhancedTools.filter(t => (request.allowedToolSlugs as string[]).includes(t.name))
+          : enhancedTools;
+
+      // Middleware pipeline — used by the in-process agentic loop. Built
+      // here (not inside the adapter) because `runAgenticLoop` requires
+      // a single instance threaded through every iteration.
+      const pipeline = createDefaultPipeline();
+
+      // Closure-context bundle assembled from the variables in scope here
+      // and forwarded to the api/headless adapters via
+      // `BackendDispatchInput.backendOptions.loopContext`. See
+      // `executionBackends/options.ts:ApiHeadlessLoopContext`.
+      const closureContext: ExecutionClosureContext = {
+        agent,
+        effectiveTools,
+        pipeline,
+        mcpClients,
+        mcpLazyRegistry,
+        runContextData,
+        saLink: saLink!,
+        agentDomain,
+        configVersion: fingerprint(resolvedConfig),
+        hierarchyContext,
+        orgProcesses,
+        request,
+        startTime,
+        isOrgSubaccountRun,
+        maxLoopIterations: CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations,
+        // Routing context for the LLM router — built here because
+        // `run.id` and `agent.name` are only in scope at the dispatch
+        // site. Mirrors the pre-Chunk-5 inline construction.
+        routerCtx: {
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? undefined,
+          runId: run.id,
+          subaccountAgentId: request.subaccountAgentId ?? undefined,
+          agentName: agent.name,
+          sourceType: 'agent_run',
+        },
+        // Claude Code runner consumes a task prompt (workspace summary or
+        // a default fallback if the workspace is empty).
+        taskPrompt: workspaceContext || 'Review the current workspace and report status.',
+      };
+
+      const backend = executionBackendRegistry.resolve(effectiveMode);
       let loopResult: LoopResult;
 
-      if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
-        // ── 8z. IEE — Integrated Execution Environment ──────────────────
-        // Phase 0 (docs/iee-delegation-lifecycle-spec.md): transition the
-        // parent agent run to the non-terminal 'delegated' state and
-        // return early. The worker will reach a terminal state on
-        // iee_runs and emit an 'iee-run-completed' pg-boss event; the
-        // main-app handler (server/jobs/ieeRunCompletedHandler.ts) then
-        // finalises the parent via finaliseAgentRunFromIeeRun.
-        //
-        // IMPORTANT: we deliberately skip the post-completion hooks at
-        // the bottom of this function (handoff build, memory scoring,
-        // Workflow engine notification, etc.). Those fire from the event
-        // handler's finalisation path when the delegation terminates.
-        if (!request.ieeTask) {
-          throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
-        }
-        const expectedType = effectiveMode === 'iee_browser' ? 'browser' : 'dev';
-        if (request.ieeTask.type !== expectedType) {
-          throw { statusCode: 400, message: `executionMode ${effectiveMode} requires ieeTask.type=${expectedType}`, errorCode: 'IEE_TASK_TYPE_MISMATCH' };
-        }
-        const { enqueueIEETask } = await import('./ieeExecutionService.js');
-        const enqueueResult = await enqueueIEETask({
-          task: request.ieeTask as Parameters<typeof enqueueIEETask>[0]['task'],
+      try {
+        const dispatchResult = await backend.dispatch({
+          runId: run.id,
           organisationId: request.organisationId,
           subaccountId: request.subaccountId ?? null,
           agentId: request.agentId,
-          agentRunId: run.id,
-          correlationId: run.id,
-        });
-
-        // Park the parent run in 'delegated' state. Do NOT set completedAt.
-        // Persist ieeRunId as a first-class column (migration 0176) so
-        // callers never need to parse it out of the summary string and
-        // can fetch progress via the denormalised reference directly.
-        await db.update(agentRuns).set({
-          status: 'delegated',
-          ieeRunId: enqueueResult.ieeRunId,
-          summary: `Delegated to IEE ${expectedType} (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
-          lastActivityAt: new Date(),
-          updatedAt: new Date(),
-        }).where(eq(agentRuns.id, run.id));
-
-        emitAgentRunUpdate(run.id, 'agent:run:delegated', {
-          ieeRunId: enqueueResult.ieeRunId,
-          mode: effectiveMode,
-          deduplicated: enqueueResult.deduplicated,
-        });
-
-        return {
-          runId: run.id,
-          status: 'delegated',
-          summary: null,
-          totalToolCalls: 0,
-          totalTokens: 0,
-          durationMs: Date.now() - startTime,
-          tasksCreated: 0,
-          tasksUpdated: 0,
-          deliverablesCreated: 0,
-          ieeRunId: enqueueResult.ieeRunId,
-          delegationDeduplicated: enqueueResult.deduplicated,
-        };
-      } else if (effectiveMode === 'claude-code') {
-        // ── 8a. Claude Code CLI execution ──────────────────────────────
-        // Spawn `claude -p` with the agent's prompt. Uses the host's
-        // Claude Max plan — zero API cost. The same prompts & skills
-        // will transfer to Docker-based execution later.
-        let projectRoot = '.';
-        try {
-          const { context: dec } = await devContextService.getContext(request.subaccountId!);
-          projectRoot = dec.projectRoot;
-        } catch {
-          // DEC not configured — use current directory
-        }
-
-        const taskPrompt = workspaceContext || 'Review the current workspace and report status.';
-
-        emitAgentRunUpdate(run.id, 'agent:run:progress', {
-          type: 'execution_mode', mode: 'claude-code',
-          message: 'Spawning Claude Code CLI...',
-        });
-
-        const ccResult = await claudeCodeRunner.execute({
-          systemPrompt: fullSystemPrompt, // Claude Code runner uses flat string
-          taskPrompt,
-          cwd: projectRoot,
-          maxTurns: maxToolCalls,
+          promptAssembly: { stablePrefix, dynamicSuffix },
+          tokenBudget,
+          maxToolCalls,
           timeoutMs,
-          runId: run.id,
+          backendOptions: buildBackendOptionsForMode(effectiveMode, request, closureContext),
         });
 
-        loopResult = {
-          summary: ccResult.result,
-          toolCallsLog: [{
-            type: 'claude_code_execution',
-            sessionId: ccResult.sessionId,
-            success: ccResult.success,
-            durationMs: ccResult.durationMs,
-            numTurns: ccResult.numTurns,
-            timedOut: ccResult.timedOut,
-          }],
-          totalToolCalls: ccResult.numTurns,
-          inputTokens: ccResult.inputTokens,
-          outputTokens: ccResult.outputTokens,
-          totalTokens: ccResult.totalTokens,
-          tasksCreated: 0,
-          tasksUpdated: 0,
-          deliverablesCreated: 0,
-          finalStatus: ccResult.timedOut ? 'timeout' : (ccResult.success ? 'completed' : 'failed'),
-        };
-      } else {
-        // ── 8b. Standard API agentic loop ──────────────────────────────
-        const pipeline = createDefaultPipeline();
-
-        // Session linking (Section WS2): group related runs
-        let traceSessionId: string;
-        if (request.runSource === 'handoff' && request.parentRunId) {
-          traceSessionId = `handoff-chain-${request.parentRunId}`;
-        } else if (request.runType === 'scheduled') {
-          const dateStr = new Date().toISOString().slice(0, 10);
-          traceSessionId = `schedule-${request.agentId}-${dateStr}`;
-        } else if (request.runSource === 'sub_agent' && request.parentSpawnRunId) {
-          traceSessionId = `spawn-${request.parentSpawnRunId}`;
-        } else {
-          traceSessionId = run.id;
+        if (dispatchResult.lifecycle === 'delegated') {
+          // The adapter has already updated the parent with status,
+          // backendId, backendTaskId, ieeRunId, and emitted the delegated
+          // websocket event. Return the delegated-run response shape;
+          // post-completion hooks fire later via the terminal event
+          // handler.
+          return {
+            runId: run.id,
+            status: 'delegated',
+            summary: null,
+            totalToolCalls: 0,
+            totalTokens: 0,
+            durationMs: Date.now() - startTime,
+            tasksCreated: 0,
+            tasksUpdated: 0,
+            deliverablesCreated: 0,
+            ieeRunId: dispatchResult.backendTaskId ?? undefined,
+            delegationDeduplicated: dispatchResult.deduplicated,
+          };
         }
 
-        // agent_decision steps restrict the tool list to prevent side effects.
-        // allowedToolSlugs: [] means no tools (pure reasoning). When undefined,
-        // the full enhancedTools list is used (normal agent behavior).
-        const effectiveTools =
-          request.allowedToolSlugs !== undefined
-            ? enhancedTools.filter(t => (request.allowedToolSlugs as string[]).includes(t.name))
-            : enhancedTools;
-
-        // Run fingerprint (Section 8.3)
-        const skillSlugs = effectiveTools.map(t => t.name);
-        const runFingerprint = generateRunFingerprint(request.agentId, 'development', skillSlugs);
-
-        const trace = langfuse.trace({
-          name:      'agent-run',
-          userId:    request.subaccountId,
-          sessionId: traceSessionId,
-          metadata: {
-            agentId:       request.agentId,
-            runType:       request.runType,
-            orgId:         request.organisationId,
-            subaccountId:  request.subaccountId,
-            executionMode: 'api',
-            traceSchemaVersion: 'v1',
-            instrumentationVersion: '1.0',
-            startedAt:     new Date().toISOString(),
-            runFingerprint,
-            handoffDepth:     request.handoffDepth ?? 0,
-            parentRunId:      request.parentRunId ?? null,
-            isSubAgent:       request.isSubAgent ?? false,
-            parentSpawnRunId: request.parentSpawnRunId ?? null,
-          },
-        });
-
-        loopResult = await withTrace(trace, {
-          runId:         run.id,
-          orgId:         request.organisationId,
-          subaccountId:  request.subaccountId ?? undefined,
-          agentId:       request.agentId ?? undefined,
-          executionMode: 'api',
-        }, async () => {
-          const result = await runAgenticLoop({
+        // In-process / subprocess: the loop ran inline and the adapter
+        // returned the loop result. The post-completion finalisation
+        // block below handles the terminal write + side-effects.
+        loopResult = dispatchResult.loopResult!;
+      } catch (err) {
+        if (err instanceof ParentRunNotDispatchable) {
+          // The parent run moved past the delegation window before the
+          // adapter could claim it (cancellation racing dispatch, or a
+          // duplicate dispatch). The adapter has already written the
+          // backend-side orphan-cleanup row. Surface the parent's
+          // current terminal status so the caller sees a consistent
+          // result rather than a 5xx.
+          const [currentRow] = await db
+            .select({ status: agentRuns.status })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, run.id))
+            .limit(1);
+          const observedStatus = currentRow?.status ?? 'failed';
+          logger.warn('agentExecutionService.parent_not_dispatchable', {
             runId: run.id,
-            agent,
-            routerCtx: {
-              organisationId:    request.organisationId,
-              subaccountId:      request.subaccountId ?? undefined,
-              runId:             run.id,
-              subaccountAgentId: request.subaccountAgentId ?? undefined,
-              agentName:         agent.name,
-              sourceType:        'agent_run',
-            },
-            systemPrompt: { stablePrefix, dynamicSuffix },
-            tools: effectiveTools,
-            tokenBudget,
-            maxToolCalls,
-            maxLoopIterations: CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations,
-            timeoutMs,
-            startTime,
-            request,
-            orgProcesses,
-            saLink: saLink!,
-            pipeline,
-            mcpClients,
-            mcpLazyRegistry,
-            runContextData,
-            isOrgSubaccountRun,
-            agentDomain,
-            hierarchyContext,
-            // Sprint 3 P2.1 Sprint 3A — stable fingerprint of the resolved
-            // config, stamped onto every checkpoint so the resume path can
-            // refuse to resume runs whose config has drifted.
-            configVersion: fingerprint(resolvedConfig),
+            mode: effectiveMode,
+            observedStatus,
+            reason: err.reason,
           });
-
-          // ── Finalize Langfuse trace (inside withTrace so context is available) ──
-          const loopDurationMs = Date.now() - startTime;
-          const loopFinalStatus = (result.finalStatus ?? 'completed') as string;
-
-          const traceFinalStatus: FinalStatus =
-            loopFinalStatus === 'timeout' ? 'timeout'
-            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
-            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
-            : loopFinalStatus === 'failed' ? 'failed'
-            : 'completed';
-
-          const traceErrorType: ErrorType | null =
-            loopFinalStatus === 'timeout' ? 'timeout'
-            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
-            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
-            : loopFinalStatus === 'failed' ? 'internal_error'
-            : null;
-
-          const finalizationSpan = createSpan('agent.finalization.run');
-          createEvent('run.status.changed', {
-            fromStatus: 'running', toStatus: traceFinalStatus,
-          });
-          finalizationSpan.end();
-
-          finalizeTrace({
-            finalStatus: traceFinalStatus,
-            totalTokensIn: result.inputTokens,
-            totalTokensOut: result.outputTokens,
-            iterationCount: result.toolCallsLog.length > 0
-              ? Math.max(...result.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
-              : 0,
-            toolCallCount: result.totalToolCalls,
-            durationMs: loopDurationMs,
-            errorType: traceErrorType,
-            startedAt: new Date(startTime).toISOString(),
-          });
-
-          langfuse.flushAsync().catch(() => {}); // guard-ignore: no-silent-failures reason="fire-and-forget telemetry flush"
-
-          return result;
-        });
+          // Map to the closed `AgentRunResult.status` union — non-terminal
+          // observed values fall back to 'failed' for the response (the
+          // row itself is unchanged).
+          const responseStatus: AgentRunResult['status'] =
+            observedStatus === 'completed' ? 'completed'
+            : observedStatus === 'failed' ? 'failed'
+            : observedStatus === 'timeout' ? 'timeout'
+            : observedStatus === 'loop_detected' ? 'loop_detected'
+            : observedStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : 'failed';
+          return {
+            runId: run.id,
+            status: responseStatus,
+            summary: null,
+            totalToolCalls: 0,
+            totalTokens: 0,
+            durationMs: Date.now() - startTime,
+            tasksCreated: 0,
+            tasksUpdated: 0,
+            deliverablesCreated: 0,
+          };
+        }
+        throw err;
       }
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
@@ -1706,8 +1771,9 @@ export const agentExecutionService = {
         });
       } else {
         // F22 — meaningful-run tracking hook for the non-IEE finalization path.
-        // The IEE path calls this from `agentRunFinalizationService.finaliseAgentRunFromIeeRun`;
-        // without this call, ordinary API/triggered runs never advance
+        // The IEE path calls this from the IEE adapter's post-commit hook
+        // (`executionBackends/_ieeShared.ts::ieeFinalise`); without this
+        // call, ordinary API/triggered runs never advance
         // `subaccount_agents.last_meaningful_tick_at` /
         // `ticks_since_last_meaningful_run`, which leaves the heartbeat
         // streak detector blind to the primary execution path. Best-effort —

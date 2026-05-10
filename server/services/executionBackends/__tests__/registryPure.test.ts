@@ -456,11 +456,25 @@ function buildMismatchInput(forBackendId: ExecutionMode): BackendDispatchInput {
     timeoutMs: 1000,
     backendOptions:
       forBackendId === 'api'
-        ? { backendId: 'api', runSource: 'manual' }
+        ? {
+            backendId: 'api',
+            runSource: 'manual',
+            // The mock adapters never read `loopContext`; supply an empty
+            // `as never` placeholder so the discriminated union typechecks
+            // post-Chunk-5 (when api/headless variants gained the field).
+            loopContext: {} as never,
+          }
         : forBackendId === 'headless'
-          ? { backendId: 'headless', runSource: 'manual' }
+          ? {
+              backendId: 'headless',
+              runSource: 'manual',
+              loopContext: {} as never,
+            }
           : forBackendId === 'claude-code'
-            ? { backendId: 'claude-code' }
+            ? {
+                backendId: 'claude-code',
+                loopContext: { taskPrompt: '', request: {} as never },
+              }
             : forBackendId === 'iee_browser'
               ? { backendId: 'iee_browser', ieeTask: { type: 'browser' } as unknown as never }
               : { backendId: 'iee_dev', ieeTask: { type: 'dev' } as unknown as never },

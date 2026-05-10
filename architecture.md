@@ -3061,21 +3061,25 @@ Main app (Replit/Express)        Worker (Docker, DigitalOcean)
 
 ### Routing — how a task reaches IEE
 
-Decision happens in `agentExecutionService.executeAgentRun`:
+`executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. Each value resolves to an adapter implementation registered in `executionBackendRegistry` (`server/services/executionBackends/registry.ts`). The dispatch site in `agentExecutionService.executeAgentRun` no longer carries an `if/else` ladder over `executionMode`; instead it builds a `BackendDispatchInput`, resolves the adapter, and consumes the returned `BackendDispatchResult`:
 
 ```typescript
-if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
-  if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
-  const { enqueueIEETask } = await import('./ieeExecutionService.js');
-  const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
-  // Park the parent agent_run in the non-terminal 'delegated' status (NOT
-  // a synthetic completion) and persist enqueueResult.ieeRunId on the
-  // denormalised iee_run_id column. Real terminal transition lands later
-  // via the iee-run-completed event handler (see §IEE delegation lifecycle).
-}
+const backend = executionBackendRegistry.resolve(effectiveMode);
+const result = await backend.dispatch({
+  runId, organisationId, subaccountId, agentId,
+  promptAssembly: { stablePrefix, dynamicSuffix },
+  tokenBudget, maxToolCalls, timeoutMs,
+  backendOptions: buildBackendOptionsForMode(effectiveMode, request, closureContext),
+});
 ```
 
-`executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+Each adapter owns its own dispatch body in `server/services/executionBackends/`:
+
+- `apiBackend.ts` / `headlessBackend.ts` — in-process agentic loop (wraps `runAgenticLoop` via `_apiHeadlessShared.ts`).
+- `claudeCodeBackend.ts` — subprocess invocation of the Claude Code CLI runner.
+- `ieeBrowserBackend.ts` / `ieeDevBackend.ts` — delegated-task dispatch to the IEE worker (parks parent in `'delegated'`; terminal write arrives later via the pg-boss event handler — see §IEE delegation lifecycle).
+
+The IEE adapters return `lifecycle: 'delegated'`; api/headless return `lifecycle: 'in_process'`; claude-code returns `lifecycle: 'subprocess'`. The post-completion finalisation block in `agentExecutionService.ts` consumes `result.loopResult` for the in-process / subprocess paths, and short-circuits to the delegated-run response shape when `lifecycle === 'delegated'`.
 
 ### IEE delegation lifecycle (Phase 0 — `docs/iee-delegation-lifecycle-spec.md`)
 
@@ -3083,12 +3087,12 @@ The IEE branch does NOT mark the parent `agent_run` complete at handoff time (th
 
 1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
 2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
-3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromIeeRun`. That service:
-   - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row.
+3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromBackend({ backendId, backendTaskId })`. That orchestrator resolves the adapter (`iee_browser` or `iee_dev`) from the registry and dispatches to the adapter's `finalise()` body inside a single `db.transaction(...)`. The IEE adapter (`executionBackends/_ieeShared.ts::ieeFinalise`):
+   - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row (the orchestrator does this before calling the adapter).
    - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
    - Updates the parent with terminal status, summary, error fields, durationMs, token totals — gated on `status IN ('pending','running','delegated','cancelling') AND completed_at IS NULL` for defence-in-depth.
-   - Emits `agent:run:completed` (run room) and `live:agent_completed` (subaccount room) post-commit so dashboards and sidebar counters decrement.
-4. **Reconciliation backstop** — `maintenance:iee-main-app-reconciliation` cron (every 2 min, registered in `queueService.ts`) calls `reconcileStuckDelegatedRuns()` to catch orphans: parent stuck in `delegated` (event handler crashed / event lost) or `cancelling` (pg-boss event publish failed after `cancelIeeRun` wrote `iee_runs='cancelled'`) while `iee_runs` is already terminal. 120-second grace window before reconciliation kicks in.
+   - Emits `agent:run:completed` (run room) and `live:agent_completed` (subaccount room) post-commit (via the orchestrator's `postCommit` callback) so dashboards and sidebar counters decrement.
+4. **Reconciliation backstop** — `maintenance:backend-reconciliation` cron (every 2 min, registered in `queueService.ts`) calls `reconcileBackends()` which walks every registered delegated adapter via `executionBackendRegistry.forDelegated()` and runs each adapter's `reconcile()` once per tick. Catches orphans: parent stuck in `delegated` (event handler crashed / event lost) or `cancelling` (pg-boss event publish failed after `cancelIeeRun` wrote `iee_runs='cancelled'`) while the canonical backend row is already terminal. 120-second grace window before reconciliation kicks in.
 
 Pure helpers live in `agentRunFinalizationServicePure.ts` (`mapIeeStatusToAgentRunStatus`, `buildSummaryFromIeeRun`) so the mapping table is testable without a DB. Tests in `server/services/__tests__/agentRunFinalizationServicePure.test.ts` cover the full Appendix A mapping matrix plus summary-formatting edge cases.
 

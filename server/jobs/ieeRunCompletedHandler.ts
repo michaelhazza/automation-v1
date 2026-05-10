@@ -4,7 +4,9 @@
  * The IEE worker emits an 'iee-run-completed' pg-boss event after every
  * terminal iee_runs write (see worker/src/persistence/runs.ts::finalizeRun).
  * This handler consumes those events and finalises the parent agent_runs
- * row via finaliseAgentRunFromIeeRun.
+ * row via `finaliseAgentRunFromBackend({ backendId, backendTaskId })` —
+ * the generic registry orchestrator that resolves the IEE adapter and
+ * dispatches to its `finalise()` body.
  *
  * Idempotency: the finalisation service is idempotent, so duplicate event
  * deliveries (expected — worker retry sweep re-emits unemitted events) are

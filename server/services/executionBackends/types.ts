@@ -260,7 +260,7 @@ export interface BackendFinalisationResult {
    * this slot to issue its `agent:run:completed` / `dashboard.activity.updated`
    * / `live:agent_completed` emissions and to run the F22 meaningful-output
    * hook — work that previously lived in the post-`db.transaction()`
-   * tail of `finaliseAgentRunFromIeeRun`. The orchestrator awaits the
+   * tail of the legacy IEE finaliser. The orchestrator awaits the
    * callback (or no-ops if undefined) whenever it is set; typically only
    * set on the `finalised: true` path.
    */

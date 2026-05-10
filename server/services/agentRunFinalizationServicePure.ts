@@ -4,7 +4,7 @@
  * Extracted from agentRunFinalizationService.ts so the mapping + summary
  * helpers can be unit-tested without pulling in DB / env / websocket
  * dependencies at module load. The DB-touching entry points
- * (finaliseAgentRunFromIeeRun, reconcileStuckDelegatedRuns) remain in the
+ * (`finaliseAgentRunFromBackend`, `reconcileBackends`) remain in the
  * non-pure file and delegate to these helpers.
  *
  * Spec: docs/iee-delegation-lifecycle-spec.md §3, Appendix A.

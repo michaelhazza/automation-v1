@@ -128,7 +128,17 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
     throw new BackendOptionsMismatch(adapterId, opts.backendId);
   }
 
+  // Required-task guard. The dispatch-site no longer pre-validates this
+  // (Chunk 5 acceptance criterion § 16 #1 requires zero `if (effectiveMode
+  // === 'iee_*')` blocks in `agentExecutionService.ts`), so the
+  // typecheck-narrowed but value-undefined case is handled here.
   const ieeTask = opts.ieeTask;
+  if (!ieeTask) {
+    throw Object.assign(new Error(`adapter '${adapterId}' requires ieeTask but received undefined`), {
+      statusCode: 400,
+      errorCode: 'IEE_TASK_REQUIRED',
+    });
+  }
   if (ieeTask.type !== type) {
     throw Object.assign(new Error(`adapter '${adapterId}' requires ieeTask.type='${type}', got '${ieeTask.type}'`), {
       statusCode: 400,
@@ -239,8 +249,8 @@ export async function ieeLoadTerminalState(
 }
 
 // ---------------------------------------------------------------------------
-// finalise — lift of the existing `finaliseAgentRunFromIeeRun` body
-// (agentRunFinalizationService.ts lines 198–389) minus row-loading.
+// finalise — lift of the legacy IEE finaliser body that previously
+// lived in agentRunFinalizationService.ts, minus row-loading.
 // ---------------------------------------------------------------------------
 
 interface TokenTotals {

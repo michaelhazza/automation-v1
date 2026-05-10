@@ -2,28 +2,25 @@
  * claudeCodeBackend — subprocess invocation of the Claude Code CLI runner.
  *
  * Spec: tasks/builds/execution-backend-adapter-contract/spec.md § 7
- *       (claude-code row), § 11 (Adapter rows), § 14 Chunk 4.
+ *       (claude-code row), § 11 (Adapter rows), § 14 Chunk 4 (registration),
+ *       § 14 Chunk 5 (real dispatch wiring).
  *
  * Tier 5 terminal-repo adapter. Spawns `claude -p` against the host's
  * Claude Max plan — zero API cost. The runner module
  * (`claudeCodeRunner.execute`) already encapsulates the subprocess
  * lifecycle, so the adapter dispatch body is a thin shim that builds the
- * runner input from `BackendDispatchInput` + the cwd carried by
- * `ClaudeCodeBackendOptions`.
+ * runner input from `BackendDispatchInput` + the cwd / task-prompt carried
+ * by `ClaudeCodeBackendOptions`.
  *
  * Cycle prevention — does NOT import from `agentExecutionService.ts`. The
- * `claudeCodeRunner` module is a sibling that has no path back into the
- * dispatch site; importing it directly is safe.
- *
- * Status — Chunk 4 (this commit):
- *   The dispatch ladder still routes `claude-code` through the inline
- *   branch in `agentExecutionService.ts:1474–1521`. Chunk 5 cuts over to
- *   the registry call and the inline branch is removed. Until then the
- *   adapter is registered (so the registry resolves all five modes) but
- *   never reached at runtime — the dispatch body throws an explicit
- *   "not yet wired" diagnostic if a future caller races ahead of the
- *   cutover.
+ * `claudeCodeRunner` and `devContextService` modules are siblings that
+ * have no path back into the dispatch site; importing them directly is
+ * safe.
  */
+
+import { claudeCodeRunner } from '../claudeCodeRunner.js';
+import { devContextService } from '../devContextService.js';
+import { emitAgentRunUpdate } from '../../websocket/emitters.js';
 
 import {
   BackendOptionsMismatch,
@@ -43,17 +40,80 @@ export const claudeCodeBackend: ExecutionBackend = {
     if (input.backendOptions.backendId !== 'claude-code') {
       throw new BackendOptionsMismatch('claude-code', input.backendOptions.backendId);
     }
+    const opts = input.backendOptions;
+    const ctx = opts.loopContext;
 
-    // The real `claudeCodeRunner.execute` invocation lands in Chunk 5
-    // alongside the dispatch-site cutover. Until then, throwing keeps
-    // the contract honest: every dispatch path reaches a defined code
-    // path, and any caller racing ahead of Chunk 5 fails loudly. Spec
-    // § 14 Chunk 5 is the locus for the actual wiring.
-    throw new Error(
-      `claudeCodeBackend.dispatch is not yet wired — Chunk 5 of the ` +
-        `ExecutionBackend Adapter Contract refactor cuts over the ` +
-        `dispatch ladder. Until then, claude-code dispatch continues ` +
-        `through the inline branch in agentExecutionService.ts.`,
-    );
+    // Resolve the project root for the subprocess cwd. Order:
+    //   1. explicit `opts.cwd` from the dispatch site,
+    //   2. dev-execution-context lookup (subaccount-scoped projectRoot),
+    //   3. fallback to '.'.
+    let projectRoot = opts.cwd ?? '.';
+    if (!opts.cwd && ctx.request.subaccountId) {
+      try {
+        const { context: dec } = await devContextService.getContext(
+          ctx.request.subaccountId,
+        );
+        projectRoot = dec.projectRoot;
+      } catch {
+        // DEC not configured — keep '.'.
+      }
+    }
+
+    emitAgentRunUpdate(input.runId, 'agent:run:progress', {
+      type: 'execution_mode',
+      mode: 'claude-code',
+      message: 'Spawning Claude Code CLI...',
+    });
+
+    // claudeCodeRunner.systemPrompt is a flat string; flatten the union
+    // exactly like the pre-Chunk-5 inline branch (which passed
+    // `fullSystemPrompt = stablePrefix + dynamicSuffix`).
+    const systemPromptString =
+      typeof input.promptAssembly === 'string'
+        ? input.promptAssembly
+        : input.promptAssembly.stablePrefix + input.promptAssembly.dynamicSuffix;
+
+    const ccResult = await claudeCodeRunner.execute({
+      systemPrompt: systemPromptString,
+      taskPrompt: ctx.taskPrompt,
+      cwd: projectRoot,
+      maxTurns: input.maxToolCalls,
+      timeoutMs: input.timeoutMs,
+      runId: input.runId,
+    });
+
+    return {
+      lifecycle: 'subprocess',
+      // claudeCodeRunner identifies the subprocess via sessionId; expose it
+      // as the backendTaskId so observability surfaces have a stable handle
+      // even though the inline branch did not record one.
+      backendTaskId: ccResult.sessionId ?? null,
+      loopResult: {
+        summary: ccResult.result,
+        toolCallsLog: [
+          {
+            type: 'claude_code_execution',
+            sessionId: ccResult.sessionId,
+            success: ccResult.success,
+            durationMs: ccResult.durationMs,
+            numTurns: ccResult.numTurns,
+            timedOut: ccResult.timedOut,
+          },
+        ],
+        totalToolCalls: ccResult.numTurns,
+        inputTokens: ccResult.inputTokens,
+        outputTokens: ccResult.outputTokens,
+        totalTokens: ccResult.totalTokens,
+        tasksCreated: 0,
+        tasksUpdated: 0,
+        deliverablesCreated: 0,
+        finalStatus: ccResult.timedOut
+          ? 'timeout'
+          : ccResult.success
+          ? 'completed'
+          : 'failed',
+      },
+      deduplicated: false,
+    };
   },
 };

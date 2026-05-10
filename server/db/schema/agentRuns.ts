@@ -94,7 +94,8 @@ export const agentRuns = pgTable(
     // — the run has been handed off to a delegated execution backend (currently
     // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
     // (iee_runs). Transitions to a terminal value when the backend reaches its
-    // own terminal state, via finaliseAgentRunFromIeeRun.
+    // own terminal state, via the registry orchestrator
+    // (`agentRunFinalizationService.finaliseAgentRunFromBackend`).
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration'>(),
 
     // Context & config

@@ -11,14 +11,7 @@
  * `finalise(input)`. The adapter owns the per-backend mapping + writes;
  * this file owns ordering, locking, and post-commit emit dispatch.
  *
- * Legacy aliases retained for one chunk:
- *   - `finaliseAgentRunFromIeeRun(ieeRun)` — delegates to
- *     `finaliseAgentRunFromBackend` after deriving `backendId` from
- *     `ieeRun.type`. Removed in Chunk 5.
- *   - `reconcileStuckDelegatedRuns()` — delegates to `reconcileBackends()`
- *     and returns its `total`. Removed in Chunk 5.
- *
- * Callers (unchanged after Chunk 3):
+ * Callers (post Chunk 5 of the refactor):
  *   1. server/jobs/ieeRunCompletedHandler.ts — pg-boss event handler.
  *   2. server/jobs/ieeMainAppReconciliationJob.ts — periodic orphan sweep.
  *
@@ -36,7 +29,6 @@
 import { eq, sql, and, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
-import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { actions } from '../db/schema/actions.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
 import { subaccountAgents } from '../db/schema/subaccountAgents.js';
@@ -52,8 +44,6 @@ import type { ExecutionBackendId } from './executionBackends/types.js';
 // Re-export the pure helpers so existing importers don't need to update
 // their import paths.
 export { mapIeeStatusToAgentRunStatus, buildSummaryFromIeeRun, computeMeaningfulOutputPure };
-
-type IeeRun = typeof ieeRuns.$inferSelect;
 
 /**
  * F22 — count actions proposed and memory blocks written for an agent run,
@@ -270,38 +260,8 @@ export async function reconcileBackends(): Promise<{
 }
 
 // ---------------------------------------------------------------------------
-// Legacy aliases — Chunk 3 transitional shape; removed in Chunk 5.
+// Legacy aliases were removed in Chunk 5 of the ExecutionBackend Adapter
+// Contract refactor. Callers migrated to
+// `finaliseAgentRunFromBackend({ backendId, backendTaskId })` and
+// `reconcileBackends()` in Chunks 3 and 5 respectively.
 // ---------------------------------------------------------------------------
-
-/**
- * @deprecated Use `finaliseAgentRunFromBackend({ backendId, backendTaskId })`.
- * Removed in Chunk 5 of the Execution Backend Adapter Contract refactor.
- *
- * Thin alias — derives `backendId` from `ieeRun.type` and forwards.
- * Existing callers (`server/jobs/ieeRunCompletedHandler.ts`,
- * `server/jobs/ieeMainAppReconciliationJob.ts`) migrate over Chunks 3–5.
- */
-export async function finaliseAgentRunFromIeeRun(ieeRun: IeeRun): Promise<boolean> {
-  // Pre-flight identical to the legacy implementation: only terminal IEE
-  // statuses produce a finalisation. Keeps logging output consistent.
-  if (ieeRun.status !== 'completed' && ieeRun.status !== 'failed' && ieeRun.status !== 'cancelled') {
-    logger.warn('agentRunFinalization.non_terminal_iee_run', {
-      ieeRunId: ieeRun.id,
-      ieeStatus: ieeRun.status,
-    });
-    return false;
-  }
-
-  const backendId: ExecutionBackendId = ieeRun.type === 'browser' ? 'iee_browser' : 'iee_dev';
-  return finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRun.id });
-}
-
-/**
- * @deprecated Use `reconcileBackends()`. Removed in Chunk 5.
- *
- * Thin alias — runs `reconcileBackends()` and returns its `total`.
- */
-export async function reconcileStuckDelegatedRuns(): Promise<number> {
-  const result = await reconcileBackends();
-  return result.total;
-}
