@@ -1,4 +1,4 @@
-**Status:** Draft v4
+**Status:** Draft v5
 **Date:** 2026-05-10
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** sandbox-isolation
@@ -61,7 +61,7 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 8. **Per-customer sandbox-minute metering.** Aggregations queryable from day one. **`subaccountId` is the minimum billing attribution grain; both `organisationId` and `subaccountId` rollups must be queryable.** UI dashboard NOT required in V1; the data must exist and be queryable from the first deploy.
 9. **Sub-account credential scoping.** The sandbox receives only task-scoped, sub-account-scoped credentials required for the specific operation. Secrets must be **short-lived where provider support allows**, **redacted from logs**, **excluded from harvested artefacts**, and **traceable through an audit event**. The sandbox never sees credentials belonging to a different sub-account.
 10. **Runtime posture — default-deny.** Sandbox filesystem, network, credential injection, artefact size, and runtime package installation must be explicitly allowed by policy. Anything not required for V1 task execution is denied or omitted. Spec B must pin V1 defaults for:
-    - Outbound network: allow-list, or deny-by-default with explicit per-task egress
+    - Outbound network: allow-list, or deny-by-default with explicit per-task egress. **If any outbound network is allowed, Spec B must define egress audit logging at the policy level:** destination class / domain, task / run identity, credential context if relevant, and deny / allow outcome. Full payload logging is not required and may be prohibited.
     - Writable filesystem area (V1 default: `/workspace` only)
     - Credential injection mechanism (env var vs mounted file vs short-lived token)
     - Maximum artefact size and total artefact bytes per task
@@ -77,10 +77,10 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
     - Artefact upload failed
     - Provider unavailable
     Each terminal state declares whether it is user-visible, retryable, billable, and audit-worthy.
-12. **Observability.** Every sandbox execution MUST emit structured telemetry tied to `organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `sandboxExecutionId`, `provider`, `templateVersion`, `wallClockMs`, and `terminalState`. Required structured events at minimum: sandbox start, sandbox terminal, timeout, cost-ceiling termination, output validation failure, harvest failure, artefact upload failure, credential injection denied / missing, provider unavailable.
+12. **Observability.** Every sandbox execution MUST emit structured telemetry tied to `organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `sandboxExecutionId`, `provider`, `templateVersion`, `wallClockMs`, and `terminalState`. Required structured events at minimum: sandbox start, sandbox terminal, timeout, cost-ceiling termination, output validation failure, harvest failure, artefact upload failure, credential injection denied / missing, provider unavailable. **Sandbox telemetry, logs, artefacts, and cost rows MUST remain RLS / scoping-compatible with existing organisation / subaccount boundaries.** No sandbox-derived row may be queryable outside its owning organisation / subaccount context — metadata tagging is not a substitute for enforced query isolation.
 13. **Template build pipeline + version pinning.** CI job that builds `synthetos-sandbox` (and `openclaw-session`) Docker images from `infra/sandbox-templates/`, pushes to e2b template registry on tag bump. Same Dockerfile used by `docker-compose` for local dev. **Every sandbox execution must record the template name, immutable template version / digest, build source commit, and provider project / environment.** Floating `latest` templates are not acceptable for production execution. **Template CI must define dependency update and vulnerability scanning posture, including what blocks a template publish.**
 14. **Provider availability and fallback posture.** Spec B must define behaviour when the sandbox provider is unavailable, rate-limited, slow to start, or returns an ambiguous terminal state. **V1 must fail closed for untrusted code execution. It must NOT silently fall back to worker execution or `inlineSandbox`.** Acceptable responses are: queue and retry with backoff, surface a typed failure to the agent run, or hard-fail the task with audit trail. Falling back to in-process execution is forbidden — it defeats the security premise of the entire spec.
-15. **Retention and deletion posture.** Spec B must define retention for harvested logs and artefacts (object-storage TTL / default retention), deletion behaviour when a run is deleted (cascade through artefacts, logs, ledger rows where appropriate), and guarantees on provider-side file deletion after sandbox terminal / close. **Sandbox filesystems are ephemeral execution surfaces, not persistence layers — only explicitly harvested, validated, redacted outputs may be retained.** Relevant because customer uploads may include sensitive CSVs, PDFs, and document content.
+15. **Retention and deletion posture.** Spec B must define retention for harvested logs and artefacts (object-storage TTL / default retention), deletion behaviour when a run is deleted (including whether artefacts / logs are deleted, tombstoned, or retained, and whether ledger rows are retained, anonymised, or correction-reversed rather than physically deleted — finance and audit trails must stay intact), and guarantees on provider-side file deletion after sandbox terminal / close. **Sandbox filesystems are ephemeral execution surfaces, not persistence layers — only explicitly harvested, validated, redacted outputs may be retained.** Relevant because customer uploads may include sensitive CSVs, PDFs, and document content.
 16. **Migration path from collapsed `iee_dev`.** Today `iee_dev` collapses untrusted code execution into the worker process. Spec B splits this: `iee_dev` adapter starts consuming `SandboxExecutionService` for the untrusted-execution portion; the trusted "Terminal / Repo" portion (Tier 5) stays in the worker. The split is pinned by the classification table below — there is no "small script" exception that lets customer-derived code back into the worker.
 
 ### 2a. Execution classification (Spec B must enforce this table)
@@ -161,6 +161,9 @@ Lock-ready invariants. The spec is non-conformant if any are violated.
 - Template CI MUST define dependency update and vulnerability scanning posture, including publish-blocking criteria.
 - `localDockerSandbox` MUST share the template Dockerfile and output contract with `e2bSandbox`; parity gaps documented.
 - Spec B MUST NOT introduce a broad `artefact` / `artifact` naming migration unless required for the sandbox interface.
+- Sandbox telemetry, logs, artefacts, and cost rows MUST be RLS / scoping-enforced — never queryable outside the owning organisation / subaccount.
+- If outbound network is allowed, egress audit logging MUST record destination class, task / run identity, credential context, and deny / allow outcome.
+- Ledger rows MUST be retained, anonymised, or correction-reversed on run deletion — never physically deleted in a way that breaks finance or audit trails.
 
 ---
 
