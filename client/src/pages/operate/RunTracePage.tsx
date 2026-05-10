@@ -41,6 +41,7 @@ import { collapseToOperatorBadge } from '../../lib/runtimeCheckBadgePure';
 import { fetchRunTrace } from '../../lib/api/runTrace';
 import type { RunTraceResult } from '../../lib/api/runTrace';
 import { RunTraceHeadline } from '../../components/run-trace/RunTraceHeadline';
+import { RunTraceArtifactsPanel } from '../../components/run-trace/RunTraceArtifactsPanel';
 import { formatApprovalStatus } from '../../lib/runTraceFormatters';
 
 // ── IEE progress polling (ported from RunTraceViewerPage) ─────────────────────
@@ -432,6 +433,7 @@ export default function RunTracePage({ user }: { user: User }) {
         />
         {rcEmptyFooter}
         {rcErrorFooter}
+        <RunTraceArtifactsPanel runId={run.id} />
       </div>
     );
   }
@@ -462,6 +464,7 @@ export default function RunTracePage({ user }: { user: User }) {
           onCorrect={setCorrectingEvent}
           systemEvents={traceResult?.events}
         />
+        <RunTraceArtifactsPanel runId={run.id} />
       </div>
 
       {/* Correct dialog — mounts when the user clicks Correct on a step.

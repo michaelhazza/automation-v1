@@ -52,6 +52,10 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function judgeScoreDisplay(value: number): string {
+  return `${value.toFixed(2)} / 5`;
+}
+
 // Returns true when current avg accuracy is >10% below previous
 function hasClassificationDrift(current: EvalRun, previous: EvalRun): boolean {
   const currentAvg = avgAccuracy(current.classificationAccuracyPerIntent);
@@ -141,9 +145,9 @@ function EvalRunCard({
           </div>
           <div className="flex items-center gap-2">
             <span className={`text-lg font-semibold ${judgeOk ? 'text-green-700' : 'text-red-600'}`}>
-              {pct(judgeScore)}
+              {judgeScoreDisplay(judgeScore)}
             </span>
-            <span className="text-xs text-gray-400">threshold {pct(judgeThreshold)}</span>
+            <span className="text-xs text-gray-400">threshold {judgeScoreDisplay(judgeThreshold)}</span>
           </div>
         </div>
       </div>

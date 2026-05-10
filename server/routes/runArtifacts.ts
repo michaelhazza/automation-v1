@@ -25,6 +25,8 @@ import {
 } from '../lib/agentRunVisibility.js';
 import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
 import * as fileDeliveryService from '../services/fileDeliveryService.js';
+import { deriveSignedUrlExpiry } from '../services/fileDeliveryServicePure.js';
+import type { RunArtifact } from '../../shared/types/runArtifact.js';
 import type { Readable } from 'node:stream';
 
 const router = Router();
@@ -39,6 +41,7 @@ interface ResolvedArtifact {
   agentRunId: string | null;
   displayName: string;
   mimeType: string;
+  artifactKind: RunArtifact['artifactKind'];
   storageKey: string;
   storageRegion: string | null;
 }
@@ -56,6 +59,7 @@ async function loadArtifactWithVisibility(
       agentRunId: runArtifacts.agentRunId,
       displayName: runArtifacts.displayName,
       mimeType: runArtifacts.mimeType,
+      artifactKind: runArtifacts.artifactKind,
       storageKey: runArtifacts.storageKey,
       storageRegion: runArtifacts.storageRegion,
     })
@@ -303,10 +307,9 @@ router.post(
       return;
     }
 
-    // Derive expiresAt from the signed URL's X-Amz-Expires parameter if present,
-    // otherwise default to 7 days for report / 24h for others.
-    const sevenDays = 7 * 24 * 60 * 60 * 1000;
-    const expiresAt = new Date(Date.now() + sevenDays).toISOString();
+    const expiresAt = new Date(
+      Date.now() + deriveSignedUrlExpiry(artifact.artifactKind) * 1000,
+    ).toISOString();
 
     logger.info('phase1.file_delivery.signed_url_issued', {
       artifactId: artifact.id,

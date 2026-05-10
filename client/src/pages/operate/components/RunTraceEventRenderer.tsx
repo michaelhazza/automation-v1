@@ -22,6 +22,11 @@ import type { RuntimeCheckResult } from '../../../../../shared/types/runtimeChec
 import { RuntimeCheckBadge } from '../../../components/runtimeCheck/RuntimeCheckBadge';
 import api from '../../../lib/api';
 import type { RunTraceEvent } from '../../../../../shared/types/runTraceEvent';
+import { getSupportEventRenderer } from '../../../components/run-trace/SupportEventRenderers';
+import {
+  MacroReportRenderingFailedRenderer,
+  MacroArtifactUploadFailedRenderer,
+} from '../../../components/run-trace/MacroFailureRenderers';
 
 // ── Wire shape returned by /api/agent-runs/:id/trace-events ─────────────────
 
@@ -135,6 +140,19 @@ function LateChip() {
 
 function SystemEventRow({ event }: { event: RunTraceEvent }) {
   const isLate = !!event.late;
+
+  // Phase1 support events — delegated to the support event renderer registry.
+  const SupportRenderer = getSupportEventRenderer(event.eventType);
+  if (SupportRenderer) {
+    return <SupportRenderer event={event as { payload?: Record<string, unknown>; eventType: string }} />;
+  }
+
+  if (event.eventType === 'phase1.macro.report_rendering_failed') {
+    return <MacroReportRenderingFailedRenderer event={event as { payload?: Record<string, unknown> }} />;
+  }
+  if (event.eventType === 'phase1.macro.artifact_upload_failed') {
+    return <MacroArtifactUploadFailedRenderer event={event as { payload?: Record<string, unknown> }} />;
+  }
 
   if (event.eventType === 'controller_style_decided') {
     return (
@@ -356,14 +374,15 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
     }
   }
 
-  // Filter system events to the types this renderer handles.
+  // Filter system events to the types this renderer handles: known system event
+  // types plus all phase1.* events (support agent + 42 Macro failure events).
   const SYSTEM_EVENT_TYPES = new Set([
     'controller_style_decided',
     'policy_envelope_resolved',
     'tool_security_decision',
   ]);
   const filteredSystemEvents = systemEvents?.filter((e) =>
-    SYSTEM_EVENT_TYPES.has(e.eventType),
+    SYSTEM_EVENT_TYPES.has(e.eventType) || e.eventType.startsWith('phase1.'),
   ) ?? [];
 
   return (
