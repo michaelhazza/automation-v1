@@ -4011,3 +4011,15 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Place under `server/services/__tests__/` as a Vitest integration spec; CI handles full-suite execution.
 
 
+
+## Deferred from chatgpt-pr-review — phase-1-showcase-mvps (2026-05-11)
+
+**Captured:** 2026-05-11
+**Source log:** `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`
+**PR:** #283
+
+- [ ] **PHASE1-N1 — Tighten phase1.* event filter in RunTraceEventRenderer**
+  - Location: `client/src/pages/operate/components/RunTraceEventRenderer.tsx`
+  - Current: `e.eventType.startsWith('phase1.')` includes all future phase1 events in `filteredSystemEvents`, which fall through to `SystemEventRow` returning `null` (silently unrendered).
+  - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
+  - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.
