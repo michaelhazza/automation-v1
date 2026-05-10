@@ -41,6 +41,7 @@ emit_header "$GUARD_NAME"
 
 MIDDLEWARE_INDEX="$ROOT_DIR/server/services/middleware/index.ts"
 EXECUTION_SERVICE="$ROOT_DIR/server/services/agentExecutionService.ts"
+EXECUTION_LOOP="$ROOT_DIR/server/services/agentExecutionLoop.ts"
 MIDDLEWARE_FILE="$ROOT_DIR/server/services/middleware/reflectionLoopMiddleware.ts"
 PURE_FILE="$ROOT_DIR/server/services/middleware/reflectionLoopPure.ts"
 
@@ -92,19 +93,22 @@ else
   VIOLATIONS=$((VIOLATIONS + 1))
 fi
 
-# ── Check 3: agentExecutionService handles escalate_to_review ────────────
-if [ -f "$EXECUTION_SERVICE" ]; then
-  FILES_SCANNED=$((FILES_SCANNED + 1))
-  if ! grep -q "escalate_to_review" "$EXECUTION_SERVICE"; then
-    emit_violation "$GUARD_ID" "error" "server/services/agentExecutionService.ts" "1" \
-      "runAgenticLoop does not handle the 'escalate_to_review' postTool action" \
-      "Add a case for 'escalate_to_review' in the postTool switch. See docs/improvements-roadmap-spec.md §P2.2."
-    VIOLATIONS=$((VIOLATIONS + 1))
+# ── Check 3: escalate_to_review handled in the agentic loop ─────────────
+# The handler may live in agentExecutionService.ts (pre-extraction) or
+# agentExecutionLoop.ts (post-extraction into its own module).
+LOOP_HANDLED=0
+for loop_file in "$EXECUTION_SERVICE" "$EXECUTION_LOOP"; do
+  if [ -f "$loop_file" ]; then
+    FILES_SCANNED=$((FILES_SCANNED + 1))
+    if grep -q "escalate_to_review" "$loop_file"; then
+      LOOP_HANDLED=1
+    fi
   fi
-else
-  emit_violation "$GUARD_ID" "error" "server/services/agentExecutionService.ts" "0" \
-    "agentExecutionService.ts is missing" \
-    "Restore the file and re-wire the postTool switch."
+done
+if [ "$LOOP_HANDLED" -eq 0 ]; then
+  emit_violation "$GUARD_ID" "error" "server/services/agentExecutionService.ts" "1" \
+    "runAgenticLoop does not handle the 'escalate_to_review' postTool action" \
+    "Add a case for 'escalate_to_review' in the postTool switch. See docs/improvements-roadmap-spec.md §P2.2."
   VIOLATIONS=$((VIOLATIONS + 1))
 fi
 

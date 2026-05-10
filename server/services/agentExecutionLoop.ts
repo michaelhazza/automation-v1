@@ -429,7 +429,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
               }
             }
           } catch (previewErr) {
-            console.warn('[P4.3] Spend preview failed (non-blocking):', previewErr);
+            logger.warn('[P4.3] Spend preview failed (non-blocking)', { err: previewErr });
           }
 
           messages.push({
@@ -442,7 +442,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         }
       } catch (planError) {
         // Planning failure is non-fatal — fall through to the normal loop
-        console.warn(`[P4.3] Planning prelude failed for run ${runId}:`, planError);
+        logger.warn('[P4.3] Planning prelude failed', { err: planError, runId });
       }
     }
   }
@@ -591,7 +591,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       const validation = validateToolCalls(response.toolCalls, tools as unknown as ProviderTool[]);
       if (!validation.valid && !escalationAttempted) {
         escalationAttempted = true;
-        console.warn(`[agentLoop] escalating: ${validation.failureReason} — retrying with frontier model`);
+        logger.warn('[agentLoop] escalating — retrying with frontier model', { failureReason: validation.failureReason });
         const escalatedResponse = await routeCall({
           messages: maskedMessages,
           system: systemPrompt,
