@@ -4115,6 +4115,8 @@ Six foundation primitives shipped with PR #277 (build slug `synthetos-foundation
 ### CI gate
 
 - `scripts/verify-risk-tier-assigned.sh` + `verify-risk-tier-assigned.ts` — every entry in `server/config/actionRegistry/` must declare a numeric `riskTier ∈ 0..6`. 148 entries covered.
+- `scripts/verify-action-registry-snapshot.sh` + `diff-action-registry.ts` — serialises the compiled `ACTION_REGISTRY` and diffs against `scripts/snapshots/action-registry.snapshot.json`. Exit 0 = byte match; exit 1 = mismatch (blocking); exit 2 = snapshot missing (warning). **The snapshot is a regression oracle** — it proves refactors don't silently change runtime field values. It is NOT a source of truth for querying registry entries at runtime; use `import { ACTION_REGISTRY }` for that. Requires `npm run build:server` before running.
+- `scripts/verify-risk-tier-drift.sh` + `audit-action-registry-risk-tiers.ts` — cross-checks every slug in the canonical CSV (`tasks/builds/synthetos-foundation-refactor/risk-tier-assignments.csv`) against `ACTION_REGISTRY[slug].riskTier`. CSV-only slugs or mismatches are blocking; registry-only slugs (methodology/support entries added after the CSV) are INFO-only. Requires `npm run build:server` before running.
 
 ### Subaccount Agent Edit page tabs (current set)
 
