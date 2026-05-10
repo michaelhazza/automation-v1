@@ -1,6 +1,7 @@
-**Status:** draft
+**Status:** accepted
 **Spec date:** 2026-05-10
 **Last updated:** 2026-05-10
+**Locked:** 2026-05-10 (after spec-reviewer iter 1–5 + chatgpt-spec-review rounds 1–2)
 **Author:** main session (operator-driven)
 **Build slug:** execution-backend-adapter-contract
 
@@ -692,7 +693,7 @@ The existing exported name `finaliseAgentRunFromIeeRun` is kept as a thin alias 
 ### 9.2 `reconcileBackends` (replaces `reconcileStuckDelegatedRuns`)
 
 ```ts
-export async function reconcileBackends(): Promise<{ total: number; perBackend: Record<ExecutionBackendId, number> }> {
+export async function reconcileBackends(): Promise<{ total: number; perBackend: Partial<Record<ExecutionBackendId, number>> }> {
   const perBackend: Record<string, number> = {};
   for (const backend of executionBackendRegistry.forDelegated()) {
     if (!backend.reconcile) continue; // capability mismatch — should not happen post-validation
@@ -945,7 +946,7 @@ One spec, one Phase 2 build slug. Five chunks, in this order. Each chunk is inde
 - Rename cron `maintenance:iee-main-app-reconciliation` → `maintenance:backend-reconciliation`. Add boot-time `boss.unschedule('maintenance:iee-main-app-reconciliation')` for one release cycle to clean up the old schedule entry.
 - Remove the alias exports (`finaliseAgentRunFromIeeRun`, `reconcileStuckDelegatedRuns`) and update remaining callers.
 
-**Verifier:** all five existing modes run end-to-end; integration tests pass; cron-rename does not double-fire (asserted by inspecting pg-boss `schedule` table post-deploy).
+**Verifier:** all five existing modes run end-to-end; integration tests pass; cron-rename does not double-fire (asserted by inspecting pg-boss `schedule` table post-deploy); `grep -R "finaliseAgentRunFromIeeRun\|reconcileStuckDelegatedRuns" server --exclude-dir=node_modules` returns zero matches (per § 16 acceptance criterion 15 — confirms the alias removal is total).
 
 ### Chunk dependency graph
 
@@ -964,8 +965,8 @@ Per `docs/spec-context.md` and `docs/spec-authoring-checklist.md` § 9: pure-fun
 
 ### Pure tests (new)
 
-- `executionBackends/__tests__/contractPure.test.ts` — capability-validation rules, dispatch-result shape exhaustiveness, options union closure. Uses an in-memory mock adapter implementing every capability shape. Adds: (a) F5 mismatch invariant — `dispatch()` throws `BackendOptionsMismatch` when `input.backendOptions.backendId !== this.id` (positive + negative cases); (b) F3 no-circular-import check — module-source assertion that `types.ts` does not import from `agentExecutionService.ts`.
-- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters; rejects adapters declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`; rejects same-queue + different-`terminalStateTable` pairs (`BackendQueueOwnershipViolation`); resolves every `ExecutionMode` value to its registered adapter; rejects unregistered ids with `BackendNotRegistered`; against an in-memory mock that registers two adapters sharing one `terminalStateTable`, asserts each adapter's `reconcile()` returns a disjoint count (no double-processing).
+- `executionBackends/__tests__/contractPure.test.ts` — capability-validation rules, dispatch-result shape exhaustiveness, options union closure. Uses an in-memory mock adapter implementing every capability shape. Adds: (a) F5 mismatch invariant **on the mock** — `dispatch()` throws `BackendOptionsMismatch` when `input.backendOptions.backendId !== this.id` (positive + negative cases); (b) F3 no-circular-import check — module-source assertion that `types.ts` does not import from `agentExecutionService.ts`.
+- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters; rejects adapters declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`; rejects same-queue + different-`terminalStateTable` pairs (`BackendQueueOwnershipViolation`); resolves every `ExecutionMode` value to its registered adapter; rejects unregistered ids with `BackendNotRegistered`; against an in-memory mock that registers two adapters sharing one `terminalStateTable`, asserts each adapter's `reconcile()` returns a disjoint count (no double-processing). **Adds F5 per-adapter mismatch coverage:** for each of the five concrete V1 adapters (`apiBackend`, `headlessBackend`, `claudeCodeBackend`, `ieeBrowserBackend`, `ieeDevBackend`), a minimal dispatch fixture asserts that calling `dispatch()` with a `backendOptions.backendId` that does not match the adapter's `id` throws `BackendOptionsMismatch`. Adapter-specific test files MAY host this assertion instead — registryPure carries the assertion when no adapter-specific pure test file exists.
 - `agentRunFinalizationServicePure.test.ts` (existing) — mapping table coverage stays; calls renamed to `finaliseAgentRunFromBackend`. **Adds F2 legacy-fallback case:** fixture with `agent_runs.backend_id IS NULL` (pre-cutover in-flight run); IEE handler-equivalent path derives `backendId` from `iee_runs.type` and finalises correctly.
 
 ### Integration tests (existing, kept)
@@ -1013,18 +1014,19 @@ The work is complete when:
 10. `architecture.md § Execution modes` describes the registry pattern; `docs/openclaw-strategic-analysis.md` Phase 1 marker updated.
 11. No regression on existing API / headless / claude-code execution paths (verified by integration tests + manual smoke).
 12. **No-circular-import rule (F3):** `executionBackends/types.ts` does not import any symbol from `agentExecutionService.ts`. Asserted by a pure import-graph check at the top of `contractPure.test.ts` (`expect(typesModuleSource).not.toMatch(/from .+agentExecutionService/)`) and reviewed manually at PR time.
-13. **Mismatch invariant (F5):** every adapter's `dispatch()` throws `BackendOptionsMismatch` when `input.backendOptions.backendId !== this.id`. Asserted by `contractPure.test.ts` against an in-memory mock adapter — both the positive case (matching id passes) and the negative case (mismatched id throws) are tested.
+13. **Mismatch invariant (F5):** every adapter's `dispatch()` throws `BackendOptionsMismatch` when `input.backendOptions.backendId !== this.id`. Asserted **once** in `contractPure.test.ts` against an in-memory mock adapter (positive + negative cases) AND **once per concrete V1 adapter** (`apiBackend`, `headlessBackend`, `claudeCodeBackend`, `ieeBrowserBackend`, `ieeDevBackend`) using a minimal dispatch fixture in either the adapter's own pure test file or `registryPure.test.ts`. The mock test alone is insufficient — a real adapter could omit the first-line check while the mock test still passes; per-adapter assertion closes that gap.
 14. **Legacy in-flight fallback (F2):** the IEE handler path finalises a pre-cutover run with `agent_runs.backend_id IS NULL` correctly. Asserted by `agentRunFinalizationServicePure.test.ts` — fixture seeds an `iee_runs` row and an `agent_runs` parent with `backend_id` left NULL, calls the handler-equivalent code path, and verifies the parent terminal UPDATE writes the expected status.
+15. **Alias removal complete (P1):** after Chunk 5 lands, `grep -R "finaliseAgentRunFromIeeRun\|reconcileStuckDelegatedRuns" server --exclude-dir=node_modules` returns zero matches. Run as a manual operator check at Chunk 5 PR review and again immediately after the cutover commit lands on main; a non-zero result indicates the alias-removal step is partial and the chunk is not ready to merge.
 
 ---
 
 ## 17. Risks
 
-1. **Refactoring the four existing modes into adapters is a "no behaviour change" claim — but each mode has subtle quirks.** *Mitigation:* Chunk 1 lands contract tests against an in-memory mock adapter *before* any real adapter ships. Chunk 3 lands the IEE adapter behind the existing dispatch (registered but not called from dispatch) so the IEE integration test continues to exercise the old path during the transition. Cutover (Chunk 5) is the only commit where behaviour can diverge; it is reviewed end-to-end against every existing test plus operator manual smoke.
+1. **Refactoring the five existing `executionMode` values into adapters is a "no behaviour change" claim — but each mode has subtle quirks.** *Mitigation:* Chunk 1 lands contract tests against an in-memory mock adapter *before* any real adapter ships. Chunk 3 lands the IEE adapter behind the existing dispatch (registered but not called from dispatch) so the IEE integration test continues to exercise the old path during the transition. Cutover (Chunk 5) is the only commit where behaviour can diverge; it is reviewed end-to-end against every existing test plus operator manual smoke.
 
 2. **Cron rename causes duplicate scheduling.** *Mitigation:* Chunk 5 includes a boot-time `boss.unschedule('maintenance:iee-main-app-reconciliation')` call to clean up the old schedule entry. After one release cycle, the unschedule call is removed. Documented in Chunk 5 verifier.
 
-3. **Per-org `preferred_backends` adds a JSONB column with implicit shape.** *Mitigation:* the column is **schema-only in V1** — no V1 code path reads it (registry resolution uses identity mapping). The column is documented in `architecture.md` as the intended `Map<ExecutionMode, ExecutionBackendId>` shape (request-side `executionMode` → resolved adapter variant id, e.g. `iee_dev → iee_dev` today, `openclaw → openclaw_managed` once Phase 3 lands). Phase 3.5+ routing introduces the Zod schema for the value at the same time it introduces the read; until then the column accepts only the default `'{}'` and any non-default writes are rejected at the API layer (no V1 endpoint writes this column).
+3. **Per-org `preferred_backends` adds a JSONB column with implicit shape.** *Mitigation:* the column is **schema-only in V1** — no V1 code path reads it (registry resolution uses identity mapping). The column is documented in `architecture.md` as the intended `Map<ExecutionMode, ExecutionBackendId>` shape (request-side `executionMode` → resolved adapter variant id, e.g. `iee_dev → iee_dev` today, `openclaw → openclaw_managed` once Phase 3 lands). **No V1 endpoint writes this column.** Any future endpoint that writes it MUST introduce Zod validation against the documented shape at the same time it introduces the write — Phase 3.5+ routing is the natural place this lands. The DB default `'{}'` is the only value the column carries until then.
 
 4. **Two adapters (`iee_browser`, `iee_dev`) share `iee-run-completed` queue.** *Mitigation:* registry validation rejects adapters that share a queue without sharing storage; the rule is documented in §13.4. The existing IEE handler reads `iee_runs.type` to discriminate; this preserves today's behaviour.
 
@@ -1097,9 +1099,9 @@ The work is complete when:
 
 ## End of spec
 
-This spec is **draft**. Next steps per `CLAUDE.md`:
+This spec is **accepted** (locked 2026-05-10). Review trail:
 
-1. Operator review.
-2. Run `spec-reviewer` (Codex loop, max 5 iterations) — `tasks/builds/execution-backend-adapter-contract/spec.md`.
-3. (Optional) `chatgpt-spec-review` — manual ChatGPT-web rounds.
-4. Lock as `accepted` and hand to `feature-coordinator` for Phase 2 plan + build.
+1. Operator authoring + draft (commit `a2384ec7`).
+2. `spec-reviewer` Codex loop — iterations 1–5 (commits `02e00c93`, `9d5a90d2`, `bee0d051`, plus iter4/iter5 raw logs). Outcome: contract self-containment, adapter ownership of writes, IEE discriminator schema fix, shared-storage reconcile scoping.
+3. `chatgpt-spec-review` — rounds 1–2 (this session log: `tasks/review-logs/chatgpt-spec-review-execution-backend-adapter-contract-2026-05-10T03-42-11Z.md`). Round 1 applied 9 auto + 1 user-approved (`ExecutionBackendId` type seam); Round 2 applied 5 final tightenings (mismatch test scope, `Partial<Record<…>>`, alias-removal grep, preferred_backends wording, "five existing modes" risk wording).
+4. Hand off to `feature-coordinator` for Phase 2 plan + build.

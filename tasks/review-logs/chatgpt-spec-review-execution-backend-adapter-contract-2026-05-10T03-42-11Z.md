@@ -80,3 +80,58 @@ Two stale references found and auto-fixed (both mechanical, `[auto]`):
 No directional contradictions found. No forward references to renamed/removed sections. Pass.
 
 ---
+
+## Round 2 — 2026-05-10T04-00-00Z
+
+### ChatGPT Feedback (raw)
+
+> Round 2 result: mostly clean. I would apply 3 small tightenings, then lock. No major contract issues remain. The Round 1 fixes landed well, especially the ExecutionBackendId split, legacy in-flight fallback, neutral agentExecutionTypes.ts, and V1-vs-Spec-B sandbox validation distinction.
+>
+> **Required before lock**
+>
+> **F1. Fix "four existing modes" wording in Risks.** §17 Risk 1 still says "Refactoring the four existing modes into adapters..." but the spec now correctly frames this as five executionMode values sharing three physical branches elsewhere. Patch: "Refactoring the five existing executionMode values into adapters is a 'no behaviour change' claim..."
+>
+> **F2. Clarify BackendOptionsMismatch test scope.** The spec says every adapter's dispatch() must throw BackendOptionsMismatch on mismatched backendOptions.backendId, but the acceptance test only asserts this against an in-memory mock adapter. That proves the contract, not the five real adapters. Patch acceptance criterion 13 to: "Asserted once in contractPure.test.ts against an in-memory mock adapter, and asserted for all five concrete V1 adapters in their adapter-specific pure tests or registryPure test using a minimal dispatch fixture." Otherwise a real adapter could forget the first-line check while the mock test still passes.
+>
+> **F3. Tighten Record<ExecutionBackendId, number> typing.** §9.2 shows `Promise<{ total: number; perBackend: Record<ExecutionBackendId, number> }>` but V1 will only register five of the seven possible ExecutionBackendId values, so a total Record implies keys for openclaw_managed and openclaw_external exist too. Patch to `Partial<Record<ExecutionBackendId, number>>`.
+>
+> **Optional polish**
+>
+> **P1. Add a grep acceptance for no lingering old finaliser imports.** Since aliases are removed in Chunk 5, add: `grep -R "finaliseAgentRunFromIeeRun\|reconcileStuckDelegatedRuns" server --exclude-dir=node_modules`. Expected: zero matches after Chunk 5. This prevents the alias-removal claim from becoming partial.
+>
+> **P2. Make preferred_backends "no non-default writes" enforceable.** Risk 3 says any non-default writes are rejected at the API layer, but there is no V1 endpoint writing this column. Safer wording: "No V1 endpoint writes this column. Any future endpoint that writes it must introduce validation at the same time."
+>
+> **Lock recommendation:** After F1 to F3, I'd lock it. The spec now has the important contracts in place: no dispatch behaviour change, no in-flight IEE breakage, no circular type imports, no premature sandbox enforcement, and a clean forward seam for OpenClaw/operator-session routing.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| F1 (R2) — "four existing modes" wording in §17 | technical | apply | auto (apply) | low | Mechanical wording carryover from pre-Round-1 phrasing — same fix family as R4 in Round 1. |
+| F2 (R2) — Extend mismatch invariant test from mock to five adapters | technical | apply | auto (apply) | medium | Real-adapter coverage gap; mock test alone could pass while a real adapter forgets the first-line check. Internal test-coverage clarification. |
+| F3 (R2) — `Partial<Record<ExecutionBackendId, number>>` typing | technical | apply | auto (apply) | low | Type narrowness — V1 registers 5 of 7 possible keys; `Partial<Record<…>>` is the precise type. |
+| P1 — Grep acceptance for old finaliser imports | technical | apply | auto (apply) | low | Cheap belt-and-braces check that the alias removal is total. Enhances Chunk 5 verifier. |
+| P2 — Preferred_backends API-layer wording | technical | apply | auto (apply) | low | Wording overstates the V1 enforcement mechanism (no endpoint exists). Replace with the accurate "future endpoints must add validation at the same time." |
+
+### Applied (auto-applied technical)
+
+- [auto] **F1 (R2)** — §17 Risk 1 wording: "four existing modes" → "five existing `executionMode` values" (carry-over fix from Round 1's R4 family).
+- [auto] **F2 (R2)** — §16 acceptance criterion #13 + §15 `registryPure.test.ts` now require the mismatch invariant to be asserted **once on the mock AND once per concrete V1 adapter** (`apiBackend`, `headlessBackend`, `claudeCodeBackend`, `ieeBrowserBackend`, `ieeDevBackend`). Closes the "real adapter forgets the first-line check while mock test still passes" gap.
+- [auto] **F3 (R2)** — `reconcileBackends()` return type tightened to `Partial<Record<ExecutionBackendId, number>>`. V1 only registers 5 of 7 possible keys; total `Record<…>` was over-narrow.
+- [auto] **P1** — Added §16 acceptance criterion #15 + §14 Chunk 5 verifier: post-cutover `grep -R "finaliseAgentRunFromIeeRun\|reconcileStuckDelegatedRuns" server` returns zero matches. Cheap belt-and-braces check that the alias removal is total.
+- [auto] **P2** — §17 Risk 3 (`preferred_backends`): replaced "any non-default writes are rejected at the API layer" with the accurate "No V1 endpoint writes this column. Any future endpoint that writes it MUST introduce Zod validation against the documented shape at the same time." Avoids implying a non-existent enforcement path.
+
+### Spec lock
+
+Status flipped `draft` → `accepted`. Locked 2026-05-10. End-of-spec footer updated with the full review trail (5 Codex iters + 2 ChatGPT rounds).
+
+### Integrity check
+
+Three targeted greps (Round 2 changes only):
+- `four existing|four modes|four dispatch` → 0 matches (F1 propagated cleanly).
+- `Record<ExecutionBackendId, number>` (without `Partial<…>` wrapper) → 0 matches outside the F3-fixed line; the only remaining occurrence is wrapped in `Partial<…>` per F3.
+- `rejected at the API layer` → 0 matches (P2 propagated cleanly).
+
+No directional contradictions. Pass.
+
+---
