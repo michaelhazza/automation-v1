@@ -1,5 +1,6 @@
 import { eq, and, isNull, desc, asc, ilike, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import type { OrgScopedTx } from '../db/index.js';
 import {
   tasks,
   taskActivities,
@@ -15,6 +16,33 @@ import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { triggerService } from './triggerService.js';
 import { subtaskWakeupService } from './subtaskWakeupService.js';
 import { logger } from '../lib/logger.js';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type CreateTaskData = {
+  title: string;
+  description?: string;
+  brief?: string;
+  status?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  assignedAgentId?: string;
+  assignedAgentIds?: string[];
+  createdByAgentId?: string;
+  processId?: string;
+  dueDate?: Date;
+  handoffSourceRunId?: string;
+  handoffContext?: Record<string, unknown>;
+  handoffDepth?: number;
+  isSubTask?: boolean;
+  parentTaskId?: string;
+};
+
+export type CreateTaskInput = {
+  organisationId: string;
+  subaccountId: string;
+  data: CreateTaskData;
+  userId?: string;
+};
 
 const POSITION_GAP = 1000;
 
@@ -36,6 +64,175 @@ function mergeAgentIds(
   const deduped = [...new Set(ids.filter(Boolean))];
   const primary = deduped[0] ?? null;
   return { agentId: primary, agentIds: deduped };
+}
+
+// ─── createTask — overloaded standalone (DEC-4 / spec §3.3) ─────────────────
+//
+// TypeScript does not support overloads on object literal methods, so
+// `createTask` is declared as a module-level function and then assigned to
+// `taskService.createTask`. Callers import via `taskService` as before.
+
+/**
+ * Canonical — required for all in-scope callers.
+ * Must be called with a caller-supplied `OrgScopedTx` obtained from
+ * `getOrgScopedDb()` inside an active `withOrgTx(...)` block.
+ */
+function _createTask(input: CreateTaskInput, tx: OrgScopedTx): Promise<Task>;
+/**
+ * @deprecated transitional shim for sister-branch reconciliation — do NOT call from new code.
+ * Throws at runtime. Sister branch removes this overload when it lands its own
+ * withOrgTx wrappers.
+ */
+function _createTask(
+  organisationId: string,
+  subaccountId: string,
+  data: CreateTaskData,
+  userId?: string,
+): Promise<Task>;
+async function _createTask(
+  arg1: CreateTaskInput | string,
+  arg2: OrgScopedTx | string,
+  arg3?: CreateTaskData,
+  arg4?: string,
+): Promise<Task> {
+  if (typeof arg1 === 'string') {
+    throw new Error(
+      'taskService.createTask called via legacy 4-arg shape — caller must migrate to (input, tx) and wrap in withOrgTx (DEC-4 / spec §3.3). Sister-branch transitional path; runtime-unreachable from in-scope callers.',
+    );
+  }
+
+  // Canonical implementation — arg1 is CreateTaskInput, arg2 is OrgScopedTx
+  const { organisationId, subaccountId, data, userId } = arg1;
+  const tx = arg2 as OrgScopedTx;
+
+  const status = (data.status ?? 'inbox') as TaskStatus;
+
+  await _validateStatus(organisationId, subaccountId, status, tx);
+  const position = await _nextPosition(subaccountId, status, tx);
+
+  const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
+
+  if (agentId) {
+    const [assignedAgent] = await tx
+      .select({ id: agents.id, deletedAt: agents.deletedAt })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
+      .limit(1);
+    assertActive(assignedAgent, 'Agent');
+  }
+
+  const [item] = await tx
+    .insert(tasks)
+    .values({
+      organisationId,
+      subaccountId,
+      title: data.title,
+      description: data.description ?? null,
+      brief: data.brief ?? null,
+      status,
+      priority: data.priority ?? 'normal',
+      assignedAgentId: agentId,
+      assignedAgentIds: agentIds,
+      createdByAgentId: data.createdByAgentId ?? null,
+      createdByUserId: userId ?? null,
+      processId: data.processId ?? null,
+      position,
+      dueDate: data.dueDate ?? null,
+      handoffSourceRunId: data.handoffSourceRunId ?? null,
+      handoffContext: data.handoffContext ?? null,
+      handoffDepth: data.handoffDepth ?? 0,
+      isSubTask: data.isSubTask ?? false,
+      parentTaskId: data.parentTaskId ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  await tx.insert(taskActivities).values({
+    organisationId,
+    taskId: item.id,
+    userId: userId ?? null,
+    agentId: data.createdByAgentId ?? null,
+    activityType: 'created',
+    message: `Task "${data.title}" created`,
+    createdAt: new Date(),
+  });
+
+  emitSubaccountUpdate(subaccountId, 'task:created', {
+    taskId: item.id, title: data.title, status,
+  });
+
+  // Fire task_created triggers (non-blocking)
+  triggerService.checkAndFire(subaccountId, organisationId, 'task_created', {
+    taskId: item.id,
+    title: data.title,
+    status,
+    priority: item.priority,
+    agentId: data.createdByAgentId ?? null,
+  }).catch((err: unknown) => {
+    logger.error('task.trigger_failed', {
+      subaccountId,
+      eventType: 'task_created',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md §7).
+  // Enqueue the Orchestrator-from-task job when the task meets the eligibility
+  // predicate. Non-blocking; the handler performs its own guards and silently
+  // no-ops when the Orchestrator agent is not linked in this org.
+  import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
+    enqueueOrchestratorRoutingIfEligible({
+      id: item.id,
+      organisationId,
+      status: item.status,
+      assignedAgentId: item.assignedAgentId ?? null,
+      isSubTask: item.isSubTask,
+      createdByAgentId: item.createdByAgentId ?? null,
+      description: item.description ?? null,
+    }),
+  ).catch((err: unknown) => {
+    logger.error('task.orchestrator_enqueue_failed', {
+      taskId: item.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  return item;
+}
+
+// ─── Standalone helpers (also used internally by createTask) ─────────────────
+
+async function _validateStatus(organisationId: string, subaccountId: string, status: string, tx?: OrgScopedTx): Promise<void> {
+  // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
+  // fall back to db — those callers are not yet inside withOrgTx; tracked as a future migration.
+  const queryHandle = tx ?? db;
+  const [config] = await queryHandle
+    .select()
+    .from(boardConfigs)
+    .where(and(eq(boardConfigs.organisationId, organisationId), eq(boardConfigs.subaccountId, subaccountId)));
+
+  if (!config) return;
+
+  const columns = config.columns as Array<{ key: string }>;
+  if (!columns.some(c => c.key === status)) {
+    const validKeys = columns.map(c => c.key).join(', ');
+    throw { statusCode: 400, message: `Invalid status "${status}". Valid statuses: ${validKeys}` };
+  }
+}
+
+async function _nextPosition(subaccountId: string, status: TaskStatus, tx?: OrgScopedTx): Promise<number> {
+  // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
+  // fall back to db — those callers are not yet inside withOrgTx; tracked as a future migration.
+  const queryHandle = tx ?? db;
+  const [last] = await queryHandle
+    .select({ position: tasks.position })
+    .from(tasks)
+    .where(and(eq(tasks.subaccountId, subaccountId), eq(tasks.status, status), isNull(tasks.deletedAt)))
+    .orderBy(desc(tasks.position))
+    .limit(1);
+
+  return (last?.position ?? 0) + POSITION_GAP;
 }
 
 export const taskService = {
@@ -127,123 +324,7 @@ export const taskService = {
     };
   },
 
-  async createTask(
-    organisationId: string,
-    subaccountId: string,
-    data: {
-      title: string;
-      description?: string;
-      brief?: string;
-      status?: string;
-      priority?: 'low' | 'normal' | 'high' | 'urgent';
-      assignedAgentId?: string;
-      assignedAgentIds?: string[];
-      createdByAgentId?: string;
-      processId?: string;
-      dueDate?: Date;
-      handoffSourceRunId?: string;
-      handoffContext?: Record<string, unknown>;
-      handoffDepth?: number;
-      isSubTask?: boolean;
-      parentTaskId?: string;
-    },
-    userId?: string
-  ) {
-    const status = (data.status ?? 'inbox') as TaskStatus;
-
-    await this._validateStatus(organisationId, subaccountId, status);
-    const position = await this._nextPosition(subaccountId, status);
-
-    const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
-
-    if (agentId) {
-      const [assignedAgent] = await db
-        .select({ id: agents.id, deletedAt: agents.deletedAt })
-        .from(agents)
-        .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
-        .limit(1);
-      assertActive(assignedAgent, 'Agent');
-    }
-
-    const [item] = await db
-      .insert(tasks)
-      .values({
-        organisationId,
-        subaccountId,
-        title: data.title,
-        description: data.description ?? null,
-        brief: data.brief ?? null,
-        status,
-        priority: data.priority ?? 'normal',
-        assignedAgentId: agentId,
-        assignedAgentIds: agentIds,
-        createdByAgentId: data.createdByAgentId ?? null,
-        createdByUserId: userId ?? null,
-        processId: data.processId ?? null,
-        position,
-        dueDate: data.dueDate ?? null,
-        handoffSourceRunId: data.handoffSourceRunId ?? null,
-        handoffContext: data.handoffContext ?? null,
-        handoffDepth: data.handoffDepth ?? 0,
-        isSubTask: data.isSubTask ?? false,
-        parentTaskId: data.parentTaskId ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
-    await db.insert(taskActivities).values({
-      organisationId,
-      taskId: item.id,
-      userId: userId ?? null,
-      agentId: data.createdByAgentId ?? null,
-      activityType: 'created',
-      message: `Task "${data.title}" created`,
-      createdAt: new Date(),
-    });
-
-    emitSubaccountUpdate(subaccountId, 'task:created', {
-      taskId: item.id, title: data.title, status,
-    });
-
-    // Fire task_created triggers (non-blocking)
-    triggerService.checkAndFire(subaccountId, organisationId, 'task_created', {
-      taskId: item.id,
-      title: data.title,
-      status,
-      priority: item.priority,
-      agentId: data.createdByAgentId ?? null,
-    }).catch((err: unknown) => {
-      logger.error('task.trigger_failed', {
-        subaccountId,
-        eventType: 'task_created',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md §7).
-    // Enqueue the Orchestrator-from-task job when the task meets the eligibility
-    // predicate. Non-blocking; the handler performs its own guards and silently
-    // no-ops when the Orchestrator agent is not linked in this org.
-    import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
-      enqueueOrchestratorRoutingIfEligible({
-        id: item.id,
-        organisationId,
-        status: item.status,
-        assignedAgentId: item.assignedAgentId ?? null,
-        isSubTask: item.isSubTask,
-        createdByAgentId: item.createdByAgentId ?? null,
-        description: item.description ?? null,
-      }),
-    ).catch((err: unknown) => {
-      logger.error('task.orchestrator_enqueue_failed', {
-        taskId: item.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    return item;
-  },
+  createTask: _createTask,
 
   async updateTask(
     id: string,
@@ -269,7 +350,7 @@ export const taskService = {
     if (!existing) throw { statusCode: 404, message: 'Task not found' };
 
     if (data.status && data.status !== existing.status) {
-      await this._validateStatus(organisationId, existing.subaccountId!, data.status);
+      await _validateStatus(organisationId, existing.subaccountId!, data.status);
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -351,7 +432,7 @@ export const taskService = {
 
     if (!existing) throw { statusCode: 404, message: 'Task not found' };
 
-    await this._validateStatus(organisationId, existing.subaccountId!, data.status);
+    await _validateStatus(organisationId, existing.subaccountId!, data.status);
 
     const statusChanged = data.status !== existing.status;
 
@@ -492,31 +573,10 @@ export const taskService = {
     );
   },
 
-  // ─── Helpers ────────────────────────────────────────────────────────────────
+  // ─── Helpers (delegating to module-level functions) ──────────────────────────
+  // These remain on the object for callers (e.g. skillExecutor) that reference
+  // them directly as `taskService._nextPosition`.
 
-  async _validateStatus(organisationId: string, subaccountId: string, status: string) {
-    const [config] = await db
-      .select()
-      .from(boardConfigs)
-      .where(and(eq(boardConfigs.organisationId, organisationId), eq(boardConfigs.subaccountId, subaccountId)));
-
-    if (!config) return;
-
-    const columns = config.columns as Array<{ key: string }>;
-    if (!columns.some(c => c.key === status)) {
-      const validKeys = columns.map(c => c.key).join(', ');
-      throw { statusCode: 400, message: `Invalid status "${status}". Valid statuses: ${validKeys}` };
-    }
-  },
-
-  async _nextPosition(subaccountId: string, status: TaskStatus) {
-    const [last] = await db
-      .select({ position: tasks.position })
-      .from(tasks)
-      .where(and(eq(tasks.subaccountId, subaccountId), eq(tasks.status, status), isNull(tasks.deletedAt)))
-      .orderBy(desc(tasks.position))
-      .limit(1);
-
-    return (last?.position ?? 0) + POSITION_GAP;
-  },
+  _nextPosition,
+  _validateStatus,
 };

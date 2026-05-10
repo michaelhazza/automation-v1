@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { getActiveClientId } from '../../lib/auth';
 import StatusPill from '../../components/support/StatusPill';
 import PriorityPill from '../../components/support/PriorityPill';
 import ThreadMessage from '../../components/support/ThreadMessage';
@@ -59,9 +60,15 @@ export default function TicketDetailPage() {
 
   const load = useCallback(async () => {
     if (!id) return;
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) {
+      setError('No active client selected.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
-    api.get<ThreadData>(`/api/support/tickets/${id}`)
+    api.get<ThreadData>(`/api/subaccounts/${subaccountId}/support/tickets/${id}`)
       .then(({ data: d }) => setData(d))
       .catch(() => setError('Failed to load ticket.'))
       .finally(() => setLoading(false));

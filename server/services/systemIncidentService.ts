@@ -4,6 +4,7 @@ import { eq, and, or, inArray, isNull, sql, desc, asc, count } from 'drizzle-orm
 import { db } from '../db/index.js';
 import { taskService } from './taskService.js';
 import { resolveSystemOpsContext } from './systemOperationsOrgResolver.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   systemIncidents,
   systemIncidentEvents,
@@ -284,24 +285,27 @@ export const systemIncidentService = {
     const previousTaskIds = (incident.previousTaskIds ?? []) as string[];
 
     // Create task + update incident inside a single transaction to prevent orphan tasks on rollback.
-    // taskService.createTask runs its own internal db calls — this wraps them atomically.
+    // taskService.createTask receives the savepoint tx directly so all writes are atomic.
     const updated = await db.transaction(async (tx) => {
       const task = await taskService.createTask(
-        sysOps.organisationId,
-        sysOps.subaccountId,
         {
-          title: `[Incident] ${incident.summary.slice(0, 120)}`,
-          description: [
-            `**Source:** ${incident.source}`,
-            `**Severity:** ${incident.severity}`,
-            `**Error code:** ${incident.errorCode ?? '—'}`,
-            `**Occurrences:** ${incident.occurrenceCount}`,
-            `**First seen:** ${incident.firstSeenAt.toISOString()}`,
-            `**Fingerprint:** \`${incident.fingerprint}\``,
-          ].join('\n'),
-          priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
+          organisationId: sysOps.organisationId,
+          subaccountId: sysOps.subaccountId,
+          data: {
+            title: `[Incident] ${incident.summary.slice(0, 120)}`,
+            description: [
+              `**Source:** ${incident.source}`,
+              `**Severity:** ${incident.severity}`,
+              `**Error code:** ${incident.errorCode ?? '—'}`,
+              `**Occurrences:** ${incident.occurrenceCount}`,
+              `**First seen:** ${incident.firstSeenAt.toISOString()}`,
+              `**Fingerprint:** \`${incident.fingerprint}\``,
+            ].join('\n'),
+            priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
+          },
+          userId,
         },
-        userId,
+        tx,
       );
 
       const [row] = await tx.update(systemIncidents).set({

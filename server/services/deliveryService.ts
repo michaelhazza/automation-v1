@@ -26,6 +26,7 @@ import { taskService } from './taskService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   DELIVERY_RETRY_CONFIG,
   shouldDispatchChannel,
@@ -237,12 +238,15 @@ export const deliveryService = {
     // ── Step 1: Always write to inbox (system guarantee, §10.5) ─────────────
     // This write happens unconditionally regardless of config.email.
     // The inbox is the enforcement boundary — failure here is fatal and throws.
-    const task = await taskService.createTask(orgId, subaccountId, {
-      title: artefact.title,
-      description: artefact.content,
-      status: 'inbox',
-      createdByAgentId: artefact.createdByAgentId,
-    });
+    const tx = getOrgScopedDb('service:deliveryService.deliver');
+    const task = await taskService.createTask(
+      {
+        organisationId: orgId,
+        subaccountId,
+        data: { title: artefact.title, description: artefact.content, status: 'inbox', createdByAgentId: artefact.createdByAgentId },
+      },
+      tx,
+    );
 
     const channels: ChannelDispatchResult[] = [];
 

@@ -101,12 +101,21 @@ router.get(
   })
 );
 
+const patchConnectionBodySchema = z.object({
+  connectionStatus: z.enum(['active', 'revoked', 'error']).optional(),
+}).passthrough();
+
 // Update connection (label, status, tokens)
 router.patch(
   '/api/subaccounts/:subaccountId/connections/:id',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
+    const parsed = patchConnectionBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw { statusCode: 400, message: 'Invalid connectionStatus value', errorCode: 'connection.status_invalid' };
+    }
+
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const [existing] = await db.select()
       .from(integrationConnections)
@@ -121,7 +130,7 @@ router.patch(
 
     if (req.body.label !== undefined) updates.label = req.body.label;
     if (req.body.displayName !== undefined) updates.displayName = req.body.displayName;
-    if (req.body.connectionStatus !== undefined) updates.connectionStatus = req.body.connectionStatus;
+    if (parsed.data.connectionStatus !== undefined) updates.connectionStatus = parsed.data.connectionStatus;
     if (req.body.configJson !== undefined) updates.configJson = req.body.configJson;
 
     // Re-encrypt if new tokens provided

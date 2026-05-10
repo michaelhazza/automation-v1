@@ -469,8 +469,8 @@ app.use(governQualityRouter);
 app.use(correctionsRouter);
 // Agent Workspace — presence SSE stream (Chunk 9)
 app.use(agentPresenceStreamRouter);
-// Support Desk canonical substrate (C13)
-app.use('/api/support', supportRouter);
+// Support Desk canonical substrate (C13) — subaccount-scoped (pre-test-hardening C3)
+app.use('/api/subaccounts/:subaccountId/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

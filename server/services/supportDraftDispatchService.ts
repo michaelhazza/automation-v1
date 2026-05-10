@@ -4,7 +4,7 @@
 // All DB access uses getOrgScopedDb(). Pure helpers live in supportDraftDispatchServicePure.ts.
 // Preflight pure evaluator in supportDraftDispatchPreflightPure.ts.
 
-import { eq, and, inArray, or, sql, notInArray, gt } from 'drizzle-orm';
+import { eq, and, inArray, or, sql, notInArray } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalTickets,
@@ -21,7 +21,13 @@ import {
   deriveActionIdempotencyKey,
   planSameRunSupersession,
 } from './supportDraftDispatchServicePure.js';
-import { evaluatePreflight } from './supportDraftDispatchPreflightPure.js';
+import {
+  evaluatePreflight,
+  checkTicketStatusEligibility,
+  checkCollisionWindow,
+  checkCustomerMatchPolicy,
+  checkSupersession,
+} from './supportDraftDispatchPreflightPure.js';
 import type { SupportProposedActions } from '../../shared/types/supportProposedActions.js';
 import type { SupportInboxAgentConfig } from '../../shared/types/supportInboxAgentConfig.js';
 import { adapters } from '../adapters/index.js';
@@ -38,6 +44,10 @@ import { auditService } from './auditService.js';
 
 function notFoundError(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 404, message });
+}
+
+function forbiddenError(errorCode: string, message?: string): Error {
+  return Object.assign(new Error(message ?? errorCode), { statusCode: 403, errorCode });
 }
 
 function preflightError(message: string, errorCode: string): Error {
@@ -159,6 +169,15 @@ export async function approveDraft(
   principalCtx: PrincipalContext,
   options?: { reviewNotes?: string; overrideCollision?: boolean },
 ): Promise<{ status: string; messageId?: string }> {
+  // ── S2 guard: overrideCollision requires a human principal (§4.2) ────────
+  // This check fires BEFORE any DB read. No audit row is written on this path.
+  if (options?.overrideCollision === true && principalCtx.type !== 'user') {
+    throw forbiddenError(
+      'support.draft.override_collision_human_only',
+      'overrideCollision requires a human principal',
+    );
+  }
+
   const db = getOrgScopedDb('supportDraftDispatchService.approveDraft');
 
   // ── Phase 1: Preflight ───────────────────────────────────────────────────
@@ -199,6 +218,12 @@ export async function approveDraft(
     throw notFoundError('support.ticket.not_found');
   }
 
+  // Subaccount scope assertion: principal scoped to a subaccount must not mutate
+  // drafts whose ticket belongs to a different subaccount.
+  if (principalCtx.subaccountId !== null && ticket.subaccountId !== principalCtx.subaccountId) {
+    throw forbiddenError('support.draft.scope_mismatch');
+  }
+
   // Load inbox agentConfig
   const [inbox] = await db
     .select({ agentConfig: canonicalInboxes.agentConfig })
@@ -227,27 +252,13 @@ export async function approveDraft(
     assigneeAgentKind = assignee?.agentKind ?? null;
   }
 
-  // Check for a newer draft superseding this one (§8.1 check #7)
-  // A draft is "newer" if it was created after this draft's createdAt for the same
-  // (ticket, run, visibility) tuple and is in an active or post-dispatch state.
-  const [newerDraft] = await db
-    .select({ id: canonicalTicketDrafts.id })
-    .from(canonicalTicketDrafts)
-    .where(
-      and(
-        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
-        eq(canonicalTicketDrafts.ticketId, draft.ticketId),
-        eq(canonicalTicketDrafts.proposedVisibility, draft.proposedVisibility),
-        gt(canonicalTicketDrafts.createdAt, draft.createdAt),
-        inArray(canonicalTicketDrafts.status, ['awaiting_review', 'dispatching', 'needs_reconciliation', 'sent']),
-      ),
-    )
-    .limit(1);
-
   const agentConfig = inbox?.agentConfig as SupportInboxAgentConfig | null | undefined;
   const callerIsAutonomousAgent = principalCtx.type !== 'user';
 
-  const preflight = evaluatePreflight({
+  // ── Checks 1–3: inbox mode + ticket quarantine + subaccount scope ────────
+  // Checks 1-2 are evaluated via the shared evaluatePreflight helper.
+  // Check 3 (subaccount scope) is the scope_mismatch guard already applied above.
+  const legacyPreflight = evaluatePreflight({
     draftStatus: draft.status,
     proposedVisibility: draft.proposedVisibility as 'public' | 'internal',
     inboxMode: agentConfig?.mode ?? null,
@@ -258,29 +269,125 @@ export async function approveDraft(
     collisionWindowMinutes: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
     respectHumanAssignee: agentConfig?.collisionWindow?.respectHumanAssignee ?? true,
     assigneeAgentKind,
-    hasNewerDraft: newerDraft !== undefined,
-    overrideCollision: options?.overrideCollision === true,
-    callerIsAutonomousAgent,
+    hasNewerDraft: false, // supersession re-checked below with tuple comparison
+    overrideCollision: false, // collision re-checked below with named function
+    callerIsAutonomousAgent: false, // S2 already enforced above before any DB read
   });
 
-  if (!preflight.ok) {
-    if (preflight.reason === 'human_collision_blocked') {
-      logger.info(SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED, {
-        organisationId: principalCtx.organisationId,
-        connectorConfigId: draft.connectorConfigId,
-        ticketId: draft.ticketId,
-        draftId: draft.id,
-        inboxId: ticket.inboxId,
-        lastHumanActivityAt: preflight.collisionDetail?.lastHumanActivityAt,
-        minMinutesRequired: preflight.collisionDetail?.minMinutesRequired,
-      });
-    }
-    throw preflightError('support.draft.preflight_failed', preflight.reason ?? 'unknown');
+  // Only propagate inbox_disabled and ticket_quarantined from the legacy helper
+  // (checks 4-7 are handled by the named functions below per S1 spec §4.1)
+  if (!legacyPreflight.ok && (legacyPreflight.reason === 'inbox_disabled' || legacyPreflight.reason === 'ticket_quarantined')) {
+    throw preflightError('support.draft.preflight_failed', legacyPreflight.reason);
+  }
+
+  // ── Check 4: Ticket-status eligibility ──────────────────────────────────
+  // Map proposedVisibility to the action type for the eligibility matrix.
+  // set_status is handled by a separate code path; approveDraft only handles reply drafts.
+  const draftAction =
+    (draft.proposedVisibility as string) === 'public'
+      ? 'support.propose_reply' as const
+      : 'support.add_internal_note' as const;
+
+  const check4 = checkTicketStatusEligibility({
+    ticket: { status: ticket.status },
+    action: draftAction,
+    agentConfig: {
+      optIns: {
+        autonomousReplyOnWaitingOnCustomer:
+          agentConfig?.optIns?.autonomousReplyOnWaitingOnCustomer,
+        postResolutionFollowUp:
+          agentConfig?.optIns?.postResolutionFollowUp,
+      },
+    },
+  });
+  if (!check4.ok) {
+    throw forbiddenError(
+      'support.draft.preflight.ticket_status_ineligible',
+      'support.draft.preflight_failed: ticket_status_ineligible',
+    );
+  }
+
+  // ── Check 5: Collision window ────────────────────────────────────────────
+  // Skip when overrideCollision=true AND human principal (S2 already enforced).
+  const isHumanOverride = options?.overrideCollision === true && !callerIsAutonomousAgent;
+
+  const check5 = checkCollisionWindow({
+    ticket: { lastHumanActivityAt: ticket.lastHumanActivityAt ?? null },
+    agentConfig: {
+      collisionWindow: {
+        minMinutesSinceHumanActivity: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+        respectHumanAssignee: agentConfig?.collisionWindow?.respectHumanAssignee ?? true,
+      },
+    },
+    now: new Date(),
+    overrideCollision: options?.overrideCollision === true,
+    principalKind: callerIsAutonomousAgent ? 'agent' : 'human',
+    assigneeIsHuman: assigneeAgentKind === 'human',
+  });
+  if (!check5.ok) {
+    logger.info(SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED, {
+      organisationId: principalCtx.organisationId,
+      connectorConfigId: draft.connectorConfigId,
+      ticketId: draft.ticketId,
+      draftId: draft.id,
+      inboxId: ticket.inboxId,
+      lastHumanActivityAt: ticket.lastHumanActivityAt,
+      minMinutesRequired: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+    });
+    throw forbiddenError(
+      'support.draft.preflight.human_collision_blocked',
+      'support.draft.preflight_failed: human_collision_blocked',
+    );
+  }
+
+  // ── Check 6: Customer-match policy gate (forward-compat no-op in v1) ────
+  const check6 = checkCustomerMatchPolicy({
+    ticket: { canonicalContactId: ticket.canonicalContactId },
+    agentConfig: {
+      optIns: {
+        requireCustomerMatch: (agentConfig?.optIns as { requireCustomerMatch?: boolean } | undefined)?.requireCustomerMatch,
+      },
+    },
+  });
+  if (!check6.ok) {
+    throw forbiddenError(
+      'support.draft.preflight.customer_match_required',
+      'support.draft.preflight_failed: customer_match_required',
+    );
+  }
+
+  // ── Check 7: Supersession — newer draft query with tuple comparison ──────
+  // Uses (created_at, id) > ($2, $3) to handle same-millisecond ties correctly.
+  // IMPORTANT: do NOT simplify to created_at > $2 alone (per spec §4.1 check 7).
+  // NOTE: proposedVisibility is intentionally NOT filtered — any newer draft for
+  // the same ticket supersedes regardless of visibility (spec §4.1 check 7, plan §C6 step 7).
+  const [newerDraftRow] = await db
+    .select({ id: canonicalTicketDrafts.id })
+    .from(canonicalTicketDrafts)
+    .where(
+      and(
+        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        eq(canonicalTicketDrafts.ticketId, draft.ticketId),
+        sql`(${canonicalTicketDrafts.createdAt}, ${canonicalTicketDrafts.id}) > (${draft.createdAt.toISOString()}, ${draft.id})`,
+        inArray(canonicalTicketDrafts.status, ['awaiting_review', 'dispatching', 'needs_reconciliation', 'sent']),
+      ),
+    )
+    .limit(1);
+
+  const check7 = checkSupersession({
+    candidateDraft: { id: draft.id, createdAt: draft.createdAt },
+    hasNewerDraft: newerDraftRow !== undefined,
+  });
+  if (!check7.ok) {
+    throw forbiddenError(
+      'support.draft.preflight.superseded_by_newer_draft',
+      'support.draft.preflight_failed: superseded_by_newer_draft',
+    );
   }
 
   // Collision override: if the caller is a human and overrideCollision was set, write audit event (§8.6 #2)
-  // The pure evaluator already approved the request (ok=true) when override is valid.
-  if (options?.overrideCollision === true && !callerIsAutonomousAgent) {
+  // S2 already enforced above: if we reach here with isHumanOverride=true, the principal is human.
+  if (isHumanOverride) {
     const actorUserId = principalCtx.type === 'user' ? principalCtx.id : undefined;
     await auditService.log({
       organisationId: principalCtx.organisationId,
@@ -549,7 +656,7 @@ export async function listDraftsForReview(
   principalCtx: PrincipalContext,
 ): Promise<CanonicalTicketDraft[]> {
   const db = getOrgScopedDb('supportDraftDispatchService.listDraftsForReview');
-  const conditions = [
+  const draftConditions = [
     eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
     or(
       inArray(canonicalTicketDrafts.status, ['awaiting_review', 'needs_reconciliation']),
@@ -557,12 +664,23 @@ export async function listDraftsForReview(
     ),
   ];
   if (filter.ticketId) {
-    conditions.push(eq(canonicalTicketDrafts.ticketId, filter.ticketId));
+    draftConditions.push(eq(canonicalTicketDrafts.ticketId, filter.ticketId));
   }
+
+  if (principalCtx.subaccountId !== null) {
+    const rows = await db
+      .select({ draft: canonicalTicketDrafts })
+      .from(canonicalTicketDrafts)
+      .innerJoin(canonicalTickets, eq(canonicalTicketDrafts.ticketId, canonicalTickets.id))
+      .where(and(...draftConditions, eq(canonicalTickets.subaccountId, principalCtx.subaccountId)))
+      .orderBy(canonicalTicketDrafts.createdAt);
+    return rows.map(r => r.draft);
+  }
+
   return db
     .select()
     .from(canonicalTicketDrafts)
-    .where(and(...conditions))
+    .where(and(...draftConditions))
     .orderBy(canonicalTicketDrafts.createdAt);
 }
 
@@ -575,6 +693,26 @@ export async function getDraftById(
   principalCtx: PrincipalContext,
 ): Promise<CanonicalTicketDraft> {
   const db = getOrgScopedDb('supportDraftDispatchService.getDraftById');
+
+  if (principalCtx.subaccountId !== null) {
+    const [row] = await db
+      .select({ draft: canonicalTicketDrafts })
+      .from(canonicalTicketDrafts)
+      .innerJoin(canonicalTickets, eq(canonicalTicketDrafts.ticketId, canonicalTickets.id))
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+          eq(canonicalTickets.subaccountId, principalCtx.subaccountId),
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      throw notFoundError('support.draft.not_found');
+    }
+    return row.draft;
+  }
+
   const [draft] = await db
     .select()
     .from(canonicalTicketDrafts)
@@ -601,6 +739,37 @@ export async function editDraft(
   principalCtx: PrincipalContext,
 ): Promise<CanonicalTicketDraft> {
   const db = getOrgScopedDb('supportDraftDispatchService.editDraft');
+
+  // Subaccount scope assertion: load the draft and its ticket before mutating.
+  if (principalCtx.subaccountId !== null) {
+    const [draftRow] = await db
+      .select({ ticketId: canonicalTicketDrafts.ticketId })
+      .from(canonicalTicketDrafts)
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!draftRow) {
+      throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+    }
+    const [ticket] = await db
+      .select({ subaccountId: canonicalTickets.subaccountId })
+      .from(canonicalTickets)
+      .where(
+        and(
+          eq(canonicalTickets.id, draftRow.ticketId),
+          eq(canonicalTickets.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!ticket || ticket.subaccountId !== principalCtx.subaccountId) {
+      throw forbiddenError('support.draft.scope_mismatch');
+    }
+  }
+
   const [updated] = await db
     .update(canonicalTicketDrafts)
     .set({ proposedBodyText, updatedAt: new Date() })
@@ -630,6 +799,36 @@ export async function manualResolveDraft(
 ): Promise<void> {
   const db = getOrgScopedDb('supportDraftDispatchService.manualResolveDraft');
   const now = new Date();
+
+  // Subaccount scope assertion: load the draft and its ticket before mutating.
+  if (principalCtx.subaccountId !== null) {
+    const [draftRow] = await db
+      .select({ ticketId: canonicalTicketDrafts.ticketId })
+      .from(canonicalTicketDrafts)
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!draftRow) {
+      throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+    }
+    const [ticket] = await db
+      .select({ subaccountId: canonicalTickets.subaccountId })
+      .from(canonicalTickets)
+      .where(
+        and(
+          eq(canonicalTickets.id, draftRow.ticketId),
+          eq(canonicalTickets.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!ticket || ticket.subaccountId !== principalCtx.subaccountId) {
+      throw forbiddenError('support.draft.scope_mismatch');
+    }
+  }
 
   if (action === 'mark_sent') {
     const result = await db
@@ -704,7 +903,7 @@ export async function rejectDraft(
   const db = getOrgScopedDb('supportDraftDispatchService.rejectDraft');
 
   const [draft] = await db
-    .select({ status: canonicalTicketDrafts.status })
+    .select({ status: canonicalTicketDrafts.status, ticketId: canonicalTicketDrafts.ticketId })
     .from(canonicalTicketDrafts)
     .where(
       and(
@@ -716,6 +915,24 @@ export async function rejectDraft(
 
   if (!draft) {
     throw notFoundError('support.draft.not_found');
+  }
+
+  // Subaccount scope assertion: load ticket to confirm the draft belongs to the
+  // principal's subaccount before allowing the mutation.
+  if (principalCtx.subaccountId !== null) {
+    const [ticket] = await db
+      .select({ subaccountId: canonicalTickets.subaccountId })
+      .from(canonicalTickets)
+      .where(
+        and(
+          eq(canonicalTickets.id, draft.ticketId),
+          eq(canonicalTickets.organisationId, principalCtx.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!ticket || ticket.subaccountId !== principalCtx.subaccountId) {
+      throw forbiddenError('support.draft.scope_mismatch');
+    }
   }
 
   // Idempotent: already in a terminal/rejected state (dispatching → rejected is forbidden)

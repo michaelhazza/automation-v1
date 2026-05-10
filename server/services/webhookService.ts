@@ -29,6 +29,16 @@ import { logger } from '../lib/logger.js';
 let webhookOpenModeWarned = false;
 
 // ---------------------------------------------------------------------------
+// Test-only reset hook
+// ---------------------------------------------------------------------------
+
+/** Reset module-level mutable state between tests. Only callable in test environments. */
+export function resetForTest(): void {
+  if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'integration') return;
+  webhookOpenModeWarned = false;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -70,16 +80,26 @@ export const webhookService = {
   /**
    * Verifies an incoming callback token.
    * Accepts a per-engine secret or falls back to global WEBHOOK_SECRET.
-   * Returns true when:
-   *   - Neither per-engine nor global secret is configured (open mode), OR
-   *   - The provided token matches the expected HMAC.
+   *
+   * Production (NODE_ENV === 'production'):
+   *   - No secret configured → throws { statusCode: 401, message: 'Webhook signature required',
+   *     errorCode: 'webhook.signature_required' }
+   *   - Secret configured + no/invalid token → returns false
+   *   - Secret configured + valid HMAC → returns true
+   *
+   * Development / other environments:
+   *   - No secret configured → returns true (open mode); emits a one-time warn log.
+   *   - Secret configured → HMAC-verified as above.
    */
   verifyCallbackToken(executionId: string, token?: string, engineHmacSecret?: string): boolean {
     const secret = engineHmacSecret ?? env.WEBHOOK_SECRET;
     if (!secret) {
+      if (env.NODE_ENV === 'production') {
+        throw { statusCode: 401, message: 'Webhook signature required', errorCode: 'webhook.signature_required' };
+      }
       if (!webhookOpenModeWarned) {
         webhookOpenModeWarned = true;
-        logger.warn('webhook.open_mode_active', {
+        logger.warn('webhook_secret_missing', {
           reason: 'WEBHOOK_SECRET unset; verifyCallbackToken accepts any token',
           nodeEnv: env.NODE_ENV,
         });

@@ -3,7 +3,7 @@ import supportTicketsRoutes from './supportTicketsRoutes.js';
 import supportDraftsRoutes from './supportDraftsRoutes.js';
 import supportInboxesRoutes from './supportInboxesRoutes.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 router.use('/', supportTicketsRoutes);
 router.use('/', supportDraftsRoutes);

@@ -240,6 +240,46 @@ export const connectorConfigService = {
     return config ?? null;
   },
 
+  /**
+   * Find an active connector config by its per-connector webhook URL token.
+   * Used by webhook routes to route incoming webhooks to exactly one connector config
+   * without scanning all active configs.
+   *
+   * IMPORTANT: WHERE clause intentionally matches only `status = 'active'` — do NOT add
+   * disconnectedAt IS NULL or any other predicate; `status = 'active'` is the sole active guard.
+   * Returns null when the token is unknown or belongs to a non-active / non-teamwork config.
+   */
+  async findByWebhookToken(
+    token: string,
+    connectorType: 'teamwork',
+  ): Promise<typeof connectorConfigs.$inferSelect | null> {
+    // Guard: reject non-UUID-shaped tokens before the DB call to avoid Postgres
+    // cast errors. The unique index requires webhook_token IS NOT NULL, and NULL
+    // rows never match the equality predicate — so this guard is purely for
+    // invalid-format protection.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(token)) return null;
+
+    return await withAdminConnection(
+      { source: 'teamwork_webhook_token_lookup', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select()
+          .from(connectorConfigs)
+          .where(
+            and(
+              eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+              eq(connectorConfigs.status, 'active'),
+              sql`${connectorConfigs.webhookToken} = ${token}::uuid`,
+            ),
+          )
+          .limit(1);
+        return row ?? null;
+      },
+    );
+  },
+
   /** Find all active connector configs for a given type (across all orgs). Used by webhook routes that match by signature. */
   async findAllActiveByType(connectorType: string) {
     return db

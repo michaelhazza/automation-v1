@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, hasOrgPermission } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
+import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
 import {
   listDraftsForReview,
   getDraftById,
@@ -11,26 +12,27 @@ import {
   manualResolveDraft,
 } from '../../services/supportDraftDispatchService.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
-function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string }): PrincipalContext {
+async function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string; params: Record<string, string> }): Promise<PrincipalContext> {
+  const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
   return {
     type: 'user',
     id: req.user!.id,
     organisationId: req.orgId!,
-    subaccountId: null,
+    subaccountId: subaccount.id,
     teamIds: [],
   };
 }
 
 router.get('/drafts', authenticate, asyncHandler(async (req, res) => {
   const ticketId = req.query.ticketId as string | undefined;
-  const drafts = await listDraftsForReview({ ticketId }, makePrincipal(req));
+  const drafts = await listDraftsForReview({ ticketId }, await makePrincipal(req));
   res.json({ drafts });
 }));
 
 router.get('/drafts/:id', authenticate, asyncHandler(async (req, res) => {
-  const draft = await getDraftById(req.params.id, makePrincipal(req));
+  const draft = await getDraftById(req.params.id, await makePrincipal(req));
   res.json({ draft });
 }));
 
@@ -40,13 +42,13 @@ router.post('/drafts/:id/approve', authenticate, requireOrgPermission('support.d
     res.status(403).json({ message: 'support.draft.override_collision permission required' });
     return;
   }
-  const result = await approveDraft(req.params.id, makePrincipal(req), { reviewNotes, overrideCollision });
+  const result = await approveDraft(req.params.id, await makePrincipal(req), { reviewNotes, overrideCollision });
   res.json(result);
 }));
 
 router.post('/drafts/:id/reject', authenticate, requireOrgPermission('support.draft.reject'), asyncHandler(async (req, res) => {
   const { reason } = req.body as { reason: string };
-  await rejectDraft(req.params.id, makePrincipal(req), reason ?? '');
+  await rejectDraft(req.params.id, await makePrincipal(req), reason ?? '');
   res.json({ ok: true });
 }));
 
@@ -55,7 +57,7 @@ router.post('/drafts/:id/edit', authenticate, requireOrgPermission('support.draf
   if (!proposedBodyText?.trim()) {
     return res.status(422).json({ message: 'proposedBodyText is required' });
   }
-  const draft = await editDraft(req.params.id, proposedBodyText, makePrincipal(req));
+  const draft = await editDraft(req.params.id, proposedBodyText, await makePrincipal(req));
   res.json({ draft });
 }));
 
@@ -74,7 +76,7 @@ router.post('/drafts/:id/manual-resolve', authenticate, asyncHandler(async (req,
     }
   }
 
-  await manualResolveDraft(req.params.id, action, makePrincipal(req), { notes });
+  await manualResolveDraft(req.params.id, action, await makePrincipal(req), { notes });
   res.json({ ok: true });
 }));
 

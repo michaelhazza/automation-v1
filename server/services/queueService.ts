@@ -969,6 +969,19 @@ export const queueService = {
         }
       });
 
+      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly)
+      await (boss as any).work('maintenance:webhook-replay-nonce-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runWebhookReplayNoncePrune } = await import('../jobs/webhookReplayNoncePruneJob.js');
+          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:webhook-replay-nonce-prune', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1174,6 +1187,7 @@ export const queueService = {
       await boss.schedule('maintenance:iee-sessions-compact',       '0 5 * * *',   {});  // 5am daily
       await boss.schedule('maintenance:agent-observations-prune',   '30 5 * * *',  {});  // 5:30am daily
       await boss.schedule('maintenance:working-time-rollup-compact','0 6 1 * *',   {});  // 6am 1st of month
+      await boss.schedule('maintenance:webhook-replay-nonce-prune', '0 * * * *',   {});  // hourly
 
       // System Monitor — self-check (every 5 minutes)
       await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});

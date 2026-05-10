@@ -9,6 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
 import { taskService } from './taskService.js';
 import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
 import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 // ---------------------------------------------------------------------------
 // Scheduled Task Service — CRUD + occurrence firing + retry logic
@@ -644,17 +645,21 @@ export const scheduledTaskService = {
       : `${st.title} #${occurrence}`;
 
     try {
+      const tx = getOrgScopedDb('service:scheduledTaskService.runDue');
       const task = await taskService.createTask(
-        st.organisationId,
-        st.subaccountId!,
         {
-          title: taskTitle,
-          description: st.description ?? undefined,
-          brief: st.brief ?? undefined,
-          priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
-          status: 'inbox',
-          assignedAgentId: st.assignedAgentId,
-        }
+          organisationId: st.organisationId,
+          subaccountId: st.subaccountId!,
+          data: {
+            title: taskTitle,
+            description: st.description ?? undefined,
+            brief: st.brief ?? undefined,
+            priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+            status: 'inbox',
+            assignedAgentId: st.assignedAgentId,
+          },
+        },
+        tx,
       );
 
       // Update the run with the task reference

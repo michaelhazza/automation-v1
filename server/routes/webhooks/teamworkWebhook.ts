@@ -2,23 +2,57 @@ import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
+import { recordIfNew } from '../../lib/webhookReplayNonceStore.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { recordIncident } from '../../services/incidentIngestor.js';
+import { logger } from '../../lib/logger.js';
 
 const router = Router();
 
 /**
  * Teamwork Desk Webhook endpoint — unauthenticated.
- * Security: HMAC-SHA256 signature verification against connector_configs.webhook_secret.
+ *
+ * Security (W3 — pre-test hardening):
+ *   - URL carries a per-connector token: POST /api/webhooks/teamwork/:orgWebhookToken
+ *   - HMAC-SHA256 signature verified against the single matched connector config's secret.
+ *   - Replay protection backed by the durable webhook_replay_nonces table.
+ *   - The old un-tokened route ( POST /api/webhooks/teamwork ) is REMOVED entirely.
  *
  * Teamwork Desk sends:
  *   - Event type in X-Desk-Event header (not in payload body)
  *   - Signature in X-Desk-Signature header
+ *   - Delivery ID in X-Desk-Delivery header
  */
-router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+router.post('/api/webhooks/teamwork/:orgWebhookToken', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+  const { orgWebhookToken } = req.params;
   const rawBody = req.body as Buffer;
-  let event: Record<string, unknown>;
 
+  // ── Step 1: Resolve the connector config by token ──────────────────────────
+  let config: Awaited<ReturnType<typeof connectorConfigService.findByWebhookToken>>;
+  try {
+    config = await connectorConfigService.findByWebhookToken(orgWebhookToken, 'teamwork');
+  } catch (err) {
+    logger.error('webhook.teamwork.token_lookup_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await recordIncident({
+      source: 'route',
+      summary: 'Teamwork webhook connector-config token lookup failed',
+      fingerprintOverride: 'webhook:teamwork:token_lookup_failed',
+      severity: 'medium',
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    res.status(500).json({ error: 'Internal error' });
+    return;
+  }
+
+  if (!config) {
+    res.status(401).json({ error: 'webhook.token_unknown' });
+    return;
+  }
+
+  // ── Step 2: Parse body ─────────────────────────────────────────────────────
+  let event: Record<string, unknown>;
   try {
     event = JSON.parse(rawBody.toString('utf-8'));
   } catch {
@@ -32,90 +66,104 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), asyncHa
     event.event = eventType;
   }
 
-  // Find active Teamwork connector configs via service layer
-  let config;
+  // ── Step 3: Verify HMAC signature ─────────────────────────────────────────
+  const signature = req.headers['x-desk-signature'] as string | undefined;
+  if (!signature) {
+    res.status(401).json({ error: 'webhook.signature_invalid' });
+    return;
+  }
+
+  const adapter = adapters.teamwork;
+  const signatureValid = config.webhookSecret && adapter?.webhook?.verifySignature(rawBody, signature, config.webhookSecret);
+  if (!signatureValid) {
+    res.status(401).json({ error: 'webhook.signature_invalid' });
+    return;
+  }
+
+  // ── Step 4: Require deliveryId ─────────────────────────────────────────────
+  const deliveryId = req.headers['x-desk-delivery'] as string | undefined;
+  if (!deliveryId || deliveryId.trim() === '') {
+    res.status(400).json({ error: 'webhook.delivery_id_required' });
+    return;
+  }
+
+  // ── Step 5: Persistent replay dedup ───────────────────────────────────────
+  let deduped: { inserted: boolean };
   try {
-    const configs = await connectorConfigService.findAllActiveByType('teamwork');
-
-    if (configs.length === 0) {
-      console.warn('[Teamwork Webhook] No active Teamwork connector configs found');
-      res.status(200).json({ received: true });
-      return;
-    }
-
-    // Match by verifying HMAC signature against each config's webhook secret
-    const adapter = adapters.teamwork;
-    const signature = req.headers['x-desk-signature'] as string | undefined;
-
-    if (!signature) {
-      console.warn('[Teamwork Webhook] Missing X-Desk-Signature header, rejecting');
-      res.status(401).json({ error: 'Missing signature' });
-      return;
-    }
-
-    for (const candidate of configs) {
-      if (candidate.webhookSecret && adapter?.webhook?.verifySignature(rawBody, signature, candidate.webhookSecret)) {
-        config = candidate;
-        break;
-      }
-    }
-
-    if (!config) {
-      console.warn('[Teamwork Webhook] No config matched signature, rejecting');
-      res.status(401).json({ error: 'Invalid signature' });
-      return;
-    }
+    deduped = await recordIfNew(config.organisationId, 'teamwork', deliveryId);
   } catch (err) {
-    console.error('[Teamwork Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    logger.error('webhook.teamwork.dedup_db_unreachable', {
+      orgId: config.organisationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     await recordIncident({
       source: 'route',
-      summary: 'Teamwork webhook DB lookup failed',
-      fingerprintOverride: 'webhook:teamwork:db_lookup_failed',
+      summary: 'Teamwork webhook replay-nonce DB insert failed',
+      fingerprintOverride: 'webhook:teamwork:dedup_db_unreachable',
       severity: 'medium',
+      organisationId: config.organisationId,
       stack: err instanceof Error ? err.stack : undefined,
-      errorDetail: { eventType: (event as Record<string, unknown>)?.event },
     });
     res.status(500).json({ error: 'Internal error' });
     return;
   }
 
-  // Ack immediately
+  if (!deduped.inserted) {
+    // Replay detected — ack but perform no side effects.
+    logger.info('webhook.teamwork.replay_deduped', {
+      orgId: config.organisationId,
+      deliveryId,
+      source: 'teamwork',
+    });
+    res.status(200).json({ received: true, deduplicated: true });
+    return;
+  }
+
+  // ── Step 6: Ack immediately ────────────────────────────────────────────────
   res.status(200).json({ received: true });
 
-  // Process asynchronously
+  // ── Step 7: Process asynchronously ────────────────────────────────────────
   try {
-    const adapter = adapters.teamwork;
     if (!adapter?.webhook?.normaliseEvent) {
-      console.warn('[Teamwork Webhook] Teamwork adapter has no webhook normaliser');
+      logger.warn('webhook.teamwork.no_normaliser', { orgId: config.organisationId });
       return;
     }
 
     const normalised = adapter.webhook.normaliseEvent(event);
     if (!normalised) return; // Unrecognised event type
 
-    // Deduplicate — skip if already processed
+    // Layer-0 in-memory fast-path probe (non-authoritative; durable dedup above is the invariant).
     if (normalised.externalEventId && webhookDedupeStore.isDuplicate(normalised.externalEventId)) {
-      console.log(`[Teamwork Webhook] Skipping duplicate event ${normalised.externalEventId}`);
+      logger.debug('webhook.teamwork.in_memory_dedup', {
+        orgId: config.organisationId,
+        externalEventId: normalised.externalEventId,
+      });
       return;
     }
 
-    console.log(`[Teamwork Webhook] Processed ${normalised.eventType} for ticket ${normalised.entityExternalId}`);
+    logger.info('webhook.teamwork.processed', {
+      orgId: config.organisationId,
+      eventType: normalised.eventType,
+      entityExternalId: normalised.entityExternalId,
+    });
 
     // Ticket webhook events are for real-time awareness (agent reactions),
     // not canonical data ingestion. Emit for downstream consumers.
     // Future: publish to event bus / pg-boss queue for agent processing.
   } catch (err) {
-    console.error('[Teamwork Webhook] Error processing event:', err instanceof Error ? err.message : err);
-    const orgId = config?.organisationId;
-    await recordIncident({
+    logger.error('webhook.teamwork.handler_failed', {
+      orgId: config.organisationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    recordIncident({
       source: 'route',
       summary: 'Teamwork webhook event processing failed',
       fingerprintOverride: 'webhook:teamwork:handler_failed',
       severity: 'medium',
-      organisationId: orgId ?? null,
+      organisationId: config.organisationId,
       stack: err instanceof Error ? err.stack : undefined,
-      errorDetail: { eventType: (event as Record<string, unknown>)?.event },
-    });
+      errorDetail: { eventType: event?.event },
+    }).catch(() => { /* fire-and-forget */ });
   }
 }));
 

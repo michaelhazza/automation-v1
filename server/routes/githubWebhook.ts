@@ -14,13 +14,15 @@
 
 import { Router } from 'express';
 import crypto from 'crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { taskService } from '../services/taskService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 import { recordIncident } from '../services/incidentIngestor.js';
+import { withOrgTx } from '../instrumentation.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 const router = Router();
 
@@ -165,16 +167,27 @@ async function handleIssueEvent(payload: Record<string, any>) {
     const title = `[GitHub] ${issue.title}`;
     const description = buildIssueDescription(issue, repo);
 
-    await taskService.createTask(
-      context.organisationId,
-      context.subaccountId,
-      {
-        title,
-        description,
-        status: 'inbox',
-        priority,
-      }
-    );
+    // Unauthenticated path: manually open a db.transaction, set the org GUC,
+    // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
+    // same pattern used by agentObservationsPruneJob and correctionPatternDetectorJob
+    // for non-HTTP write paths where auth middleware is not available.
+    await db.transaction(async (innerTx) => {
+      await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${context.organisationId}, true)`);
+      await withOrgTx(
+        { tx: innerTx, organisationId: context.organisationId, source: 'route:githubWebhook.issue-opened' },
+        async () => {
+          const tx = getOrgScopedDb('route:githubWebhook.issue-opened');
+          await taskService.createTask(
+            {
+              organisationId: context.organisationId,
+              subaccountId: context.subaccountId,
+              data: { title, description, status: 'inbox', priority },
+            },
+            tx,
+          );
+        },
+      );
+    });
 
     logger.info('github_webhook.task_created', { issueNumber: issue.number, repo });
   }
@@ -212,16 +225,32 @@ async function handleIssueCommentEvent(payload: Record<string, any>) {
   const taskTitle = body.replace(/\/task\s*/, '').replace(/@synthetos\s*/, '').trim().split('\n')[0];
   if (!taskTitle) return;
 
-  await taskService.createTask(
-    context.organisationId,
-    context.subaccountId,
-    {
-      title: `[GitHub] ${taskTitle}`,
-      description: `Created from comment on issue #${issue.number} in ${repo}\n\n${body}\n\n[View comment](${comment.html_url})`,
-      status: 'inbox',
-      priority: 'normal',
-    }
-  );
+  // Unauthenticated path: manually open a db.transaction, set the org GUC,
+  // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
+  // same pattern used by agentObservationsPruneJob and correctionPatternDetectorJob
+  // for non-HTTP write paths where auth middleware is not available.
+  await db.transaction(async (innerTx) => {
+    await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${context.organisationId}, true)`);
+    await withOrgTx(
+      { tx: innerTx, organisationId: context.organisationId, source: 'route:githubWebhook.issue-comment' },
+      async () => {
+        const tx = getOrgScopedDb('route:githubWebhook.issue-comment');
+        await taskService.createTask(
+          {
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            data: {
+              title: `[GitHub] ${taskTitle}`,
+              description: `Created from comment on issue #${issue.number} in ${repo}\n\n${body}\n\n[View comment](${comment.html_url})`,
+              status: 'inbox',
+              priority: 'normal',
+            },
+          },
+          tx,
+        );
+      },
+    );
+  });
 
   logger.info('github_webhook.task_from_comment', { issueNumber: issue.number, repo });
 }

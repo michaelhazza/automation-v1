@@ -3,7 +3,7 @@
 **Slug:** `pre-test-hardening`
 **Branch:** `pre-test-hardening`
 **Class:** Major (architect first; full review pipeline)
-**Migration range reserved:** `0313–0320`
+**Migration range reserved:** `0313–0315`
 
 ---
 

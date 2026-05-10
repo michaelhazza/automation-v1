@@ -57,6 +57,7 @@ export async function ghlAutoStartOnboardingWorker(
     subaccountId,
   });
 
+  // TODO(post-T3, spec §10): wrap in withOrgTx — explicitly deferred per spec §0.4 + §10. Depends on the GHL unauthenticated path landing first.
   const result = await subaccountOnboardingService.autoStartOwedOnboardingWorkflows({
     organisationId,
     subaccountId,

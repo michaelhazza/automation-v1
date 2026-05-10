@@ -6,6 +6,7 @@ import { taskService } from '../services/taskService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { createTaskBody, updateTaskBody, moveTaskBody, createActivityBody, createDeliverableBody } from '../schemas/tasks.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 const router = Router();
 
@@ -41,10 +42,15 @@ router.post(
       res.status(400).json({ error: 'title is required' });
       return;
     }
+    const tx = getOrgScopedDb('route:tasks.create');
     const item = await taskService.createTask(
-      req.orgId!, req.params.subaccountId,
-      { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
-      req.user!.id
+      {
+        organisationId: req.orgId!,
+        subaccountId: req.params.subaccountId,
+        data: { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
+        userId: req.user!.id,
+      },
+      tx,
     );
     res.status(201).json(item);
   })

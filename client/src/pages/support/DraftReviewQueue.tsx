@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../../lib/api';
+import { getActiveClientId } from '../../lib/auth';
 import StatusPill from '../../components/support/StatusPill';
 import CollisionCallout from '../../components/support/CollisionCallout';
 import BackLinkAwaitingBadge from '../../components/support/BackLinkAwaitingBadge';
@@ -27,7 +28,13 @@ export default function DraftReviewQueue() {
   const [hasOverrideCollisionPerm, setHasOverrideCollisionPerm] = useState(false);
 
   const load = useCallback(() => {
-    api.get<{ drafts: Draft[] }>('/api/support/drafts')
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) {
+      setError('No active client selected.');
+      setLoading(false);
+      return;
+    }
+    api.get<{ drafts: Draft[] }>(`/api/subaccounts/${subaccountId}/support/drafts`)
       .then(({ data }) => {
         setDrafts(data.drafts ?? []);
         setError(null);
@@ -59,9 +66,11 @@ export default function DraftReviewQueue() {
 
   const handleApprove = async (overrideCollision = false) => {
     if (!selected) return;
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
     setActionLoading(true);
     try {
-      await api.post(`/api/support/drafts/${selected.id}/approve`, { overrideCollision });
+      await api.post(`/api/subaccounts/${subaccountId}/support/drafts/${selected.id}/approve`, { overrideCollision });
       load();
       setSelectedId(null);
     } finally {
@@ -71,9 +80,11 @@ export default function DraftReviewQueue() {
 
   const handleReject = async () => {
     if (!selected) return;
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
     setActionLoading(true);
     try {
-      await api.post(`/api/support/drafts/${selected.id}/reject`, { reason: 'Rejected from review queue' });
+      await api.post(`/api/subaccounts/${subaccountId}/support/drafts/${selected.id}/reject`, { reason: 'Rejected from review queue' });
       load();
       setSelectedId(null);
     } finally {
@@ -83,9 +94,11 @@ export default function DraftReviewQueue() {
 
   const handleManualResolve = async (action: 'mark_sent' | 'mark_failed' | 'retry_reconciliation') => {
     if (!selected) return;
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
     setActionLoading(true);
     try {
-      await api.post(`/api/support/drafts/${selected.id}/manual-resolve`, { action });
+      await api.post(`/api/subaccounts/${subaccountId}/support/drafts/${selected.id}/manual-resolve`, { action });
       load();
       setSelectedId(null);
     } finally {

@@ -1194,6 +1194,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0312_action_attempts.sql',
     rationale: 'Action idempotency ledger — records in-flight and completed provider write attempts. Cross-tenant leak exposes which actions were attempted and their outcomes.',
   },
+  // 0313 — Pre-Test Hardening: persistent webhook replay nonces (W3)
+  {
+    tableName: 'webhook_replay_nonces',
+    schemaFile: 'webhookReplayNonces.ts',
+    policyMigration: '0313_webhook_replay_nonces.sql',
+    rationale: 'Per-org webhook replay nonces (deliveryId from provider) — cross-tenant leak would reveal which webhook events any other org has received; UNIQUE constraint is the dedup invariant.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

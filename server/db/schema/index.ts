@@ -307,3 +307,6 @@ export * from './canonicalTicketDrafts.js';
 
 // Support Desk action idempotency ledger (migration 0312)
 export * from './actionAttempts.js';
+
+// Pre-Test Hardening W3 — persistent webhook replay nonces (migration 0313)
+export * from './webhookReplayNonces.js';
