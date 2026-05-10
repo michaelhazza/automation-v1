@@ -113,6 +113,8 @@ _Why first:_ every OpenClaw run is a delegated run. If IEE delegation is half-bu
 
 ### Phase 1 — Substrate insertion
 
+**Status: COMPLETE** (implemented in execution-backend-adapter-contract, 2026-05-10)
+
 - Define `ExecutionBackend` adapter contract
 - Refactor existing modes (API, Claude Code, `iee_browser`, `iee_dev`) into adapters — **no behaviour change**
 - Implement `openclaw_managed` adapter behind a feature flag

@@ -84,9 +84,11 @@ export const claudeCodeBackend: ExecutionBackend = {
 
     return {
       lifecycle: 'subprocess',
-      // claudeCodeRunner identifies the subprocess via sessionId; expose it
-      // as the backendTaskId so observability surfaces have a stable handle
-      // even though the inline branch did not record one.
+      // Intentional improvement over the plan spec (which specified
+      // `backendTaskId: null`): claudeCodeRunner surfaces the subprocess
+      // sessionId, so we record it as `backend_task_id` in `agent_runs`
+      // for observability. No code reads this value yet, but it provides
+      // a stable handle when debugging subprocess runs in production.
       backendTaskId: ccResult.sessionId ?? null,
       loopResult: {
         summary: ccResult.result,

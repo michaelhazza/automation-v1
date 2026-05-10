@@ -227,4 +227,39 @@ describe('ExecutionBackend contract — module-source guard (acceptance § 16 #1
         `(spec § 16 #12 — cycle prevention). Found: ${offendingImport?.[0] ?? '<none>'}`,
     ).toBeNull();
   });
+
+  it('options.ts does NOT have a runtime (non-type) import from agentExecutionService.ts (cycle prevention)', () => {
+    // options.ts carries `import type { AgentRunRequest }` from
+    // agentExecutionService — that is acceptable because type-only imports
+    // are erased at compile time and do not introduce a runtime cycle.
+    // This assertion guards against a future edit accidentally promoting
+    // the import to a runtime import (`import {`, `import *`, or a bare
+    // default import).
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const optionsPath = path.resolve(here, '..', 'options.ts');
+    const optionsSource = readFileSync(optionsPath, 'utf8');
+
+    // Strip block and line comments to avoid false positives from
+    // documentation references to the filename.
+    const sourceWithoutComments = optionsSource
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    // Match any `import` line that:
+    //   - references agentExecutionService in the module specifier, AND
+    //   - is NOT an `import type` line.
+    // Regex: starts with `import` (not `import type`), then eventually
+    // reaches a module specifier containing agentExecutionService.
+    const runtimeImport =
+      /^import\s+(?!type\s)[\s\S]*?from\s+['"][^'"]*agentExecutionService[^'"]*['"]/m.exec(
+        sourceWithoutComments,
+      );
+
+    expect(
+      runtimeImport,
+      `executionBackends/options.ts MUST NOT have a runtime import from ` +
+        `agentExecutionService.ts — use \`import type\` only ` +
+        `(cycle prevention). Found: ${runtimeImport?.[0] ?? '<none>'}`,
+    ).toBeNull();
+  });
 });

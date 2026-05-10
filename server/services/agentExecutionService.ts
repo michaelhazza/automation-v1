@@ -163,7 +163,9 @@ interface ExecutionClosureContext {
  * variant is wired.
  *
  * Pure: no DB / I/O / closure mutations; only assembles the discriminated
- * shape from the inputs.
+ * shape from the inputs. `ctx` is pass-through closure data — the function
+ * neither mutates `ctx` nor performs any I/O — so it is still pure in the
+ * functional sense despite receiving three parameters.
  */
 function buildBackendOptionsForMode(
   mode: ExecutionMode,
@@ -236,10 +238,9 @@ function buildBackendOptionsForMode(
         },
       };
     case 'iee_browser':
-      // Pre-flight validation in the dispatch site narrowed
-      // `request.ieeTask.type === 'browser'`; the cast matches the
-      // BrowserTaskPayload shape the adapter expects. A runtime
-      // mismatch is caught by the adapter's own `dispatch()` guard.
+      // Validation of ieeTask presence/type happens adapter-side in
+      // _ieeShared.ts::ieeDispatch; the cast is safe because mismatches
+      // are caught and thrown before any DB writes.
       return {
         backendId: 'iee_browser',
         ieeTask: request.ieeTask as never,

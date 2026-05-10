@@ -243,6 +243,8 @@ Rationale:
 
 ## 3. Decision 2 — ExecutionBackend Adapter Contract
 
+**Status: IMPLEMENTED** (execution-backend-adapter-contract build, 2026-05-10)
+
 ### 3.1 Background — what's in place today
 
 The agentic loop in `server/services/agentExecutionService.ts` dispatches per-run execution based on `executionMode` (`api`, `headless`, `claude-code`, `iee_browser`, `iee_dev`). Each mode is a hardcoded branch in the dispatch logic:
