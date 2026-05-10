@@ -39,40 +39,49 @@ interface EvalFixture {
   voiceProfile: string;
 }
 
+// Fixture `expectedIntent` values MUST match the SupportIntent enum in
+// shared/types/supportClassifyTicketResult.ts — otherwise classifier output
+// can never match and per-intent accuracy is recorded as 0 forever, failing
+// the eval gate after two runs.
 const EVAL_FIXTURES: EvalFixture[] = [
   {
     ticketId: 'fixture-001',
     ticketSubject: 'Billing charge I did not authorise',
     latestMessage: 'I see a charge on my account that I did not make. Please refund it immediately.',
-    expectedIntent: 'billing',
+    expectedIntent: 'billing_question',
     voiceProfile: 'Professional, empathetic, solution-oriented.',
   },
   {
     ticketId: 'fixture-002',
     ticketSubject: 'Cannot log in to my account',
     latestMessage: 'My password reset email never arrived. I have checked spam.',
-    expectedIntent: 'account_access',
+    expectedIntent: 'account_question',
     voiceProfile: 'Professional, empathetic, solution-oriented.',
   },
   {
     ticketId: 'fixture-003',
     ticketSubject: 'Where is my shipment?',
     latestMessage: 'My order was placed 10 days ago and tracking shows it has not moved in 5 days.',
-    expectedIntent: 'shipping',
+    // No dedicated 'shipping' enum value; the closest match per the
+    // SupportIntent enum is `how_to_question` for "where is my X" lookups.
+    // If a future enum extension adds 'shipping_question', update here.
+    expectedIntent: 'how_to_question',
     voiceProfile: 'Professional, empathetic, solution-oriented.',
   },
   {
     ticketId: 'fixture-004',
     ticketSubject: 'How do I cancel my subscription?',
     latestMessage: 'I want to cancel before my next renewal date. What is the process?',
-    expectedIntent: 'cancellation',
+    expectedIntent: 'cancellation_request',
     voiceProfile: 'Professional, empathetic, solution-oriented.',
   },
   {
     ticketId: 'fixture-005',
     ticketSubject: 'Product arrived damaged',
     latestMessage: 'The item was broken when I opened the box. I have photos.',
-    expectedIntent: 'returns',
+    // No dedicated 'returns' enum value; damaged-product complaints map to
+    // `complaint`. If a future enum extension adds 'return_request', update.
+    expectedIntent: 'complaint',
     voiceProfile: 'Professional, empathetic, solution-oriented.',
   },
 ];

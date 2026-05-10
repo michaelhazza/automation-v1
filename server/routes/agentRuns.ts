@@ -10,7 +10,7 @@ import { resumeFromIntegrationConnect } from '../services/agentResumeService.js'
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { agentRuns, agentRunSnapshots, agentExecutionEvents } from '../db/schema/index.js';
+import { agentRuns, agentRunSnapshots, agentExecutionEvents, agents } from '../db/schema/index.js';
 import { eq, and, gte, sql, inArray, count, asc, or } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
@@ -19,6 +19,13 @@ import { ControllerStyleNotAllowedForAgentError } from '../services/controllerSt
 import { logger } from '../lib/logger.js';
 import { runTraceService, InvalidRunTraceCursorError } from '../services/runTraceService.js';
 import type { RunTraceEventType } from '../../shared/types/runTraceEvent.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import {
+  resolveAgentRunVisibility,
+  type AgentRunVisibilityRun,
+  type AgentRunVisibilityUser,
+} from '../lib/agentRunVisibility.js';
+import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
 
 const router = Router();
 
@@ -652,15 +659,75 @@ router.post(
 );
 
 // ─── Phase 1 — Run artifacts: list metadata (spec §4.5.2, §6.1.5) ───────────
-
+//
+// Visibility parity with /api/run-artifacts/:id/download and /signed-url:
+// listing artifact metadata (display names, IDs, hashes, sizes) leaks the same
+// surface as those routes, so it must clear the same gate. Org `AGENTS_VIEW`
+// alone is insufficient for system-managed runs and runs the user otherwise
+// cannot see in the run trace.
 router.get(
   '/api/agent-runs/:runId/artifacts',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { runId } = req.params;
+    const orgId = req.orgId!;
+
+    const scopedDb = getOrgScopedDb('agentRuns.artifactsList');
+    const [runRow] = await scopedDb
+      .select({
+        id: agentRuns.id,
+        organisationId: agentRuns.organisationId,
+        subaccountId: agentRuns.subaccountId,
+        agentId: agentRuns.agentId,
+        executionScope: agentRuns.executionScope,
+      })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+
+    if (!runRow) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    // System-managed agents have a non-null `agents.system_agent_id` FK to
+    // `system_agents` — same pattern as runArtifacts.ts:106-114.
+    const [agentRow] = await scopedDb
+      .select({ systemAgentId: agents.systemAgentId })
+      .from(agents)
+      .where(eq(agents.id, runRow.agentId))
+      .limit(1);
+
+    const visibilityRun: AgentRunVisibilityRun = {
+      organisationId: runRow.organisationId,
+      subaccountId: runRow.subaccountId,
+      executionScope: runRow.executionScope,
+      isSystemRun: Boolean(agentRow?.systemAgentId),
+    };
+
+    const userCtx = await buildUserContextForRun(req, {
+      id: runRow.id,
+      organisationId: runRow.organisationId,
+      subaccountId: runRow.subaccountId,
+      executionScope: runRow.executionScope,
+    });
+
+    const visibilityUser: AgentRunVisibilityUser = {
+      id: userCtx.id,
+      role: userCtx.role,
+      organisationId: userCtx.organisationId,
+      orgPermissions: userCtx.orgPermissions,
+    };
+
+    const visibility = resolveAgentRunVisibility(visibilityRun, visibilityUser);
+    if (!visibility.canView) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
     const { listForRun } = await import('../services/fileDeliveryService.js');
-    const raw = await listForRun(runId, req.orgId!);
+    const raw = await listForRun(runId, orgId);
     // Strip internal S3 fields before sending to client.
     const artifacts = raw.map(({ storageKey: _sk, storageRegion: _sr, ...pub }) => pub);
     res.json({ artifacts });

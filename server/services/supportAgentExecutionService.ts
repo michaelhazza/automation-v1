@@ -504,6 +504,65 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
     return;
   }
 
+  // ── Step 4b: Honour explicit non-draft recommended_action ─────────────────
+  // Spec §5.4.1: classifier returns one of four recommended_actions. Only
+  // `draft_reply` continues into the draft path. The other three terminate
+  // with the spec-mandated `phase1.support.ticket_terminal` event (§5.6.3)
+  // and per-ticket verdict from the spec-locked set in §5.3.4.
+  //
+  // Action-skill status (deferred per `tasks/todo.md` REQ #42):
+  //   - escalate_to_human: requires support.add_internal_note + support.assign
+  //   - add_internal_note_only: requires support.add_internal_note
+  //   - close_as_no_action: no side-effect skill required; verdict matches semantics
+  //
+  // Until those handlers ship, every recommended_action that needs a side
+  // effect emits a `phase1.support.escalation_action_pending` warn-log so
+  // operators see the unimplemented action. The terminal event still fires
+  // so the outer-loop predicate skips the ticket on the same customer
+  // message — without it, the agent would re-classify-and-skip every tick.
+  if (classification.recommended_action !== 'draft_reply') {
+    const claimReleasedAt = new Date().toISOString();
+    await releaseTicketClaim(ticketId, organisationId);
+    const perTicketVerdict =
+      classification.recommended_action === 'escalate_to_human'
+        ? 'escalated_to_human'
+        : 'skipped_no_action_needed';
+    const pendingActions =
+      classification.recommended_action === 'escalate_to_human'
+        ? ['support.add_internal_note', 'support.assign(human)']
+        : classification.recommended_action === 'add_internal_note_only'
+          ? ['support.add_internal_note']
+          : [];
+    if (pendingActions.length > 0) {
+      logger.warn('phase1.support.escalation_action_pending', {
+        ticketId,
+        runId,
+        reason: `classifier_recommended_${classification.recommended_action}`,
+        pendingActions,
+      });
+    }
+    logger.info('phase1.support.ticket_terminal', {
+      ticketId,
+      perTicketVerdict,
+      reason: `recommended_action:${classification.recommended_action}`,
+      claimReleasedAt,
+    });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.ticket_terminal',
+      payload: {
+        ticketId,
+        perTicketVerdict,
+        reason: `recommended_action:${classification.recommended_action}`,
+        claimReleasedAt,
+      },
+      sourceService: 'supportAgentExecutionService',
+    });
+    return;
+  }
+
   // ── Step 5: Customer history lookup (account-issue intents) ─────────────
   let customerHistoryContext: string | undefined;
   if (requiresCustomerHistory(classification.intent)) {

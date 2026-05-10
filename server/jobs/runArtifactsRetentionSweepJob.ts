@@ -71,6 +71,12 @@ export async function registerRunArtifactsRetentionSweepJob(boss: PgBoss): Promi
 
             if (page.length === 0) break;
 
+            // Track per-page progress so a full page that fails to delete any
+            // rows (e.g. S3 outage, bad credentials) does not respin the same
+            // result set forever within a single tick — exit and let the next
+            // scheduled tick retry instead.
+            let pageDeleted = 0;
+
             for (const artifact of page) {
               try {
                 // Delete S3 object first — if S3 delete fails, DB row stays
@@ -110,6 +116,7 @@ export async function registerRunArtifactsRetentionSweepJob(boss: PgBoss): Promi
                 });
 
                 totalDeleted += 1;
+                pageDeleted += 1;
               } catch (err) {
                 logger.warn('run_artifacts.retention_sweep.db_delete_failed', {
                   artifactId: artifact.id,
@@ -120,6 +127,15 @@ export async function registerRunArtifactsRetentionSweepJob(boss: PgBoss): Promi
 
             // Page smaller than limit means we've exhausted the result set
             if (page.length < PAGE_SIZE) pageExhausted = true;
+
+            // If a full page yielded zero DB deletes the same rows would be
+            // re-read on every iteration — defer to the next scheduled tick.
+            if (pageDeleted === 0 && page.length === PAGE_SIZE) {
+              logger.warn('run_artifacts.retention_sweep.no_progress_break', {
+                pageSize: page.length,
+              });
+              pageExhausted = true;
+            }
           }
 
           logger.info('run_artifacts.retention_sweep.completed', { totalDeleted });

@@ -3942,10 +3942,15 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Gap: maintenance jobs that advertise per-org partial-success must use one admin tx per org or SAVEPOINT subtxs. Current code opens one shared admin tx — fragile under non-caught failures.
   - Suggested approach: group expired rows by `organisation_id`, open one `withAdminConnection` per org. Or wrap each per-artifact DELETE in a SAVEPOINT subtx.
 
-- [ ] PR-S6 — Escalation paths (low-confidence + skill-error) lack `support.add_internal_note + support.assign(human)` calls
+- [ ] PR-S6 — Escalation + add-note paths lack their action skills
   - Spec section: §5.4.1
-  - Gap: the catch / low-confidence branches release the claim and emit the terminal event, but do NOT call the spec-required action skills. `phase1.support.escalation_action_pending` warn-log is currently the only signal humans see — no internal note lands on the ticket and no human assignee is set.
-  - Suggested approach: implement `support.add_internal_note` and `support.assign` skill handlers (currently only classify, propose, find-customer-history exist). Wire from the two escalation branches in `supportAgentExecutionService.ts`. Phase 1.5 candidate.
+  - Gap: four spots in `supportAgentExecutionService.ts` release the claim and emit the terminal event but never call the spec-required action skills:
+    - low-confidence branch (Step 4 confidence-check) → needs `support.add_internal_note + support.assign(human)`
+    - skill-error catch branch → needs `support.add_internal_note + support.assign(human)`
+    - `recommended_action: 'escalate_to_human'` branch (Step 4b) → needs `support.add_internal_note + support.assign(human)`
+    - `recommended_action: 'add_internal_note_only'` branch (Step 4b) → needs `support.add_internal_note`
+  - `phase1.support.escalation_action_pending` warn-log is currently the only signal humans see; no internal note lands on the ticket and no human assignee is set. The `close_as_no_action` branch correctly needs no side effect.
+  - Suggested approach: implement `support.add_internal_note` and `support.assign` skill handlers (currently only classify, propose, find-customer-history exist). Wire from all four branches above in `supportAgentExecutionService.ts`. Phase 1.5 candidate.
 
 - [ ] PR-S7 — No runtime tests for `phase1RunTraceEventEmitter.ts`
   - Gap: the helper has complex behaviour (raw-SQL JSONB binding, atomic seq allocation, FK-violation handling, SAVEPOINT semantics) but no tests.
