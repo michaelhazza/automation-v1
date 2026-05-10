@@ -82,3 +82,48 @@
 All five entries are recorded in `tasks/todo.md` under sections "Deferred from spec-conformance review", "Deferred from adversarial-reviewer", "Deferred from pr-reviewer round 3" (consolidated).
 
 **Next:** open a new Claude Code session and type `launch finalisation`. This session ends here.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #281
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-execution-backend-adapter-contract-2026-05-10T10-27-36Z.md`
+**spec_deviations reviewed:** n/a (none recorded in Phase 2 handoff)
+**REVIEW_GAP:** none — dual-reviewer ran APPROVED in Phase 2
+
+**S2 branch-sync:** merged main commits `2e6089ad` (PR #282 actionRegistry refactor) and `18deec86` (support-desk-canonical chore) cleanly. Auto-resolved 2 known-shape conflicts: `KNOWLEDGE.md` (union) and `tasks/current-focus.md` (ours). `architecture.md` auto-merged without conflict. Commit: `493fc7eb`.
+
+**G4 regression guard:** PASSED on first attempt (lint 0 errors, typecheck clean across both tsconfigs).
+
+**chatgpt-pr-review:** 3 rounds, manual mode.
+- Round 1 — CHANGES_REQUESTED. 5 findings, all auto-applied as technical fixes (commit `33d724f6`):
+  - B1 — boot-time backend registration is now FATAL; reorder to spec § 8.3 (api → headless → claude-code → iee_browser → iee_dev)
+  - B2 — `claudeCodeBackend.backendTaskId` restored to `null`; sessionId stays in `toolCallsLog[0]`
+  - T1 — `ParentRunNotDispatchable` rethrown with structured warn (verified no pre-cutover race-loser shape on `origin/main`)
+  - T2 — new `FinaliseRequiresDelegatedAdapter` typed error; finaliser throws on capability mismatch instead of silent `false`
+  - T3 — registration order fix folded into B1
+- Round 2 — APPROVED with 1 optional polish (P1). P1 implemented (commit `f9588578`): comment rewording on `ParentRunNotDispatchable` re-throw site (verified ChatGPT's claim — `ParentRunNotDispatchable` has no `statusCode`, route layer renders 500 today, neutral wording applied)
+- Round 3 — APPROVED with 0 findings. Operator signalled `done`. Finalisation commit `01051c78` appended 5 dated KNOWLEDGE.md patterns + log Final Summary + index entries.
+
+**Doc-sync sweep verdicts (coordinator cross-check):**
+- `architecture.md`: yes (Run statuses, executionMode dispatch, reconciliation cron — landed earlier in spec-conformance pass commit `bfd86ac5`)
+- `docs/capabilities.md`: no — checked `execution backend`, `claude-code`, `iee_browser`, `iee_dev`, `backend adapter`; no capability surface change (internal refactor only)
+- `docs/integration-reference.md`: no — checked `execution backend`, `iee`, `backend adapter`; zero matches; no integration behaviour change
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md`: yes (`DEVELOPMENT_GUIDELINES.md §8.32` cycle-prevention assertion-coverage rule, commit `1898b1ef`)
+- `CONTRIBUTING.md`: n/a — no lint-suppression policy changes
+- `docs/frontend-design-principles.md`: n/a — no UI surface in this PR
+- `KNOWLEDGE.md`: yes (9 entries — 4 from Phase 2 build + 5 from chatgpt-pr-review finalisation; plus 1 stale-reference correction at line 1577)
+- `docs/spec-context.md`: n/a — feature pipeline, not a spec-review session
+- `docs/decisions/`: no — `tasks/builds/execution-backend-adapter-contract/spec.md` is the durable record; ADR would duplicate
+- `docs/context-packs/`: no — checked architecture.md anchor changes; section names unchanged
+- `references/test-gate-policy.md`: n/a — no test-gate policy changes
+- `references/spec-review-directional-signals.md`: n/a — feature pipeline, not a spec-review session
+- `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md`: n/a — repo-specific architectural change, not framework-level
+- `docs/iee-delegation-lifecycle-spec.md` (additional, not in registered list): yes — added "Status: superseded (2026-05-10)" banner pointing at the new spec, citing the three rename pairs
+
+**KNOWLEDGE.md entries added:** 9 (5 from chatgpt-pr-review finalisation: B1 fatal-boot, B2 contract-field semantics, P1 route-error-envelope wording, T1 verify-on-origin-main, T2 throw-on-capability-mismatch; 4 from Phase 2 build: cycle-prevention regex precision, domain-primitive registration must not be queue-backend-gated, lifting code into a generic orchestrator drops leaf side-effects, capability-gated optional methods make adapter contract widenings cheap)
+
+**tasks/todo.md items removed:** 0 (5 deferred EBAC-* items remain open: EBAC-DG-1, EBAC-DG-2, EBAC-ADV-2, EBAC-ADV-3, EBAC-PR3-S1)
+
+**ready-to-merge label applied at:** 2026-05-10T11:06:47Z

@@ -1,5 +1,7 @@
 # IEE Delegation Lifecycle — Phase 0 Implementation Spec
 
+> **Status: superseded (2026-05-10).** Generalised by `tasks/builds/execution-backend-adapter-contract/spec.md` (PR #281). The IEE-specific dispatch is now one of five `ExecutionBackend` adapter implementations. Symbol renames since this spec: `finaliseAgentRunFromIeeRun` → `finaliseAgentRunFromBackend`, `reconcileStuckDelegatedRuns` → `reconcileBackends`, `maintenance:iee-main-app-reconciliation` → `maintenance:backend-reconciliation`. This document is preserved as historical context for the pattern that was generalised; do not implement against it.
+
 _Date: 2026-04-18_
 _Branch: `claude/openclaw-worker-mode-VnjQT`_
 _Sequence: Phase 0 of the OpenClaw Strategy roadmap (`docs/openclaw-strategic-analysis.md`). Must complete before Phase 1 (substrate adapter) begins._
