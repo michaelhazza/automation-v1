@@ -44,16 +44,25 @@ export interface MasterPromptContext {
   escalationCategories: ReadonlyArray<string>;
 }
 
+/**
+ * Strip `{{}}` template tokens from a placeholder value so a tenant whose name
+ * contains adversarial template syntax cannot inject an additional placeholder
+ * expansion or break the prompt's structure. Pure text values pass through.
+ */
+function safeForTemplate(value: string): string {
+  return value.replaceAll('{{', '').replaceAll('}}', '');
+}
+
 export function resolveMasterPrompt(context: MasterPromptContext): string {
   const template = loadMasterPromptTemplate();
   const escalationList =
     context.escalationCategories.length > 0
-      ? context.escalationCategories.join(', ')
+      ? context.escalationCategories.map(safeForTemplate).join(', ')
       : 'none';
   return template
-    .replaceAll('{{org_name}}', context.orgName)
-    .replaceAll('{{subaccount_name}}', context.subaccountName)
+    .replaceAll('{{org_name}}', safeForTemplate(context.orgName))
+    .replaceAll('{{subaccount_name}}', safeForTemplate(context.subaccountName))
     .replaceAll('{{min_confidence}}', context.minConfidence.toFixed(2))
-    .replaceAll('{{voice_profile}}', context.voiceProfile)
+    .replaceAll('{{voice_profile}}', safeForTemplate(context.voiceProfile))
     .replaceAll('{{escalation_categories}}', escalationList);
 }

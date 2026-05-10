@@ -26,14 +26,21 @@ router.get(
 );
 
 // POST /api/support/evals/run
-// Triggers an immediate eval run. System admin only — this makes live LLM calls.
+// Triggers an immediate eval run for the caller's CURRENT org (req.orgId).
+// System admin only — this makes live LLM calls.
+//
+// Cross-org eval triggering is intentionally NOT supported via request body —
+// to evaluate a different org, system_admin must switch tenant context first
+// so the action is auditable as that org's session and the org-scoped tx /
+// RLS policies evaluate correctly. Accepting a body-supplied organisationId
+// would otherwise allow any system_admin to attribute eval LLM spend and
+// pollute eval history of any tenant from any session context.
 router.post(
   '/evals/run',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const { organisationId } = req.body as { organisationId?: string };
-    const orgId = organisationId ?? req.orgId!;
+    const orgId = req.orgId!;
     const result = await runOnce(orgId);
     res.json(result);
   }),

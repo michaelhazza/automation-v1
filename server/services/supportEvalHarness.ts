@@ -12,7 +12,7 @@
 // INV-16: event type verbatim from shared/types/runTraceEvent.ts
 
 import { eq, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { supportEvalRuns } from '../db/schema/supportEvalRuns.js';
 import { routeCall } from './llmRouter.js';
 import { logger } from '../lib/logger.js';
@@ -178,14 +178,18 @@ export async function runOnce(organisationId: string): Promise<{ evalRunId: stri
 
   // Fetch the most-recent previous row BEFORE inserting so the query cannot
   // race with a concurrent admin trigger that also calls runOnce.
-  const [previousRow] = await db
+  // Both reads and writes go through the org-scoped tx (set up by createWorker
+  // for the daily job, or the orgScoping middleware for the admin route) so
+  // FORCE RLS on support_eval_runs evaluates correctly.
+  const orgDb = getOrgScopedDb('supportEvalHarness.runOnce');
+  const [previousRow] = await orgDb
     .select()
     .from(supportEvalRuns)
     .where(eq(supportEvalRuns.organisationId, organisationId))
     .orderBy(desc(supportEvalRuns.runAt))
     .limit(1);
 
-  const [inserted] = await db
+  const [inserted] = await orgDb
     .insert(supportEvalRuns)
     .values({
       organisationId,
@@ -224,7 +228,8 @@ export async function listLatest(
   organisationId: string,
   limit = 5,
 ): Promise<typeof supportEvalRuns.$inferSelect[]> {
-  return db
+  const orgDb = getOrgScopedDb('supportEvalHarness.listLatest');
+  return orgDb
     .select()
     .from(supportEvalRuns)
     .where(eq(supportEvalRuns.organisationId, organisationId))

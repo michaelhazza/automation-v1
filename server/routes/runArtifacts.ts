@@ -168,7 +168,22 @@ router.get(
     const safeDisplayName = artifact.displayName.replace(/[\r\n]/g, '').replace(/"/g, '\\"');
 
     // ?disposition=inline renders the file in-browser (PDFs, images) instead of triggering a download.
-    const inlineMode = req.query.disposition === 'inline';
+    // SAFE_INLINE_MIME_PREFIXES restricts which MIME types may be served with inline
+    // disposition — preventing stored XSS in the rare case that a malformed or
+    // malicious worker upload bypassed the finalize-route allowlist. For any
+    // other MIME type the response is forced to `attachment` so the browser
+    // downloads the file rather than rendering it.
+    const SAFE_INLINE_MIME_PREFIXES: ReadonlyArray<string> = [
+      'application/pdf',
+      'image/',
+      'text/plain',
+      'text/csv',
+    ];
+    const requestedInline = req.query.disposition === 'inline';
+    const mimeAllowsInline = SAFE_INLINE_MIME_PREFIXES.some(
+      (p) => artifact.mimeType === p || artifact.mimeType.startsWith(p),
+    );
+    const inlineMode = requestedInline && mimeAllowsInline;
     const disposition = inlineMode ? `inline; filename="${safeDisplayName}"` : `attachment; filename="${safeDisplayName}"`;
 
     const command = new GetObjectCommand({

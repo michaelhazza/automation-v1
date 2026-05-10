@@ -104,6 +104,32 @@ router.post(
       return res.status(400).json({ error: { code: 'bad_request', message: 'Invalid artifactKind' } });
     }
 
+    // MIME-type allowlist: prevents stored XSS via `text/html` / `text/javascript`
+    // payloads that the inline-disposition download path would otherwise serve as
+    // executable HTML/JS in the application origin. The allowlist matches the
+    // five artifactKind values the spec supports (report=PDF, transcript=text,
+    // media=audio/video, attachment=common doc types, log=text).
+    const ALLOWED_MIME_PREFIXES: ReadonlyArray<string> = [
+      'application/pdf',
+      'application/json',
+      'application/zip',
+      'application/octet-stream',
+      'text/plain',
+      'text/csv',
+      'image/',
+      'audio/',
+      'video/',
+    ];
+    const mimeAllowed = ALLOWED_MIME_PREFIXES.some((p) => body.mimeType === p || body.mimeType.startsWith(p));
+    if (!mimeAllowed) {
+      return res.status(400).json({
+        error: {
+          code: 'mime_type_not_allowed',
+          message: `mimeType '${body.mimeType}' is not in the artifact allowlist`,
+        },
+      });
+    }
+
     const contentBuffer = Buffer.from(body.contentBase64, 'base64');
     const retainUntil = body.retainUntil ? new Date(body.retainUntil) : undefined;
 
@@ -117,6 +143,20 @@ router.post(
       if (retainUntil > maxRetain) {
         return res.status(400).json({ error: { code: 'retain_until_too_far', message: 'retainUntil cannot be more than 365 days in the future' } });
       }
+    }
+
+    // Per-artifact size cap. The global express.json parser caps the JSON body
+    // at 10MB, but a compromised worker could otherwise loop maximum-size
+    // uploads and consume S3 storage budget without per-tenant quotas.
+    const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
+    const decodedBytes = Buffer.byteLength(body.contentBase64, 'base64');
+    if (decodedBytes > MAX_ARTIFACT_BYTES) {
+      return res.status(413).json({
+        error: {
+          code: 'artifact_too_large',
+          message: `Artifact exceeds ${MAX_ARTIFACT_BYTES} byte cap (received ${decodedBytes})`,
+        },
+      });
     }
 
     // Tenant-isolation cross-check: the worker payload's organisationId is
