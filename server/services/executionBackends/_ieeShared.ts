@@ -175,6 +175,7 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
     })
     .where(and(
       eq(agentRuns.id, input.runId),
+      eq(agentRuns.organisationId, input.organisationId),
       inArray(agentRuns.status, ['pending', 'running'] as const),
     ))
     .returning({ id: agentRuns.id });
@@ -193,6 +194,7 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
       })
       .where(and(
         eq(ieeRuns.id, enqueueResult.ieeRunId),
+        eq(ieeRuns.organisationId, input.organisationId),
         inArray(ieeRuns.status, ['pending', 'running'] as const),
       ));
 

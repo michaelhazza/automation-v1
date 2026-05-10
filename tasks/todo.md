@@ -3834,4 +3834,24 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - Gap: spec §4.1 declares `'per_token' | 'subscription' | 'per_worker_second' | 'per_session_hour' | 'mixed'` (5 values). Implementation in `server/services/executionBackends/types.ts:99` declares `'per_token' | 'subscription' | 'none'` (3 values — adds `'none'`, drops three deferred slots). Spec §10.2 explicitly says: *"Declared now so the adapters are self-describing for those specs without amendment."* — the narrowed surface means future adapter authors will need to amend `types.ts` before declaring the dropped values.
   - Suggested approach: either (a) widen the implemented union to match the spec (low cost, restores the contract surface), or (b) amend the spec to record that `'none'` was added and the three speculative values were dropped (the spec is the source of truth and should reflect what V1 actually shipped). Either way, the implementation and spec should agree.
 
+## Deferred from adversarial-reviewer — execution-backend-adapter-contract (2026-05-10)
+
+**Captured:** 2026-05-10T09:13:06Z
+**Source log:** `tasks/review-logs/adversarial-review-log-execution-backend-adapter-contract-2026-05-10T09-13-06Z.md`
+**Verdict:** HOLES_FOUND (1 confirmed-hole fixed inline; 2 deferred)
+
+> Note: **EBAC-ADV-1 (confirmed-hole, missing org predicates on IEE dispatch UPDATEs in `_ieeShared.ts`)** was fixed inline during the Phase 2 review pass — see commit alongside the pr-reviewer changes.
+
+- [ ] **EBAC-ADV-2 — Confirm IEE worker orphan-cleanup covers `(pending, pending)` stuck-pair scenario**
+  - Category: Race conditions / silent run leak.
+  - Location: `server/services/executionBackends/_ieeShared.ts:149-206` (dispatch sequence) and the IEE worker's task-cleanup sweep (separate repo).
+  - Concern: Steps 1 (enqueue `iee_runs` INSERT) and 2 (parent `agent_runs` UPDATE to `'delegated'`) are non-transactional. If the IEE worker also dies before picking up the task, both rows stay in `'pending'`. `ieeReconcile` only matches `agentRuns.status IN ('delegated', 'cancelling')` — invisible.
+  - Suggested approach: read the IEE worker repo's "cleanup orphaned tasks" sweep and verify it emits `iee-run-completed` for tasks enqueued but never picked up. If it does not, either (a) extend the worker sweep, or (b) widen `ieeReconcile` to match `(pending iee_run, pending/running parent)` pairs older than the IEE task TTL.
+
+- [ ] **EBAC-ADV-3 — Confirm `claudeCodeRunner.execute` uses `execFile`/`spawn` not `exec`**
+  - Category: Injection (prompt-injection-to-shell-injection pivot).
+  - Location: `server/services/agentExecutionService.ts:1570` and `server/services/executionBackends/claudeCodeBackend.ts:76-83`.
+  - Concern: `taskPrompt = workspaceContext || '...'` is LLM-generated content from workspace memory. If `claudeCodeRunner.ts` uses `child_process.exec` with a concatenated shell string, workspace-memory content with shell metacharacters could inject shell commands.
+  - Suggested approach: read `server/services/claudeCodeRunner.ts`. If it uses `execFile` or `spawn` with an argument array — close as non-finding. If it uses `exec` with a string — fix to use `execFile`/`spawn` with arg array.
+
 
