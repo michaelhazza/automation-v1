@@ -7,6 +7,7 @@
 **Scope:** entire spec — all 5 chunks committed; caller confirmed completed implementation
 **Changed-code set:** 47 files (committed since base; spec/review/build artefacts excluded from verification surface — see Setup §B)
 **Run at:** 2026-05-10T08:46:26Z
+**Commit at finish:** `bfd86ac5`
 
 ---
 
