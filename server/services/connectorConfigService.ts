@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { eq, and, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
@@ -137,6 +138,12 @@ export const connectorConfigService = {
     pollIntervalMinutes?: number;
     webhookSecret?: string;
   }) {
+    // Pre-Test Hardening W3 — Teamwork connectors require a per-connector
+    // webhook URL token at creation time. The tokenised webhook route
+    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
+    // token; a null token means deliveries are silently dropped with 401.
+    // Migration 0314 backfills existing rows; this auto-generates for new ones.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
     const [config] = await db
       .insert(connectorConfigs)
       .values({
@@ -146,6 +153,7 @@ export const connectorConfigService = {
         configJson: data.configJson ?? null,
         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
         webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
       })
       .returning();
 
@@ -165,6 +173,8 @@ export const connectorConfigService = {
     pollIntervalMinutes?: number;
     webhookSecret?: string;
   }) {
+    // Pre-Test Hardening W3 — see `create` above for rationale.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
     const [config] = await db
       .insert(connectorConfigs)
       .values({
@@ -175,6 +185,7 @@ export const connectorConfigService = {
         configJson: data.configJson ?? null,
         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
         webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
       })
       .returning();
     return config;
