@@ -3388,3 +3388,23 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 **Resolution.** All new stable log codes route through `import { logger } from '../lib/logger.js'`. Sibling new services (`credentialBrokerService.ts`, `runTraceService.ts`) had it correct from chunk 5; `policyEngineService.ts` regressed because it pre-existed and the chunk-4 patch didn't add the import. Lint/typecheck don't catch this — the contract is "downstream consumes the stable code", which is observability, not type-system.
 
 **Detection heuristic.** When introducing a new namespaced log code (`<feature>.<event>`), grep the file for both `console.log('<code>` and `logger.info('<code>` — only the structured form should appear.
+
+## Pattern: Type seam for future variants — declare the wider type now, restrict registration at runtime
+
+**Context.** While locking the ExecutionBackend Adapter Contract spec (`tasks/builds/execution-backend-adapter-contract/spec.md`), ChatGPT-spec-review F1 caught that typing `ExecutionBackend.id` as `ExecutionMode` (a closed five-value union) would force a future cascading rename when OpenClaw lands and introduces internal variants like `openclaw_managed` vs `openclaw_external`. Renaming a contract type after it has propagated through the registry, finaliser, and reconcile signatures is exactly the kind of "expensive to retrofit" cost that's cheap to pre-empt at spec time.
+
+**Resolution.** Introduce the wider type now (`ExecutionBackendId = ExecutionMode | 'openclaw_managed' | 'openclaw_external'`) and key the registry, `resolve()`, finaliser, and reconcile on it. Keep dispatch keyed on the narrower `ExecutionMode` (subtype assignment is automatic). Restrict V1 by a runtime guard at registration time: a register-call carrying an OpenClaw `ExecutionBackendId` value throws `BackendCapabilityViolation('OpenClaw backend ids reserved for Phase 3')`. The guard is removed when the OpenClaw adapter lands.
+
+**Why this matters.** A type seam carries forward without code changes; a type rename touches every call site. The wider type costs nothing at runtime (V1 still only registers ExecutionMode values) but eliminates a future PR that exists solely to rename the parameter type at every dispatch / finalise / reconcile call site. Apply this pattern whenever a contract field will plausibly need to accept additional discriminant values within the next ~2 specs — the cost-to-add-now is one type definition; the cost-to-add-later is a contract-wide rename.
+
+**Detection heuristic.** During spec review, ask: "is this id/discriminant typed as a closed union that the spec itself already mentions might expand?" If yes, expand the type now and restrict at runtime.
+
+## Pattern: Service-layer circular import — extract shared types into a neutral file
+
+**Context.** Same spec session, F3. Adapter types (`executionBackends/types.ts`) needed `TokenBudget` and `LoopResult` from `agentExecutionService.ts`, while `agentExecutionService.ts` imports `executionBackends/registry.ts` (which imports `executionBackends/types.ts`). Result: `types.ts → agentExecutionService.ts → registry.ts → types.ts` cycle. This is the service-layer analogue of the 2026-04-25 schema-as-leaf finding (KNOWLEDGE.md), but the fix shape is different.
+
+**Resolution.** Extract the shared type aliases (`TokenBudget`, `LoopResult`) into a new neutral file (`server/services/agentExecutionTypes.ts`) — type aliases only, zero runtime code. Both consumers import directly from the neutral file. The original service file re-exports the types for backwards compatibility with existing consumers (so call sites do not churn). Acceptance test: `expect(typesModuleSource).not.toMatch(/from .+agentExecutionService/)` in the contract pure test.
+
+**Why this matters.** Schema-leaf and service-leaf cycles have the same root cause (a leaf depending upward) but different fix shapes — schema fix is to drop the import; service fix is to relocate the shared type. Don't try to fix a service-layer cycle by inverting one of the imports; the right move is to lift the shared shape into a neutral module that neither side owns.
+
+**Detection heuristic.** When a new file references a "private" type from a module that will eventually depend on the new file, treat the type as already-shared and lift it before authoring the new module. The cycle is preventable at design time; catching it at typecheck time is rework.

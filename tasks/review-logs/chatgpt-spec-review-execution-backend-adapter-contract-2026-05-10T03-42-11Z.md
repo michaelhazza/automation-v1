@@ -6,6 +6,8 @@
 - PR: #281 — https://github.com/michaelhazza/automation-v1/pull/281
 - Mode: manual
 - Started: 2026-05-10T03:42:11Z
+- Finalised: 2026-05-10T04:10:00Z
+- **Verdict:** APPROVED (2 rounds, spec locked to `accepted`)
 
 ---
 
@@ -135,3 +137,44 @@ Three targeted greps (Round 2 changes only):
 No directional contradictions. Pass.
 
 ---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 14 applied | 0 rejected | 0 deferred
+- User-decided: 1 applied (F1 ExecutionBackendId type seam — "apply now") | 0 rejected | 0 deferred
+- Index write failures: 0 (clean)
+- Deferred to tasks/todo.md § Spec Review deferred items: none
+- KNOWLEDGE.md updated: yes (2 entries — type-seam-for-future-variants, service-layer circular-import / neutral-types-file pattern)
+- architecture.md updated: no — spec is forward-looking; the §IEE delegation lifecycle prose still describes current code accurately. Update is committed in the spec's §11 Components affected for the Chunk 5 cutover. Grep terms checked and found absent in current code: `executionBackendRegistry`, `ExecutionBackendId`, `agentExecutionTypes`, `finaliseAgentRunFromBackend`.
+- capabilities.md updated: n/a — internal refactor only; no add / remove / rename of any product capability, agency capability, skill, or integration in this session.
+- integration-reference.md updated: n/a — no integration behaviour change in this session.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no change to build discipline, agent fleet, review pipeline, or §8 development discipline.
+- CONTRIBUTING.md updated: n/a — no change to lint-suppression policy or contributor conventions.
+- spec-context.md updated: yes — `last_reviewed_at: 2026-05-09 → 2026-05-10` (framing verified current; no `accepted_primitives` change because the `executionBackendRegistry` primitive lands during the build, not at spec lock).
+- frontend-design-principles.md updated: n/a — no UI surface in this spec.
+- references/test-gate-policy.md updated: n/a — testing posture unchanged.
+- references/spec-review-directional-signals.md updated: n/a — no new directional signal class surfaced.
+- docs/decisions/ updated: n/a — durable choices captured in the spec itself + parent brief `tasks/builds/sandbox-and-executionbackend-strategy/brief.md § 3.6`. ADR not authored because the spec is the authoritative durable record.
+- docs/context-packs/ updated: n/a — no architecture.md anchor changes in this session.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a — repo-specific spec edit, not a framework-level change.
+- PR: #281 — https://github.com/michaelhazza/automation-v1/pull/281
+
+### Implementation readiness checklist (5/5 pass)
+
+- ✅ All inputs defined — `BackendDispatchInput`, `BackendFinalisationInput` fully typed (§4.1).
+- ✅ All outputs defined — `BackendDispatchResult`, `BackendFinalisationResult`, `BackendTerminalState`, `finaliseAgentRunFromBackend()` and `reconcileBackends()` return types declared.
+- ✅ Failure modes covered — typed errors `BackendOptionsMismatch`, `ParentRunNotDispatchable`, `BackendNotRegistered`, `BackendCapabilityViolation`, `BackendQueueOwnershipViolation`, `BackendTaskAlreadyClaimed`. Idempotency posture per operation in §13.1; retry classification in §13.2; concurrency guard in §13.3.
+- ✅ Ordering guarantees explicit — §13.1.1 four-step delegated dispatch sequence + reconciliation rule; §8.3 adapter-registration-before-pg-boss-workers boot invariant.
+- ✅ No unresolved forward references — Round 1 + Round 2 integrity checks both pass.
+
+Spec is implementation-ready.
+
+### Cross-round consistency check
+
+- Round 2 F1 extends Round 1 R4 (singular/plural drift family — caught a missed instance in §17 Risk 1). Refinement, not contradiction.
+- Round 2 F2 strengthens Round 1 F5 acceptance criterion (mock-only → mock + 5 real adapters). Refinement.
+- Round 2 F3 refines Round 1 F1's type signature for forward compatibility (`Record<…>` → `Partial<Record<…>>`). Refinement.
+- Round 2 P1 + P2 add belt-and-braces to existing claims. No inversion of any prior decision.
+
+No directional contradictions across rounds.
