@@ -91,5 +91,25 @@
 
 **Round 3 verdict:** CHANGES_REQUESTED → APPROVED with 1 deferred (PTH-CGT-R3-R2).
 
-**Round 4 diff:** pending generation after commit.
+### Round 4 — 2026-05-11T00:00:00Z (post Round 3 commit `15f03f63`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `connectorConfigService.ts` missing `withAdminConnection` import | high (claimed blocker) | typecheck | scope | technical | **reject** | auto (reject) — **third duplicate false positive** (also raised Round 1 F1, Round 3 F1). Import IS at line 7 of `server/services/connectorConfigService.ts`. Verified each round; typecheck PASSED in all four rounds. Per KNOWLEDGE.md `[2026-05-10] Correction — apply DiD patterns consistently...` §3, auto-rejecting duplicates without further investigation. |
+| F2 | Drizzle schema `.references()` does NOT encode `ON DELETE CASCADE`; migration does. Round 3 fix incomplete. | high (claimed blocker) | schema | naming | technical | **implement** | auto (implement) — added `{ onDelete: 'cascade' }` to the Drizzle `.references()` declaration in `server/db/schema/webhookReplayNonces.ts:7`. Now both sides agree: SQL = `REFERENCES organisations(id) ON DELETE CASCADE`, TS = `.references(() => organisations.id, { onDelete: 'cascade' })`. This is the exact class of bug KNOWLEDGE.md `[2026-05-10] Correction §2` warned against — and I committed it the very next round. Lesson reinforced. |
+| F3 | Migration uses unnamed `CREATE INDEX` (Postgres auto-names) but schema declares explicit name `webhook_replay_nonces_org_source_seen_at_idx`; introspection drift | medium (claimed blocker) | schema | naming | technical | **implement** | auto (implement) — added explicit index name to migration 0318: `CREATE INDEX webhook_replay_nonces_org_source_seen_at_idx ON webhook_replay_nonces (...)`. Both sides now agree on the index name. |
+| T1 | `SET LOCAL ROLE admin_role` requires a real transaction context; verify `withAdminConnection` wraps callback in one | low | observability / safety-comment | other | technical | **implement (comment)** | auto (implement) — added explanatory comments at both `SET LOCAL ROLE` call sites (`server/jobs/webhookReplayNoncePruneJob.ts:46` and `server/services/connectorConfigService.ts:277`) citing `server/lib/adminDbConnection.ts:82` where `withAdminConnection` wraps the callback in `db.transaction(async (tx) => ...)`. Confirmed: `SET LOCAL ROLE` is transaction-scoped and correctly resets on commit/rollback. |
+| T2 | Support legacy route 404 test mostly structural, not full app coverage | low | test-quality | test_coverage | technical | **defer** | already deferred from Round 3 as `PTH-CGT-R3-R2`. ChatGPT acknowledged this. No additional action. |
+
+**Auto-applied:** F2, F3, T1 (3 findings).
+**Auto-rejected:** F1 (1 finding — third duplicate false positive).
+**Deferred to backlog (no change):** T2 (already deferred as PTH-CGT-R3-R2).
+
+**Verification after Round 4 fixes (commit pending):** server typecheck CLEAN (0 errors); all 20 regression tests pass.
+
+**Round 4 verdict:** CHANGES_REQUESTED → APPROVED.
+
+**Round 5 diff:** pending generation after commit.
 

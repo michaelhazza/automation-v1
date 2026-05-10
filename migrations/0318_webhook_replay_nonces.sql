@@ -6,7 +6,8 @@ CREATE TABLE webhook_replay_nonces (
   CONSTRAINT webhook_replay_nonces_org_source_nonce_unique UNIQUE (organisation_id, webhook_source, nonce)
 );
 
-CREATE INDEX ON webhook_replay_nonces (organisation_id, webhook_source, seen_at);
+CREATE INDEX webhook_replay_nonces_org_source_seen_at_idx
+  ON webhook_replay_nonces (organisation_id, webhook_source, seen_at);
 
 ALTER TABLE webhook_replay_nonces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_replay_nonces FORCE ROW LEVEL SECURITY;

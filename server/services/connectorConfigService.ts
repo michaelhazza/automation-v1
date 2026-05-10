@@ -274,6 +274,9 @@ export const connectorConfigService = {
     return await withAdminConnection(
       { source: 'teamwork_webhook_token_lookup', skipAudit: true },
       async (adminDb) => {
+        // SET LOCAL ROLE is transaction-scoped — safe here because
+        // withAdminConnection wraps the callback in db.transaction()
+        // (see server/lib/adminDbConnection.ts:82). Role resets on commit/rollback.
         await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
         const [row] = await adminDb
           .select()

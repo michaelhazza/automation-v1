@@ -4,7 +4,7 @@ import { organisations } from './organisations.js';
 export const webhookReplayNonces = pgTable(
   'webhook_replay_nonces',
   {
-    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id, { onDelete: 'cascade' }),
     webhookSource: text('webhook_source').notNull(),
     nonce: text('nonce').notNull(),
     seenAt: timestamp('seen_at', { withTimezone: true }).defaultNow().notNull(),

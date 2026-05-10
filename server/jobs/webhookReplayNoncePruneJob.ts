@@ -43,6 +43,9 @@ export async function runWebhookReplayNoncePrune(): Promise<WebhookReplayNoncePr
     const deleted = await withAdminConnection(
       { source: SOURCE, reason: 'Hourly prune of expired webhook_replay_nonces', skipAudit: true },
       async (adminDb) => {
+        // SET LOCAL ROLE is transaction-scoped — safe here because
+        // withAdminConnection wraps the callback in db.transaction()
+        // (see server/lib/adminDbConnection.ts:82). Role resets on commit/rollback.
         await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
         const rows = (await adminDb.execute(
           sql`DELETE FROM webhook_replay_nonces WHERE seen_at < now() - INTERVAL '10 minutes' RETURNING 1`,
