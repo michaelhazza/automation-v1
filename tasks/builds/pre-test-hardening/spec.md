@@ -1,0 +1,413 @@
+# Pre-Test Hardening — Dev Spec
+
+**Slug:** `pre-test-hardening`
+**Branch:** `pre-test-hardening`
+**Class:** Major
+**Migration range reserved:** `0313–0320`
+**Source brief:** [`brief.md`](./brief.md)
+**Authored:** 2026-05-10
+
+---
+
+## Table of contents
+
+- §0. Framing
+- §1. Domain model
+- §2. Phase 1 — Webhook auth & isolation
+- §3. Phase 2 — Read/write tenant scoping closures
+- §4. Phase 3 — Support draft preflight + agent guards
+- §5. Phase 4 — Input validation + concurrency hardening
+- §6. Phase 5 — Operational hardening
+- §7. Test matrix
+- §8. Chunk plan
+- §9. Acceptance criteria summary
+- §10. Out of scope
+
+---
+
+## §0. Framing
+
+### §0.1 Posture
+
+This is the last hardening sprint before testing lockdown. After this build, the system is feature-frozen for testing → production deployment. Scope is intentionally tight: 9 MUST-DO items + 5 SHOULD-DO items. No new features. No refactors beyond what each fix requires.
+
+### §0.2 Sister-branch boundary
+
+Files owned by other in-flight branches are **out of scope for this build**:
+
+- `pre-prod-boundary-and-brief-api` owns: `server/middleware/*`, auth routes, rate-limiting primitive, multer config (audit rows #21, #24).
+- `pre-prod-workflow-and-delegation` owns: `server/services/workflowEngineService.ts`, `workflowRunService.ts`, `agentExecutionService.ts`, `agentRuns` schema.
+
+A scope-out grep gate runs in CI; the build is rejected if any file under those paths shows up in the diff.
+
+### §0.3 Migration sequencing
+
+Reserved range: `0313–0315`. Three slots cover:
+
+- Phase 1: 2 migrations (W3 — webhook replay nonces, Teamwork connector token) → `0313`, `0314`.
+- Phase 2: 0 migrations (route/service-only).
+- Phase 3: 0 migrations.
+- Phase 4: 1 migration (V1 — connection status CHECK constraint) → `0315`.
+- Phase 5: 0 migrations (O2 phased swap deferred per DEC-3).
+
+Builder must follow the canonical migration shape: `.sql` + matching `.down.sql`, idempotent where the operation permits it, no `CONCURRENTLY` inside a transaction.
+
+### §0.4 Decisions (resolved 2026-05-10)
+
+All four decision points were technical calls about implementation shape. Defaults are activated; rationale captured below for the audit trail. None of these decisions are reversible without rework, so they are part of the spec contract.
+
+| ID | Decision | Resolution + rationale |
+|----|----------|------------------------|
+| **DEC-1** | Support read scoping shape | **Subaccount-required path.** A support-desk product is operated within one subaccount at a time (one customer-support inbox per subaccount); an "all-subaccounts" view is a power-user / admin feature, not a daily driver. Adding sibling org-listing endpoints would multiply the permission surface (every endpoint needs its own scope key, scope check, audit hook) and introduce a parallel query path that drifts from the subaccount-scoped one over time. Requiring `:subaccountId` matches the canonical pattern used by every other subaccount-scoped surface in the codebase (`resolveSubaccount(req.params.subaccountId, req.orgId!)`) and is mechanically simpler. |
+| **DEC-2** | Webhook attribution shape (W3) | **Per-org URL path token.** Webhook config UIs (Teamwork's, and every comparable SaaS) reliably let operators set a delivery URL; setting custom HTTP headers is either unsupported or clunky. Path tokens are also the canonical pattern for the rest of the industry (Stripe, GitHub, Slack all do this) — operators recognise the shape. The token is a coarse-grained discriminator, not a secret; HMAC remains the auth boundary. URL-token leakage in third-party logs is acceptable because (a) the receiver already logs the URL, (b) the token can't be used without the matching HMAC secret, (c) tokens are revocable per-connector. |
+| **DEC-3** | Migration 0240 phased swap | **Defer to post-launch + ship runbook now.** The trigger condition (tens-of-millions of rows OR ~100–300ms write-latency tail) is not met today; pre-launch `conversations` will be in the low thousands of rows. The phased migration adds rollout complexity (two non-transactional migration files, intermediate two-index state) that is disproportionate to the current table size. Cost of the runbook entry is near-zero and prevents the next operator from rediscovering the trigger condition under pressure. |
+| **DEC-4** | `taskService.createTask` signature (T3) | **Caller-supplied `tx`.** Matches the established `getOrgScopedDb` / `withOrgTx` pattern shipped in the pre-prod-tenancy build. The alternative (callee opens its own `withOrgTx`) breaks down whenever the caller is already inside a transaction: it forces a nested savepoint, re-sets the GUC, and obscures transaction boundaries from the caller. Caller-supplied `tx` also forces every call site to think about org-scoping at its own boundary, which is the correct posture under FORCE-RLS — the boundary is the point where authorisation is established (route handler, job runner, OAuth callback), not the leaf service. Compile-time enforcement (TypeScript signature) catches regressions for free. |
+
+### §0.5 Verification posture
+
+Per `references/test-gate-policy.md`: targeted vitest only locally; CI runs the full suite. Each chunk ships with at least one test asserting the **closed gap fires** (negative test) — the test would fail on `main` and pass after the fix.
+
+---
+
+## §1. Domain model
+
+### §1.1 Domains touched
+
+- **Webhook ingest** — `server/services/webhookService.ts`, `server/routes/webhooks/*`. HMAC validation, replay protection, attribution, incident surfacing.
+- **Support draft dispatch** — `server/services/support/supportDraftDispatchService.ts`, `server/routes/support/*`. Preflight checks, principal-type gating, subaccount-scoped reads.
+- **Reference document promotion** — `server/services/referenceDocumentService.ts`, `server/routes/referenceDocuments/*`. Org-membership verification on scope-link writes.
+- **Task creation** — `server/services/taskService.ts`. Service-layer write path under FORCE-RLS.
+- **Knowledge override** — `server/services/knowledgeService.ts`. Concurrent-write serialisation.
+- **Integration connections** — `server/routes/integrationConnections.ts`. Enum validation.
+- **Agent working-time rollups** — `server/jobs/workingTimeRollupCompactJob.ts`. SQL bug.
+- **Operational scripts** — `scripts/_reseed_*.ts`. Environment guards.
+
+### §1.2 Cross-cutting invariants reinforced
+
+| Invariant | Where it bites here |
+|-----------|---------------------|
+| Tenant isolation on writes | T2 (promote scope IDs), T3 (taskService) |
+| Tenant isolation on reads | T1 (support routes) |
+| Webhook fail-closed | W1 (HMAC validation) |
+| Webhook unambiguous attribution | W3 (Teamwork connector enumeration) |
+| Spec preflight contract | S1, S2 (support draft) |
+| Input validation at boundaries | V1 (connection status enum) |
+| Concurrency-safe writes | V2 (knowledge override race) |
+| Job correctness | O1 (rollup compact SQL) |
+| Production safety on operational scripts | O3, O4 (reseed) |
+| CI gate enforcement | O5 (branch protection) |
+
+---
+
+## §2. Phase 1 — Webhook auth & isolation
+
+### §2.1 W1 — HMAC validation fails closed
+
+**File:** `server/services/webhookService.ts:74-77`
+
+**Current:** validation skipped when `WEBHOOK_SECRET` env-var is absent.
+
+**Target:** in production (`NODE_ENV === 'production'`), an unset secret causes the request to reject with `401 webhook.signature_required`. In development, the existing skip behaviour is preserved but emits a one-time `logger.warn('webhook_secret_missing', { route })` per process boot.
+
+**Acceptance:**
+- Negative test: production env + no secret → 401.
+- Positive test: production env + secret + valid HMAC → 200.
+- Positive test: development env + no secret → 200, log line emitted once.
+
+### §2.2 W2 — `recordIncident` on Slack + Teamwork webhook 5xx paths
+
+**Files:** `server/routes/webhooks/slackWebhook.ts`, `teamworkWebhook.ts`
+
+**Pattern:** mirror the GHL/GitHub webhook handler shape. Every inline `res.status(500)` path acquires a `recordIncident({ fingerprintOverride, errorDetail, ... })` call before the response, with stable fingerprints:
+- `webhook:slack:handler_failed`
+- `webhook:teamwork:handler_failed`
+
+**Acceptance:**
+- Targeted test per webhook: simulate a downstream throw inside the handler; assert `recordIncident` is called with the correct fingerprint before the 500 response.
+- No new fingerprint registry entries needed; reuse existing `webhook:*` namespace.
+
+### §2.3 W3 — Teamwork webhook cross-tenant attribution + persistent dedup
+
+**File:** `server/routes/webhooks/teamworkWebhook.ts:37-67`
+
+**Current:** handler iterates all active Teamwork connector configs, breaks at first HMAC match. Two orgs with the same secret cross-attribute. Replay protection is in-memory.
+
+**Target (DEC-2):**
+
+1. **URL discriminator.** New webhook URL shape: `/api/webhooks/teamwork/:orgWebhookToken` where `orgWebhookToken` is a stable, opaque per-connector-config token (UUIDv4, generated when the connector is created or migrated). Handler resolves the connector config by token in a single indexed lookup; HMAC validation runs against that one config only.
+2. **Persistent replay protection.** New table `webhook_replay_nonces (organisation_id, webhook_source, nonce, seen_at)` with a 10-minute TTL prune job. Handler inserts `(orgId, 'teamwork', deliveryId)` before processing; ON CONFLICT DO NOTHING; if conflict → reject as duplicate. TTL prune runs hourly via existing job framework.
+3. **Migration scope.** Existing Teamwork connectors get a token generated by a one-shot migration; URL rotation is communicated to operators via a runbook entry. The pre-launch posture means zero or very few prod connectors exist; cost is negligible.
+
+**Migrations:**
+- `0313_webhook_replay_nonces.sql` — table + index on `(organisation_id, webhook_source, seen_at)`; RLS policy registering `webhook_replay_nonces` in `rlsProtectedTables.ts`.
+- `0314_teamwork_connector_webhook_token.sql` — adds `webhook_token uuid NOT NULL DEFAULT gen_random_uuid()` to the Teamwork connector config row; UNIQUE constraint.
+
+**Acceptance:**
+- Negative test: webhook delivered to org A's URL signed with org B's secret → 401.
+- Negative test: same `deliveryId` replayed within 10min → 409 / 200-noop (dedup).
+- Negative test: same `deliveryId` replayed across two app instances → still rejected (DB-backed).
+- Positive test: distinct deliveries within window → both processed.
+- RLS gate (`scripts/verify-rls-protected-tables.sh`) exits 0 after registration.
+
+---
+
+## §3. Phase 2 — Read/write tenant scoping closures
+
+### §3.1 T1 — Support read-path subaccount scoping
+
+**Files:** `server/routes/support/supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21` and the corresponding service-layer query helpers.
+
+**Current:** route handlers pass `subaccountId: null`; service queries filter only by `organisationId`.
+
+**Target (DEC-1):**
+
+All five read endpoints (`GET /api/support/tickets`, `tickets/:id`, `drafts`, `drafts/:id`, `inboxes`) move under the existing `/api/subaccounts/:subaccountId/support/...` namespace. Path-segment scoping is chosen over a query-parameter shape because it (a) matches the canonical pattern used by every other subaccount-scoped surface, (b) cannot be silently forgotten on a new endpoint, (c) is enforced by the route definition rather than per-handler validation. Routes call `resolveSubaccount(req.params.subaccountId, req.orgId!)`. Service-layer queries gain an explicit `eq(table.subaccountId, subaccountId)` filter. The frontend is updated in the same chunk to call the new URLs; the old paths are removed (no compatibility shim — pre-launch posture).
+
+**Acceptance:**
+- Negative test: GET without subaccountId → 400 `support.subaccount_required`.
+- Negative test: GET with another org's subaccountId → 403 (existing `resolveSubaccount` behaviour).
+- Negative test (cross-tenant read): seed two subaccounts; query A returns only A's drafts/tickets/inboxes.
+- No service queries on `support_*` tables without an explicit subaccount filter.
+
+### §3.2 T2 — Reference-document promote: cross-org scope-ID rejection
+
+**Files:** `server/routes/referenceDocuments/promoteRoute.ts` (or wherever `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` live), `server/services/referenceDocumentService.ts`.
+
+**Current:** body-supplied `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` flow into `referenceDocumentDataSources` insert without org-membership verification.
+
+**Target:** before insert, every non-null scope ID is verified against `WHERE id = :id AND organisation_id = :req.orgId!`. Verification is a single batched query per scope kind (`agents`, `subaccounts`, `scheduled_tasks`, `tasks`). Mismatch → 403 `referenceDocument.scope_cross_org`.
+
+**Acceptance:**
+- Negative test (per scope kind): seed an entity in org B; promote with that ID under org A's auth → 403; insert is not attempted.
+- Positive test: promote with same-org IDs → 201.
+- Audit log row written on the 403 path.
+
+### §3.3 T3 — `taskService.createTask` write-path scoping
+
+**File:** `server/services/taskService.ts:158, 185` and every caller.
+
+**Current:** `createTask` and `taskActivities` insert use module-level `db`. Under FORCE-RLS, writes silently no-op or fail policy unless ALS happens to have a GUC set (which it does NOT for module-level `db`).
+
+**Target (DEC-4):**
+
+1. `createTask(input, tx)` and the corresponding `taskActivities` insert helper require an explicit transaction client supplied by the caller (signature change).
+2. Every caller is audited and migrated. Two caller categories:
+   - **Already inside `withOrgTx`** — pass the existing `tx` through.
+   - **Not yet inside `withOrgTx`** — wrap the call in `withOrgTx({ organisationId, source })` at the appropriate boundary.
+3. The unauthenticated GHL path (todo line 2609 — auto-start onboarding) is a known special case and is **explicitly out of scope** per §0.2 — but the refactor must not regress it. The refactor lands a TODO comment at the GHL caller pointing at the deferred work.
+
+**Acceptance:**
+- Compile-time enforcement: removing the `tx` parameter from any call site is a TypeScript error.
+- Targeted test: `createTask` called inside a `withOrgTx` block writes successfully under FORCE-RLS; called with module-level `db` (regression simulation) throws or no-ops.
+- Caller audit checklist appended to `progress.md` listing every modified call site.
+- `npx tsc --noEmit -p server/tsconfig.json` clean.
+
+**Estimated reach:** 12–25 caller sites (inferred from the todo entry "dozens of call sites"). Builder confirms the count in the Phase 2 progress entry.
+
+---
+
+## §4. Phase 3 — Support draft preflight + agent guards
+
+### §4.1 S1 — `approveDraft` preflight checks 4–7
+
+**File:** `server/services/support/supportDraftDispatchService.ts approveDraft`
+
+**Spec source:** `tasks/builds/support-ticket-structure/spec.md` §8.1 (the seven-check enumeration).
+
+**Target:** add the four missing checks, in the order the spec defines them, after the existing checks 1–3. Each check is its own pure function under `supportDraftPreflightPure.ts` (or extension of the existing module) and is unit-tested in isolation:
+
+- **Check 4 — Ticket-status eligibility.** Reject if the action (`support.propose_reply` etc.) is disallowed for the current ticket status per spec §5.1.A column 3.
+- **Check 5 — Collision-window.** Reject if `now - last_human_activity_at < agent_config.collisionWindow.minMinutesSinceHumanActivity`. Respect `respect-human-assignee` flag. Bypass allowed when `overrideCollision=true` AND principal is human (see S2).
+- **Check 6 — Customer-match policy gate.** Reject if the inbox's customer-match policy disallows the customer in question (per spec §5.1.B).
+- **Check 7 — Supersession.** Reject if any newer draft exists for the same `ticketId`.
+
+When `overrideCollision=true` and the principal is human (S2 holds), check 5 is skipped, an `auditEvents` row is written with the snapshot, and the route-layer `assertScope(principal, 'support.draft.override_collision')` is re-asserted defensively at the service layer.
+
+**Acceptance:**
+- Per-check unit test (negative + positive).
+- Integration test: `approveDraft` with each rejecting condition → correct error code.
+- `overrideCollision=true` + human principal: check 5 skipped, audit row present.
+- `overrideCollision=true` + agent principal: 403 (S2).
+
+### §4.2 S2 — Agent-run principal cannot set `overrideCollision: true`
+
+**File:** same service.
+
+**Spec source:** spec §8.6 paragraph 5.
+
+**Target:** at the start of `approveDraft`, if `overrideCollision === true`, assert the principal has a non-null human `userId`. Otherwise reject with `403 { errorCode: 'support.draft.override_collision_human_only' }`.
+
+**Acceptance:**
+- Negative test: agent-run principal + `overrideCollision: true` → 403; no DB writes.
+- Positive test: human principal + `overrideCollision: true` → check 5 skipped; succeeds.
+
+---
+
+## §5. Phase 4 — Input validation + concurrency hardening
+
+### §5.1 V1 — `PATCH /api/connections` enum validation
+
+**File:** `server/routes/integrationConnections.ts:123`.
+
+**Target:**
+
+1. **Route layer:** Zod schema rejects unknown `connectionStatus` strings: `connectionStatus: z.enum(['active','revoked','error']).optional()`. Reject → 400 `connection.status_invalid`.
+2. **DB layer:** new migration `0315_connections_status_check.sql` adds a CHECK constraint on `integration_connections.connection_status` matching the enum. Idempotent.
+
+The two layers are deliberately redundant: the route guard prevents the bad write at runtime; the CHECK constraint ensures any future code path that bypasses the route can't poison the column.
+
+**Acceptance:**
+- Negative test: PATCH with `connectionStatus: 'foo'` → 400.
+- Negative test: direct DB insert with `'foo'` (test fixture) → 23514 CHECK violation.
+- Positive test: PATCH with `'revoked'` → 200; subsequent GET returns the row.
+
+### §5.2 V2 — Knowledge `overrideEntry` concurrent-write serialisation
+
+**File:** `server/services/knowledgeService.ts:766-811`.
+
+**Target:** at transaction start, acquire `pg_advisory_xact_lock(hashtextextended(blockId, 0))`. Concurrent overrides on the same `blockId` serialise; `(memoryBlockId, version)` collisions cannot occur. Lock is per-block and transaction-scoped, released automatically on commit/rollback.
+
+**Acceptance:**
+- Concurrency test: spawn N concurrent overrides with distinct bodies on the same `blockId`; assert all succeed in some order; final `MAX(version) = N + initial`.
+- 500-leak test: concurrent overrides do not produce a 500 with constraint name in the body.
+- Cross-block concurrency test: overrides on distinct `blockId`s do not serialise (lock is per-block).
+
+---
+
+## §6. Phase 5 — Operational hardening
+
+### §6.1 O1 — `workingTimeRollupCompactJob` SQL fix
+
+**File:** `server/jobs/workingTimeRollupCompactJob.ts:99`.
+
+**Current:** `DELETE FROM agent_working_time_rollups ... RETURNING id` — fails because the table has a composite PK and no `id` column.
+
+**Target:** drop `RETURNING id`. If the caller needs a row count, use `affectedRows` from the drizzle response. The job's purpose is bounded compaction; a count is sufficient — no individual-row reference is needed downstream.
+
+**Acceptance:**
+- Targeted test: seed `agent_working_time_rollups` with a couple of rows past retention; run job; assert rows deleted, no SQL error.
+
+### §6.2 O2 — Migration 0240 phased swap (deferred per DEC-3)
+
+**Scope in this build:** runbook entry only — no code change.
+
+New file `docs/runbooks/migration-0240-phased-swap.md` documents (a) the trigger condition (table size or write-latency tail past the threshold), (b) the two-step `CREATE UNIQUE INDEX CONCURRENTLY` + drop-old + rename migration, (c) the rollback plan, (d) the operator's command sequence. Linked from `docs/doc-sync.md` if the doc sync gate requires.
+
+### §6.3 O3 — Reseed drop-create env guard
+
+**File:** `scripts/_reseed_drop_create.ts`.
+
+**Target:** `main()` first lines:
+
+1. If `process.env.NODE_ENV === 'production'` → throw with explicit message.
+2. If `DATABASE_URL` matches a list of known production host fragments (operator-supplied via env var `PROD_DB_HOST_DENYLIST` or hardcoded) → throw.
+3. Otherwise proceed.
+
+The denylist is stored in `scripts/lib/prod-db-guard.ts` (new) and reused by O4 and any future destructive script.
+
+**Acceptance:**
+- Negative test: invoke with `NODE_ENV=production` → throws; no SQL executed.
+- Negative test: invoke with `DATABASE_URL` matching a denylist host → throws.
+- Positive test: invoke with `NODE_ENV=development` and a dev DB URL → proceeds (existing behaviour preserved).
+
+### §6.4 O4 — Reseed restore transaction wrap
+
+**File:** `scripts/_reseed_restore_users.ts`.
+
+**Target:** wrap the entire restore body in `db.transaction(async (tx) => { ... })`. All DML inside uses `tx`. Re-uses the prod-DB guard from O3 (defence-in-depth).
+
+**Acceptance:**
+- Targeted test: simulate mid-restore throw; assert DB state is unchanged after rollback.
+- Positive test: full restore runs to completion; users + joined rows present.
+
+### §6.5 O5 — Branch protection on `main`
+
+**Operator-action — not code.** Spec records the requirement; the operator applies it at the GitHub UI.
+
+**Settings → Branches → main → Branch protection:**
+
+- Require pull request before merging.
+- Require status checks to pass before merging:
+  - `lint-typecheck`
+  - `Grep invariants (Phase 3 B.1-B.4)`
+  - `Portable framework tests`
+- Require branches to be up to date before merging.
+- Do not allow bypassing the above settings (or restrict bypass to a small admin group).
+
+**Acceptance:** spec captures the requirement. Build's `progress.md` includes a screenshot or `gh api repos/<owner>/<repo>/branches/main/protection` output confirming the rules are live.
+
+---
+
+## §7. Test matrix
+
+| Phase | Item | Negative test (regression catcher) | Positive test |
+|-------|------|------------------------------------|---------------|
+| 1 | W1 | prod + no secret → 401 | prod + secret + valid sig → 200 |
+| 1 | W2 (Slack) | downstream throw → `recordIncident` called | normal flow → no incident |
+| 1 | W2 (Teamwork) | downstream throw → `recordIncident` called | normal flow → no incident |
+| 1 | W3 | wrong-org URL → 401 | per-org URL → 200 |
+| 1 | W3 | replay within 10min → dedup | distinct deliveries → both processed |
+| 1 | W3 | replay across instances → dedup | — |
+| 2 | T1 | GET without subaccountId → 400 | scoped GET → only that subaccount's rows |
+| 2 | T1 | cross-org subaccountId → 403 | — |
+| 2 | T2 | promote with cross-org agentId → 403 | same-org → 201 |
+| 2 | T2 | (per other scope kinds) | — |
+| 2 | T3 | createTask outside withOrgTx → throw or no-op | createTask inside withOrgTx → success under FORCE-RLS |
+| 3 | S1 (×4 checks) | each rejecting condition → correct error code | clean draft → success |
+| 3 | S1 | overrideCollision human path → audit row written | — |
+| 3 | S2 | agent + override=true → 403 | human + override=true → success |
+| 4 | V1 | PATCH 'foo' → 400 | PATCH 'revoked' → 200 |
+| 4 | V1 | direct insert 'foo' → 23514 | — |
+| 4 | V2 | concurrent same-block → all succeed, no 23505 | concurrent distinct blocks → no serialisation |
+| 5 | O1 | seeded rows → DELETE succeeds, no SQL error | — |
+| 5 | O3 | NODE_ENV=production → throw | NODE_ENV=development → proceed |
+| 5 | O3 | denylist host → throw | — |
+| 5 | O4 | mid-restore throw → DB unchanged | full restore → users present |
+| 5 | O5 | (manual verification) | — |
+
+---
+
+## §8. Chunk plan (architect refines)
+
+The architect agent decomposes this spec into builder-sized chunks. Recommended boundaries:
+
+- **C1 — W1, W2** (webhook auth + 5xx incidents). Co-locates webhook stack changes.
+- **C2 — W3** (cross-tenant attribution + persistent dedup). Includes migrations 0313, 0314.
+- **C3 — T1** (support read scoping). Co-locates the three route files + service helpers.
+- **C4 — T2** (promote endpoint).
+- **C5 — T3** (`taskService.createTask` rewrite). Largest chunk — runs solo to keep the diff reviewable.
+- **C6 — S1, S2** (support draft preflight + agent guard). Co-locates because S2 is a guard inside S1's call path.
+- **C7 — V1** (connection status enum + migration 0315).
+- **C8 — V2** (knowledge override race).
+- **C9 — O1, O3, O4** (operational scripts + job SQL fix).
+- **C10 — O2 runbook + O5 branch-protection record.**
+
+Architect may merge or split based on diff size and review-pipeline considerations. Each chunk passes its own G1 gate (lint + typecheck + targeted test) before the next chunk starts.
+
+---
+
+## §9. Acceptance criteria summary
+
+The build is merge-ready when:
+
+1. All 14 items above ship per their per-item acceptance criteria.
+2. `npx tsc --noEmit -p server/tsconfig.json` clean.
+3. `npm run lint` clean.
+4. `bash scripts/verify-rls-protected-tables.sh` exits 0 (W3 adds one new registered table).
+5. Sister-branch scope-out gate exits 0 (no diff in §0.2 forbidden paths).
+6. `progress.md` documents:
+   - DEC-1 through DEC-4 resolutions (locked in spec §0.4 — `progress.md` only re-states the resolutions and notes any in-build deviations).
+   - T3 caller audit checklist with every modified call site listed.
+   - O5 branch-protection screenshot or `gh api` output.
+7. `pr-reviewer` passes.
+8. `adversarial-reviewer` auto-fires (webhook + RLS surface) and returns no escalated findings.
+9. `chatgpt-pr-review` round 1 returns no blockers.
+
+---
+
+## §10. Out of scope
+
+- **Audit row #21, #24** — sister-branch (`pre-prod-boundary-and-brief-api`).
+- **GHL unauthenticated auto-start onboarding RLS** (todo line 2609) — depends on T3 landing first; deserves its own decision because the fix space (admin-bypass vs ALS-context wiring) is non-trivial.
+- **Defense-in-depth tightenings, code-quality polish, doc rot, post-launch architectural items** — backlog cluster identified in 2026-05-10 triage; not launch-blocking; ship later.
+- **New features** — nothing in this spec adds product surface; every change closes a known gap.
