@@ -3581,7 +3581,10 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 
 **OQ-1 deferral (operator-acknowledged):** Foundry-trained model wiring into the dispatch path is deferred. Future wiring is gated on operator-driven OQ-1 close per `tasks/todo.md § Deferred`. See ADR-0009 Consequences.
 
-### Routes (mounted at `/api/support`)
+### Routes (mounted at `/api/subaccounts/:subaccountId/support` — pre-test-hardening DEC-1/T1)
+
+Support reads are subaccount-scoped: every endpoint resolves `req.params.subaccountId` via `resolveSubaccount(req.params.subaccountId, req.orgId!)` before any DB query. The legacy unscoped `/api/support` mount was removed (no compatibility shim per pre-test-hardening spec §3.1 / DEC-1 — pre-launch posture). Service-layer queries additionally carry `eq(table.subaccountId, subaccountId)` so cross-subaccount reads return zero rows.
+
 
 | Route | File | Purpose |
 |-------|------|---------|

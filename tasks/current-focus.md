@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/phase-1-showcase-mvps/spec.md
-active_plan: tasks/builds/phase-1-showcase-mvps/plan.md
-build_slug: phase-1-showcase-mvps
-branch: feat/phase-1-showcase-mvps
-status: MERGE_READY
-last_updated: 2026-05-11
-last_merged_pr: #279
-last_merged_slug: synthetos-foundation-refactor
-last_merged_branch: claude/openclaw-worker-mode-VnjQT
-last_merged_at: 2026-05-09T23:39:33Z
-last_merged_commit: 53dabb69
+active_spec: tasks/builds/pre-test-hardening/spec.md
+active_plan: tasks/builds/pre-test-hardening/plan.md
+build_slug: pre-test-hardening
+branch: claude/review-preprod-spec-CmHez
+status: REVIEWING
+last_updated: 2026-05-10T22:32:09Z
+last_merged_pr: #283
+last_merged_slug: phase-1-showcase-mvps
+last_merged_branch: feat/phase-1-showcase-mvps
+last_merged_at: 2026-05-10T22:00:00Z
+last_merged_commit: f3dac9f3
 -->
 
 # Current Focus
@@ -24,13 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/phase-1-showcase-mvps/spec.md`
-**Active plan:** `tasks/builds/phase-1-showcase-mvps/plan.md`
-**Active build slug:** phase-1-showcase-mvps
-**Branch:** feat/phase-1-showcase-mvps
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered in `RunTracePage.tsx` / `RunTraceEventRenderer.tsx`); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (N1 phase1.* filter posture deferred to `tasks/todo.md` as PHASE1-N1 — non-blocking). Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). PR #283. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`. **Next:** CI auto-fix loop if needed, then auto-merge. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) + 1 PHASE1-N1 deferred to post-merge backlog in `tasks/todo.md`.
+**Active spec:** `tasks/builds/pre-test-hardening/spec.md`
+**Active plan:** `tasks/builds/pre-test-hardening/plan.md`
+**Active build slug:** pre-test-hardening
+**Branch:** claude/review-preprod-spec-CmHez
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete. 14-item launch-blocker hardening sprint (W1-W3 webhook auth + isolation; T1-T3 read/write tenant scoping; S1-S2 support-draft preflight + agent guards; V1-V2 input validation + concurrency hardening; O1-O5 operational hardening). Three migrations (0318/0319/0320 — renumbered forward post-S2 to clear collision with PR #281 + PR #283). 76 files, +8082/-541 lines. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer 2 rounds APPROVED (Round 1 3 Blockers fixed in `3423a0d5`; Round 2 1 Blocker B1.x + 3 Strong fixed in `930d385e`) → dual-reviewer Codex APPROVED (4 iterations, 1 accepted fix `bde109c9` — auto-generate `webhook_token` on Teamwork connector create; 2 rejected with spec citation) → adversarial-reviewer HOLES_FOUND (PTH-ADV-1 LIKELY-HOLE defence-in-depth org-id filter on `supportDraftDispatchService.approveDraft` — CLOSED in `930d385e`; 3 WORTH-CONFIRMING routed to backlog as PTH-ADV-2/3/4) → S2 merge of origin/main `0c025224` (3 known-shape conflicts resolved; migrations renumbered; npm install for `@react-pdf/renderer 4.5.1` + 52 transitive packages) → doc-sync sweep complete (architecture.md support routes mount + integration-reference.md Teamwork entry + KNOWLEDGE.md +3 patterns). Handoff at `tasks/builds/pre-test-hardening/handoff.md`. **Next:** PR creation + Phase 3 finalisation (G4 regression guard → chatgpt-pr-review manual rounds → doc-sync cross-check → ready-to-merge → CI fix-loop → auto-merge).
 
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Pointer was overwritten by the active `phase-1-showcase-mvps` work; recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+**Just merged:** PR #283 — `phase-1-showcase-mvps` (squash-commit `f3dac9f3`, 2026-05-10). Phase 1 Showcase MVPs — Phase 3 complete. chatgpt-pr-review 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (PHASE1-N1 phase1.* filter posture deferred). Migrations 0313/0314/0315/0316/0317 (run_artifacts + support_agent_install + support_eval_runs + corrective + RLS guards). Doc-sync sweep: 3 docs updated. KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`.
+
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when pre-test-hardening reaches MERGED.
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 
@@ -88,7 +90,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11 (PR #283 `phase-1-showcase-mvps` → MERGE_READY; Phase 3 finalisation complete)
+**Last updated:** 2026-05-10T22:32:09Z (Phase 2 close for `pre-test-hardening` → REVIEWING; PR #283 noted as merged)
 
 ---
 
