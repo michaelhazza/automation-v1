@@ -1,0 +1,85 @@
+{
+  "mode": "spec",
+  "model": "gpt-4.1",
+  "input_summary": {
+    "branch": "main",
+    "spec_path": "tasks/builds/phase-1-showcase-mvps/spec.md",
+    "files_changed": null
+  },
+  "findings": [
+    {
+      "id": "f-001",
+      "title": "No Canonical Source-of-Truth Declared for Artifact/Attachment Drift Between Worker and Main-App Ledgers",
+      "severity": "high",
+      "category": "architecture",
+      "finding_type": "architecture",
+      "rationale": "Spec describes the dual ledger system (`iee_artifacts` in the worker and `run_artifacts` in the main app) but does not specify which is the ultimate source-of-truth in cases of drift, nor is there a firm/explicit mechanism ensuring full consistency or automatic recovery for all drift scenarios.",
+      "evidence": "Section 6.1.2 Schema: 'Source-of-truth precedence vs `iee_artifacts` ... No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.' and 'Drift handling between the two ledgers. Promotion is not transactional across worker-internal `iee_artifacts` and customer-facing `run_artifacts`...' (no proactive reconciliation/policy)."
+    },
+    {
+      "id": "f-002",
+      "title": "Missing Explicit Idempotency and Retry Semantics for PDF Rendering Step",
+      "severity": "medium",
+      "category": "architecture",
+      "finding_type": "idempotency",
+      "rationale": "PDF rendering is performed after IEE run-completed event but the spec only states that the same content hash should result for the same input. There is no explicit declaration of the idempotency behavior or error-handling posture for re-invocation, especially if PDF generation or upload fails independently of run-complete.",
+      "evidence": "Section 4.4.3: 'the worker hands off the transcript artifact and structured analysis to the main app via the existing run-completed event; the main app renders the PDF and uploads it via file-delivery service'; additionally, the failure path for run_artifact creation is not described (see also Section 6.1.2)."
+    },
+    {
+      "id": "f-003",
+      "title": "Phase Sequencing Contradiction: File Delivery Infrastructure Dependency and Parallelism",
+      "severity": "high",
+      "category": "architecture",
+      "finding_type": "architecture",
+      "rationale": "Spec asserts that both MVPs can proceed in parallel, yet artifacts (non-ephemeral files) are a gating dependency for both workflows: 42 Macro cannot proceed to completion without file delivery; Support Inbox may require it for attachments. Contradiction between stated phase parallelism and dependency.",
+      "evidence": "Section 0.6 and 8.1: 'The two showcase MVPs can build in parallel once their dependencies are met. File delivery infrastructure is shared and must complete first or alongside.' Yet, file delivery is listed as a not-started dependency for both."
+    },
+    {
+      "id": "f-004",
+      "title": "No Mechanism Specified to Prevent Prompt Injection Beyond Conventions in Per-Inbox promptOverride",
+      "severity": "medium",
+      "category": "improvement",
+      "finding_type": "security",
+      "rationale": "Controls listed for promptOverride are heuristic/dev-discipline based, not programmatic or enforced at model run-time. Creative or encoded attacks could bypass length- or string-lists. No mandatory context isolation or proven model-guard.",
+      "evidence": "Section 5.3.6: 'These controls are dev-discipline, not a security boundary.'"
+    },
+    {
+      "id": "f-005",
+      "title": "Eval Harness as a Static Gate Depends on Timely/Available Historical Data",
+      "severity": "medium",
+      "category": "improvement",
+      "finding_type": "test_coverage",
+      "rationale": "The acceptance of Support Agent depends on the presence of a Foundry-derived regression set, curated draft replies, and timely/accurate model-pinned judgements. If this data is not available (e.g., Foundry API cutover, data stale), gate will not be effective; missing rollback/mitigation strategy is a load-bearing claim.",
+      "evidence": "Section 5.5.2: 'Regression set | 50 to 200 historical tickets with golden classifications + golden draft replies (provided by Foundry export, per support-desk-canonical OQ-1)' and Section 7.3: 'if fewer than two rows exist, the gate exits 0 (fail-open)... fail-open is logged...'"
+    },
+    {
+      "id": "f-006",
+      "title": "Support Inbox Agent Claim Concurrency Guard is Vulnerable to Clock Skew and Transactional Out-of-Order Edge Cases",
+      "severity": "medium",
+      "category": "bug",
+      "finding_type": "idempotency",
+      "rationale": "Optimistic claim with TTL relies on accurate server time; if distributed workers have skew, could see double claims, or claims could expire earlier/later than intended. No mention of clock sync or mitigation.",
+      "evidence": "Section 5.3.4: 'Claim acquisition... SET bot_claimed_at = now()... AND (bot_claimed_at IS NULL OR bot_claimed_at < now() - interval ':claimTtlMinutes minutes')'."
+    },
+    {
+      "id": "f-007",
+      "title": "No Stated Remediation for Foundational Table Migration Failure",
+      "severity": "medium",
+      "category": "architecture",
+      "finding_type": "error_handling",
+      "rationale": "While migrations are declared as 'reversible', the effect on the system if a migration fails due to a partial state or external S3/IAM issues is not described. Manual revert is assumed, but details for hard-recovery, especially with external state, are omitted.",
+      "evidence": "Section 6.1.2: 'Migration... creates the table ...' and Section 8.4: 'Each migration has `.down.sql`.'"
+    },
+    {
+      "id": "f-008",
+      "title": "Slack Approval Flow and Manual Review are Claimed as ‘Existing’ But Not Linked to Test or Posture Guarantee",
+      "severity": "low",
+      "category": "improvement",
+      "finding_type": "test_coverage",
+      "rationale": "Assumption that Slack Block Kit/HITL approval flow will work unchanged for new support agent runs is made, but no explicit acceptance or test is referenced that covers integration between new agent payloads and existing manual review UIs.",
+      "evidence": "Section 5.4.2: '...the existing review queue + Slack Block Kit flow takes over... the three-phase dispatch in supportDraftDispatchService consumes the human approval signal directly per the support-desk-canonical contract.'"
+    }
+  ],
+  "verdict": "CHANGES_REQUESTED",
+  "raw_response": "{\n  \"findings\": [\n    {\n      \"id\": \"f-001\",\n      \"title\": \"No Canonical Source-of-Truth Declared for Artifact/Attachment Drift Between Worker and Main-App Ledgers\",\n      \"severity\": \"high\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"architecture\",\n      \"rationale\": \"Spec describes the dual ledger system (`iee_artifacts` in the worker and `run_artifacts` in the main app) but does not specify which is the ultimate source-of-truth in cases of drift, nor is there a firm/explicit mechanism ensuring full consistency or automatic recovery for all drift scenarios.\",\n      \"evidence\": \"Section 6.1.2 Schema: 'Source-of-truth precedence vs `iee_artifacts` ... No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.' and 'Drift handling between the two ledgers. Promotion is not transactional across worker-internal `iee_artifacts` and customer-facing `run_artifacts`...' (no proactive reconciliation/policy).\"\n    },\n    {\n      \"id\": \"f-002\",\n      \"title\": \"Missing Explicit Idempotency and Retry Semantics for PDF Rendering Step\",\n      \"severity\": \"medium\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"idempotency\",\n      \"rationale\": \"PDF rendering is performed after IEE run-completed event but the spec only states that the same content hash should result for the same input. There is no explicit declaration of the idempotency behavior or error-handling posture for re-invocation, especially if PDF generation or upload fails independently of run-complete.\",\n      \"evidence\": \"Section 4.4.3: 'the worker hands off the transcript artifact and structured analysis to the main app via the existing run-completed event; the main app renders the PDF and uploads it via file-delivery service'; additionally, the failure path for run_artifact creation is not described (see also Section 6.1.2).\"\n    },\n    {\n      \"id\": \"f-003\",\n      \"title\": \"Phase Sequencing Contradiction: File Delivery Infrastructure Dependency and Parallelism\",\n      \"severity\": \"high\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"architecture\",\n      \"rationale\": \"Spec asserts that both MVPs can proceed in parallel, yet artifacts (non-ephemeral files) are a gating dependency for both workflows: 42 Macro cannot proceed to completion without file delivery; Support Inbox may require it for attachments. Contradiction between stated phase parallelism and dependency.\",\n      \"evidence\": \"Section 0.6 and 8.1: 'The two showcase MVPs can build in parallel once their dependencies are met. File delivery infrastructure is shared and must complete first or alongside.' Yet, file delivery is listed as a not-started dependency for both.\"\n    },\n    {\n      \"id\": \"f-004\",\n      \"title\": \"No Mechanism Specified to Prevent Prompt Injection Beyond Conventions in Per-Inbox promptOverride\",\n      \"severity\": \"medium\",\n      \"category\": \"security\",\n      \"finding_type\": \"security\",\n      \"rationale\": \"Controls listed for promptOverride are heuristic/dev-discipline based, not programmatic or enforced at model run-time. Creative or encoded attacks could bypass length- or string-lists. No mandatory context isolation or proven model-guard.\",\n      \"evidence\": \"Section 5.3.6: 'These controls are dev-discipline, not a security boundary.'\"\n    },\n    {\n      \"id\": \"f-005\",\n      \"title\": \"Eval Harness as a Static Gate Depends on Timely/Available Historical Data\",\n      \"severity\": \"medium\",\n      \"category\": \"test_coverage\",\n      \"finding_type\": \"test_coverage\",\n      \"rationale\": \"The acceptance of Support Agent depends on the presence of a Foundry-derived regression set, curated draft replies, and timely/accurate model-pinned judgements. If this data is not available (e.g., Foundry API cutover, data stale), gate will not be effective; missing rollback/mitigation strategy is a load-bearing claim.\",\n      \"evidence\": \"Section 5.5.2: 'Regression set | 50 to 200 historical tickets with golden classifications + golden draft replies (provided by Foundry export, per support-desk-canonical OQ-1)' and Section 7.3: 'if fewer than two rows exist, the gate exits 0 (fail-open)... fail-open is logged...'\"\n    },\n    {\n      \"id\": \"f-006\",\n      \"title\": \"Support Inbox Agent Claim Concurrency Guard is Vulnerable to Clock Skew and Transactional Out-of-Order Edge Cases\",\n      \"severity\": \"medium\",\n      \"category\": \"bug\",\n      \"finding_type\": \"idempotency\",\n      \"rationale\": \"Optimistic claim with TTL relies on accurate server time; if distributed workers have skew, could see double claims, or claims could expire earlier/later than intended. No mention of clock sync or mitigation.\",\n      \"evidence\": \"Section 5.3.4: 'Claim acquisition... SET bot_claimed_at = now()... AND (bot_claimed_at IS NULL OR bot_claimed_at < now() - interval ':claimTtlMinutes minutes')'.\"\n    },\n    {\n      \"id\": \"f-007\",\n      \"title\": \"No Stated Remediation for Foundational Table Migration Failure\",\n      \"severity\": \"medium\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"error_handling\",\n      \"rationale\": \"While migrations are declared as 'reversible', the effect on the system if a migration fails due to a partial state or external S3/IAM issues is not described. Manual revert is assumed, but details for hard-recovery, especially with external state, are omitted.\",\n      \"evidence\": \"Section 6.1.2: 'Migration... creates the table ...' and Section 8.4: 'Each migration has `.down.sql`.'\"\n    },\n    {\n      \"id\": \"f-008\",\n      \"title\": \"Slack Approval Flow and Manual Review are Claimed as ‘Existing’ But Not Linked to Test or Posture Guarantee\",\n      \"severity\": \"low\",\n      \"category\": \"test_coverage\",\n      \"finding_type\": \"test_coverage\",\n      \"rationale\": \"Assumption that Slack Block Kit/HITL approval flow will work unchanged for new support agent runs is made, but no explicit acceptance or test is referenced that covers integration between new agent payloads and existing manual review UIs.\",\n      \"evidence\": \"Section 5.4.2: '...the existing review queue + Slack Block Kit flow takes over... the three-phase dispatch in supportDraftDispatchService consumes the human approval signal directly per the support-desk-canonical contract.'\"\n    }\n  ],\n  \"verdict\": \"CHANGES_REQUESTED\"\n}"
+}

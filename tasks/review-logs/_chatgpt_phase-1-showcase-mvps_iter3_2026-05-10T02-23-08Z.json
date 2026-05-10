@@ -1,0 +1,103 @@
+{
+  "mode": "spec",
+  "model": "gpt-4.1",
+  "input_summary": {
+    "branch": "main",
+    "spec_path": "tasks/builds/phase-1-showcase-mvps/spec.md",
+    "files_changed": null
+  },
+  "findings": [
+    {
+      "id": "f-001",
+      "title": "Ambiguity in Source-of-Truth Between run_artifacts and iee_artifacts",
+      "severity": "high",
+      "category": "architecture",
+      "finding_type": "other",
+      "rationale": "Potential for drift and inconsistency between worker-internal artifacts and customer-facing artifacts, with unclear reconciliation/visibility for orphaned artifacts.",
+      "evidence": "Section 6.1.2 Schema: 'Promotion is not transactional across worker-internal iee_artifacts and customer-facing run_artifacts, so partial failure can leave a row in one and not the other. The MVP's posture: ... No automatic backfill of pre-MVP iee_artifacts rows; only artifacts produced after the MVP ships appear in run_artifacts.'"
+    },
+    {
+      "id": "f-002",
+      "title": "PDF Rendering Determinism Contract Lacks Concrete Implementation/Validation Plan",
+      "severity": "medium",
+      "category": "architecture",
+      "finding_type": "idempotency",
+      "rationale": "Contract claims byte-level determinism via normalization, but details for ensuring full determinism (e.g., handling potential @react-pdf/renderer output drift across environments) require more concrete specification and test automation.",
+      "evidence": "Section 4.4.3: 'The acceptance criterion in §9.1 (\"byte-deterministic across re-runs\") is satisfied via a small post-render normalization step in reportRenderingService' — but no details on automated golden testing or regression."
+    },
+    {
+      "id": "f-003",
+      "title": "Support Agent's Per-Ticket Atomic Claim TTL Has No Out-of-Band Recovery Worker",
+      "severity": "medium",
+      "category": "architecture",
+      "finding_type": "idempotency",
+      "rationale": "Spec asserts TTL expiry is sufficient, but does not back this with monitoring or out-of-band clean up for pathological or lost-claim cases.",
+      "evidence": "Section 5.3.4: 'On run abort, the claim ages out via the TTL — no recovery worker is required for Phase 1.'"
+    },
+    {
+      "id": "f-004",
+      "title": "File Delivery Worker-to-S3 IAM Path Is Directionally Open",
+      "severity": "medium",
+      "category": "architecture",
+      "finding_type": "scope",
+      "rationale": "There are two physically distinct upload paths for artifact bytes, and the spec leaves the selection to ops-time decision without fully accounting for migration costs or forward/backward compatibility across deployments.",
+      "evidence": "Section 6.1.4: 'Option A is the steady-state target; Option B is a viable Phase 1 fallback if worker-scoped IAM is not yet provisioned.'"
+    },
+    {
+      "id": "f-005",
+      "title": "Prompt Override Controls Lean on Dev Discipline, Not Technical Enforcement",
+      "severity": "medium",
+      "category": "improvement",
+      "finding_type": "security",
+      "rationale": "Relies on server-side string scans and clear-text warnings for prompt-injection prevention, but does not have a formal list or enforcement mechanism robust to new injection vectors.",
+      "evidence": "Section 5.3.6: 'The MVP applies four narrow controls...[but] these controls are dev-discipline, not a security boundary.'"
+    },
+    {
+      "id": "f-006",
+      "title": "Classification Cache Table Not Fully Specified; Open Decision Gating Complete Implementation",
+      "severity": "medium",
+      "category": "improvement",
+      "finding_type": "other",
+      "rationale": "Final caching scheme for support.classify_ticket outputs is gated on unresolved Open Decision; migration and interface changes will be needed.",
+      "evidence": "Section 5.4.1 New skill: 'Classification results are cached by content hash of (ticket_id, last_message_external_id) in a new lightweight cache table or in agent_run_messages reuse. See Open Decision 11.4.'"
+    },
+    {
+      "id": "f-007",
+      "title": "Eval Regression Set Requirements Not Fully Enforced in Acceptance Gates",
+      "severity": "medium",
+      "category": "improvement",
+      "finding_type": "other",
+      "rationale": "Regression evaluation falls open if fewer than two rows, or if Foundry export is unavailable/stale, with only operator warnings. This allows critical quality gates to be sidestepped without fail-closed behavior.",
+      "evidence": "Section 5.5.2: 'the MVP's posture is fail-open with explicit operator visibility, NOT fail-closed' and Section 7.3 'if fewer than two rows exist, the gate exits 0 (fail-open)'"
+    },
+    {
+      "id": "f-008",
+      "title": "Concurrency of Agent Runs Relies on Advisory Locks and Filters But Has Residual Race Potential",
+      "severity": "low",
+      "category": "architecture",
+      "finding_type": "other",
+      "rationale": "While the advisory lock and per-ticket claim minimize concurrency issues, brief race windows may exist, especially during high-throughput moments or distributed latency spikes.",
+      "evidence": "Section 5.3.1: 'Two concurrent install attempts...the MVP defends against this with two layers...' and 'Concurrency under racing installs.'"
+    },
+    {
+      "id": "f-009",
+      "title": "No End-to-End or Frontend Tests for Core User Workflows",
+      "severity": "low",
+      "category": "improvement",
+      "finding_type": "test_coverage",
+      "rationale": "Test strategy is strictly pure/unit/integration, but omits end-to-end or UI regression checks for key user artifact delivery interactions, which may cause regressions to slip by undetected.",
+      "evidence": "Section 7.1: 'No frontend unit tests, no React component tests, no E2E tests of the Automation OS app. The framing assumption (`frontend_tests: none_for_now`...')"
+    },
+    {
+      "id": "f-010",
+      "title": "Classification Scheme for confidence/intent/urgency Lacks Formal Schema Enforcement",
+      "severity": "low",
+      "category": "improvement",
+      "finding_type": "null_check",
+      "rationale": "Skill outputs depend on model outputs and loose enums, without evidence of runtime contract enforcement (Zod parse or similar) for accidental null/undefined/malformed values.",
+      "evidence": "Section 5.4.1 New skill: 'output_schema: intent: enum ... confidence: number (0..1)' but no statement about runtime contract check."
+    }
+  ],
+  "verdict": "CHANGES_REQUESTED",
+  "raw_response": "{\n  \"findings\": [\n    {\n      \"id\": \"f-001\",\n      \"title\": \"Ambiguity in Source-of-Truth Between run_artifacts and iee_artifacts\",\n      \"severity\": \"high\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"source_of_truth\",\n      \"rationale\": \"Potential for drift and inconsistency between worker-internal artifacts and customer-facing artifacts, with unclear reconciliation/visibility for orphaned artifacts.\",\n      \"evidence\": \"Section 6.1.2 Schema: 'Promotion is not transactional across worker-internal iee_artifacts and customer-facing run_artifacts, so partial failure can leave a row in one and not the other. The MVP's posture: ... No automatic backfill of pre-MVP iee_artifacts rows; only artifacts produced after the MVP ships appear in run_artifacts.'\"\n    },\n    {\n      \"id\": \"f-002\",\n      \"title\": \"PDF Rendering Determinism Contract Lacks Concrete Implementation/Validation Plan\",\n      \"severity\": \"medium\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"idempotency\",\n      \"rationale\": \"Contract claims byte-level determinism via normalization, but details for ensuring full determinism (e.g., handling potential @react-pdf/renderer output drift across environments) require more concrete specification and test automation.\",\n      \"evidence\": \"Section 4.4.3: 'The acceptance criterion in §9.1 (\\\"byte-deterministic across re-runs\\\") is satisfied via a small post-render normalization step in reportRenderingService' — but no details on automated golden testing or regression.\"\n    },\n    {\n      \"id\": \"f-003\",\n      \"title\": \"Support Agent's Per-Ticket Atomic Claim TTL Has No Out-of-Band Recovery Worker\",\n      \"severity\": \"medium\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"idempotency\",\n      \"rationale\": \"Spec asserts TTL expiry is sufficient, but does not back this with monitoring or out-of-band clean up for pathological or lost-claim cases.\",\n      \"evidence\": \"Section 5.3.4: 'On run abort, the claim ages out via the TTL — no recovery worker is required for Phase 1.'\"\n    },\n    {\n      \"id\": \"f-004\",\n      \"title\": \"File Delivery Worker-to-S3 IAM Path Is Directionally Open\",\n      \"severity\": \"medium\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"scope\",\n      \"rationale\": \"There are two physically distinct upload paths for artifact bytes, and the spec leaves the selection to ops-time decision without fully accounting for migration costs or forward/backward compatibility across deployments.\",\n      \"evidence\": \"Section 6.1.4: 'Option A is the steady-state target; Option B is a viable Phase 1 fallback if worker-scoped IAM is not yet provisioned.'\"\n    },\n    {\n      \"id\": \"f-005\",\n      \"title\": \"Prompt Override Controls Lean on Dev Discipline, Not Technical Enforcement\",\n      \"severity\": \"medium\",\n      \"category\": \"security\",\n      \"finding_type\": \"security\",\n      \"rationale\": \"Relies on server-side string scans and clear-text warnings for prompt-injection prevention, but does not have a formal list or enforcement mechanism robust to new injection vectors.\",\n      \"evidence\": \"Section 5.3.6: 'The MVP applies four narrow controls...[but] these controls are dev-discipline, not a security boundary.'\"\n    },\n    {\n      \"id\": \"f-006\",\n      \"title\": \"Classification Cache Table Not Fully Specified; Open Decision Gating Complete Implementation\",\n      \"severity\": \"medium\",\n      \"category\": \"scope\",\n      \"finding_type\": \"other\",\n      \"rationale\": \"Final caching scheme for support.classify_ticket outputs is gated on unresolved Open Decision; migration and interface changes will be needed.\",\n      \"evidence\": \"Section 5.4.1 New skill: 'Classification results are cached by content hash of (ticket_id, last_message_external_id) in a new lightweight cache table or in agent_run_messages reuse. See Open Decision 11.4.'\"\n    },\n    {\n      \"id\": \"f-007\",\n      \"title\": \"Eval Regression Set Requirements Not Fully Enforced in Acceptance Gates\",\n      \"severity\": \"medium\",\n      \"category\": \"test_coverage\",\n      \"finding_type\": \"other\",\n      \"rationale\": \"Regression evaluation falls open if fewer than two rows, or if Foundry export is unavailable/stale, with only operator warnings. This allows critical quality gates to be sidestepped without fail-closed behavior.\",\n      \"evidence\": \"Section 5.5.2: 'the MVP's posture is fail-open with explicit operator visibility, NOT fail-closed' and Section 7.3 'if fewer than two rows exist, the gate exits 0 (fail-open)'\"\n    },\n    {\n      \"id\": \"f-008\",\n      \"title\": \"Concurrency of Agent Runs Relies on Advisory Locks and Filters But Has Residual Race Potential\",\n      \"severity\": \"low\",\n      \"category\": \"architecture\",\n      \"finding_type\": \"concurrency\",\n      \"rationale\": \"While the advisory lock and per-ticket claim minimize concurrency issues, brief race windows may exist, especially during high-throughput moments or distributed latency spikes.\",\n      \"evidence\": \"Section 5.3.1: 'Two concurrent install attempts...the MVP defends against this with two layers...' and 'Concurrency under racing installs.'\"\n    },\n    {\n      \"id\": \"f-009\",\n      \"title\": \"No End-to-End or Frontend Tests for Core User Workflows\",\n      \"severity\": \"low\",\n      \"category\": \"test_coverage\",\n      \"finding_type\": \"test_coverage\",\n      \"rationale\": \"Test strategy is strictly pure/unit/integration, but omits end-to-end or UI regression checks for key user artifact delivery interactions, which may cause regressions to slip by undetected.\",\n      \"evidence\": \"Section 7.1: 'No frontend unit tests, no React component tests, no E2E tests of the Automation OS app. The framing assumption (`frontend_tests: none_for_now`...')\"\n    },\n    {\n      \"id\": \"f-010\",\n      \"title\": \"Classification Scheme for confidence/intent/urgency Lacks Formal Schema Enforcement\",\n      \"severity\": \"low\",\n      \"category\": \"error_handling\",\n      \"finding_type\": \"null_check\",\n      \"rationale\": \"Skill outputs depend on model outputs and loose enums, without evidence of runtime contract enforcement (Zod parse or similar) for accidental null/undefined/malformed values.\",\n      \"evidence\": \"Section 5.4.1 New skill: 'output_schema: intent: enum ... confidence: number (0..1)' but no statement about runtime contract check.\"\n    }\n  ],\n  \"verdict\": \"CHANGES_REQUESTED\"\n}"
+}

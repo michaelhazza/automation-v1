@@ -3795,3 +3795,23 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
 - [ ] **SFR-N9 — Future-only: functional index on `audit_events ((metadata->>'subaccountId'))`**
   - File: `server/db/schema/auditEvents.ts`
   - Current `(organisation_id, created_at)` index is sufficient at current scale. Add only if subaccount-scoped audit queries grow large enough that the current narrow-org-partition path slows.
+
+---
+
+## Deferred spec decisions — phase-1-showcase-mvps (2026-05-10)
+
+**Captured:** 2026-05-10T01-36-17Z
+**Source log:** `tasks/review-logs/spec-review-log-phase-1-showcase-mvps-1-2026-05-10T01-36-17Z.md`
+**Context:** spec-reviewer iteration 1 surfaced two directional findings that the operator may want to revisit before build planning. Neither blocks the spec.
+
+- [ ] **PSM-D1 — Tighten Support Agent eval acceptance threshold before lock-in?**
+  - Spec: `tasks/builds/phase-1-showcase-mvps/spec.md` §9.2 + §10 Risk Register entry "Eval threshold too strict"
+  - Codex iteration 1 finding C15: "≥85% per intent OR a tuned-during-pilot threshold" makes the merge gate movable.
+  - **Spec-reviewer decision:** AUTO-DECIDED reject — operator pre-pass deliberately tagged the threshold as tunable during pilot. Tightening pre-build forces Product sign-off into the build flow which conflicts with rapid-evolution posture. Eval harness is Phase 1 instrumentation, not a regulated launch gate.
+  - **For human review:** if you want a hard gate ahead of Phase 1.5 use-case fan-out, decide here and update §9.2 / §10 in a separate small spec edit.
+
+- [ ] **PSM-D2 — Resolve §11.1–§11.4 open decisions before build planning, or carry them into the architect's plan breakdown?**
+  - Spec: `tasks/builds/phase-1-showcase-mvps/spec.md` §11.1 (PDF library), §11.2 (worker-to-S3 upload path), §11.3 (default model + routing), §11.4 (classification cache strategy)
+  - Codex iteration 1 finding C16: these decisions affect dependencies, schema, services, sequencing.
+  - **Spec-reviewer decision:** AUTO-DECIDED reject — caller framing said the spec is intentionally architecture-level. The four decisions all carry explicit recommendations in the spec; the architect-agent can resolve them during plan breakdown. Forcing pre-build resolution is over-constraint at this stage.
+  - **For human review:** if you want to lock the four decisions before invoking architect, edit §11 to record each as Resolved with the recommendation chosen. Otherwise expect the architect's plan to carry one chunk per decision.
