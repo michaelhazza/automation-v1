@@ -412,7 +412,7 @@ For a delegated backend, the same logical fact (terminal state) lives in three p
 
 1. **Backend's terminal-state row (canonical source).** The IEE adapter's source-of-truth row is `iee_runs`. Future adapters declare their own (e.g., `openclaw_runs` for OpenClaw). Always re-loaded at finaliser entry via the adapter's `loadTerminalState()`.
 2. **Parent `agent_runs` row (derived).** Status, cost rollup, summary derived from #1 by `finaliseAgentRunFromBackend`. Treated as cached projection.
-3. **Pg-boss event payload (hint only).** Used for routing the event to the correct adapter; never trusted as data. New delegated backends authored after this spec emit `{ backendId, backendTaskId }` plus the queue's required envelope. **The existing IEE queue (`iee-run-completed`) keeps its current `{ ieeRunId, ... }` payload shape unchanged in V1**; `ieeRunCompletedHandler` loads `iee_runs`, derives `backendId` from `iee_runs.task_type` (`'browser_use' → 'iee_browser'`, `'dev_runner' → 'iee_dev'`), and calls `finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRunId })`. This preserves the no-behaviour-change claim for V1; future generic delegated backends adopt the new payload shape from day one.
+3. **Pg-boss event payload (hint only).** Used for routing the event to the correct adapter; never trusted as data. New delegated backends authored after this spec emit `{ backendId, backendTaskId }` plus the queue's required envelope. **The existing IEE queue (`iee-run-completed`) keeps its current `{ ieeRunId, ... }` payload shape unchanged in V1**; `ieeRunCompletedHandler` loads `iee_runs`, derives `backendId` from `iee_runs.type` (`'browser' → 'iee_browser'`, `'dev' → 'iee_dev'`), and calls `finaliseAgentRunFromBackend({ backendId, backendTaskId: ieeRunId })`. This preserves the no-behaviour-change claim for V1; future generic delegated backends adopt the new payload shape from day one.
 
 The handler always re-loads the canonical row before calling the finaliser. Existing IEE handler already does this (`server/jobs/ieeRunCompletedHandler.ts:78–86`); the pattern continues.
 
@@ -476,7 +476,10 @@ export const ieeBrowserBackend: ExecutionBackend = {
     // Does NOT open its own transaction.
   },
   async reconcile() {
-    // Body = current reconcileStuckDelegatedRuns filtered to ieeRuns; identical SQL.
+    // Body = current reconcileStuckDelegatedRuns filtered to ieeRuns AND scoped
+    // by `iee_runs.type = 'browser'` (the iee_dev adapter's reconcile() applies
+    // `iee_runs.type = 'dev'`). Each adapter reconciles only its own slice of
+    // shared storage so reconcileBackends does not double-process rows. See § 9.2.
   },
   async cancel({ runId, backendTaskId }) {
     // Body = existing cancelIeeRun call.
@@ -644,6 +647,12 @@ Cron renamed: `maintenance:iee-main-app-reconciliation` → `maintenance:backend
 
 The cron registration in `server/services/queueService.ts:1160` switches to call `reconcileBackends()` instead of `reconcileStuckDelegatedRuns()`. The old cron name is unregistered cleanly via pg-boss (one-off boot step the first time the new code runs — see § 14).
 
+#### Shared-storage adapters and reconciliation scoping
+
+When two adapters share a `terminalStateTable` (the IEE adapters share `iee_runs`), each adapter's `reconcile()` MUST filter to its own slice of the shared table — otherwise `reconcileBackends()` would double-process every row (once per adapter sharing the storage). For the IEE adapters this is `WHERE iee_runs.type = 'browser'` (for `iee_browser.reconcile`) and `WHERE iee_runs.type = 'dev'` (for `iee_dev.reconcile`). The discriminator column is the same one the event handler uses to derive `backendId` (§ 4.3 / § 13.4); the per-adapter filter is asserted by `registryPure.test.ts` against an in-memory mock that registers two adapters with the same `terminalStateTable` and verifies their reconcile counts are disjoint.
+
+Adapters that own their own `terminalStateTable` (no sibling) have no constraint — the table-wide scan is the per-adapter scope.
+
 ### 9.3 `loadTerminalState` per-adapter helper
 
 The shared finaliser needs to load the adapter's terminal-state row inside the transaction without knowing the adapter's table name. Each delegated adapter exposes:
@@ -779,7 +788,9 @@ Each delegated adapter has exactly one terminal pg-boss event per backend task:
 - `iee_dev` → `iee-run-completed` (shared queue with `iee_browser` — see note)
 - Future: `openclaw_managed` → `openclaw-run-completed`
 
-**Shared-queue note (IEE):** the two IEE adapters share `iee-run-completed` because they share `iee_runs` storage. The handler routes by reading `iee_runs.task_type` from the loaded row, then derives `backendId` (`'browser_use' → 'iee_browser'`, `'dev_runner' → 'iee_dev'`) before calling `finaliseAgentRunFromBackend`. Future adapters that share storage may share queues; the rule — *one queue per terminal-state table, not per adapter id* — is enforced declaratively via the `terminalStateTable` field on each delegated adapter (§ 4.1, § 8.2). A future adapter declaring `completedEventQueue: 'iee-run-completed'` with a different `terminalStateTable` value fails registration with `BackendQueueOwnershipViolation`.
+**Shared-queue note (IEE):** the two IEE adapters share `iee-run-completed` because they share `iee_runs` storage. The handler routes by reading `iee_runs.type` from the loaded row, then derives `backendId` (`'browser' → 'iee_browser'`, `'dev' → 'iee_dev'`) before calling `finaliseAgentRunFromBackend`. Future adapters that share storage may share queues; the rule — *one queue per terminal-state table, not per adapter id* — is enforced declaratively via the `terminalStateTable` field on each delegated adapter (§ 4.1, § 8.2). A future adapter declaring `completedEventQueue: 'iee-run-completed'` with a different `terminalStateTable` value fails registration with `BackendQueueOwnershipViolation`.
+
+**Reconciliation scoping for shared storage** — see § 9.2 *Shared-storage adapters and reconciliation scoping*. Each shared-storage adapter's `reconcile()` filters by the same discriminator used here for event-routing (`iee_runs.type`).
 
 Post-terminal prohibition: the worker's `finalizeRun()` writes `iee_runs.eventEmittedAt = now()` after the event; the cleanup-orphan reconciliation never re-fires for rows where `eventEmittedAt IS NOT NULL && parent.status` is terminal. Existing behaviour.
 
@@ -885,7 +896,7 @@ Per `docs/spec-context.md` and `docs/spec-authoring-checklist.md` § 9: pure-fun
 ### Pure tests (new)
 
 - `executionBackends/__tests__/contractPure.test.ts` — capability-validation rules, dispatch-result shape exhaustiveness, options union closure. Uses an in-memory mock adapter implementing every capability shape.
-- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters; rejects adapters declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`; rejects same-queue + different-`terminalStateTable` pairs (`BackendQueueOwnershipViolation`); resolves every `ExecutionMode` value to its registered adapter.
+- `executionBackends/__tests__/registryPure.test.ts` — registration accepts valid adapters; rejects adapters declaring `'delegated'` without `loadTerminalState` / `finalise` / `reconcile` / `completedEventQueue` / `terminalStateTable`; rejects same-queue + different-`terminalStateTable` pairs (`BackendQueueOwnershipViolation`); resolves every `ExecutionMode` value to its registered adapter; against an in-memory mock that registers two adapters sharing one `terminalStateTable`, asserts each adapter's `reconcile()` returns a disjoint count (no double-processing).
 - `agentRunFinalizationServicePure.test.ts` (existing) — mapping table coverage stays; calls renamed to `finaliseAgentRunFromBackend`.
 
 ### Integration tests (existing, kept)
@@ -943,7 +954,7 @@ The work is complete when:
 
 3. **Per-org `preferred_backends` adds a JSONB column with implicit shape.** *Mitigation:* the column is **schema-only in V1** — no V1 code path reads it (registry resolution uses identity mapping). The column is documented in `architecture.md` as the intended `Map<ExecutionMode, string>` shape. Phase 3.5+ routing introduces the Zod schema for the value at the same time it introduces the read; until then the column accepts only the default `'{}'` and any non-default writes are rejected at the API layer (no V1 endpoint writes this column).
 
-4. **Two adapters (`iee_browser`, `iee_dev`) share `iee-run-completed` queue.** *Mitigation:* registry validation rejects adapters that share a queue without sharing storage; the rule is documented in §13.4. The existing IEE handler reads `iee_runs.task_type` to discriminate; this preserves today's behaviour.
+4. **Two adapters (`iee_browser`, `iee_dev`) share `iee-run-completed` queue.** *Mitigation:* registry validation rejects adapters that share a queue without sharing storage; the rule is documented in §13.4. The existing IEE handler reads `iee_runs.type` to discriminate; this preserves today's behaviour.
 
 5. **Spec scope creep — pull in routing now.** *Mitigation:* §19 routes routing policy + cost-aware dispatch to deferred items with explicit Phase 3.5+ reference. Reviewer is asked to flag any chunk that introduces routing-policy code as out of scope.
 
