@@ -2625,18 +2625,18 @@ interface LoopParams {
   hierarchyContext?: Readonly<HierarchyContext>;
 }
 
-interface LoopResult {
-  summary: string | null;
-  toolCallsLog: object[];
-  totalToolCalls: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  tasksCreated: number;
-  tasksUpdated: number;
-  deliverablesCreated: number;
-  finalStatus?: string;
-}
+// LoopResult is the relocated neutral shape consumed by both the agentic
+// loop here and the ExecutionBackend dispatch contract
+// (server/services/executionBackends/types.ts -> BackendDispatchResult).
+// See spec § 4.1 "Neutral type file" — extraction breaks the import cycle
+// between agentExecutionService.ts and executionBackends/registry.ts.
+//
+// The neutral source of truth lives in `agentExecutionTypes.ts`. The
+// `export type` re-export here keeps backwards-compat for existing
+// importers of this module (and future consumers reach for the neutral
+// file directly).
+import type { LoopResult } from './agentExecutionTypes.js';
+export type { LoopResult };
 
 // Tool call validation + phase selection + middleware-context construction
 // are pure helpers extracted to agentExecutionServicePure.ts per P0.1 Layer 3
