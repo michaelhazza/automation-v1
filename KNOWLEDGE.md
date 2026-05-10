@@ -1574,7 +1574,7 @@ When a service does SELECT → UPDATE and a concurrent path can write a column b
 `agent_runs.status = 'cancelling'` is set once by `agentRunCancelService` and must resolve to a terminal value promptly:
 - In-process loops: exit at the next iteration, write `'cancelled'`.
 - IEE-delegated runs: `cancelIeeRun` writes `iee_runs='cancelled'` + enqueues `iee-run-completed`; finaliser parks the parent.
-- If the pg-boss event publish fails: `reconcileStuckDelegatedRuns` sweeps `status IN ('delegated','cancelling')` after 120 s and calls `finaliseAgentRunFromIeeRun`.
+- If the pg-boss event publish fails: `reconcileBackends` sweeps `status IN ('delegated','cancelling')` after 120 s and calls `finaliseAgentRunFromBackend`. (Pre-2026-05-10: `reconcileStuckDelegatedRuns` / `finaliseAgentRunFromIeeRun` — renamed under the execution-backend-adapter-contract build.)
 
 **Divergence case:** if the IEE worker completes before observing the cancel, the parent can transition `cancelling → completed` (not `cancelled`). This is logged as `agentRunFinalization.cancel_intent_divergence` and is expected best-effort behaviour, not a bug.
 
@@ -3532,3 +3532,43 @@ server/config/actionRegistry/
 **Resolution.** Capability-gated optional methods in the contract mean a widening that touches a delegated method only edits the delegated implementations. The api/headless/claude-code adapters were untouched. Both IEE adapters are thin forwarders to `_ieeShared.ts::ieeFinalise`, so the actual edit was to one shared body. The contract type signature change required no adapter-level edits beyond the shared helper.
 
 **Detection heuristic.** When considering a contract change against a registry-resolved adapter set: list the adapters and their declared capabilities. Methods gated by capability only need re-edits in adapters that declare the gating capability. Contract widenings (T → T | null, narrow union → wider union) flow through cleanly; contract narrowings (the reverse) require all gated implementations to re-validate. The DRY of the IEE pair via `_ieeShared.ts` reduces the per-edit cost from N×M to 1 — worth preserving when adding new delegated adapters.
+
+### [2026-05-10] Pattern — Boot-time registration validation must be FATAL, not log-and-continue
+
+**Context.** ChatGPT PR review (PR #281, Round 1, B1) — `server/index.ts` registered all five `ExecutionBackend` adapters in a try/catch that logged registration errors and continued startup. The spec made registration validation a boot-time safety boundary (adapters that fail validation must never reach dispatch); a partial-registry boot would surface as a 500 on every dispatch, strictly worse than a clean fatal-on-failure crash.
+
+**Rule.** When a spec says "registration validation must prevent dispatch", the implementation must rethrow after logging, matching the fatal-boot-failure pattern of other required boot dependencies. Catching-and-continuing produces a half-booted process where every consumer of the registry fails at runtime, the operator sees no boot-time signal, and "boot succeeded" is technically true but functionally misleading. The fix is two lines: keep the structured warn line for forensics, then `throw err`.
+
+**Detection heuristic.** Any boot-time `register*()` call wrapped in try/catch where the catch logs and proceeds is suspicious. The right shape is: log structured detail (error message, stack, context) FOR forensics, then rethrow. The exception is when the registration is truly optional (e.g., a feature-flagged plugin that's opt-in). For domain-primitive registries (dispatch tables, capability maps, finaliser routing), opt-in is rare and rethrow is the safe default.
+
+### [2026-05-10] Pattern — Adapter-contract field semantics must match the migration intent
+
+**Context.** ChatGPT PR review (PR #281, Round 1, B2) — `claudeCodeBackend.ts` returned `ccResult.sessionId` as `backendTaskId` for observability. The contract spec said `backendTaskId` is for delegated backends only and should be `null` for in-process and subprocess adapters. The migration `0313_execution_backend_columns.sql` introduced `(backend_id, backend_task_id)` as a generic delegated-task reference, with `backend_task_id` null for in-process/subprocess paths. Returning a Claude session ID in that field was hidden contract drift inside what looked like an observability improvement.
+
+**Rule.** When a migration introduces a typed contract field with a stated semantics ("delegated-task reference, null for non-delegated"), the adapter implementations must match the stated semantics — even when the adapter has another value that "fits" the field's shape. Observability identifiers belong in the typed log payload (`toolCallsLog[0].sessionId` already preserved this) or in a deliberately named future field (`backendSessionId`); never in a contract field whose semantics are documented elsewhere.
+
+**Detection heuristic.** Cross-check every adapter implementation against the migration that introduced the contract field. Grep the migration text for the field's column comment, then grep adapter code for the field name in returned objects. If an adapter populates the field with a value that doesn't match the migration's stated semantics, the implementation has drifted from the contract. The most common drift shape: an adapter has a "spare" identifier (session id, request id, trace id) that's tempting to surface through a contract field that happens to be the right type. Resist — add a deliberate observability field.
+
+### [2026-05-10] Pattern — Verify route-error envelope behaviour before documenting HTTP shape in code comments
+
+**Context.** ChatGPT PR review (PR #281, Round 2, P1) — A code comment near a `throw ParentRunNotDispatchable` claimed "the route layer's existing error envelope renders typed errors as a 4xx". Investigation showed: `ParentRunNotDispatchable` extends `Error` with no `statusCode` field; `normaliseRouteError` checks `instanceof AppError`, then duck-typed `statusCode`, then falls through to `kind: 'unknown'` with statusCode 500. The error today actually maps to a 500 envelope, not a 4xx — the comment was verifiably wrong, and would mislead future maintainers reasoning about the route surface.
+
+**Rule.** When a typed error is returned to a route layer, do NOT document its HTTP shape in code comments unless you've grep-verified the route mapping. The safe default is a neutral comment ("the route layer will surface the typed error according to the existing error-envelope behaviour") that doesn't claim a specific status code. A deliberate AgentRunResult shape can be added later if/when the desired client-visible shape is decided — that's a behaviour change, separate scope.
+
+**Detection heuristic.** Any inline comment that claims "renders as 4xx" / "renders as 5xx" / "returns N" near a `throw` site is a verification target. Grep the route layer for the typed error class name and check the envelope normalisation code. If the error class lacks `statusCode` AND doesn't extend the route layer's typed-error base, it falls through to the unknown-error branch — which is almost always a 500. Don't write status-code claims into code comments without that grep.
+
+### [2026-05-10] Pattern — When the plan says "rethrow if no existing race-loser shape exists", verify by searching origin/main first
+
+**Context.** ChatGPT PR review (PR #281, Round 1, T1) — The plan explicitly said: "map ParentRunNotDispatchable to the exact existing race-loser shape, or rethrow and document if no such shape exists". The implementation invented a synthetic zeroed `AgentRunResult` with `summary: null`, zero counters, and a coerced status. Verification against `origin/main` showed the pre-cutover dispatch had no such shape — the synthetic response was invented, not replicated.
+
+**Rule.** When a plan directs "match the existing X shape, or rethrow if X doesn't exist", verification is mandatory: grep `origin/main` for the shape's call sites BEFORE inventing one. The "or rethrow" branch exists precisely so the implementation doesn't invent a new shape during a refactor — synthetic shapes are silent contract additions that are hard to back out later. Rethrow + structured warn line is the spec-compliant path when no existing shape exists.
+
+**Detection heuristic.** Plans that mention "existing X" alongside "or do Y if X doesn't exist" are testing whether the implementer verified. The invented-shape failure mode looks like a normal refactor at first glance — the synthetic values often look reasonable in isolation. The tell is that those values weren't there before the refactor. The verification step is one grep against `origin/main` for the shape's signature; skipping it produces a class of bugs where downstream consumers receive plausible-but-wrong data.
+
+### [2026-05-10] Pattern — Capability mismatches that the registry should make impossible must THROW, not silently return false
+
+**Context.** ChatGPT PR review (PR #281, Round 1, T2) — `finaliseAgentRunFromBackend()` resolved an adapter and, if the adapter wasn't delegated or lacked finalisation methods, logged `agentRunFinalization.non_delegated_adapter` and returned `false`. The registry already validates delegated adapters at registration time (Rule 2 requires delegated lifecycle methods when `capabilities.includes('delegated')`), so reaching this branch indicates caller misuse (stale event payload, wrong reconciliation backendId, registry/config drift) — not a recoverable reconciliation result. Returning `false` made a bad call look like an idempotent no-op.
+
+**Rule.** When a runtime check covers a case the registry's invariants make impossible, the right outcome is a typed throw, not a silent boolean false. False says "this is a recoverable no-op state"; throw says "the system is in an invalid configuration the registry promised wouldn't happen". Calling finalisation on `api`, `headless`, or `claude-code` is a programmer error, not a recoverable case — the typed `FinaliseRequiresDelegatedAdapter` error makes the misuse loud at every layer (logs, sentry, route 500).
+
+**Detection heuristic.** When implementing a runtime guard that "shouldn't" be reachable per the registry's invariants, ask: "if this branch fires, is the system still in a valid state?" If no, throw a typed error so the failure is loud. If yes, return a typed result that distinguishes "recoverable no-op" from "actual success". Don't conflate the two by returning a generic false — the caller can't tell which branch fired and bug-hunting takes longer.

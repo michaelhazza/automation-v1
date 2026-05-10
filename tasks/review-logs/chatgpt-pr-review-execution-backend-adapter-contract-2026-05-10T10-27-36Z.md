@@ -6,6 +6,7 @@
 - Mode: manual
 - Started: 2026-05-10T10:27:36Z
 - Branch HEAD at start: 493fc7eb
+- **Verdict:** APPROVED (3 rounds, 6 findings, 6 implemented / 0 rejected / 0 deferred)
 
 ---
 
@@ -150,4 +151,80 @@ documentation, error_handling
 ### Verification
 - `npm run lint` — 0 errors.
 - `npm run typecheck` — clean.
+
+---
+
+## Round 3 — 2026-05-10T12-15-00Z
+
+### ChatGPT Feedback (raw)
+
+(ChatGPT labelled this "Round 4" in its own counter, but in our session log it is Round 3.)
+
+Round 4 verdict: approved. No new findings.
+
+This diff still reflects the same closure state from Round 3:
+
+Backend registration is unconditional, deterministic, and fatal on validation failure.
+ParentRunNotDispatchable is logged and rethrown, with the now-neutral route-layer comment.
+claude-code remains non-delegated by contract, with no backend-task drift visible in the shown diff.
+The lifecycle docs and architecture references now consistently point at finaliseAgentRunFromBackend / reconcileBackends, not the old IEE-specific names.
+The new cycle-prevention guideline is reasonable and matches the earlier import-chain risk we flagged.
+
+No further review round needed. Finalise the loop and merge once CI is green.
+
+### Verdict
+**Verdict:** APPROVED
+
+### Recommendations and Decisions
+
+(No findings — verdict APPROVED with zero blocking, zero polish, zero new items.)
+
+### Top themes
+(none — no findings)
+
+### Verification
+- No code changes this round; lint / typecheck unchanged from Round 2.
+
+---
+
+## Final Summary
+
+- **Verdict:** APPROVED
+- **Rounds:** 3
+- **Findings:** 6 total — 5 (Round 1: B1, B2, T1, T2, T3) + 1 (Round 2: P1) + 0 (Round 3)
+- **Auto-accepted (technical):** 6 implemented | 0 rejected | 0 deferred
+- **User-decided:** 0 (zero user-facing findings across all rounds)
+- **Index write failures:** 0 (clean)
+- **Cumulative commits:**
+  - Round 1: `33d724f6` — fatal boot + null backendTaskId + rethrow ParentRunNotDispatchable
+  - Round 2: `f9588578` — comment polish (drop overclaimed 4xx)
+  - Finalisation: (this commit) — KNOWLEDGE.md pattern extraction + log finalisation
+- **Consistency warnings:** none. No finding type was both implemented and rejected across rounds; B1, B2, T1, T2, T3, P1 all moved cleanly from raised to implemented to closed.
+- **Deferred to tasks/todo.md § PR Review deferred items / PR #281:** none
+- **Architectural items surfaced to screen (user decisions):** none
+
+### KNOWLEDGE.md updated: yes (5 entries appended + 1 stale-reference correction)
+
+New `[2026-05-10]` entries:
+- `Pattern — Boot-time registration validation must be FATAL, not log-and-continue` (B1)
+- `Pattern — Adapter-contract field semantics must match the migration intent` (B2)
+- `Pattern — Verify route-error envelope behaviour before documenting HTTP shape in code comments` (P1)
+- `Pattern — When the plan says "rethrow if no existing race-loser shape exists", verify by searching origin/main first` (T1)
+- `Pattern — Capability mismatches that the registry should make impossible must THROW, not silently return false` (T2)
+
+Stale-reference correction at `KNOWLEDGE.md:1577` (the `[2026-04-28] Pattern — cancelling is a transient non-terminal status` block) — updated `reconcileStuckDelegatedRuns` → `reconcileBackends` and `finaliseAgentRunFromIeeRun` → `finaliseAgentRunFromBackend` to match the rename landed in this PR; cited the pre-2026-05-10 names so the historical context survives the rename.
+
+### Doc sync verdicts (FULL PR diff vs origin/main)
+
+Candidate-stale-reference set derived from PR: new symbols `finaliseAgentRunFromBackend`, `reconcileBackends`, `executionBackendRegistry`, `BackendDispatchInput/Result`, `BackendFinalisationInput`, `FinaliseRequiresDelegatedAdapter`, `ParentRunNotDispatchable`, `agentExecutionLoop`, `_apiHeadlessShared`, `_ieeShared`, `apiBackend`, `headlessBackend`, `claudeCodeBackend`, `ieeBrowserBackend`, `ieeDevBackend`, `agentExecutionTypes`; superseded names `finaliseAgentRunFromIeeRun`, `reconcileStuckDelegatedRuns`, `maintenance:iee-main-app-reconciliation`; new rule §8.32 (cycle-prevention assertion coverage).
+
+- **architecture.md updated: yes** (sections "Run statuses" and "Routing — how a task reaches IEE" / "IEE delegation lifecycle"). Diff vs main updates `delegated` and `cancelling` status descriptions to reference `finaliseAgentRunFromBackend` and `reconcileBackends`; expands the routing section from an `if/else` ladder snippet to the registry-resolved adapter dispatch pattern; updates the lifecycle finalisation section to describe `finaliseAgentRunFromBackend({backendId, backendTaskId})` and the `maintenance:backend-reconciliation` cron iterating `executionBackendRegistry.forDelegated()`. Already landed earlier in this build's chunks.
+- **docs/capabilities.md updated: no — checked `delegated browser tasks` mention at line 540; copy is vendor-neutral customer-facing UX (live progress on long-running browser tasks). Internal rename `finaliseAgentRunFromIeeRun → finaliseAgentRunFromBackend` does not change the user-visible capability, the wording, or the surface. No add/remove/rename of any product capability, agency capability, skill, or integration in this PR.**
+- **docs/integration-reference.md updated: no — checked `execution backend`, `claude-code`, `iee_browser`, `iee_dev`, `backend adapter`; zero matches. PR is internal service-layer refactor — no integration behaviour changes (no new scope, skill, OAuth provider, MCP preset, or capability slug).**
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes** (DEVELOPMENT_GUIDELINES.md §8.32 — cycle-prevention assertions must cover all files in the import chain; the spec also bumped `Last updated:` to 2026-05-10 with the §8.32 reference). CLAUDE.md unchanged in this PR — no agent-fleet, review pipeline, or build discipline changes were introduced. Already landed earlier in this build's chunks.
+- **docs/frontend-design-principles.md updated: no — checked `execution backend`, `agentic loop`, `claude-code`, `iee_browser`, `iee_dev`, `delegated`, `backend adapter`, `agentExecutionLoop`, `finaliseAgentRunFrom`, `reconcile`; zero matches. PR is server-side internal refactor with no UI patterns, hard rules, or worked examples introduced.**
+- **KNOWLEDGE.md updated: yes** (5 new `[2026-05-10]` pattern entries from this PR review's findings + 1 stale-reference correction at line 1577). Includes prior-build entries already landed earlier in this branch (cycle-prevention regex, domain-primitive registration, lifting drops side-effects, capability-gated methods, type seam for future variants, service-layer circular import).
+
+### Top themes across the session
+architecture, error_handling, scope, documentation
 
