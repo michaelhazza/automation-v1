@@ -1,4 +1,4 @@
-**Status:** Draft v1
+**Status:** Draft v2 (lock-ready pending operator sign-off)
 **Date:** 2026-05-10
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** operator-session-identity
@@ -8,6 +8,22 @@
 **Successor:** OpenClaw adapter scope — `tasks/builds/openclaw-adapter/scope.md`
 
 # Spec C — Operator Session Identity — Build Brief
+
+## 0a. v2 changelog (2026-05-10)
+
+Tightened in response to CEO read. Core shape unchanged.
+
+- Reframed "ChatGPT OAuth + plan introspection" as **architectural uncertainty** — spec MUST verify provider-supported mechanisms before locking implementation; if none exist, schema/consent/UX still ship and connection wiring is gated.
+- Added **hard ban** on credential scraping, browser-cookie capture, headless-browser login automation, and any non-provider-sanctioned account extraction.
+- Consent table is **append-only**; revocation/supersession modelled as a companion `operator_session_consent_events` event table; disclosure-version bumps force re-acceptance.
+- **Authority boundary** named: default subaccount-scoped storage, user-attributed consent, broker-mediated backend-only use.
+- **Retention under deletion** spelled out — 7-year evidence window survives identity removal, with PII minimisation and access restriction.
+- **Token-lifecycle failure classification** added — six buckets, only auth/scope failures mark credential unusable.
+- **Redaction surface** expanded — logs, audit, traces, prompts, tool inputs, UI, errors, telemetry, test snapshots.
+- **No-consumer V1 acceptance criterion** added — mechanical check that no existing adapter consumes `operator_session`.
+- Renamed "OAuth connection flow" → "Provider connection flow"; lifecycle event renamed to `operator_session.revoked`; schema field `oauth_provider` → `provider`, `oauth_token` → `auth_token`.
+
+---
 
 ## 0. Purpose
 
@@ -34,21 +50,30 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 
 ## 2. What Spec C must define
 
-1. **`auth_type: 'operator_session'` schema** in the Credential Broker. Fields: `oauth_provider` (`openai` initially, generic for future), `oauth_token`, `refresh_token`, `token_expires_at`, `plan_tier` (`pro` / `team` / `enterprise` / `plus`), `consent_record_id` (FK to consent log if plan is `plus`).
-2. **OAuth connection flow.** Two paths:
-   - **Default (sanctioned tiers):** standard OAuth callback, plan-tier detected, credential stored, ready to use.
-   - **Plus tier (opt-in):** OAuth callback detects `plan = plus` → presents disclosure screen → user types "I accept the risk" → consent row written → credential stored.
-3. **Plan-tier detection mechanism.** Three options to evaluate in the spec:
-   - OpenAI's plan-introspection API (preferred if available)
-   - First-call probe (issue a trivial API call, inspect rate-limit headers / model availability)
-   - Customer self-declaration (fallback only — easily lied about)
-   - Spec recommends one with rationale.
+1. **`auth_type: 'operator_session'` schema** in the Credential Broker. Fields: `provider` (`openai` initially, generic for future), `auth_token`, `refresh_token`, `token_expires_at`, `plan_tier` (`pro` / `team` / `enterprise` / `plus`), `consent_record_id` (FK to consent log if plan is `plus`). Field names are provider-agnostic; OAuth is one possible mechanism, not assumed.
+2. **Provider connection flow.** The spec MUST first verify the currently supported OpenAI account/session identity mechanism against current OpenAI documentation. Do not assume OAuth callback semantics, plan-introspection APIs, or rate-limit-header tier inference exist until verified. If a sanctioned mechanism exists, define both paths:
+   - **Default (sanctioned tiers):** provider-supported handshake, plan-tier detected, credential stored, ready to use.
+   - **Plus tier (opt-in):** handshake detects `plan = plus` → disclosure screen → user types "I accept the risk" → consent row written → credential stored.
+   If no sanctioned mechanism exists, the spec MUST still define the broker schema, consent table, and disclosure UX, and mark the provider connection implementation as **blocked behind verified provider support** — the primitive ships, the connection wiring waits.
+3. **Plan-tier detection mechanism.** Three options to evaluate in the spec, conditional on provider support verified in §2:
+   - Provider plan-introspection API (preferred if exposed)
+   - First-call probe (trivial call, inspect rate-limit headers / model availability) — only if provider documentation supports this as a stable signal
+   - Customer self-declaration (fallback only — easily lied about; gates Plus disclosure regardless)
+   - Spec recommends one with rationale, or marks detection blocked if none is verifiable.
+   - **Hard ban:** Spec C MUST NOT implement credential scraping, browser-cookie capture, password collection, session hijacking, headless-browser login automation, or any non-provider-sanctioned account extraction. Operator Session Identity may only use provider-supported authentication flows. This boundary protects future consumers (OpenClaw, others) from inheriting an unsafe primitive.
 4. **Consent-record table.** New table `operator_session_consents`: `id`, `org_id`, `subaccount_id`, `user_id`, `plan_tier`, `disclosure_version`, `accepted_at`, `disclosure_text_snapshot`, `consent_text_snapshot`. RLS-protected. **7-year retention minimum** — disclosure-as-evidence requires durable records.
-5. **Token-lifecycle service.** Background refresh ahead of TTL; re-auth UI when refresh fails. Adapter consumers don't see expired tokens.
-6. **Provider-agnostic framing.** Even though V1 is ChatGPT-only, write the schema as "Operator Session Identity" with `oauth_provider` as a discriminator. When Anthropic Claude.ai / Google Gemini come, slot them in via the same `auth_type`. No ChatGPT-only column names.
-7. **Connection-UI surface.** Connection list shows operator-session-typed connections distinctly from API-key connections; tier badge visible; "switch tier" placeholder CTA (Phase 3.5+).
-8. **Audit / observability.** Every consent record action (granted, revoked, re-auth) writes to existing security audit stream. OpenAI session-revocation events fire a typed `operator-session-revoked` lifecycle event.
-9. **Adapter consumption contract.** When an adapter requests a credential and gets an `operator_session` back, it receives a *redacted* envelope (auth token never logged, never serialised into prompt). Pin the redaction at the broker level.
+   - **Append-only.** Consent rows are never updated or deleted. Revocation, supersession, and re-acceptance are modelled as new rows in a companion `operator_session_consent_events` event table (`event_type ∈ {granted, revoked, superseded}`, `consent_id`, `actor_user_id`, `at`, `superseded_by_consent_id` nullable). Revocation marks the linked credential unusable via the broker; the consent row itself stays immutable.
+   - **Disclosure version bump = forced re-acceptance.** If `disclosure_version` increments, existing Plus-tier credentials are flagged unusable until the user re-accepts; the new acceptance writes a fresh consent row referencing the prior via `superseded_by_consent_id`.
+   - **Authority boundary.** Spec MUST define whether operator-session credentials are user-bound, subaccount-bound, or org-bound at runtime. **Default posture:** subaccount-scoped storage, user-attributed consent, broker-mediated backend-only use. The connecting user owns the consent record; the credential is usable by authorised backend agents acting within the subaccount, never directly by other operators.
+5. **Retention under deletion.** Spec MUST define consent-record behaviour under user deletion, subaccount deletion, and org deletion. Records are retained for the 7-year evidence window even when the originating identity is removed; retained rows MUST be minimised (PII-stripped where legally permissible), access-restricted (compliance-role only), and explicitly excluded from normal destructive cleanup paths. Coordinate with any active GDPR / account-deletion playbook.
+6. **Token-lifecycle service.** Background refresh ahead of TTL; re-auth UI when refresh fails; adapter consumers never see expired tokens.
+   - **Failure classification.** Refresh failures MUST be classified at minimum as: `expired_refresh_token`, `provider_revoked`, `insufficient_scope`, `provider_unavailable`, `rate_limited`, `unknown`. Only `expired_refresh_token`, `provider_revoked`, and `insufficient_scope` mark the credential unusable and surface re-auth UI; `provider_unavailable` and `rate_limited` retry with bounded exponential backoff and stay usable; `unknown` defaults to unusable + alerted.
+7. **Provider-agnostic framing.** Even though V1 is ChatGPT-only, write the schema as "Operator Session Identity" with `provider` as a discriminator. When Anthropic Claude.ai / Google Gemini come, slot them in via the same `auth_type`. No ChatGPT-only column names; no OAuth-specific column names where the underlying mechanism may vary by provider.
+8. **Connection-UI surface.** Connection list shows operator-session-typed connections distinctly from API-key connections; tier badge visible; "switch tier" placeholder CTA (Phase 3.5+).
+9. **Audit / observability.** Every consent lifecycle event (granted, revoked, superseded) writes to the existing security audit stream. Provider/session revocation events fire a typed `operator_session.revoked` lifecycle event consumable by adapter run loops and connection UI.
+10. **Adapter consumption contract.** When an adapter requests a credential and gets an `operator_session` back, it receives a *redacted envelope*; only the broker / token-lifecycle service may access raw token material.
+    - **Redaction surface.** Redaction MUST apply to: logs, audit context, run traces, prompts, tool inputs, UI payloads, error objects, telemetry metadata, and test snapshots. Pin the redaction at the broker level — no consumer is trusted to redact correctly.
+11. **No-consumer enforcement (V1 acceptance criterion).** Spec C ships the primitive without rewiring any existing adapter. Acceptance MUST include a mechanical check (grep / test) proving no existing adapter (`api`, `headless`, `claude-code`, `iee_*`) requests or consumes `operator_session` credentials, and that all existing adapters continue using their previous auth paths. This prevents accidental runtime behaviour change before OpenClaw lands.
 
 ---
 
@@ -56,7 +81,7 @@ Decided in `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` Decisio
 
 Spec C runs in parallel with **Spec B — Sandbox Isolation** (`tasks/builds/sandbox-isolation/brief.md`). The two specs touch different code surfaces:
 
-- C = `server/services/credentialBroker*`, OAuth callback handlers, new consent-log table, connection UI.
+- C = `server/services/credentialBroker*`, provider-handshake handlers (OAuth or whatever the verified mechanism turns out to be), new consent-log + consent-event tables, connection UI.
 - B = `server/services/sandbox*`, `infra/sandbox-templates/`, cost ledger extension, `iee_dev` adapter rewiring.
 
 **No code-area conflicts.** Both touch `architecture.md` (different sections) and `llm_requests` schema (different `source_type` values). Doc-sync sweep at finalisation reconciles. Either spec can land first; the second rebases.
@@ -71,9 +96,9 @@ Cross-coordination points (be aware, not blocking):
 ## 4. Out of scope
 
 - **Actual use of the credential by an adapter.** Spec C ships the *credential primitive*. Adapters (OpenClaw, future ones) consume it — that's their spec's scope. Today, no existing adapter is rewired to consume `operator_session`.
-- **OAuth → API-key fallback path when session fails mid-run.** OpenClaw adapter's responsibility (it has the run context). Spec C exposes the broker mechanism (`getFallbackCredential(orgId, subaccountId)`); OpenClaw spec wires the call.
+- **Operator-session → API-key fallback path when session fails mid-run.** OpenClaw adapter's responsibility (it has the run context). Spec C exposes the broker mechanism (`getFallbackCredential(orgId, subaccountId)`); OpenClaw spec wires the call.
 - **Customer billing dashboards showing subscription-mediated zero-cost runs** — Phase 3.5+.
-- **Multi-OAuth-provider posture framework** beyond the schema-level forward compat. ChatGPT is the only provider in V1; the schema is the seam for others.
+- **Multi-provider posture framework** beyond the schema-level forward compat. ChatGPT is the only provider in V1; the schema is the seam for others (Anthropic Claude.ai, Google Gemini, etc.) regardless of their underlying auth mechanism.
 - **CS runbook for "OpenAI suspended my account."** Deferred to OpenClaw adapter scope (see `tasks/builds/openclaw-adapter/scope.md` § 3.5). Spec C surfaces the lifecycle event; the runbook is operational.
 - **Customer-self-service tier switching UI** — Phase 3.5+.
 - **Cost calculator / "should I be on Pro?" recommender** — Phase 3.5+.
