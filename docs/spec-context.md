@@ -18,7 +18,7 @@ stale_after_days: 60
 stale_blocks_at_days: 120
 ```
 
-Current as of 2026-04-16. Update the date whenever any of the statements below change AND when the framing is verified to still apply (even if no statement changed). The staleness check above turns "I'll re-check this someday" into "the agent stops me at 4 months."
+Current as of 2026-05-09. Update the date whenever any of the statements below change AND when the framing is verified to still apply (even if no statement changed). The staleness check above turns "I'll re-check this someday" into "the agent stops me at 4 months."
 
 ```yaml
 # Deployment context

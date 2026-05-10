@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { formatSpendCardPure } from '../components/spend/formatSpendCardPure.js';
+import ApprovalRiskContext from '../components/review/ApprovalRiskContext.js';
 
 // ── Review types ─────────────────────────────────────────────────────────────
 
@@ -510,11 +511,22 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     const isReasoningExpanded = expandedReasoning.has(item.id);
     const workflowCtx = workflowContextByActionId.get(item.actionId);
 
+    const ctx = item.reviewPayloadJson.context ?? {};
+    const riskTier = typeof ctx.riskTier === 'number' ? ctx.riskTier : null;
+    const policyReason = typeof ctx.policyReason === 'string' ? ctx.policyReason : null;
+    const requiresApproval = typeof ctx.requiresApproval === 'boolean' ? ctx.requiresApproval : true;
+
     return (
       <div key={item.id} className={`p-4 bg-white border border-slate-200 rounded-lg ${isLoading ? 'opacity-60 pointer-events-none' : ''}`}>
         <div className="flex items-start gap-3">
           <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="mt-1 cursor-pointer accent-indigo-500" />
           <div className="flex-1">
+            <ApprovalRiskContext
+              actionLabel={formatActionType(item.reviewPayloadJson.actionType)}
+              riskTier={riskTier}
+              requiresApproval={requiresApproval}
+              reason={policyReason}
+            />
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <span className={`inline-block px-2.5 py-0.5 rounded text-[12px] font-semibold ${badgeCls}`}>
                 {formatActionType(item.reviewPayloadJson.actionType)}

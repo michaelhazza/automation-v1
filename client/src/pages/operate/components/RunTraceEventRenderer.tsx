@@ -11,11 +11,17 @@
 // `embedded` prop: when true, suppresses any "open in modal" / "open in
 // iframe" affordances (embedded-mode recursion guard — see RunTracePage.tsx
 // invariant comment).
+//
+// `systemEvents` prop: optional unified-stream events from the new
+// /api/agent-runs/:id/trace endpoint. When provided, renders system event
+// rows (controller_style_decided, policy_envelope_resolved,
+// tool_security_decision) above the tool-call tree, with late-event markers.
 
 import { useEffect, useState } from 'react';
 import type { RuntimeCheckResult } from '../../../../../shared/types/runtimeCheck';
 import { RuntimeCheckBadge } from '../../../components/runtimeCheck/RuntimeCheckBadge';
 import api from '../../../lib/api';
+import type { RunTraceEvent } from '../../../../../shared/types/runTraceEvent';
 
 // ── Wire shape returned by /api/agent-runs/:id/trace-events ─────────────────
 
@@ -112,6 +118,59 @@ function OutputField({
       </div>
     </div>
   );
+}
+
+// ── System event row (new event types from unified trace stream) ─────────────
+
+function LateChip() {
+  return (
+    <span
+      className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-600 border border-amber-200 ml-1 select-none"
+      title="This event arrived after the run terminated"
+    >
+      late
+    </span>
+  );
+}
+
+function SystemEventRow({ event }: { event: RunTraceEvent }) {
+  const isLate = !!event.late;
+
+  if (event.eventType === 'controller_style_decided') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-[12px] text-slate-600">
+        <span className="font-medium text-slate-700">Controller decided:</span>
+        <span>{event.controllerStyle}</span>
+        <span className="text-slate-400 text-[11px]">source: {event.source}</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'policy_envelope_resolved') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-[12px] text-slate-600">
+        <span className="font-medium text-slate-700">Policy envelope resolved</span>
+        <span className="text-slate-400 text-[11px]">schema v{event.schemaVersion}</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'tool_security_decision') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-[12px] text-slate-600">
+        <span className="font-medium text-slate-700">Security decision:</span>
+        <span>{event.toolSlug}</span>
+        <span className="text-slate-400 text-[11px]">
+          tier {event.riskTier} / gate: {event.gateLevel} ({event.gateLevelSource})
+        </span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ── Single event card ────────────────────────────────────────────────────────
@@ -223,12 +282,19 @@ interface RunTraceEventRendererProps {
   canCorrect?: boolean;
   /** Called when the user clicks Correct on a step. */
   onCorrect?: (event: RunTraceToolCallEvent) => void;
+  /**
+   * Optional unified-stream events from /api/agent-runs/:id/trace.
+   * When provided, system events (controller_style_decided,
+   * policy_envelope_resolved, tool_security_decision) are rendered above
+   * the tool-call tree. Late-event markers are shown on late events.
+   */
+  systemEvents?: RunTraceEvent[];
 }
 
 // embedded: reserved for the recursion-guard invariant (RunTracePage.tsx). No modal affordances
 // exist in this renderer today, so the prop is intentionally unused — future contributors adding
 // run-id links or "view in modal" buttons MUST check this flag and suppress those affordances.
-export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeChecks, canCorrect, onCorrect }: RunTraceEventRendererProps) {
+export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeChecks, canCorrect, onCorrect, systemEvents }: RunTraceEventRendererProps) {
   const [events, setEvents] = useState<RunTraceToolCallEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -290,8 +356,28 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
     }
   }
 
+  // Filter system events to the types this renderer handles.
+  const SYSTEM_EVENT_TYPES = new Set([
+    'controller_style_decided',
+    'policy_envelope_resolved',
+    'tool_security_decision',
+  ]);
+  const filteredSystemEvents = systemEvents?.filter((e) =>
+    SYSTEM_EVENT_TYPES.has(e.eventType),
+  ) ?? [];
+
   return (
     <div className="flex flex-col gap-2 animate-[fadeIn_0.2s_ease-out_both]">
+      {filteredSystemEvents.length > 0 && (
+        <div className="flex flex-col gap-1 mb-2">
+          <div className="text-[12px] text-slate-400 font-medium uppercase tracking-wider mb-1">
+            System events ({filteredSystemEvents.length})
+          </div>
+          {filteredSystemEvents.map((event, idx) => (
+            <SystemEventRow key={`${event.eventType}-${idx}`} event={event} />
+          ))}
+        </div>
+      )}
       <div className="text-[12px] text-slate-400 font-medium uppercase tracking-wider mb-1">
         Tool calls ({events.length})
       </div>

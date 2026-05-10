@@ -3335,3 +3335,56 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 **Detection heuristic.** Grep boot-time / startup / scheduled-job code for `db.select(`, `db.update(`, `db.insert(` against canonical or RLS-protected tables. If the code runs without a per-call org context (no `withOrgTx`, no `getOrgScopedDb`), it must be inside `withAdminConnectionGuarded` with explicit `SET LOCAL ROLE admin_role`. Otherwise the access silently no-ops in prod and the operator never sees an error.
 
 **Applies to:** boot recovery jobs, maintenance jobs, cross-tenant sweepers, billing aggregators — anywhere a startup or scheduled task needs to scan across organisations. Same rule applies to peer-medians materialised view refresh, baseline rot detectors, and any future cross-tenant background work.
+
+### [2026-05-09] Pattern — Spec-design: drop the backfill that contradicts a conservative default introduced in the same spec
+
+**Date:** 2026-05-09
+**Source:** ChatGPT spec review of `tasks/builds/synthetos-foundation-refactor/spec.md` round 1, finding F1. Session log: `tasks/review-logs/chatgpt-spec-review-synthetos-foundation-refactor-2026-05-09T07-43-56Z.md`.
+
+**Rule.** When a spec adds (i) a new column with a conservative DEFAULT, (ii) a new governance column with a conservative DEFAULT that constrains downstream behaviour, AND (iii) a one-shot UPDATE that retroactively rewrites historical rows on the new column — check whether (iii) writes values the new governance default in (ii) would block. If yes, the backfill creates a permanent row-vs-policy mismatch (e.g., `agent_runs.controller_style = 'operator'` for an agent whose `subaccount_agents.controller_style_allowed = 'native_only'`). Drop the backfill rather than constraining it: the constrained version usually no-ops in practice (because the conservative default applies to almost all rows) and the unconstrained version produces inconsistent state. Forward-only on the new column is the right trade.
+
+**Apply to:** every spec that adds a new typed/enum column on a hot table AND introduces a governance column or default that gates downstream values on that column. Specifically: when migration N introduces both columns, ask "does my proposed backfill on column A write values that column B's default would forbid?". If yes, drop the backfill in the spec and document the forward-only trade (existing rows render with the conservative default; historical accuracy is the explicit cost).
+
+**Detection heuristic.** During spec review, grep the spec for `UPDATE.*SET.*WHERE.*default` patterns and cross-check against any new `DEFAULT` introduced in the same migration set. The contradiction is invisible at the SQL level (both statements are valid) but produces a class of "agent allow-list says X but historical run says Y" data states that surface confusingly months later in Run Trace UI.
+
+**Related:** the same review caught a CI-gate script using `node --eval "require('./....ts')"` (won't load TypeScript without a loader). Repo precedent for typed verifier harnesses is `npx tsx scripts/foo.ts` invoked from a thin bash wrapper — see `scripts/verify-visibility-parity.sh`. When sketching a new verify gate in a spec, match the existing repo pattern (bash + awk for source-text scans; bash + `npx tsx` for typed import-then-check). Don't invent a third pattern.
+
+## Pattern: First-resolver-wins UPDATE on per-run JSONB snapshots requires snapshot.organisationId as the predicate source
+
+**Context.** The Policy Envelope `persist` function (`server/services/policyEnvelopeResolver.ts`) writes a one-shot JSONB snapshot to `agent_runs` with `WHERE id = $runId AND policy_envelope_snapshot IS NULL`, and re-reads on zero-rows-affected to distinguish "another resolver won" from "row missing". Round-1 pr-reviewer flagged the missing `organisationId` predicate per DEVELOPMENT_GUIDELINES §1 ("filter by organisationId in app code, even with RLS").
+
+**Resolution.** The snapshot itself encodes the run's `organisationId` because the resolver computes it from `ctx.organisationId` before assembly. Use `snapshot.organisationId` as the predicate source in both the UPDATE and the re-read — same value the resolver was scoped against, no risk of the predicate disagreeing with the data being written.
+
+**Why this matters.** Reading from a separate context object would create a class of bugs where the snapshot's contents differ from the predicate's scope. Sourcing from the snapshot itself makes the invariant load-bearing: if the snapshot's `organisationId` is wrong, the UPDATE matches nothing and the loop fails closed.
+
+## Pattern: `replace_all=true` silently misses identical strings with different leading indentation
+
+**Context.** Round-2 pr-reviewer fix replaced two `console.log('foundation.risk_tier.gate_derived', { … })` blocks in `policyEngineService.ts` with `replace_all=true`. The two call sites had different leading indentation (8 spaces inside a `for-of` loop body vs 4 spaces at function-body top level). `replace_all` operates on exact-match strings — only the first site converted; the second was missed. Round-3 pr-reviewer caught it; required a second surgical Edit.
+
+**Resolution.** When replacing call-site patterns that may appear at different indentation levels, do separate surgical Edits per site OR use a regex tool. `replace_all` is for true rename-style replacements (e.g., a single identifier).
+
+**Why this matters.** Linter/typecheck both passed because half-converted code was still valid. Only the human reviewer caught it. Add to the mental checklist for "identical-content blocks at multiple call sites".
+
+## Pattern: Pagination correctness requires SQL filter pushdown, never in-memory filter after LIMIT
+
+**Context.** Run Trace service (`server/services/runTraceService.ts`) initially fetched `LIMIT N+1` rows from a UNION ALL across 7 ledger tables, then applied cursor / eventType / sinceTimestamp / untilTimestamp / toolSlug filters in JavaScript. Codex (dual-reviewer) caught that any filter that reduces the page size below `limit` makes page 2 unreachable — the cursor stops as soon as one filtered page returns less than `limit`, even though more matching events exist downstream.
+
+**Resolution.** Push every filter predicate into the SQL query: cursor as a tuple comparison `(ts, COALESCE(seq,0), source_table, source_id) > $cursor` matching the canonical ORDER BY; `eventType = ANY($::text[])` against the post-translation column; per-arm `toolSlug` predicates that emit `AND FALSE` for non-tool-scoped UNION arms; `ts >= $since::timestamptz` / `ts <= $until::timestamptz`. The LIMIT then operates on the already-filtered row set.
+
+**Detection heuristic.** Whenever a UNION ALL or paginated query feeds a downstream JavaScript `.filter()` call, the LIMIT is applied against the wrong row set. Treat in-memory filtering after LIMIT as a paging-correctness bug, not just a performance hint.
+
+## Pattern: Subaccount-scoped fallback UPDATE must filter by subaccountId, not just organisationId
+
+**Context.** The CredentialBrokerService `revoke` method initially scoped its fallback UPDATE for subaccount-scoped connections by `(id, organisationId)` only. An actor with `CONNECTIONS_MANAGE` on subaccount-A could call `DELETE /api/subaccounts/<sub-A>/connections/<sub-B-connection>` and revoke a sibling subaccount's credential within the same org. The route resolved subaccount-A but did not pass it to the broker — the broker's fallback UPDATE matched any connection in the org.
+
+**Resolution.** Make `subaccountId` a required param on `revoke` (typed `string | null` so org-level vs subaccount-scoped revokes are explicit), and always include the subaccount predicate in the fallback UPDATE: `eq(connections.subaccountId, params.subaccountId)` for subaccount-scoped, `isNull(connections.subaccountId)` for org-level. Codex (dual-reviewer) further hardened by strict-branching on `subaccountId === null` to choose between the two delegate paths up front. Return type changed from `void` to `boolean` so callers can restore the pre-broker 404 behaviour for missing/cross-scope IDs.
+
+**Why this matters.** This is a class of cross-tenant-within-org isolation hole that adversarial-reviewer's auto-trigger surface (server/db/schema, routes, middleware) catches at the route layer but misses at the service-layer when the route looks correct. The defense-in-depth is to make subaccountId a hard parameter at the service boundary.
+
+## Pattern: Stable structured-log codes must use logger.info, never console.log
+
+**Context.** New foundation log codes (`foundation.risk_tier.gate_derived`, `foundation.policy_envelope.resolution_failed`, etc.) had two `console.log` call sites in `policyEngineService.ts` instead of `logger.info`. Downstream observability and alerting consume these codes via the structured-log pipeline (correlation IDs, level, structured fields). `console.log` writes to stdout outside that pipeline, breaking ingestion of half the events emitted from that service.
+
+**Resolution.** All new stable log codes route through `import { logger } from '../lib/logger.js'`. Sibling new services (`credentialBrokerService.ts`, `runTraceService.ts`) had it correct from chunk 5; `policyEngineService.ts` regressed because it pre-existed and the chunk-4 patch didn't add the import. Lint/typecheck don't catch this — the contract is "downstream consumes the stable code", which is observability, not type-system.
+
+**Detection heuristic.** When introducing a new namespaced log code (`<feature>.<event>`), grep the file for both `console.log('<code>` and `logger.info('<code>` — only the structured form should appear.

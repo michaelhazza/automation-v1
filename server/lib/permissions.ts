@@ -190,6 +190,8 @@ export const SUBACCOUNT_PERMISSIONS = {
   SCORECARDS_VIEW:      'subaccount.scorecards.view',
   SCORECARDS_MANAGE:    'subaccount.scorecards.manage',
   CORRECTIONS_CREATE:   'subaccount.corrections.create',
+  // ── Credentials audit log (SynthetOS Phase 1) ────────────────────────────
+  CREDENTIALS_AUDIT_READ: 'credentials:audit:read',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -363,6 +365,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SUPPORT_DRAFT_REJECT,             description: 'Reject support reply drafts',                         groupName: 'org.support' },
   { key: ORG_PERMISSIONS.SUPPORT_DRAFT_OVERRIDE_COLLISION, description: 'Override collision check on draft approval',           groupName: 'org.support' },
   { key: ORG_PERMISSIONS.SUPPORT_INBOX_CONFIGURE,          description: 'Configure support inbox agent settings',              groupName: 'org.support' },
+  // subaccount.credentials (SynthetOS Phase 1)
+  { key: SUBACCOUNT_PERMISSIONS.CREDENTIALS_AUDIT_READ, description: 'View the credential audit log for this subaccount', groupName: 'subaccount.credentials' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

@@ -71,6 +71,9 @@ run_gate "$SCRIPT_DIR/verify-test-quality.sh"
 run_gate "$SCRIPT_DIR/verify-idempotency-strategy-declared.sh"
 run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 
+# ── synthetos-foundation-refactor: Risk Tier classification (§4.2.5, §9.1) ──
+run_gate "$SCRIPT_DIR/verify-risk-tier-assigned.sh"
+
 # ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"

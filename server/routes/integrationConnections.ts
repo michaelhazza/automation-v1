@@ -14,6 +14,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
+import { credentialBrokerService } from '../services/credentialBrokerService.js';
 import { listConnections, getConnectionUsage, disconnectConnection } from '../services/connectionsService.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -148,22 +149,17 @@ router.delete(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
 
-    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
-
-    // Revoke rather than hard delete — keeps audit trail
-    await db.update(integrationConnections)
-      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-      ));
+    const revoked = await credentialBrokerService.revoke({
+      organisationId: req.orgId!,
+      credentialId: req.params.id,
+      subaccountId: subaccount.id,
+    });
+    if (!revoked) {
+      // Connection not found in this subaccount scope — preserve the pre-broker
+      // 404 behaviour rather than returning success on a no-op delete.
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
 
     res.json({ success: true });
   })

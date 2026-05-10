@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import Modal from './Modal';
+import CredentialsAuditLog from './CredentialsAuditLog.js';
 
 interface SubaccountAgentOption {
   id: string;
@@ -458,6 +459,9 @@ export default function CredentialsTab({ subaccountId }: Props) {
           </div>
         </div>
       )}
+
+      {/* Credential Audit Log */}
+      {subaccountId && <CredentialsAuditLog subaccountId={subaccountId} />}
 
       {/* Web Login Credentials */}
       <section>

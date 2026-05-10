@@ -230,3 +230,48 @@ export function selectGuidanceTexts<TRule extends GuidanceRule, TCtx>(
 
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Subaccount-constraint application (Chunk 4 — synthetos-foundation-refactor)
+// ---------------------------------------------------------------------------
+
+export type SubaccountConstraintSource =
+  | 'subaccount_constraint'
+  | 'policy_override'
+  | 'preserved_existing'
+  | 'tier_default';
+
+export interface SubaccountConstraintResult {
+  decision: PolicyGateDecision;
+  gateLevelSource: SubaccountConstraintSource;
+}
+
+/**
+ * Apply subaccount-level governance constraints on top of a pure-derived
+ * gate level (spec §4.2.8).
+ *
+ * Rules (applied in precedence order):
+ *   1. riskTier > maxRiskTier → force block (subaccount_constraint).
+ *   2. riskTier >= requireApprovalAtTier AND baseDecision === 'auto'
+ *        → upgrade to review (subaccount_constraint).
+ *   3. Otherwise pass through baseDecision unchanged with the baseSource.
+ *
+ * Pure: no I/O, no side effects.
+ */
+export function applySubaccountConstraintsPure(
+  baseDecision: PolicyGateDecision,
+  baseSource: SubaccountConstraintSource,
+  riskTier: number | undefined,
+  governance: { maxRiskTier: number; requireApprovalAtTier: number } | null,
+): SubaccountConstraintResult {
+  if (riskTier === undefined || governance === null) {
+    return { decision: baseDecision, gateLevelSource: baseSource };
+  }
+  if (riskTier > governance.maxRiskTier) {
+    return { decision: 'block', gateLevelSource: 'subaccount_constraint' };
+  }
+  if (riskTier >= governance.requireApprovalAtTier && baseDecision === 'auto') {
+    return { decision: 'review', gateLevelSource: 'subaccount_constraint' };
+  }
+  return { decision: baseDecision, gateLevelSource: baseSource };
+}
