@@ -1,8 +1,8 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md
-active_plan: tasks/builds/support-desk-canonical/plan.md
-build_slug: support-desk-canonical
-branch: claude/support-ticket-structure-xMcy8
+active_spec: tasks/builds/execution-backend-adapter-contract/spec.md
+active_plan: tasks/builds/execution-backend-adapter-contract/plan.md
+build_slug: execution-backend-adapter-contract
+branch: claude/sandbox-execution-provider-DLfjn
 status: REVIEWING
 last_updated: 2026-05-10
 last_merged_pr: #279
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (Status: accepted)
-**Active plan:** `tasks/builds/support-desk-canonical/plan.md`
-**Active build slug:** support-desk-canonical
-**Branch:** claude/support-ticket-structure-xMcy8
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 15 chunks built + branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer HOLES_FOUND non-blocking with 6 routed to backlog, pr-reviewer 4 rounds APPROVED, dual-reviewer Codex APPROVED with 6 [ACCEPT] decisions including 2 P1 runtime bugs caught) + 2 fix-loop rounds + doc-sync gate (4 docs updated, ADR-0009, +2 KNOWLEDGE patterns). Handoff at `tasks/builds/support-desk-canonical/handoff.md`. PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). **Next:** new Claude Code session, type `launch finalisation`. 14 deferred items routed to `tasks/todo.md` SDC-PR-1..14 + 6 SDC-ADV-1..6 for post-merge backlog.
+**Active spec:** `tasks/builds/execution-backend-adapter-contract/spec.md` (Status: accepted, locked 2026-05-10)
+**Active plan:** `tasks/builds/execution-backend-adapter-contract/plan.md`
+**Active build slug:** execution-backend-adapter-contract
+**Branch:** claude/sandbox-execution-provider-DLfjn
+**Status:** **REVIEWING** — Phase 2 complete. All 5 chunks built; G2 + branch-level review pass complete. Verdicts: spec-conformance CONFORMANT_AFTER_FIXES (1 mechanical fix, 2 directional gaps deferred), adversarial-reviewer HOLES_FOUND (1 confirmed-hole EBAC-ADV-1 fixed inline, 2 deferred), pr-reviewer round-1 CHANGES_REQUESTED → 4 Strong fixed → round-2 APPROVED, dual-reviewer APPROVED with 1 P2 fix (orphan-event-emit regression), pr-reviewer round-3 (post-dual) APPROVED with 1 Strong deferred (EBAC-PR3-S1 orphan-stamp integration test). Doc-sync gate complete (architecture.md updated, KNOWLEDGE.md +4 patterns, DEVELOPMENT_GUIDELINES.md §8.32 added in-build). Phase 3 handoff ready at `tasks/builds/execution-backend-adapter-contract/handoff.md`. **Next:** open a new Claude Code session and type `launch finalisation`.
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 

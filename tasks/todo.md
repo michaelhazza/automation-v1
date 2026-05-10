@@ -3854,4 +3854,13 @@ Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These
   - Concern: `taskPrompt = workspaceContext || '...'` is LLM-generated content from workspace memory. If `claudeCodeRunner.ts` uses `child_process.exec` with a concatenated shell string, workspace-memory content with shell metacharacters could inject shell commands.
   - Suggested approach: read `server/services/claudeCodeRunner.ts`. If it uses `execFile` or `spawn` with an argument array — close as non-finding. If it uses `exec` with a string — fix to use `execFile`/`spawn` with arg array.
 
+- [ ] **EBAC-PR3-S1 — Add integration test for orphan-stamp path in `_ieeShared.ts::ieeFinalise`**
+  - Source: `tasks/review-logs/pr-review-log-execution-backend-adapter-contract-2026-05-10T09-59-40Z.md` Strong S-1.
+  - Why: dual-reviewer fix `44ac0cab` restored `eventEmittedAt` stamping when `parentRun === null` (orphaned `iee_runs` rows whose parent `agent_runs` was deleted). The regression Codex caught had no automated coverage — the mock adapter test in `contractPure.test.ts` only exercises the happy path with non-null `parentRun`.
+  - Given/When/Then:
+    - *Given* an `iee_runs` row in status `'completed'` with `event_emitted_at = NULL` whose `agent_run_id` references a deleted `agent_runs` row,
+    - *When* `finaliseAgentRunFromBackend({ backendId: 'iee_browser', backendTaskId: <ieeRunId> })` runs,
+    - *Then* function returns `false`, row's `event_emitted_at` is non-null, no `agent_runs` UPDATE attempted, no websocket emission fires.
+  - Place under `server/services/__tests__/` as a Vitest integration spec; CI handles full-suite execution.
+
 
