@@ -4,7 +4,6 @@ import { eq, and, or, inArray, isNull, sql, desc, asc, count } from 'drizzle-orm
 import { db } from '../db/index.js';
 import { taskService } from './taskService.js';
 import { resolveSystemOpsContext } from './systemOperationsOrgResolver.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   systemIncidents,
   systemIncidentEvents,

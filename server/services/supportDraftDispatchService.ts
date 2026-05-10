@@ -432,6 +432,11 @@ export async function approveDraft(
     .where(
       and(
         eq(canonicalTicketDrafts.id, draftId),
+        // PTH-ADV-1 defence-in-depth: explicit org-id filter per DEVELOPMENT_GUIDELINES §1.
+        // FORCE-RLS on canonical_ticket_drafts is the primary boundary; this filter is
+        // a redundant guard so a future RLS-bypass path (admin role escalation, missing
+        // GUC) cannot mutate another org's draft on the durable state-claim transition.
+        eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
         inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
       ),
     )
@@ -442,7 +447,13 @@ export async function approveDraft(
     const [current] = await db
       .select({ status: canonicalTicketDrafts.status, sentMessageId: canonicalTicketDrafts.sentMessageId })
       .from(canonicalTicketDrafts)
-      .where(eq(canonicalTicketDrafts.id, draftId))
+      .where(
+        and(
+          eq(canonicalTicketDrafts.id, draftId),
+          // PTH-ADV-1 defence-in-depth: see UPDATE clause above for rationale.
+          eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+        ),
+      )
       .limit(1);
     return { status: current?.status ?? 'unknown', messageId: current?.sentMessageId ?? undefined };
   }
