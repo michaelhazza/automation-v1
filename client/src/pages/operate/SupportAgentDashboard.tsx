@@ -24,35 +24,45 @@ const MODE_SEQUENCE: AgentMode[] = ['disabled', 'assisted', 'autonomous'];
 
 function ModeToggle({ inboxId, mode, onModeChange }: { inboxId: string; mode: AgentMode; onModeChange: (m: AgentMode) => void }) {
   const [saving, setSaving] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   async function setMode(nextMode: AgentMode) {
     if (nextMode === mode || saving) return;
     setSaving(true);
+    setToggleError(null);
     try {
       await api.patch(`/api/support/inboxes/${inboxId}/agent-config`, { mode: nextMode });
       onModeChange(nextMode);
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { error?: string } } };
+      setToggleError(axiosError.response?.data?.error ?? 'Failed to update mode');
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[11px] font-medium">
-      {MODE_SEQUENCE.map((m) => (
-        <button
-          key={m}
-          type="button"
-          disabled={saving}
-          onClick={() => void setMode(m)}
-          className={`px-2.5 py-1 capitalize transition-colors ${
-            m === mode
-              ? 'bg-indigo-600 text-white'
-              : 'bg-white text-slate-600 hover:bg-slate-50'
-          } disabled:opacity-50`}
-        >
-          {m}
-        </button>
-      ))}
+    <div>
+      <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[11px] font-medium">
+        {MODE_SEQUENCE.map((m) => (
+          <button
+            key={m}
+            type="button"
+            disabled={saving}
+            onClick={() => void setMode(m)}
+            className={`px-2.5 py-1 capitalize transition-colors ${
+              m === mode
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white text-slate-600 hover:bg-slate-50'
+            } disabled:opacity-50`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      {toggleError !== null && (
+        <div className="mt-1 text-[11px] text-red-600">{toggleError}</div>
+      )}
     </div>
   );
 }

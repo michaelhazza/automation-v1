@@ -4,7 +4,6 @@ import type { SupportInboxAgentConfig } from '../../../../shared/types/supportIn
 
 interface InboxAgentConfigTabProps {
   inboxId: string;
-  subaccountId: string;
   initialConfig: SupportInboxAgentConfig;
   onSaved: () => void;
 }
