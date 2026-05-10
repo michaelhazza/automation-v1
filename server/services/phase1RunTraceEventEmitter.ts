@@ -14,7 +14,7 @@
 // validated at the call site by the structured-log shape.
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 
 /** Run-rendered Phase 1 event types — must match spec §3.5 registry. */
@@ -48,45 +48,84 @@ export interface Phase1RunRenderedEventInput {
  * `sequence_number` atomically from `agent_runs.next_event_seq` so concurrent
  * writes for the same run do not collide on the unique index.
  *
+ * Runs inside the caller's open org-scoped transaction (via `getOrgScopedDb`)
+ * so the `app.organisation_id` GUC is set and RLS policies on
+ * `agent_execution_events` and `agent_runs` evaluate correctly. The double-write
+ * is wrapped in a SAVEPOINT so a failure here only rolls back the savepoint —
+ * the outer transaction's other work continues.
+ *
  * On any failure (FK violation if no agent_runs row exists, transient DB error,
  * etc.), warn-logs and returns. The caller's structured-log emit is the
  * primary observability surface; this is the durability companion.
+ *
+ * NOTE: callers must already be inside a `withOrgTx(...)` block — typically
+ * the outer tx opened by `createWorker` for pg-boss handlers, or the
+ * `orgScoping` HTTP middleware.
  */
 export async function emitPhase1RunRenderedEvent(
   input: Phase1RunRenderedEventInput,
 ): Promise<void> {
+  let orgDb: ReturnType<typeof getOrgScopedDb>;
   try {
-    await db.transaction(async (tx) => {
-      const [seqRow] = await tx.execute<{ next_event_seq: number; started_at: Date | null }>(
-        sql`UPDATE agent_runs
-            SET next_event_seq = next_event_seq + 1, updated_at = NOW()
-            WHERE id = ${input.runId}
-            RETURNING next_event_seq, started_at`,
-      );
-      if (!seqRow) return;
-      const sequenceNumber = Number(seqRow.next_event_seq);
-      const startedAt = seqRow.started_at ?? new Date();
-      const durationMs = Math.max(0, Date.now() - new Date(startedAt).getTime());
-
-      const payloadJson = JSON.stringify(input.payload);
-      await tx.execute(sql`
-        INSERT INTO agent_execution_events (
-          run_id, organisation_id, subaccount_id,
-          sequence_number, event_type, duration_since_run_start_ms,
-          source_service, payload
-        ) VALUES (
-          ${input.runId},
-          ${input.organisationId},
-          ${input.subaccountId},
-          ${sequenceNumber},
-          ${input.eventType},
-          ${durationMs},
-          ${input.sourceService},
-          ${payloadJson}::jsonb
-        )
-      `);
-    });
+    orgDb = getOrgScopedDb('phase1RunTraceEventEmitter');
   } catch (err) {
+    logger.warn('phase1.run_rendered_event_write_failed', {
+      runId: input.runId,
+      eventType: input.eventType,
+      error: err instanceof Error ? err.message : String(err),
+      reason: 'no_org_scope',
+    });
+    return;
+  }
+
+  await orgDb.execute(sql`SAVEPOINT phase1_event_emit`);
+  try {
+    const seqResult = await orgDb.execute<{
+      next_event_seq: number;
+      started_at: Date | null;
+    }>(sql`UPDATE agent_runs
+           SET next_event_seq = next_event_seq + 1, updated_at = NOW()
+           WHERE id = ${input.runId}
+           RETURNING next_event_seq, started_at`);
+    const seqRows = Array.isArray(seqResult)
+      ? seqResult
+      : ((seqResult as { rows?: unknown[] }).rows ?? []);
+    const seqRow = seqRows[0] as
+      | { next_event_seq: number; started_at: Date | string | null }
+      | undefined;
+    if (!seqRow) {
+      await orgDb.execute(sql`RELEASE SAVEPOINT phase1_event_emit`);
+      return;
+    }
+    const sequenceNumber = Number(seqRow.next_event_seq);
+    const startedAt = seqRow.started_at ? new Date(seqRow.started_at) : new Date();
+    const durationMs = Math.max(0, Date.now() - startedAt.getTime());
+
+    const payloadJson = JSON.stringify(input.payload);
+    await orgDb.execute(sql`
+      INSERT INTO agent_execution_events (
+        run_id, organisation_id, subaccount_id,
+        sequence_number, event_type, duration_since_run_start_ms,
+        source_service, payload
+      ) VALUES (
+        ${input.runId},
+        ${input.organisationId},
+        ${input.subaccountId},
+        ${sequenceNumber},
+        ${input.eventType},
+        ${durationMs},
+        ${input.sourceService},
+        ${payloadJson}::jsonb
+      )
+    `);
+    await orgDb.execute(sql`RELEASE SAVEPOINT phase1_event_emit`);
+  } catch (err) {
+    try {
+      await orgDb.execute(sql`ROLLBACK TO SAVEPOINT phase1_event_emit`);
+      await orgDb.execute(sql`RELEASE SAVEPOINT phase1_event_emit`);
+    } catch {
+      // SAVEPOINT may already be torn down by an aborted outer tx; nothing to do.
+    }
     logger.warn('phase1.run_rendered_event_write_failed', {
       runId: input.runId,
       eventType: input.eventType,

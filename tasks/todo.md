@@ -3916,3 +3916,47 @@ The branch implements substantial portions of the spec but several integration g
   - Spec section: §5.3.5
   - Gap: spec describes a CI gate that re-runs the eval harness before allowing system_agents.version bumps. No such gate is implemented; it is informational / process discipline today.
   - Suggested approach: add a `verify-support-agent-prompt-version-bump.sh` gate that detects PR-level diffs to `server/prompts/support-agent-master.md` and conditionally runs the eval harness against the regression set. Phase 1.5 candidate.
+
+## Deferred from pr-reviewer (branch-level) - phase-1-showcase-mvps (2026-05-10)
+
+**Captured:** 2026-05-10T11:17:44Z
+**Source log:** `tasks/review-logs/pr-review-log-phase-1-showcase-mvps-2026-05-10T*.md`
+
+P0 Blockers and 3 of 7 Strong recommendations were closed in commit `910236f0`'s follow-up.
+The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
+
+### Strong (post-merge)
+
+- [ ] PR-S3 — Finalize endpoint body cap will reject base64 PDF / media > 10MB
+  - Spec section: §6.1.4 / DEVELOPMENT_GUIDELINES.md §8.29
+  - Gap: `/api/internal/run-artifacts/finalize` relies on the global `express.json({ limit: '10mb' })` parser. Worker-uploaded base64-encoded PDFs / media will hit the limit (33% inflation over raw bytes).
+  - Suggested approach: install a path-scoped `express.json({ limit: '50mb' })` BEFORE the global parser in `server/index.ts`. Or refactor the finalize endpoint to accept multipart upload (preferred — avoids base64 inflation).
+
+- [ ] PR-S4 — `phase1RunTraceEventEmitter.ts` is a parallel write path that bypasses canonical `appendEvent`
+  - Spec section: §3.5 / INV-16
+  - Gap: even with the GUC fix landed, the helper still bypasses `agentExecutionEventService.appendEvent`, missing websocket envelope emission, presence projection, working-time tracking, observation forwarding, payload validation, and event-cap metric counters.
+  - Suggested approach: extend `AgentExecutionEventType` and `AgentExecutionEventPayload` discriminated unions in `shared/types/agentExecutionLog.ts` with the 14 Phase 1 run-rendered event types; route through `appendEvent` / `insertExecutionEventSafe`; delete `phase1RunTraceEventEmitter.ts`.
+
+- [ ] PR-S5 — `runArtifactsRetentionSweepJob.ts` uses single shared admin tx across all orgs
+  - Spec section: DEVELOPMENT_GUIDELINES.md §2
+  - Gap: maintenance jobs that advertise per-org partial-success must use one admin tx per org or SAVEPOINT subtxs. Current code opens one shared admin tx — fragile under non-caught failures.
+  - Suggested approach: group expired rows by `organisation_id`, open one `withAdminConnection` per org. Or wrap each per-artifact DELETE in a SAVEPOINT subtx.
+
+- [ ] PR-S6 — Escalation paths (low-confidence + skill-error) lack `support.add_internal_note + support.assign(human)` calls
+  - Spec section: §5.4.1
+  - Gap: the catch / low-confidence branches release the claim and emit the terminal event, but do NOT call the spec-required action skills. `phase1.support.escalation_action_pending` warn-log is currently the only signal humans see — no internal note lands on the ticket and no human assignee is set.
+  - Suggested approach: implement `support.add_internal_note` and `support.assign` skill handlers (currently only classify, propose, find-customer-history exist). Wire from the two escalation branches in `supportAgentExecutionService.ts`. Phase 1.5 candidate.
+
+- [ ] PR-S7 — No runtime tests for `phase1RunTraceEventEmitter.ts`
+  - Gap: the helper has complex behaviour (raw-SQL JSONB binding, atomic seq allocation, FK-violation handling, SAVEPOINT semantics) but no tests.
+  - Suggested approach: author `server/services/__tests__/phase1RunTraceEventEmitter.integration.test.ts` covering the seq allocation race, JSONB round-trip with embedded quotes / unicode, FK-violation rollback path, and missing-org-context fail-closed path.
+
+### Non-blocking
+
+- [ ] PR-N1 — `supportAgentMasterPrompt.ts` resolves prompt path via `process.cwd()` (env-fragile)
+- [ ] PR-N2 — `supportAgentMasterPrompt.ts` module-level cache lacks justification comment per §8.24
+- [ ] PR-N3 — `processInbox` `subaccountId: string | null` could tighten to `string`
+- [ ] PR-N4 — `InboxConfigPage.tsx` legacy form `<button>` lacks `type="button"`
+- [ ] PR-N5 — `supportAgentInstallService.ts` does not set `appliedTemplateId` / `appliedTemplateVersion`
+- [ ] PR-N6 — `runArtifacts.ts` artifacts-list endpoint relies on org-scope only (per-spec, but worth code comment)
+- [ ] PR-N7 — Confirm `dist/` is gitignored or remove committed artifacts

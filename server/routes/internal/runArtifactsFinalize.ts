@@ -6,10 +6,12 @@
 // The worker sends this header on every call; missing or invalid secret → 401.
 
 import { Router, type Request } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { withOrgTx } from '../../instrumentation.js';
+import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import * as fileDeliveryService from '../../services/fileDeliveryService.js';
 import { logger } from '../../lib/logger.js';
 import type { RunArtifact } from '../../../shared/types/runArtifact.js';
@@ -19,7 +21,43 @@ const router = Router();
 function verifyWorkerSecret(req: Request): boolean {
   const secret = process.env.WORKER_SHARED_SECRET;
   if (!secret) return false;
-  return req.headers['x-worker-secret'] === secret;
+  const supplied = req.headers['x-worker-secret'];
+  if (typeof supplied !== 'string') return false;
+  // Constant-time comparison to defeat byte-by-byte timing attacks. The length
+  // check first avoids the buffer-length precondition on timingSafeEqual; an
+  // attacker cannot use the length-mismatch fast path to learn anything beyond
+  // the secret length, which is fixed and not secret.
+  if (supplied.length !== secret.length) return false;
+  return timingSafeEqual(Buffer.from(supplied), Buffer.from(secret));
+}
+
+/**
+ * Verifies the supplied agentRunId belongs to the supplied organisationId.
+ * The worker payload's organisationId is otherwise untrusted; without this
+ * cross-check, a compromised worker could attribute any tenant's run to any
+ * other tenant's organisation. The lookup uses an admin connection because
+ * we cannot scope to the claimed organisationId until we have verified it.
+ */
+async function verifyRunBelongsToOrg(
+  agentRunId: string,
+  organisationId: string,
+): Promise<boolean> {
+  return withAdminConnection(
+    {
+      source: 'internal:run-artifacts:finalize:verifyRunBelongsToOrg',
+      reason: 'Verify worker-supplied organisationId owns the run before opening org-scoped tx',
+    },
+    async (tx) => {
+      const result = await tx.execute<{ organisation_id: string }>(
+        sql`SELECT organisation_id FROM agent_runs WHERE id = ${agentRunId}::uuid LIMIT 1`,
+      );
+      const rows = Array.isArray(result)
+        ? result
+        : ((result as { rows?: unknown[] }).rows ?? []);
+      const row = rows[0] as { organisation_id?: string } | undefined;
+      return row?.organisation_id === organisationId;
+    },
+  );
 }
 
 interface FinalizeBody {
@@ -73,6 +111,19 @@ router.post(
       if (retainUntil > maxRetain) {
         return res.status(400).json({ error: { code: 'retain_until_too_far', message: 'retainUntil cannot be more than 365 days in the future' } });
       }
+    }
+
+    // Tenant-isolation cross-check: the worker payload's organisationId is
+    // untrusted. Verify it actually owns the supplied agentRunId before opening
+    // the org-scoped tx with that GUC. A compromised or misconfigured worker
+    // can otherwise attribute any tenant's run to any other tenant's org.
+    const runOwnedByOrg = await verifyRunBelongsToOrg(body.agentRunId, body.organisationId);
+    if (!runOwnedByOrg) {
+      logger.warn('internal.run_artifacts.finalize.tenant_mismatch', {
+        suppliedOrganisationId: body.organisationId,
+        agentRunId: body.agentRunId,
+      });
+      return res.status(403).json({ error: { code: 'tenant_mismatch', message: 'agentRunId does not belong to organisationId' } });
     }
 
     let result: Awaited<ReturnType<typeof fileDeliveryService.upload>> | undefined;

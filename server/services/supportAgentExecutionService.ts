@@ -8,7 +8,6 @@
 
 import { sql, eq, and } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { db } from '../db/index.js';
 import {
   canonicalInboxes,
   organisations,
@@ -20,6 +19,7 @@ import { logger } from '../lib/logger.js';
 import { classifyTicket } from './skillHandlers/supportClassifyTicket.js';
 import { proposeReplyForTicket } from './skillHandlers/supportProposeReply.js';
 import { findCustomerHistory } from './skillHandlers/supportFindCustomerHistory.js';
+import { readThreadForAgent } from './supportTicketService.js';
 import { approveDraft } from './supportDraftDispatchService.js';
 import {
   isHumanActivityTooRecent,
@@ -57,17 +57,16 @@ export async function tryClaimTicket(
   claimTtlMinutes: number = DEFAULT_CLAIM_TTL_MINUTES,
 ): Promise<ClaimResult> {
   const claimPredicate = buildClaimPredicateSql(claimTtlMinutes);
-  const claimResult = await db.transaction(async (tx) => {
-    return tx.execute(sql`
-      UPDATE canonical_tickets
-      SET    bot_claimed_at = now(),
-             bot_claimed_by_run_id = ${runId}::uuid
-      WHERE  id = ${ticketId}::uuid
-        AND  organisation_id = ${orgId}::uuid
-        AND  (${sql.raw(claimPredicate)})
-      RETURNING id, last_human_activity_at
-    `);
-  });
+  const orgDb = getOrgScopedDb('supportAgentExecutionService.tryClaimTicket');
+  const claimResult = await orgDb.execute(sql`
+    UPDATE canonical_tickets
+    SET    bot_claimed_at = now(),
+           bot_claimed_by_run_id = ${runId}::uuid
+    WHERE  id = ${ticketId}::uuid
+      AND  organisation_id = ${orgId}::uuid
+      AND  (${sql.raw(claimPredicate)})
+    RETURNING id, last_human_activity_at
+  `);
 
   const rows = Array.isArray(claimResult)
     ? claimResult
@@ -92,7 +91,8 @@ export async function tryClaimTicket(
 // ---------------------------------------------------------------------------
 
 async function releaseTicketClaim(ticketId: string, orgId: string): Promise<void> {
-  await db.execute(sql`
+  const orgDb = getOrgScopedDb('supportAgentExecutionService.releaseTicketClaim');
+  await orgDb.execute(sql`
     UPDATE canonical_tickets
     SET    bot_claimed_at = NULL,
            bot_claimed_by_run_id = NULL
@@ -119,8 +119,9 @@ async function listOpenTickets(
   inboxId: string,
 ): Promise<OpenTicketRow[]> {
   const terminalEventPredicate = buildTerminalEventPredicateSql();
+  const orgDb = getOrgScopedDb('supportAgentExecutionService.listOpenTickets');
 
-  const result = await db.execute(sql`
+  const result = await orgDb.execute(sql`
     SELECT
       id,
       subject,
@@ -198,7 +199,8 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
   // so the existing job-payload / claim-write code paths keep using the same
   // identifier. controller_style defaults to 'native' on the column. The insert
   // is idempotent via onConflictDoNothing — duplicate-job retries no-op cleanly.
-  const [linkRow] = await db
+  // All reads/writes here run through the org-scoped tx so RLS is enforced.
+  const [linkRow] = await orgDb
     .select({ subaccountAgentId: subaccountAgents.id, agentId: subaccountAgents.agentId })
     .from(subaccountAgents)
     .where(
@@ -222,7 +224,7 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
     return;
   }
 
-  await db
+  await orgDb
     .insert(agentRuns)
     .values({
       id: subaccountAgentRunId,
@@ -245,13 +247,13 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
   // '{{MASTER_PROMPT_PLACEHOLDER}}' (set at install time). The actual prompt
   // body lives in server/prompts/support-agent-master.md and is loaded from
   // disk at run start so edits ship via standard PR review without DB writes.
-  const [orgRow] = await db
+  const [orgRow] = await orgDb
     .select({ name: organisations.name })
     .from(organisations)
     .where(eq(organisations.id, organisationId))
     .limit(1);
   const [subaccountRow] = subaccountId
-    ? await db
+    ? await orgDb
         .select({ name: subaccounts.name })
         .from(subaccounts)
         .where(eq(subaccounts.id, subaccountId))
@@ -400,6 +402,14 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
     // Skill error — escalate, emit terminal, release claim
     const claimReleasedAt = new Date().toISOString();
     await releaseTicketClaim(ticketId, organisationId);
+    // Spec §5.4.1 escalation actions (add_internal_note + assign) pending the
+    // implementation of those skill handlers — tracked in tasks/todo.md PR-S6.
+    logger.warn('phase1.support.escalation_action_pending', {
+      ticketId,
+      runId,
+      reason: 'skill_error',
+      pendingActions: ['support.add_internal_note', 'support.assign(human)'],
+    });
     logger.info('phase1.support.ticket_terminal', {
       ticketId,
       perTicketVerdict: 'escalated_to_human',
@@ -461,6 +471,17 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
   if (classification.confidence < minConfidence) {
     const claimReleasedAt = new Date().toISOString();
     await releaseTicketClaim(ticketId, organisationId);
+    // Spec §5.4.1 calls for `support.add_internal_note + support.assign(human)`
+    // on this escalation path. Those skill handlers are not yet implemented in
+    // this codebase (only classify, propose, find-customer-history exist).
+    // Tracked in tasks/todo.md PR-S6 — emit a structured signal so operators
+    // can see escalations occurred even before the action skills land.
+    logger.warn('phase1.support.escalation_action_pending', {
+      ticketId,
+      runId,
+      reason: 'low_confidence',
+      pendingActions: ['support.add_internal_note', 'support.assign(human)'],
+    });
     logger.info('phase1.support.ticket_terminal', {
       ticketId,
       perTicketVerdict: 'escalated_to_human',
@@ -496,8 +517,33 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
     customerHistoryContext = historyResult.summary;
   }
 
+  // ── Step 5b: Load thread for the draft step (spec §5.3.3 step 3) ───────
+  // The classifier reads the thread internally, but the result is not threaded
+  // forward. Without this load the draft step sees only subject + intent and
+  // produces generic, context-free replies.
+  const threadPrincipal: PrincipalContext = {
+    type: 'service',
+    id: 'supportAgentExecutionService',
+    organisationId,
+    subaccountId,
+    serviceId: 'supportAgentExecutionService',
+    teamIds: [],
+  };
+  let recentMessages: string[] = [];
+  try {
+    const { messages } = await readThreadForAgent(ticketId, threadPrincipal);
+    recentMessages = messages
+      .slice(-10)
+      .map((m) => `[${m.direction}] ${m.body}`);
+  } catch (err) {
+    logger.warn('support.execution.thread_load_failed_for_draft', {
+      ticketId,
+      runId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // ── Step 6: Draft via supportProposeReply ──────────────────────────────
-  const recentMessages: string[] = [];
   const draftResult = await proposeReplyForTicket(
     {
       organisationId,

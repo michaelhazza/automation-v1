@@ -17,7 +17,7 @@ import { getS3Client, getBucketName } from '../lib/storage.js';
 import { logger } from '../lib/logger.js';
 import { runArtifacts } from '../db/schema/runArtifacts.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
-import { systemAgents } from '../db/schema/systemAgents.js';
+import { agents } from '../db/schema/agents.js';
 import {
   resolveAgentRunVisibility,
   type AgentRunVisibilityRun,
@@ -103,17 +103,21 @@ async function resolveVisibilityForArtifact(
     return true;
   }
 
-  const [sysAgent] = await db
-    .select({ id: systemAgents.id })
-    .from(systemAgents)
-    .where(eq(systemAgents.id, runRow.agentId))
+  // System-managed agents have a non-null `agents.system_agent_id` FK to
+  // `system_agents`. Comparing `agents.id` to `system_agents.id` directly is
+  // wrong (two independent UUID columns) — the visibility gate would never
+  // engage and any user with AGENTS_VIEW could read system-tier artifacts.
+  const [agentRow] = await db
+    .select({ systemAgentId: agents.systemAgentId })
+    .from(agents)
+    .where(eq(agents.id, runRow.agentId))
     .limit(1);
 
   const visibilityRun: AgentRunVisibilityRun = {
     organisationId: runRow.organisationId,
     subaccountId: runRow.subaccountId,
     executionScope: runRow.executionScope,
-    isSystemRun: Boolean(sysAgent),
+    isSystemRun: Boolean(agentRow?.systemAgentId),
   };
 
   const userCtx = await buildUserContextForRun(req, {
