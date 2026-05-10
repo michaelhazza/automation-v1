@@ -36,6 +36,13 @@ export default defineConfig({
       NODE_ENV: process.env.NODE_ENV ?? 'test',
       SYSTEM_INCIDENT_IDEMPOTENCY_TTL_SECONDS: '0.1',
       SYSTEM_INCIDENT_THROTTLE_MS: '100',
+      // Permit pure tests to import server modules whose transitive imports
+      // touch `lib/env.ts` — `envSchema.parse(process.env)` requires
+      // DATABASE_URL even when the tests never open a real connection.
+      // The `db` handle is still typically `vi.mock`-ed at the test level
+      // for hot-path units; this default just lets the env parse succeed
+      // so the import chain reaches the mock layer.
+      DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://test:test@localhost:5432/test',
     },
     poolOptions: {
       threads: {

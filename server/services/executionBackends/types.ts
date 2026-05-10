@@ -253,6 +253,18 @@ export interface BackendFinalisationResult {
    * adapter has already issued the UPDATE through `input.tx`.
    */
   parentTerminalStatus: string;
+  /**
+   * Optional callback the orchestrator runs AFTER the caller-owned
+   * transaction commits. Used by adapters to emit websocket / pub-sub
+   * events that must NOT fire if the tx rolls back. The IEE adapter uses
+   * this slot to issue its `agent:run:completed` / `dashboard.activity.updated`
+   * / `live:agent_completed` emissions and to run the F22 meaningful-output
+   * hook — work that previously lived in the post-`db.transaction()`
+   * tail of `finaliseAgentRunFromIeeRun`. The orchestrator awaits the
+   * callback (or no-ops if undefined) on the `finalised: true` path; on
+   * the race-loser path it is omitted.
+   */
+  postCommit?: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

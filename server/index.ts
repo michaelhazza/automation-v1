@@ -648,9 +648,23 @@ async function start() {
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
   // Consumes pg-boss events emitted by the worker after terminal iee_runs
   // writes, and finalises the parent agent_runs row accordingly.
+  //
+  // Boot ordering invariant (Execution Backend Adapter Contract spec § 8.3):
+  // every delegated adapter MUST be registered against
+  // `executionBackendRegistry` BEFORE the pg-boss worker that consumes its
+  // terminal events starts pulling jobs. The handler resolves
+  // `finaliseAgentRunFromBackend` -> `executionBackendRegistry.resolve(id)`
+  // on every event; an unregistered id throws `BackendNotRegistered` and
+  // pg-boss DLQs the job. Registration is therefore done first, in the
+  // same `pg-boss` boot block, before `registerIeeRunCompletedHandler`.
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();
+      const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
+      const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
+      const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+      executionBackendRegistry.register(ieeBrowserBackend);
+      executionBackendRegistry.register(ieeDevBackend);
       const { registerIeeRunCompletedHandler } = await import('./jobs/ieeRunCompletedHandler.js');
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {

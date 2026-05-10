@@ -496,3 +496,35 @@ describe('ExecutionBackend mismatch invariant — mock adapters', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — per-adapter mismatch fixture for the real IEE adapters
+// (Execution Backend Adapter Contract spec § 16 #13).
+//
+// The mock adapters above exercise the contract surface; these tests pin
+// the same invariant on the actual `ieeBrowserBackend` / `ieeDevBackend`
+// implementations to catch a regression in either adapter's `dispatch()`
+// first statement.
+// ---------------------------------------------------------------------------
+
+describe('ExecutionBackend mismatch invariant — IEE adapter implementations', () => {
+  it('ieeBrowserBackend.dispatch rejects backendOptions.backendId="iee_dev"', async () => {
+    const { ieeBrowserBackend } = await import('../ieeBrowserBackend.js');
+    const input = buildMismatchInput('iee_dev');
+    await expect(ieeBrowserBackend.dispatch(input)).rejects.toBeInstanceOf(BackendOptionsMismatch);
+    await expect(ieeBrowserBackend.dispatch(input)).rejects.toMatchObject({
+      expectedId: 'iee_browser',
+      actualId: 'iee_dev',
+    });
+  });
+
+  it('ieeDevBackend.dispatch rejects backendOptions.backendId="iee_browser"', async () => {
+    const { ieeDevBackend } = await import('../ieeDevBackend.js');
+    const input = buildMismatchInput('iee_browser');
+    await expect(ieeDevBackend.dispatch(input)).rejects.toBeInstanceOf(BackendOptionsMismatch);
+    await expect(ieeDevBackend.dispatch(input)).rejects.toMatchObject({
+      expectedId: 'iee_dev',
+      actualId: 'iee_browser',
+    });
+  });
+});
