@@ -272,15 +272,33 @@ Shipping the showcase MVPs first proves the patterns; Phase 1.5 then fans them o
 
 ### 3.5 Observability constraints
 
-**INV-16. Stable log codes; Run Trace discriminators map 1:1 with log codes for events emitted from agent runs.** New log codes follow the `phase1.<area>.<event>` pattern. Events emitted from inside an agent run appear as both a structured log code AND an `agent_execution_events.event_type` discriminator with a single payload shape (the "run-rendered" set). Events emitted from non-run paths (background jobs, sweeper jobs) are log-only — they do not appear as `agent_execution_events.event_type` because there is no run to attach them to.
+**INV-16. Stable log codes; Run Trace discriminators map 1:1 with log codes for events emitted from agent runs.** New log codes follow the `phase1.<area>.<event>` pattern. Events emitted from inside an agent run appear as both a structured log code AND an `agent_execution_events.event_type` discriminator with a single payload shape (the "run-rendered" set). Events emitted from non-run paths (background jobs, sweeper jobs, user HTTP requests) are log-only — they do not appear as `agent_execution_events.event_type` because there is no run-process context to attach them to.
 
-**Run-rendered events** (emitted from agent runs; surface in Run Trace):
-- `phase1.macro.run_started`, `phase1.macro.run_completed`, `phase1.macro.artifact_delivered`, `phase1.macro.login_failed`, `phase1.macro.run_stuck`
-- `phase1.support.ticket_classified`, `phase1.support.draft_proposed`, `phase1.support.draft_dispatched`, `phase1.support.draft_blocked_by_policy`, `phase1.support.collision_skipped`, `phase1.support.ticket_terminal`
+**Canonical event registry.** Every Phase 1 event appears here exactly once. Run-rendered events double as `agent_execution_events.event_type` discriminators; log-only events surface in structured logs + the Activity feed only. All payloads are defined in `shared/types/runTraceEvents.ts` (additive Zod discriminated-union members; +120 LOC across the four areas).
 
-**Log-only events** (emitted from non-run paths; surface in structured logs + the Activity feed only):
-- `phase1.support.eval_drift_detected` (emitted by the daily eval job)
-- `phase1.file_delivery.uploaded`, `phase1.file_delivery.signed_url_issued`, `phase1.file_delivery.downloaded`, `phase1.file_delivery.expired` (emitted by main-app endpoints + sweeper job; not bound to a single agent run)
+| Event | Run Trace? | Activity? | Emitter | Notes |
+|---|---|---|---|---|
+| `phase1.macro.run_started` | yes | yes | 42 Macro agent run start | — |
+| `phase1.macro.run_completed` | yes | yes | 42 Macro agent run completion | — |
+| `phase1.macro.artifact_delivered` | yes | yes | `ieeRunCompletedHandler` after happy-path upload | — |
+| `phase1.macro.login_failed` | yes | yes | 42 Macro browser worker on login exhaustion | — |
+| `phase1.macro.run_stuck` | yes | yes | `staleMacroRunDetector` (system-monitoring) | Fires from a detector inside the run-monitoring path; run id is known. |
+| `phase1.macro.report_rendering_failed` | yes | yes | `reportRenderingService` after retry exhaustion | Per §4.4.4. |
+| `phase1.macro.artifact_upload_failed` | yes | yes | `fileDeliveryService.upload` (main-app) after retry exhaustion | Per §4.4.4 / §4.6.1. |
+| `phase1.support.ticket_classified` | yes | yes | Support Agent classify step | Non-terminal. |
+| `phase1.support.classify_failed` | yes | yes | `supportClassifyTicket` on Zod parse failure | Per §5.4.1; routes ticket to escalation. |
+| `phase1.support.draft_proposed` | yes | yes | Support Agent draft step | Terminal for draft branches (§5.3.4). |
+| `phase1.support.draft_dispatched` | yes | yes | `supportDraftDispatchService` per dispatch phase | Non-terminal at per-ticket level. |
+| `phase1.support.draft_blocked_by_policy` | yes | yes | `supportDraftDispatchService` preflight | Non-terminal. |
+| `phase1.support.collision_skipped` | yes | yes | Support Agent claim step | Terminal (§5.3.4). |
+| `phase1.support.ticket_terminal` | yes | yes | Support Agent terminal verdicts | Terminal for non-draft, non-collision branches (§5.3.4). |
+| `phase1.support.eval_drift_detected` | no | yes | `supportEvalDailyJob` | Not bound to a run; admin-only. |
+| `phase1.file_delivery.uploaded` | no | yes | Main-app `fileDeliveryService.upload` (Option B) or finalize endpoint (Option A) | Never the worker. |
+| `phase1.file_delivery.signed_url_issued` | no | yes | Main-app `fileDeliveryService.issueSignedUrl` | Includes `requestSource` discriminator. |
+| `phase1.file_delivery.downloaded` | no | yes | Main-app download proxy (`GET /api/run-artifacts/:id/download`) ONLY | Never fires for direct signed-URL fetches per §6.1.5b — Copy-link downloads are unattributable by design. |
+| `phase1.file_delivery.expired` | no | yes | Main-app daily sweeper (§6.1.2b) | — |
+
+The registry is the single source of truth: §4–§6 emit events from this list only; §9 acceptance criteria reference these names verbatim; new events introduced in later phases extend this table in the same PR that ships the emitter.
 
 **INV-17. Both MVPs surface in Run Trace.** Run Trace virtual view (foundation Item 4) already aggregates events; new event types from this spec emit through the same channels.
 
@@ -397,10 +415,10 @@ If `@react-pdf/renderer` is later swapped (Open Decision 11.1), the determinism 
 
 The `ieeRunCompletedHandler` invokes `renderMacroReportPdf` followed by `fileDeliveryService.upload`; either step can fail. The MVP's posture:
 
-- **Idempotency key.** The PDF row in `run_artifacts` is keyed on `(content_hash, agent_run_id, artifact_kind='report')`. Re-rendering the same input produces the same content hash by design (PDF byte determinism per §4.4.1) so a retried render maps to the same row via the unique index on `(storage_provider, storage_key)` (the storage key is derived from the content hash).
+- **Idempotency key.** The PDF row in `run_artifacts` is keyed on `(organisation_id, agent_run_id, artifact_kind, content_hash)` via the composite partial unique index `run_artifacts_run_kind_hash_unique` defined in §6.1.2. Re-rendering the same input produces the same content hash by design (PDF byte determinism per §4.4.1), so a retried render maps to the same row via that index. The storage key (per §6.1.1 storage layout: `orgs/{org_id}/runs/{run_id}/{artifact_kind}/{content_hash}.{ext}`) is unique by construction; the composite DB index is the logical idempotency boundary.
 - **Retry classification.** `safe`. The handler can be invoked unconditionally for the same `agent_run_id`; a duplicate invocation finds the existing `run_artifacts` row, emits `phase1.file_delivery.uploaded` with `wasReplay: true`, and returns. No work is duplicated, no row is overwritten.
 - **Failure path — render fails.** The handler bubbles the error to pg-boss, which retries up to 3 times with exponential backoff (existing pg-boss policy); on exhaustion the agent run completes with a `phase1.macro.report_rendering_failed` event and no `run_artifacts.report` row. The transcript artifact is still delivered (it does not depend on the report). The Run Trace headline shows "Transcript ready · Download · Report unavailable (rendering failed)".
-- **Failure path — render succeeds, upload fails.** Same retry posture; the unique index ensures we never get a duplicate row. On exhaustion, the run completes without the report row and emits `phase1.macro.artifact_upload_failed` per §4.6.1.
+- **Failure path — render succeeds, upload fails.** Same retry posture; the composite partial unique index `run_artifacts_run_kind_hash_unique` (§6.1.2) ensures we never get a duplicate row. On exhaustion, the run completes without the report row and emits `phase1.macro.artifact_upload_failed` per §4.6.1.
 - **No partial state.** A successful render that fails to upload leaves NO row in `run_artifacts`; the handler does not insert the row until upload returns 200. The customer-facing UI never sees a "report exists but cannot be downloaded" state.
 
 This treats PDF rendering identically to the §6.1.4 worker-side artifact upload: the backing store is the source of truth; the row is inserted only after the bytes land.
@@ -429,7 +447,9 @@ Artifacts
   source-video.mp4      32 MB   [Download]  [Copy link]   (auto-deleted in 7 days)
 ```
 
-The "Preview" button opens an inline PDF viewer (existing `PDFEmbed` primitive in `consolidation-foundation`). The "Copy link" button copies a signed URL valid for 7 days.
+The "Preview" and "Download" buttons both fetch bytes through the main-app download proxy at `GET /api/run-artifacts/:id/download` (preserves attribution by emitting `phase1.file_delivery.downloaded` per §6.1.5b). The "Preview" button additionally streams the response into the existing `PDFEmbed` primitive (`consolidation-foundation`) for inline rendering.
+
+The "Copy link" button calls `POST /api/run-artifacts/:id/signed-url` to mint a 7-day signed URL and writes it to the clipboard. This path emits `phase1.file_delivery.signed_url_issued` only — downloads initiated from the copied link bypass the proxy and DO NOT emit `phase1.file_delivery.downloaded`. This is the explicit attribution trade-off: a sharable URL cannot also be tracked. Operators who need download attribution use the Download button; Copy link is for sending the artifact to someone outside the app.
 
 #### 4.5.3 Implementation
 
@@ -437,11 +457,14 @@ The "Preview" button opens an inline PDF viewer (existing `PDFEmbed` primitive i
 |---|---|---|
 | `client/src/components/run-trace/RunTraceArtifactsPanel.tsx` | New component | +120 |
 | `client/src/components/run-trace/RunTraceHeadline.tsx` | Add artifact-ready badge inline | +20 |
-| `client/src/lib/api/runArtifacts.ts` | New API client wrapper | +30 |
-| `server/routes/agentRuns.ts` | New route `GET /api/agent-runs/:runId/artifacts` returning artifact list with signed URLs | +40 |
-| `server/routes/__tests__/agentRunsArtifactsRoute.integration.test.ts` | Single integration test for the new route | +60 |
+| `client/src/lib/api/runArtifacts.ts` | New API client wrapper (artifact list + signed-URL mint + proxy fetch) | +40 |
+| `server/routes/agentRuns.ts` | New route `GET /api/agent-runs/:runId/artifacts` — wraps `withOrgTx(req.orgId!, ...)`; returns artifact metadata only (no embedded URLs); RLS on `run_artifacts` enforces tenant scope at the read | +40 |
+| `server/routes/runArtifacts.ts` | New route file — `GET /api/run-artifacts/:id/download` (download proxy, emits `phase1.file_delivery.downloaded`) and `POST /api/run-artifacts/:id/signed-url` (signed-URL mint, emits `phase1.file_delivery.signed_url_issued`); both wrap `withOrgTx`, both call `agentRunVisibility.canView(req.user, artifact.agentRunId)` before returning bytes or a URL | +120 |
+| `server/routes/__tests__/agentRunsArtifactsRoute.integration.test.ts` | Single integration test for the artifact list + download proxy + signed-URL mint | +90 |
 
-**Total: ~270 LOC.** No frontend component tests per the project's testing posture.
+**Total: ~430 LOC.** No frontend component tests per the project's testing posture.
+
+**Permissions posture (artifact access).** No new permission tile is introduced for Phase 1. Artifact access follows the existing `agentRunVisibility` model (`server/lib/agentRunVisibility.ts`): a user who can view a run's metadata can list and download its artifacts. The route handlers above call `agentRunVisibility.canView(...)` before returning bytes or signed URLs; RLS on `run_artifacts` is the second layer. Adding a granular `files.download` permission is deferred to Phase 2 if customer feedback warrants finer control.
 
 ### 4.6 Production hardening
 
@@ -466,8 +489,9 @@ A new `phase1.macro.run_stuck` log code fires when a 42 Macro run has been on th
 | `worker/src/browser/macroExecutor.ts` (or equivalent existing file) | Add explicit failure-mode branches per the table above | +60 |
 | `server/services/systemMonitoring/detectors/staleMacroRunDetector.ts` | New detector | +80 |
 | `server/services/systemMonitoring/detectors/__tests__/staleMacroRunDetectorPure.test.ts` | Pure-function tests for stuck-step threshold logic | +80 |
+| `client/src/components/run-trace/MacroFailureRenderers.tsx` | New event renderers for `phase1.macro.report_rendering_failed` and `phase1.macro.artifact_upload_failed` (per §5.6.3 / §3.5 registry) | +60 |
 
-**Total: ~220 LOC.**
+**Total: ~280 LOC.**
 
 ### 4.7 Effort estimate for 42 Macro Full MVP
 
@@ -556,9 +580,43 @@ A new row in `system_agents` (column names per `server/db/schema/systemAgents.ts
 **Concurrency under racing installs.** Two concurrent install attempts for the same subaccount could both pass the existence check before either commits. The MVP defends against this with two layers:
 
 1. **PG advisory transaction lock keyed on `(subaccount_id, system_agent_id)`** taken at the start of the install transaction (`pg_advisory_xact_lock(hashtextextended(...))`). The second concurrent transaction blocks until the first commits or rolls back; on resume it re-runs the existence check and refuses with a 409.
-2. **Partial unique index on `subaccount_agents`** filtering on `is_active = true AND applied_template_id = <system-agent-template-id>`. Even if both transactions somehow proceeded past the advisory lock, the index would reject the second insert with `23505`; the install service maps this to a 409 with body `{ error: 'already_installed' }`. The existing `subaccount_agents_unique_idx` covers `(subaccount_id, agent_id)` but not the system-agent-template; the MVP adds the system-agent-template-scoped partial index in the same migration that adds the install-flow code.
+2. **Partial unique index on `subaccount_agents`** scoped to the Support Agent template by stable slug. The schema does not currently carry a slug on `subaccount_agents` (only `applied_template_id`), and a partial index cannot reference another table — so the install migration ships an additive `applied_template_slug text` column (INV-5-allowed: additive only) populated from `system_agents.slug` at install time, plus the index. Existing rows are backfilled in the same migration via a join. Both DDL statements live in the migration that adds the install-flow code:
 
-The advisory lock is the primary defence (clean error path); the partial index is the safety net (serialisation guarantee).
+```sql
+-- 1. Additive column (INV-5: no behaviour change for existing callers).
+ALTER TABLE subaccount_agents ADD COLUMN applied_template_slug text;
+
+-- 2. Backfill from system_agents.slug for existing rows where the linkage exists.
+UPDATE subaccount_agents sa
+SET    applied_template_slug = a.slug
+FROM   agents a, system_agents sysa
+WHERE  sa.applied_template_id = sysa.id
+  AND  a.id = sa.agent_id
+  AND  a.system_agent_id = sysa.id
+  AND  sa.applied_template_slug IS NULL;
+
+-- 3. Partial unique index, scoped to the Support Agent template by slug.
+CREATE UNIQUE INDEX subaccount_agents_support_agent_singleton_idx
+ON subaccount_agents (subaccount_id)
+WHERE is_active = true
+  AND applied_template_slug = 'support-agent';
+```
+
+Even if both transactions somehow proceeded past the advisory lock, the index rejects the second insert with `23505`; the install service maps this to a 409 with body `{ error: 'already_installed' }`. The existing `subaccount_agents_unique_idx` covers `(subaccount_id, agent_id)` but not the system-agent-template scope; this MVP adds the slug column + the partial index in the same migration that adds the install-flow code. The install service writes `applied_template_slug` on every new install (set from `system_agents.slug` after the existence check, before the INSERT), and the slug column has no other consumers in Phase 1.
+
+The advisory lock is the primary defence (clean error path); the partial index is the safety net (serialisation guarantee). Acceptance criterion in §9.2 covers the race outcome (one success + one 409 under concurrent install).
+
+**File inventory addition (Support Agent install flow):**
+
+| File | Change | Rough LOC |
+|---|---|---|
+| `migrations/<next-available>_support_agent_install.sql` + `.down.sql` | Additive `subaccount_agents.applied_template_slug` column + backfill UPDATE + partial unique singleton index. Migration number assigned at chunk-build time. | +50 |
+| `server/db/schema/subaccountAgents.ts` | Drizzle schema: add `appliedTemplateSlug: text('applied_template_slug')` (nullable) | +3 |
+| `server/services/supportAgentInstallService.ts` | New install service: advisory-lock + existence-check + INSERT with `applied_template_slug='support-agent'`; maps `23505` to `409 already_installed` | +120 |
+| `server/services/__tests__/supportAgentInstall.integration.test.ts` | Single integration test for the concurrent-install acceptance criterion (§9.2) | +90 |
+| `server/routes/support/supportAgentInstallRoute.ts` | POST `/api/subaccounts/:subaccountId/support-agent/install` route handler; calls `resolveSubaccount` then delegates to the install service | +40 |
+
+**Subtotal: +303 LOC for the install flow.** Counted alongside §5.6.4's UI surfaces.
 
 The agent is system-managed: customers cannot edit the master prompt; they can only configure per-inbox `agent_config` (mode, collision window, draft expiry, prompt overrides).
 
@@ -669,8 +727,25 @@ WHERE  id = :ticketId
 
 **Run-loop (cross-ticket) idempotency.** A single Support Agent run iterates over N tickets; partial completion (worker crash, deploy restart, pg-boss retry) is possible. The MVP's posture is per-ticket retryable, not run-level transactional:
 
-- **No outer-loop idempotency key.** A retried agent run does NOT attempt to "resume" the prior run. It enqueues a fresh run and lets the per-ticket atomic claim (above) absorb the duplication: any ticket the prior run already terminated will either still hold a non-stale claim (the new run skips with `concurrent_claim`) or have already received its terminal Run Trace event (the new run sees no eligible tickets in `support.list_open_tickets` because the canonical `bot_handled_at` watermark or terminal-event audit trail filters it out).
-- **`support.list_open_tickets` is the idempotency boundary.** The query that selects tickets for processing must filter out tickets that already have a terminal `phase1.support.*` event for the current `(inbox_id, claim_window)`. The canonical layer's `last_human_activity_at` and `bot_claimed_at` columns plus the run-trace event store give us all the inputs; the filter is a left-join on the event store. No new persistence is needed.
+- **No outer-loop idempotency key.** A retried agent run does NOT attempt to "resume" the prior run. It enqueues a fresh run and lets the per-ticket atomic claim (above) absorb the duplication: any ticket the prior run already terminated will either still hold a non-stale claim (the new run skips with `concurrent_claim`) or have already received its terminal Run Trace event since the latest customer activity (the new run sees no eligible tickets in `support.list_open_tickets` because the terminal-event predicate below filters it out).
+- **`support.list_open_tickets` is the idempotency boundary.** The query that selects tickets for processing filters out tickets that already have a terminal `phase1.support.*` event recorded SINCE the ticket's last customer message. No new persistence is needed beyond what's already written by the per-ticket terminal events. The exact predicate against the canonical event store:
+
+```sql
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM   agent_execution_events e
+  WHERE  e.organisation_id = canonical_tickets.organisation_id
+    AND  e.payload->>'ticketId' = canonical_tickets.id::text
+    AND  e.event_type IN (
+           'phase1.support.draft_proposed',
+           'phase1.support.collision_skipped',
+           'phase1.support.ticket_terminal'
+         )
+    AND  e.created_at >= canonical_tickets.last_customer_message_at
+)
+```
+
+The `>= last_customer_message_at` anchor is the key: a ticket that received a new customer reply AFTER its prior terminal event becomes eligible again on the next run, because the predicate finds no qualifying terminal event in the new window. Without this anchor, a one-time terminal event would silently exclude the ticket forever even after the customer responds. The three terminal event types match the per-ticket terminal-verdict set documented above (`drafted_for_review` / `drafted_and_dispatched` and the three non-draft, non-collision branches all emit one of those three event names). Test fixture in `supportListOpenTicketsPure.test.ts` exercises the re-eligibility case (terminal event → new customer message → ticket re-appears).
 - **pg-boss retry policy on the agent-run handler is `singleton: true` per (subaccount_id, inbox_id)`.** The handler claims a per-(subaccount, inbox) advisory lock at run start; a duplicate run for the same inbox enqueued by both schedule and webhook simply waits for the lock and then sees no eligible tickets. The lock is released on run termination (success or fail).
 - **What this does NOT cover.** Cross-inbox parallel runs for the same subaccount ARE allowed (different inboxes, different lock keys). That is by design — inbox A's processing must not block on inbox B's queue depth. Cross-subaccount parallelism is naturally bounded by RLS scope.
 
@@ -697,7 +772,7 @@ The `system_agents.master_prompt` value is system-managed (not editable by org a
 3. **Forbidden-token scan** — server-side `validatePromptOverride()` (a pure helper) rejects overrides containing common injection markers: `</?system>`, `</?user>`, `<<SYS>>`, `### Rules`, `BEGIN SYSTEM`, `ignore previous`, `disregard`, raw role-switching tokens, or runs of three or more backticks. Failure surfaces inline on the config form. List is conservative; expand based on attempted overrides observed in production.
 4. **Audit trail** — every change to `agent_config.promptOverride` is logged to the existing audit-event stream with the diff of the prior and new value, the actor's user id, and the inbox id. No silent edits.
 
-These controls are dev-discipline, not a security boundary. The defence in depth is that the agent's tool surface is fixed (the 13-skill list in §5.3.1) and customer-facing replies still go through three-phase dispatch with HITL approval in `assisted` mode. A successful prompt injection still cannot send a reply without passing those gates.
+These controls are dev-discipline, not a security boundary. The defence in depth is that the agent's tool surface is fixed (the 12-skill list in §5.3.1: 11 `support.*` skills + the universal `ask_clarifying_question`; no `web_search` or `search_knowledge_base` per NG3) and customer-facing replies still go through three-phase dispatch with HITL approval in `assisted` mode. A successful prompt injection still cannot send a reply without passing those gates.
 
 **File inventory addition (§5.4.3 / §5.6.4):** `server/services/promptOverridePure.ts` (validator) — +60 LOC; route-handler integration in `supportInboxesRoutes.ts` — +20 LOC; tests for forbidden-token scan + length cap — +60 LOC.
 
@@ -895,18 +970,21 @@ Extends the existing inbox config UI (PR #277 `inbox-config.html` mockup) with t
 
 Support Agent runs surface in the Run Trace UI (foundation Item 4). The existing virtual view aggregates the agent's events; this spec adds new event type discriminators. Event names align with the INV-16 stable log code namespace (`phase1.support.*`) so the Run Trace event discriminator and the structured log code are the same string per event.
 
-**Run Trace per-ticket events.** Six events render in Run Trace; every per-ticket terminal verdict fires exactly one terminal event:
+**Run Trace per-ticket events.** Seven events render in Run Trace; every per-ticket terminal verdict fires exactly one terminal event:
 
 - `phase1.support.ticket_classified` — payload: `{ticketId, intent, urgency, confidence}`. Non-terminal.
+- `phase1.support.classify_failed` — payload: `{ticketId, parseError, rawModelOutputRedacted}`. Non-terminal at the per-ticket level (the next renderer is the escalation `ticket_terminal` event with `perTicketVerdict: 'escalated_to_human'`). Per §5.4.1.
 - `phase1.support.draft_proposed` — payload: `{ticketId, draftId, controllerStyleAtPropose, riskTierResolved, perTicketVerdict: 'drafted_for_review' | 'drafted_and_dispatched'}`. Terminal for the draft branches.
 - `phase1.support.draft_dispatched` — payload: `{draftId, dispatchPhase, idempotencyKey}`. Non-terminal at the per-ticket level (logs the three-phase dispatch step).
 - `phase1.support.draft_blocked_by_policy` — payload: `{ticketId, draftId, blockingPolicy}`. Non-terminal.
 - `phase1.support.collision_skipped` — payload: `{ticketId, reason: 'concurrent_claim' | 'human_active', lastHumanActivityAgo?, perTicketVerdict: 'skipped_collision'}`. Terminal.
 - `phase1.support.ticket_terminal` — payload: `{ticketId, perTicketVerdict: 'escalated_to_human' | 'skipped_low_confidence' | 'skipped_no_action_needed', reason, claimReleasedAt}`. Terminal for every non-draft, non-collision branch. Exactly one of the three Terminal events fires per ticket per agent run.
 
+**42 Macro failure renderers also surface in Run Trace.** Per the canonical event registry in §3.5: `phase1.macro.report_rendering_failed` and `phase1.macro.artifact_upload_failed` render inline in the 42 Macro run's tree-of-decisions view as failure-state events (red icon + retry-context summary). The renderer for these lives in `client/src/components/run-trace/MacroFailureRenderers.tsx` (new, +60 LOC; see §4.6.3 file inventory addition below).
+
 **Admin alert event (NOT Run Trace).** `phase1.support.eval_drift_detected` is emitted by the daily eval job into the Activity feed and admin alerts only; it is not rendered in the per-run Run Trace virtual view (the eval job is not a Support Agent run). Its payload is `{evalRunId, accuracyDelta, judgeScoreDelta, threshold}`.
 
-These slot into the existing Run Trace event renderer with no new UI surface; the existing tree-of-decisions view shows them inline.
+These slot into the existing Run Trace event renderer with no new UI surface beyond the named renderer files; the existing tree-of-decisions view shows them inline.
 
 #### 5.6.4 Code changes
 
@@ -914,7 +992,7 @@ These slot into the existing Run Trace event renderer with no new UI surface; th
 |---|---|---|
 | `client/src/pages/operate/SupportAgentDashboard.tsx` | New page | +180 |
 | `client/src/components/support/InboxAgentConfigTab.tsx` | Extends PR #277 inbox config | +150 |
-| `client/src/components/run-trace/SupportEventRenderers.tsx` | New event renderers for the 6 Run Trace event types in §5.6.3 (5 per-ticket events + `phase1.support.ticket_terminal`); the admin-only `phase1.support.eval_drift_detected` is not rendered here | +135 |
+| `client/src/components/run-trace/SupportEventRenderers.tsx` | New event renderers for the 7 Run Trace event types in §5.6.3 (6 non-terminal/per-ticket events including `phase1.support.classify_failed` + the `phase1.support.ticket_terminal` terminal); the admin-only `phase1.support.eval_drift_detected` is not rendered here | +160 |
 | `server/routes/support/supportAgentRoutes.ts` | Routes for dashboard + config (placed under the existing `server/routes/support/` group; no new `routes/operate/` directory) | +60 |
 | `shared/types/supportInboxAgentConfig.ts` | Additive Zod fields: `minConfidence?`, `voiceProfile?`, `escalationCategories?` (per §5.3.2) | +15 |
 
@@ -943,7 +1021,7 @@ Both MVPs need to deliver files to users (PDF reports, transcripts, attachments)
 **Recommended: AWS S3** (or equivalent object store: GCS, Cloudflare R2). The existing infrastructure choice is whatever the worker container can reach with low latency.
 
 Key requirements:
-- Per-org bucket prefix: `s3://{bucket}/orgs/{org_id}/runs/{run_id}/{content_hash}.{ext}`
+- Per-org bucket prefix: `s3://{bucket}/orgs/{org_id}/runs/{run_id}/{artifact_kind}/{content_hash}.{ext}` — including `artifact_kind` in the path prevents byte-identical artifacts of different kinds (e.g. a transcript and a report that happened to hash the same) from colliding on the storage key. Aligns with the composite DB index in §6.1.2.
 - Server-side encryption (SSE-S3 or SSE-KMS)
 - Lifecycle rule: source media (videos, raw audio) auto-delete in 7 days; reports (PDFs, transcripts) retain per org policy
 - Signed URL TTL: 7 days for reports, 24 hours for raw media
@@ -975,13 +1053,20 @@ CREATE INDEX run_artifacts_org_run_idx ON run_artifacts(organisation_id, agent_r
 CREATE INDEX run_artifacts_content_hash_idx ON run_artifacts(content_hash);
 CREATE INDEX run_artifacts_retain_until_idx ON run_artifacts(retain_until) WHERE retain_until IS NOT NULL;
 
--- Idempotency: object-store keys are globally unique by construction (per-org bucket
--- prefix + content-hash filename), so the storage_provider+storage_key pair is the
--- natural idempotency key for upload retries. Inserts use ON CONFLICT DO NOTHING and
--- return the existing row id, making upload safe to retry.
-CREATE UNIQUE INDEX run_artifacts_storage_key_unique
-  ON run_artifacts(storage_provider, storage_key);
+-- Idempotency: storage keys are unique per (org, run, kind, hash) by construction
+-- of the §6.1.1 storage layout, BUT the customer-facing logical idempotency contract
+-- is the composite DB index below. Two byte-identical artifacts of different kinds
+-- (e.g. a transcript and a report that hashed the same) would collide on storage_key
+-- if we keyed only on (provider, key) — and re-running the same agent_run produces
+-- an identical row that we want to dedupe via ON CONFLICT DO NOTHING. The composite
+-- index gives us both: per-(org,run,kind,hash) uniqueness and a clear logical key
+-- for the upload retry path.
+CREATE UNIQUE INDEX run_artifacts_run_kind_hash_unique
+  ON run_artifacts(organisation_id, agent_run_id, artifact_kind, content_hash)
+  WHERE agent_run_id IS NOT NULL;
 ```
+
+**Why partial on `agent_run_id IS NOT NULL`.** `run_artifacts.agent_run_id` is `ON DELETE SET NULL`; once an `agent_runs` row is hard-deleted by retention, the artifact's `agent_run_id` becomes NULL until §6.1.2b sweeps the orphan. Excluding NULLs from the index keeps the constraint meaningful only while the run lineage is intact, and prevents post-deletion artifacts from blocking new inserts that happen to share `(org, NULL, kind, hash)`.
 
 `run_artifacts` is RLS-protected; registered in `server/config/rlsProtectedTables.ts`.
 
@@ -993,13 +1078,13 @@ CREATE UNIQUE INDEX run_artifacts_storage_key_unique
 
 The retention sweep (§6.1.2b) does not reference `agent_runs`, so a deploy that fails after `run_artifacts` lands but before the sweeper job ships is safe (rows accumulate; the sweeper picks them up on its first scheduled run). No application-side reconciliation is required.
 
-**Idempotency posture (per checklist §10.1):** key-based on `(storage_provider, storage_key)`. **Retry classification (per checklist §10.2):** `safe` — the worker can retry uploads unconditionally; the unique index guarantees exactly-once row creation. **HTTP mapping for `23505` on the artifact upload endpoint:** 200 with the existing row id (idempotent hit), never bubbled as 500.
+**Idempotency posture (per checklist §10.1):** key-based on `(organisation_id, agent_run_id, artifact_kind, content_hash)` via the composite partial unique index above. **Retry classification (per checklist §10.2):** `safe` — the worker can retry uploads unconditionally; the unique index guarantees exactly-once row creation per (org, run, kind, hash). **HTTP mapping for `23505` on the artifact upload endpoint:** 200 with the existing row id (idempotent hit), never bubbled as 500. The storage-key path (`orgs/{org_id}/runs/{run_id}/{artifact_kind}/{content_hash}.{ext}`) is unique by construction of the §6.1.1 layout and acts as the physical de-duplication key in S3; the DB composite index is the logical idempotency boundary.
 
 **Source-of-truth precedence vs `iee_artifacts`.** `iee_artifacts` remains the worker-internal ledger of raw artifacts produced during IEE execution (used by IEE progress UI, transcription cache, dedup-by-content-hash inside the worker). `run_artifacts` is the customer-delivery ledger — only entries the customer can download via signed URL. When an IEE artifact is promoted to customer delivery, the worker copies the bytes to S3 and inserts a new `run_artifacts` row referencing the same `iee_run_id` plus the same `content_hash`; the original `iee_artifacts` row is never moved. Customer-facing UI reads `run_artifacts` only; the worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows; only artifacts produced after the MVP ships appear in `run_artifacts`.
 
 **Drift handling between the two ledgers.** Promotion is not transactional across worker-internal `iee_artifacts` and customer-facing `run_artifacts`, so partial failure can leave a row in one and not the other. The MVP's posture:
 
-- **`iee_artifacts` row exists, `run_artifacts` row missing.** Outcome: customer-facing UI shows nothing; worker UI/cache continues to function. Cause: S3 upload succeeded but `run_artifacts` insert failed, OR run completed before the promotion step ran. The promotion step is idempotent (keyed on `(content_hash, agent_run_id, artifact_kind)`); on the next run-completed handler invocation the missing row is created. No special detection job is required — the next happy path re-promotes.
+- **`iee_artifacts` row exists, `run_artifacts` row missing.** Outcome: customer-facing UI shows nothing; worker UI/cache continues to function. Cause: S3 upload succeeded but `run_artifacts` insert failed, OR run completed before the promotion step ran. The promotion step is idempotent via the §6.1.2 composite partial unique index `(organisation_id, agent_run_id, artifact_kind, content_hash)`; on the next run-completed handler invocation the missing row is created. No special detection job is required — the next happy path re-promotes.
 - **`run_artifacts` row exists, `iee_artifacts` row missing.** Outcome: customer-facing UI shows the artifact; worker has no record. Cause: should not happen for MVP-produced artifacts (worker writes `iee_artifacts` first); only possible for artifacts inserted via paths other than the IEE worker (e.g., the main-app PDF renderer, which writes `run_artifacts` directly without an `iee_artifacts` row). This is by design: not every customer artifact has an IEE provenance. `run_artifacts.iee_run_id` is nullable for exactly this case.
 - **Detection of orphaned `run_artifacts` rows after run deletion.** When an `agent_runs` row is hard-deleted by retention, `run_artifacts.agent_run_id` SET NULL fires; the orphaned `run_artifacts` rows continue to honour `retain_until` and are swept by §6.1.2b. The `listForRun` query naturally returns nothing for the deleted run.
 - **No backfill, no reconciliation worker.** Drift between the two ledgers is bounded (only the promotion-failure case above), self-healing via the next happy path, and visible to the operator via the `phase1.file_delivery.uploaded` event. A reconciliation worker can be added in Phase 2 if drift becomes operationally visible.
@@ -1078,22 +1163,22 @@ INV-16 lists four `phase1.file_delivery.*` events. Their payload contracts and e
 | `phase1.file_delivery.downloaded` | Main-app download proxy at `GET /api/run-artifacts/:id/download` (the proxy follows the signed-URL exchange and streams bytes back) | When the bytes are actually fetched (not on URL issuance — that's the previous event) | `{artifactId, organisationId, downloaderUserId?, byteCount, durationMs}` |
 | `phase1.file_delivery.expired` | Main-app daily sweeper job that runs against `run_artifacts` rows where `retain_until < now()` | When the sweeper deletes the S3 object and removes the row (Phase 1 hard-deletes per §6.1.6b) | `{artifactId, organisationId, retainUntil, ageDays}` |
 
-All four events emit from the main app. The download proxy is the only practical route to per-download attribution without infrastructure work, so Phase 1 mandates it. `expired` is best-effort observability; the spec does not gate any behaviour on it.
+All four events emit from the main app. The download proxy (`GET /api/run-artifacts/:id/download`) is the only practical route to per-download attribution without infrastructure work, so Phase 1 mandates it for the Preview / Download paths in §4.5.2. The signed-URL mint endpoint (`POST /api/run-artifacts/:id/signed-url`) is the Copy-link path: it issues a sharable URL for users to send outside the app and emits `signed_url_issued` only — downloads via the copied URL bypass the proxy and DO NOT emit `phase1.file_delivery.downloaded`. This is the explicit attribution trade-off (per §4.5.2): a sharable URL cannot also be tracked. `expired` is best-effort observability; the spec does not gate any behaviour on it.
 
 #### 6.1.6 Code changes
 
 | File | Change | Rough LOC |
 |---|---|---|
-| `migrations/NNNN_run_artifacts.sql` + `.down.sql` | New table | +60 |
+| `migrations/<next-available>_run_artifacts.sql` + `.down.sql` | New table + composite partial unique index + RLS policy. **Migration number assigned at chunk-build time to avoid collisions; do not pin the placeholder.** Same convention as the §5.5.4 `support_eval_runs` migration. | +60 |
 | `server/db/schema/runArtifacts.ts` | Drizzle schema | +50 |
 | `server/services/fileDeliveryService.ts` | Service + S3 client integration | +280 |
-| `server/services/__tests__/fileDeliveryServicePure.test.ts` | Pure-function tests: storage-key derivation, signed-URL TTL math, retain-until calculation | +120 |
+| `server/services/__tests__/fileDeliveryServicePure.test.ts` | Pure-function tests: storage-key derivation (org/run/kind/hash path), signed-URL TTL math, retain-until calculation | +120 |
 | `server/services/__tests__/fileDeliveryService.integration.test.ts` | Single integration test: upload + signed URL + download round-trip against a local S3 mock | +120 |
 | `server/config/rlsProtectedTables.ts` | Register new table | +1 |
 | `worker/src/lib/uploadArtifact.ts` | Worker-side upload helper | +80 |
-| `server/routes/agentRuns.ts` | New `/artifacts` route handler (Section 4.5.3) | +40 |
+| (artifact list + download proxy + signed-URL mint routes) | Counted in §4.5.3 code-changes table — not duplicated here | (already counted) |
 
-**Total: ~750 LOC.**
+**Total: ~710 LOC** (excluding the routes counted in §4.5.3).
 
 #### 6.1.7 Effort estimate
 
@@ -1243,26 +1328,32 @@ After merge:
 - [ ] Run Trace headline shows "Report ready · Download".
 - [ ] Artifacts panel renders below the tool tree with Preview / Download / Copy link affordances.
 - [ ] Login failure produces a clear failure mode in Run Trace and triggers an admin alert.
+- [ ] **Failure-path renderers visible in Run Trace.** Both `phase1.macro.report_rendering_failed` (PDF render exhaustion per §4.4.4) and `phase1.macro.artifact_upload_failed` (S3 upload exhaustion per §4.6.1) render inline in the Run Trace tree-of-decisions view via `MacroFailureRenderers.tsx` (per §5.6.3). Smoke-test scenario 2 covers `login_failed`; a third smoke check (manual: kill the upload mid-flight) covers `artifact_upload_failed`.
 - [ ] Stale-run detector (`staleMacroRunDetector`) fires when a run is stuck.
 - [ ] No regression on existing 42 Macro run wall-clock duration: 95th percentile end-to-end run time after MVP changes is within 1.25x of the pre-MVP baseline, measured on the staging dogfood run for one week. Baseline captured at the start of the build phase and recorded in `tasks/builds/phase-1-showcase-mvps/progress.md`.
 
 ### 9.2 Support Inbox MVP
 
 - [ ] Support Agent record exists with locked master prompt and the 12 listed default skills (11 `support.*` + `ask_clarifying_question`).
+- [ ] **Default skill list grep check (NG3 negative test).** `default_system_skill_slugs` for the Support Agent contains NO `web_search` and NO `search_knowledge_base` entry. A static check in `verify-support-agent-skill-set.sh` (or equivalent grep against the seed migration) fails the build if either appears.
 - [ ] `support.classify_ticket` skill returns valid output for the regression set; classification accuracy meets the **initial threshold (>= 85% per intent)** OR a tuned-during-pilot threshold formally agreed with Product before lock-in. Threshold is tunable for the duration of the pilot per §10 Risk Register entry "Eval threshold too strict".
+- [ ] **Classify-failure escalation path.** A malformed model output for `support.classify_ticket` (null intent, out-of-range confidence, missing required field) emits `phase1.support.classify_failed` and routes the ticket to `add_internal_note + assign(human)` rather than proceeding to drafting. Covered by `supportClassifyTicketPure.test.ts` malformed-output fixtures (per §5.4.1).
 - [ ] Support Agent run on a seeded inbox produces drafts in `canonical_ticket_drafts`.
 - [ ] Assisted mode: drafts route to review queue and Slack Block Kit; human approval triggers three-phase dispatch.
 - [ ] Autonomous mode: agent auto-approves drafts per inbox policy; three-phase dispatch fires without human.
 - [ ] Collision avoidance: agent skips tickets where `last_human_activity_at` is within the configured window; emits `phase1.support.collision_skipped`.
+- [ ] **Concurrent install race.** Two simultaneous install attempts of the Support Agent against the same `subaccount_id` return exactly one success (200) and one 409 with body `{ error: 'already_installed' }`. The advisory lock + partial unique index in §5.3.1 are both exercised by the integration test `supportAgentInstall.integration.test.ts`.
 - [ ] Eval harness runs daily; results visible at `/operate/agents/support/evals`.
 - [ ] Drift alert fires when classification accuracy drops > 10% week over week.
-- [ ] All 6 Run Trace event types from §5.6.3 render correctly (the 5 per-ticket events plus `phase1.support.ticket_terminal`); the admin-only `phase1.support.eval_drift_detected` surfaces in the Activity feed but is not rendered in Run Trace.
+- [ ] All 7 Run Trace event types from §5.6.3 render correctly (the 6 non-terminal/per-ticket events including `phase1.support.classify_failed`, plus `phase1.support.ticket_terminal`); the admin-only `phase1.support.eval_drift_detected` surfaces in the Activity feed but is not rendered in Run Trace.
 - [ ] Inbox Agent Configuration tab saves per-inbox `agent_config` correctly.
 
 ### 9.3 Shared
 
-- [ ] `run_artifacts` table created and RLS-protected.
+- [ ] `run_artifacts` table created and RLS-protected; composite partial unique index `run_artifacts_run_kind_hash_unique` enforces per-(org, run, kind, hash) idempotency.
 - [ ] `fileDeliveryService` is the only path for artifact upload + signed URL issuance.
+- [ ] **Download proxy attribution.** Preview / Download from the Run Trace artifacts panel emits `phase1.file_delivery.downloaded` (proxy path); Copy-link emits `phase1.file_delivery.signed_url_issued` only and downloads via the copied URL DO NOT emit `downloaded` (per §4.5.2 / §6.1.5b attribution trade-off).
+- [ ] **Retention sweep.** Daily sweeper job hard-deletes `run_artifacts` rows with `retain_until < now()`, deletes the corresponding S3 object, emits `phase1.file_delivery.expired`, and `fileDeliveryService.listForRun` no longer returns the swept artifact for the affected run.
 - [ ] Both MVPs use `controllerStyle: 'native'`.
 - [ ] Both MVPs surface decisions through the foundation Run Trace virtual view.
 - [ ] All new CI gates pass.
