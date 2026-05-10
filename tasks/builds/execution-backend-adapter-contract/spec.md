@@ -193,6 +193,49 @@ export type SandboxRequirement =
   | 'browser'
   | 'terminal_repo';
 
+/**
+ * Adapter-agnostic view of the backend's canonical terminal-state row.
+ * `loadTerminalState` returns this shape; `finalise` consumes it.
+ *
+ * Mandatory fields drive shared idempotency / orchestration; the adapter is
+ * free to populate optional fields and is required to populate `raw` so its
+ * own `finalise()` can read columns the structural type does not name (e.g.,
+ * IEE adapter reads cost columns and `task_type` from `raw`).
+ */
+export interface BackendTerminalState {
+  /** Foreign key to the parent `agent_runs.id`. Mandatory. */
+  agentRunId: string;
+  /** The backend's own row id (same as `backendTaskId`). Mandatory. */
+  backendTaskId: string;
+  /**
+   * Closed-set adapter-side status. Adapter maps this to `agent_runs.status`
+   * inside `finalise()`. Strings are adapter-specific (e.g., IEE: `'pending'
+   * | 'running' | 'completed' | 'failed' | 'cancelled'`). The shared finaliser
+   * does NOT read this directly; it is documentation for the adapter.
+   */
+  status: string;
+  /** Adapter-side failure reason (closed set per adapter). Null on success. */
+  failureReason: string | null;
+  /** Wall-clock terminal time on the backend side. Null if the row is not yet terminal. */
+  completedAt: Date | null;
+  /**
+   * Set non-null by the adapter once the terminal pg-boss event has been
+   * emitted (or by the reconciler when it discovers a row whose event was
+   * missed). Used by the shared idempotency check in § 13.1: if `parentRun.status`
+   * is already terminal AND `eventEmittedAt !== null`, finalise() returns the
+   * race-loser shape without writing.
+   */
+  eventEmittedAt: Date | null;
+  /** Optional human-readable summary; populated for completed runs. */
+  resultSummary: string | null;
+  /**
+   * Opaque slot for the adapter's own row. The adapter's `finalise()` casts
+   * this to its real row type (e.g., IEE adapter casts to `IeeRun` to access
+   * `task_type`, cost columns, etc.). Other consumers MUST NOT reach into `raw`.
+   */
+  raw: unknown;
+}
+
 export interface BackendDispatchInput {
   /** Parent agent_run row id. Always set. */
   runId: string;
@@ -242,8 +285,17 @@ export interface BackendFinalisationInput {
 }
 
 export interface BackendFinalisationResult {
+  /**
+   * True if `finalise()` issued the parent + adapter writes through `input.tx`.
+   * False on the race-loser path (parent already terminal AND `eventEmittedAt`
+   * already set) — the caller commits an empty tx.
+   */
   finalised: boolean;
-  /** Mapped agent_runs.status. Idempotent — caller may have already written this. */
+  /**
+   * The parent terminal status the adapter wrote (or observed already-set on
+   * the race-loser path). Returned for observability only — the adapter has
+   * already issued the UPDATE through `input.tx`.
+   */
   parentTerminalStatus: AgentRunTerminalStatus;
 }
 
@@ -256,9 +308,16 @@ export interface ExecutionBackend {
 
   // === Dispatch (mandatory) ===
   /**
-   * Dispatch a run to this backend. Returns immediately. For delegated
-   * lifecycles the parent agent_run is transitioned to 'delegated' inside
-   * dispatch; finalisation happens via the event handler later.
+   * Dispatch a run to this backend. The adapter owns ALL writes for its
+   * lifecycle:
+   *   - in-process / subprocess: runs the loop / subprocess, returns the
+   *     LoopResult; the dispatch-site post-completion block writes the parent
+   *     terminal UPDATE (existing behaviour).
+   *   - delegated: enqueues the backend task AND updates the parent
+   *     agent_run to 'delegated' inside the same `dispatch()` call, in the
+   *     order described in § 13.1.1. Finalisation happens later via the event
+   *     handler → `finaliseAgentRunFromBackend` → adapter's `finalise()`.
+   * Returns immediately for delegated; blocks for in-process / subprocess.
    */
   dispatch(input: BackendDispatchInput): Promise<BackendDispatchResult>;
 
@@ -285,12 +344,24 @@ export interface ExecutionBackend {
    */
   loadTerminalState?(tx: Transaction, backendTaskId: string): Promise<BackendTerminalState | null>;
   /**
-   * Apply the adapter's backend-specific terminal mapping and write any
-   * adapter-owned columns inside the caller-owned transaction (`input.tx`).
-   * MUST NOT open its own transaction. MUST NOT trust event-payload data —
-   * the caller has already re-loaded the canonical row via `loadTerminalState`.
-   * The shared caller writes the parent `agent_runs` terminal update
-   * atomically alongside whatever the adapter writes.
+   * Apply the adapter's backend-specific terminal mapping AND write the parent
+   * `agent_runs` terminal UPDATE — both inside the caller-owned transaction
+   * (`input.tx`). MUST NOT open its own transaction. MUST NOT trust event-payload
+   * data — the caller has already re-loaded the canonical row via
+   * `loadTerminalState` (which took `FOR UPDATE`) and the parent run via
+   * `loadParentRun(tx, ...)` (also `FOR UPDATE`). The adapter:
+   *   1. Maps `terminalState` to the parent terminal status (cell-by-cell —
+   *      see Appendix A of `docs/iee-delegation-lifecycle-spec.md` for the IEE
+   *      adapter's mapping table; future adapters define their own).
+   *   2. Writes adapter-owned columns (e.g., `iee_runs.eventEmittedAt = now()`).
+   *   3. Writes the parent `agent_runs` terminal UPDATE through `input.tx`.
+   *   4. Returns `{ finalised: true, parentTerminalStatus }` for observability.
+   * The caller's job is purely orchestration (load + lock + commit).
+   *
+   * Idempotency: if the loaded `parentRun.status` is already terminal AND
+   * `terminalState.eventEmittedAt` is non-null, the adapter MUST return
+   * `{ finalised: false, parentTerminalStatus: parentRun.status }` without
+   * writing — this is the duplicate-event / race-loser path.
    */
   finalise?(input: BackendFinalisationInput): Promise<BackendFinalisationResult>;
   /**
@@ -490,7 +561,7 @@ class ExecutionBackendRegistry {
 export const executionBackendRegistry = new ExecutionBackendRegistry();
 ```
 
-`resolve()` is **synchronous and parameterless beyond the mode** in V1. The lookup is `this.backends.get(mode)`. Throws `BackendNotRegistered` if the mode has no registered adapter (treated as a startup-validation bug — every `ExecutionMode` value MUST resolve).
+`resolve()` is **synchronous and parameterless beyond the mode** in V1. The lookup is `this.backends.get(mode)`. Throws `BackendNotRegistered` if the mode has no registered adapter — this is per-call lazy validation, not a boot-time enumeration. (Boot-time validation is per-adapter — see § 8.2 — and runs only against adapters that have been registered. Chunks 3 and 4 each register a subset of adapters; the dispatch-site caller still uses the if/else ladder until Chunk 5, so no Chunk-3-or-4 path calls `resolve()` against an unregistered mode. After Chunk 5 cutover, every `ExecutionMode` value resolves because every adapter has been registered.)
 
 Phase 3.5+ routing (§19) will extend `resolve()` to accept a preloaded `PreferredBackends` shape (read once per request from `organisations.preferred_backends` and threaded through the dispatch context). That extension is deliberately out of scope for V1; adding the parameter now would force every dispatch caller to plumb an unused value through. The extension point is named here so the future signature change is anticipated.
 
@@ -528,21 +599,22 @@ export async function finaliseAgentRunFromBackend(args: {
     throw new Error(`backend ${args.backendId} declared 'delegated' but missing loadTerminalState/finalise`);
   }
 
-  // Re-load the adapter's terminal-state row + parent agent_run, transactionally.
-  // loadTerminalState takes FOR UPDATE on the canonical row; loadParentRun takes
-  // FOR UPDATE on agent_runs. First commit wins on cross-process races.
+  // Orchestration only: load + lock + hand off to the adapter. The adapter's
+  // finalise() owns ALL writes (adapter-owned columns AND the parent agent_runs
+  // terminal UPDATE) — see § 4.1 for the contract. This keeps mapping +
+  // adapter-side columns + parent terminal UPDATE atomic in one tx.
   return await db.transaction(async (tx) => {
     const terminalState = await backend.loadTerminalState!(tx, args.backendTaskId);
     if (!terminalState) return false;
-    const parentRun = await loadParentRun(tx, terminalState.agentRunId);
+    const parentRun = await loadParentRun(tx, terminalState.agentRunId);  // FOR UPDATE
     if (!parentRun) return false;
-    // Adapter writes adapter-owned columns (e.g. iee_runs.eventEmittedAt) through tx.
-    // Caller writes the parent agent_runs terminal update through tx after finalise resolves.
     const result = await backend.finalise!({ terminalState, parentRun, tx });
     return result.finalised;
   });
 }
 ```
+
+**Why adapter owns the parent UPDATE.** The existing `finaliseAgentRunFromIeeRun` body (PR #279) already does this — the IEE-specific mapping table (`iee_runs.failureReason` → `agent_runs.status`) and the parent UPDATE live in the same function. Lifting that body unchanged into the IEE adapter's `finalise()` preserves the no-behaviour-change claim. The shared caller cannot write the parent UPDATE generically because it does not know the adapter's per-row mapping cells. Returning a "full parent terminal projection" from `finalise()` for the caller to write is the alternative — rejected because it forces every adapter to round-trip its mapping through a structural type, doubling the surface for no execution gain.
 
 The IEE adapter's `finalise()` body is the existing `finaliseAgentRunFromIeeRun` body, lifted unchanged minus the row-loading code (which moves into the shared caller).
 
@@ -580,9 +652,9 @@ The shared finaliser needs to load the adapter's terminal-state row inside the t
 loadTerminalState(tx: Transaction, backendTaskId: string): Promise<BackendTerminalState | null>;
 ```
 
-For the IEE adapter, this is `tx.select().from(ieeRuns).where(eq(ieeRuns.id, backendTaskId)).for('update')`. Future adapters point at their own canonical table.
+For the IEE adapter, this is `tx.select().from(ieeRuns).where(eq(ieeRuns.id, backendTaskId)).for('update')`, mapped into the `BackendTerminalState` shape (see § 4.1 for the full structural interface). Future adapters point at their own canonical table and emit the same shape.
 
-The return type `BackendTerminalState` is a small structural interface (`agentRunId`, `status`, `failureReason?`, `completedAt`, `resultSummary?`, plus an opaque `raw` slot for the adapter's own row); the IEE adapter's `finalise()` casts `raw` to `IeeRun` to access cost columns and summary.
+The IEE adapter's `finalise()` casts `BackendTerminalState.raw` to `IeeRun` to access cost columns and summary fields not named in the structural type.
 
 ---
 
@@ -667,11 +739,14 @@ Per `docs/spec-authoring-checklist.md` § 10:
 
 #### 13.1.1 Delegated dispatch sequence — orphan-task contract
 
-Two writes are needed to dispatch a delegated run: create the backend task and update the parent. They cannot both happen atomically across the two storage systems (pg-boss + adapter table vs `agent_runs`). The contract names the order and the orphan-cleanup behaviour:
+Two writes are needed to dispatch a delegated run: create the backend task and update the parent. They cannot happen atomically across the two storage systems (pg-boss + adapter table vs `agent_runs`). The adapter owns BOTH writes inside its `dispatch()` body — the dispatch-site caller (`agentExecutionService`) does not write to `agent_runs` for delegated lifecycles. The contract names the order and the orphan-cleanup behaviour:
 
-1. **Step 1 — adapter creates / enqueues backend task.** The adapter's idempotency key is the existing per-adapter key (IEE: `iee_runs.idempotency_key` UNIQUE; future adapters declare their own). Re-dispatch with the same key dedupes onto the in-flight task and returns `{ deduplicated: true }` — see § 4.1 `BackendDispatchResult.deduplicated`.
-2. **Step 2 — caller updates parent run** with `WHERE id = ? AND status IN ('pending', 'running') ... SET status = 'delegated', backend_id = ?, backend_task_id = ?`. If 0 rows affected, the caller has already moved past the delegation window (terminal status reached via cancellation, etc.).
-3. **Step 3 (only on 0-rows step 2) — orphan cleanup.** The adapter's `dispatch()` MUST mark the just-created backend task as orphaned in adapter storage (IEE: write `iee_runs.status = 'cancelled', failureReason = 'parent_orphaned'`) and return a diagnostic error to the caller. The parent run is already in a terminal state, so no further finalisation is needed.
+1. **Step 1 — adapter creates / enqueues backend task.** The adapter's idempotency key is the existing per-adapter key (IEE: `iee_runs.idempotency_key` UNIQUE; future adapters declare their own). Re-dispatch with the same key dedupes onto the in-flight task and returns `{ deduplicated: true }` — see § 4.1 `BackendDispatchResult.deduplicated`. Step 1 happens BEFORE the parent UPDATE so a duplicate dispatch does not transiently widen the parent's `'running' → 'delegated'` window.
+2. **Step 2 — adapter updates parent run** with `WHERE id = ? AND status IN ('pending', 'running') ... SET status = 'delegated', backend_id = ?, backend_task_id = ?` (and `iee_run_id` for the IEE adapter, which dual-writes — see § 3). The UPDATE happens inside the adapter's `dispatch()`, not in the caller. If 0 rows affected, the parent has already moved past the delegation window (terminal via cancellation race, etc.) and Step 3 fires.
+3. **Step 3 (only on 0-rows Step 2) — adapter orphan cleanup, same `dispatch()` call.** The adapter writes the just-created backend task as orphaned in adapter storage (IEE: write `iee_runs.status = 'cancelled', failureReason = 'parent_orphaned'`). The adapter then either:
+    - re-throws a `ParentRunNotDispatchable` typed error, OR
+    - returns a `BackendDispatchResult` with `lifecycle: 'in_process'` and a `loopResult` indicating the run is already terminal (so the dispatch-site post-completion block is a no-op).
+   The contract permits either; the IEE adapter throws (existing behaviour). The dispatch-site caller treats `ParentRunNotDispatchable` as a recoverable diagnostic — log + return — never a 5xx.
 4. **Reconciliation rule.** `reconcile()` for any delegated adapter MUST skip backend-task rows whose parent `agent_runs.status` is already terminal. Filter via `WHERE NOT EXISTS (SELECT 1 FROM agent_runs WHERE agent_runs.id = backend_task.agent_run_id AND agent_runs.status IN ('completed', 'failed', 'cancelled', 'timeout', 'budget_exceeded'))`. Existing IEE reconciliation already filters this way.
 
 The `'parent_orphaned'` failure reason is added to the IEE adapter's `failureReason` TS union as part of Chunk 3. No SQL migration needed (text column).
@@ -710,7 +785,7 @@ Post-terminal prohibition: the worker's `finalizeRun()` writes `iee_runs.eventEm
 
 ### 13.5 No-silent-partial-success
 
-Adapters return an explicit `BackendDispatchResult.lifecycle` value. A delegated adapter that fails to enqueue propagates the error up through `dispatch()`; it never returns `{ lifecycle: 'delegated', backendTaskId: null, ... }`. The post-completion finaliser's `BackendFinalisationResult.finalised` is true only if both rows wrote their terminal updates. Caller cannot mistake a partial-finalise for success.
+Adapters return an explicit `BackendDispatchResult.lifecycle` value. A delegated adapter that fails to enqueue propagates the error up through `dispatch()`; it never returns `{ lifecycle: 'delegated', backendTaskId: null, ... }`. The adapter's `finalise()` writes both adapter-owned columns AND the parent `agent_runs` terminal UPDATE in the same transaction (see § 4.1); `BackendFinalisationResult.finalised` is true only after both writes have been issued through `input.tx`. Either both writes commit (caller commits the tx) or both roll back (caller rolls back). Caller cannot mistake a partial-finalise for success — there is no path where one row writes and the other does not.
 
 ### 13.6 Unique-constraint mapping
 
