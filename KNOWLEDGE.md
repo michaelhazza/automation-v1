@@ -3445,3 +3445,31 @@ The `guard-ignore` comment is not a substitute for proper admin-role bypass — 
 **Resolution.** Wrap any optional canonical-layer watermark in `COALESCE(<watermark>, <safe-floor>)` so the predicate degrades to a known-good comparison rather than UNKNOWN. For the support-agent case: `COALESCE(last_customer_message_at, created_at)` pins the lower bound to ticket creation time as a degenerate safe floor. Pair the COALESCE with an explicit ingestion-contract paragraph naming the writers (`connectorPollingService`, `webhookAdapterService`) so future developers know who is responsible for keeping the watermark fresh. Add test fixtures specifically for the null-timestamp degenerate cases — null + earlier-created (excluded) and null + later-created (eligible).
 
 **Detection heuristic.** Any predicate of shape `<event_column> >= <optional_canonical_column>` inside a NOT EXISTS / WHERE NOT IN / aggregate filter is a silent-UNKNOWN landmine when the optional column is nullable. Reviewer prompt: "Is this column ALWAYS populated by every ingestion path that touches the parent row, including legacy paths?" If the answer is "should be" or "the writer is supposed to", COALESCE the comparison. The cost of the COALESCE is one extra column read; the cost of the bug is silently re-processing data forever.
+
+## Pattern: Worker-internal `iee_artifacts` vs customer-delivery `run_artifacts` source-of-truth precedence
+
+**Context.** Phase 1 Showcase MVPs (2026-05-10). The IEE browser worker already has its own artifact table (`iee_artifacts`) used internally for IEE progress UI, transcription cache, and dedup-by-content-hash inside the worker loop. A naive design would reuse that table for customer-facing file delivery.
+
+**Resolution.** Two separate tables, distinct roles: `iee_artifacts` is the worker-internal ledger (write by worker; read by IEE progress UI + worker loop). `run_artifacts` is the customer-delivery ledger (write by `fileDeliveryService.upload` via main-app finalize route; read by customer-facing UI only). Promotion path: worker calls `uploadArtifact` helper → main-app `/api/internal/run-artifacts/finalize` → `fileDeliveryService.upload` inserts `run_artifacts` row. The original `iee_artifacts` row is NEVER moved or deleted by promotion. Customer-facing UI reads `run_artifacts` only; worker reads `iee_artifacts` only. No automatic backfill of pre-MVP `iee_artifacts` rows.
+
+**Detection heuristic.** Whenever an internal-caching table and a customer-delivery table serve the same content, keep them separate. Conflating them couples customer-delivery SLAs to internal caching volatility and creates dual-write complexity. The promotion step (internal → delivery) is the explicit boundary.
+
+## Convention: Detector pattern path is workspaceHealth, not systemMonitoring
+
+**Context.** Phase 1 Showcase spec §4.6.2 referenced `server/services/systemMonitoring/detectors/` for the stale-macro-run detector. That path does not exist.
+
+**Convention.** The workspace health detector pattern lives at `server/services/workspaceHealth/detectors/`. All async detectors that perform their own DB reads are registered in `ASYNC_DETECTORS` in `server/services/workspaceHealth/detectors/index.ts`. Pure helper functions live in a `<name>Pure.ts` sibling file; the async wrapper imports the pure function and converts findings to `WorkspaceHealthFinding[]`. When a spec mentions `systemMonitoring/detectors/`, always use `workspaceHealth/detectors/` instead.
+
+## Pattern: Singleton-agent-per-subaccount — advisory lock + partial unique index on applied_template_slug
+
+**Context.** Phase 1 Showcase MVPs Chunk 7 (2026-05-10). The Support Agent must be installed at most once per subaccount. A naive `SELECT → INSERT` check is vulnerable to TOCTOU races under concurrent requests.
+
+**Resolution.** Two-layer defence: (1) `pg_advisory_xact_lock(hashtext(subaccountId || ':' || systemAgentId)::bigint)` acquired at the start of the install transaction serialises concurrent installs for the same (subaccount, system_agent) pair. (2) Partial unique index `subaccount_agents_support_agent_singleton_idx ON subaccount_agents(subaccount_id) WHERE is_active = true AND applied_template_slug = 'support-agent'` is the safety net — catches any race that bypasses the lock and maps `23505` to `409 already_installed`. The advisory lock produces the clean error path (checked before INSERT); the partial index is the serialisation guarantee. Migration `0314`.
+
+**Pattern location.** `server/services/supportAgentInstallService.ts`. CI gate: `scripts/gates/verify-support-agent-skill-set.sh`.
+
+## Convention: applied_template_slug is a stable install discriminator — never rewrite
+
+**Context.** Phase 1 Showcase MVPs Chunk 7 (2026-05-10). The `applied_template_slug` column on `subaccount_agents` is the value the partial unique index keys on for the singleton guard.
+
+**Convention.** Once a `subaccount_agents` row carries `applied_template_slug = 'support-agent'`, that value MUST NOT be rewritten by future system-agent renames or any other code path. Rewriting would either reopen the singleton race or invalidate the index's coverage. Mutating `applied_template_slug` outside `supportAgentInstallService.ts` is a CI gate failure (`scripts/gates/verify-support-agent-skill-set.sh`). The slug is the install identity, not a display string — it is decoupled from the system agent's `name` field on purpose.

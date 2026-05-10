@@ -713,6 +713,17 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - Intent classification and urgency routing ensures the right priority
 - Backlog triage processes accumulations systematically, not ad hoc
 
+#### Support Agent (Phase 1 MVP)
+
+A dedicated agent that runs per-client and works through their open support tickets in a structured loop. Installs as a singleton per client via a race-safe install endpoint — only one Support Agent can be active per client at any time.
+
+| | |
+|---|---|
+| **Mode: Assisted** | Drafts replies and classifications for human review before anything reaches the customer |
+| **Mode: Autonomous** | Sends approved-confidence replies directly; still gates sensitive categories on human review |
+| **Voice profiles** | Casual, neutral, formal, or custom — configured per client inbox |
+| **Escalation** | Billing disputes, account termination, and configurable categories always route to human regardless of mode |
+
 #### Support Desk Skills
 
 Structured access to connected helpdesk inboxes. All read skills are non-destructive; write skills require human approval before any reply reaches the customer.
