@@ -18,7 +18,7 @@ import { ACTION_REGISTRY } from '../actionRegistry.js';
 
 const VALID_GATE_LEVELS = ['auto', 'review', 'block'] as const;
 const VALID_CATEGORIES = ['api', 'worker', 'browser', 'devops', 'mcp'] as const;
-const VALID_IDEMPOTENCY_STRATEGIES = ['read_only', 'keyed_write', 'locked'] as const;
+const VALID_IDEMPOTENCY_STRATEGIES = ['read_only', 'keyed_write', 'locked', 'state_based'] as const;
 
 console.log('');
 console.log('actionRegistry — every entry shape and metadata');

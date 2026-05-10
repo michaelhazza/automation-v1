@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Support Desk Canonical — Prototype catalogue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  .proto-nav { background: white; border-bottom: 1px solid var(--sl-200); padding: 8px 24px; font-size: 12px; color: var(--sl-500); }
+  .proto-nav a { color: var(--sl-700); text-decoration: none; }
+  .proto-nav a:hover { color: var(--indigo-600); }
+  .page { padding: 28px 24px; max-width: 1000px; margin: 0 auto; }
+  .proto-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .proto-grid { grid-template-columns: repeat(2, 1fr); } }
+  .proto-tile {
+    display: block; background: white; border: 1px solid var(--sl-200);
+    border-radius: 10px; padding: 18px 16px; text-decoration: none;
+    transition: border-color 120ms, box-shadow 120ms, transform 100ms;
+  }
+  .proto-tile:hover { border-color: var(--indigo-400); box-shadow: 0 4px 12px rgba(99,102,241,0.1); transform: translateY(-1px); }
+  .tile-num { font-size: 11px; font-weight: 700; color: var(--indigo-600); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 6px; }
+  .tile-title { font-size: 14px; font-weight: 600; color: var(--sl-900); margin-bottom: 6px; }
+  .tile-desc { font-size: 12px; color: var(--sl-500); line-height: 1.55; }
+  .tile-tag { display: inline-flex; margin-top: 10px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--indigo-50); color: var(--indigo-700); }
+
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sl-400); margin: 24px 0 10px; }
+  .section-label:first-of-type { margin-top: 0; }
+
+  .deferred-card { background: white; border: 1px solid var(--sl-200); border-radius: 10px; padding: 16px 18px; }
+  .deferred-card ul { margin: 10px 0 0 18px; padding: 0; font-size: 12px; color: var(--sl-600); line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<div class="proto-nav"><a href="../../prototypes">../prototypes</a> &middot; support-desk-canonical</div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Prototypes</span><span class="sep">/</span><span style="color: var(--sl-900);">Support Desk Canonical</span></span>
+  <span class="right"><span style="font-size: 12px; color: var(--sl-500);">Round 1 &middot; 2026-05-09</span></span>
+</div>
+
+<div class="page">
+  <div style="margin-bottom: 24px;">
+    <h1 style="font-size: 22px; font-weight: 600; color: var(--sl-900); margin-bottom: 6px;">Support Desk Canonical</h1>
+    <p style="font-size: 13px; color: var(--sl-500); max-width: 600px; line-height: 1.6;">Five clickable screens for the canonical support desk layer. Teamwork Desk as the first provider. Click any tile to open the screen.</p>
+  </div>
+
+  <div class="callout callout-info" style="margin-bottom: 28px; max-width: 700px;">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div>All navigation between screens is live. Filters, mode selection, approve/reject buttons, and the inline edit flow on draft review all update visible state. Data is static and representative.</div>
+  </div>
+
+  <div class="section-label">Setup</div>
+  <div class="proto-grid" style="grid-template-columns: repeat(2, 1fr); max-width: 580px;">
+    <a class="proto-tile" href="integration-setup.html">
+      <div class="tile-num">01</div>
+      <div class="tile-title">Teamwork Desk connection</div>
+      <div class="tile-desc">OAuth vs. API key auth, inbox multi-select, backfill window, connect confirmation. Three-step wizard with completion state.</div>
+      <span class="tile-tag">Setup flow</span>
+    </a>
+    <a class="proto-tile" href="inbox-config.html">
+      <div class="tile-num">05</div>
+      <div class="tile-title">Inbox configuration</div>
+      <div class="tile-desc">Per-inbox mode (autonomous, assisted, disabled), collision window, draft expiry, model and prompt overrides (advanced, collapsed).</div>
+      <span class="tile-tag">Settings</span>
+    </a>
+  </div>
+
+  <div class="section-label" style="margin-top: 24px;">Daily operation</div>
+  <div class="proto-grid">
+    <a class="proto-tile" href="tickets-list.html">
+      <div class="tile-num">02</div>
+      <div class="tile-title">Tickets list</div>
+      <div class="tile-desc">All six canonical statuses, filterable by inbox and status group. Quarantine indicator at top. Clickable filters that visibly update the table.</div>
+      <span class="tile-tag">Operational</span>
+    </a>
+    <a class="proto-tile" href="ticket-detail.html">
+      <div class="tile-num">03</div>
+      <div class="tile-title">Ticket thread</div>
+      <div class="tile-desc">Full message ledger: inbound (customer), outbound human, outbound bot with provenance on hover, internal note. In-flight dispatching draft. Right rail with customer context and CRM revenue.</div>
+      <span class="tile-tag">Operational</span>
+    </a>
+    <a class="proto-tile" href="draft-review.html">
+      <div class="tile-num">04</div>
+      <div class="tile-title">Draft review queue</div>
+      <div class="tile-desc">Split-pane list and detail. Shows one clean draft (all policy checks green), one blocked draft (human collision, red). Approve, edit inline, reject buttons all toggle state.</div>
+      <span class="tile-tag">Operational</span>
+    </a>
+  </div>
+
+  <div class="section-label" style="margin-top: 24px;">Deliberately not built</div>
+  <div class="deferred-card">
+    <p style="font-size: 13px; color: var(--sl-700); margin: 0 0 8px;">Per frontend design principles: primary task first, default to hidden.</p>
+    <ul>
+      <li>Ticket volume dashboard with KPI tiles (tickets per day, first-response time, bot-vs-human ratio)</li>
+      <li>Raw internal IDs on user-facing rows (draft ID, agent run ID, idempotency key) — draft ID appears only on hover in the thread view</li>
+      <li>Provider status mapping editor (admin-only concern, separate surface)</li>
+      <li>Cross-inbox aggregate analytics and trend charts</li>
+      <li>Attachment inspector or attachment mirror management</li>
+      <li>Foundry training data export UI (lives in Foundry, not here)</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

@@ -3597,6 +3597,141 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
 
+## Deferred from feature-coordinator hard-gate override — support-desk-canonical (2026-05-09)
+
+Phase 2 (`feature-coordinator`) entered the build pipeline with one of the two Phase 1 → Phase 2 hard gates explicitly overridden by the operator. The override is documented inline in `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (§22 OQ-1 marked DEFERRED, §19 deferred-items entry, status-line acknowledgement) and acknowledges the brief §5.1 spec-drift risk.
+
+- [ ] **SDC-OVERRIDE-1 — Foundry ticket-schema parity verification (OQ-1).** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` §11.3 declares `CanonicalTicketData` (the canonical runtime ticket shape) without a field-by-field comparison against Foundry's current Teamwork ticket schema. Brief §5.1 names training-runtime alignment as a non-negotiable design invariant; the single biggest risk to an agentic system is a model trained against one shape and served a different shape at runtime. **Risk:** every Foundry/runtime serve uses the schema in §11.3 unverified — divergence may exist but is not enumerated, and silent quality regressions become possible.
+  - Spec sections: §11.3 `CanonicalTicketData`, §22 OQ-1 (deferred-by-operator entry), §19 deferred-items entry.
+  - Gap: Phase 1 → Phase 2 hard gate override; comparison was not performed.
+  - Suggested close path: before the first Foundry-trained model is wired to this canonical layer (typically a pre-prod gate before the support agent's first deployment), operator runs a side-by-side comparison of `CanonicalTicketData` against Foundry's schema, enumerates every divergence as one of `match — identical` / `divergence — Foundry has X, runtime intentionally omits / renames because Y` / `divergence — runtime has X, Foundry intentionally omits because Y`, amends spec §11.3 with the divergence list inlined, and updates §22 OQ-1 + §19 to mark CLOSED. If a divergence is unintentional, it triggers a runtime schema migration before the Foundry-trained model is served.
+
+## Deferred from spec-conformance review — support-desk-canonical (2026-05-09)
+
+**Captured:** 2026-05-09T20:34:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T20-34-30Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md`
+
+Branch-level Phase 2 review pass against the integrated `claude/support-ticket-structure-xMcy8` branch (head `d96fb728`). All 15 chunks (C1–C15) of the build are present and most of the spec surface area is implemented faithfully. Seven gaps require human design judgement before the build is merge-ready. The most urgent (REQ #45) silently breaks the brief's collision-avoidance invariant.
+
+- [ ] **REQ #45 — §8.1 preflight checks 4, 5, 6, 7 missing in `supportDraftDispatchService.approveDraft`.** Spec §8.1 enumerates seven preflight checks; the implementation performs only checks 1, 2, 3 (in part). Missing: (4) ticket status eligibility per §5.1.A column 3 (e.g. `support.propose_reply` not allowed on `pending_internal`), (5) collision-window check (`now - last_human_activity_at >= agent_config.collisionWindow.minMinutesSinceHumanActivity` AND respect-human-assignee), (6) customer-match policy gate, (7) supersession check (no newer draft exists). Without these the dispatch service can issue a public reply on top of fresh human activity — direct violation of brief §5.4 (collision avoidance) and brief §6.5 (assisted/autonomous mode separation). The `overrideCollision` parameter on `approveDraft` is plumbed but the underlying check it bypasses does not exist; the parameter is therefore inert today.
+  - Spec section: §8.1 (preflight checks) + §5.4 (brief invariant) + §15 (`support.ticket.human_collision_blocked` log code)
+  - Suggested approach: Read `canonical_inboxes.agent_config` once during preflight (already loaded for the inbox-disabled check). For check 5, compare `ticket.lastHumanActivityAt` against `now - minMinutesSinceHumanActivity` and inspect `ticket.assigneeAgentId` joined to `canonical_support_agents.agentKind` when `respectHumanAssignee=true`. For check 7, query for newer drafts on the same ticket in `awaiting_review`+ states. Each failure returns `{ statusCode: 422, errorCode: <reason> }`. Emit `SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED` on collision fail. Pure helpers belong in `supportDraftDispatchServicePure.ts` for fixture testing.
+
+- [ ] **REQ #49 — §8.6 collision-override audit-event write not implemented.** Spec §8.6 #2 mandates an `auditEvents` row with action `support.draft.collision_override` recording who, when, draft id, original collision-window state at preflight, and operator notes. `server/services/supportDraftDispatchService.ts` does not insert into `auditEvents` for any path.
+  - Spec section: §8.6 #2
+  - Suggested approach: Once REQ #45 lands the collision-window check, gate the `overrideCollision=true` path on `assertScope(principal, 'support.draft.override_collision')` (already gated at the route layer; the service should re-assert defensively), then before re-running preflight without the collision check, insert an `auditEvents` row capturing the snapshot. Use the existing `auditEvents` schema. The route already enforces the permission key (`server/routes/support/supportDraftsRoutes.ts:39`), so the service-level guard is defence-in-depth.
+
+- [ ] **REQ #50 — §8.6 autonomous-agent guard for `overrideCollision: true` missing.** Spec §8.6 paragraph 5 explicitly requires that `overrideCollision: true` from an agent-run principal (no human user id) be rejected with `{ statusCode: 403, errorCode: 'support.draft.override_collision_human_only' }`. The current implementation silently records `reviewerUserId = null` for non-user principals and proceeds.
+  - Spec section: §8.6 paragraph 5
+  - Suggested approach: At the top of `approveDraft`, when `options?.overrideCollision === true`, throw the spec-named typed error if `principalCtx.type !== 'user'`. Single-line guard.
+
+- [ ] **REQ #52a — `action_attempts` ledger ships in migration 0312 but is not wired into the dispatch / adapter path.** The OQ-3 closure (no native idempotency) and spec §14.1 + plan C7 require the ledger lookup-then-insert flow before each adapter `addReply` / `addInternalNote` call: insert with `attempt_status='in_flight'` `ON CONFLICT DO NOTHING RETURNING id`; if zero rows returned, look up the existing row and route to `needs_reconciliation` (if `in_flight` or `failed`) or return cached `provider_response_id` (if `succeeded`). Without it, the action-idempotency invariant relies solely on `canonical_ticket_drafts.action_idempotency_key` UNIQUE — which protects against duplicate dispatch of the *same draft* but does not catch retry paths that create a fresh draft + re-dispatch from a different shape.
+  - Spec section: §14.1 (idempotency mechanism table, last paragraph + adapter wrapper logic post-OQ-3), plan C7 contract
+  - Suggested approach: Introduce a `server/services/actionAttemptsService.ts` with a single method `claimOrLookup(connectorConfigId, idempotencyKey, actionType, organisationId)` returning `{ kind: 'claimed' } | { kind: 'in_flight' } | { kind: 'succeeded', providerResponseId }`. Call from `supportDraftDispatchService.approveDraft` Phase 3 just before invoking the adapter. On success, `UPDATE action_attempts SET attempt_status='succeeded', succeeded_at=NOW(), provider_response_id=<replyId>`. On terminal failure, `UPDATE attempt_status='failed'`. The Drizzle schema (`server/db/schema/actionAttempts.ts`) already exists.
+
+- [ ] **REQ #55 — `support.set_status` parameter enum missing `resolved`.** `server/config/actionRegistry.ts:3576` declares `z.enum(['open', 'pending_internal', 'waiting_on_customer', 'closed'])`. Spec §5.1.A names six statuses: `open | pending_internal | waiting_on_customer | resolved | closed | unknown_provider_status`. The skill should permit transitions to all five non-quarantine states; the spec excludes `unknown_provider_status` (only the fail-closed mapping path may set that). `closed` is correctly included; `resolved` should be too.
+  - Spec section: §5.1.A (lifecycle), §9 (`support.set_status` skill row)
+  - Suggested approach: Add `'resolved'` to the enum at `server/config/actionRegistry.ts:3576`. One-liner.
+
+- [ ] **REQ #56 — `support.find_customer_history` skill does not join `canonical_revenue` and `canonical_accounts` per spec §9.** `server/services/skillExecutor.ts:2298-2321` implements a contacts → tickets join only. Spec §9 row: "Joins `canonical_contacts` → `canonical_tickets` + `canonical_revenue` + `canonical_accounts`. Returns the customer's full surface across CRM and support."
+  - Spec section: §9 (`support.find_customer_history` row), §11 source-of-truth precedence summary (cross-domain join via `canonical_contacts`)
+  - Suggested approach: Extend the handler to additionally select from `canonical_revenue` (filtered by `canonicalContactId`) and `canonical_accounts` (joined via the contact's `canonicalAccountId` if present). Wrap in `withOrgTx` for RLS. Return shape: `{ contacts, tickets, revenue, accounts }`.
+
+- [ ] **REQ #69 — `architecture.md` § Canonical Support Desk uses non-canonical status enum names.** Architecture-md line 3515 lists `(open/pending/solved/closed/spam/quarantine)`. Spec §5.1.A defines `(open | pending_internal | waiting_on_customer | resolved | closed | unknown_provider_status)` — `pending_internal` not `pending`, `resolved` not `solved`, no separate `spam` (spam maps to `closed` per §11.2), `unknown_provider_status` not `quarantine`. Doc-sync drift in a high-visibility document.
+  - Spec section: §5.1.A status state machine table
+  - Suggested approach: Rewrite the architecture.md status-enum line to match the spec's six values exactly, and add the spec §11.2 mapping note (`spam → closed`, custom → `unknown_provider_status`). Doc-only change.
+
+## Deferred from spec-conformance review — support-desk-canonical (2026-05-09 round 2)
+
+**Captured:** 2026-05-09T21:08:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-support-desk-canonical-2026-05-09T21-08-30Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md`
+
+Round-2 verification against the integrated `claude/support-ticket-structure-xMcy8` branch (head `74fb0306`). All seven round-1 directional gaps are confirmed remediated. One previously-uncaught gap surfaced via deeper §11.7 read. Per caller's 2-round cap, this is the final spec-conformance pass — the gap routes here for operator decision.
+
+- [x] **REQ #72 — `proposed_actions.setStatus` enum not enforced at the LLM-facing actionRegistry boundary.** Spec §11.7 (line 1300): "`setStatus` must be one of `{ 'open', 'pending_internal', 'waiting_on_customer', 'resolved' }` only. Companion actions cannot transition a ticket to `closed` or to `unknown_provider_status` — the closure path requires explicit operator action." `server/config/actionRegistry.ts:3499-3504` declares `support.propose_reply.parameterSchema.proposedActions.setStatus` as `z.string().optional()` (loose). The strict shared type `SupportProposedActionsSchema` at `shared/types/supportProposedActions.ts:11-16` is correctly closed-enum but is NOT used to parse the inbound LLM payload — `server/services/skillExecutor.ts:2230` uses a TypeScript type assertion (`as`) instead of `SupportProposedActionsSchema.parse(...)`. Severity: Low — no currently-emitting code path forwards `closed` to the provider (the support.set_status registry entry already excludes it after R1 #55), so the gap is in defensive validation rather than active leakage.
+  - **Closed in commit `62f9a28e`** — tightened `actionRegistry.ts` to use `SupportProposedActionsSchema.optional()` directly. G3 clean.
+
+## Deferred from adversarial-reviewer — support-desk-canonical (2026-05-09)
+
+**Captured:** 2026-05-09T21:28:46Z
+**Source log:** `tasks/review-logs/adversarial-review-log-support-desk-canonical-2026-05-09T21-28-46Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md`
+**Branch HEAD at review:** `62f9a28e`
+**Verdict:** HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming) — non-blocking advisory per playbook §8.2
+
+- [ ] **SDC-ADV-1 (confirmed-hole, partial spec-contradiction) — Read-pathway sub-account scoping not enforced.** `GET /api/support/{tickets,tickets/:id,drafts,drafts/:id,inboxes}` are gated only by `authenticate`. Any authenticated org user can read all support drafts (full `proposedBodyText` + `reviewNotes`), all ticket message threads (customer email bodies), all inbox `agent_config` (mode, collision-window, opt-ins). Spec chatgpt-spec-review R2 explicitly removed read permission keys ("read access is implicit in org membership + sub-account scoping") — but the route handlers pass `subaccountId: null` hardcoded (`supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21`), and the service-layer queries do not filter by subaccountId. Net: implementation enforces "read = org membership" only; spec-mandated subaccount scoping is missing.
+  - **Operator triage:** (a) implement subaccount scoping by extracting `req.subaccountId` from the auth middleware and passing through to the service layer's RLS-aware queries (preferred — matches spec); or (b) override the spec decision and add `support.{ticket,draft,inbox}.view` read permission keys to gate these routes (spec amendment required).
+
+- [ ] **SDC-ADV-2 (likely-hole) — `action_attempts` TOCTOU on crash-recovery path.** `supportDraftDispatchService.ts:367-402` — Phase 2 CAS and `action_attempts` INSERT are not in the same transaction. If process A wins Phase 2 (sets `dispatching`), calls the adapter, but crashes before inserting the `in_flight` ledger row, boot-recovery transitions to `needs_reconciliation` and re-enqueues. The retry finds no `action_attempts` row, calls the adapter again. Result: duplicate provider send if the Teamwork Desk adapter's `idempotencyKey` is not provider-side honored.
+  - **Confirmation needed:** does Teamwork Desk's `addReply` honor the `idempotencyKey` parameter as provider-side dedup? If yes → not exploitable. If no → confirmed duplicate-send hole.
+  - **Suggested:** add a Teamwork Desk API smoke test in C7 follow-up that submits two `addReply` calls with the same key and verifies provider behavior. Document in spec §14.1 next to OQ-3.
+
+- [ ] **SDC-ADV-3 (likely-hole) — Teamwork webhook cross-tenant attribution + in-memory dedup.** `teamworkWebhook.ts:37-67` enumerates all active Teamwork connector configs across all orgs and breaks at first HMAC match. If two orgs configure the same `webhookSecret` (no platform-side uniqueness enforcement), webhook events from org A can be attributed to org B. Currently the post-processing is a no-op (`Future: publish to event bus`) — when canonical mutations land, this becomes a cross-tenant data injection path. Replay protection is in-memory (`webhookDedupeStore`, 10-min TTL) — multi-instance deployments have independent stores; manual replay against a different instance bypasses dedup.
+  - **Suggested:** (a) add a unique constraint or platform-side check that `connector_configs.config->>'webhookSecret'` cannot collide across orgs for the same connector type; (b) persist webhook dedup in a shared store (Postgres `webhook_dedup_keys` table with TTL cleanup, or Redis with TTL).
+
+- [ ] **SDC-ADV-4 (worth-confirming) — Multiple UPDATEs in `approveDraft` omit `organisationId` predicate.** `supportDraftDispatchService.ts` lines 295-312, 339-341, 346-350, 381-384, 443-446, 455-458, 470-473, 478-481. RLS provides the backstop, but `DEVELOPMENT_GUIDELINES.md §1` requires explicit application-layer org filtering for defence-in-depth. Pattern violation — not exploitable in isolation.
+  - **Suggested:** thread `principalCtx.organisationId` through the UPDATE WHERE clauses to match the SELECT pattern at line 148-156.
+
+- [ ] **SDC-ADV-5 (worth-confirming) — `drizzleSql.raw()` usage in boot recovery.** `supportDispatchBootRecovery.ts:32` uses `drizzleSql.raw(String(STALLED_THRESHOLD_SECONDS))`. The constant is module-level (`= 60`), safe today. Pattern is fragile — replacing with a config-sourced value would create direct SQL injection.
+  - **Suggested:** replace with hardcoded SQL literal in the template tag: `` drizzleSql`... INTERVAL '60 seconds'` ``.
+
+- [x] **SDC-ADV-6 (worth-confirming, correctness — not security) — `sentMessageId` UUID type mismatch with provider replyId.** `supportDraftDispatchService.ts:442-445` — `const messageId = replyId || draft.id` assigns the provider response string (e.g. `"12345"`) to `sentMessageId`, a `uuid()` column with FK to `canonical_ticket_messages(id)`. Postgres rejects non-UUID strings on INSERT.
+  - **Closed in dual-reviewer commit `c9bdec5c`** — dispatch now routes successful sends through `needs_reconciliation` and lets the back-link routine resolve `replyId → canonical message id`.
+
+## Deferred from pr-reviewer — support-desk-canonical (2026-05-09)
+
+**Captured:** 2026-05-09T22:50:50Z
+**Source logs:**
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T21-41-38Z.md` (round 1, CHANGES_REQUESTED)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-02-25Z.md` (round 2, APPROVED post fix-loop)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-38-27Z.md` (round 3, CHANGES_REQUESTED post dual-reviewer)
+- `tasks/review-logs/pr-review-log-support-desk-canonical-2026-05-09T22-50-50Z.md` (round 4, APPROVED post fix-loop round 2)
+**Branch HEAD at final review:** `85c54a16`
+
+All 7 blocking findings (5 in round 1, 2 in round 3) closed in fix-loop commits `f64cd397` + `ec581e11`. Strong + non-blocking carry-overs deferred:
+
+- [ ] **SDC-PR-1 (Strong) — `decideOutcome` matcher does not exclude messages already back-linked to another draft.** `server/services/supportDraftReconciliationPure.ts:85-91`. Two cross-run drafts on the same ticket with identical normalised body text could bind to the same `canonical_ticket_messages.id`. Both drafts would flip to `sent` pointing at the same message id.
+  - **Suggested:** thread `sourceDraftId` into the worker's `latestMessages` projection and add `msg.sourceDraftId == null` to the matcher predicate (and to the SELECT so the worker doesn't re-fetch).
+
+- [ ] **SDC-PR-2 (Strong) — `decideOutcome` post-dispatch timestamp filter assumes monotonic clock alignment.** `server/services/supportDraftReconciliationPure.ts:89` — `msg.createdAtExternal.getTime() >= dispatchedAt.getTime()`. Provider timestamps frequently lag. An outbound message even 1ms before `dispatchingStartedAt` will be filtered → sync-success drafts stuck in `needs_reconciliation`.
+  - **Suggested:** allow tolerance window (e.g. `dispatchedAt.getTime() - 5_000`) or explicitly document the assumption.
+
+- [ ] **SDC-PR-3 (Strong) — `support.find_customer_history` does direct DB access in `skillExecutor.ts`.** `server/services/skillExecutor.ts:2298-2341`. Other 9 support skills delegate to services. Convention deviation — same behaviour, just placement.
+  - **Suggested:** extract to `findCustomerHistory(email, principalCtx)` export in `supportTicketService.ts` (or new `supportCustomerHistoryService.ts`), have skill handler delegate.
+
+- [ ] **SDC-PR-4 (Strong) — Reconciliation worker + boot-recovery untested at orchestration layer.** `server/lib/supportDispatchBootRecovery.ts`, `server/jobs/supportDraftReconciliationWorker.ts`. Pure pieces are well-covered; orchestrating impure layers are not.
+  - **Suggested tests (Vitest):**
+    - Boot-recovery enqueue-once: 2 stranded drafts in 2 orgs both transition + enqueue inside one `withAdminConnectionGuarded` invocation.
+    - Worker CAS-miss is silent: concurrent webhook back-link flips draft to `sent` between SELECT and UPDATE → UPDATE returns 0 rows, logger.debug fires, no throw.
+    - Worker honours `decision.messageId`: returned messageId matches the UPDATE write.
+
+- [ ] **SDC-PR-5 (Strong) — No targeted unit tests for B1 (webhook author resolution) or B2 (boot recovery RLS) fixes.** Captured in round-4 review.
+  - **Suggested:**
+    - `server/services/__tests__/webhookAdapterService.authorResolution.test.ts` — missing/unknown author external id paths emit `INGEST_CONTRACT_VIOLATION` and skip insert without throwing.
+    - `server/lib/__tests__/supportDispatchBootRecovery.test.ts` — verifies RLS bypass + per-row enqueue.
+
+- [ ] **SDC-PR-6 (Non-blocking) — Type-safety drift on `Message.direction`.** `client/src/pages/support/TicketDetailPage.tsx:31` declares `'inbound' | 'outbound'` but server DTO emits `'inbound' | 'outbound' | 'internal_note'`. Practical rendering correct (visibility carries the load-bearing signal), interface drift will surface if a future change switches on direction.
+  - **Suggested:** widen client interface OR map `direction` to UI-direction server-side.
+
+- [ ] **SDC-PR-7 (Non-blocking) — Permission-scope inconsistency between architecture.md and code.** `architecture.md:3574-3578` documents `support.draft.{approve,reject,override_collision}` + `support.inbox.configure` as **subaccount** scope; `server/lib/permissions.ts:113-117` defines them under `ORG_PERMISSIONS` and routes use `requireOrgPermission`.
+  - **Suggested:** doc-sync gap to address — either update architecture.md to "Org" or migrate keys to `SUBACCOUNT_PERMISSIONS` and routes to `requireSubaccountPermission`.
+
+- [ ] **SDC-PR-8 (Non-blocking) — `lastReconciliationAt` inconsistent timestamping.** `server/jobs/supportDraftReconciliationWorker.ts:78-92` sets it on `surface_manual` and `retry_after_ms` but not on `resolve_sent` / `resolve_failed`. Either set consistently or document why terminal transitions don't.
+
+- [ ] **SDC-PR-9 (Non-blocking) — Stray `§934` reference in `supportDraftDispatchService.ts:79`.** Tidy to a real spec section pointer or remove.
+
+- [ ] **SDC-PR-10 (Non-blocking) — Dead `void hasOverrideCollisionPerm` in `TicketDetailPage.tsx:100`.** Either wire up the inline action bar or delete the state + effect.
+
+- [ ] **SDC-PR-11 (Non-blocking) — `TICKET_HUMAN_COLLISION_BLOCKED` logged at `info`.** `server/services/supportDraftDispatchService.ts:249-258`. Consider `warn` since it represents a guarded action.
+
+- [ ] **SDC-PR-12 (Non-blocking) — Adapter `addReply` / `addInternalNote` accept `idempotencyKey` but ignore it.** `server/adapters/teamworkAdapter.ts:252-313`. Add inline comment that the `action_attempts` ledger is the sole idempotency boundary so the next contributor doesn't assume provider honours it.
+
+- [ ] **SDC-PR-13 (Non-blocking) — `shapeThreadMessage` inlines redaction logic.** `server/services/supportTicketService.ts:169-170` inlines `row.redacted ? '[redacted]' : row.bodyText` instead of calling `applyMessageRedactionFilterForAudience`. Pure helper now uncalled. Either delete or keep for `audit` audience.
+
+- [ ] **SDC-PR-14 (Non-blocking) — Boot recovery enqueue inside admin tx.** `server/lib/supportDispatchBootRecovery.ts`. If `boss.send` throws, the tx rolls back the status flip — actually the desired idempotency-on-retry behaviour. Document with a brief comment.
+
 ## Deferred spec decisions — synthetos-foundation-refactor
 
 Routed by `spec-reviewer` during the iteration-1 review pass (2026-05-09). These are AUTO-DECIDED items the human can address at leisure; the spec is mechanically tight without them.
