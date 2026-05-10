@@ -14,6 +14,11 @@ export interface FindCustomerHistoryInput {
   ticketId: string;
   runId: string;
   customerEmail: string | null;
+  /**
+   * Resolved Support Agent master prompt. When provided, prepended to the skill-local
+   * system message so the LLM call sees agent-level guidance ahead of the per-skill rules.
+   */
+  masterPrompt?: string;
 }
 
 export interface FindCustomerHistoryResult {
@@ -24,7 +29,7 @@ export interface FindCustomerHistoryResult {
 export async function findCustomerHistory(
   input: FindCustomerHistoryInput,
 ): Promise<FindCustomerHistoryResult> {
-  const { organisationId, ticketId, runId, customerEmail } = input;
+  const { organisationId, ticketId, runId, customerEmail, masterPrompt } = input;
 
   if (!customerEmail) {
     return { summary: 'No customer email available for history lookup.', ticketCount: 0 };
@@ -63,7 +68,8 @@ export async function findCustomerHistory(
     return `- [${t.status}${closedNote}] ${t.subject} (${t.priority} priority, opened ${t.createdAt.toISOString().slice(0, 10)})`;
   });
 
-  const system = `You are a support context summariser. Summarise the customer's support history in 2-3 sentences. Focus on: patterns, recurring issues, unresolved items, and overall satisfaction signal. Be factual and brief — this summary will be used to inform a reply draft.`;
+  const skillSystem = `You are a support context summariser. Summarise the customer's support history in 2-3 sentences. Focus on: patterns, recurring issues, unresolved items, and overall satisfaction signal. Be factual and brief — this summary will be used to inform a reply draft.`;
+  const system = masterPrompt ? `${masterPrompt}\n\n---\n\n${skillSystem}` : skillSystem;
 
   const user = `Customer email: ${customerEmail}
 Prior support tickets (${otherTickets.length} found):

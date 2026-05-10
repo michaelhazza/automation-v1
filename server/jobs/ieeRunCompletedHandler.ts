@@ -20,6 +20,7 @@ import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { finaliseAgentRunFromIeeRun } from '../services/agentRunFinalizationService.js';
 import { reportRenderingService } from '../services/reportRenderingService.js';
 import * as fileDeliveryService from '../services/fileDeliveryService.js';
+import { emitPhase1RunRenderedEvent } from '../services/phase1RunTraceEventEmitter.js';
 import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -198,6 +199,14 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
               attemptCount: 1,
               lastError: String(err),
             });
+            await emitPhase1RunRenderedEvent({
+              runId: agentRunId,
+              organisationId,
+              subaccountId: null,
+              eventType: 'phase1.macro.report_rendering_failed',
+              payload: { agentRunId, ieeRunId, attemptCount: 1, lastError: String(err) },
+              sourceService: 'ieeRunCompletedHandler',
+            });
           }
 
           if (pdfBuf) {
@@ -217,6 +226,14 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
                 ieeRunId,
                 artifactKind: 'report',
                 lastError: String(err),
+              });
+              await emitPhase1RunRenderedEvent({
+                runId: agentRunId,
+                organisationId,
+                subaccountId: null,
+                eventType: 'phase1.macro.artifact_upload_failed',
+                payload: { agentRunId, ieeRunId, artifactKind: 'report', lastError: String(err) },
+                sourceService: 'ieeRunCompletedHandler',
               });
             }
           }

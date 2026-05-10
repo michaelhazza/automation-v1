@@ -19,6 +19,11 @@ export interface ProposeReplyInput {
   confidence: number;
   voiceProfile: 'casual' | 'neutral' | 'formal' | 'custom';
   customerHistoryContext?: string;
+  /**
+   * Resolved Support Agent master prompt. When provided, prepended to the skill-local
+   * system message so the LLM call sees agent-level guidance ahead of the per-skill rules.
+   */
+  masterPrompt?: string;
 }
 
 export interface ProposeReplyResult {
@@ -59,6 +64,7 @@ export async function proposeReplyForTicket(
     urgency,
     voiceProfile,
     customerHistoryContext,
+    masterPrompt,
   } = input;
 
   const voiceInstruction = VOICE_PROFILE_INSTRUCTIONS[voiceProfile] ?? VOICE_PROFILE_INSTRUCTIONS.neutral;
@@ -68,7 +74,7 @@ export async function proposeReplyForTicket(
     ? `\n\nCustomer history context:\n${customerHistoryContext}`
     : '';
 
-  const system = `You are a support reply drafter. Your task is to write a helpful, accurate reply to a support ticket.
+  const skillSystem = `You are a support reply drafter. Your task is to write a helpful, accurate reply to a support ticket.
 
 Voice profile: ${voiceProfile}
 ${voiceInstruction}
@@ -76,6 +82,8 @@ ${voiceInstruction}
 Intent-specific guidance: ${intentRule}
 
 IMPORTANT: Respond ONLY with the reply body text. Do not include subject lines, greetings like "Dear Customer", or sign-offs — those are added automatically. Write the body of the reply only.`;
+
+  const system = masterPrompt ? `${masterPrompt}\n\n---\n\n${skillSystem}` : skillSystem;
 
   const messageContext = recentMessages.length > 0
     ? `\nRecent conversation:\n${recentMessages.map((m, i) => `[${i + 1}] ${m}`).join('\n')}`

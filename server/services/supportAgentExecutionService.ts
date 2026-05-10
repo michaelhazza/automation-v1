@@ -11,6 +11,10 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { db } from '../db/index.js';
 import {
   canonicalInboxes,
+  organisations,
+  subaccounts,
+  agentRuns,
+  subaccountAgents,
 } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { classifyTicket } from './skillHandlers/supportClassifyTicket.js';
@@ -25,6 +29,8 @@ import {
   requiresCustomerHistory,
   DEFAULT_CLAIM_TTL_MINUTES,
 } from './supportAgentExecutionServicePure.js';
+import { resolveMasterPrompt } from './supportAgentMasterPrompt.js';
+import { emitPhase1RunRenderedEvent } from './phase1RunTraceEventEmitter.js';
 import type { SupportInboxAgentConfig } from '../../shared/types/supportInboxAgentConfig.js';
 import type { PrincipalContext } from './principal/types.js';
 
@@ -187,6 +193,86 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
     return;
   }
 
+  // ── Run-create site for Support Agent (spec §5.3.7, INV-8 / REQ #36) ────
+  // Inserts an agent_runs row using the supplied subaccountAgentRunId as the PK
+  // so the existing job-payload / claim-write code paths keep using the same
+  // identifier. controller_style defaults to 'native' on the column. The insert
+  // is idempotent via onConflictDoNothing — duplicate-job retries no-op cleanly.
+  const [linkRow] = await db
+    .select({ subaccountAgentId: subaccountAgents.id, agentId: subaccountAgents.agentId })
+    .from(subaccountAgents)
+    .where(
+      and(
+        eq(subaccountAgents.organisationId, organisationId),
+        subaccountId
+          ? eq(subaccountAgents.subaccountId, subaccountId)
+          : sql`${subaccountAgents.subaccountId} IS NULL`,
+        eq(subaccountAgents.appliedTemplateSlug, 'support-agent'),
+        eq(subaccountAgents.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  if (!linkRow) {
+    logger.warn('support.execution.subaccount_agent_link_not_found', {
+      inboxId,
+      organisationId,
+      subaccountId,
+    });
+    return;
+  }
+
+  await db
+    .insert(agentRuns)
+    .values({
+      id: subaccountAgentRunId,
+      organisationId,
+      subaccountId,
+      agentId: linkRow.agentId,
+      subaccountAgentId: linkRow.subaccountAgentId,
+      runType: 'triggered',
+      runSource: 'system',
+      executionScope: 'subaccount',
+      principalType: 'service',
+      principalId: 'supportAgentExecutionService',
+      status: 'running',
+      runMetadata: { inboxId },
+    })
+    .onConflictDoNothing();
+
+  // ── Master prompt resolution (spec §5.3.2, §5.3.5) ──────────────────────
+  // The system_agents.master_prompt column carries the literal placeholder
+  // '{{MASTER_PROMPT_PLACEHOLDER}}' (set at install time). The actual prompt
+  // body lives in server/prompts/support-agent-master.md and is loaded from
+  // disk at run start so edits ship via standard PR review without DB writes.
+  const [orgRow] = await db
+    .select({ name: organisations.name })
+    .from(organisations)
+    .where(eq(organisations.id, organisationId))
+    .limit(1);
+  const [subaccountRow] = subaccountId
+    ? await db
+        .select({ name: subaccounts.name })
+        .from(subaccounts)
+        .where(eq(subaccounts.id, subaccountId))
+        .limit(1)
+    : [{ name: 'default' }];
+
+  const masterPrompt = resolveMasterPrompt({
+    orgName: orgRow?.name ?? 'unknown',
+    subaccountName: subaccountRow?.name ?? 'default',
+    minConfidence: inboxConfig.minConfidence ?? 0.8,
+    voiceProfile: inboxConfig.voiceProfile ?? 'neutral',
+    escalationCategories: inboxConfig.escalationCategories ?? [],
+  });
+
+  logger.info('support.execution.master_prompt_loaded', {
+    organisationId,
+    subaccountId,
+    inboxId,
+    promptCharCount: masterPrompt.length,
+  });
+
   // Service principal for calls into supportDraftDispatchService
   const principalCtx: PrincipalContext = {
     type: 'service',
@@ -214,6 +300,7 @@ export async function processInbox(options: ProcessInboxOptions): Promise<void> 
       organisationId,
       subaccountId,
       principalCtx,
+      masterPrompt,
     });
   }
 
@@ -236,10 +323,11 @@ interface ProcessTicketOptions {
   organisationId: string;
   subaccountId: string | null;
   principalCtx: PrincipalContext;
+  masterPrompt: string;
 }
 
 async function processTicket(options: ProcessTicketOptions): Promise<void> {
-  const { ticket, runId, inboxConfig, organisationId, principalCtx } = options;
+  const { ticket, runId, inboxConfig, organisationId, subaccountId, principalCtx, masterPrompt } = options;
   const ticketId = ticket.id;
   const nowMs = Date.now();
 
@@ -253,6 +341,14 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
       ticketId,
       reason: 'concurrent_claim',
       perTicketVerdict: 'skipped_collision',
+    });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.collision_skipped',
+      payload: { ticketId, reason: 'concurrent_claim', perTicketVerdict: 'skipped_collision' },
+      sourceService: 'supportAgentExecutionService',
     });
     return;
   }
@@ -273,6 +369,19 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
       lastHumanActivityAgo: lastHumanActivityAgo ?? undefined,
       perTicketVerdict: 'skipped_collision',
     });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.collision_skipped',
+      payload: {
+        ticketId,
+        reason: 'human_active',
+        lastHumanActivityAgo: lastHumanActivityAgo ?? undefined,
+        perTicketVerdict: 'skipped_collision',
+      },
+      sourceService: 'supportAgentExecutionService',
+    });
     return;
   }
 
@@ -283,7 +392,9 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
       runId,
       inboxConfig,
       organisationId,
+      subaccountId,
       principalCtx,
+      masterPrompt,
     });
   } catch (err) {
     // Skill error — escalate, emit terminal, release claim
@@ -294,6 +405,19 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
       perTicketVerdict: 'escalated_to_human',
       reason: 'skill_error',
       claimReleasedAt,
+    });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.ticket_terminal',
+      payload: {
+        ticketId,
+        perTicketVerdict: 'escalated_to_human',
+        reason: 'skill_error',
+        claimReleasedAt,
+      },
+      sourceService: 'supportAgentExecutionService',
     });
     logger.warn('support.execution.ticket_pipeline_error', {
       ticketId,
@@ -313,18 +437,22 @@ interface ExecuteTicketPipelineOptions {
   runId: string;
   inboxConfig: SupportInboxAgentConfig;
   organisationId: string;
+  subaccountId: string | null;
   principalCtx: PrincipalContext;
+  masterPrompt: string;
 }
 
 async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Promise<void> {
-  const { ticket, runId, inboxConfig, organisationId, principalCtx } = options;
+  const { ticket, runId, inboxConfig, organisationId, subaccountId, principalCtx, masterPrompt } = options;
   const ticketId = ticket.id;
 
   // ── Step 3: Classify ────────────────────────────────────────────────────
   const classification = await classifyTicket({
     organisationId,
+    subaccountId,
     ticketId,
     runId,
+    masterPrompt,
   });
 
   const minConfidence = inboxConfig.minConfidence ?? 0.8;
@@ -339,6 +467,19 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
       reason: `low_confidence:${classification.confidence}`,
       claimReleasedAt,
     });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.ticket_terminal',
+      payload: {
+        ticketId,
+        perTicketVerdict: 'escalated_to_human',
+        reason: `low_confidence:${classification.confidence}`,
+        claimReleasedAt,
+      },
+      sourceService: 'supportAgentExecutionService',
+    });
     return;
   }
 
@@ -350,6 +491,7 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
       ticketId,
       runId,
       customerEmail: ticket.customerEmail,
+      masterPrompt,
     });
     customerHistoryContext = historyResult.summary;
   }
@@ -368,6 +510,7 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
       confidence: classification.confidence,
       voiceProfile: inboxConfig.voiceProfile ?? 'neutral',
       customerHistoryContext,
+      masterPrompt,
     },
     principalCtx,
   );
@@ -384,6 +527,20 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
       riskTierResolved: 6,
       perTicketVerdict: 'drafted_and_dispatched',
     });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.draft_proposed',
+      payload: {
+        ticketId,
+        draftId,
+        controllerStyleAtPropose: 'native',
+        riskTierResolved: 6,
+        perTicketVerdict: 'drafted_and_dispatched',
+      },
+      sourceService: 'supportAgentExecutionService',
+    });
   } else {
     // assisted: leave draft in awaiting_review; human reviews via existing review queue + Slack Block Kit
     logger.info('phase1.support.draft_proposed', {
@@ -392,6 +549,20 @@ async function executeTicketPipeline(options: ExecuteTicketPipelineOptions): Pro
       controllerStyleAtPropose: 'native',
       riskTierResolved: 6,
       perTicketVerdict: 'drafted_for_review',
+    });
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.draft_proposed',
+      payload: {
+        ticketId,
+        draftId,
+        controllerStyleAtPropose: 'native',
+        riskTierResolved: 6,
+        perTicketVerdict: 'drafted_for_review',
+      },
+      sourceService: 'supportAgentExecutionService',
     });
   }
 

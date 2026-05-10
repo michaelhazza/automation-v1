@@ -213,6 +213,7 @@ import correctionsRouter from './routes/corrections.js';
 import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
 // Phase 1 Showcase — run artifact read surface (Chunk 2)
 import runArtifactsRouter from './routes/runArtifacts.js';
+import runArtifactsFinalizeRouter from './routes/internal/runArtifactsFinalize.js';
 // Support Desk canonical substrate (C13)
 import supportRouter from './routes/support/index.js';
 
@@ -473,6 +474,8 @@ app.use(correctionsRouter);
 app.use(agentPresenceStreamRouter);
 // Phase 1 Showcase — run artifact read surface (Chunk 2)
 app.use(runArtifactsRouter);
+// Phase 1 Showcase — internal worker-to-S3 finalize route (Chunk 1, spec §6.1.4)
+app.use(runArtifactsFinalizeRouter);
 // Support Desk canonical substrate (C13)
 app.use('/api/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
@@ -724,6 +727,36 @@ async function start() {
       registerSupportDraftReconciliationWorker(boss);
     } catch (err) {
       console.error('[boot] failed to register support-draft-reconciliation worker', err);
+    }
+  }
+  // Phase 1 Showcase — run-artifacts retention sweep (spec §6.1.2b)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerRunArtifactsRetentionSweepJob } = await import('./jobs/runArtifactsRetentionSweepJob.js');
+      await registerRunArtifactsRetentionSweepJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register run-artifacts-retention-sweep worker', err);
+    }
+  }
+  // Phase 1 Showcase — Support Agent run worker (spec §5.3.3, §5.3.7)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportAgentRunJob } = await import('./jobs/supportAgentRunJob.js');
+      registerSupportAgentRunJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-agent-run worker', err);
+    }
+  }
+  // Phase 1 Showcase — Support Agent eval daily worker (spec §5.5.4)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportEvalDailyJob } = await import('./jobs/supportEvalDailyJob.js');
+      registerSupportEvalDailyJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-eval-daily worker', err);
     }
   }
   // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)

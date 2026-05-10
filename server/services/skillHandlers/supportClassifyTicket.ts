@@ -7,6 +7,7 @@ import { logger } from '../../lib/logger.js';
 import { SupportClassifyTicketResultSchema } from '../../../shared/types/supportClassifyTicketResult.js';
 import type { SupportClassifyTicketResult } from '../../../shared/types/supportClassifyTicketResult.js';
 import { readThreadForAgent } from '../supportTicketService.js';
+import { emitPhase1RunRenderedEvent } from '../phase1RunTraceEventEmitter.js';
 import {
   buildClassifyPrompt,
   buildSentinelResult,
@@ -14,12 +15,20 @@ import {
 
 export interface ClassifyTicketInput {
   organisationId: string;
+  subaccountId?: string | null;
   ticketId: string;
   runId?: string;
+  /**
+   * Resolved Support Agent master prompt from supportAgentMasterPrompt.resolveMasterPrompt(...).
+   * When provided, prepended to the skill-local system message so the LLM call sees the
+   * agent-level guidance ahead of the per-skill instructions. Optional for direct callers
+   * (e.g. tests or HTTP-route entry points) that do not have an agent-run context.
+   */
+  masterPrompt?: string;
 }
 
 export async function classifyTicket(input: ClassifyTicketInput): Promise<SupportClassifyTicketResult> {
-  const { organisationId, ticketId, runId } = input;
+  const { organisationId, subaccountId = null, ticketId, runId, masterPrompt } = input;
 
   if (!input.ticketId) {
     throw Object.assign(new Error('classify_invalid_input'), { statusCode: 400, errorCode: 'classify_invalid_input' });
@@ -44,7 +53,8 @@ export async function classifyTicket(input: ClassifyTicketInput): Promise<Suppor
     .map((m) => `[${m.direction}] ${m.body}`);
   const latestMessage = recentMessages.at(-1) ?? '';
 
-  const { system, user } = buildClassifyPrompt(ticketSubject, latestMessage, recentMessages.slice(0, -1));
+  const { system: skillSystem, user } = buildClassifyPrompt(ticketSubject, latestMessage, recentMessages.slice(0, -1));
+  const system = masterPrompt ? `${masterPrompt}\n\n---\n\n${skillSystem}` : skillSystem;
 
   let rawContent: string;
   try {
@@ -92,6 +102,21 @@ export async function classifyTicket(input: ClassifyTicketInput): Promise<Suppor
       urgency: zodResult.data.urgency,
       confidence: zodResult.data.confidence,
     });
+    if (runId) {
+      await emitPhase1RunRenderedEvent({
+        runId,
+        organisationId,
+        subaccountId,
+        eventType: 'phase1.support.ticket_classified',
+        payload: {
+          ticketId,
+          intent: zodResult.data.intent,
+          urgency: zodResult.data.urgency,
+          confidence: zodResult.data.confidence,
+        },
+        sourceService: 'supportClassifyTicket',
+      });
+    }
     return zodResult.data;
   }
 
@@ -103,6 +128,16 @@ export async function classifyTicket(input: ClassifyTicketInput): Promise<Suppor
     parseError,
     rawModelOutputRedacted,
   });
+  if (runId) {
+    await emitPhase1RunRenderedEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      eventType: 'phase1.support.classify_failed',
+      payload: { ticketId, parseError, rawModelOutputRedacted },
+      sourceService: 'supportClassifyTicket',
+    });
+  }
 
   return buildSentinelResult('classification_parse_failed');
 }

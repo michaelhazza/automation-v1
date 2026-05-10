@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
 import SyncHealthPill from '../../components/support/SyncHealthPill';
+import { InboxAgentConfigTab } from '../../components/support/InboxAgentConfigTab';
+import type { SupportInboxAgentConfig as PhaseOneInboxAgentConfig } from '../../../../shared/types/supportInboxAgentConfig';
 
 interface SupportInboxAgentConfig {
   version: 1;
@@ -17,6 +19,12 @@ interface SupportInboxAgentConfig {
     autonomousReplyOnWaitingOnCustomer: boolean;
     postResolutionFollowUp: boolean;
   };
+  // Phase 1 Showcase fields — preserved on legacy PATCH to avoid clobbering values
+  // set via the InboxAgentConfigTab below.
+  minConfidence?: number;
+  voiceProfile?: 'casual' | 'neutral' | 'formal' | 'custom';
+  promptOverride?: string;
+  escalationCategories?: string[];
 }
 
 interface Inbox {
@@ -97,6 +105,12 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
           autonomousReplyOnWaitingOnCustomer: autonomousReplyOnWaiting,
           postResolutionFollowUp,
         },
+        // Preserve Phase 1 Showcase fields set via InboxAgentConfigTab so a save here
+        // does not clobber them.
+        minConfidence: base.minConfidence,
+        voiceProfile: base.voiceProfile,
+        promptOverride: base.promptOverride,
+        escalationCategories: base.escalationCategories,
       };
       await api.patch(`/api/support/inboxes/${inbox.id}`, { agentConfig });
       setSaved(true);
@@ -250,6 +264,35 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
       >
         {saving ? 'Saving...' : saved ? 'Saved' : 'Save changes'}
       </button>
+
+      {/* Phase 1 Showcase — agent config (mode, collision, confidence, voice, escalation) */}
+      <div className="mt-4 border-t border-slate-100 pt-4">
+        <p className="text-xs font-medium text-slate-700 mb-2">Agent config</p>
+        <InboxAgentConfigTab
+          inboxId={inbox.id}
+          initialConfig={{
+            version: 1,
+            mode,
+            collisionWindow: {
+              minMinutesSinceHumanActivity,
+              respectHumanAssignee,
+            },
+            draftExpiry: {
+              awaitingReviewHours,
+              draftHours,
+            },
+            optIns: {
+              autonomousReplyOnWaitingOnCustomer: autonomousReplyOnWaiting,
+              postResolutionFollowUp,
+            },
+            minConfidence: base.minConfidence ?? 0.8,
+            voiceProfile: base.voiceProfile ?? 'neutral',
+            promptOverride: base.promptOverride,
+            escalationCategories: base.escalationCategories ?? [],
+          } as PhaseOneInboxAgentConfig}
+          onSaved={onSaved}
+        />
+      </div>
     </div>
   );
 }
