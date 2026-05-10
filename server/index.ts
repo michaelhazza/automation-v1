@@ -663,8 +663,14 @@ async function start() {
       const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
       const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
       const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+      const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
+      const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
+      const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
       executionBackendRegistry.register(ieeBrowserBackend);
       executionBackendRegistry.register(ieeDevBackend);
+      executionBackendRegistry.register(apiBackend);
+      executionBackendRegistry.register(headlessBackend);
+      executionBackendRegistry.register(claudeCodeBackend);
       const { registerIeeRunCompletedHandler } = await import('./jobs/ieeRunCompletedHandler.js');
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {

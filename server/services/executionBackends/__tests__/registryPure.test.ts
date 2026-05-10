@@ -528,3 +528,46 @@ describe('ExecutionBackend mismatch invariant — IEE adapter implementations', 
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — per-adapter mismatch fixture for the api / headless / claude-code
+// adapters added in Chunk 4 (spec § 16 #13).
+//
+// Each adapter's dispatch() throws BackendOptionsMismatch on the first
+// statement when `backendOptions.backendId` doesn't match the adapter's
+// own id. Stub-call style: pass a minimal input whose only meaningful
+// field is `backendOptions.backendId` (set to the wrong value). The
+// adapters never reach DB / network code, so no mocking is required.
+// ---------------------------------------------------------------------------
+
+describe('ExecutionBackend mismatch invariant — api / headless / claude-code adapter implementations', () => {
+  it('apiBackend.dispatch rejects backendOptions.backendId="headless"', async () => {
+    const { apiBackend } = await import('../apiBackend.js');
+    const input = buildMismatchInput('headless');
+    await expect(apiBackend.dispatch(input)).rejects.toBeInstanceOf(BackendOptionsMismatch);
+    await expect(apiBackend.dispatch(input)).rejects.toMatchObject({
+      expectedId: 'api',
+      actualId: 'headless',
+    });
+  });
+
+  it('headlessBackend.dispatch rejects backendOptions.backendId="api"', async () => {
+    const { headlessBackend } = await import('../headlessBackend.js');
+    const input = buildMismatchInput('api');
+    await expect(headlessBackend.dispatch(input)).rejects.toBeInstanceOf(BackendOptionsMismatch);
+    await expect(headlessBackend.dispatch(input)).rejects.toMatchObject({
+      expectedId: 'headless',
+      actualId: 'api',
+    });
+  });
+
+  it('claudeCodeBackend.dispatch rejects backendOptions.backendId="api"', async () => {
+    const { claudeCodeBackend } = await import('../claudeCodeBackend.js');
+    const input = buildMismatchInput('api');
+    await expect(claudeCodeBackend.dispatch(input)).rejects.toBeInstanceOf(BackendOptionsMismatch);
+    await expect(claudeCodeBackend.dispatch(input)).rejects.toMatchObject({
+      expectedId: 'claude-code',
+      actualId: 'api',
+    });
+  });
+});
