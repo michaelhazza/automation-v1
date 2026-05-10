@@ -78,8 +78,12 @@ export async function emitPhase1RunRenderedEvent(
     return;
   }
 
-  await orgDb.execute(sql`SAVEPOINT phase1_event_emit`);
   try {
+    // SAVEPOINT inside the try block so a failure to even open the savepoint
+    // (e.g. the outer tx is already in an aborted state) is caught and
+    // warn-logged rather than propagating — preserves the helper's
+    // never-throws contract.
+    await orgDb.execute(sql`SAVEPOINT phase1_event_emit`);
     const seqResult = await orgDb.execute<{
       next_event_seq: number;
       started_at: Date | null;

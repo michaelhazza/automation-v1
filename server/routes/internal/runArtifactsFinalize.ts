@@ -48,6 +48,12 @@ async function verifyRunBelongsToOrg(
       reason: 'Verify worker-supplied organisationId owns the run before opening org-scoped tx',
     },
     async (tx) => {
+      // Elevate to admin_role so this cross-org SELECT bypasses agent_runs' FORCE RLS.
+      // The worker-supplied organisationId is what we are validating here, so the
+      // GUC-based RLS policy cannot apply — without admin_role the policy filters
+      // every row and every legitimate upload would be rejected as tenant_mismatch.
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
       const result = await tx.execute<{ organisation_id: string }>(
         sql`SELECT organisation_id FROM agent_runs WHERE id = ${agentRunId}::uuid LIMIT 1`,
       );
