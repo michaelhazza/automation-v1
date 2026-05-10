@@ -20,6 +20,7 @@ import { approveDraft } from './supportDraftDispatchService.js';
 import {
   isHumanActivityTooRecent,
   minutesSinceHumanActivity,
+  buildClaimPredicateSql,
   buildTerminalEventPredicateSql,
   requiresCustomerHistory,
   DEFAULT_CLAIM_TTL_MINUTES,
@@ -31,9 +32,15 @@ import type { PrincipalContext } from './principal/types.js';
 // tryClaimTicket — optimistic claim via atomic UPDATE
 // ---------------------------------------------------------------------------
 
+interface ClaimResult {
+  claimed: boolean;
+  lastHumanActivityAt: Date | null;
+}
+
 /**
  * Attempts to claim a ticket for the agent run.
- * Returns true when the claim is acquired; false on collision.
+ * Returns the fresh last_human_activity_at via RETURNING to eliminate TOCTOU
+ * between listOpenTickets and the human-activity collision check.
  *
  * Uses database-side now() for clock-skew safety (spec §5.3.4).
  */
@@ -42,7 +49,8 @@ export async function tryClaimTicket(
   ticketId: string,
   orgId: string,
   claimTtlMinutes: number = DEFAULT_CLAIM_TTL_MINUTES,
-): Promise<boolean> {
+): Promise<ClaimResult> {
+  const claimPredicate = buildClaimPredicateSql(claimTtlMinutes);
   const claimResult = await db.transaction(async (tx) => {
     return tx.execute(sql`
       UPDATE canonical_tickets
@@ -50,9 +58,8 @@ export async function tryClaimTicket(
              bot_claimed_by_run_id = ${runId}::uuid
       WHERE  id = ${ticketId}::uuid
         AND  organisation_id = ${orgId}::uuid
-        AND  (bot_claimed_at IS NULL
-              OR bot_claimed_at < now() - interval '${sql.raw(String(claimTtlMinutes))} minutes')
-      RETURNING id
+        AND  (${sql.raw(claimPredicate)})
+      RETURNING id, last_human_activity_at
     `);
   });
 
@@ -62,7 +69,16 @@ export async function tryClaimTicket(
       ? (claimResult as { rows: unknown[] }).rows
       : [];
 
-  return rows.length > 0;
+  if (rows.length === 0) {
+    return { claimed: false, lastHumanActivityAt: null };
+  }
+
+  const row = rows[0] as Record<string, unknown>;
+  const lastHumanActivityAt = row.last_human_activity_at
+    ? new Date(row.last_human_activity_at as string)
+    : null;
+
+  return { claimed: true, lastHumanActivityAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +244,9 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
   const nowMs = Date.now();
 
   // ── Step 1: Atomic claim ────────────────────────────────────────────────
-  const claimed = await tryClaimTicket(runId, ticketId, organisationId);
+  // RETURNING last_human_activity_at eliminates TOCTOU between listOpenTickets
+  // and the human-activity check below.
+  const { claimed, lastHumanActivityAt } = await tryClaimTicket(runId, ticketId, organisationId);
 
   if (!claimed) {
     logger.info('phase1.support.collision_skipped', {
@@ -239,16 +257,16 @@ async function processTicket(options: ProcessTicketOptions): Promise<void> {
     return;
   }
 
-  // ── Step 2: Human-activity collision check ─────────────────────────────
+  // ── Step 2: Human-activity collision check (fresh value from claim RETURNING)
   const humanActivityRecent = isHumanActivityTooRecent(
-    ticket.lastHumanActivityAt,
+    lastHumanActivityAt,
     inboxConfig.collisionWindow.minMinutesSinceHumanActivity,
     nowMs,
   );
 
   if (humanActivityRecent) {
     await releaseTicketClaim(ticketId, organisationId);
-    const lastHumanActivityAgo = minutesSinceHumanActivity(ticket.lastHumanActivityAt, nowMs);
+    const lastHumanActivityAgo = minutesSinceHumanActivity(lastHumanActivityAt, nowMs);
     logger.info('phase1.support.collision_skipped', {
       ticketId,
       reason: 'human_active',

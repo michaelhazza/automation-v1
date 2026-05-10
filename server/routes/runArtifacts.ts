@@ -189,16 +189,16 @@ router.get(
 
     const startMs = Date.now();
     let byteCount = 0;
-    let streamEnded = false;
 
     body.on('data', (chunk: Buffer) => {
       byteCount += chunk.length;
     });
 
-    body.on('end', () => {
-      streamEnded = true;
+    // Use res 'finish' (not body 'end') so the event fires reliably after
+    // pipe() has flushed all bytes to the client — body 'end' can race with
+    // the pipe() call when the source stream is already exhausted.
+    res.on('finish', () => {
       const durationMs = Date.now() - startMs;
-      // Emit only on successful byte completion (spec §6.1.5b).
       logger.info('phase1.file_delivery.downloaded', {
         artifactId: artifact.id,
         organisationId: orgId,
@@ -209,14 +209,11 @@ router.get(
     });
 
     body.on('error', () => {
-      // Stream interrupted — do not emit downloaded event.
-      if (!streamEnded) {
-        logger.warn('phase1.file_delivery.download_interrupted', {
-          artifactId: artifact.id,
-          organisationId: orgId,
-          byteCount,
-        });
-      }
+      logger.warn('phase1.file_delivery.download_interrupted', {
+        artifactId: artifact.id,
+        organisationId: orgId,
+        byteCount,
+      });
     });
 
     body.pipe(res);

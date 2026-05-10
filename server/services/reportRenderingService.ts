@@ -26,7 +26,7 @@ function normalizePdfBytes(buf: Buffer): Buffer {
   let str = buf.toString('binary');
   str = str.replace(/\/CreationDate\s*\([^)]*\)/g, '/CreationDate (D:20000101000000Z)');
   str = str.replace(/\/ModDate\s*\([^)]*\)/g, '/ModDate (D:20000101000000Z)');
-  str = str.replace(/\/ID\s*\[[\s\S]*?\]/g, '');
+  str = str.replace(/\/ID\s*\[<[0-9a-fA-F]{32}>\s*<[0-9a-fA-F]{32}>\]/g, '');
   return Buffer.from(str, 'binary');
 }
 

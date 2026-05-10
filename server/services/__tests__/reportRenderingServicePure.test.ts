@@ -16,10 +16,10 @@ const FIXTURE: MacroReportInput = {
 
 describe('reportRenderingService', () => {
   it('renders the same input to identical bytes (determinism contract)', async () => {
-    const [buf1, buf2] = await Promise.all([
-      reportRenderingService.renderMacroReportPdf(FIXTURE),
-      reportRenderingService.renderMacroReportPdf(FIXTURE),
-    ]);
+    // Sequential renders to expose timestamp drift between calls — concurrent
+    // renders would share the same wall-clock tick and mask the normalization.
+    const buf1 = await reportRenderingService.renderMacroReportPdf(FIXTURE);
+    const buf2 = await reportRenderingService.renderMacroReportPdf(FIXTURE);
     expect(buf1.equals(buf2)).toBe(true);
   });
 

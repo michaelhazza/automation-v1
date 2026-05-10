@@ -660,7 +660,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const { runId } = req.params;
     const { listForRun } = await import('../services/fileDeliveryService.js');
-    const artifacts = await listForRun(runId, req.orgId!);
+    const raw = await listForRun(runId, req.orgId!);
+    // Strip internal S3 fields before sending to client.
+    const artifacts = raw.map(({ storageKey: _sk, storageRegion: _sr, ...pub }) => pub);
     res.json({ artifacts });
   }),
 );
