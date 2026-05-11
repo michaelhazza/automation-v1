@@ -116,3 +116,84 @@ These are code-quality issues, not spec gaps.
 **NON_CONFORMANT — 3 directional gaps must be addressed by the main session before `pr-reviewer`.** See `tasks/todo.md` under "Deferred from spec-conformance review — operator-session-identity (2026-05-11)". Two of the three gaps (REQ #5b, REQ #9) require cross-chunk coordination (Chunks 9, 10) before they can be resolved cleanly. The "Edit label" gap (REQ #5a) requires a product decision on whether label editing ships in V1 and a corresponding server route.
 
 Because mechanical fixes modified the changed-code set, `pr-reviewer` (when invoked) should run against the post-fix state.
+
+---
+
+## Follow-up re-verification — 2026-05-11T10:48:37Z
+
+**Trigger:** Caller requested re-verification of Chunk 8 after fix commit `154f550a` ("chunk 8 review fixes — OAuth endpoint, subaccountId, shared disconnect dialog").
+
+**Updated commit range:** `2885319b..154f550a` (Chunk 8 commit `76277bf9` + auto-fix commits `52fa61bb`/`8e280f12` + fix commit `154f550a`).
+
+**HEAD at re-check:** `154f550a`
+
+### Status of previously deferred gaps
+
+| REQ | Prior verdict | Re-check verdict | Notes |
+|---|---|---|---|
+| #5a — "Edit label" action in 3-dot menu | DIRECTIONAL_GAP | **DEFERRED for V1 (accepted)** | No backend endpoint exists for label-only PATCH; same posture as Chunk 7's master toggle gap. Source file carries an in-line marker comment `// V1: label edit deferred (no backend endpoint)` at `ManageMultiConnectDrawer.tsx:122`. Caller explicitly instructed: do NOT auto-fix. `tasks/todo.md` entry remains open as the record of the deferral. |
+| #5b — drawer opens for all connection counts, not only ≥2 | DIRECTIONAL_GAP | **DEFERRED to Chunk 10 (accepted)** | Chunk 10 owns the wiring between cards and single-connection detail; the branch decision lives there, not in Chunk 8. Caller explicitly instructed: do NOT auto-fix. `tasks/todo.md` entry remains open. |
+| #9 — drawer should use shared `DisconnectConfirmDialog` | DIRECTIONAL_GAP | **RESOLVED (drawer side)** | Verified — see evidence block below. |
+
+### REQ #9 resolution evidence
+
+- `ManageMultiConnectDrawer.tsx:9` — imports the shared dialog: `import { DisconnectConfirmDialog } from './DisconnectConfirmDialog';`
+- `ManageMultiConnectDrawer.tsx:315-325` — mounts the shared dialog at the bottom of the drawer portal, gated by local `disconnectTarget` state.
+- `ConnRow` (`ManageMultiConnectDrawer.tsx:31-136`) — the per-row Disconnect button now calls `onDisconnectRequest(connection)` which lifts the connection up to the drawer's `setDisconnectTarget`, which mounts the shared dialog.
+- Previously inlined `DisconnectConfirmInline` component is **deleted** — file shrank from 397 → 329 lines; full-file grep finds no remaining inline confirm-dialog code.
+- The shared `DisconnectConfirmDialog.tsx:32` carries the type-to-confirm gate (`canConfirm = ... && (impactCount === 0 || confirmText === 'disconnect')`) and the agents/tasks/workflows impact summary (lines 63-82) that the prior inline implementation lacked.
+
+**Residual cross-chunk concern:** the shared dialog still gates on the literal string `"disconnect"` rather than on the connection label as §17.8 prescribes. This is a pre-existing concern in `DisconnectConfirmDialog.tsx` carried over from `consolidation-govern` and touches Chunks 7, 8, and 9. The `tasks/todo.md` REQ #9 entry already captures this sub-point; updated below to reflect that the drawer-side gap is closed while the dialog-gating sub-point remains open as a separate cross-chunk decision.
+
+### Sanity-check on previously-PASSing requirements
+
+Re-verified by reading the post-fix files. None regressed:
+
+| REQ | Re-check |
+|---|---|
+| #1 / #12 — mutually-exclusive sections | PASS — `AppIntegrationsTab.tsx:256-257, 315-351` unchanged in semantics |
+| #2 — `APP_CATEGORIES` chip filter | PASS — `AppIntegrationsTab.tsx:14, 280-295` |
+| #3 — no "OAuth"/"API Key"/"MCP"/"Cookie" labels visible | PASS — the prior footer-string fix held; grep confirms only code-side identifiers/comments contain these terms |
+| #4 — variant map for all 9 providers | PASS — `ConnectAppModal.tsx:30-92` lists gmail/hubspot/slack/ghl/teamwork/google_drive/outlook/microsoft_calendar/google_calendar |
+| #6 — card content (avatar/name/category/status/CTA) | PASS — `AppIntegrationsTab.tsx:159-201` |
+| #7 — section membership from `listConnections` | PASS — `AppIntegrationsTab.tsx:230-257` |
+| #8 — uses `listConnections` from `governApi.ts` | PASS — both tab (line 5) and drawer (line 6, fetches its own live list now — fix item B4) |
+| #10 — per-app vocabulary (Gmail "Continue to Google"; HubSpot "Connect HubSpot" + "Private App Token") | PASS — `ConnectAppModal.tsx:32, 38-42` |
+| #11 — no "Add Connection" / "Operator Controller" / "sanctioned" | PASS — grep returns 0 hits |
+| #13 — three named files exist | PASS — all three present; an additional shared helper `_utils.ts` was added (not a forbidden addition; not a deletion) |
+
+### Out-of-scope code-quality observations from prior log
+
+Both incidentally addressed by the fix commit (commit message items B5 + S4):
+
+- `AppIntegrationsTab.tsx:129` invalid Tailwind class `justify-content-center` — **FIXED** (line now reads cleanly with only valid Tailwind classes).
+- `ManageMultiConnectDrawer.tsx` unused `onAddAnother` prop on `ConnRow` — **FIXED** (`ConnRowProps` no longer declares it).
+
+These were not blocking gaps, but worth noting that the fix commit cleared them.
+
+### Verification commands re-run
+
+- `npm run lint` — 0 errors; 899 warnings (pre-existing across the repo, none new from Chunk 8 files)
+- `npm run typecheck` — clean (no output, exit 0)
+
+### Files touched in this re-verification
+
+- `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-8-2026-05-11T10-31-11Z.md` — this follow-up section appended; prior content unchanged
+- `tasks/todo.md` — REQ #9 entry updated to reflect drawer-side resolution and narrow the open scope to the cross-chunk dialog-gating sub-point; REQ #5a and REQ #5b annotated as "deferred — accepted" (no new entries added; no duplicates introduced)
+
+### Updated summary
+
+| Metric | Count (post-fix) |
+|---|---|
+| Requirements re-checked | 13 |
+| PASS | 10 (was 9; #9 now PASS for the drawer-side requirement) |
+| DEFERRED — accepted V1 limitation | 2 (#5a "Edit label", #5b drawer-vs-single-detail routing) |
+| Cross-chunk open | 1 (the literal-"disconnect" gate inside the shared dialog — Chunks 7/8/9) |
+
+### Revised verdict
+
+**CONFORMANT (with documented deferrals)** for Chunk 8 in isolation. The Chunk-8-scoped portion of REQ #9 (drawer uses the shared dialog) is satisfied; the remaining gating-token concern is a cross-chunk decision that does not belong to Chunk 8 and is already routed in `tasks/todo.md`.
+
+`pr-reviewer` may now run on the post-fix state. No further mechanical fixes are required from this agent.
+
+**Commit at finish:** to be filled by auto-commit step below.
