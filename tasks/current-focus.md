@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/sandbox-isolation/spec.md
-active_plan: tasks/builds/sandbox-isolation/plan.md
-build_slug: sandbox-isolation
-branch: claude/evolve-sandbox-isolation-brief-Q51hc
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-11
+last_merge_ready_pr: #287
+last_merge_ready_slug: sandbox-isolation
+last_merge_ready_branch: claude/evolve-sandbox-isolation-brief-Q51hc
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -24,11 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/sandbox-isolation/spec.md` (LOCKED 2026-05-11; status `accepted`; 1679 lines)
-**Active plan:** `tasks/builds/sandbox-isolation/plan.md` (16 chunks; 2 rounds chatgpt-plan-review APPROVED)
-**Active build slug:** sandbox-isolation
-**Branch:** claude/evolve-sandbox-isolation-brief-Q51hc
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 16 chunks built and committed; spec-conformance R2 CONFORMANT_AFTER_FIXES; adversarial-reviewer HOLES_FOUND (advisory, 11 routed); pr-reviewer APPROVED after 1 fix-loop round closing 4 of 5 blockers (B4 ceiling-monitor enqueue deferred as architectural follow-up); dual-reviewer (Codex) APPROVED after 3 iterations + 5 ACCEPT fixes; pr-reviewer re-review APPROVED; doc-sync gate PASS (4 docs updated + 9 n/a). Handoff at `tasks/builds/sandbox-isolation/handoff.md § Phase 2 (BUILD) — complete`. Master architecture anchor: `docs/synthetos-governed-agentic-os-brief-v1.2.md`. **Critical follow-up:** SANDBOX-B4 (ceiling-monitor + wall-clock-kill enqueue requires async provider interface refactor — out of fix-loop scope; operator decides at Phase 3 chatgpt-pr-review). **Next:** operator runs `launch finalisation` in a new Claude Code session for Phase 3 (S2 sync + G4 regression guard + chatgpt-pr-review + MERGE_READY transition).
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — `sandbox-isolation` build complete. PR #287 has passed all branch-level reviews (spec-conformance, adversarial-reviewer, pr-reviewer, dual-reviewer, chatgpt-pr-review across 3 rounds — final verdict APPROVED). Phase 3 finalisation: S2 sync clean (0 behind main); G4 regression-guard same baseline; doc-sync PASS (architecture.md + KNOWLEDGE.md updated, 11 docs n/a); KNOWLEDGE.md +4 patterns (DB CHECK application classifier; DB-anchored elapsed time; CI gates require workflow wiring; pre-publish version-string convention). 9 chatgpt-pr-review findings closed in-branch (5 R1 implements + 1 R1 defer + 3 R2 implements). 2 R3 advisory items routed (SANDBOX-R3-T1 reconciliation wall-clock; SANDBOX-R3-T2 covered by SANDBOX-F1). ready-to-merge label applied at 2026-05-11T10:38:04Z; CI monitor loop now driving green prior to auto-merge.
+
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
 
@@ -94,7 +99,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11T00:44:16Z (Phase 3 close for `pre-test-hardening` PR #284 → MERGE_READY; ready-to-merge label about to be applied)
+**Last updated:** 2026-05-11T10:38:04Z (Phase 3 close for `sandbox-isolation` PR #287 → MERGE_READY; ready-to-merge label about to be applied)
 
 ---
 

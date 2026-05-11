@@ -4255,3 +4255,19 @@ Source: `tasks/review-logs/adversarial-review-log-sandbox-isolation-2026-05-11T0
 - [ ] **SANDBOX-ADV-3.2 — Race between provider success and ceiling-monitor `markForHarvest`** can cause completed execution to be billed as timed-out with no cost row.
 - [ ] **SANDBOX-ADV-4.2 — S3 path-traversal via filename.** `${ctx.subaccountId}/${ctx.sandboxExecutionId}/${artefact.filename}` — `..` could overwrite another execution's artefact. Sanitise filename.
 - [ ] **SANDBOX-ADV-5.2 — No per-tenant log-storage quota.** Per-execution caps (10MB stdout + 10MB stderr) but tenant could fill DB before 90d prune.
+
+---
+
+## Deferred from chatgpt-pr-review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`. 3 rounds; Round 3 verdict APPROVED. 2 advisory non-blockers carried forward (recorded for future work; ChatGPT explicitly flagged both as not-blocking).
+
+- [ ] **SANDBOX-R3-T1 (advisory, low priority) — Reconciliation eligibility still uses Node wall-clock `now = new Date()`**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:72` (`const now = new Date();`)
+  - ChatGPT call (Round 3): *"less critical than the ceiling monitor because it is recovery timing, not billing enforcement, but for consistency I'd eventually move that to DB time too. Not a blocker."*
+  - Why deferred: recovery timing has no billing or correctness invariant; clock skew of seconds-to-minutes shifts when stuck-row sweep fires but does not change which rows are eligible (the per-row `isExecutionEligibleForReconciliation` check still validates the deadline). Round 2 R2-T1 fix migrated the ceiling monitor (correctness-sensitive) to DB-anchored time; this completes the migration to consistency.
+  - Suggested approach: replace `const now = new Date();` with a `SELECT NOW()` in the same admin transaction; thread the DB time through to `isExecutionEligibleForReconciliation`. Pure helper signature unchanged. Single-file change, ~10 lines.
+
+- [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
+  - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
+  - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.

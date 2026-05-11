@@ -110,4 +110,44 @@ Doc-sync gate PASS (4 docs updated + 9 n/a with rationale).
 - `tasks/todo.md` (SANDBOX-F1 step 0 added — operator flips back to v1.0.0 at first-publish)
 - `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md` (this log)
 
+### Round 3 — 2026-05-11T10:45:00Z
+
+**Verdict from ChatGPT:** **APPROVED — lock-ready, assuming CI is green.**
+
+> *"No further blocker from me."*
+
+All 3 Round 2 findings confirmed resolved by ChatGPT:
+- R2-F1 CHECK violation → fixed via `classifyCeilingTransition` + DB-CHECK-encoded pure test matrix.
+- R2-T1 DB-anchored ceiling timing → fixed via `EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000`.
+- R2-T2 STRICT_TEMPLATE_TAG_CHECK + all 5 sandbox gates → wired into `grep_invariants`.
+
+**Two non-blocker advisory notes** (operator chose to record both as explicit deferred items rather than silently accept):
+
+| ID | Title | ChatGPT call | Action |
+|---|---|---|---|
+| R3-T1 | Reconciliation still uses Node wall-clock for `now = new Date()` eligibility check | *"less critical than ceiling monitor because it is recovery timing, not billing enforcement, but for consistency I'd eventually move that to DB time too. Not a blocker."* | Routed to `tasks/todo.md § Deferred from chatgpt-pr-review — sandbox-isolation` as **SANDBOX-R3-T1** for a future build. |
+| R3-T2 | Placeholder PUBLISHED_VERSION acceptable only because version is now `local-dev-*` | *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."* | SANDBOX-F1 already explicitly carries the operator runbook; no new entry needed, but cross-referenced in R3-T1 entry. |
+
+**Operator directive (after verdict):** *"lock down the review after this and progress to finalisation including setting timers for managing CI tests and iterating fixes until complete and merged"* — explicit close-out signal. No further rounds. finalisation-coordinator proceeds to doc-sync + KNOWLEDGE + tasks/todo.md cleanup + MERGE_READY transition + CI monitor loop + auto-merge.
+
+**Files changed in Round 3:**
+- `tasks/todo.md` (SANDBOX-R3-T1 advisory deferred for future build)
+- `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md` (this log close-out)
+
+## Final Summary
+
+**3 rounds total. Final verdict: APPROVED — operator-locked Round 3.**
+
+| Round | Verdict | Findings | Implemented | Deferred | Commit |
+|---|---|---|---|---|---|
+| 1 | CHANGES_REQUESTED | 6 (3 blockers + 3 tightenings) | 5 (F2, F3, T1, T2, T3) | 1 (F1 → SANDBOX-F1) | `aa4a2596` |
+| 2 | CHANGES_REQUESTED | 3 (1 blocker + 2 tightenings) | 3 (F1-R2, T1-R2, T2-R2) | 0 | `647d96db` |
+| 3 | APPROVED | 0 blocking, 2 advisory non-blockers | 0 (advisory) | 2 (R3-T1, R3-T2 advisory; R3-T2 already covered by SANDBOX-F1) | (this commit) |
+
+**Doc-sync sweep verdicts:** see Phase 3 handoff section in `tasks/builds/sandbox-isolation/handoff.md`.
+
+**KNOWLEDGE.md patterns appended this Phase 3:** see same handoff section.
+
+**Operator decisions surfaced:** 0 user-facing. 1 architectural escalation (SANDBOX-B4) was explicitly flagged in framing but ChatGPT did not raise it — the V1-ship limitation is documented in handoff + SANDBOX-ADV-5.1 for a follow-up build. Operator's "fix it in this branch" directive applied to ChatGPT's findings only; the wall-clock-kill/ceiling-monitor enqueue refactor remains a separate architectural follow-up.
+
 

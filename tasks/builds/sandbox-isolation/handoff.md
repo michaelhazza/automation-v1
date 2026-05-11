@@ -205,3 +205,79 @@ Operator and Phase 3 chatgpt-pr-review must decide:
 - 1 architectural follow-up (SANDBOX-B4) explicitly flagged for operator decision
 
 Phase 2 closed. Next: operator runs `launch finalisation` in a new Claude Code session for Phase 3 (S2 sync + G4 regression guard + chatgpt-pr-review + MERGE_READY transition).
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #287
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`
+**spec_deviations reviewed:** yes (SANDBOX-B4 architectural follow-up framed in Round 1 kickoff; ChatGPT did not raise as blocker; V1-ship limitation documented in `tasks/todo.md § SANDBOX-ADV-5.1`)
+
+### S2 sync + G4 regression guard
+
+- S2: 0 commits behind `origin/main`; clean no-op. No migration collisions (this branch adds 0321/0322/0323/0324; main tops out at 0320).
+- G4: lint 0 errors / 906 baseline warnings; typecheck 2 pre-existing `@react-pdf/renderer` errors confirmed on origin/main baseline. No regressions introduced.
+
+### chatgpt-pr-review rounds
+
+| Round | Verdict | Findings | Implemented | Deferred | Commit |
+|---|---|---|---|---|---|
+| 1 | CHANGES_REQUESTED | 6 (3 blockers + 3 tightenings) | 5 (F2, F3, T1, T2, T3) | 1 (F1 → SANDBOX-F1) | `aa4a2596` |
+| 2 | CHANGES_REQUESTED | 3 (1 blocker + 2 tightenings) | 3 (F1-R2, T1-R2, T2-R2) | 0 | `647d96db` |
+| 3 | **APPROVED** | 0 blocking; 2 advisory non-blockers | 0 (advisory) | 2 (R3-T1, R3-T2 — R3-T2 covered by SANDBOX-F1) | (this commit) |
+
+**Operator directive in Round 2:** *"whatever it is, let's fix it in this branch"* — overrode any defer instinct for that round. All 3 R2 findings implemented in-branch.
+
+### Doc-sync sweep verdicts (per `docs/doc-sync.md`)
+
+| Doc | Verdict |
+|---|---|
+| `architecture.md` | **yes** (§ Sandbox Isolation primitive § Provider selection — strengthened to document fail-fast guard, added § Application-level invariant for DB CHECK constraints, § CI integration, § Time-source for correctness-sensitive paths) |
+| `docs/capabilities.md` | n/a — no capability / agency-capability / skill / integration add/remove/rename in Phase 3 (already covered Phase 2) |
+| `docs/integration-reference.md` | n/a — e2b is internal sandbox infra, not a customer-exposed integration in the integration-reference sense |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | n/a — no build discipline / convention / agent fleet / review pipeline changes in Phase 3 |
+| `CONTRIBUTING.md` | n/a — no lint-suppression / comment-format changes |
+| `docs/frontend-design-principles.md` | n/a — no UI changes (ui_touch=false per brief §2.8, §4) |
+| `KNOWLEDGE.md` | **yes** (+4 patterns: DB CHECK constraint application classifier; DB-anchored elapsed time in correctness-sensitive paths; CI gates authored without workflow wiring; strict CI gates require pre-publish version-string convention) |
+| `docs/spec-context.md` | n/a — spec-review sessions only |
+| `docs/decisions/` | n/a — Phase 3 work is bug fixes + CI hygiene, not new ADR-worthy decisions (ADR 0010 covers SandboxExecutionService boundary from Phase 2) |
+| `docs/context-packs/` | n/a — no architecture.md section-anchor changes invalidating existing packs |
+| `references/test-gate-policy.md` | n/a — no test-gate posture change; the 5 sandbox gates are project-specific grep gates |
+| `references/spec-review-directional-signals.md` | n/a — not a spec-review session |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | n/a — repo-specific feature work, not framework-level |
+
+**Doc-sync gate: PASS** (all 13 registered docs have explicit verdicts; 2 updated + 11 n/a with rationale).
+
+### KNOWLEDGE.md entries added: 4
+
+1. **DB CHECK constraints require a pure application-level transition classifier** — generalises from `classifyCeilingTransition`.
+2. **DB-anchored elapsed time in correctness-sensitive paths (ceiling monitor)** — extends existing `inboundRateLimiter` / `agentWorkingTimeService` pattern.
+3. **CI grep gates authored in code must be wired into a workflow before merge** — process gap caught by Round 2 T2 (scope expansion).
+4. **Strict CI gates require pre-publish version-string convention to avoid blocking ship** — `local-dev-*` prefix as the "not yet published" sentinel.
+
+### tasks/todo.md items removed/closed
+
+0 items closed by this Phase 3 (this is a build-finalisation pass; deferred items from spec-conformance, adversarial-reviewer, pr-reviewer, dual-reviewer, and chatgpt-pr-review remain explicit follow-ups for future builds).
+
+Items added in Phase 3:
+- **SANDBOX-F1** (deferred operator runbook for first-publish work — flip versions, compute real hashes, wire e2b CLI, push tag).
+- **SANDBOX-R3-T1** (advisory — reconciliation eligibility uses Node wall-clock).
+- **SANDBOX-R3-T2** (advisory cross-reference — covered by SANDBOX-F1).
+
+### ready-to-merge label applied at: 2026-05-11T10:38:04Z
+
+### Open issues at MERGE_READY
+
+1. **SANDBOX-B4 architectural follow-up** — ceiling-monitor + wall-clock-kill jobs cannot be pre-start enqueued with the current synchronous `provider.runTask` interface. V1 ships with provider-side best-effort enforcement; tracked as `SANDBOX-ADV-5.1` in `tasks/todo.md` for a follow-up build that delivers async `startTask`/`getProviderSignal`/`terminateTask`/`readFiles` seams.
+2. **e2b SDK installation** — interface-stubbed in V1. SANDBOX-F1 runbook covers operator post-merge work once the e2b account is provisioned.
+3. **`@react-pdf/renderer` typecheck errors** — pre-existing on origin/main (confirmed); not introduced by this build, but operator may want to fix before the typecheck gate becomes load-bearing on every PR.
+
+### Pipeline summary at handoff
+
+- Branch state: clean (working tree empty post-Phase-3 commit)
+- All 3 chatgpt-pr-review rounds closed (verdict APPROVED on Round 3)
+- 9 chatgpt-pr-review findings closed in-branch (6 R1 + 3 R2); 2 R3 advisory routed
+- 25+ deferred items in `tasks/todo.md` for post-merge backlog; 1 architectural follow-up (SANDBOX-B4) explicitly flagged
+
+Phase 3 closed. Next: CI monitor loop drives green, then auto-merge.

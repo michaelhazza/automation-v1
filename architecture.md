@@ -3517,11 +3517,23 @@ Adapters that need sandbox execution (today `iee_dev`, future OpenClaw) call `Sa
 ### Provider selection
 
 `SANDBOX_PROVIDER` env var selects the provider at service construction:
-- `e2b` — accepted in all environments.
+- `e2b` — production-grade; **the registered factory fails fast at construction** when `NODE_ENV=production` (the SDK is not yet installed) or in non-production without `E2B_SDK_STUBBED=true`. A boot with `SANDBOX_PROVIDER=e2b` and a missing SDK never proceeds — the alternative ("valid provider, throws on first sandbox call") creates an ambiguous runtime mode that this guard rules out.
 - `local_docker` — rejected in `NODE_ENV=production`.
 - `inline` — rejected outside `NODE_ENV=test` + `SANDBOX_ALLOW_INLINE=1`.
 
 Any misconfiguration throws at boot (fail-fast), not at first call.
+
+### Application-level invariant for DB CHECK constraints
+
+`sandbox_executions` carries a CHECK constraint requiring `provider_sandbox_id IS NOT NULL` when `status` is `running` or `harvesting` (paired with `provider_sandbox_id IS NULL` when `status='pending'`). The application enforces the matching invariant before any write: a pending row whose worker died pre-start MUST transition to `provider_unavailable` directly, never to `harvesting` (which would violate the CHECK). The pure helper `classifyCeilingTransition(status, providerSandboxId, ceilingType)` in `server/jobs/sandboxCeilingMonitorPure.ts` is the single point of truth — both the ceiling monitor and the harvest reconciliation job consult it before issuing any transition. Pure-test matrix encodes the legal grid; defence-in-depth race-safe `status=` WHERE predicates back it up.
+
+### CI integration
+
+All five sandbox gates (`verify-sandbox-classification`, `verify-sandbox-minimum-events`, `verify-no-sandbox-cost-update`, `verify-no-inline-sandbox-outside-test`, `verify-template-version-coherence`) run in `.github/workflows/ci.yml § grep_invariants` on every PR. The template-version gate switches to STRICT mode (hard-fails on missing publish tags for non-`local-dev-*` versions) when the PR carries the `ready-to-merge` label — set via `STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}`. Pre-first-publish, `CURRENT_VERSION.version` is `local-dev-v1.0.0`; the operator flips it to `v1.0.0` post-account-provisioning per `tasks/todo.md § SANDBOX-F1`.
+
+### Time-source for correctness-sensitive paths
+
+The ceiling monitor computes elapsed time DB-side via `(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint` returned in the same row-load `SELECT`. This anchors both endpoints to DB time and avoids the cross-instance clock-skew failure mode that wall-clock `Date.now()` would introduce in correctness-sensitive paths (mirrors the patterns established in `inboundRateLimiter.ts` and `agentWorkingTimeService.ts`). Reconciliation eligibility still uses Node wall-clock for the sweep-start instant — that path is recovery timing, not billing enforcement; future migration tracked as `SANDBOX-R3-T1`.
 
 ### Cost ledger
 
