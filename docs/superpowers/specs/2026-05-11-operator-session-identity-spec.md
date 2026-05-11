@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-11
-**Last updated:** 2026-05-11 (spec-reviewer iteration 4 mechanical pass applied)
+**Last updated:** 2026-05-11 (spec-reviewer iteration 5 mechanical pass applied — final iteration of the lifetime cap)
 **Author:** claude-opus-4-7
 **Build slug:** operator-session-identity
 **Source branch:** claude/evolve-session-identity-brief-17LO4
@@ -113,7 +113,9 @@ This split is a codebase debt that Spec C surfaced. Adding the new AI Subscripti
 
 ### 5.2 Decision
 
-The `/connections` route (`ConnectionsPage.tsx`) becomes the **single CRUD surface** for all connection types. The legacy `IntegrationsAndCredentialsPage` and `CredentialsTab` are deprecated and removed as part of this spec.
+The `/connections` route (`ConnectionsPage.tsx`) becomes the **single CRUD surface** for all connection types. As part of this spec:
+- `client/src/components/CredentialsTab.tsx` is REMOVED. Its functionality migrates entirely to the new tab components in `client/src/pages/govern/components/`.
+- `client/src/pages/IntegrationsAndCredentialsPage.tsx` is CONVERTED to a redirect to `/connections` (HTTP-level 302 from any client route still pointing at the old page). Not removed, so existing bookmarks resolve cleanly.
 
 ### 5.3 Three-tab structure
 
@@ -143,7 +145,7 @@ New server routes expose all Add/Edit/Test operations from the Govern surface, r
 
 As part of this spec:
 - `client/src/components/CredentialsTab.tsx` — deprecated, removed
-- `client/src/pages/IntegrationsAndCredentialsPage.tsx` — deprecated, removed (or converted to a redirect to `/connections`)
+- `client/src/pages/IntegrationsAndCredentialsPage.tsx` — converted to a redirect to `/connections` (single verdict; see §5.2)
 
 All existing functionality (OAuth connect, web login Add/Edit/Test, API key management) migrates to the consolidated `ConnectionsPage` surface.
 
@@ -428,7 +430,11 @@ disabled ── (terminal; re-connect creates a NEW row; this row stays disabled
 - `disabled → connected_usable` (disable is platform-side, immutable on this row)
 - Any state → any state by updating a field without going through the lifecycle service
 
-State transitions are written only by `operatorSessionLifecycleService` (new, §8). Direct column updates outside the service are prohibited.
+**Write ownership rule (closed set):**
+- `operatorSessionService.connect` — sole owner of the INITIAL `usability_state` value written on row INSERT. Inside the connect transaction, the service computes the initial state from §7.4 outcome + §11.1 branch and writes it as part of the connection INSERT. This is the only place a row's `usability_state` is set without going through `transition()`.
+- `operatorSessionLifecycleService.transition(connectionId, from, to)` — sole owner of every subsequent `usability_state` write after the row exists. All transitions in §7.5 go through this method. Direct UPDATEs to `usability_state` from any other code path are prohibited.
+
+This is the boundary the inventory in §8.5 reflects: `operatorSessionService` does "initial usability_state assignment" only on insert; `operatorSessionLifecycleService` owns every transition thereafter.
 
 **Distinct semantics:**
 - `revoked` = provider-side fact. OpenAI invalidated the session. Audit event type: `operator_session.revoked`.
@@ -472,9 +478,9 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | File | Purpose |
 |---|---|
-| `server/services/operatorSessionService.ts` | Connect flow, plan detection, `usability_state` management |
-| `server/services/operatorSessionConsentService.ts` | Append-only consent row writer (with the one-time `connection_id` back-fill exception per §7.2 / §11.1), consent-event recording, disclosure-version-bump detection (on-read per §11.4), retention enforcement. No UPDATE or DELETE primitives beyond the back-fill — historical changes are recorded as new event rows. |
-| `server/services/operatorSessionLifecycleService.ts` | State machine transitions (the only code allowed to write `usability_state`) |
+| `server/services/operatorSessionService.ts` | Connect flow (Branches A and B per §11.1), plan detection per §7.4, INITIAL `usability_state` assignment on INSERT only. Does NOT perform any transitions on existing rows — those go to `operatorSessionLifecycleService.transition`. Exports `listAllowedSubscriptionsForAgent(agentId, subaccountId)` for the Model Access summary route (Chunk 10). |
+| `server/services/operatorSessionConsentService.ts` | Append-only consent row writer (with the one-time `connection_id` back-fill exception per §7.2 / §11.1), consent-event recording (`granted` / `revoked` / `superseded`), disclosure-version-bump detection (on-read per §11.4), retention-enforcement stubs (`minimisePiiForDeletedUser` per §7.2 — V1 stub). No UPDATE or DELETE primitives beyond the back-fill — historical changes are recorded as new event rows. |
+| `server/services/operatorSessionLifecycleService.ts` | State machine transitions on existing rows (the only code allowed to UPDATE `usability_state` after a row exists). Initial state on INSERT is owned by `operatorSessionService.connect`. |
 | `server/services/operatorSessionLifecycleServicePure.ts` | Pure functions for failure classification, state-transition logic (testable) |
 | `server/services/operatorSessionConsentServicePure.ts` | Pure functions for disclosure-version comparison and consent-state derivation (testable) |
 | `server/services/credentialBrokerServicePure.ts` | Pure helpers extracted from the broker: `assertCredentialUsableOrThrow(state, decryptHook)` (broker retrieval invariant) + `orderResolvedCredentials(rows)` (§9.7 failover ordering). Single source of truth for those two invariants. |
@@ -501,7 +507,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | File | Purpose |
 |---|---|
-| `server/routes/operatorSessionConnections.ts` | Full CRUD: connect, list, get, update (label/display-name), make-default, edit availability (allow-agent-use), disconnect, consent, re-auth trigger. Permission gates per §10.4. |
+| `server/routes/operatorSessionConnections.ts` | Full CRUD: connect, list, get, update (label/display-name), make-default, edit availability (allow-agent-use), disconnect, consent re-acceptance, re-auth trigger. Also hosts the agent-side read route `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` used by the Model Access summary on the agent edit page. Permission gates per §10.4. |
 | `server/routes/webLoginConnectionsGovern.ts` | Govern-surface Add/Edit/Test Web Login routes migrated from the legacy `IntegrationsAndCredentialsPage` API. Mounts under `/api/subaccounts/:subaccountId/web-login-connections/...`. Reuses the existing `server/services/webLoginConnectionService.ts` service layer; only the HTTP surface is new. Permission guards match the legacy routes (`subaccount.connections.manage`). |
 
 ### 8.9 Modified routes
@@ -556,7 +562,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | File | Disposition |
 |---|---|
 | `client/src/components/CredentialsTab.tsx` | Removed (functionality migrated) |
-| `client/src/pages/IntegrationsAndCredentialsPage.tsx` | Removed or converted to redirect to `/connections` |
+| `client/src/pages/IntegrationsAndCredentialsPage.tsx` | Converted to a redirect to `/connections` (single verdict per §5.2) |
 
 ### 8.15 Agent edit page
 
@@ -607,7 +613,7 @@ interface OperatorSessionEnvelope {
 // 4. Return OperatorSessionEnvelope (token material excluded)
 ```
 
-**Acceptance test:** A unit test proves that calling `issueCredential` for any state other than `connected_usable` throws before any decryption step, using a mock that asserts `connectionTokenService.decryptToken` is never called.
+**Acceptance test (V1):** Pure-function unit tests target `credentialBrokerServicePure.assertCredentialUsableOrThrow(state, decryptHook)` per §17.2 — the helper throws for any state other than `connected_usable` AND never invokes the `decryptHook` mock; for `connected_usable` it invokes the hook exactly once. The non-pure `issueCredential` is verified indirectly by code-review + the static gate that no other code path reads token columns directly. A full integration test on `issueCredential` is deferred to Phase 2+ per the testing posture (§15).
 
 ---
 
@@ -644,7 +650,19 @@ interface AiSubscriptionConnection {
   availabilityScope: 'all_agents' | 'specific_agents';
   allowedAgentIds: string[] | null;       // null when scope = 'all_agents'
   label: string | null;
-  owner: { kind: 'workspace'; id: string; name: string };
+  /**
+   * The user who connected the subscription and owns the consent record (§7.2 user_id).
+   * If that user is deactivated or removed, the connection transitions to `disabled` /
+   * `owner_inactive` per §7.5 and §11.1; the `user` block keeps the original ownerUserId
+   * for audit even after `user_id` is set NULL by FK on user delete (in which case
+   * `userIdNullified: true` is returned and `displayName` is best-effort recovered from
+   * audit trail). Subaccount scope is conveyed at the URL level, not in this shape.
+   */
+  user: {
+    userId: string | null;          // null only when the originating user has been deleted
+    userIdNullified: boolean;       // true when user_id is NULL but the original user existed
+    displayName: string | null;     // best-effort, may be null for deleted users
+  };
   lastRefreshedAt: string | null;          // ISO 8601
   createdAt: string;
   // Token material: NEVER present. Raw auth_token/refresh_token never leave the server.
@@ -691,6 +709,30 @@ interface OperatorSessionConsentEvent {
 
 ---
 
+### 9.4b Availability scope shape — `integration_connections.config_json` (operator_session only)
+
+The per-subscription agent allowlist persists inside the existing `integration_connections.config_json` JSONB column under a top-level `operator_session` key. This avoids a new column and re-uses the existing JSONB column's storage and indexing.
+
+```typescript
+// Stored at: integration_connections.config_json (existing JSONB column)
+// Producer: operatorSessionService.updateAvailability / connect
+// Consumer: operatorSessionService.listAllowedSubscriptionsForAgent + credentialBrokerService.resolveAvailableCredentials
+interface OperatorSessionConfigJson {
+  operator_session: {
+    availabilityScope: 'all_agents' | 'specific_agents';
+    allowedAgentIds: string[] | null;  // populated only when availabilityScope === 'specific_agents'; null otherwise
+  };
+}
+
+// For non-operator_session rows, config_json keeps whatever shape it had before this spec —
+// the `operator_session` key is added only when the row's auth_type is 'operator_session'.
+// Existing config_json content for other auth types is untouched.
+```
+
+This shape is the canonical source of truth for the `availabilityScope` / `allowedAgentIds` fields on the §9.2 `AiSubscriptionConnection` API contract — the route reads `config_json -> 'operator_session' ->> 'availabilityScope'` and serializes it into the response. §9.6 records this as the source of truth row below.
+
+---
+
 ### 9.5 Failure classification shape
 
 Returned by `operatorSessionLifecycleServicePure.classifyRefreshFailure`:
@@ -730,6 +772,7 @@ When the same fact appears in multiple representations:
 | Plan tier | `integration_connections.plan_tier` column | DB; never inferred from token at runtime |
 | Token expiry | `integration_connections.token_expires_at` | DB; compared to `now()` by the lifecycle service before injecting |
 | Failover order for an agent run | `credentialBrokerService.resolveAvailableCredentials` returns the ordered list per the rule below; the agent run loop reads positions left-to-right and never re-sorts | Broker is single source of truth for ordering; consumers MUST NOT reorder |
+| Per-subscription agent allowlist | `integration_connections.config_json -> 'operator_session'` JSONB key per §9.4b — `availabilityScope` + `allowedAgentIds`. | Read via Drizzle JSONB accessor; write only through `operatorSessionService.updateAvailability` so the shape is validated. |
 
 ### 9.7 Failover ordering contract (locked, Goal §2 item 14)
 
@@ -741,7 +784,7 @@ When the same fact appears in multiple representations:
 
 The agent run loop consumes the array in order: try position 0, on retryable failure proceed to position 1, etc. Connections that move out of `connected_usable` mid-run are excluded from re-resolution but already-consumed positions are not re-evaluated within the same run.
 
-`label ASC NULLS LAST` ordering uses Postgres `ORDER BY label ASC NULLS LAST, id ASC` and is implemented in the broker's SQL — not in JavaScript — so the order is deterministic regardless of caller. The acceptance criteria in §17 add a test that confirms (a) Default-first, (b) alphabetical-by-label thereafter, (c) NULLS LAST, (d) `id` tiebreaker.
+**Single source of truth for the ordering rule:** `credentialBrokerServicePure.orderResolvedCredentials(rows)`. The pure helper is the canonical implementation of the §9.7 contract — it takes an unordered array of resolved-credential rows (each carrying `isDefault`, `label`, `id`, `usabilityState`, `allowedAgentIds`, `authType`) and returns the ordered array. The non-pure broker pre-filters via SQL (`WHERE usability_state = 'connected_usable'`) and applies an `ORDER BY` clause as a performance optimisation, then passes the rows through `orderResolvedCredentials` so the final ordering is deterministic and unit-testable regardless of what SQL the broker emits. If the SQL ordering and the pure helper disagree, the pure helper wins — the SQL `ORDER BY` is advisory. Acceptance tests in §17.5b target the pure helper.
 
 ---
 
@@ -851,19 +894,33 @@ The provider connection handshake is inline / synchronous from the client's pers
 
 The §17 acceptance criteria are structured so they exercise the right branch given the current registry state — pre-verification tests confirm 501; post-verification tests confirm the disclosure-required flow.
 
-**Connect sequence (the canonical one transaction):**
+**Connect sequence — two branches, both single-transaction:**
 
-1. Client POST to `connect` route with a `disclosureAcceptance: { disclosureVersion, consentText, acceptanceTier }` block. `acceptanceTier` records what the user believes their plan is, used for the consent snapshot.
-2. Server calls provider OAuth endpoint (or equivalent verified mechanism).
-3. Server receives token; attempts plan verification per the §7.4 detection mechanism.
+The disclosure-requirement gate above decides which branch runs. Pre-flight (before any provider call): the server computes `disclosureRequired` by reading the registry. If `disclosureRequired === true` AND the POST body has no valid `disclosureAcceptance` block → 422 `disclosure_required`, no provider call. Otherwise:
+
+**Branch A — Sanctioned + verified (no disclosure required).** Used when `planDetectionMechanism: 'introspection_api'` AND the verified tier ∈ `sanctionedTiers`. No `disclosureAcceptance` block is needed; if one is provided, it is ignored.
+
+1. Client POST to `connect` route (body may omit `disclosureAcceptance`).
+2. Server calls provider OAuth endpoint, receives token, runs introspection.
+3. Server confirms verified tier ∈ `sanctionedTiers`.
+4. BEGIN transaction:
+   - INSERT `integration_connections` row with `usability_state = 'connected_usable'`, `plan_verification_status = 'verified'`, `consent_record_id = NULL`, and the encrypted token material.
+   - COMMIT.
+5. Server responds 201.
+
+**Branch B — Disclosure required.** Used in all other cases (V1 self_declaration, Plus tier, unverified-tier outcome). Requires a `disclosureAcceptance: { disclosureVersion, consentText, acceptanceTier }` block in the POST body — pre-flight rejects with 422 `disclosure_required` if missing.
+
+1. Client POST to `connect` route with `disclosureAcceptance` block.
+2. Server calls provider OAuth endpoint, receives token, runs plan verification.
+3. Server determines initial `usability_state` per the §7.4 outcome table.
 4. BEGIN transaction:
    - INSERT `operator_session_consents` row using the `disclosureAcceptance` block. INSERT a `granted` event into `operator_session_consent_events`. Capture the new `consent_id`.
-   - INSERT `integration_connections` row with the correct initial `usability_state` per the disclosure-requirement gate above, `consent_record_id = <consent_id>`, and the encrypted token material.
+   - INSERT `integration_connections` row with the correct `usability_state` and `plan_verification_status`, `consent_record_id = <consent_id>`, and the encrypted token material.
    - UPDATE the consent row to set `connection_id = <new connection id>` — the single permitted UPDATE on `operator_session_consents`, scoped to a one-time NULL → non-NULL transition inside this transaction. Enforced at the service layer.
    - COMMIT.
-5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material). For `connected_unverified` connections, the response makes the gating explicit so the UI can display the Plan-not-verified state immediately.
+5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material). For `connected_unverified` results, the response makes the gating explicit so the UI can display the Plan-not-verified state immediately.
 
-**Why the back-pointer is mutable exactly once:** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link.
+**Why the back-pointer is mutable exactly once (Branch B only):** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link. Branch A never UPDATEs a consent row because it never INSERTs one.
 
 **Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump, or when the user re-confirms a `connected_unverified` connection by accepting Plus-equivalent disclosure. Inside ONE transaction the route writes:
 
@@ -895,7 +952,9 @@ Re-acceptance after a disclosure-version bump uses the dedicated `/consent` rout
 
 ### 11.4 Disclosure version bump detection
 
-When `OPERATOR_SESSION_DISCLOSURE_VERSION` config increments:
+The current disclosure version is exported from `server/config/operatorSessionProviders.ts` (the same file as the provider capability registry) as `export const OPERATOR_SESSION_DISCLOSURE_VERSION = N;`. Bumping the version is a code change in that file — it lands in the same migration / commit as the new disclosure text. The §8 file-inventory entry for `operator_session_providers.ts` covers this constant; no separate config file is introduced.
+
+When `OPERATOR_SESSION_DISCLOSURE_VERSION` increments:
 
 **On-read detection (V1 commitment).** The read path for AI Subscriptions checks whether the credential's consent record `disclosure_version` < current version. If so, the lifecycle service transitions `usability_state` to `connected_needs_consent` on first read after the version bump. The check itself is a pure function, testable; the transition write goes through `operatorSessionLifecycleService.transition` per §7.5.
 
@@ -1012,7 +1071,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 - `TestWebLoginModal.tsx`: agent attribution + running state; migrate from `CredentialsTab`
 - `DisconnectConfirmDialog.tsx`: shared type-to-confirm modal
 - New server route file `server/routes/webLoginConnectionsGovern.ts` exposes Web Login Add/Edit/Test under `/api/subaccounts/:subaccountId/web-login-connections/...` for the Govern surface (was previously only reachable from the legacy `IntegrationsAndCredentialsPage`); reuses the existing service layer in `server/services/webLoginConnectionService.ts`
-- Remove `CredentialsTab.tsx` and `IntegrationsAndCredentialsPage.tsx` (or convert the latter to a redirect)
+- Remove `CredentialsTab.tsx`; convert `IntegrationsAndCredentialsPage.tsx` to a redirect to `/connections` (single verdict per §5.2)
 
 **Depends on:** Chunk 5. Must run after Chunk 8 (both modify `ConnectionsPage`; parallel edit risk).
 
@@ -1269,7 +1328,7 @@ All criteria must pass before the build is marked complete.
 - [ ] App Integrations tab: card grid, "Your connected apps" and "Apps you can connect" sections are mutually exclusive (no app appears in both).
 - [ ] Web Logins tab: sortable/filterable table with test-status dots (Connected, Test failed, Untested).
 - [ ] AI Subscriptions tab: all six `usability_state` pills rendered with correct labels (Connected / Needs consent / Needs sign in / Plan not verified / Revoked by OpenAI / Disabled).
-- [ ] `CredentialsTab.tsx` and `IntegrationsAndCredentialsPage.tsx` are removed (or the latter is a redirect).
+- [ ] `CredentialsTab.tsx` is removed. `IntegrationsAndCredentialsPage.tsx` is a redirect-only component that issues 302 / client-side redirect to `/connections`.
 - [ ] No regression: existing OAuth + Web Login Add/Edit/Test/Disconnect flows continue to function from the consolidated `/connections` surface.
 
 ### 17.8 UI — AI Subscription flows
@@ -1296,7 +1355,7 @@ All criteria must pass before the build is marked complete.
 
 1. **Provider connection mechanism verification.** The brief mandates verifying the OpenAI-supported mechanism before shipping the connect wiring. At spec-review time (2026-05-11), the mechanism is `none_verified` in the registry. When verification completes, the builder updates `connectionMechanism` in `operatorSessionProviders.ts` and activates the connect route (removes the 501 gate). This is an open runtime gate, not a spec change.
 
-2. **Agent allowlist persistence.** The per-subscription agent allowlist (§9.2 `allowedAgentIds`) is stored in `configJson` on the `integration_connections` row. If the allowlist grows large (100+ agents), JSONB scanning may be slow. For V1 (small subaccounts), this is fine. Post-Phase 3+ if scale demands it, a join table `operator_session_connection_agents` replaces the JSONB list.
+2. **Agent allowlist persistence performance — RESOLVED for V1.** The allowlist shape is pinned in §9.4b as `integration_connections.config_json -> 'operator_session'` JSONB. For V1 (small subaccounts) JSONB scanning is fine. Post-Phase 3+ if scale demands it, a join table `operator_session_connection_agents` replaces the JSONB list — that future migration is deferred.
 
 3. **Subaccount vs. org scope for Plus consent.** The brief §2.4 default posture is subaccount-scoped storage, user-attributed consent. If an org has 50 subaccounts and each has a Plus subscription, each user signs a separate disclosure. There is no org-level "umbrella consent." Confirm this is intentional before implementation.
 
