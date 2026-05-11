@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md
 active_plan: tasks/builds/operator-session-identity/plan.md
 build_slug: operator-session-identity
 branch: claude/evolve-session-identity-brief-17LO4
-status: BUILDING
-last_updated: 2026-05-11
+status: REVIEWING
+last_updated: 2026-05-12
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/operator-session-identity/plan.md` *(Phase 2: authored by feature-coordinator)*
 **Active build slug:** operator-session-identity
 **Branch:** claude/evolve-session-identity-brief-17LO4
-**Status:** **BUILDING** — Phase 1 (SPEC) complete. Spec C — Operator Session Identity. 18-section Major spec covering: `auth_type: 'operator_session'` credential broker primitive, 2 new RLS tables (`operator_session_consents`, `operator_session_consent_events`), migrations 0321-0322 (renumbered: 0318-0320 now claimed by pre-test-hardening PR #284), token lifecycle refresh job, /connections CRUD consolidation refactor (3-tab App Integrations/Web Logins/AI Subscriptions), 11 implementation chunks. 22 hi-fi mockup screens at `prototypes/operator-session-identity/`. spec-reviewer: 5/5 iterations (54 mechanical fixes, 0 directional). Handoff at `tasks/builds/operator-session-identity/handoff.md`. Phase 2 started: feature-coordinator launched.
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 11 chunks built; branch-level review pass closed. G2 PASS (lint 0 errors / typecheck clean). spec-conformance branch-level CONFORMANT. adversarial-reviewer HOLES_FOUND (C2 + L1/L2/L3 closed in fix-loop commit `09794538`; C1 + W1-W3 + 3 advisory observations deferred as OSI-DEF-1 / OSI-DEF-6 through OSI-DEF-11). pr-reviewer CHANGES_REQUESTED → APPROVED post fix-loop (S2/S3/N3 closed; S1/S4/N1/N2/N4 deferred as OSI-DEF-2/3/4/5). dual-reviewer (Codex) APPROVED (3/3 iterations, 1 finding deferred as OSI-DEF-12, zero code change). Doc-sync gate complete (architecture.md + capabilities.md + KNOWLEDGE.md updated in Chunk 11; remainder n/a with rationale). 12 deferred items routed to `tasks/todo.md`. Branch HEAD: `44581529`. Phase 2 handoff written. Next: launch finalisation-coordinator.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 

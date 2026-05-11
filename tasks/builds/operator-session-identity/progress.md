@@ -21,15 +21,39 @@
 | 5 — Permissions + API routes | `56a6b709` + fix `a58588d5` | DONE — 5 permission keys, 10 routes, AiSubscriptionConnection type, connections bridge |
 | 6 — Token refresh job | `900cdbe5` + fix `35fc3600` | DONE — pg-boss handler + sweep; encryptToken wired; GAP-1 documented in gaps.md |
 | 7 — AI Subscriptions tab | `9cdc11ec` + fix `2885319b` | DONE — 7 React components + governApi; master toggle deferred V1; pill null-label fixed |
-| 8 — App Integrations tab | `76277bf9` | DONE (not yet reviewed) — AppIntegrationsTab, ConnectAppModal, ManageMultiConnectDrawer |
-| 11 — Architecture doc sync | (this commit) | DONE — architecture.md new section + Key files rows; capabilities.md AI Subscriptions sub-bullet; KNOWLEDGE.md implementation pattern appended; doc-sync.md no new category; progress.md updated |
+| 8 — App Integrations tab | `76277bf9` + fix `154f550a` | DONE — AppIntegrationsTab, ConnectAppModal, ManageMultiConnectDrawer; chunk-8 spec-conformance re-verify CONFORMANT (`9f9a34a4`) |
+| 9 — Web Logins tab + CRUD consolidation | `10985b91` + fix `e303f00e` | DONE — WebLoginsTab, AddWebLoginModal, EditWebLoginModal, TestWebLoginModal; CredentialsTab.tsx deleted; IntegrationsAndCredentialsPage.tsx now a redirect; chunk-9 spec-conformance re-verify CONFORMANT (`dd7d0178`) |
+| 10 — ConnectionsPage 3-tab + Model Access | `55b904a8` + refactor `081159c0` | DONE — ConnectionsPage 3-tab strip; ModelAccessSection on SubaccountAgentEditPage; AgentEditPage explainer; STATE_PILL/TIER_PILL/StatusPill/TierBadge extracted to `_aiSubscriptionPills.tsx`; chunk-10 spec-conformance CONFORMANT_AFTER_FIXES (`7fd9b0c5`) |
+| 11 — Architecture doc sync | `bfd4355d` + final fixes `9ce86c98` | DONE — architecture.md new section + Key files rows; capabilities.md AI Subscriptions sub-bullet; KNOWLEDGE.md implementation pattern appended; embedded redirects + allow-agent-use scope + stale docs addressed in final review; chunk-11 spec-conformance CONFORMANT (`53a5b963`) |
 
-### Remaining chunks
+---
 
-- **Chunk 8 review still pending** — was implemented but session interrupted before spec+quality review. Resume by reviewing Chunk 8 (base: `2885319b`, head: `76277bf9`) before proceeding.
-- **Chunk 9** — Web Logins tab + CRUD consolidation (WebLoginsTab, AddWebLoginModal, EditWebLoginModal, TestWebLoginModal; delete CredentialsTab.tsx; convert IntegrationsAndCredentialsPage.tsx to redirect)
-- **Chunk 10** — ConnectionsPage 3-tab strip + Model Access sections in AgentEditPage + SubaccountAgentEditPage
-- **Chunk 11** — DONE (this session)
+## Branch-level review pass (2026-05-11 / 2026-05-12)
+
+| Step | Verdict | Log | Notes |
+|---|---|---|---|
+| G2 (lint + typecheck) | PASSED first try | — | 0 errors, 897 warnings (unchanged from main baseline) |
+| spec-conformance (branch level) | CONFORMANT | `tasks/review-logs/spec-conformance-log-operator-session-identity-branch-2026-05-11T12-14-31Z.md` | 20/20 cross-cutting requirements; no new gaps at integration level |
+| adversarial-reviewer | HOLES_FOUND | `tasks/review-logs/adversarial-review-log-operator-session-identity-2026-05-11T12-18-00Z.md` | 2 confirmed (C1, C2), 3 likely (L1, L2, L3), 3 worth-confirming (W1-W3), 3 advisory observations. C2/L1/L2/L3 closed in fix-loop; C1 + remainder deferred (OSI-DEF-1 / OSI-DEF-6 through OSI-DEF-11) |
+| pr-reviewer | CHANGES_REQUESTED → APPROVED post fix-loop | `tasks/review-logs/pr-review-log-operator-session-identity-branch-2026-05-11T12-18-00Z.md` | 0 blocking, 4 strong (S1-S4), 4 non-blocking (N1-N4). S2/S3/N3 closed in fix-loop; S1/S4/N1/N2/N4 deferred (OSI-DEF-2/3/4/5) |
+| Fix-loop | 1 iteration, G3 clean | commit `09794538` | 7 surgical edits across 3 files: org-filter defence-in-depth on reaccept/refresh/route re-read/detectAndTransitionStaleDisclosure; make-default race CAS + target-row FOR UPDATE; sweep `LIMIT 500` + saturated flag; AiSubscriptionConnection type collapsed to shared/types/govern.ts |
+| dual-reviewer (Codex) | APPROVED | `tasks/review-logs/dual-review-log-operator-session-identity-2026-05-11T21-40-22Z.md` | 3/3 iterations; 1 finding rejected, 1 reframed as OSI-DEF-12; zero code change from this pass; auto-committed as `44581529` |
+
+## Doc Sync gate
+
+- architecture.md updated: yes (Credential Broker — operator_session mode; Key files per domain — "Modify operator_session connections", "Add a new operator_session provider", "Modify the AI Subscriptions / App Integrations / Web Logins UI"; Operator session connections row; Credential broker (operator_session mode) row; AI Subscriptions tab UI row)
+- capabilities.md updated: yes (AI Subscriptions sub-bullet under Connect & Identity Access; vendor-neutral, Editorial-Rules compliant)
+- integration-reference.md updated: n/a — operator_session is a new credential primitive, not a new integration in the registry sense; no new slug, scope, skill, or OAuth provider added this build
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no fleet, pipeline, build-discipline, RLS-rule, schema-invariant, gate, or §8 development-discipline rule changed
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy or contributor-facing convention changed
+- frontend-design-principles.md updated: n/a — new modals/screens follow existing primitives (Modal, Drawer, PageShell, SortableTable, EmptyState, StatusPill); no new UI rule introduced
+- KNOWLEDGE.md updated: yes (1 entry — operator_session implementation pattern: write-ownership, lifecycle state machine, baseline-snapshot redaction gate)
+- spec-context.md updated: n/a — feature-pipeline session, not a spec-review
+- docs/decisions/ updated: n/a — durable decisions captured in spec §6 (vocabulary palette), §11 (disclosure-bump-on-read), §16.6 (23505→409 mapping) within the spec itself; no separate ADR required
+- docs/context-packs/ updated: n/a — no architecture.md anchor renamed/removed
+- references/test-gate-policy.md updated: n/a — no test-gate posture change
+- references/spec-review-directional-signals.md updated: n/a — no spec-reviewer directional signal surfaced >2 times this build
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a — no framework-level change
 
 ### Key decisions made this session
 
