@@ -154,7 +154,7 @@ export const operatorSessionConsentService = {
         consentRecordId: integrationConnections.consentRecordId,
       })
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, connectionId))
+      .where(eq(integrationConnections.id, connectionId)) // guard-ignore: org-scoped-writes reason="standalone read inside withOrgTx context via getOrgScopedDb — RLS enforces org isolation"
       .limit(1);
 
     if (!connection || !connection.consentRecordId) {

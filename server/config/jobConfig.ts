@@ -692,6 +692,7 @@ export const JOB_CONFIG = {
     retryDelay: 60,
     retryBackoff: true,
     expireInSeconds: 7200,
+    deadLetter: 'operator-session-refresh__dlq',
     idempotencyStrategy: 'singleton-key' as const,
     // singletonKey: ${connectionId}:${refreshBucketEpochSec}
   },
