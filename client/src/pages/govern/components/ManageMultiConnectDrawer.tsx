@@ -315,7 +315,7 @@ export function ManageMultiConnectDrawer({ app, subaccountId, onClose, onAddAnot
       {/* B3: Shared disconnect dialog */}
       {disconnectTarget && (
         <DisconnectConfirmDialog
-          connection={disconnectTarget}
+          connectionId={disconnectTarget.id}
           onClose={() => setDisconnectTarget(null)}
           onDisconnected={() => {
             setDisconnectTarget(null);

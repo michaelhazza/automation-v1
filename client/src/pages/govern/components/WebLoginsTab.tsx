@@ -7,6 +7,7 @@ import { formatRelative } from './_utils';
 import { AddWebLoginModal } from './AddWebLoginModal';
 import { EditWebLoginModal } from './EditWebLoginModal';
 import { TestWebLoginModal } from './TestWebLoginModal';
+import { DisconnectConfirmDialog } from './DisconnectConfirmDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ function maskUsername(username: string): string {
 function SkeletonRow() {
   return (
     <tr>
-      {[22, 17, 18, 16, 12, 10, 5].map((w, i) => (
+      {[25, 20, 20, 18, 12, 5].map((w, i) => (
         <td key={i} className="px-4 py-3" style={{ width: `${w}%` }}>
           <div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: i === 0 ? '70%' : '80%' }} />
         </td>
@@ -112,13 +113,12 @@ function SkeletonRow() {
 // ── Row 3-dot menu ────────────────────────────────────────────────────────────
 
 interface RowMenuProps {
-  row: WebLoginConnection;
   onTest: () => void;
   onEdit: () => void;
   onDisconnect: () => void;
 }
 
-function RowMenu({ row: _row, onTest, onEdit, onDisconnect }: RowMenuProps) {
+function RowMenu({ onTest, onEdit, onDisconnect }: RowMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -181,7 +181,7 @@ function RowMenu({ row: _row, onTest, onEdit, onDisconnect }: RowMenuProps) {
 
 // ── Sort state ────────────────────────────────────────────────────────────────
 
-type SortKey = 'label' | 'loginUrl' | 'username' | 'status' | 'lastTestedAt' | 'owner';
+type SortKey = 'label' | 'loginUrl' | 'username' | 'status' | 'lastTestedAt';
 type SortDir = 'asc' | 'desc';
 
 function sortRows(rows: WebLoginConnection[], key: SortKey, dir: SortDir): WebLoginConnection[] {
@@ -197,19 +197,21 @@ function sortRows(rows: WebLoginConnection[], key: SortKey, dir: SortDir): WebLo
         av = a.config?.lastTestedAt ?? '';
         bv = b.config?.lastTestedAt ?? '';
         break;
-      case 'owner':
-        av = a.displayName ?? a.label ?? '';
-        bv = b.displayName ?? b.label ?? '';
-        break;
     }
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return dir === 'asc' ? cmp : -cmp;
   });
 }
 
-// ── Disconnect confirm (inline simple dialog — the shared DisconnectConfirmDialog
-//    requires a unified Connection type; web login connections use a different
-//    shape. We do a simple window.confirm-level inline confirm here.) ──────────
+// ── Status filter options ─────────────────────────────────────────────────────
+
+const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'connected', label: 'Connected' },
+  { value: 'test_failed', label: 'Test failed' },
+  { value: 'untested', label: 'Untested' },
+  { value: 'error', label: 'Error' },
+];
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -227,14 +229,14 @@ export function WebLoginsTab({ subaccountId }: Props) {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   // Filters
-  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<WebLoginConnection | null>(null);
   const [testTarget, setTestTarget] = useState<WebLoginConnection | null>(null);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<WebLoginConnection | null>(null);
 
   const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -252,15 +254,8 @@ export function WebLoginsTab({ subaccountId }: Props) {
   const filtered = rows
     ? sortRows(
         rows.filter((r) => {
-          if (statusFilter !== 'All') {
-            const s = deriveStatus(r);
-            const map: Record<string, WebLoginStatus> = {
-              Connected: 'connected',
-              'Test failed': 'test_failed',
-              Untested: 'untested',
-              Error: 'error',
-            };
-            if (s !== map[statusFilter]) return false;
+          if (statusFilter !== 'all') {
+            if (deriveStatus(r) !== statusFilter) return false;
           }
           if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
@@ -287,19 +282,6 @@ export function WebLoginsTab({ subaccountId }: Props) {
   function ariaSortForKey(key: SortKey): React.AriaAttributes['aria-sort'] {
     if (sortKey !== key) return 'none';
     return sortDir === 'asc' ? 'ascending' : 'descending';
-  }
-
-  async function handleDisconnect(row: WebLoginConnection) {
-    if (!confirm(`Disconnect "${row.label ?? row.config?.loginUrl ?? 'this web login'}"? This cannot be undone.`)) return;
-    setDisconnecting(row.id);
-    try {
-      await api.delete(`/api/subaccounts/${subaccountId}/web-login-connections/${row.id}`);
-      reload();
-    } catch {
-      alert('Failed to disconnect. Please try again.');
-    } finally {
-      setDisconnecting(null);
-    }
   }
 
   const thClass = (key: SortKey) =>
@@ -340,8 +322,8 @@ export function WebLoginsTab({ subaccountId }: Props) {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="text-[12.5px] border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-600 bg-white focus:outline-none focus:border-indigo-400 font-[inherit] cursor-pointer"
         >
-          {['All', 'Connected', 'Test failed', 'Untested', 'Error'].map((s) => (
-            <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+          {STATUS_FILTER_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
 
@@ -376,12 +358,11 @@ export function WebLoginsTab({ subaccountId }: Props) {
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b-2 border-slate-200">
-                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[22%]">Label</th>
-                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[17%]">Site</th>
-                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[18%]">Username</th>
-                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[16%]">Status</th>
+                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[25%]">Label</th>
+                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[20%]">Site</th>
+                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[20%]">Username</th>
+                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[18%]">Status</th>
                 <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[12%]">Last tested</th>
-                <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[10%]">Owner</th>
                 <th className="px-4 py-2.5 w-[5%]" />
               </tr>
             </thead>
@@ -399,13 +380,13 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 <path d="M7 11V7a5 5 0 0110 0v4" />
               </svg>
             </div>
-            {searchQuery || statusFilter !== 'All' ? (
+            {searchQuery || statusFilter !== 'all' ? (
               <>
                 <p className="text-[15px] font-bold text-slate-900 mb-2">No results found.</p>
                 <p className="text-[13px] text-slate-500 mb-4">Try adjusting your filters.</p>
                 <button
                   type="button"
-                  onClick={() => { setSearchQuery(''); setStatusFilter('All'); }}
+                  onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}
                   className="text-indigo-600 underline text-[13px] cursor-pointer bg-transparent border-0 font-[inherit]"
                 >
                   Clear filters
@@ -437,7 +418,7 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 <th
                   role="columnheader"
                   aria-sort={ariaSortForKey('label')}
-                  className={`${thClass('label')} w-[22%]`}
+                  className={`${thClass('label')} w-[25%]`}
                   onClick={() => toggleSort('label')}
                 >
                   Label<SortIcon col="label" />
@@ -445,7 +426,7 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 <th
                   role="columnheader"
                   aria-sort={ariaSortForKey('loginUrl')}
-                  className={`${thClass('loginUrl')} w-[17%]`}
+                  className={`${thClass('loginUrl')} w-[20%]`}
                   onClick={() => toggleSort('loginUrl')}
                 >
                   Site<SortIcon col="loginUrl" />
@@ -453,7 +434,7 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 <th
                   role="columnheader"
                   aria-sort={ariaSortForKey('username')}
-                  className={`${thClass('username')} w-[18%]`}
+                  className={`${thClass('username')} w-[20%]`}
                   onClick={() => toggleSort('username')}
                 >
                   Username<SortIcon col="username" />
@@ -461,7 +442,7 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 <th
                   role="columnheader"
                   aria-sort={ariaSortForKey('status')}
-                  className={`${thClass('status')} w-[16%]`}
+                  className={`${thClass('status')} w-[18%]`}
                   onClick={() => toggleSort('status')}
                 >
                   Status<SortIcon col="status" />
@@ -474,13 +455,6 @@ export function WebLoginsTab({ subaccountId }: Props) {
                 >
                   Last tested<SortIcon col="lastTestedAt" />
                 </th>
-                <th
-                  role="columnheader"
-                  aria-sort="none"
-                  className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-500 w-[10%]"
-                >
-                  Owner
-                </th>
                 <th className="px-4 py-2.5 w-[5%]" />
               </tr>
             </thead>
@@ -488,9 +462,7 @@ export function WebLoginsTab({ subaccountId }: Props) {
               {filtered.map((row) => (
                 <tr
                   key={row.id}
-                  className={`border-b border-slate-100 bg-white hover:bg-slate-50 transition-colors ${
-                    disconnecting === row.id ? 'opacity-50 pointer-events-none' : ''
-                  }`}
+                  className="border-b border-slate-100 bg-white hover:bg-slate-50 transition-colors"
                 >
                   <td className="px-4 py-3 text-[13px] font-medium text-slate-800">
                     {row.label ?? row.config?.loginUrl ?? 'Web Login'}
@@ -507,17 +479,11 @@ export function WebLoginsTab({ subaccountId }: Props) {
                   <td className="px-4 py-3 text-[12px] text-slate-400">
                     {formatRelative(row.config?.lastTestedAt ?? null)}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex text-[10.5px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                      {row.displayName ?? row.label ?? 'Workspace'}
-                    </span>
-                  </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <RowMenu
-                      row={row}
                       onTest={() => setTestTarget(row)}
                       onEdit={() => setEditTarget(row)}
-                      onDisconnect={() => handleDisconnect(row)}
+                      onDisconnect={() => setDisconnectTarget(row)}
                     />
                   </td>
                 </tr>
@@ -555,6 +521,15 @@ export function WebLoginsTab({ subaccountId }: Props) {
           subaccountId={subaccountId}
           connection={testTarget}
           onClose={() => setTestTarget(null)}
+        />
+      )}
+
+      {/* Disconnect dialog */}
+      {disconnectTarget && (
+        <DisconnectConfirmDialog
+          connectionId={disconnectTarget.id}
+          onClose={() => setDisconnectTarget(null)}
+          onDisconnected={() => { setDisconnectTarget(null); reload(); }}
         />
       )}
     </div>

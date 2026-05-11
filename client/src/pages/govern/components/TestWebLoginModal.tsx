@@ -64,6 +64,7 @@ export function TestWebLoginModal({ open: _open, subaccountId, connection, onClo
     setFiring(true);
     setBannerError(null);
     try {
+      // V1: row status dot does not auto-update after the test completes; user refreshes to see the result. Deferred — depends on a canonical streaming run-trace primitive (see tasks/todo.md).
       const res = await api.post(
         `/api/subaccounts/${subaccountId}/web-login-connections/${connection.id}/test`,
         { agentId: agent.agentId, subaccountAgentId: agent.id },

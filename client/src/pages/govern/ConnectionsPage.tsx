@@ -213,7 +213,7 @@ export default function ConnectionsPage() {
 
       {disconnectTarget && (
         <DisconnectConfirmDialog
-          connection={disconnectTarget}
+          connectionId={disconnectTarget.id}
           onClose={() => setDisconnectTarget(null)}
           onDisconnected={() => {
             setDisconnectTarget(null);
