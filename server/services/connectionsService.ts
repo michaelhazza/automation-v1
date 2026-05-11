@@ -1,4 +1,4 @@
-import { sql, and, eq } from 'drizzle-orm';
+import { sql, and, eq, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/integrationConnections.js';
 import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
@@ -10,7 +10,7 @@ import {
   type ContractAuthMethod,
   type ContractStatus,
 } from './connectionsListPure.js';
-import type { Connection } from '../../shared/types/govern.js';
+import type { Connection, AiSubscriptionConnection } from '../../shared/types/govern.js';
 
 type RawConnectionRow = {
   id: string;
@@ -55,6 +55,9 @@ export interface ConnectionListInput {
   cursor: string | null;
   limit: number;
   sortDir: 'asc' | 'desc';
+  /** When true, include operator_session (AI Subscription) connections in results.
+   *  Callers must gate this on OPERATOR_SESSION_VIEW permission. */
+  hasOperatorSessionView?: boolean;
 }
 
 export interface ConnectionListResult {
@@ -256,6 +259,76 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
   const nextCursor = hasMore && lastRow
     ? encodeCursor({ primary: lastRow.created_at instanceof Date ? lastRow.created_at.toISOString() : String(lastRow.created_at), id: lastRow.id })
     : null;
+
+  // Append operator_session (AI Subscription) connections when caller has VIEW permission.
+  // Uses a separate query to avoid touching the complex UNION SQL above.
+  // operator_session rows are appended after the paginated main set; cursor-based
+  // pagination does not apply to them in V1 (they are always appended in full).
+  if (input.hasOperatorSessionView) {
+    const scopeConditions: ReturnType<typeof eq>[] = [
+      eq(integrationConnections.organisationId, input.organisationId),
+      eq(integrationConnections.authType, 'operator_session'),
+      eq(integrationConnections.connectionStatus, 'active'),
+    ];
+    if (input.scope === 'workspace' && input.subaccountId) {
+      scopeConditions.push(eq(integrationConnections.subaccountId, input.subaccountId));
+    } else if (input.scope === 'org') {
+      // operator_session connections are subaccount-scoped in V1 — skip for org scope
+    }
+
+    const opRows = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(...scopeConditions))
+      .orderBy(
+        sql`${integrationConnections.isDefault} DESC`,
+        asc(integrationConnections.label),
+        asc(integrationConnections.id),
+      );
+
+    for (const opRow of opRows) {
+      const cfg = (opRow.configJson as { operator_session?: { availabilityScope?: string; allowedAgentIds?: string[] | null } } | null)?.operator_session;
+      const pendingReason = (() => {
+        switch (opRow.usabilityState) {
+          case 'connected_needs_consent': return 'needs_new_consent';
+          case 'connected_needs_reauth':  return 'needs_reauth';
+          case 'connected_unverified':    return 'plan_unverified';
+          default:                        return null;
+        }
+      })();
+      const aiConn: AiSubscriptionConnection = {
+        id: opRow.id,
+        authMethod: 'ai_subscription',
+        provider: opRow.providerType,
+        planTier: (opRow.planTier as AiSubscriptionConnection['planTier']) ?? 'unknown',
+        planVerificationStatus: (opRow.planVerificationStatus as AiSubscriptionConnection['planVerificationStatus']) ?? 'failed',
+        planVerifiedAt: opRow.planVerifiedAt ? opRow.planVerifiedAt.toISOString() : null,
+        usabilityState: (opRow.usabilityState as AiSubscriptionConnection['usabilityState']) ?? 'connected_unverified',
+        disabledReason: null,
+        pendingReason: pendingReason as AiSubscriptionConnection['pendingReason'],
+        isDefault: opRow.isDefault,
+        availabilityScope: (cfg?.availabilityScope ?? 'all_agents') as 'all_agents' | 'specific_agents',
+        allowedAgentIds: cfg?.allowedAgentIds ?? null,
+        label: opRow.label ?? null,
+        user: { userId: opRow.ownerUserId ?? null, userIdNullified: false, displayName: null },
+        lastRefreshedAt: null,
+        createdAt: opRow.createdAt.toISOString(),
+      };
+      // Bridge: map to Connection shape for the shared list response
+      rows.push({
+        id: aiConn.id,
+        name: aiConn.label ?? aiConn.provider,
+        provider: aiConn.provider,
+        authMethod: 'ai_subscription',
+        status: (['connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified'] as string[]).includes(aiConn.usabilityState) ? 'connected' : 'failed',
+        lastSyncAt: aiConn.lastRefreshedAt,
+        owner: opRow.subaccountId
+          ? { kind: 'workspace' as const, id: opRow.subaccountId, name: opRow.subaccountId }
+          : { kind: 'org' as const, id: opRow.organisationId, name: 'Organisation' },
+        createdAt: aiConn.createdAt,
+      });
+    }
+  }
 
   // filterOptions from same UNION snapshot (same-snapshot CTE per §4.0)
   const facetRows = [...await db.execute<FacetRow>(sql`

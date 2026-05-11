@@ -73,6 +73,8 @@ import integrationConnectionsRouter from './routes/integrationConnections.js';
 import credentialsRouter from './routes/credentials.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
+import operatorSessionConnectionsRouter from './routes/operatorSessionConnections.js';
+import webLoginConnectionsGovernRouter from './routes/webLoginConnectionsGovern.js';
 import workflowTemplatesRouter from './routes/workflowTemplates.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import workflowStudioRouter from './routes/workflowStudio.js';
@@ -372,6 +374,9 @@ app.use(integrationConnectionsRouter);
 app.use(credentialsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
+// operator-session-identity chunk 5 — AI Subscription management routes
+app.use(operatorSessionConnectionsRouter);
+app.use(webLoginConnectionsGovernRouter);
 app.use(workflowTemplatesRouter);
 app.use(workflowRunsRouter);
 app.use(workflowStudioRouter);

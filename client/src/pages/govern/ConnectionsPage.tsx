@@ -25,11 +25,12 @@ const STATUS_PILL: Record<Connection['status'], { label: string; className: stri
 };
 
 const AUTH_LABEL: Record<Connection['authMethod'], string> = {
-  oauth:     'OAuth',
-  api_key:   'API Key',
-  web_login: 'Web Login',
-  mcp:       'MCP',
-  cookie:    'Cookie',
+  oauth:           'OAuth',
+  api_key:         'API Key',
+  web_login:       'Web Login',
+  mcp:             'MCP',
+  cookie:          'Cookie',
+  ai_subscription: 'AI Subscription',
 };
 
 function isOrgAdmin(): boolean {
