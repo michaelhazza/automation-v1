@@ -196,4 +196,4 @@ These were not blocking gaps, but worth noting that the fix commit cleared them.
 
 `pr-reviewer` may now run on the post-fix state. No further mechanical fixes are required from this agent.
 
-**Commit at finish:** to be filled by auto-commit step below.
+**Commit at finish:** `9f9a34a4`
