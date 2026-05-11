@@ -80,7 +80,7 @@ function derivePendingReason(
   }
 }
 
-function mapToAiSubscriptionConnection(row: IntegrationConnection): AiSubscriptionConnection {
+export function mapToAiSubscriptionConnection(row: IntegrationConnection): AiSubscriptionConnection {
   const cfg = (row.configJson as OperatorSessionConfigJson | null)?.operator_session;
   const availabilityScope = cfg?.availabilityScope ?? 'all_agents';
   const allowedAgentIds = cfg?.allowedAgentIds ?? null;
@@ -361,13 +361,15 @@ export const operatorSessionService = {
   }): Promise<{ consent: OperatorSessionConsent; newState: UsabilityState }> {
     const db = getOrgScopedDb('operatorSessionService.reaccept');
 
-    // Load the existing connection
+    // Load the existing connection — include subaccountId in WHERE to prevent
+    // cross-tenant access (B1 tenant-isolation fix).
     const [connection] = await db
       .select()
       .from(integrationConnections)
       .where(
         and(
           eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.authType, 'operator_session'),
         ),
@@ -502,6 +504,66 @@ export const operatorSessionService = {
             ${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'
             OR ${integrationConnections.configJson} -> 'operator_session' -> 'allowedAgentIds' ? ${input.agentId}::text
           )`,
+        ),
+      )
+      .orderBy(
+        sql`${integrationConnections.isDefault} DESC`,
+        asc(integrationConnections.label),
+        asc(integrationConnections.id),
+      );
+
+    return freshRows.map(mapToAiSubscriptionConnection);
+  },
+
+  /**
+   * List ALL operator session connections for a subaccount (no agent filter).
+   *
+   * Returns every active operator_session row for the subaccount, regardless of
+   * availabilityScope. Runs on-read disclosure check for each row.
+   *
+   * Result is ordered: Default first, then label ASC NULLS LAST, then id ASC.
+   *
+   * Must be called within an active withOrgTx context.
+   */
+  async listForSubaccount(input: {
+    organisationId: string;
+    subaccountId: string;
+  }): Promise<AiSubscriptionConnection[]> {
+    const db = getOrgScopedDb('operatorSessionService.listForSubaccount');
+
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.subaccountId, input.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+        ),
+      )
+      .orderBy(
+        sql`${integrationConnections.isDefault} DESC`,
+        asc(integrationConnections.label),
+        asc(integrationConnections.id),
+      );
+
+    // On-read disclosure-version check — transition stale rows before returning
+    for (const row of rows) {
+      await operatorSessionService.detectAndTransitionStaleDisclosure({
+        organisationId: input.organisationId,
+        connectionId: row.id,
+      });
+    }
+
+    // Re-read rows after any transitions to get current usabilityState values
+    const freshRows = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.subaccountId, input.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
         ),
       )
       .orderBy(

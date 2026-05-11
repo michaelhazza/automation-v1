@@ -11,6 +11,7 @@ import {
   type ContractStatus,
 } from './connectionsListPure.js';
 import type { Connection, AiSubscriptionConnection } from '../../shared/types/govern.js';
+import { mapToAiSubscriptionConnection } from './operatorSessionService.js';
 
 type RawConnectionRow = {
   id: string;
@@ -287,33 +288,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
       );
 
     for (const opRow of opRows) {
-      const cfg = (opRow.configJson as { operator_session?: { availabilityScope?: string; allowedAgentIds?: string[] | null } } | null)?.operator_session;
-      const pendingReason = (() => {
-        switch (opRow.usabilityState) {
-          case 'connected_needs_consent': return 'needs_new_consent';
-          case 'connected_needs_reauth':  return 'needs_reauth';
-          case 'connected_unverified':    return 'plan_unverified';
-          default:                        return null;
-        }
-      })();
-      const aiConn: AiSubscriptionConnection = {
-        id: opRow.id,
-        authMethod: 'ai_subscription',
-        provider: opRow.providerType,
-        planTier: (opRow.planTier as AiSubscriptionConnection['planTier']) ?? 'unknown',
-        planVerificationStatus: (opRow.planVerificationStatus as AiSubscriptionConnection['planVerificationStatus']) ?? 'failed',
-        planVerifiedAt: opRow.planVerifiedAt ? opRow.planVerifiedAt.toISOString() : null,
-        usabilityState: (opRow.usabilityState as AiSubscriptionConnection['usabilityState']) ?? 'connected_unverified',
-        disabledReason: null,
-        pendingReason: pendingReason as AiSubscriptionConnection['pendingReason'],
-        isDefault: opRow.isDefault,
-        availabilityScope: (cfg?.availabilityScope ?? 'all_agents') as 'all_agents' | 'specific_agents',
-        allowedAgentIds: cfg?.allowedAgentIds ?? null,
-        label: opRow.label ?? null,
-        user: { userId: opRow.ownerUserId ?? null, userIdNullified: false, displayName: null },
-        lastRefreshedAt: null,
-        createdAt: opRow.createdAt.toISOString(),
-      };
+      const aiConn: AiSubscriptionConnection = mapToAiSubscriptionConnection(opRow);
       // Bridge: map to Connection shape for the shared list response
       rows.push({
         id: aiConn.id,

@@ -22,7 +22,7 @@ export const reacceptBodySchema = z.object({
   disclosureAcceptance: z.object({
     disclosureVersion: z.number().int().min(1),
     consentText: z.string().min(1).max(10000),
-    acceptanceTier: z.string().min(1).max(64),
+    acceptanceTier: z.enum(['pro', 'team', 'enterprise', 'plus', 'unknown']),
   }),
 });
 

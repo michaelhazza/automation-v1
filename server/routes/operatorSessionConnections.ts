@@ -24,7 +24,7 @@ import { authenticate, requireSubaccountPermission } from '../middleware/auth.js
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
-import { operatorSessionService } from '../services/operatorSessionService.js';
+import { operatorSessionService, mapToAiSubscriptionConnection } from '../services/operatorSessionService.js';
 import { operatorSessionLifecycleService } from '../services/operatorSessionLifecycleService.js';
 import { isTerminalState } from '../services/operatorSessionLifecycleServicePure.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
@@ -51,14 +51,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
-    // Use listAllowedSubscriptionsForAgent with empty agentId — the SQL condition:
-    //   availabilityScope = 'all_agents' OR allowedAgentIds ? agentId
-    // With agentId='' no specific-agent rows match, so only all_agents rows appear.
-    // For V1 all connections use all_agents scope so this returns the full list.
-    const rows = await operatorSessionService.listAllowedSubscriptionsForAgent({
+    const rows = await operatorSessionService.listForSubaccount({
       organisationId: req.orgId!,
       subaccountId: subaccount.id,
-      agentId: '',
     });
 
     res.json(rows);
@@ -132,37 +127,7 @@ router.get(
       throw { statusCode: 404, message: 'Connection not found' };
     }
 
-    // Map to AiSubscriptionConnection shape via service helper — re-use service's
-    // listAllowedSubscriptionsForAgent and filter, or do a direct minimal mapping.
-    // Simplest: fetch via the service's list path filtered to this connection.
-    const cfg = (fresh.configJson as { operator_session?: { availabilityScope?: string; allowedAgentIds?: string[] | null } } | null)?.operator_session;
-    const result = {
-      id: fresh.id,
-      authMethod: 'ai_subscription' as const,
-      provider: fresh.providerType,
-      planTier: fresh.planTier ?? 'unknown',
-      planVerificationStatus: fresh.planVerificationStatus ?? 'failed',
-      planVerifiedAt: fresh.planVerifiedAt ? fresh.planVerifiedAt.toISOString() : null,
-      usabilityState: fresh.usabilityState ?? 'connected_unverified',
-      disabledReason: null,
-      pendingReason: (() => {
-        switch (fresh.usabilityState) {
-          case 'connected_needs_consent': return 'needs_new_consent' as const;
-          case 'connected_needs_reauth':  return 'needs_reauth' as const;
-          case 'connected_unverified':    return 'plan_unverified' as const;
-          default:                        return null;
-        }
-      })(),
-      isDefault: fresh.isDefault,
-      availabilityScope: (cfg?.availabilityScope ?? 'all_agents') as 'all_agents' | 'specific_agents',
-      allowedAgentIds: cfg?.allowedAgentIds ?? null,
-      label: fresh.label ?? null,
-      user: { userId: fresh.ownerUserId ?? null, userIdNullified: false, displayName: null },
-      lastRefreshedAt: null,
-      createdAt: fresh.createdAt.toISOString(),
-    };
-
-    res.json(result);
+    res.json(mapToAiSubscriptionConnection(fresh));
   }),
 );
 
@@ -344,7 +309,7 @@ router.post(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_REAUTH),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     reauthBodySchema.parse(req.body);
 
     const db = getOrgScopedDb('operatorSessionConnections.reauth');
@@ -355,6 +320,7 @@ router.post(
       .where(
         and(
           eq(integrationConnections.id, req.params.connId),
+          eq(integrationConnections.subaccountId, subaccount.id),
           eq(integrationConnections.organisationId, req.orgId!),
           eq(integrationConnections.authType, 'operator_session'),
         ),

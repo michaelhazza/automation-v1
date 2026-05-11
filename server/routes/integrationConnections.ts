@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -250,7 +250,7 @@ router.get(
     const querySchema = z.object({
       scope: z.enum(['workspace', 'org']).optional(),
       subaccountId: z.string().uuid().optional(),
-      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie']).optional(),
+      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie', 'ai_subscription']).optional(),
       status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
       q: z.string().trim().min(1).max(200).optional(),
     }).refine(
@@ -270,6 +270,12 @@ router.get(
     }
 
     const limit = Math.min(Number(req.query.limit) || 50, 50);
+    // Gate AI Subscription rows on OPERATOR_SESSION_VIEW permission so callers
+    // without it receive only the standard connection types (B4 fix).
+    const hasOperatorSessionView = await hasOrgPermission(
+      req,
+      SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,
+    );
     const result = await listConnections({
       organisationId: req.orgId!,
       scope: parsed.data.scope,
@@ -281,6 +287,7 @@ router.get(
       cursor: (req.query.cursor as string) || null,
       limit,
       sortDir: req.query.sortDir === 'asc' ? 'asc' : 'desc',
+      hasOperatorSessionView,
     });
     res.json(result);
   })
