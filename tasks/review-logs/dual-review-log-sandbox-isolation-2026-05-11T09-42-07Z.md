@@ -5,7 +5,7 @@
 **Timestamp:** 2026-05-11T09:42:07Z
 **Branch:** claude/evolve-sandbox-isolation-brief-Q51hc
 **Pre-fix HEAD:** c5167bc5
-**Commit at finish:** (recorded below post-commit)
+**Commit at finish:** `37451d8a` (auto-push to remote failed: local OpenSSL CA store issue — `unable to get local issuer certificate`. Same symptom recorded in `spec-conformance-log-sandbox-isolation-2026-05-11T08-35-46Z.md` for commit `1656248c`. Commit is local; operator must push manually or fix the local CA bundle.)
 
 ---
 
