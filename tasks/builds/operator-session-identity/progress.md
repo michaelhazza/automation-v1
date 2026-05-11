@@ -10,7 +10,7 @@
 
 **Branch:** `claude/evolve-session-identity-brief-17LO4`
 
-### Completed chunks (Chunks 1–8)
+### Completed chunks (Chunks 1–11)
 
 | Chunk | Commits | Status |
 |---|---|---|
@@ -22,13 +22,14 @@
 | 6 — Token refresh job | `900cdbe5` + fix `35fc3600` | DONE — pg-boss handler + sweep; encryptToken wired; GAP-1 documented in gaps.md |
 | 7 — AI Subscriptions tab | `9cdc11ec` + fix `2885319b` | DONE — 7 React components + governApi; master toggle deferred V1; pill null-label fixed |
 | 8 — App Integrations tab | `76277bf9` | DONE (not yet reviewed) — AppIntegrationsTab, ConnectAppModal, ManageMultiConnectDrawer |
+| 11 — Architecture doc sync | (this commit) | DONE — architecture.md new section + Key files rows; capabilities.md AI Subscriptions sub-bullet; KNOWLEDGE.md implementation pattern appended; doc-sync.md no new category; progress.md updated |
 
 ### Remaining chunks
 
 - **Chunk 8 review still pending** — was implemented but session interrupted before spec+quality review. Resume by reviewing Chunk 8 (base: `2885319b`, head: `76277bf9`) before proceeding.
 - **Chunk 9** — Web Logins tab + CRUD consolidation (WebLoginsTab, AddWebLoginModal, EditWebLoginModal, TestWebLoginModal; delete CredentialsTab.tsx; convert IntegrationsAndCredentialsPage.tsx to redirect)
 - **Chunk 10** — ConnectionsPage 3-tab strip + Model Access sections in AgentEditPage + SubaccountAgentEditPage
-- **Chunk 11** — architecture.md + capabilities.md + KNOWLEDGE.md doc sync
+- **Chunk 11** — DONE (this session)
 
 ### Key decisions made this session
 

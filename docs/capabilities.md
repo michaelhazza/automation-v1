@@ -503,6 +503,7 @@ Pre-built connectors for the tools agencies already use — connect once, use ac
 - **MCP servers** — Model Context Protocol for extending agent capabilities with any external tool; credential binding to any OAuth provider; per-tool approval overrides
 - **Webhooks** — Signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
 - Enterprise-grade credential management with encryption, key rotation, and a visual tool browser
+- **AI Subscriptions** — Connect a subscription that your autonomous agents can use to run model-mediated work, in addition to the platform's managed model providers. Per-agent availability controls let you scope which agents can use which subscriptions.
 - See [Integrations Reference](#integrations-reference) for the full list
 
 ### Document Bundles & Cached Context
