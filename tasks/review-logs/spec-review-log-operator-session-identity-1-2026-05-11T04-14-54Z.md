@@ -139,4 +139,4 @@
 - Ambiguous findings:            0
 - Reclassified → directional:    0
 - Autonomous decisions (directional/ambiguous): 0
-- Spec commit after iteration:   (pending Step 8b commit)
+- Spec commit after iteration:   995a1389
