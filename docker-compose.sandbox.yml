@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# synthetos-sandbox — local dev compose extension (spec B §15.5)
+#
+# Provides the `localDockerSandbox` provider's image build + run target.
+# Use with: docker compose -f docker-compose.yml -f docker-compose.sandbox.yml
+#
+# The `synthetos-sandbox-build` service builds the image from the template
+# directory. The `localDockerSandbox` provider runs this image via `docker run`
+# directly (not via compose run) with per-execution volume mounts for /workspace.
+#
+# Parity gaps vs e2bSandbox documented in infra/sandbox-templates/synthetos-sandbox/README.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # Build-only service: exists so `docker compose build synthetos-sandbox-build`
+  # produces a locally tagged image the localDockerSandbox provider can reference.
+  # The provider references this image as `synthetos-sandbox:local-dev`.
+  synthetos-sandbox-build:
+    build:
+      context: ./infra/sandbox-templates/synthetos-sandbox
+      dockerfile: Dockerfile
+      # --platform linux/amd64 enforced per spec §15.2 deterministic-build requirements.
+      # On Apple Silicon this forces emulation; on Linux CI this is a no-op.
+      platforms:
+        - linux/amd64
+    image: synthetos-sandbox:local-dev
+    # No ports, no volumes — this service only produces the image.
+    # localDockerSandbox spawns ephemeral containers with per-execution volume mounts.
+    profiles:
+      - sandbox-build
