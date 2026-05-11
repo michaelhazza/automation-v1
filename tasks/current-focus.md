@@ -3,7 +3,7 @@ active_spec: tasks/builds/sandbox-isolation/spec.md
 active_plan: tasks/builds/sandbox-isolation/plan.md
 build_slug: sandbox-isolation
 branch: claude/evolve-sandbox-isolation-brief-Q51hc
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-11
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
@@ -25,10 +25,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** `tasks/builds/sandbox-isolation/spec.md` (LOCKED 2026-05-11; status `accepted`; 1679 lines)
-**Active plan:** `tasks/builds/sandbox-isolation/plan.md` (authored in Phase 2 by `feature-coordinator` invoking `architect`)
+**Active plan:** `tasks/builds/sandbox-isolation/plan.md` (16 chunks; 2 rounds chatgpt-plan-review APPROVED)
 **Active build slug:** sandbox-isolation
 **Branch:** claude/evolve-sandbox-isolation-brief-Q51hc
-**Status:** **BUILDING** — Phase 1 (SPEC) complete. Handoff at `tasks/builds/sandbox-isolation/handoff.md`. Spec passed: spec-reviewer (Codex, 4 iterations, READY_FOR_BUILD) + v1.2 master architecture alignment pass + chatgpt-spec-review (3 rounds, 30 findings, all auto-applied as technical fixes, Round 3 APPROVED — LOCK). Master architecture anchor: `docs/synthetos-governed-agentic-os-brief-v1.2.md`. Sibling Spec C (`operator-session-identity`) runs concurrently on a separate branch per `tasks/builds/sandbox-isolation/brief.md § 3` — different code surfaces, no conflicts. **Next:** operator launches `feature-coordinator` in a new Claude Code session for Phase 2.
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete. All 16 chunks built and committed; spec-conformance R2 CONFORMANT_AFTER_FIXES; adversarial-reviewer HOLES_FOUND (advisory, 11 routed); pr-reviewer APPROVED after 1 fix-loop round closing 4 of 5 blockers (B4 ceiling-monitor enqueue deferred as architectural follow-up); dual-reviewer (Codex) APPROVED after 3 iterations + 5 ACCEPT fixes; pr-reviewer re-review APPROVED; doc-sync gate PASS (4 docs updated + 9 n/a). Handoff at `tasks/builds/sandbox-isolation/handoff.md § Phase 2 (BUILD) — complete`. Master architecture anchor: `docs/synthetos-governed-agentic-os-brief-v1.2.md`. **Critical follow-up:** SANDBOX-B4 (ceiling-monitor + wall-clock-kill enqueue requires async provider interface refactor — out of fix-loop scope; operator decides at Phase 3 chatgpt-pr-review). **Next:** operator runs `launch finalisation` in a new Claude Code session for Phase 3 (S2 sync + G4 regression guard + chatgpt-pr-review + MERGE_READY transition).
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
 

@@ -9,6 +9,7 @@
 **Fix commit under verification:** `7d12f77f` — fix(sandbox-isolation): wire harvest pipeline + emit start/start_failed events
 **Scope (Round 2):** ONLY the 3 critical-gap REQs (REQ #11, #28, #29). The 12 directional + 2 ambiguous gaps from Round 1 remain deferred and were NOT re-verified. The 38 PASS items from Round 1 are unchanged (the fix only modified `sandboxExecutionService.ts`).
 **Run at:** 2026-05-11T08:35:46Z
+**Commit at finish:** `1656248c` (auto-push to remote failed: local OpenSSL CA store issue — `unable to get local issuer certificate`. Commit is local; operator must push manually or fix the local CA bundle.)
 
 ---
 

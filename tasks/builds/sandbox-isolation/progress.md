@@ -96,15 +96,65 @@ Confirmed pre-existing on this branch via stash round-trip. Tracked here for rev
 - migration_count: 381
 - captured_at: 2026-05-11T09:15:00Z
 
-## Phase 2 BUILD complete — pending G2 + branch-level review
+## Phase 2 BUILD complete + branch-level review pass complete
 
-All 16 chunks committed and pushed. Next steps:
-- G2 (lint + typecheck on integrated state)
-- Spec-validity checkpoint (operator pre-authorised proceed under autonomous mode)
-- Branch-level review pass: spec-conformance → adversarial-reviewer (conditional) → pr-reviewer → fix-loop → dual-reviewer
-- Doc-sync gate
-- Phase 2 handoff write
-- current-focus.md → REVIEWING
+All 16 chunks committed and pushed. Branch-level review pass closed.
+
+### Gate results
+
+| Gate | Verdict | Notes |
+|---|---|---|
+| G2 (lint + typecheck) | PASS | 0 lint errors / 906 pre-existing warnings; 2 pre-existing typecheck errors (`@react-pdf/renderer` missing types — confirmed on origin/main baseline) |
+| Spec-validity checkpoint | autonomous-skip | Operator pre-authorised |
+| spec-conformance R1 | NON_CONFORMANT | 3 critical gaps (REQ 11/28/29) + 12 directional + 2 ambiguous |
+| spec-conformance R2 | CONFORMANT_AFTER_FIXES | 3 critical gaps closed at `7d12f77f`; 14 deferred items in tasks/todo.md |
+| adversarial-reviewer | HOLES_FOUND (advisory) | 2 confirmed + 4 likely + 5 worth-confirming; 11 routed to tasks/todo.md (3 prioritised pre-merge) |
+| pr-reviewer R1 | CHANGES_REQUESTED | 5 blocking (B1-B5); 6 strong; 14 nits |
+| pr-reviewer R2 (post fix-loop) | APPROVED | 4 blockers fixed at `c5167bc5`; B4 deferred as architectural |
+| dual-reviewer (Codex) | APPROVED | 3 iterations, 5 ACCEPT + 1 REJECT; fixes at `37451d8a` (provider bootstrap import, started_at, harvest step 2, reconciliation step 1) |
+| pr-reviewer re-review | APPROVED | 0 blocking, 1 strong (test coverage for new branches), 2 non-blocking |
+| Final G3 | PASS | Same baseline (0 lint, 2 pre-existing typecheck) |
+
+### Doc-sync gate verdicts (per docs/doc-sync.md)
+
+- **architecture.md updated:** yes (new section "Sandbox Isolation primitive — SandboxExecutionService" under Layer 4 / Execution Backends; ieeDevBackend cross-link)
+- **docs/capabilities.md updated:** yes (Tier 4 Isolated Code Execution agency capability row, vendor-neutral phrasing)
+- **docs/integration-reference.md updated:** n/a — no customer-facing integration scope/skill/OAuth/MCP/alias changes. e2b is internal sandbox infrastructure, not a customer-exposed integration in the integration-reference sense.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** n/a — checked for changes to build discipline, conventions, agent fleet, review pipeline, locked rules; sandbox build follows existing patterns without new conventions.
+- **CONTRIBUTING.md updated:** n/a — no lint-suppression policy, comment-format, or contributor-convention changes.
+- **docs/frontend-design-principles.md updated:** n/a — Spec B has no UI in V1 (ui_touch=false per brief §2.8, §4).
+- **KNOWLEDGE.md updated:** yes (4 patterns appended: registration-seam pattern, string-constant queue-name module, stale gitignored .js intercept, OR-clause chunk cohesion)
+- **docs/spec-context.md updated:** n/a per playbook (feature pipelines record n/a; spec-review sessions only).
+- **docs/decisions/ updated:** yes (new ADR `0010-sandbox-execution-service.md` — vendor-adapter pattern, SandboxExecutionService boundary, no-silent-fallback decision)
+- **docs/context-packs/ updated:** n/a — no architecture.md section-anchor changes that would invalidate existing packs.
+- **references/test-gate-policy.md updated:** n/a — test posture unchanged (pure-tests-only + 5 new CI grep gates added per spec, not a policy change).
+- **references/spec-review-directional-signals.md updated:** n/a — not a spec-review session.
+- **.claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated:** n/a — no framework-level changes; this is repo-specific feature work.
+
+Doc-sync gate: **PASS** (all 13 registered docs have explicit verdicts; 4 updated + 9 n/a with rationale).
+
+### Known architectural follow-up (must be addressed by a subsequent build)
+
+**SANDBOX-B4 — Ceiling-monitor + wall-clock-kill jobs never enqueued.** The current `provider.runTask` implementation in `e2bSandbox` / `localDockerSandbox` is synchronous (start + run + return-on-terminal in one call). This means:
+- Pre-start monitor enqueue (the spec's intent) would deadlock — the monitor would find the row still `pending` and never trigger.
+- Post-start enqueue (which COULD work after the row transitions to `running`) doesn't currently happen because the row goes `pending → harvesting` directly (skipping `running` entirely).
+
+**Real fix requires:** Refactor provider interface from `runTask(input): Promise<SandboxRunTaskOutput>` to async start/poll/terminate seams:
+- `startTask(input): Promise<{ providerSandboxId }>`
+- `getProviderSignal(providerSandboxId): Promise<ProviderSignal | null>`
+- `terminateTask(providerSandboxId): Promise<void>`
+- `readFiles(providerSandboxId, path): Promise<ProviderFileResult>` (called by harvest)
+
+Then `sandboxExecutionService.runTask` becomes a state-machine orchestrator that:
+1. Calls `provider.startTask` → row goes pending → running
+2. Enqueues `sandboxCeilingMonitorJob` (singleton on sandbox_execution_id)
+3. Enqueues `sandboxWallClockKillJob` (one-shot, scheduled with `startAfter = wallClockMs + buffer`)
+4. Polls `provider.getProviderSignal` until terminal OR ceiling-monitor terminates
+5. Transitions row to `harvesting` and calls `runHarvest`
+
+Until this refactor lands, wall-clock + cost ceiling enforcement is provider-side only (best-effort). Tenant code can run beyond spec §10.1 30-minute hard cap if e2b SDK timeout is bypassed or misbehaves. Resource-abuse vector acknowledged.
+
+**Acceptance for V1 ship:** documented in this handoff + `tasks/todo.md` SANDBOX-ADV-5.1. Operator and Phase 3 chatgpt-pr-review decide whether to ship V1 with this limitation or block on the architectural follow-up.
 
 ### Known issues to surface at spec-conformance review
 
