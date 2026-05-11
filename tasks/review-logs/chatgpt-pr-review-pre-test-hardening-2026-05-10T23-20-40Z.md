@@ -151,5 +151,23 @@
 
 **Round 6 verdict:** CHANGES_REQUESTED → APPROVED with 2 deferred (PTH-CGT-R6-F3, PTH-CGT-R6-F6).
 
-**Round 7 diff:** pending generation after commit.
+### Round 7 — 2026-05-11T00:35:00Z (post Round 6 commit `1c8571dc`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `connectorConfigService.findByWebhookToken` uses `withAdminConnection` without import | high (claimed blocker) | typecheck | scope | technical | **reject** | auto (reject) — **FIFTH duplicate false positive** (Rounds 1, 3, 4, 6, 7). `withAdminConnection` imported at `connectorConfigService.ts:7`. Typecheck PASSED in all 7 rounds. ChatGPT consistently misreads the import context when only viewing the diff hunk. Permanent rejection class per KNOWLEDGE.md `[2026-05-10] Correction §3`. |
+| F2 | Migrated `createTask(input, tx)` callers (routes/tasks.ts, routes/workflowRuns.ts, routes/portal.ts, services/skillExecutor.ts, services/workflowRunStartSkillService.ts, services/subaccountOnboardingService.ts) still emit side effects pre-commit because public wrapper calls emit inline | high (claimed blocker) | observability / transaction-correctness | architecture | technical (scope_signal: architectural) | **defer** | **no action — already deferred as PTH-CGT-R6-F3 in Round 6.** Operator explicitly chose defer last round. ChatGPT is re-litigating a closed decision. The backlog entry documents these exact 6 callers and 3 fix options for the next sprint. The migrations to (input, tx) shape were made in the original feature commit `2b5e52fa` — they are not new in Round 7; ChatGPT misread their visibility-in-the-diff as newness. |
+| F3 | `documentDataSourceService.verifyScopeIdsBelongToOrg` inserts directly into `auditEvents` instead of routing through `auditService.log` | medium | audit-discipline | other | technical | **implement** | auto (implement) — replaced direct `db.insert(auditEvents)` with `auditService.log({...})`. The service wraps the insert in its own try/catch so audit failure never masks the 403 (preserves prior best-effort contract). Removed `auditEvents` from the schema imports; added `auditService` import. Aligns with the audit-event discipline used elsewhere in the codebase. Comment added citing PTH-CGT-R7-F3 origin. |
+
+**Auto-applied:** F3 (1 finding).
+**Auto-rejected:** F1 (1 finding — fifth duplicate false positive).
+**No action (re-litigated deferral):** F2 (PTH-CGT-R6-F3 remains the backlog entry).
+
+**Verification after Round 7 fixes (commit pending):** server typecheck CLEAN (0 errors); referenceDocumentScopeVerification.test.ts 7/7 pass (2 skipped — DB-dependent).
+
+**Round 7 verdict:** CHANGES_REQUESTED → APPROVED (F3 closed; F1 rejected; F2 remains operator-deferred).
+
+**Round 8 diff:** pending generation after commit.
 

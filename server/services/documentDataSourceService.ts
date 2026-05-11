@@ -1,5 +1,6 @@
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { referenceDocumentDataSources, referenceDocuments, agents, subaccounts, scheduledTasks, tasks, auditEvents } from '../db/schema/index.js';
+import { referenceDocumentDataSources, referenceDocuments, agents, subaccounts, scheduledTasks, tasks } from '../db/schema/index.js';
+import { auditService } from './auditService.js';
 import { eq, and, isNull } from 'drizzle-orm';
 import type { ReferenceDocumentMode } from '../db/schema/referenceDocuments.js';
 
@@ -75,17 +76,18 @@ export async function verifyScopeIdsBelongToOrg(
   // Find the first failing check (all verifications complete before this point).
   const failed = checks.find((c) => !c.found);
   if (failed) {
-    // Write audit row — best-effort, never throws into the caller.
-    try {
-      await db.insert(auditEvents).values({
-        organisationId: orgId,
-        actorType: 'system',
-        action: 'referenceDocument.scope_cross_org_rejected',
-        metadata: { scopeKind: failed.kind, scopeId: failed.id },
-      });
-    } catch {
-      // Audit failure must not mask the 403.
-    }
+    // PTH-CGT-R7-F3: route through canonical auditService.log instead of
+    // direct insert. The service wraps the insert in its own try/catch so
+    // audit failure never masks the 403 (preserves the prior best-effort
+    // contract). Switching keeps audit-event discipline (single namespace
+    // gate, future factory changes, severity conventions) consistent across
+    // the codebase.
+    await auditService.log({
+      organisationId: orgId,
+      actorType: 'system',
+      action: 'referenceDocument.scope_cross_org_rejected',
+      metadata: { scopeKind: failed.kind, scopeId: failed.id },
+    });
     return { ok: false, failedKind: failed.kind, failedId: failed.id };
   }
 
