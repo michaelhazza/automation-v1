@@ -805,6 +805,26 @@ async function start() {
       console.error('[boot] failed to register support-eval-daily worker', err);
     }
   }
+  // operator-session-identity chunk 6 — token refresh worker
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { createWorker } = await import('./lib/createWorker.js');
+      const { processOperatorSessionRefresh } = await import('./jobs/operatorSessionRefreshJob.js');
+      await createWorker({
+        queue: 'operator-session-refresh',
+        boss,
+        // Cross-org: payload carries only connectionId (no organisationId).
+        // The handler resolves org context via withAdminConnection then opens
+        // its own org-scoped tx. Opt out of createWorker's auto-transaction.
+        resolveOrgContext: () => null,
+        handler: processOperatorSessionRefresh,
+      });
+      logger.info('[boot] operator-session-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-refresh worker', err);
+    }
+  }
   // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)
   try {
     const { runSupportDispatchBootRecovery } = await import('./lib/supportDispatchBootRecovery.js');

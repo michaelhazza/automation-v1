@@ -681,6 +681,20 @@ export const JOB_CONFIG = {
     deadLetter: 'support-eval-daily__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
   },
+
+  // ── operator-session-identity chunk 6 — token refresh ───────────────────
+  // Per-connection refresh job. singletonKey = ${connectionId}:${refreshBucketEpochSec}
+  // deduplicates rapid re-enqueues within the same 5-minute bucket.
+  // retryLimit 5 with exponential backoff handles transient provider errors;
+  // expireInSeconds 7200 (2h) gives ample headroom above the retry series.
+  'operator-session-refresh': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 7200,
+    idempotencyStrategy: 'singleton-key' as const,
+    // singletonKey: ${connectionId}:${refreshBucketEpochSec}
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
