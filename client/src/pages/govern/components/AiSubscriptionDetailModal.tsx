@@ -4,10 +4,7 @@
 import { useState } from 'react';
 import Modal from '../../../components/Modal';
 import type { AiSubscriptionConnection } from '../../../../../shared/types/govern.js';
-import {
-  disconnectAiSubscription,
-  editAiSubscriptionAvailability,
-} from '../../../api/governApi';
+import { disconnectAiSubscription } from '../../../api/governApi';
 import { MakeDefaultConfirmModal } from './MakeDefaultConfirmModal';
 import { SignInAgainModal } from './SignInAgainModal';
 import { EditAvailabilityModal } from './EditAvailabilityModal';
@@ -79,9 +76,6 @@ type SubModal = 'make_default' | 'sign_in_again' | 'edit_availability' | null;
 export function AiSubscriptionDetailModal({ subaccountId, connection: initialConnection, onClose, onUpdated }: Props) {
   const [conn] = useState(initialConnection);
   const [subModal, setSubModal] = useState<SubModal>(null);
-  const [agentUseEnabled, setAgentUseEnabled] = useState(
-    conn.usabilityState !== 'disabled' && conn.usabilityState !== 'revoked'
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,23 +93,6 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } }).response?.data?.message;
       setError(msg ?? (e instanceof Error ? e.message : 'Disconnect failed.'));
-      setBusy(false);
-    }
-  }
-
-  async function handleToggleAgentUse(enabled: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      await editAiSubscriptionAvailability(subaccountId, conn.id, {
-        availabilityScope: conn.availabilityScope,
-        allowedAgentIds: enabled ? conn.allowedAgentIds : [],
-      });
-      setAgentUseEnabled(enabled);
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } }).response?.data?.message;
-      setError(msg ?? 'Failed to update. Please try again.');
-    } finally {
       setBusy(false);
     }
   }
@@ -248,36 +225,9 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
           </div>
         )}
 
-        {/* Master toggle: allow agent use */}
-        {!isTerminal && (
-          <div className="flex items-start justify-between gap-3 pt-3 border-t border-slate-100">
-            <div className="flex-1">
-              <div className="text-[13px] font-medium text-slate-900 mb-1">
-                {agentUseEnabled ? 'Turn off agent use' : 'Turn on agent use'}
-              </div>
-              <div className="text-[11.5px] text-slate-500 leading-snug">
-                {agentUseEnabled
-                  ? 'Turn off to block all agents from using this AI Subscription, even ones already allowed.'
-                  : 'Agent use is off. No agents can use this AI Subscription until you re-enable it.'}
-              </div>
-            </div>
-            <label className="relative inline-block w-10 h-6 flex-shrink-0 mt-0.5 cursor-pointer">
-              <input
-                type="checkbox"
-                className="opacity-0 w-0 h-0"
-                checked={agentUseEnabled}
-                disabled={busy}
-                onChange={(e) => { void handleToggleAgentUse(e.target.checked); }}
-              />
-              <span
-                className={`absolute inset-0 rounded-full transition-colors duration-150 ${agentUseEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-              />
-              <span
-                className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-150 ${agentUseEnabled ? 'translate-x-4' : 'translate-x-0.5'}`}
-              />
-            </label>
-          </div>
-        )}
+        {/* V1: Agent use pause/resume deferred — no pause endpoint in V1.
+            Re-enable when POST .../:connId/pause and POST .../:connId/resume routes ship.
+            The "Turn off agent use" spec action maps to a future lifecycle state. */}
       </Modal>
 
       {/* Sub-modals */}

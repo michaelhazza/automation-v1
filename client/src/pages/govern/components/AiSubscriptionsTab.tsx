@@ -43,8 +43,8 @@ const STATE_PILL: Record<UsabilityState, { label: (r: AiSubscriptionConnection) 
         admin_disabled: 'admin disabled',
         permission_revoked: 'permission revoked',
       };
-      const cause = r.disabledReason ? causeMap[r.disabledReason] : 'disabled';
-      return `Disabled: ${cause}`;
+      const cause = r.disabledReason ? causeMap[r.disabledReason] : null;
+      return cause ? `Disabled: ${cause}` : 'Disabled';
     },
     className: 'inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded',
   },
@@ -196,6 +196,9 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
         </div>
       )}
 
+      {/* TODO(chunk-10): Gate Connect, Make default, Edit availability, Disconnect buttons
+          on OPERATOR_SESSION_CONNECT / OPERATOR_SESSION_DISCONNECT / OPERATOR_SESSION_ALLOW_AGENT_USE
+          permissions from the /api/subaccounts/:id/my-permissions endpoint. */}
       {/* Toolbar: Connect button */}
       <div className="flex justify-end mb-3">
         {is501 ? (
