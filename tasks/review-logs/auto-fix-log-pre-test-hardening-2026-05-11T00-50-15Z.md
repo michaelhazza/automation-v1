@@ -106,3 +106,30 @@ Escalated to operator. Awaiting decision on how to proceed (see operator-prompt 
 - Iteration count: 3/5
 - Integration tests: SUCCESS post-iteration-2 ✓
 - Remaining check at HEAD: Lint + Typecheck (was IN_PROGRESS at iteration 2's poll)
+
+---
+
+## Final outcome — 2026-05-11T01:29:34Z — MERGED ✓
+
+CI poll #5 (post-iteration-3): **all 6 required checks SUCCESS + mergeState CLEAN**.
+
+- unit tests: SUCCESS
+- verify: SUCCESS
+- integration tests: SUCCESS
+- Lint + Typecheck: SUCCESS
+- Grep invariants (Phase 3 B.1-B.4): SUCCESS
+- Portable framework tests: SUCCESS
+
+**Step 12 executed:**
+- `tasks/current-focus.md` post-merge prep committed as `3f7c3603` (REVIEWING → NONE)
+- `gh pr merge 284 --admin --squash --delete-branch` succeeded at `2026-05-11T01:29:34Z`
+- Squash-commit on main: **`37067df9ac208da17cfd3b0a35d023799a7d0be1`** (`37067df9`)
+- Feature branch `claude/review-preprod-spec-CmHez` deleted from origin
+- `tasks/current-focus.md` on main patched with the squash sha (`pending-squash` → `37067df9`), committed as `2552ccb1` and pushed
+
+**Total CI fix-loop iterations: 3/5.**
+- Iteration 1: ESCALATED (failing unit + integration tests in G3 escalate-immediately category)
+- Iteration 2: 3 gate-script auto-fixes + 4 operator-approved test-setup fixes
+- Iteration 3: 1 gate-script auto-fix (test-exclusion in verify-rls-contract-compliance.sh Rule 2)
+
+**False-positive class confirmed permanent:** ChatGPT-pr-review claimed missing `withAdminConnection` import 6 times across 8 rounds. Each verified present at `server/services/connectorConfigService.ts:7`. Rejection class documented in KNOWLEDGE.md `[2026-05-10] Correction §3`.
