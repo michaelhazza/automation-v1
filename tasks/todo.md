@@ -4147,9 +4147,7 @@ These items were classified ambiguous/directional during spec review. Spec mecha
   - Candidates: (a) e2b SDK network-policy hooks if they expose per-decision callbacks, (b) application-layer egress proxy outside the sandbox with mandatory routing from the template entrypoint, (c) CNI / eBPF-side hooks if e2b exposes them.
   - Decision lands during C12 template-build chunk after verifying which hooks e2b actually exposes.
 
-- [ ] **SANDBOX-DEF-LOG-SCHEMA — Choose sandbox log sink schema (gating decision before C1)**
-  - Spec section: §8.4 step 9 (log persistence), §17.1 (retention).
-  - Whichever path is chosen MUST honour the `(sandbox_execution_id, log_stream, sequence)` idempotency key and per-tenant RLS / scoping (§14.4 / §21).
-  - Candidates: (a) new `sandbox_logs` table in `server/db/schema/sandboxLogs.ts` with the matching unique-index + RLS policy + manifest entry (adds one file + one migration to §19 inventory) — chosen now, the work lands in C1 (types + schema) plus a sandbox-logs-prune job alongside the existing prune jobs; (b) extension of an existing structured-log layer that already enforces the key shape — chosen now, the work folds into C7 (harvest pipeline).
-  - **Gating note:** the option choice itself must be made BEFORE C1 starts, because option (a) requires C1 to carry the new schema. C7 cannot wire step 9 without the option locked. This is the chunk-zero gating decision for the build.
-  - Whichever path is chosen, §19 + §21 are updated in the same PR to keep inventory authoritative.
+- [x] **SANDBOX-DEF-LOG-SCHEMA — CLOSED 2026-05-11 at chatgpt-spec-review Round 1 F1.** Locked to **option (a) — new `sandbox_logs` table**.
+  - Spec section: §8.4 step 9 (log persistence), §17.1 + §17.3 (retention), §20.8 (contract), §21.1 (RLS), §19.1 (schema file + prune job), §19.4 (migration).
+  - Rationale: cleaner RLS surface (symmetric with the other four sandbox tables); line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` enforceable at the DB layer (a JSONB column couldn't); 90d retention lifecycle decoupled from the general application log layer.
+  - Build impact: schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). No longer a chunk-zero gating decision.

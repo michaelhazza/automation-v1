@@ -1,10 +1,11 @@
-**Status:** draft
+**Status:** accepted (spec-reviewer READY_FOR_BUILD after 4 iterations; SynthetOS v1.2 master architecture alignment pass applied; chatgpt-spec-review 3 rounds, all 30 findings closed; locked 2026-05-11)
 **Spec date:** 2026-05-11
 **Last updated:** 2026-05-11
 **Author:** main session (Opus, spec-coordinator playbook)
 **Build slug:** sandbox-isolation
 **Source brief:** `tasks/builds/sandbox-isolation/brief.md` (v5, 2026-05-10)
 **Parent strategy:** `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` (Decision 1)
+**Anchoring brief:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` (SynthetOS Governed Agentic Operating System Master Architecture v1.2) — locks the Layer 1 (Control Plane) / Layer 4 (Execution Environments) / Layer 5 (IEE Execution Plane) / Layer 6 (Model Access) positioning, Risk Tier 4 classification, Policy Envelope integration, Run Trace integration, three-tier agent model, and controller-style agnosticism that Spec B honours. See §4.1.
 **Predecessor spec:** `tasks/builds/execution-backend-adapter-contract/spec.md` (shipped PR #281)
 **Sibling spec (concurrent):** `tasks/builds/operator-session-identity/spec.md` (Spec C, in flight)
 **Successor:** `tasks/builds/openclaw-adapter/scope.md`
@@ -136,6 +137,20 @@ Out of scope for Spec B (lifted directly from brief §4):
 - Concurrent with Spec C. Different code surfaces (§26). Either can land first; the second rebases. Shared design points: `llm_requests.source_type` enum extension (B adds `sandbox_compute`, C adds `subscription_mediated`); sub-account scoping (both enforce); credential redaction patterns (first to land defines the shared bundle).
 - Brief §6 invariants are non-negotiable acceptance criteria. The self-consistency pass (§29) checks each invariant against the spec.
 
+### 4.1 Master architecture alignment (per SynthetOS v1.2 brief)
+
+Spec B sits at a precise location in the master architecture:
+
+- **Layer 4 (Execution Environments).** Spec B implements the **Sandbox Environment** — one of six capability surfaces in the master brief §6.4. Sandbox Environment is a capability invoked by a Controller; it is NOT itself a controller or an agent.
+- **Layer 5 (IEE Execution Plane).** `SandboxExecutionService` is **IEE-owned**. Session lifecycle, worker scheduling, runtime isolation, credential injection mechanics, artefact store, telemetry emission — all IEE responsibilities per the master brief §14 ownership table. SynthetOS Control Plane (Layer 1) decides whether to dispatch; IEE executes. **`SandboxExecutionService` is the boundary primitive** — its input descriptor crosses SynthetOS → IEE; its output + harvest writes cross IEE → SynthetOS.
+- **Layer 6 (Model Access).** A sandboxed script that calls a model routes through the existing `llmRouter.routeCall` (existing primitive). Spec B does NOT bypass the Model Access and Identity Layer. If sandbox code needs LLM inference, the call exits the sandbox via egress, hits the LLM router, and the cost is recorded as a normal `llm_requests` row with `sourceType = 'agent_run'` (NOT `sandbox_compute`). `sandbox_compute` rows are sandbox compute only, not the LLM calls that happen inside a sandbox.
+- **Risk Tier 4.** Sandboxed code execution is **Risk Tier 4** in the master brief §11 matrix. Default approval gate is `review` (Tier 3-5 default). The existing `actions.gateLevel` derivation from Risk Tier (shipped in PR #279) handles this — Spec B does not redefine gateLevel semantics. Policy rules can override per master brief §11.1 single-axis-with-overrides model.
+- **Controller-style agnostic.** Both Native Controller and Operator Controller (Phase 3+) dispatch sandbox-class work into the same `SandboxExecutionService`. The primitive is style-agnostic; the calling controller's `controllerStyle` field (shipped on `agent_runs` via migration 0308 in PR #279) is read by upstream routing logic, not by the sandbox itself. Long-lived Operator session semantics live in the OpenClaw adapter spec, not here.
+- **Three-tier agent model.** Customer-facing subaccount agents (Revenue Ops Assistant, Research Intelligence Agent) AND internal system agents (SynthetOS Dev Agent, Platform Engineering Agent) both dispatch into the same `SandboxExecutionService`. System agents tag executions with a System Workspace tenancy (`organisationId = synthetos_system` or equivalent — exact value pinned by the existing three-tier model in `system_agents` / `agents` / `subaccount_agents`); the isolation, redaction, RLS, and cost-ledger rules apply uniformly.
+- **Run Trace integration.** Per the master brief §12.1, Phase 1 Run Trace is a virtual view joining decision ledgers. Spec B's five new ledgers (`sandbox_executions`, `sandbox_telemetry_events`, `sandbox_artefacts`, `sandbox_egress_audit`, `sandbox_logs`) become additive join sources on the virtual view, keyed on `runId`. The server-side Run Trace API contract (a Phase 1 foundation deliverable owned outside Spec B) extends to surface sandbox-domain events. Phase 3+ canonical Run Trace ledger consolidation per master brief §12.2 is downstream; Spec B's row shapes are designed to be consolidation-friendly.
+- **Policy Envelope integration.** The `policy_json` snapshot on `sandbox_executions` is the **sandbox-specific projection** of the calling run's Policy Envelope (shipped on `agent_runs.policy_envelope_snapshot`, JSONB, migration 0309 in PR #279). Spec B does NOT introduce a parallel envelope store. The `PolicyEnvelopeResolver` service (existing, PR #279) is the authoritative source; Spec B's input descriptor `policy` field is its sandbox-domain projection (allowed network, ceilings, artefact limits, runtime install, input limits).
+- **Naming map (per master brief §4.0).** Spec B uses code names where they exist (`executionMode` enum continues to refer to capability; Spec B's "Sandbox Environment" maps to a new `executionMode` value pinned by §19 file inventory updates). Brief-level concepts (Sandbox Environment, Risk Tier, Run Trace, Policy Envelope) appear in user-facing prose; code uses the established lowercase identifiers.
+
 ## 5. Verify present state
 
 Per `docs/spec-authoring-checklist.md § Section 0`, every spec that draws from deferred items in `tasks/todo.md` or a prior mini-spec must verify each cited item against current state.
@@ -157,13 +172,19 @@ The following table is the source of truth for which primitives Spec B reuses ve
 | Per-run cost ceiling | `runCostBreaker` | `server/lib/runCostBreaker.ts` | **Reuse + extend.** Sandbox cost contributes to the same per-run aggregate; sandbox-side wall-clock + cost ceilings are separate but feed `cost_aggregates` via the harvest writer. |
 | Redaction pattern engine | `redactValue` + `DEFAULT_REDACTION_PATTERNS` | `server/lib/redaction.ts` | **Reuse.** Spec B's harvest pipeline calls `redactValue` against `output.json`, stdout/stderr lines, and artefact metadata. Shared with Spec C (see §26). |
 | Credential issuance + injection | `credentialBrokerService.issueCredential` / `injectIntoEnvironment` | `server/services/credentialBrokerService.ts` | **Reuse + extend.** Add a sandbox-specific injection path (mounted file in `/workspace/secrets/`, env-var bridge, or short-lived token), §11. |
-| RLS manifest enforcement | `RLS_PROTECTED_TABLES` + `verify-rls-coverage.sh` / `verify-rls-contract-compliance.sh` | `server/config/rlsProtectedTables.ts`, `scripts/gates/` | **Reuse.** All new sandbox tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`) added to the manifest in the same migration that creates them. |
+| RLS manifest enforcement | `RLS_PROTECTED_TABLES` + `verify-rls-coverage.sh` / `verify-rls-contract-compliance.sh` | `server/config/rlsProtectedTables.ts`, `scripts/gates/` | **Reuse.** All five new sandbox tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`) added to the manifest in the same migration that creates them. |
 | Org-scoped DB access | `withOrgTx` / `getOrgScopedDb` / `withAdminConnection` | `server/middleware/orgScoping.ts` | **Reuse.** Harvest writer uses `withOrgTx` per execution; admin-only reconciliation paths use `withAdminConnection`. |
 | Cost ledger | `llm_requests` table | `server/db/schema/llmRequests.ts` | **Reuse + extend.** Spec B extends the `sourceType` enum to include `sandbox_compute` and lands a Spec-B-specific CHECK constraint pairing `sandbox_compute` with sandbox-specific columns (see §12). |
-| Pg-boss worker harness | `createWorker` | `server/lib/createWorker.ts` | **Reuse.** Used by the reconciliation, ceiling-monitor, telemetry-prune, egress-audit-prune, and artefact-purge jobs (§19.1, §22). Harvest itself is inline within `runTask` for the happy path (§22) — no `sandbox-harvest` queue is introduced. |
+| Pg-boss worker harness | `createWorker` | `server/lib/createWorker.ts` | **Reuse.** Used by all seven sandbox jobs: harvest-reconciliation, ceiling-monitor, wall-clock-kill, telemetry-prune, logs-prune, egress-audit-prune, and artefact-purge (§19.1, §22). Harvest itself is inline within `runTask` for the happy path (§22) — no `sandbox-harvest` queue is introduced. |
 | Object storage | S3-compatible client | `server/lib/storage.ts` | **Reuse.** Artefact upload uses the existing client; sandbox artefacts live under a separate prefix (`sandbox-artefacts/{orgId}/{subaccountId}/{sandboxExecutionId}/`). |
 | Execution event telemetry | `agentExecutionEventService` + criticality registry | `server/services/agentExecutionEventService.ts`, `shared/types/agentExecutionLog.ts` | **Adjacent, not reused directly.** Sandbox emits its own structured-log events tied to the run via `runId`, but does not write to `agent_execution_events` (different lifecycle granularity — sandbox is per-task, agent events are per-run). The new sandbox event types are still part of the overall run trace via `runId` correlation. |
 | Adapter contract | `ExecutionBackend` interface | `server/services/executionBackends/types.ts` | **Reuse.** No changes; Spec B sits below this boundary. |
+| `controllerStyle` field on `agent_runs` | Shipped PR #279, migration 0308 | `server/db/schema/agentRuns.ts` | **Aware, not modified.** Sandbox executions correlate to calling runs by `runId`; calling controller style is read from `agent_runs.controller_style` if downstream consumers need it. `SandboxExecutionService` itself is style-agnostic. |
+| Policy Envelope snapshot | `agent_runs.policy_envelope_snapshot` (JSONB, migration 0309 PR #279) + `PolicyEnvelopeResolver` service | `server/db/schema/agentRuns.ts`, `server/services/policyEnvelopeResolver.ts` | **Reuse + project.** Spec B's `sandbox_executions.policy_json` is the sandbox-specific projection of the run's envelope. The resolver service is authoritative; Spec B does not introduce a parallel constraint store. Input descriptor `policy` field is the materialised projection. |
+| Risk Tier classification + gateLevel derivation | 138-row Action Registry Risk Tier sweep + `actions.gateLevel` (shipped PR #279) | `server/config/actionRegistry.ts` + `verify-risk-tier-assigned.sh` CI gate | **Aware, not modified.** Sandbox-class actions are Tier 4; gate level defaults to `review` per master brief §11.2 derivation. Policy rules can override per single-axis-with-overrides model. Spec B does not redefine gate semantics. |
+| Run Trace virtual view | Phase 1 foundation deliverable — virtual view over decision ledgers per master brief §12.1 | `client/src/.../RunTracePage.tsx` + server-side Run Trace API (Phase 1 deliverable outside Spec B) | **Extend additively.** Spec B's five new tables (`sandbox_executions`, `sandbox_telemetry_events`, `sandbox_artefacts`, `sandbox_egress_audit`, `sandbox_logs`) become source ledgers joined on `runId`. Phase 3+ canonical ledger consolidation per master brief §12.2 inherits Spec B's row shapes consolidation-friendly. |
+| Three-tier agent model | `system_agents` / `agents` / `subaccount_agents` | `server/db/schema/` | **Reuse.** Customer subaccount agents AND internal system agents dispatch into `SandboxExecutionService`; tenancy tagging carries the appropriate `(organisationId, subaccountId)` or System Workspace equivalent. Isolation, redaction, RLS, cost-ledger rules apply uniformly. |
+| Capability-Aware Orchestrator (Router and Execution Planner) | `orchestratorFromTaskJob`, paths A/B/C/D | `server/jobs/orchestratorFromTaskJob.ts` (and related) | **Aware, not modified.** Orchestrator decides whether a task dispatches via the `iee_dev` adapter (which then consults `SandboxExecutionService`). Spec B does not change orchestrator routing; the orchestrator-to-adapter contract is Spec A's territory. |
 | **NEW** Sandbox execution service interface | n/a | new — see §8.1 | **New.** No existing primitive provides per-task isolated execution with policy-bounded runtime, harvest pipeline, and provider-swappable backends. Closest neighbour is the worker itself, which is what we're trying to remove from the customer-code path — reuse is the bug, not the fix. |
 | **NEW** Sandbox template build pipeline | n/a — `infra/sandbox-templates/` does not exist | new — see §15 | **New.** Templates are infrastructure artefacts (Docker images shared by e2b and Docker-Compose); pinned via CI tag-bump. |
 | **NEW** Per-execution sandbox telemetry table | n/a | new — see §14 | **New.** `sandbox_telemetry_events` table stores structured events at sandbox-lifecycle granularity (start / terminal / timeout / harvest_failed / artefact_upload_failed / credential_denied). Cannot reuse `agent_execution_events` because the criticality registry, criticality semantics, and per-event types are different — and one agent run can contain many sandbox executions. |
@@ -206,6 +227,10 @@ This table is the dispatch rule. The `iee_dev` adapter (and any future adapter) 
 
 **No third tier.** If in doubt, it runs in the sandbox. There is no "small script" exception that lets customer-derived code back into the worker. The CI gate enforces this — see §25.
 
+**Classification is by what code runs, not by which controller calls.** Both Native Controller (deterministic transforms, scheduled jobs) and Operator Controller (Phase 3+ adaptive operator tasks) dispatch sandbox-class work into the same `SandboxExecutionService`. The classification table above applies uniformly across controller styles (§4.1).
+
+**System agents are sandbox consumers too.** Customer-facing subaccount agents (Revenue Ops Assistant, Research Intelligence Agent) AND internal system agents (SynthetOS Dev Agent — Phase 2 partial MVP, Platform Engineering Agent) call `SandboxExecutionService`. Internal-agent executions tag with System Workspace tenancy; the isolation, redaction, RLS, and cost-ledger rules are identical. The Dev Agent's "trusted repo / dev operations" row above (Worker, Tier 5) is the part that does NOT touch the sandbox; its sandbox-assisted scripts and tests (customer-derived code? no — script-under-test? yes) DO. See §4.1 for the three-tier agent model integration.
+
 ### 7.3 Source-of-truth precedence
 
 When multiple representations of the same fact exist (cost in sandbox telemetry vs `llm_requests` row, terminal state in `sandbox_executions` row vs telemetry event), the precedence is:
@@ -226,11 +251,24 @@ When multiple representations of the same fact exist (cost in sandbox telemetry 
 - **`runTask(input) → output`.** One call per task. The caller passes a typed input descriptor; the call resolves when the sandbox terminates (success / timeout / cost-ceiling / crash / etc.) and the harvest pipeline has produced a normalised output. The caller never sees raw, unredacted, unvalidated sandbox output.
 - **`getExecution(sandboxExecutionId)`.** Read-side helper for reconciliation paths (provider webhooks, ambiguous-terminal recovery). Returns the canonical `sandbox_executions` row.
 
-**Input descriptor (consumer-facing contract).** Pinned in §20 (Contracts). Required fields: `sandboxExecutionId` (idempotency key, caller-generated UUID), `organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `policy` (the runtime-posture policy — §9), `inputBytes` (size-validated, redaction-aware), `inputFiles[]` (preflight-validated paths + content hashes), `credentialIssuanceContext` (which credentials to materialise inside the sandbox — §11), `ceilings` (`wallClockMs`, `costCents` — §10).
+**Input descriptor (consumer-facing contract).** Pinned in §20 (Contracts). Required fields: `sandboxExecutionId` (idempotency key, caller-generated UUID), `organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `policy` (the runtime-posture policy — §9), `inputBytes` (size-validated, redaction-aware), `inputFiles[]` (preflight-validated paths + content hashes), `credentialIssuanceContext` (which credentials to materialise inside the sandbox — §11), `ceilings` (`wallClockMs`, `costCents` — §10), `outputSchemaRef` (path / reference to the Zod schema `output.json` is validated against — §8.3, §8.4 step 3).
 
 **Output contract (caller-facing).** Pinned in §20. Required fields: `sandboxExecutionId`, `terminalState` (one of the 8 from §13), `output` (the validated, redacted `output.json` content), `artefactRefs[]` (signed-URL handles to stored artefacts), `logRefs` (handles to stdout/stderr log persistence), `metrics` (`wallClockMs`, `vcpuSeconds`, `peakMemoryMb`, `egressBytes`), `costCents` (provider-reported + corrected), `templateName`, `templateVersion`, `provider`.
 
-**Idempotency.** `runTask` is idempotent by `sandboxExecutionId`. A retry with the same ID returns the canonical row + output if the previous attempt terminated; otherwise it joins the in-flight attempt (no second sandbox starts). DB-level guarantee: `UNIQUE (sandbox_execution_id)` on `sandbox_executions` + state-based atomic claim.
+**Idempotency + start-claim lease.** `runTask` is idempotent by `sandboxExecutionId`. A retry with the same ID returns the canonical row + output if the previous attempt terminated; otherwise it joins the in-flight attempt OR reclaims a stale `pending` row whose lease has expired (no second provider sandbox starts).
+
+The mechanism is a **start-claim lease**, not just a unique-row INSERT, because a naïve "INSERT row then start provider" pattern deadlocks the execution if the worker crashes between INSERT and provider-start. The lease columns on `sandbox_executions` (§20.3) — `provider_sandbox_id`, `start_claimed_at`, `start_claim_expires_at`, `start_attempt_count` — make pending-state recovery deterministic:
+
+- Initial `runTask` call: atomic `INSERT INTO sandbox_executions (id, ..., status='pending', start_claimed_at=now(), start_claim_expires_at=now()+lease_window, start_attempt_count=1)`.
+- Provider start: on success, `UPDATE sandbox_executions SET provider_sandbox_id=$X, status='running' WHERE id=$id AND start_claimed_at=$claim_ts` (optimistic on the claim timestamp).
+- Retry semantics:
+  - If row exists with `provider_sandbox_id IS NOT NULL` and `status IN ('running', 'harvesting')`: caller joins the in-flight attempt.
+  - If row exists with `status IN (terminal-state set)`: caller returns canonical output.
+  - If row exists with `status='pending'` AND `provider_sandbox_id IS NULL` AND `start_claim_expires_at < now()`: caller reclaims the lease (`UPDATE ... SET start_claimed_at=now(), start_claim_expires_at=now()+lease_window, start_attempt_count=start_attempt_count+1 WHERE id=$id AND start_claim_expires_at=$prior_expires`). Then re-attempts provider start.
+  - If row exists with `status='pending'` AND `start_claim_expires_at >= now()`: another worker is mid-start; caller waits (configurable short backoff) then re-checks.
+- Cap: `start_attempt_count >= MAX_START_ATTEMPTS` (default 3) → transition `pending → provider_unavailable` and surface `FailureReason.sandbox_provider_unavailable`. This prevents infinite reclaim loops when a provider is durably broken.
+
+DB-level guarantees: `UNIQUE (id)` PK on `sandbox_executions` + state-based atomic `UPDATE` predicates throughout (no read-then-write races). Lease window default: `2 * providerThresholds.startTimeoutMs` (so a slow provider start has room without being declared crashed prematurely).
 
 **Error model.** Failures surface as `FailureError` instances with `FailureReason` values from §6 (e.g., `sandbox_timeout`, `sandbox_cost_ceiling`, `sandbox_provider_unavailable`). No exceptions that are not `FailureError` are surfaced to callers — internal exceptions either retry under `withBackoff` or get reclassified.
 
@@ -295,7 +333,7 @@ Post-sandbox-terminal, the calling adapter (executing inline within the `runTask
 6. **Artefact enumeration.** List `/workspace/artefacts/`. Each file's metadata (name, size) is captured; content is read in a streaming fashion. Per-task max artefact size and total artefact bytes (default 10 MB / 100 MB; pinned per task in the input descriptor) — over-cap → `artefact_upload_failed` (sub-reason `artefact_oversized`).
 7. **Artefact metadata redact.** Filenames and any extracted metadata pass through `redactValue` before storage. (A leaked credential in a filename is just as bad as a leaked credential in `output.json`.)
 8. **Object storage upload.** Each artefact uploaded to S3 prefix `sandbox-artefacts/{orgId}/{subaccountId}/{sandboxExecutionId}/{filename}`. Upload failure → `artefact_upload_failed`. Idempotent on the `sandbox_artefacts` row keyed by `(sandbox_execution_id, filename)` — see §20.
-9. **Log persistence.** Redacted log lines written to a sandbox-specific log surface tagged by `sandbox_execution_id`. Idempotent on `(sandbox_execution_id, log_stream, sequence)`. The concrete sink (new `sandbox_logs` table with RLS, OR extension of an existing structured-log layer that already enforces that key shape) is a build-time decision tracked in §27 deferred row `SANDBOX-DEF-LOG-SCHEMA`; whichever path is chosen MUST honour the idempotency key and the per-tenant RLS / scoping requirements from §14.4 / §21.
+9. **Log persistence.** Redacted log lines written to the new `sandbox_logs` table (§19.1, §20.8, RLS-protected per §21). Row shape: `(sandbox_execution_id, log_stream, sequence, line, organisationId, subaccountId, emitted_at)`. Idempotent on `UNIQUE (sandbox_execution_id, log_stream, sequence)` — re-runs of harvest are no-ops at the line level. **This was previously a build-time deferred decision (`SANDBOX-DEF-LOG-SCHEMA`); locked at Round 1 of chatgpt-spec-review to the dedicated-table option because it is the cleaner RLS surface, symmetric with the other sandbox tables, and avoids cross-coupling sandbox logs with the general application log layer.**
 10. **Cost row write.** A single `llm_requests` row with `source_type = 'sandbox_compute'` (§12). Idempotent on `(sandbox_execution_id, source_type)` via a partial unique index.
 11. **Telemetry terminal event.** One terminal event in `sandbox_telemetry_events` declaring the outcome (§14).
 12. **`sandbox_executions` row update.** Atomic transition from `harvesting` to a terminal state (one of the 8 from §13) via `UPDATE ... WHERE status = 'harvesting'`. Optimistic concurrency: two harvest invocations (e.g., one from worker, one from reconciliation job) race; the second observes 0 rows updated and joins.
@@ -382,9 +420,28 @@ The pure helper `resolveSandboxCeilings(input)` computes the active ceiling from
 
 ### 10.2 Enforcement (provider-side + worker-side fallback)
 
-**Provider-side wherever e2b supports it.** The `e2bSandbox` constructor passes the wall-clock ceiling as the e2b SDK's `timeout` parameter. Provider terminates the sandbox at the limit. Cost ceiling provider-side enforcement: best-effort against e2b's billing API where supported; otherwise read-only-observable until the worker-side fallback fires.
+**Provider-side wherever e2b supports it.** The `e2bSandbox` constructor passes the wall-clock ceiling as the e2b SDK's `timeout` parameter. Provider terminates the sandbox at the limit. Cost ceiling provider-side enforcement is **best-effort**: e2b may expose a real-time cost API or it may not. The provider-side path is invoked when available; the worker-side path always runs as the authoritative enforcement layer.
 
-**Worker-side fallback.** A `sandbox-ceiling-monitor` job (per execution, scheduled at execution start) wakes at `wallClockMs + buffer` AND polls provider cost at **5-second intervals** between sandbox start and the wall-clock ceiling. If the sandbox is still running past either ceiling and provider-side enforcement has not terminated it, the monitor calls the provider's terminate API directly. Job idempotent on `sandbox_execution_id`. The 5-second polling interval is a V1 parameter (locked in §28 #4); re-evaluation after first month of production cost data is a deferred ops task (§27).
+**Worker-side fallback — two jobs, both pg-boss-managed.**
+
+1. **`sandbox-ceiling-monitor` job (re-enqueued every monitor interval).** A pg-boss job that runs every `policy.ceilings.monitorIntervalMs` (V1 default: 5 seconds) between sandbox start and either ceiling being hit. On each tick the job:
+   - Reads the canonical row for the execution; if `status NOT IN ('pending', 'running')`, exits (sandbox already terminal).
+   - Computes the **estimated cost** using the fallback estimator (next bullet).
+   - If wall-clock ceiling tripped OR estimated cost ≥ cost ceiling: calls the provider terminate API directly, writes the appropriate terminal state.
+   - Otherwise: re-enqueues itself with `singletonKey = sandbox_execution_id` (pg-boss singleton guarantees one in-flight monitor per execution; no duplicate ticks).
+2. **`sandbox-wall-clock-kill` job (one-shot, scheduled at sandbox start).** Scheduled with `startAfter = wallClockMs + buffer`. If the sandbox is still non-terminal when this fires, it calls the provider terminate API and writes `timed_out`. Belt-and-braces against a stalled monitor.
+
+Both jobs are idempotent on `sandbox_execution_id`. The monitor exits cleanly on observing a terminal state; the kill is a no-op if the monitor already terminated.
+
+**Cost-ceiling fallback estimator (used when provider real-time cost API is unavailable).** A pure helper `estimateSandboxCostCents(elapsedMs, templateResourceClass)` computes a **conservative upper bound** on accumulated cost:
+
+```
+estimated_cost_cents = elapsedMs / 1000 × templateResourceClass.maxCostCentsPerSecond
+```
+
+`templateResourceClass.maxCostCentsPerSecond` is pinned per template in `infra/sandbox-templates/{name}/CURRENT_VERSION` as the `max_cost_cents_per_second` field (full five-field `CURRENT_VERSION` contract in §15.2; parsed by `templateVersionParserPure.ts`). It is the **vendor-published worst-case rate** for that resource class — never optimistic. When the worker terminates a sandbox at the cost ceiling using this estimator, the actual provider-reported cost at harvest may be lower than the estimate; the recorded cost row uses provider-reported cost (§12), and any delta is captured as a cost-correction ledger row.
+
+**Effect.** Even if e2b never exposes real-time cost, the worker can enforce a cost ceiling because the upper-bound estimator can never silently underestimate. If the estimator says we are at the ceiling, the worker terminates; final billing uses the provider's authoritative cost at harvest. This closes the contradiction that previously existed between §10.2's "best-effort provider-side" and §28 #4's "worker hard-terminates regardless" — the hard-terminate is real, backed by the upper-bound estimator, not by hope.
 
 **Never enforced only in application logic above the sandbox.** Application-layer "is this likely to run too long?" guesses don't count — that's not enforcement, that's wishful thinking. The brief §2.7 invariant — "provider-side where supported, worker-side fallback, never only app logic" — is encoded in this two-layer model.
 
@@ -511,10 +568,12 @@ Three additional non-terminal states tracked on `sandbox_executions.status` (not
 
 State transitions allowed:
 
-- `pending → running` — sandbox started successfully.
-- `pending → provider_unavailable` — start failed (no `running` ever entered; harvest pipeline skipped). This is the only terminal transition that bypasses `harvesting`, because no sandbox process ran and there is nothing to harvest. See §14.5 for the minimum-events scoping that allows this case.
-- `pending → sandbox_input_rejected_*` — preflight rejected (state in §9.6; no `sandbox_executions` row written for these, so this is logically "pre-state"). For row-tracking purposes there is no row.
+- `pending → pending (lease reclaim)` — same row, refreshed `start_claimed_at` / `start_claim_expires_at`, incremented `start_attempt_count`. Permitted only when `provider_sandbox_id IS NULL` AND `start_claim_expires_at < now()`. See §8.1 start-claim lease.
+- `pending → running` — sandbox started successfully (`provider_sandbox_id` written; `start_claimed_at` cleared).
+- `pending → provider_unavailable` — start failed and `start_attempt_count >= MAX_START_ATTEMPTS` cap reached (no `running` ever entered; harvest pipeline skipped). This is the only terminal transition that bypasses `harvesting`, because no sandbox process ran and there is nothing to harvest. See §14.5 for the minimum-events scoping that allows this case.
 - `running → harvesting` — sandbox emitted terminal, by any cause (clean exit, timeout, cost-ceiling, crash, provider ambiguous-terminal). The harvest pipeline then classifies the terminal cause and writes the appropriate terminal state per the table above. There are no `running → terminal-state` direct transitions; the harvest pipeline (§8.4 step 12) is the single writer of terminal states.
+
+Preflight input rejection (`sandbox_input_rejected`, §9.6) is a **pre-row failure path**, not a state transition. No `sandbox_executions` row is written; the calling run's failure trace captures the rejection. See §14.2 for the separation between sandbox-row state transitions and pre-row failure events.
 - `harvesting → completed | timed_out | cost_ceiling_hit | crashed | output_validation_failed | harvest_failed | artefact_upload_failed | provider_unavailable` — harvest outcome (one of the 8 from §13.1).
 - Most terminal states are absorbing; no transition out of them (corrections in §12.4 are a separate cost-row insertion, not a status update).
 - **Reconciliation-recoverable exception.** The two internal-only terminal states `harvest_failed` and `artefact_upload_failed` are recoverable: the `sandbox-harvest-reconciliation` job (per §13.2 `safe` classification) atomically re-enters the harvesting phase via `UPDATE sandbox_executions SET status='harvesting' WHERE status IN ('harvest_failed', 'artefact_upload_failed')`. From `harvesting`, the pipeline writes either `completed` (if reconciliation succeeded) or a new terminal state (if it failed for a different reason). After the cap on reconciliation retries (§13.2 finite-cap rules), the derived `sandbox_harvest_failed_permanent` failure surfaces to the customer (§13.4) and the row's status stays absorbing at its last recovery-attempt terminal. The other 6 terminal states are strictly absorbing.
@@ -566,9 +625,18 @@ A unique-by-sequence index `(sandbox_execution_id, sequence)` provides ordered i
 
 ### 14.2 Closed event-type enum (V1)
 
+Two distinct event surfaces, kept separate so the DB CHECK constraint on `sandbox_telemetry_events.event_type` cleanly reflects what rows exist:
+
+**A. `sandbox_telemetry_events.event_type` — DB-rows-only enum.** This is the closed set of `event_type` values that have an actual `sandbox_telemetry_events` row. Used by the CHECK constraint + the harvest pipeline + the minimum-events gate (§14.5).
+
+**B. Pre-row failure events.** Failures that occur BEFORE a `sandbox_executions` row is written (preflight rejection in §9.6 is the only one in V1). These are recorded on the calling run's failure trace (existing `agent_runs` failure surface), NOT in `sandbox_telemetry_events`. Spec B does not add a new event-type enum for these — they reuse the existing `FailureReason` machinery (§20.8 / §6).
+
+Adding a new value to surface A requires a spec amendment + a migration extending the CHECK constraint. Adding a value to surface B is just an addition to `FailureReason` (§20.8).
+
+#### Surface A — `sandbox_telemetry_events.event_type` (closed enum)
+
 | `event_type` | When fired | Criticality | Payload notes |
 |---|---|---|---|
-| `sandbox_input_rejected` | Preflight rejected (over-size, MIME mismatch, etc.). Fired on the calling run's failure trace; **NOT** in `sandbox_telemetry_events` because no execution row exists (see §9.6). Listed here for completeness. | error | n/a (no sandbox row) |
 | `sandbox_start` | Sandbox successfully started, `pending → running` transition. | info | `{ ceilings, network_policy, alias_count }` |
 | `sandbox_start_failed` | Start API call failed; `pending → provider_unavailable`. | error | `{ reason, providerErrorCode? }` |
 | `sandbox_terminal` | Sandbox terminated (any reason). The first `sandbox_terminal` per execution is the canonical terminal (`isCanonical: true`); subsequent ones written by the reconciliation recovery path (§13.1) are flagged `isCanonical: false` with `reconciliationAttempt: N`. | info | `{ terminalState, wallClockMs, vcpuSeconds, providerReportedCostCents, harvestStepReached: 0..12, isCanonical: boolean, reconciliationAttempt?: number }` — `harvestStepReached` lets the minimum-events gate decide which phase applies (§14.5) |
@@ -602,11 +670,27 @@ Log lines carry the same tenancy + correlation tuple as the DB events. The DB ev
 
 ### 14.4 RLS / scoping enforcement
 
-`sandbox_telemetry_events`, `sandbox_executions`, `sandbox_egress_audit`, and the `sandbox_compute` rows on `llm_requests` are all RLS-protected. Every row is queryable only within its owning `(organisationId, subaccountId)` context. Metadata tagging via e2b is NOT a substitute — the brief §2.12 invariant requires enforced query-side isolation as well. Spec B accomplishes this via:
+`sandbox_telemetry_events`, `sandbox_executions`, `sandbox_artefacts`, `sandbox_logs`, `sandbox_egress_audit`, and the `sandbox_compute` rows on `llm_requests` are all RLS-protected. **RLS enforces the organisation boundary** — every row is queryable only within its owning `organisationId` context, matching the existing `withOrgTx` / `getOrgScopedDb` enforcement model used across the codebase. **Subaccount isolation is enforced at the service layer** (filters in `sandboxExecutionService`, `sandboxHarvestService`, telemetry readers, plus the standard permission middleware on any HTTP route surfacing sandbox data) — NOT at the RLS policy. This matches the existing app convention (e.g., `llm_requests`, `agent_runs` RLS is org-boundary; subaccount filtering is service-side). Metadata tagging via e2b is NOT a substitute for either layer — the brief §2.12 invariant requires enforced query-side isolation at BOTH the RLS layer (org) and the service layer (subaccount). Spec B accomplishes this via:
 
-- All four tables / row types added to `RLS_PROTECTED_TABLES` manifest in the same migration that creates them.
+- All five tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`) added to `RLS_PROTECTED_TABLES` manifest in the same migrations that create them.
 - Standard three-layer fail-closed policy shape used (Layer A `withOrgTx` opens transaction with `set_config('app.organisation_id', $orgId)`; Layer B RLS policies on `organisation_id` column; Layer C `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` CI gates).
 - Read paths use `getOrgScopedDb()` exclusively. The `verify-rls-contract-compliance` CI gate already rejects raw `db.` imports inside service / route code (pattern set in PR #274 / #275); Spec B inherits this.
+
+### 14.4a Run Trace virtual view integration
+
+Per the SynthetOS v1.2 master architecture brief §12.1, Phase 1 Run Trace is implemented as a **virtual view** joining existing decision ledgers — `agent_execution_events`, `routing_outcomes`, `delegation_outcomes`, `tool_call_security_events`, `reviewAuditRecords`, `actions`, `llm_requests`. Spec B contributes **five new join sources** to this virtual view:
+
+- `sandbox_executions` — one row per sandbox run; pinned terminal state, policy snapshot, template version, provider, cost.
+- `sandbox_telemetry_events` — ordered event stream per execution (start / terminal / timeout / harvest_failed / artefact_upload_failed / credential_denied / egress_audited / etc.).
+- `sandbox_artefacts` — pointer rows for harvested artefacts (filename, content hash, object key, storage state).
+- `sandbox_egress_audit` — per-egress-decision rows (only when `network` policy is non-`none`).
+- `sandbox_logs` — per-line redacted stdout / stderr stream (locked at chatgpt-spec-review Round 1 F1).
+
+All five are keyed on `runId` (and `organisationId` / `subaccountId` for RLS), making them straightforward joins into the Run Trace virtual view. The `sandbox_compute` rows on `llm_requests` are already part of the existing `llm_requests` join.
+
+**The server-side Run Trace API contract is a Phase 1 foundation deliverable owned outside Spec B** (per master brief §18.1 foundation work list). Spec B's deliverable is the row shapes + RLS coverage; surfacing the events through the Run Trace API is the foundation team's work. Spec B's row shapes are designed to be additive — extending the Run Trace API to include sandbox events is a non-breaking change.
+
+**Phase 3+ canonical ledger consolidation.** Per master brief §12.2, a future canonical `run_trace_events` table will consolidate decision events into one ledger. Spec B's row shapes are consolidation-friendly: the `sandbox_telemetry_events.event_type` enum aligns with the eventual canonical event-type space; the `payload_json` is schema-declared per event type so the consolidation migration is mechanical. No work needed in Spec B for this — it's a Phase 3+ migration concern.
 
 ### 14.5 Required minimum-events guarantee
 
@@ -629,27 +713,73 @@ New directory introduced by Spec B. Contains two subdirectories:
 - `infra/sandbox-templates/synthetos-sandbox/` — Spec B's template. Dockerfile + entrypoint + dependency manifest. The dependency manifest pins Phase 2-relevant packages (Python + pandas / pdfplumber / openpyxl / etc.; Node baseline for JS transforms; a small shell layer for the entrypoint). README documents parity gaps vs `localDockerSandbox` (§8.2.2).
 - `infra/sandbox-templates/openclaw-session/` — image authored here, consumed by the OpenClaw adapter spec. Contents (Codex CLI install, OpenClaw process wiring) are NOT defined here — that's the OpenClaw adapter's deliverable. Spec B provides the empty scaffolding + the CI publish hook.
 
-### 15.2 CI publish job
+### 15.2 CI publish job — and CURRENT_VERSION + PUBLISHED_VERSION ownership
 
-New CI job `publish-sandbox-templates` runs on tag bump matching `sandbox-template/synthetos-sandbox/v*` or `sandbox-template/openclaw-session/v*`:
+**Two files per template, with distinct ownership.**
 
-1. Build the Docker image from the relevant template directory.
-2. Run the dependency / vulnerability scan (§15.4).
-3. Publish to e2b template registry with the tag's version.
-4. Compute + record the immutable image digest.
-5. Bump `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION` (a single-line file) to the new version + digest.
+- **`CURRENT_VERSION`** — committed by humans / build agents in the same PR as the template change. Declares everything that is determined BEFORE CI runs: target version, template resource class, max cost rate per second, pinned base-image digest, and committed lockfile hashes. **Does NOT declare the final image digest** — that is determined by CI and recorded in `PUBLISHED_VERSION`.
+- **`PUBLISHED_VERSION`** — written by CI's post-publish attestation workflow as a PR (NOT direct repo write). Declares: final image digest from the actual CI build + publish, registry response, scanner result hash, CI build-source commit. Human / build agent merges the attestation PR; runtime code reads this file to determine which immutable digest is actually live.
 
-`CURRENT_VERSION` is the source of truth runtime code reads to determine "what version do new executions pin?" An out-of-band change to `CURRENT_VERSION` without a corresponding registry publish is a CI failure (`verify-template-version-coherence`, §25).
+This split closes the previous-revision fragility: a locally-computed digest is sensitive to local build environment, base-image resolution timing, dependency-resolution non-determinism, and platform differences. Round 1's "developer pins digest at PR time" pattern only works if the build is fully deterministic across machines. Round 2's split is the safer pattern: **CI is the final-digest source of truth.**
+
+**`CURRENT_VERSION` contract (multi-line, parsed by `templateVersionParserPure.ts`):**
+
+```
+version=v1.2.0
+template_resource_class=cpu-small
+max_cost_cents_per_second=0.00042
+base_image_digest=sha256:def...
+deps_lockfile_hash=sha256:123...
+```
+
+All five fields are required for production templates. `version` is the semver alias published to the e2b registry. `template_resource_class` is a free-form identifier consumed by `estimateSandboxCostCents` (§10.2). `max_cost_cents_per_second` is the vendor-published worst-case rate for that resource class — the fallback estimator multiplies elapsed wall-clock by this number. `base_image_digest` is the immutable digest of the Dockerfile's `FROM` line (`trivy image` re-scan target; CI gate enforces digest-pinned base images, never floating tags). `deps_lockfile_hash` is the SHA256 of the committed `requirements.txt` + `package-lock.json` (concatenated, deterministic order); CI verifies it matches.
+
+**`PUBLISHED_VERSION` contract (written by CI attestation workflow):**
+
+```
+version=v1.2.0
+image_digest=sha256:abc...
+ci_build_commit=<git sha>
+registry_published_at=2026-05-11T10:00:00Z
+scanner_result_hash=sha256:789...
+```
+
+`image_digest` is the truth runtime executions pin per §15.3. `CURRENT_VERSION.deps_lockfile_hash` + `PUBLISHED_VERSION.scanner_result_hash` together form the audit trail for "is this template build reproducible enough to defend in a post-incident review?"
+
+**Deterministic build requirements (locked).** Templates ship with: Dockerfile `FROM` lines pinned by digest (never `:latest` or floating tags); `requirements.txt` pinned to exact versions with hash-locking; `package-lock.json` committed; `--platform linux/amd64` enforced; build-args containing build timestamps prohibited. Any non-determinism in the local build is acceptable — CI is the digest of record.
+
+**The CI publish flow:**
+
+1. **Developer (or build agent) updates the template** under `infra/sandbox-templates/{name}/`: edits Dockerfile / entrypoint / dependencies + bumps `CURRENT_VERSION` in the same PR with the five fields above. The developer does NOT need a local build at PR time — they declare intent in `CURRENT_VERSION`.
+2. **PR merges** to `main`. The developer-applied tag (e.g., `sandbox-template/synthetos-sandbox/v1.2.0`) is created against the merge commit.
+3. **`publish-sandbox-templates` CI job fires on the tag**:
+   1. Reads `infra/sandbox-templates/{name}/CURRENT_VERSION` from the tagged commit.
+   2. Verifies the deterministic-build prerequisites: digest-pinned base images, committed lockfiles, `deps_lockfile_hash` matches the computed concatenation hash. Failure → CI fails before build.
+   3. Builds the Docker image from the template directory under `--platform linux/amd64` with deterministic build args.
+   4. Runs the dependency / vulnerability scan (§15.4). Critical/High CVE → publish blocked. Outdated base image → publish blocked.
+   5. Publishes the image to the e2b template registry with the version from `CURRENT_VERSION` as the alias.
+   6. Computes the published image digest. Opens an attestation PR writing `PUBLISHED_VERSION` for this template with the five fields above. Human / build agent merges the attestation PR.
+4. **Runtime code reads `PUBLISHED_VERSION`** to pin per-execution `template_digest` (§15.3). `CURRENT_VERSION.max_cost_cents_per_second` feeds the cost-fallback estimator (§10.2).
+
+The `verify-template-version-coherence` CI gate (§25) checks that:
+- `CURRENT_VERSION` has all five fields with valid values.
+- Every commit modifying `CURRENT_VERSION` is accompanied by a corresponding `sandbox-template/{name}/v{version}` tag.
+- Once the tag is published, a `PUBLISHED_VERSION` attestation PR has been merged (gate fails open for 24h after publish to allow the attestation PR to land).
+- `PUBLISHED_VERSION.version` matches `CURRENT_VERSION.version` after publish.
+
+**No CI commits to the runtime repo** beyond the bounded attestation-PR workflow. The publish job is read-only against the source tree.
 
 ### 15.3 Per-execution pinning
 
 Every `sandbox_executions` row pins:
 
 - `template_name` (e.g., `synthetos-sandbox`)
-- `template_version` (semver from the tag bump)
-- `template_digest` (the immutable Docker digest)
-- `template_build_commit` (git commit of the build that produced the image)
+- `template_version` (read from `CURRENT_VERSION.version` at execution start)
+- `template_digest` (read from `PUBLISHED_VERSION.image_digest` at execution start — the actual CI-published immutable digest)
+- `template_build_commit` (read from `PUBLISHED_VERSION.ci_build_commit`)
 - `provider_project` (e2b project name — `synthetos-prod` or `synthetos-staging`)
+
+`max_cost_cents_per_second` is NOT denormalised onto the row (it's per-template, looked up from `CURRENT_VERSION` at monitor-tick time). This keeps the row shape stable across cost-rate changes.
 
 The provider call passes `template_version` (resolved to the corresponding e2b template alias). The recorded digest provides post-hoc verification that the alias didn't get re-pointed.
 
@@ -713,7 +843,7 @@ After harvest, three classes of sandbox-derived data persist:
 
 - **`output.json` content** — retained on the `sandbox_executions` row's `output_json` column (JSONB, redacted, schema-validated). Read by the calling run / agent / customer-visible surfaces.
 - **Artefacts** — uploaded to object storage under `sandbox-artefacts/{orgId}/{subaccountId}/{sandboxExecutionId}/{filename}`. Pointer rows in `sandbox_artefacts` table.
-- **Logs** — redacted stdout / stderr lines persisted via the sandbox-specific log surface (build-time choice tracked in §27 / `SANDBOX-DEF-LOG-SCHEMA`), tagged by `sandbox_execution_id`.
+- **Logs** — redacted stdout / stderr lines persisted to `sandbox_logs` table (§20.8; locked at chatgpt-spec-review Round 1, was SANDBOX-DEF-LOG-SCHEMA). One row per line, keyed `(sandbox_execution_id, log_stream, sequence)`.
 - **Telemetry events** — `sandbox_telemetry_events` table.
 - **Egress audit** — `sandbox_egress_audit` table (only if `network` policy was non-`none`).
 - **Cost rows** — `llm_requests` table with `source_type = 'sandbox_compute'` (and any `sandbox_compute_correction` rows).
@@ -727,7 +857,7 @@ After harvest, three classes of sandbox-derived data persist:
 - **Telemetry events** (`sandbox_telemetry_events`) — 90 days. After 90 days, raw event rows are deleted by a `sandbox-telemetry-prune` job. No summary roll-up is computed: the `sandbox_executions` row already carries the durable per-execution fields (terminal `status`, `terminated_at`, `harvested_at`, `metrics_json`, `cost_cents`, `error_reason`) that future audit queries need, and structured log lines (§14.3) provide the per-event archive for ops paging. Treating the `sandbox_executions` row itself as the post-prune summary keeps the data shape simple and avoids a separate summary contract that would need its own retention rules.
 - **Egress audit** (`sandbox_egress_audit`) — 180 days. Required retention for security audit purposes; pruned thereafter.
 - **Artefacts in object storage** — 90 days. Pointer rows in `sandbox_artefacts` retained as tombstones (rows kept, `object_storage_state = 'expired'` set, content key cleared) until the parent `agent_runs` row is deleted; tombstones are then removed by the run-deletion cascade (§17.4).
-- **Logs** — 90 days (matches existing log retention; Spec B does not change the existing log layer's retention policy).
+- **Logs** (`sandbox_logs`) — 90 days. Pruned by `sandboxLogsPruneJob` (§19.1, pg-boss). Physically deleted at retention boundary (logs are not financial / audit-critical, so no tombstone). Run-delete cascade soft-deletes log rows via the existing `isActive(table)` pattern; the prune job hard-deletes both soft-deleted and retention-expired rows at runtime.
 - **`output.json` content + `sandbox_executions` row** — retained indefinitely (until run deletion). Anchors the audit trail.
 - **Cost rows in `llm_requests`** — retained indefinitely; financial / audit data is never aged out (matches existing `llm_requests` posture).
 
@@ -739,7 +869,7 @@ When a customer or operator deletes an `agent_runs` row (existing soft-delete pa
 
 - **`sandbox_executions` rows for the run** — soft-deleted (existing `isActive(table)` pattern). The row stays for audit but is hidden from customer-facing queries.
 - **Artefacts** — physically deleted from object storage by a `sandbox-artefact-purge` job triggered by the soft-delete event. Pointer rows soft-deleted with `object_storage_state = 'purged'`.
-- **Logs** — soft-deleted (existing log retention layer handles this).
+- **Logs** — `sandbox_logs` rows soft-deleted via `isActive(table)`; physically removed at next prune cycle by `sandboxLogsPruneJob`.
 - **Telemetry events + egress audit** — retained per their default retention windows (above). The brief §2.15 invariant — "ledger rows MUST be retained, anonymised, or correction-reversed on run deletion — never physically deleted in a way that breaks finance or audit trails" — extends to telemetry: the events are kept past the run's soft-delete so the audit trail survives.
 - **Cost rows in `llm_requests`** — retained, NEVER physically deleted. If a "delete this run's spend" request comes through (e.g., compliance / GDPR-equivalent), the path is correction-reversed: a paired correction row negates the original. Original row stays. Brief §6 invariant.
 
@@ -820,16 +950,21 @@ Per `docs/spec-authoring-checklist.md § Section 2`, this table is the single so
 | `server/jobs/sandboxTelemetryPruneJob.ts` | Pg-boss job — prunes telemetry events past 90d. No summary aggregation: the `sandbox_executions` row is the post-prune summary (§17.3). | §17.3 |
 | `server/jobs/sandboxEgressAuditPruneJob.ts` | Pg-boss job — prunes egress audit rows past 180d. | §17.3 |
 | `server/jobs/sandboxArtefactPurgeJob.ts` | Pg-boss job — physically deletes artefacts from object storage when parent run is soft-deleted. | §17.4 |
-| `server/db/schema/sandboxExecutions.ts` | Drizzle schema for `sandbox_executions` table. | §13.1, §20 |
-| `server/db/schema/sandboxArtefacts.ts` | Drizzle schema for `sandbox_artefacts` pointer rows. | §17.4, §20 |
-| `server/db/schema/sandboxTelemetryEvents.ts` | Drizzle schema for `sandbox_telemetry_events`. | §14.1, §20 |
-| `server/db/schema/sandboxEgressAudit.ts` | Drizzle schema for `sandbox_egress_audit`. | §9.1, §20 |
+| `server/db/schema/sandboxExecutions.ts` | Drizzle schema for `sandbox_executions` table (incl. F3 lease columns: `provider_sandbox_id`, `start_claimed_at`, `start_claim_expires_at`, `start_attempt_count`). | §13.1, §20.3 |
+| `server/db/schema/sandboxArtefacts.ts` | Drizzle schema for `sandbox_artefacts` pointer rows. | §17.4, §20.4 |
+| `server/db/schema/sandboxTelemetryEvents.ts` | Drizzle schema for `sandbox_telemetry_events`. | §14.1, §20.5 |
+| `server/db/schema/sandboxEgressAudit.ts` | Drizzle schema for `sandbox_egress_audit`. | §9.1, §20.6 |
+| `server/db/schema/sandboxLogs.ts` | Drizzle schema for `sandbox_logs` (one row per redacted log line; locked at chatgpt-spec-review Round 1, was SANDBOX-DEF-LOG-SCHEMA). | §8.4 step 9, §20.8 |
+| `server/jobs/sandboxLogsPruneJob.ts` | Pg-boss job — prunes `sandbox_logs` rows past 90d retention. | §17.3, §20.8 |
+| `server/jobs/sandboxWallClockKillJob.ts` | Pg-boss one-shot job scheduled at sandbox start with `startAfter = wallClockMs + buffer`. Belt-and-braces wall-clock terminator if `sandboxCeilingMonitorJob` stalled. | §10.2 |
 | `shared/types/sandbox.ts` | TypeScript types for the input descriptor, output, terminal-state enum, policy schema, contracts. Consumed by adapters + UI in future phases. | §8.1, §20 |
 | `infra/sandbox-templates/synthetos-sandbox/Dockerfile` | Spec B's template image. | §15.1 |
 | `infra/sandbox-templates/synthetos-sandbox/entrypoint.sh` | Sandbox entrypoint script. Sets up `/workspace`, runs the task, captures logs. | §15.1 |
 | `infra/sandbox-templates/synthetos-sandbox/requirements.txt` | Python dependency pin. | §15.1, §15.4 |
 | `infra/sandbox-templates/synthetos-sandbox/package.json` | Node baseline + JS-transform dependency pin. | §15.1 |
-| `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION` | Single-line file: `version=v1.0.0 digest=sha256:...`. Read by `e2bSandbox` to pin per-execution `template_version`. | §15.2, §15.3 |
+| `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION` | Five-field human-committed file: `version`, `template_resource_class`, `max_cost_cents_per_second`, `base_image_digest`, `deps_lockfile_hash` (full contract in §15.2). Source of truth for cost-rate + base-image pinning + deps integrity. Does NOT carry the published image digest. | §15.2, §15.3 |
+| `infra/sandbox-templates/synthetos-sandbox/PUBLISHED_VERSION` | CI-written attestation file (via attestation PR workflow, NOT direct CI write): `version`, `image_digest`, `ci_build_commit`, `registry_published_at`, `scanner_result_hash`. Source of truth for the actual published image digest. Read by runtime to pin per-execution `template_digest`. | §15.2, §15.3 |
+| `server/services/sandbox/templateVersionParserPure.ts` | Pure parser for `CURRENT_VERSION` + `PUBLISHED_VERSION` files. Validates the five-field shape, surface-area for the `verify-template-version-coherence` CI gate. | §15.2, §25.2 |
 | `infra/sandbox-templates/synthetos-sandbox/README.md` | Documents parity gaps between `e2b` and `localDocker`. | §8.2.2 |
 | `infra/sandbox-templates/openclaw-session/` | Empty scaffolding: Dockerfile + entrypoint + CURRENT_VERSION (placeholder). Contents owned by the OpenClaw adapter spec. | §15.1 |
 | `docker-compose.sandbox.yml` (or extension to existing `docker-compose.yml`) | Service definition for `localDockerSandbox`'s template image build + run target. | §15.5 |
@@ -841,7 +976,7 @@ Per `docs/spec-authoring-checklist.md § Section 2`, this table is the single so
 |---|---|---|
 | `scripts/gates/verify-sandbox-classification.sh` | Grep gate. Fails the build if any task-dispatch code path that takes customer input reaches a non-sandbox runtime call. | §18.4, §25 |
 | `scripts/gates/verify-sandbox-minimum-events.sh` | Grep gate. Fails if any `sandbox_executions` terminal-state insert is not paired with the required minimum telemetry events. | §14.5, §25 |
-| `scripts/gates/verify-template-version-coherence.sh` | Verifies `CURRENT_VERSION` file in `infra/sandbox-templates/synthetos-sandbox/` matches a published CI tag (no out-of-band edits). | §15.2 |
+| `scripts/gates/verify-template-version-coherence.sh` | Verifies `CURRENT_VERSION` + `PUBLISHED_VERSION` shape / coherence: (a) `CURRENT_VERSION` carries all five required fields including `max_cost_cents_per_second` consumed by the cost-fallback estimator; (b) every commit modifying `CURRENT_VERSION` is paired with a corresponding `sandbox-template/{name}/v{version}` git tag; (c) once a tag is published, a `PUBLISHED_VERSION` attestation PR has been merged (24h grace window after publish to allow the attestation PR to land); (d) `PUBLISHED_VERSION.version` matches `CURRENT_VERSION.version`. | §15.2 |
 | `scripts/gates/verify-no-sandbox-cost-update.sh` | Grep gate. Fails if any code path issues UPDATE against `llm_requests` for `source_type IN ('sandbox_compute', 'sandbox_compute_correction')`. | §12.4 |
 | `scripts/gates/verify-no-inline-sandbox-outside-test.sh` | Grep gate. Fails if `inlineSandbox` import / construction appears outside `*.test.ts` / `__tests__/` paths. | §8.2.3 |
 
@@ -852,11 +987,11 @@ Per `docs/spec-authoring-checklist.md § Section 2`, this table is the single so
 | `server/services/executionBackends/ieeDevBackend.ts` | `dispatch()` rewired to consult `classifyExecutionClass()` and call `SandboxExecutionService.runTask` for sandbox-class tasks. The Tier 5 worker-trusted path is unchanged. | §18 |
 | `server/services/executionBackends/ieeDevBackendPure.ts` | New pure helper alongside the adapter, containing `classifyExecutionClass`. (If the file does not exist today, it's added per the existing `*ServicePure.ts` convention.) | §18.2 |
 | `server/db/schema/llmRequests.ts` | (1) Extend `sourceType` enum with `'sandbox_compute'` and `'sandbox_compute_correction'`. (2) Add 6 nullable columns: `sandbox_execution_id`, `sandbox_vcpu_seconds`, `sandbox_wall_clock_ms`, `sandbox_provider`, `sandbox_template_version`, `correction_sequence`. (3) CHECK constraint extension per §12.2; partial unique indexes per §12.3 + §24.1. | §12.2, §12.3 |
-| `server/config/rlsProtectedTables.ts` | Append rows for `sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`. | §14.4, §21 |
+| `server/config/rlsProtectedTables.ts` | Append rows for `sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs` (five new entries). | §14.4, §21 |
 | `server/lib/redaction.ts` | Extension of `DEFAULT_REDACTION_PATTERNS` with sandbox-specific patterns + the runtime-extensible per-execution pattern set. Coordinated with Spec C (§26). | §11.3 |
 | `server/services/credentialBrokerService.ts` | Extend `issueCredential` return shape to optionally include a per-execution redaction pattern (regex) the harvest pipeline registers for the execution's lifetime (§11.3). Existing callers ignoring the new field are unaffected; no breaking change to the public surface. Coordinated with Spec C if Spec C also extends this file (§26). | §11.3, §26 |
 | `shared/iee/failure.ts` | Extend `FailureReason` enum with the 8 new sandbox-specific values. | §6, §13.2 |
-| `server/jobs/index.ts` | Register the 5 new pg-boss jobs (sandbox-harvest-reconciliation, sandbox-ceiling-monitor, sandbox-telemetry-prune, sandbox-egress-audit-prune, sandbox-artefact-purge). | §17.3, §17.4 |
+| `server/jobs/index.ts` | Register the **7 new pg-boss jobs**: `sandbox-harvest-reconciliation`, `sandbox-ceiling-monitor`, **`sandbox-wall-clock-kill`** (one-shot, paired with monitor per §10.2), `sandbox-telemetry-prune`, **`sandbox-logs-prune`** (added Round 1 F1), `sandbox-egress-audit-prune`, `sandbox-artefact-purge`. | §10.2, §17.3, §17.4 |
 | `architecture.md` | New section: "Sandbox Isolation primitive — `SandboxExecutionService`" under the Layer 4 / Execution Backends area. Includes the §7.2 execution classification table reproduced as the dispatch contract. Cross-link from `iee_dev` adapter description to the new section. | §11 (doc-sync) |
 | `docs/capabilities.md` | New row under "Agency capabilities": sandbox-backed Tier 4 execution. Vendor-neutral phrasing — does not name e2b in customer-facing copy. (Brief §1 styling: lowercase `e2b` only inside the spec / docs intended for engineers.) | doc-sync |
 | `docs/env-manifest.json` | Add `SANDBOX_PROVIDER` (required, enum), `SANDBOX_ALLOW_INLINE` (test-only flag, defaults to absent), `E2B_API_KEY` (required when provider=`e2b`), `E2B_PROJECT_PROD` / `E2B_PROJECT_STAGING`. | §8.2 |
@@ -864,18 +999,19 @@ Per `docs/spec-authoring-checklist.md § Section 2`, this table is the single so
 | `KNOWLEDGE.md` | Append patterns observed during build (post-implementation). | doc-sync |
 | `docs/decisions/0009-sandbox-execution-service.md` (proposed ADR) | Records the vendor-adapter pattern + the `SandboxExecutionService` interface choice + the "no silent fallback" decision. Authored during Phase 2 if the build reaffirms the decision warrants an ADR. | optional, doc-sync judgement |
 
-### 19.4 New migrations
+### 19.4 New migrations + sequencing script
 
-Spec B adds **four migrations**, numbered sequentially after the most recent migration in `migrations/`:
+Spec B adds **four SQL migrations and one sequencing script**, numbered sequentially after the most recent migration in `migrations/` (main is at 0320 as of PR #284, so Spec B will start at 0321+ at build time). The second SQL migration creates **three tables in one file** (`sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_logs`) so the related RLS policies and manifest entries land atomically; this keeps the migration count proportionate to logical lifecycle, not table count.
 
 | Migration | Purpose |
 |---|---|
-| `XXXX_create_sandbox_executions.sql` | `CREATE TABLE sandbox_executions` + indexes + RLS policy + manifest entry. |
-| `XXXX_create_sandbox_artefacts_and_telemetry.sql` | `CREATE TABLE sandbox_artefacts` + `sandbox_telemetry_events` + indexes + RLS policies + manifest entries. |
-| `XXXX_create_sandbox_egress_audit.sql` | `CREATE TABLE sandbox_egress_audit` + indexes + RLS policy + manifest entry. |
-| `XXXX_extend_llm_requests_for_sandbox.sql` | Extend `sourceType` enum + add 5 nullable columns + extend CHECK constraint + add partial unique index on `(sandbox_execution_id) WHERE source_type = 'sandbox_compute'`. |
+| `XXXX_create_sandbox_executions.sql` (SQL migration #1) | `CREATE TABLE sandbox_executions` (incl. F3 lease columns: `provider_sandbox_id`, `start_claimed_at`, `start_claim_expires_at`, `start_attempt_count`) + indexes (incl. partial on `provider_sandbox_id`) + CHECK constraints (per §20.3) + RLS policy (org-boundary) + manifest entry. |
+| `XXXX_create_sandbox_artefacts_telemetry_logs.sql` (SQL migration #2) | `CREATE TABLE sandbox_artefacts` + `sandbox_telemetry_events` + `sandbox_logs` + indexes (incl. `UNIQUE (sandbox_execution_id, log_stream, sequence)` on `sandbox_logs`) + RLS policies (all org-boundary) + manifest entries (three new rows added to `RLS_PROTECTED_TABLES`). |
+| `XXXX_create_sandbox_egress_audit.sql` (SQL migration #3) | `CREATE TABLE sandbox_egress_audit` + indexes + RLS policy + manifest entry. |
+| `XXXX_extend_llm_requests_for_sandbox.sql` (SQL migration #4) | Extend `sourceType` enum with `'sandbox_compute'` + `'sandbox_compute_correction'`; add **six** nullable columns: `sandbox_execution_id`, `sandbox_vcpu_seconds`, `sandbox_wall_clock_ms`, `sandbox_provider`, `sandbox_template_version`, **`correction_sequence`** (NULL for `sandbox_compute` rows; non-NULL for `sandbox_compute_correction` rows); extend CHECK constraint per §12.2; add partial unique index on `(sandbox_execution_id) WHERE source_type = 'sandbox_compute'`; add partial unique on `(sandbox_execution_id, correction_sequence) WHERE source_type = 'sandbox_compute_correction'` (multiple corrections per execution; ordered). |
+| `scripts/sandbox-classification-dry-run.ts` (sequencing script, NOT a migration) | One-shot pre-cut classification dry-run; see §19.1. Listed here because its position in the build order matters relative to C13 + C14, not because it is a SQL migration. |
 
-Each migration has a paired `.down.sql` using defensive `IF EXISTS` / `IF NOT EXISTS` (per KNOWLEDGE.md pattern from PR #274). Final migration numbers assigned at build-time based on `migrations/` head.
+Each SQL migration has a paired `.down.sql` using defensive `IF EXISTS` / `IF NOT EXISTS` (per KNOWLEDGE.md pattern from PR #274). Final migration numbers assigned at build-time based on `migrations/` head — per the post-S2-collision KNOWLEDGE.md pattern from PR #284 (renumber forward, never backward).
 
 ### 19.5 Files NOT modified
 
@@ -977,31 +1113,36 @@ Per `docs/spec-authoring-checklist.md § Section 3`, every shape that crosses a 
 ### 20.3 `sandbox_executions` table row
 
 - **Type:** Postgres row (Drizzle schema in `server/db/schema/sandboxExecutions.ts`).
-- **Columns:** `id` (UUID PK = `sandbox_execution_id`), `organisation_id`, `subaccount_id`, `run_id`, `agent_id`, `task_id`, `provider`, `template_name`, `template_version`, `template_digest`, `template_build_commit`, `provider_project`, `status` (closed enum from §13), `policy_json` (JSONB snapshot of the policy at run start), `input_summary_json` (size + MIME + file count — no content), `output_json` (JSONB, redacted, schema-validated, nullable until terminal), `metrics_json` (wall-clock, vcpu, memory, egress), `cost_cents` (provider-reported), `started_at`, `terminated_at`, `harvested_at`, `error_reason` (FailureReason, nullable), `error_detail` (text, redacted), `attempt_number` (integer; for crash retries), `is_active` (boolean, soft-delete flag).
-- **Indexes:** PK; `(organisation_id, started_at DESC)`; `(subaccount_id, started_at DESC)`; `(run_id)`; `(status) WHERE status IN ('pending', 'running', 'harvesting')` (partial — for reconciliation queries).
-- **Constraints:** `UNIQUE (id)` (PK); CHECK `status IN (...closed enum...)`.
-- **RLS:** `FORCE ROW LEVEL SECURITY`; policy joins on `organisation_id = current_setting('app.organisation_id')::uuid`.
+- **Columns:** `id` (UUID PK = `sandbox_execution_id`), `organisation_id`, `subaccount_id`, `run_id`, `agent_id`, `task_id`, `provider`, `provider_sandbox_id` (text, nullable — set when provider start succeeds; primary correlation key for provider-side reconciliation), `template_name`, `template_version`, `template_digest`, `template_build_commit`, `provider_project`, `status` (closed enum from §13), `policy_json` (JSONB snapshot of the policy at run start), `input_summary_json` (size + MIME + file count — no content), `output_json` (JSONB, redacted, schema-validated, nullable until terminal), `metrics_json` (wall-clock, vcpu, memory, egress), `cost_cents` (provider-reported), `started_at`, `terminated_at`, `harvested_at`, `error_reason` (FailureReason, nullable), `error_detail` (text, redacted), `attempt_number` (integer; for crash retries), **`start_claimed_at`** (timestamptz, nullable — set when a worker claims the pending lease), **`start_claim_expires_at`** (timestamptz, nullable — `start_claimed_at + lease_window`; reclaimable by another worker after expiry per §8.1), **`start_attempt_count`** (integer, default 0 — incremented on every lease reclaim; cap-driven `pending → provider_unavailable` transition at `MAX_START_ATTEMPTS`), `is_active` (boolean, soft-delete flag).
+- **Indexes:** PK; `(organisation_id, started_at DESC)`; `(subaccount_id, started_at DESC)`; `(run_id)`; `(status) WHERE status IN ('pending', 'running', 'harvesting')` (partial — for reconciliation queries); `(provider_sandbox_id) WHERE provider_sandbox_id IS NOT NULL` (partial — for provider-webhook-driven reconciliation lookups).
+- **Constraints:**
+  - `UNIQUE (id)` (PK).
+  - `CHECK status IN (...closed enum from §13.1...)`.
+  - `CHECK (provider_sandbox_id IS NULL OR status <> 'pending')` — no row remains `pending` once a provider sandbox ID has been assigned (lease semantic per §8.1). The reverse case — a `provider_unavailable` terminal with `provider_sandbox_id` still NULL — is permitted because provider start may fail before any ID is returned.
+  - `CHECK (status NOT IN ('running', 'harvesting') OR provider_sandbox_id IS NOT NULL)` — captures the real invariant: any row that ever progressed beyond `pending` must carry a provider sandbox ID. This is the symmetric guarantee to the constraint above.
+  - `CHECK (start_attempt_count >= 0)` — lease-reclaim counter is non-negative.
+- **RLS:** `FORCE ROW LEVEL SECURITY`; policy enforces **organisation boundary**: `organisation_id = current_setting('app.organisation_id')::uuid`. **Subaccount filtering is enforced at the service layer** (`sandboxExecutionService`, `sandboxHarvestService`, telemetry readers), not at the RLS policy — matching the existing `llm_requests` / `agent_runs` enforcement model.
 
 ### 20.4 `sandbox_artefacts` table row
 
 - **Type:** Postgres row (`server/db/schema/sandboxArtefacts.ts`).
 - **Columns:** `id` (UUID PK), `sandbox_execution_id` (FK to `sandbox_executions.id`), `organisation_id`, `subaccount_id`, `filename`, `object_key`, `bytes`, `content_hash` (sha256), `mime` (sniffed), `uploaded_at`, `object_storage_state` (`uploaded | expired | purged`), `is_active`.
 - **Indexes:** PK; `UNIQUE (sandbox_execution_id, filename)` — DB-level idempotency.
-- **RLS:** as above, FORCE RLS, scoped by `organisation_id`.
+- **RLS:** `FORCE ROW LEVEL SECURITY`; org-boundary policy on `organisation_id` (matches §20.3). Subaccount filtering service-side.
 
 ### 20.5 `sandbox_telemetry_events` table row
 
 - **Type:** Postgres row (`server/db/schema/sandboxTelemetryEvents.ts`).
-- **Columns:** `id` (UUID PK), `sandbox_execution_id`, `organisation_id`, `subaccount_id`, `run_id`, `agent_id`, `task_id`, `provider`, `template_name`, `template_version`, `event_type` (closed enum from §14.2), `event_at`, `sequence` (integer; per-execution ordered), `criticality` (`info | warn | error`), `payload_json`.
+- **Columns:** `id` (UUID PK), `sandbox_execution_id`, `organisation_id`, `subaccount_id`, `run_id`, `agent_id`, `task_id`, `provider`, `template_name`, `template_version`, `event_type` (closed enum from §14.2 Surface A), `event_at`, `sequence` (integer; per-execution ordered), `criticality` (`info | warn | error`), `payload_json`.
 - **Indexes:** PK; `UNIQUE (sandbox_execution_id, sequence)`; `(organisation_id, event_at DESC)`; `(event_type, event_at DESC)` (partial on warn/error).
-- **RLS:** as above.
+- **RLS:** `FORCE ROW LEVEL SECURITY`; org-boundary policy on `organisation_id`. Subaccount filtering service-side.
 
 ### 20.6 `sandbox_egress_audit` table row
 
 - **Type:** Postgres row (`server/db/schema/sandboxEgressAudit.ts`).
 - **Columns:** `id` (UUID PK), `sandbox_execution_id`, `organisation_id`, `subaccount_id`, `run_id`, `destination_class` (`internal | customer | vendor | unknown`), `destination_host`, `destination_port`, `destination_protocol` (`http | https | tcp | other`), `credential_context_alias`, `outcome` (`allow | deny`), `decision_at`, `policy_rule_id` (which allow-list entry matched, if any).
 - **Indexes:** PK; `(organisation_id, decision_at DESC)`; `(sandbox_execution_id)`.
-- **RLS:** as above.
+- **RLS:** `FORCE ROW LEVEL SECURITY`; org-boundary policy on `organisation_id`. Subaccount filtering service-side.
 
 ### 20.7 `llm_requests` extended row (sandbox_compute)
 
@@ -1031,18 +1172,30 @@ Per `docs/spec-authoring-checklist.md § Section 3`, every shape that crosses a 
 }
 ```
 
-### 20.8 `FailureReason` enum additions
+### 20.8 `sandbox_logs` table row
 
-| New value | Surfaces |
+- **Type:** Postgres row (`server/db/schema/sandboxLogs.ts`). **New table, locked at Round 1 of chatgpt-spec-review (previously deferred as SANDBOX-DEF-LOG-SCHEMA).**
+- **Producer:** `sandboxHarvestService` step 9 (one row per redacted log line).
+- **Consumer:** Run Trace virtual view (per §14.4a), operator log-tail (Phase 3.5+ if surfaced), `sandboxLogsPruneJob` at retention boundary.
+- **Columns:** `id` (UUID PK), `sandbox_execution_id` (FK to `sandbox_executions.id`), `organisation_id`, `subaccount_id`, `run_id`, `log_stream` (`stdout | stderr`), `sequence` (integer; per-(execution, stream) ordered, allocated at harvest write time), `line` (text, redacted), `emitted_at` (timestamptz — captured-from-sandbox time), `persisted_at` (timestamptz — when the row landed; default `now()`), `is_active` (boolean, soft-delete flag — set false when parent run is soft-deleted).
+- **Indexes:** PK; **`UNIQUE (sandbox_execution_id, log_stream, sequence)`** (DB-level idempotency; harvest re-runs are no-ops at the line level); `(organisation_id, persisted_at DESC)`; `(sandbox_execution_id, log_stream, sequence ASC)` (covered by the unique index — query ordering); `(run_id)`.
+- **Constraints:** `CHECK (log_stream IN ('stdout', 'stderr'))`; `CHECK (length(line) <= MAX_LOG_LINE_BYTES)` (V1 default: 64 KB per line — over-cap lines are truncated by the harvest pre-write step, never silently dropped).
+- **RLS:** `FORCE ROW LEVEL SECURITY`; org-boundary policy on `organisation_id` (same shape as §20.5). Subaccount filtering service-side.
+- **Retention:** 90 days (matches §17.3). Pruned by `sandboxLogsPruneJob` (§19.1). Logs are physically deleted at retention boundary (no tombstone — log content is not financial / audit-critical).
+- **Why a dedicated table, not a JSONB column on `sandbox_executions` or an extension of an existing log layer.** Three reasons: (1) line-level idempotency requires a per-line row with a uniqueness constraint, which a JSONB array cannot enforce at the DB layer; (2) the prune lifecycle is sandbox-specific (90d retention, run-delete cascade) and doesn't fit the lifecycles of any existing log layer; (3) RLS surface symmetry with the other four sandbox tables makes the §21 checklist trivially uniform.
+
+### 20.9 `FailureReason` enum additions
+
+| New value | Surface (DB telemetry row vs pre-row failure trace) |
 |---|---|
-| `sandbox_timeout` | Wall-clock ceiling tripped. |
-| `sandbox_cost_ceiling` | Cost ceiling tripped. |
-| `sandbox_output_invalid` | `output.json` missing / malformed / schema-failed. |
-| `sandbox_harvest_failed` | Post-terminal harvest read failed. |
-| `sandbox_artefact_upload_failed` | Object-storage upload failed. |
-| `sandbox_provider_unavailable` | Provider ambiguous-terminal, unavailability, or both enforcement layers failed. |
-| `sandbox_credential_denied` | Broker refused to issue (long-lived token + no proxy). |
-| `sandbox_input_rejected` | Preflight validator rejected. |
+| `sandbox_timeout` | DB row (`sandbox_telemetry_events.event_type = 'sandbox_timeout'` + terminal state). |
+| `sandbox_cost_ceiling` | DB row (`sandbox_cost_ceiling_hit` event + terminal state). |
+| `sandbox_output_invalid` | DB row (`output_validation_failed` event + terminal state). |
+| `sandbox_harvest_failed` | DB row (`harvest_failed` event + terminal state). |
+| `sandbox_artefact_upload_failed` | DB row (`artefact_upload_failed` event + terminal state). |
+| `sandbox_provider_unavailable` | DB row (`provider_unavailable` + canonical terminal event). |
+| `sandbox_credential_denied` | DB row (`credential_injection_denied` event + the calling run records the failure). |
+| `sandbox_input_rejected` | **Pre-row failure trace only** (per §14.2 Surface B). NO `sandbox_telemetry_events` row, NO `sandbox_executions` row. The calling run's `agent_runs.failure_reason` carries this value when preflight rejects (§9.6). |
 
 ---
 
@@ -1057,43 +1210,49 @@ Per `docs/spec-authoring-checklist.md § Section 4`, every new tenant-scoped tab
 
 ### 21.1 Coverage for Spec B's new tables
 
-| Table | RLS policy | Manifest entry | HTTP guard | Principal-scoped context |
-|---|---|---|---|---|
-| `sandbox_executions` | Yes — in migration. `FORCE RLS`. Policy on `organisation_id`. | Yes — appended to `RLS_PROTECTED_TABLES`. | N/A in Phase 2. Phase 3.5+ if a customer-visible endpoint is added. | Yes — accessed only via `withOrgTx` / `getOrgScopedDb` from `sandboxExecutionService`, `sandboxHarvestService`, reconciliation job. Job context resolver uses `agent_runs.organisation_id` via the payload. |
-| `sandbox_artefacts` | Yes — `FORCE RLS`. | Yes. | N/A in Phase 2. If an "open this artefact" endpoint is needed, it goes through `requirePermission` + signed-URL with `deriveSignedUrlExpiry` (existing pattern from `runArtifacts.ts`). Out of scope for Spec B's V1. | Yes — same orgScoped path. |
-| `sandbox_telemetry_events` | Yes — `FORCE RLS`. | Yes. | N/A in Phase 2. | Yes — same. |
-| `sandbox_egress_audit` | Yes — `FORCE RLS`. | Yes. | N/A in Phase 2. | Yes — same. |
+**RLS posture (uniform across all five new tables): organisation-boundary enforced at the RLS policy; subaccount filtering enforced at the service layer.** This matches the existing app convention (`llm_requests`, `agent_runs`, etc.). The RLS policy joins on `organisation_id = current_setting('app.organisation_id')::uuid`. Subaccount-scoped reads add `AND subaccount_id = $caller_subaccount_id` as a service-layer predicate via `sandboxExecutionService` / `sandboxHarvestService` / telemetry readers.
+
+| Table | RLS policy (org-boundary) | Manifest entry | Service-layer subaccount filter | HTTP guard | Principal-scoped context |
+|---|---|---|---|---|---|
+| `sandbox_executions` | Yes — `FORCE RLS`. Policy on `organisation_id`. | Yes — appended to `RLS_PROTECTED_TABLES`. | Yes — service reader adds `subaccount_id` predicate when caller principal is subaccount-scoped. | N/A in Phase 2. Phase 3.5+ if a customer-visible endpoint is added. | Yes — accessed only via `withOrgTx` / `getOrgScopedDb` from `sandboxExecutionService`, `sandboxHarvestService`, reconciliation job. Job context resolver uses `agent_runs.organisation_id` via the payload. |
+| `sandbox_artefacts` | Yes — `FORCE RLS`, org-boundary. | Yes. | Yes — same shape. | N/A in Phase 2. If an "open this artefact" endpoint is needed, it goes through `requirePermission` + signed-URL with `deriveSignedUrlExpiry` (existing pattern from `runArtifacts.ts`). Out of scope for Spec B's V1. | Yes — same orgScoped path. |
+| `sandbox_telemetry_events` | Yes — `FORCE RLS`, org-boundary. | Yes. | Yes — same shape. | N/A in Phase 2. | Yes — same. |
+| `sandbox_egress_audit` | Yes — `FORCE RLS`, org-boundary. | Yes. | Yes — same shape. | N/A in Phase 2. | Yes — same. |
+| `sandbox_logs` (new in Round 1, formerly deferred SANDBOX-DEF-LOG-SCHEMA) | Yes — `FORCE RLS`, org-boundary. | Yes — appended to `RLS_PROTECTED_TABLES`. | Yes — service reader adds `subaccount_id` predicate when caller principal is subaccount-scoped. | N/A in Phase 2. | Yes — same orgScoped path; harvest writer uses `withOrgTx`. |
 
 ### 21.2 Coverage for the extended `llm_requests` rows
 
-`llm_requests` is already RLS-protected (existing manifest entry). The new `sandbox_compute` rows inherit the existing policy. No new policy / manifest work needed beyond extending the CHECK constraint (§12.2).
+`llm_requests` is already RLS-protected (existing manifest entry, org-boundary). The new `sandbox_compute` rows inherit the existing policy. No new policy / manifest work needed beyond extending the CHECK constraint (§12.2). Subaccount filtering is service-side, identical to the existing `llm_requests` aggregation queries.
 
 ### 21.3 No opt-out
 
-None of Spec B's new tables are intentionally non-tenant-scoped. The four tables above are all `(organisationId, subaccountId)` scoped. Reference data (provider names, terminal states, event types) is in code constants, not in tables.
+None of Spec B's new tables are intentionally non-tenant-scoped. All five tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`) carry both `organisation_id` and `subaccount_id`. **The brief §2.12 invariant — "queryable only within the owning organisation / subaccount context" — is satisfied by BOTH layers:** the RLS policy enforces the organisation boundary at the DB; service-layer filters enforce the subaccount boundary above. Either layer alone would not satisfy the invariant; both together do. Reference data (provider names, terminal states, event types) is in code constants, not in tables.
 
 ### 21.4 Read paths
 
-All read paths against the new tables flow through `getOrgScopedDb()` or `withOrgTx`. The `verify-rls-contract-compliance` CI gate (existing, from PR #274 / #275) rejects any direct `db.select().from(sandbox*)` import in service code. Reconciliation jobs use the existing `createWorker` org-context resolver path (extracts `organisationId` from the job payload, opens `withOrgTx`).
+All read paths against the new tables flow through `getOrgScopedDb()` or `withOrgTx` for the org-boundary enforcement, AND through a service-layer reader (`sandboxExecutionServiceReader`, etc.) that adds the subaccount-scoped predicate when the caller principal is subaccount-scoped. The `verify-rls-contract-compliance` CI gate (existing, from PR #274 / #275) rejects any direct `db.select().from(sandbox*)` import in service code outside the approved readers. Reconciliation jobs use the existing `createWorker` org-context resolver path (extracts `organisationId` from the job payload, opens `withOrgTx`).
 
 ### 21.5 Admin / cross-tenant access
 
-Spec B has zero admin / system-wide read endpoints. Operator visibility comes from the structured-log events (§14.3), not from cross-tenant DB queries. If a Phase 3.5+ admin dashboard is built, it uses `withAdminConnection` per the existing P3B principal-scoped pattern (architecture.md §1116).
+Spec B has zero admin / system-wide read endpoints. Operator visibility comes from the structured-log events (§14.3), not from cross-tenant DB queries. If a Phase 3.5+ admin dashboard is built, it uses `withAdminConnection` per the existing P3B principal-scoped pattern (architecture.md §1116), and the cross-tenant queries themselves still go through the service-layer reader so subaccount scoping is uniform with the customer-facing path.
 
 ## 22. Execution model
 
 Per `docs/spec-authoring-checklist.md § Section 5`, every behaviour crossing a transactional or latency boundary picks one of: inline / sync, queued / async, cached / partition. Spec B has several behaviours; each gets its own pick.
 
+**Caller-context note (IEE Delegation Lifecycle).** The calling adapter (`iee_dev`) is itself invoked from a pg-boss `orchestratorFromTaskJob` per the existing IEE delegation lifecycle (master brief §0.3 cross-reference; Spec A's adapter contract documents this). From the orchestrator's perspective, sandbox dispatch is one step inside that job; from `SandboxExecutionService.runTask`'s perspective, it is synchronous within the calling Node process. The two views are consistent: the orchestrator-side queueing is the existing primitive (Spec A); the sandbox-side `runTask` is synchronous-from-its-caller (Spec B). Nothing changes about how delegation lifecycle events are emitted by Spec A's existing adapter contract — Spec B's `sandbox_telemetry_events` are a parallel, additive event stream, not a replacement.
+
 | Behaviour | Model | Why |
 |---|---|---|
 | `SandboxExecutionService.runTask` | **Inline / synchronous** | The calling adapter blocks on the task result. No pg-boss row for this call. Provider-side concurrency in e2b means one Node process holds one sandbox handle for the duration; the task itself runs in the sandbox process. |
 | Provider-side ceiling enforcement | **Inline** (in the sandbox provider's own timer) | Enforcement runs inside the sandbox lifecycle — provider terminates on timer expiry. No external scheduler. |
-| Worker-side ceiling fallback (`sandboxCeilingMonitorJob`) | **Queued / async (pg-boss)** | A job scheduled at execution start, wakes at `wallClockMs + buffer`, polls + terminates if provider didn't. Decoupled from the calling Node process so a crashed worker still has its sandbox terminated. |
+| Worker-side ceiling fallback (`sandboxCeilingMonitorJob` + `sandboxWallClockKillJob`) | **Queued / async (pg-boss), two-job model** | (1) Monitor: re-enqueues every `policy.ceilings.monitorIntervalMs` (V1 5s); pg-boss singleton on `sandbox_execution_id` (no duplicate ticks); exits cleanly on observing terminal state; uses the cost-fallback estimator from §10.2. (2) Wall-clock kill: one-shot, `startAfter = wallClockMs + buffer`; belt-and-braces against a stalled monitor. Both idempotent on `sandbox_execution_id`. |
 | Post-terminal harvest pipeline | **Inline within `runTask` for the happy path; async reconciliation for crashes** | The default path: provider returns terminal → calling Node process runs harvest inline → `runTask` returns. If the Node process dies between terminal and harvest completion, `sandboxHarvestReconciliationJob` (pg-boss, scheduled every 5 minutes — V1 cadence) picks it up. |
 | Harvest reconciliation (`sandboxHarvestReconciliationJob`) | **Queued / async (pg-boss)** | Reads `sandbox_executions` rows in `pending` / `running` / `harvesting` past their wall-clock-plus-buffer. Re-enqueues harvest. |
 | Cost row write | **Inline** within harvest step 10 | Single DB INSERT inside the harvest transaction for that step. Idempotent on `(sandbox_execution_id) WHERE source_type = 'sandbox_compute'` via the partial unique index. |
 | Telemetry event writes | **Inline** to `sandbox_telemetry_events` | Each event INSERT is its own statement. Sequence allocation atomic via `INSERT ... RETURNING sequence` pattern (mirrors `agentExecutionEventService`). |
 | Telemetry pruning (`sandboxTelemetryPruneJob`) | **Queued / async (pg-boss), scheduled daily** | Decoupled from request lifecycle; runs as a maintenance job. |
+| Log pruning (`sandboxLogsPruneJob`) | **Queued / async (pg-boss), scheduled daily** | Prunes `sandbox_logs` rows past 90d retention. Same shape as telemetry pruning. |
 | Egress audit pruning | **Queued / async (pg-boss), scheduled daily** | Same shape as telemetry pruning. |
 | Artefact purge on run delete (`sandboxArtefactPurgeJob`) | **Queued / async (pg-boss), triggered by run soft-delete event** | Decoupled because object-storage delete can be slow and shouldn't block the soft-delete request. |
 | Provider call retry (`withSandboxProvider`) | **Inline within the calling Node process** | `withBackoff`-style retry inside `runTask`. No pg-boss for transient retries — only for ambiguous-terminal reconciliation. |
@@ -1104,7 +1263,9 @@ Per `docs/spec-authoring-checklist.md § Section 5`, every behaviour crossing a 
 
 Three checks per `docs/spec-authoring-checklist.md § Section 5`:
 
-1. **Does any async job have an idempotency row?** Yes — all five new jobs are idempotent on `sandbox_execution_id` (reconciliation, ceiling monitor, telemetry prune, egress audit prune, artefact purge). Telemetry / egress prune is idempotent on `(table, cutoff_date)` — re-running with the same cutoff is a no-op since rows are already gone.
+1. **Does any async job have an idempotency row?** Yes, and the idempotency key shape depends on the job's scope:
+   - **Execution-scoped jobs** (idempotent on `sandbox_execution_id`): `sandboxHarvestReconciliationJob`, `sandboxCeilingMonitorJob`, `sandboxWallClockKillJob`, `sandboxArtefactPurgeJob`. Re-runs against the same `sandbox_execution_id` are no-ops once the row reaches its target terminal state.
+   - **Cutoff-scoped retention jobs** (idempotent on `(table, cutoff_date)` or equivalent): `sandboxTelemetryPruneJob`, `sandboxLogsPruneJob`, `sandboxEgressAuditPruneJob`. Retention jobs are not execution-scoped — they sweep by date boundary. Re-running with the same cutoff is a no-op because the rows have already been deleted.
 2. **Sync vs async prose match?** Yes — Spec B describes `runTask` as a synchronous call from the adapter's perspective; harvest happens inline within `runTask`'s lifetime except for the reconciliation fallback.
 3. **Non-functional goals contradict model?** No. Spec B does not claim cache efficiency or sub-millisecond latency for sandbox calls — sandboxes have inherent start-up time (seconds, not ms), so the inline model is appropriate.
 
@@ -1118,7 +1279,7 @@ Spec B's chunking pre-plan (for the architect's reference, not a final plan):
 
 | Chunk | Scope | Depends on |
 |---|---|---|
-| C1 — Types + schema | `shared/types/sandbox.ts`, four new Drizzle schemas, four migrations, `RLS_PROTECTED_TABLES` updates. | (none) |
+| C1 — Types + schema | `shared/types/sandbox.ts`; **five new Drizzle schemas** (`sandboxExecutions.ts` including lease columns, `sandboxArtefacts.ts`, `sandboxTelemetryEvents.ts`, `sandboxEgressAudit.ts`, `sandboxLogs.ts`); **four SQL migrations + one sequencing script** (per §19.4); `RLS_PROTECTED_TABLES` manifest updates (all five tables). `FailureReason` extension lives in C2 — not duplicated here. | (none) |
 | C2 — `FailureReason` extension | `shared/iee/failure.ts` enum additions. | C1 (for type consistency, though weak dep) |
 | C3 — `llm_requests` extension | Schema extension migration; CHECK constraint; partial unique index. | C1 |
 | C4 — Provider resolver + `inlineSandbox` | `sandboxProviderResolver.ts`, `inlineSandbox.ts`, hard guards. | C1, C2 |
@@ -1128,7 +1289,7 @@ Spec B's chunking pre-plan (for the architect's reference, not a final plan):
 | C8 — `withSandboxProvider` wrapper | `server/lib/withSandboxProvider.ts`. Backoff + ambiguous-terminal reconciliation. | C5 |
 | C9 — `e2bSandbox` provider | `e2bSandbox.ts`. Uses `withSandboxProvider`. | C5, C8 |
 | C10 — `localDockerSandbox` provider | `localDockerSandbox.ts`. Reads from local-built image. | C5 |
-| C11 — Pg-boss jobs | `sandboxHarvestReconciliationJob` (needs harvest pipeline from C7), `sandboxCeilingMonitorJob` (needs the `withSandboxProvider` terminate path from C8 AND the provider implementations from C9/C10), `sandboxTelemetryPruneJob`, `sandboxEgressAuditPruneJob`, `sandboxArtefactPurgeJob`. `server/jobs/index.ts` registration. | C7, C8, C9 (and C10 for local-dev parity) |
+| C11 — Pg-boss jobs (**seven total**) | `sandboxHarvestReconciliationJob` (needs harvest pipeline from C7); `sandboxCeilingMonitorJob` (needs `withSandboxProvider` terminate path from C8 AND provider implementations from C9/C10; consumes `templateResourceClass.maxCostCentsPerSecond` from C12 `CURRENT_VERSION`); **`sandboxWallClockKillJob`** (one-shot kill paired with the monitor per §10.2; same dependency set as the monitor); `sandboxTelemetryPruneJob`; **`sandboxLogsPruneJob`** (90d retention sweep on `sandbox_logs`, locked Round 1 F1); `sandboxEgressAuditPruneJob`; `sandboxArtefactPurgeJob`. `server/jobs/index.ts` registration of all seven. | C7, C8, C9 (and C10 for local-dev parity), C12 (for `CURRENT_VERSION` cost-rate field consumed by the ceiling monitor) |
 | C12 — Template Dockerfile + CI publish pipeline | `infra/sandbox-templates/synthetos-sandbox/*`, `docker-compose.sandbox.yml`, CI workflow update. | C1 (so e2b/localDocker can be tested e2e once built) |
 | C13 — `iee_dev` adapter rewiring + classification helper | Modify `ieeDevBackend.ts`, add `ieeDevBackendPure.ts` with `classifyExecutionClass`, pure tests. | C5, C9 (or C10 for local), C12 (templates must be built and pinned before adapter rewiring goes live in CI — see §23.1) |
 | C14 — CI gates + doc-sync | 5 new gate scripts; `architecture.md` update; `docs/capabilities.md` row; `docs/env-manifest.json` updates; migration dry-run script. | All of C1–C13 |
@@ -1154,7 +1315,8 @@ C1 ──┬──> C2 ──> C5 ──> C6 ──> C7 ──> C11 ──┐
 
 Notes:
 - `C12 → C13`: the `iee_dev` adapter rewiring cannot land in CI before the template Dockerfile + CI publish pipeline exists, because the new dispatch path resolves `template_version` against `CURRENT_VERSION` (§15.2) and refuses `latest` (§15.3). C12 itself depends only on C1 (the schema must be in place), so C12 can run in parallel with most of the C2–C11 fanout — but the gating edge into C13 is mandatory.
-- `C8/C9/C10 → C11`: the `sandboxCeilingMonitorJob` inside C11 calls the provider's terminate API through the `withSandboxProvider` wrapper (C8) and the provider implementations (C9 + C10). C11's other jobs only need C7's harvest API, but the monitor's provider-terminate call path means C11 as a whole cannot land before C8/C9/C10 are in.
+- `C8/C9/C10 → C11`: the `sandboxCeilingMonitorJob` + paired `sandboxWallClockKillJob` inside C11 call the provider's terminate API through the `withSandboxProvider` wrapper (C8) and the provider implementations (C9 + C10). C11's other jobs only need C7's harvest API, but the monitor/kill provider-terminate call paths mean C11 as a whole cannot land before C8/C9/C10 are in.
+- `C12 → C11`: the `sandboxCeilingMonitorJob` reads `templateResourceClass.maxCostCentsPerSecond` from the template's `CURRENT_VERSION` (§15.2) to drive the cost-fallback estimator (§10.2). The `templateVersionParserPure.ts` from C12 is the consumer surface for both the monitor (C11) and the runtime sandbox start path (C5/C9/C10). C11's monitor cannot land in CI before C12 provides the parser.
 
 No backward dependencies. C14 (CI gates + doc-sync) closes the build. C12 (templates + CI publish) is parallelisable with most chunks but must complete before C13's adapter rewiring goes live in CI.
 
@@ -1183,7 +1345,7 @@ Per `docs/spec-authoring-checklist.md § Section 10`, every new write path / sta
 | Artefact upload row | **key-based** | `UNIQUE (sandbox_execution_id, filename)` on `sandbox_artefacts`. |
 | Telemetry event write | **key-based** | `UNIQUE (sandbox_execution_id, sequence)` on `sandbox_telemetry_events`. |
 | Egress audit write | **non-idempotent (intentional)** | Egress decisions are an append-only audit log; same `sandbox_execution_id` + `destination_host` can legitimately repeat. No idempotency key; duplicate writes are allowed and meaningful. |
-| Provider start call | **state-based** | Provider call is wrapped: BEFORE call, atomic `INSERT INTO sandbox_executions (..., status='pending')`. If the row exists in `pending` from a prior attempt, the caller joins (does not re-issue). |
+| Provider start call | **state-based with start-claim lease** | BEFORE call, atomic `INSERT INTO sandbox_executions (..., status='pending', start_claimed_at=now(), start_claim_expires_at=now()+lease_window, start_attempt_count=1)`. After provider start succeeds, atomic `UPDATE ... SET provider_sandbox_id=$X, status='running' WHERE id=$id AND start_claimed_at=$claim_ts`. On retry: if row exists with `provider_sandbox_id IS NOT NULL` or `status IN (terminal-set)`, caller joins / returns canonical; if row in `pending` with `provider_sandbox_id IS NULL` and `start_claim_expires_at < now()`, caller reclaims the lease (lease reclaim path in §8.1). Lease + cap together prevent both duplicate provider starts AND the deadlock that would occur if a worker crashed mid-start (per F3, chatgpt-spec-review Round 1). |
 | Provider terminate call | **non-idempotent at provider, idempotent at our boundary** | The provider's terminate API may be called multiple times by us (worker-side fallback + reconciliation) — provider handles idempotency. On our side, the `sandbox_executions.status` state guard prevents duplicate terminal writes. |
 
 ### 24.2 Retry classification
@@ -1221,7 +1383,7 @@ Unique-constraint violations map to HTTP / failure surfaces:
 
 Per the harvest pipeline (§8.4), every `sandbox_executions` row in a terminal state has exactly one CANONICAL terminal telemetry event: a `sandbox_terminal` event for post-start executions, or a `sandbox_start_failed` event for the pre-start failure path. The canonical terminal event is the first one written for a given `sandbox_execution_id`. Post-canonical-terminal prohibition: no further events with the same `sandbox_execution_id` after the canonical terminal EXCEPT:
 
-- Cost-correction events from §12.4 (these are explicitly post-terminal corrections; allowed because they're additive to the audit trail, not contradictory).
+- **Cost-correction ledger rows** from §12.4 (these are explicitly post-terminal corrections; they are `llm_requests` rows with `source_type = 'sandbox_compute_correction'`, NOT `sandbox_telemetry_events` rows. There is no telemetry event type for corrections — the canonical record is the ledger row itself, which is audit-discoverable via the existing `llm_requests` join in the Run Trace virtual view (§14.4a). Calling them "ledger rows" rather than "events" avoids confusion with the §14.2 telemetry enum, which has no `sandbox_cost_corrected` member.).
 - Reconciliation events from the harvest_failed / artefact_upload_failed recovery path (§13.1 reconciliation-recoverable exception). When the row re-enters `harvesting`, the recovery attempt emits its own `harvest_started` + `harvest_failed|artefact_uploaded|sandbox_terminal` events with `reconciliationAttempt: N` and `isCanonical: false` in the payload. The first `sandbox_terminal` event with `isCanonical: true` remains the only canonical terminal; subsequent ones are explicitly non-canonical recovery events that the "exactly one canonical terminal" rule does NOT cover.
 - Late-arriving provider terminate events (e.g., e2b webhook fires after our wrapper already declared `provider_unavailable`): the late event is recorded with a `late_arriving: true` flag in `payload_json` and the canonical state is not changed.
 - `provider_diagnostic` events are pre-terminal by definition (§14.2) and do not violate this rule; they cannot fire after the canonical terminal event for the same `sandbox_execution_id`.
@@ -1287,7 +1449,7 @@ Five new gate scripts (§19.2):
 
 - `verify-sandbox-classification.sh` — grep-based. Fails if any `dispatch()` body in `executionBackends/` reaches an execution call (Node `child_process`, worker enqueue, etc.) without first consulting `classifyExecutionClass`. Pattern-set similar to PR #267 B.4 Pass 4.
 - `verify-sandbox-minimum-events.sh` — grep-based. Three-pass check matching the phase-scoped contract in §14.5: (1) pre-start terminal-status writers (`pending → provider_unavailable` without entering `running`) must pair with a `sandbox_start_failed` event write; (2) post-start-without-output-read terminal-status writers (mid-execution `provider_unavailable`; `harvest_failed` at step 2) must pair with `sandbox_start` + `sandbox_terminal` (`harvestStepReached < 3`); (3) post-start-with-output-read terminal-status writers (all other terminals) must pair with `sandbox_start` + `sandbox_terminal` (`harvestStepReached >= 3`) + one of (`output_validated` | `output_validation_failed`). The three paths are distinguished by whether `running` was entered (pass 1 vs 2/3) and by the `harvestStepReached` payload field (pass 2 vs 3).
-- `verify-template-version-coherence.sh` — checks `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION` matches an existing git tag prefixed `sandbox-template/synthetos-sandbox/v*` (or `local-dev-*` for non-publish branches).
+- `verify-template-version-coherence.sh` — verifies the `CURRENT_VERSION` + `PUBLISHED_VERSION` two-file contract (§15.2): five-field shape on `CURRENT_VERSION` (incl. `max_cost_cents_per_second` consumed by the cost-fallback estimator), matching git tag prefix `sandbox-template/{name}/v*` (or `local-dev-*` for non-publish branches), published-image attestation present within the 24h grace window, and `version` agreement between the two files.
 - `verify-no-sandbox-cost-update.sh` — grep-based. Fails if any `.ts` file contains an `update(llmRequests)` / `db.update(llmRequests)` call against the sandbox-source-type rows.
 - `verify-no-inline-sandbox-outside-test.sh` — grep-based. Fails if `inlineSandbox` import / construction appears outside `.test.ts`, `__tests__/`, or `e2e/` paths.
 
@@ -1295,7 +1457,7 @@ All five gates plug into the existing CI workflow alongside the gates from PR #2
 
 ### 25.3 Existing CI gates inherited (no new work)
 
-- `verify-rls-coverage.sh` — automatically picks up the four new tables once their manifest entries exist.
+- `verify-rls-coverage.sh` — automatically picks up the five new tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`) once their manifest entries exist.
 - `verify-rls-contract-compliance.sh` — automatically rejects raw-DB-access regressions in Spec B's services.
 - `verify-test-quality.sh` — automatically rejects `node:assert` / `node:test` in new test files.
 - `verify-pure-helper-convention.sh` — enforces the `*ServicePure.ts` naming + dual-export pattern (from PR #267).
@@ -1326,7 +1488,7 @@ Spec B and Spec C (`operator-session-identity`) run in parallel on separate bran
 
 ### 26.1 No code-area conflicts
 
-- **Spec B's code surface:** `server/services/sandbox*`, `server/services/executionBackends/ieeDev*`, `server/db/schema/sandbox*`, `infra/sandbox-templates/`, `server/lib/withSandboxProvider.ts`, `server/lib/sandboxRetentionConstants.ts`, `server/jobs/sandbox*`, the four new migrations + `llm_requests` extension migration.
+- **Spec B's code surface:** `server/services/sandbox*`, `server/services/executionBackends/ieeDev*`, `server/db/schema/sandbox*` (five new schemas), `infra/sandbox-templates/`, `server/lib/withSandboxProvider.ts`, `server/lib/sandboxRetentionConstants.ts`, `server/jobs/sandbox*` (seven new jobs), the four SQL migrations + one sequencing script per §19.4 (which together extend `llm_requests` plus create the five sandbox tables).
 - **Spec C's code surface:** `server/services/credentialBroker*`, OAuth callback handlers, new consent-log table, connection UI. Per brief §3.
 
 These do not overlap. Both touch `architecture.md` (different sections) and `llm_requests` schema (different `source_type` values). Doc-sync sweep at finalisation reconciles.
@@ -1380,7 +1542,7 @@ Per `docs/spec-authoring-checklist.md § Section 7`, every prose mention of "def
 - **Object-storage prefix alignment with `fileService` / `fileDeliveryService`** (§28 #6). If build-time inspection finds a path-convention drift, alignment is a follow-up task — Spec B's sandbox prefix is independent of existing file-delivery paths.
 - **ADR `docs/decisions/0009-sandbox-execution-service.md`** (§28 #8). Authored during Phase 2 build, not Phase 1.
 - **`SANDBOX-DEF-EGRESS-MECH`** (§9.1). Build-time choice of egress interception mechanism (e2b SDK hooks vs application-layer proxy vs CNI/eBPF). Audit-row schema is locked in §20.6 independent of the mechanism. Decision lands during C12 template-build chunk after verifying e2b's exposed hooks.
-- **`SANDBOX-DEF-LOG-SCHEMA`** (§8.4 step 9, §17.1). Build-time choice of sandbox log sink (new `sandbox_logs` table vs extension of an existing structured-log layer). Whichever path is chosen MUST honour the `(sandbox_execution_id, log_stream, sequence)` idempotency key and per-tenant RLS. **Decision timing depends on the chosen option:** if the existing-layer extension is chosen, the work folds into C7 (harvest pipeline) as planned; if the new `sandbox_logs` table is chosen, the schema + migration + RLS manifest entry + retention prune job must land in C1 (types + schema) — meaning the option choice itself MUST be made before C1 starts. C7 cannot proceed past step 9 wiring without the option locked. Captured in `tasks/todo.md` as the chunk-zero gating decision for the build.
+- **`SANDBOX-DEF-LOG-SCHEMA` — CLOSED at chatgpt-spec-review Round 1 (F1).** Locked to dedicated `sandbox_logs` table (§20.8) on the basis that it is the cleaner RLS surface (symmetric with the other four sandbox tables), supports line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` which a JSONB column cannot enforce, and decouples sandbox-log retention (90d) from the existing general-application log layer's lifecycle. Schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). Closed in `tasks/todo.md` in the same commit.
 
 ---
 
@@ -1394,7 +1556,7 @@ The questions below were carried forward from the brief intake for `spec-reviewe
 
 3. **Egress audit table scope** — locked: ship `sandbox_egress_audit` day-1 (§20.6), even though V1's default `network: 'none'` policy means most executions write zero rows. The migration is cheap; post-hoc enabling would require a second migration plus retroactive design work.
 
-4. **Provider-side cost ceiling enforcement granularity** — locked: V1 ships with the two-layer model in §10.2, with the worker-side `sandbox-ceiling-monitor` job polling provider cost at **5-second intervals** between the start of the sandbox and `wallClockMs + buffer`, AND firing a hard terminate at the cost ceiling regardless of provider real-time-cost-API support. The wall-clock ceiling remains the absolute upper bound (a sandbox without real-time cost data still terminates at its wall-clock limit). This satisfies brief §2.7 / §6 invariants — both ceilings are enforced, never only in app logic, and the worker-side fallback covers the case where the provider's billing API is not real-time. Re-evaluate the polling interval after first month of production cost data; the 5-second value is a §27 deferred parameter, not a load-bearing contract.
+4. **Provider-side cost ceiling enforcement granularity** — locked (revised at chatgpt-spec-review Round 1 F2 to resolve the previous internal contradiction between "best-effort provider-side cost" and "worker hard-terminate at cost ceiling regardless"): V1 ships with the two-layer model in §10.2 plus a **conservative upper-bound fallback estimator**. The worker-side `sandbox-ceiling-monitor` job re-enqueues every `policy.ceilings.monitorIntervalMs` (V1 default 5s); the paired one-shot `sandbox-wall-clock-kill` job is scheduled at `startAfter = wallClockMs + buffer`. On each monitor tick, the job computes `estimated_cost_cents = elapsedMs / 1000 × templateResourceClass.maxCostCentsPerSecond`. `maxCostCentsPerSecond` is the vendor-published worst-case rate for the template's resource class (pinned in `CURRENT_VERSION` per §15.2). When estimated cost ≥ ceiling OR provider real-time cost (where available) ≥ ceiling, the monitor terminates the sandbox. Final billing uses provider-reported cost at harvest (§12); deltas vs the estimate are captured as cost-correction ledger rows. **Effect:** cost ceiling enforcement is real and unconditional, never optimistic — the upper-bound estimator can never silently underestimate. Re-evaluate the monitor interval after first month of production cost data; the 5-second value is a §27 deferred ops parameter.
 
 5. **`sandbox_input_rejected` audit shape** — locked: recorded on the calling run's `agent_runs.failure_reason` column with structured detail in the existing run-failure trace. No new audit surface, no `sandbox_executions` row, no `sandbox_telemetry_events` row. The build chunk confirms the trace shape matches the existing `failure_reason` convention.
 
@@ -1460,7 +1622,7 @@ Each invariant from `tasks/builds/sandbox-isolation/brief.md § 6` cross-referen
 - Template CI defines vulnerability scanning posture → §15.4. ✅
 - `localDockerSandbox` template parity contract → §8.2.2. ✅
 - No broad `artefact` / `artifact` naming migration → §8.3, §19.5 (existing `run_artifacts` table unchanged). ✅
-- Sandbox telemetry / artefacts / cost / egress audit RLS-enforced → §14.4, §21. ✅ (Logs: the per-tenant RLS / scoping requirement is **contractually mandated** — see §8.4 step 9 — but the concrete log-sink schema is a build-time decision tracked in §27 / `SANDBOX-DEF-LOG-SCHEMA`. Whichever sink is chosen MUST honour §14.4 / §21 scoping rules; the build PR updates the inventory and manifest in the same change.)
+- Sandbox telemetry / artefacts / cost / egress audit / **logs** RLS-enforced (organisation boundary at RLS, subaccount boundary at service layer per Round 1 F4) → §14.4, §21. ✅ Logs locked to dedicated `sandbox_logs` table at Round 1 F1 (§20.8); RLS policy + manifest entry + `sandboxLogsPruneJob` land in C1.
 - Egress audit logging when network is allowed → §9.1, §14.2, §20.6. ✅
 - Ledger rows retained / anonymised / correction-reversed on run deletion → §17.4. ✅
 
@@ -1502,10 +1664,10 @@ No load-bearing claim is unbacked.
 |---|---|
 | Section 0 — verify deferred items | n/a (greenfield) ✅ |
 | Section 1 — new primitives have "why not reuse" justifications | ✅ (§6 + §8.1 + §14.1) |
-| Section 2 — file inventory has every new file / column / migration | ✅ (§19) — provisional for the log sink (build-time choice tracked in §27 / `SANDBOX-DEF-LOG-SCHEMA`; whichever option lands, the build PR updates §19/§21 in the same commit) |
-| Section 3 — every contract has an example | ✅ (§20) |
+| Section 2 — file inventory has every new file / column / migration | ✅ (§19) — five sandbox tables + four SQL migrations + one sequencing script + seven pg-boss jobs (harvest reconciliation, ceiling monitor, wall-clock kill, telemetry prune, logs prune, egress audit prune, artefact purge) inventoried. |
+| Section 3 — every contract has an example | ✅ (§20) — five new tables (`sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`) plus the extended `llm_requests` row shape. |
 | Section 3 — source-of-truth precedence declared | ✅ (§7.3, §20.1, §20.2, §20.7) |
-| Section 4 — RLS / manifest / guard / principal-scope for each new tenant table | ✅ (§21) — log sink: the RLS / scoping requirement is contractually mandated in §8.4 step 9 / §29.2 but the concrete table or layer is a build-time decision (`SANDBOX-DEF-LOG-SCHEMA`); the build PR adds the entry to §21 in the same commit |
+| Section 4 — RLS / manifest / guard / principal-scope for each new tenant table | ✅ (§21) — all five sandbox tables enforce organisation-boundary RLS (matching existing app convention) + subaccount filtering at the service layer. `sandbox_logs` added in Round 1 F1. |
 | Section 5 — execution model picked explicitly per behaviour | ✅ (§22) |
 | Section 6 — phase dependency graph clean | ✅ (§23.1) |
 | Section 7 — Deferred Items section exists | ✅ (§27) |

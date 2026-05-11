@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
-last_updated: 2026-05-11T01:28:16Z
+active_spec: tasks/builds/sandbox-isolation/spec.md
+active_plan: tasks/builds/sandbox-isolation/plan.md
+build_slug: sandbox-isolation
+branch: claude/evolve-sandbox-isolation-brief-Q51hc
+status: BUILDING
+last_updated: 2026-05-11
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -24,17 +24,19 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** `tasks/builds/sandbox-isolation/spec.md` (LOCKED 2026-05-11; status `accepted`; 1679 lines)
+**Active plan:** `tasks/builds/sandbox-isolation/plan.md` (authored in Phase 2 by `feature-coordinator` invoking `architect`)
+**Active build slug:** sandbox-isolation
+**Branch:** claude/evolve-sandbox-isolation-brief-Q51hc
+**Status:** **BUILDING** — Phase 1 (SPEC) complete. Handoff at `tasks/builds/sandbox-isolation/handoff.md`. Spec passed: spec-reviewer (Codex, 4 iterations, READY_FOR_BUILD) + v1.2 master architecture alignment pass + chatgpt-spec-review (3 rounds, 30 findings, all auto-applied as technical fixes, Round 3 APPROVED — LOCK). Master architecture anchor: `docs/synthetos-governed-agentic-os-brief-v1.2.md`. Sibling Spec C (`operator-session-identity`) runs concurrently on a separate branch per `tasks/builds/sandbox-isolation/brief.md § 3` — different code surfaces, no conflicts. **Next:** operator launches `feature-coordinator` in a new Claude Code session for Phase 2.
 
-**Just merged:** PR #284 — `pre-test-hardening` (squash-commit `37067df9`, 2026-05-11T01:28:16Z). 14-item launch-blocker security hardening sprint shipped: W1-W3 webhook auth + per-org Teamwork URL token + DB-backed replay nonces; T1-T3 support read subaccount scoping + cross-org scope-ID rejection + taskService caller-supplied tx contract (17 caller sites); S1-S2 four missing support-draft preflight checks + agent-principal overrideCollision guard; V1-V2 connection-status enum + CHECK constraint + advisory-lock knowledge override race fix; O1-O5 working-time-rollup compact + migration 0240 phased-swap runbook + reseed prod-DB guards (allowlist NODE_ENV=development) + branch-protection requirement. 3 migrations 0318/0319/0320 (renumbered post-S2 from 0313-0315 to clear PR #281/283 collision). Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer 2 rounds APPROVED → dual-reviewer Codex APPROVED (4 iterations) → adversarial-reviewer HOLES_FOUND (PTH-ADV-1 closed) → S2 merge → chatgpt-pr-review 8 rounds APPROVED (13 fixes + 2 operator-approved spec deviations: createTask side-effect split + reseed allowlist) → CI auto-fix 3 iterations (gate-script exclusions + integration-test setup fixes). 6 duplicate false-positive `withAdminConnection` import claims auto-rejected. PR #284 handoff: `tasks/builds/pre-test-hardening/handoff.md`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-test-hardening-2026-05-10T23-20-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-pre-test-hardening-2026-05-11T00-50-15Z.md`. CI ALL GREEN at merge time.
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
 
-**Just merged:** PR #283 — `phase-1-showcase-mvps` (squash-commit `f3dac9f3`, 2026-05-10). Phase 1 Showcase MVPs — Phase 3 complete. chatgpt-pr-review 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (PHASE1-N1 phase1.* filter posture deferred). Migrations 0313/0314/0315/0316/0317 (run_artifacts + support_agent_install + support_eval_runs + corrective + RLS guards). Doc-sync sweep: 3 docs updated. KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`.
+**Just merged:** PR #284 — `pre-test-hardening` (squash-commit `37067df9`, 2026-05-11T01:28:16Z). 14-item launch-blocker security hardening sprint shipped: W1-W3 webhook auth + per-org Teamwork URL token + DB-backed replay nonces; T1-T3 support read subaccount scoping + cross-org scope-ID rejection + taskService caller-supplied tx contract (17 caller sites); S1-S2 four missing support-draft preflight checks + agent-principal overrideCollision guard; V1-V2 connection-status enum + CHECK constraint + advisory-lock knowledge override race fix; O1-O5 working-time-rollup compact + migration 0240 phased-swap runbook + reseed prod-DB guards (allowlist NODE_ENV=development) + branch-protection requirement. 3 migrations 0318/0319/0320. Pipeline: spec-conformance → pr-reviewer 2 rounds APPROVED → dual-reviewer Codex APPROVED (4 iterations) → adversarial-reviewer HOLES_FOUND → S2 merge → chatgpt-pr-review 8 rounds APPROVED. PR #284 handoff: `tasks/builds/pre-test-hardening/handoff.md`. CI ALL GREEN at merge time.
 
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when pre-test-hardening reaches MERGED.
+**Just merged:** PR #285 — `evolve-sandbox-isolation-brief` (squash-commit `4637e7c0`, 2026-05-10). Scope briefs for Specs B (`sandbox-isolation`) and C (`operator-session-identity`).
+
+**Just merged:** PR #283 — `phase-1-showcase-mvps` (squash-commit `f3dac9f3`, 2026-05-10T21:54:21Z). Phase 1 showcase MVPs across the support/eval surfaces. Migrations 0313/0314/0315/0316/0317. KNOWLEDGE.md +3 patterns. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`.
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 
