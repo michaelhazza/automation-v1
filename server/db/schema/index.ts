@@ -316,3 +316,7 @@ export * from './supportEvalRuns.js';
 
 // Pre-Test Hardening W3 — persistent webhook replay nonces (migration 0318 — renumbered from 0313 post-S2)
 export * from './webhookReplayNonces.js';
+
+// Operator Session — consent ledger and events (migrations 0321-0322)
+export * from './operatorSessionConsents.js';
+export * from './operatorSessionConsentEvents.js';

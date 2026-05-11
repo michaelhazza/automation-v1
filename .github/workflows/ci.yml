@@ -147,6 +147,9 @@ jobs:
       - name: B.4 Audit event namespace (no raw eventType strings)
         run: bash scripts/verify-audit-event-namespace.sh
 
+      - name: "B.5 Operator session consents immutability (R3)"
+        run: bash scripts/verify-operator-session-consent-immutable.sh
+
       - name: "E.6 Skill error envelope (return paths must include ok: field)"
         run: bash scripts/verify-skill-error-envelope.sh
 
