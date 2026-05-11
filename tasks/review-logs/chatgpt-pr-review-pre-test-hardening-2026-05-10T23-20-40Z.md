@@ -129,5 +129,27 @@
 
 **Round 5 verdict:** CHANGES_REQUESTED → APPROVED.
 
-**Round 6 diff:** pending generation after commit.
+### Round 6 — 2026-05-11T00:25:00Z (post Round 5 commit `91ed6c8c`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `connectorConfigService.ts` missing `withAdminConnection` import + `systemIncidentService.ts` missing `sql` import | high (claimed blocker) | typecheck | scope | technical | **reject** | auto (reject) — **fourth duplicate false positive** (Rounds 1, 3, 4, 6). Both imports verified present: `withAdminConnection` at `connectorConfigService.ts:7`; `sql` at `systemIncidentService.ts:3`. Typecheck PASSED across all 6 rounds. |
+| F2 | Legacy 4-arg `createTask` shim still emits side effects pre-commit (calls `_createTask` recursively which fires emit inline) | high (claimed blocker) | observability / transaction-correctness | error_handling | technical | **implement** | auto (implement) — restructured the legacy shim: extract `input`, open `db.transaction(...)` containing only `_createTaskCore(input, innerTx)`, capture the returned item, then call `emitCreateTaskSideEffects(item, input)` AFTER the transaction returns. Side effects now fire post-commit on the legacy path too. |
+| F3 | Public `createTask(input, tx)` still emits side effects inline; HTTP routes + skillExecutor + onboarding callers using `getOrgScopedDb()` get pre-commit emit if their wrapping tx rolls back | high (claimed blocker) | observability / transaction-correctness | architecture | technical (scope_signal: architectural) | **defer** | **ESCALATED to operator — operator chose DEFER as PTH-CGT-R6-F3.** PR has materially improved state (5 critical callers + legacy shim now correct). Remaining callers have narrow failure windows (HTTP routes do little between createTask and `res.json`). Pre-existing pattern; spec §0.1 forbids broader refactors. Backlog entry documents 3 fix options for next sprint (migrate all remaining, add afterCommit primitive, deprecate createTask). |
+| F4 | `deliveryService.deliver` + `scheduledTaskService.fireOccurrence` ALS-present branches emit inline (same class as F3) | high (claimed blocker) | observability / transaction-correctness | architecture | technical (scope_signal: architectural) | **defer** | Tied to F3 decision — operator chose DEFER for the broader pattern. The fallback (no-ALS) branches in both services already emit post-commit per Round 5 F1. The ALS-present branches retain pre-PR semantics (caller-owns-tx; inline emit). Documented as part of PTH-CGT-R6-F3 backlog entry. |
+| F5 | `supportRouteScoping.test.ts` 404 section has weak live-route coverage (already raised in Round 3 R2) | low | test-quality | test_coverage | technical | **no action** | already deferred as `PTH-CGT-R3-R2` in `tasks/todo.md`. No new action this round. |
+| F6 | `resolveSubaccount` returns 403 for cross-org subaccount IDs vs 404 for non-existent — status-code enumeration leak | medium | security / defence-in-depth | other | technical | **defer** | spec-level decision. Spec §3.1 acceptance test for T1 explicitly chose 403 for cross-org subaccount IDs. Changing this requires amending the spec. Backlog entry `PTH-CGT-R6-F6` flags for spec review next sprint with two fix options. |
+
+**Auto-applied:** F2 (1 finding).
+**Auto-rejected:** F1 (1 finding — fourth duplicate false positive).
+**Deferred to backlog:** F3, F4 (operator decision, single backlog entry `PTH-CGT-R6-F3`), F6 (spec-level, backlog entry `PTH-CGT-R6-F6`).
+**No action:** F5 (already deferred as PTH-CGT-R3-R2).
+
+**Verification after Round 6 fixes (commit pending):** server typecheck CLEAN (0 errors); taskService.createTask.regression 5/5 pass (the F2 fix preserves all assertions because the test mocks `db.transaction` and asserts the same execute-order contract).
+
+**Round 6 verdict:** CHANGES_REQUESTED → APPROVED with 2 deferred (PTH-CGT-R6-F3, PTH-CGT-R6-F6).
+
+**Round 7 diff:** pending generation after commit.
 

@@ -99,19 +99,25 @@ async function _createTask(
     // Transitional shim for sister-branch callers (workflowEngineService) that have not yet
     // migrated to (input, tx). Opens its own transaction and sets the org GUC so RLS passes.
     // DEC-4 / spec §3.3 — remove once sister branch lands its withOrgTx wrappers.
+    // PTH-CGT-R6-F2: emit side effects AFTER the inner tx commits, not before.
+    // Previously this called _createTask recursively which fired emit inline,
+    // meaning side effects fired while the inner tx was still uncommitted.
     const organisationId = arg1;
     const subaccountId = arg2 as string;
     const data = arg3!;
     const userId = arg4;
+    const input: CreateTaskInput = { organisationId, subaccountId, data, userId };
     logger.warn('taskService.createTask_legacy_4arg', {
       event: 'legacy_4arg_createTask',
       organisationId,
       note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
     });
-    return db.transaction(async (innerTx) => {
+    const item = await db.transaction(async (innerTx) => {
       await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
-      return _createTask({ organisationId, subaccountId, data, userId }, innerTx);
+      return _createTaskCore(input, innerTx);
     });
+    emitCreateTaskSideEffects(item, input);
+    return item;
   }
 
   // Canonical implementation — arg1 is CreateTaskInput, arg2 is OrgScopedTx.

@@ -4057,3 +4057,43 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
 3. Keep the section but rename to "404 envelope shape contract pin" and add an explanatory comment.
 
 **Suggested classification:** P3 (test quality, not correctness).
+
+### PTH-CGT-R6-F3 — remaining createTask(input, tx) callers still emit side effects pre-commit
+
+**Origin:** chatgpt-pr-review Round 6 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** the public `taskService.createTask(input, tx)` API calls `createTaskCore` + `emitCreateTaskSideEffects` inline. Round 5 F1 migrated 5 critical callers to call `createTaskCore` + `emitCreateTaskSideEffects` after their outer commit. The following callers still use the public `createTask(input, tx)` and would fire side effects pre-commit if their wrapping tx rolls back:
+
+- `server/services/skillExecutor.ts` (4 call sites — agent skill execution path)
+- `server/services/workflowRunStartSkillService.ts`
+- `server/services/subaccountOnboardingService.ts`
+- `server/routes/workflowRuns.ts`
+- `server/routes/portal.ts` (2 call sites — replay paths)
+- `server/routes/tasks.ts`
+
+**Risk:** narrower than the 5 callers Round 5 fixed (HTTP routes have little logic between createTask and `res.json`; skillExecutor's failure window depends on the skill graph). Pre-existing pattern. Severity: low — observability concern, not correctness.
+
+**Why deferred:** spec §0.1 explicitly forbids refactors beyond what each fix requires. The PR has materially improved the state (5 critical callers + legacy shim now correct). A blanket migration is architectural scope-out for a hardening sprint.
+
+**Fix options for the next sprint:**
+1. Migrate all 6 remaining callers to `createTaskCore` + post-commit `emitCreateTaskSideEffects`. ~40-80 LOC across 10 call sites.
+2. Add `afterCommit(fn)` primitive to `OrgTxContext` (`server/instrumentation.ts`); auth middleware fires registered callbacks after tx commit. Have `createTask(input, tx)` auto-register `emitCreateTaskSideEffects` via afterCommit. Mechanically safe; all callers benefit. ~50-100 LOC including tests.
+3. Deprecate `createTask(input, tx)` with a runtime warning when called inside a tx; force migration over time.
+
+**Suggested classification:** P2 (correctness/observability, not security).
+
+---
+
+### PTH-CGT-R6-F6 — resolveSubaccount discriminates 403 (cross-org) from 404 (not found) via status code
+
+**Origin:** chatgpt-pr-review Round 6 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/lib/resolveSubaccount.ts:14-17` — queries without org filter, returns 404 if no subaccount with that id exists, 403 if it exists but belongs to a different org.
+
+**Risk:** minor enumeration leak. An attacker can probe subaccount IDs and discriminate "exists in another org" (403) from "does not exist" (404) via the HTTP status code. The body message is identical ("Subaccount not found") which provides some defence.
+
+**Why deferred:** the spec §3.1 acceptance test for T1 explicitly chose 403 for cross-org subaccount IDs ("Negative test: GET with another org's subaccountId in the path → 403"). This is a spec-level design choice, not a code bug. Changing it requires amending the spec.
+
+**Fix options for the next sprint (if spec is amended):**
+1. Strict: keep query org-filtered (revert to pre-PR behaviour); return 404 for both cases.
+2. Hybrid: keep current behaviour for known-trusted admin paths; return 404 elsewhere.
+
+**Suggested classification:** P3 (defence-in-depth; not actively exploitable without further chained vulns).
