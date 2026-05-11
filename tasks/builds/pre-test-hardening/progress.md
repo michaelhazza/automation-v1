@@ -237,3 +237,22 @@ Run by `spec-conformance` agent, full-spec scope. All 14 implementation items (W
 `npx tsc --noEmit -p server/tsconfig.json` clean. `npm run lint` clean (0 errors, 903 warnings — pre-existing). Sister-branch scope-out gate: zero diff in §0.2 forbidden paths (`server/middleware/*`, `workflowEngineService.ts`, `workflowRunService.ts`, `agentExecutionService.ts`, `agentRuns` schema).
 
 Audit log: `tasks/review-logs/spec-conformance-log-pre-test-hardening-2026-05-10T21-01-31Z.md`.
+
+---
+
+## Post-spec tightening (chatgpt-pr-review Round 8 F1 — 2026-05-11)
+
+**Spec deviation (operator-approved):** `scripts/lib/prod-db-guard.ts::assertDevTargetOrThrow` switched from blocklist (`NODE_ENV === 'production'` throws) to allowlist (`NODE_ENV !== 'development'` throws). Also explicitly fails when `DATABASE_URL` is unset.
+
+**Why:** spec §6.3 was permissive — `NODE_ENV=staging`/`test`/`integration`/`undefined` would pass the primary guard and rely entirely on the secondary host denylist (supabase/neon/render/rds.amazonaws/pooler.). chatgpt-pr-review Round 8 F1 flagged that this allows a CI runner with `NODE_ENV=test` and a real DB URL not matching the host denylist to silently pass the destructive script. The script is operator-run only (no CI invocations — verified via grep across `.github/workflows`, `scripts/`, `package.json`), so tightening to allowlist has no compatibility cost and materially reduces blast radius.
+
+**Tests added (`scripts/lib/__tests__/prodDbGuard.test.ts`):**
+- NODE_ENV=staging → throw on primary guard
+- NODE_ENV=test → throw on primary guard
+- NODE_ENV=integration → throw on primary guard
+- NODE_ENV=undefined → throw on primary guard
+- NODE_ENV=development AND DATABASE_URL unset → throw on DATABASE_URL guard
+
+All 14 prodDbGuard tests pass.
+
+**Spec impact:** Spec §6.3 line 347 still describes the previous blocklist posture. This is an in-build deviation per the operator's approval; the spec text is left unchanged (locked status preserved) and the actual implementation supersedes. Next spec revision should update §6.3 to match.

@@ -169,5 +169,23 @@
 
 **Round 7 verdict:** CHANGES_REQUESTED → APPROVED (F3 closed; F1 rejected; F2 remains operator-deferred).
 
-**Round 8 diff:** pending generation after commit.
+### Round 8 — 2026-05-11T00:45:00Z (post Round 7 commit `f37dac5c`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `assertDevTargetOrThrow` follows spec §6.3 blocklist (only `NODE_ENV=production` throws); `staging`/`test`/`integration`/`undefined` pass silently | high (claimed blocker) | security / defence-in-depth | error_handling | technical | **implement** | **ESCALATED to operator — operator chose APPLY NOW.** Switched primary guard from blocklist to allowlist: `NODE_ENV !== 'development'` throws. Added explicit fail for unset `DATABASE_URL`. Spec deviation documented in `tasks/builds/pre-test-hardening/progress.md` under "Post-spec tightening". Script is operator-only (no CI invocations — verified via grep), so allowlist has no compatibility cost. |
+| F2 | `connectorConfigService.findByWebhookToken` uses `withAdminConnection` without import | high (claimed blocker) | typecheck | scope | technical | **reject** | auto (reject) — **SIXTH duplicate false positive** (Rounds 1, 3, 4, 6, 7, 8). Permanent rejection class. |
+| F3 | Test coverage tightening — add tests for NODE_ENV=undefined/test/staging/integration | medium | test-coverage | test_coverage | technical | **implement** | auto (implement) — added 5 new tests to `scripts/lib/__tests__/prodDbGuard.test.ts` covering the new allowlist behaviour (NODE_ENV=production/staging/test/integration/undefined → throw) plus the new DATABASE_URL-unset guard. All 14 tests pass (was 9). |
+
+**Auto-applied:** F3 (1 finding).
+**Operator-approved + applied:** F1 (1 finding — spec deviation documented in progress.md).
+**Auto-rejected:** F2 (1 finding — sixth duplicate false positive).
+
+**Verification after Round 8 fixes (commit pending):** server typecheck CLEAN (0 errors); prodDbGuard tests 14/14 pass.
+
+**Round 8 verdict:** CHANGES_REQUESTED → APPROVED.
+
+**Loop status:** ChatGPT acknowledged at the end of Round 8 that the loop has reached diminishing returns. Recommend closing here unless the operator wants one more round. The next signal-to-noise ratio is poor — 6 consecutive rounds of the same import false positive + Round 5/6/7/8 each producing 1 real finding while progressively re-litigating earlier deferrals.
 

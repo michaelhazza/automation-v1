@@ -20,16 +20,50 @@ afterEach(() => {
   }
 });
 
-describe('assertDevTargetOrThrow — primary guard (NODE_ENV=production)', () => {
+describe('assertDevTargetOrThrow — primary guard (NODE_ENV allowlist, PTH-CGT-R8-F1)', () => {
+  // The primary guard is an ALLOWLIST: only NODE_ENV=development passes.
+  // Every other NODE_ENV value (production, staging, test, integration,
+  // undefined) MUST throw before any DATABASE_URL inspection happens.
+
   it('NODE_ENV=production AND no DATABASE_URL → throw on primary guard', () => {
     expect(() => assertDevTargetOrThrow(undefined, 'production')).toThrow(
-      'REFUSING TO RUN: NODE_ENV=production',
+      /REFUSING TO RUN: NODE_ENV="production"/,
     );
   });
 
   it('NODE_ENV=production AND DATABASE_URL=postgresql://localhost/x → throw on primary guard (denylist not consulted)', () => {
     expect(() => assertDevTargetOrThrow('postgresql://localhost/x', 'production')).toThrow(
-      'REFUSING TO RUN: NODE_ENV=production',
+      /REFUSING TO RUN: NODE_ENV="production"/,
+    );
+  });
+
+  it('NODE_ENV=staging → throw on primary guard', () => {
+    expect(() =>
+      assertDevTargetOrThrow('postgresql://localhost/x', 'staging'),
+    ).toThrow(/REFUSING TO RUN: NODE_ENV="staging"/);
+  });
+
+  it('NODE_ENV=test → throw on primary guard', () => {
+    expect(() =>
+      assertDevTargetOrThrow('postgresql://localhost/x', 'test'),
+    ).toThrow(/REFUSING TO RUN: NODE_ENV="test"/);
+  });
+
+  it('NODE_ENV=integration → throw on primary guard', () => {
+    expect(() =>
+      assertDevTargetOrThrow('postgresql://localhost/x', 'integration'),
+    ).toThrow(/REFUSING TO RUN: NODE_ENV="integration"/);
+  });
+
+  it('NODE_ENV=undefined → throw on primary guard', () => {
+    expect(() =>
+      assertDevTargetOrThrow('postgresql://localhost/x', undefined),
+    ).toThrow(/REFUSING TO RUN: NODE_ENV="undefined"/);
+  });
+
+  it('NODE_ENV=development AND DATABASE_URL unset → throw on DATABASE_URL guard', () => {
+    expect(() => assertDevTargetOrThrow(undefined, 'development')).toThrow(
+      /REFUSING TO RUN: DATABASE_URL is not set/,
     );
   });
 });
