@@ -50,3 +50,40 @@ Unknown. None of my locally-authored tests reproduce the failure. The failure ma
 ### Status
 
 Escalated to operator. Awaiting decision on how to proceed (see operator-prompt block in chat).
+
+---
+
+## Iteration 2 — 2026-05-11T01:15:00Z — 3 gate scripts auto-fixed + 4 test-setup fixes (operator-approved)
+
+### Part A — 3 gate-script auto-fixes (G3 allowlist) → commit `84eed5ec`
+
+- **Failed check:** `unit tests` (3 BLOCKING gate failures)
+- **Root cause:**
+  - `verify-subaccount-resolution.sh` flagged `__tests__/` files (gate-script bug — missing exclusion)
+  - `verify-pure-helper-convention.sh` flagged `supportDraftsRoutesInvalidAction.test.ts` (gate doesn't see dynamic imports)
+  - `verify-rls-contract-compliance.sh` flagged `server/lib/webhookReplayNonceStore.ts` (file location convention — bare `db` usage must live in `server/services/**`)
+- **Category (G3 allowlist match):** all three in "Gate-script bugs" / "RLS-contract-compliance violations" — auto-fix allowed
+- **Guardrail status:** G1=PASS (gate scripts + production module, no test-file modification beyond a guard-ignore header), G2=20 lines/50, G3=PASS, G4=logged
+- **Fix:** (1) add `-not -path '*/__tests__/*'` to find expressions in `scripts/verify-subaccount-resolution.sh`; (2) add `guard-ignore-file: pure-helper-convention reason="..."` header to `supportDraftsRoutesInvalidAction.test.ts`; (3) `git mv server/lib/webhookReplayNonceStore.ts → server/services/` + matching test move + update 3 import paths in callers
+- **Diff:** commit `84eed5ec` (7 files changed)
+- **CI re-fire result:** post-fix local re-run all three gates pass (160 / 462 / 1832 files scanned, 0 violations); CI verdict pending
+
+### Part B — 4 integration test-setup fixes (operator-approved per G1 escalation) → commit `eb6abe99`
+
+- **Failed check:** `integration tests` (4 FAILURE)
+- **Root cause:** test-file authoring bugs from original feature commit `2b5e52fa`:
+  - 3 PATCH tests in `integrationConnectionsValidation.test.ts`: `buildTestApp` stub middleware sets `req.orgId` but doesn't bypass the real `authenticate` + `requireSubaccountPermission` middlewares mounted in the router → JWT-less requests get 401'd before Zod parse
+  - 1 CHECK constraint test in `integrationConnectionsCheckConstraint.test.ts`: bare `db.insert(integrationConnections)` without setting `app.organisation_id` GUC → FORCE-RLS silently returns 0 rows → CHECK constraint never fires
+- **Category:** G1 escalate (test-file modification); operator approved per "Fix the test setup properly"
+- **Guardrail status:** G1=OPERATOR_APPROVED, G2=50 lines/50, G3=N/A (operator override), G4=logged
+- **Fix:**
+  - Added `vi.mock('../../middleware/auth.js', ...)` to `integrationConnectionsValidation.test.ts` with pass-through stubs for `authenticate`, `requireSubaccountPermission`, `hasOrgPermission`; spreads `actual` exports so the real `JwtPayload` types etc. remain available
+  - Wrapped the bad-value insert in `integrationConnectionsCheckConstraint.test.ts` inside `db.transaction(...)` preceded by `SELECT set_config('app.organisation_id', anchor.orgId, true)` so the insert reaches the CHECK constraint instead of being silently dropped by FORCE-RLS; also hardened `pgErr.code` extraction to check `pgErr.cause?.code` since drizzle may wrap the original pg error
+- **Diff:** commit `eb6abe99` (2 files changed, +50/-21)
+- **CI re-fire result:** pending (next poll)
+
+### Iteration 2 cumulative state
+
+- Commits pushed: `84eed5ec` (gate fixes), `eb6abe99` (test-setup fixes)
+- Iteration count: 2/5
+- Remaining risk: if CI still has failures after `eb6abe99`, must escalate again (not auto-iterate)
