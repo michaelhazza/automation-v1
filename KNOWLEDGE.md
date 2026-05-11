@@ -3647,3 +3647,27 @@ server/config/actionRegistry/
 **Rule.** When a pure helper encapsulates a policy (expiry, TTL, limit, threshold), callers MUST call the helper — never inline the magic number. The pure helper is the policy; inlining the number at the call site creates a second policy that silently diverges the moment the pure helper is updated. The fix is also a useful template: add the artifact kind to the select query, type it via the shared type, pass it to the pure helper.
 
 **Detection heuristic.** When writing any code that encodes a duration, limit, or threshold as a numeric literal, grep the codebase for a pure helper that returns the same kind of value. If a helper exists — use it. Common offenders: signed URL TTL (use `deriveSignedUrlExpiry`), eval thresholds (use the DB-stored values), score clamps (use `Math.min(MAX_SCALE, ...)`).
+
+## Pattern: Separate `usability_state` (broker gate) from `plan_verification_status` (audit signal) — two concerns, two columns
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 1 F1). Initial spec made self-declaration connects land in `connected_unverified` — meaning the broker would never issue credentials until plan was independently verified. This made the feature dead-on-arrival for all early users, since V1 has no independent verification mechanism.
+
+**Rule.** When a credential has two separate concerns — "can the broker decrypt and use this?" and "is this credential's metadata confirmed by a third party?" — model them as distinct columns with distinct semantics. `usability_state` is the broker gate: only `connected_usable` allows decryption and injection. `plan_verification_status` is the audit trail: `self_declared` signals unconfirmed tier without blocking access. Mixing the two into a single "unverified = unusable" state creates an unrecoverable hold state that has no exit until infrastructure that may never exist is built.
+
+**Detection heuristic.** When a spec has a state that means both "not yet confirmed by a third party" AND "blocked from use," ask: does the user's action (accepting a disclosure, self-declaring a tier) provide enough confidence to unblock? If yes, split into two fields. The "unconfirmed" signal belongs in a `*_status` or `*_verification_status` column; the "usable" gate belongs in a dedicated `usability_state` or similar state machine column.
+
+## Pattern: Type union members need defined write paths — orphaned values become implementation traps
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 1 IC-3). The `planVerificationStatus` TypeScript union included `'unverified'` as a valid value, but no code path in the spec ever set it. The `'failed'` value already covered "couldn't determine tier."
+
+**Rule.** Every value in a discriminated-union or string-literal type MUST have at least one explicitly named write path in the spec (a service method, migration default, or code branch that produces it). Values with no write path will either never appear in production data, or will be set by ad-hoc code that bypasses the intended semantics — both outcomes are bugs. Before locking a spec, grep the type definition and confirm each member is reachable from the execution model.
+
+**Detection heuristic.** For each string-literal type or discriminated union in the data model section, list its values. For each value, search the execution model and chunk plan for the phrase that sets it (e.g., "`plan_verification_status = 'self_declared'`"). A value with no grep hit is orphaned — remove it or add the write path.
+
+## Pattern: Close open questions explicitly in §18 when the answer lands in §18b — stale open questions create builder contradictions
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 2 T1). Open Question §18.3 ("subaccount vs org scope for Plus consent — confirm before implementation") was resolved in §18b during spec-reviewer iteration 5, but §18 still showed the original question verbatim. ChatGPT's Round 2 found the contradiction.
+
+**Rule.** When a resolution lands in §18b, update §18 immediately — replace the open question prose with "(Resolved — see §18b: [title])". Do not leave §18 and §18b as parallel documents. Builders reading §18 will see an unresolved question; builders reading §18b will see a resolution. Both reading paths must be consistent.
+
+**Detection heuristic.** Before locking a spec, grep §18 for any question that also appears (by subject) in §18b. Any §18 item whose topic matches a §18b entry should be replaced with a pointer. Conversely, any §18b entry with no corresponding §18 pointer is an invitation to add one (so the §18 reader is not confused by an apparently-unresolved question).

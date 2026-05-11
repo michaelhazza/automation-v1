@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** LOCKED
 **Spec date:** 2026-05-11
-**Last updated:** 2026-05-11 (spec-reviewer iteration 5 mechanical pass applied — final iteration of the lifetime cap)
+**Last updated:** 2026-05-11 (chatgpt-spec-review 2 rounds APPROVED — spec locked for build)
 **Author:** claude-opus-4-7
 **Build slug:** operator-session-identity
 **Source branch:** claude/evolve-session-identity-brief-17LO4
@@ -864,7 +864,7 @@ Specific mappings:
 | `POST /api/subaccounts/:id/operator-session-connections/:connId/make-default` | `operator_session.connect` |
 | `POST /api/subaccounts/:id/operator-session-connections/:connId/reauth` | `operator_session.reauth` |
 | `PATCH /api/subaccounts/:id/operator-session-connections/:connId/allow-agent-use` | `operator_session.allow_agent_use` |
-| `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` | `operator_session.view` (read-only summary used by the agent edit page's Model Access section; returns the ordered list of operator_session connections the agent is allowed to consume per §9.7 ordering rules; no token material) |
+| `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` | `operator_session.view` (read-only summary used by the agent edit page's Model Access section; returns the ordered list of operator_session connections the agent is allowed to consume — Default first, then non-default by `label ASC NULLS LAST, id ASC`; platform-managed rows excluded; no token material) |
 
 ---
 
@@ -1337,6 +1337,7 @@ All criteria must pass before the build is marked complete.
 - [ ] AI Subscriptions tab: all six `usability_state` pills rendered with correct labels (Connected / Needs consent / Needs sign in / Plan not verified / Revoked by OpenAI / Disabled).
 - [ ] `CredentialsTab.tsx` is removed. `IntegrationsAndCredentialsPage.tsx` is a redirect-only component that issues 302 / client-side redirect to `/connections`.
 - [ ] No regression: existing OAuth + Web Login Add/Edit/Test/Disconnect flows continue to function from the consolidated `/connections` surface.
+- [ ] Agent Model Access route (`GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions`) returns only `AiSubscriptionConnection` rows; platform-managed fallback credentials are not included in the response.
 
 ### 17.8 UI — AI Subscription flows
 
@@ -1364,7 +1365,7 @@ All criteria must pass before the build is marked complete.
 
 2. **Agent allowlist persistence performance — RESOLVED for V1.** The allowlist shape is pinned in §9.4b as `integration_connections.config_json -> 'operator_session'` JSONB. For V1 (small subaccounts) JSONB scanning is fine. Post-Phase 3+ if scale demands it, a join table `operator_session_connection_agents` replaces the JSONB list — that future migration is deferred.
 
-3. **Subaccount vs. org scope for Plus consent.** The brief §2.4 default posture is subaccount-scoped storage, user-attributed consent. If an org has 50 subaccounts and each has a Plus subscription, each user signs a separate disclosure. There is no org-level "umbrella consent." Confirm this is intentional before implementation.
+3. *(Resolved — see §18b: Subaccount-scoped Plus consent.)*
 
 4. **Re-auth identity mismatch.** §11.1 and Screen 20 assume the re-auth-ing user is the same identity as the original consent owner. If the identity differs (e.g., original owner departed), the flow should detect the mismatch and route to Transfer Ownership instead of Sign in again. Transfer Ownership itself is deferred (§13); V1 surfaces the offramp note on Screen 20 and the `disabled` state with `owner_inactive` cause. Builder should treat any identity-mismatch path as an error state in V1 (route returns 422 `owner_mismatch_transfer_ownership_required` with no state change) and not attempt to silently re-attribute the credential.
 

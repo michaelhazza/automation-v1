@@ -6,10 +6,9 @@
 - PR: #286 — https://github.com/michaelhazza/automation-v1/pull/286
 - Mode: manual
 - Started: 2026-05-11T06:04:59Z
+- **Verdict:** APPROVED (2 rounds)
 
 ---
-
-<!-- rounds appended below -->
 
 ## Round 1 — 2026-05-11T06:15:00Z
 
@@ -48,3 +47,44 @@
 **Top themes:** (1) Option B resolves the dead-on-arrival self-declaration flow by using `plan_verification_status` as the audit signal instead of gating broker access. (2) Chunk plan dependency ownership bugs are the most common mechanical spec error in this codebase — cross-check file ownership across chunks before locking. (3) Type union members need write paths; orphaned values become implementation traps.
 
 ---
+
+## Round 2 — 2026-05-11T06:30:00Z
+
+### ChatGPT Feedback (raw)
+> No new major blockers. Previous fixes landed cleanly. 3 small cleanup items: T1 remove Open Question 3 from §18 (contradiction with §18b resolution), T2 tighten §10.4 route guard wording to not reference §9.7's platform-managed bucket, T3 (optional) add acceptance criterion for agent UI route. Lock recommendation after T1+T2.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| T1 — §18 Q3 still lists open "subaccount vs org consent" question resolved in §18b | technical | apply | auto (apply) | low | Document contradiction; §18b has the resolution |
+| T2 — §10.4 route guard references "§9.7 ordering rules" (which includes platform-managed bucket) | technical | apply | auto (apply) | low | §9.7 bucket 3 includes platform-managed; route excludes them |
+| T3 — Add acceptance criterion: agent UI route returns only AiSubscriptionConnection rows | technical | apply | auto (apply) | low | Mechanical builder check for the F3 fix |
+
+**Integrity check:** 0 issues. Post-integrity sanity: clean.
+
+### Applied (auto-applied technical)
+- [auto] T1: §18 item 3 replaced with "(Resolved — see §18b)"
+- [auto] T2: §10.4 route table updated with explicit "Default first, then non-default by `label ASC NULLS LAST, id ASC`; platform-managed rows excluded"
+- [auto] T3: §17.7 new bullet — Agent Model Access route returns only `AiSubscriptionConnection` rows; platform-managed excluded
+
+**Top themes:** Open-questions lists must be closed as resolutions land — a resolved item that stays open creates contradictions builders cannot resolve. Route guard documentation should state the actual ordering rule inline rather than pointing to a broader contract that contains out-of-scope rows.
+
+---
+
+## Final Summary
+- Rounds: 2
+- Auto-accepted (technical): 10 applied | 0 rejected | 0 deferred
+- User-decided (user-facing + technical-escalated): 3 applied | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / operator-session-identity: none
+- KNOWLEDGE.md updated: yes (3 entries — usability_state vs plan_verification_status separation; orphaned type union members; open questions list drift)
+- architecture.md updated: no — checked operator_session, plan_verification_status, connected_unverified, AiSubscriptionConnection, OperatorSessionEnvelope, credentialBrokerServicePure; zero stale references (architecture.md update is Chunk 11 implementation-time deliverable)
+- capabilities.md updated: no — checked operator_session, AI Subscription, ChatGPT subscription, credential broker; zero stale references (capabilities.md entry is Chunk 11 deliverable)
+- integration-reference.md updated: n/a — no new integration slug, scope, skill, or OAuth provider introduced in this spec review
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — spec review only; no build discipline or convention changes
+- spec-context.md updated: yes (last_reviewed_at bumped to 2026-05-11 — framing confirmed current)
+- frontend-design-principles.md updated: n/a — no new UI patterns introduced in this spec review
+- PR: #286 — https://github.com/michaelhazza/automation-v1/pull/286
+
+**Verdict:** APPROVED (2 rounds)
