@@ -30,18 +30,24 @@ if [[ ! -f "$ALLOWLIST" ]]; then
 fi
 
 # Find all current files reading .accessToken or .refreshToken
+# Normalise to relative paths (server/...) so we can compare against the allowlist,
+# which is stored as repo-relative paths.
 CURRENT_FILES=$(grep -rn "\.accessToken\b\|\.refreshToken\b" "$ROOT_DIR/server/" \
-  --include="*.ts" --exclude-dir=node_modules -l 2>/dev/null | sort || true)
+  --include="*.ts" --exclude-dir=node_modules -l 2>/dev/null \
+  | sed "s#^$ROOT_DIR/##" \
+  | sort || true)
 
 if [[ -z "$CURRENT_FILES" ]]; then
   echo "OK: No accessToken/refreshToken readers found in server/."
   exit 0
 fi
 
-# Find files in CURRENT but NOT in allowlist (these are violations)
+# Find files in CURRENT but NOT in allowlist (these are violations).
+# Strip any CR characters from the allowlist defensively (allowlist file may be
+# checked in with CRLF on Windows clones); grep output is always LF.
 NEW_VIOLATIONS=$(comm -23 \
   <(echo "$CURRENT_FILES") \
-  <(sort "$ALLOWLIST") | \
+  <(tr -d '\r' < "$ALLOWLIST" | sort) | \
   grep -v "^$" || true)
 
 if [[ -n "$NEW_VIOLATIONS" ]]; then

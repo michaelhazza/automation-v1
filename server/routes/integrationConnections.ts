@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -270,12 +270,25 @@ router.get(
     }
 
     const limit = Math.min(Number(req.query.limit) || 50, 50);
-    // Gate AI Subscription rows on OPERATOR_SESSION_VIEW permission so callers
-    // without it receive only the standard connection types (B4 fix).
-    const hasOperatorSessionView = await hasOrgPermission(
-      req,
-      SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,
-    );
+    // Gate AI Subscription rows on OPERATOR_SESSION_VIEW. The permission is
+    // subaccount-scoped because AI Subscription rows are workspace-bound in V1
+    // (see connectionsService.ts: operator_session rows are skipped for
+    // scope=org and only appended when scope=workspace).
+    //
+    // - scope=workspace: check the per-subaccount permission against the
+    //   parsed subaccountId. Without the permission, AI Subscription rows are
+    //   omitted from the workspace view.
+    // - scope=org / undefined: operator_session rows are skipped downstream
+    //   regardless, so the flag is forced false here (no permission check
+    //   needed and no org-level proxy permission exists for this view).
+    const hasOperatorSessionView =
+      parsed.data.scope === 'workspace' && parsed.data.subaccountId
+        ? await hasSubaccountPermission(
+            req,
+            parsed.data.subaccountId,
+            SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,
+          )
+        : false;
     const result = await listConnections({
       organisationId: req.orgId!,
       scope: parsed.data.scope,

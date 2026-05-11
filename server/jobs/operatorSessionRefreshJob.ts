@@ -242,8 +242,10 @@ export async function enqueueOperatorSessionRefresh(
  * Call directly from a scheduled task or a pg-boss cron job.
  */
 export async function runOperatorSessionRefreshSweep(): Promise<void> {
-  const refreshWindowMs = REFRESH_WINDOW_MINUTES * 60 * 1000;
-  const expiryThreshold = new Date(Date.now() + refreshWindowMs);
+  // No-app-clock invariant: both the refresh bucket (singleton dedupe key) and
+  // the expiry threshold are computed in SQL using transaction_timestamp(), so
+  // the sweep is correct regardless of host clock skew. App-clock fallbacks
+  // would re-introduce drift sensitivity into the dedupe / ordering semantics.
 
   await withAdminConnection(
     {
@@ -253,21 +255,30 @@ export async function runOperatorSessionRefreshSweep(): Promise<void> {
     async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      // Get DB-side 5-minute refresh bucket to deduplicate rapid re-sweeps
+      // Get DB-side 5-minute refresh bucket to deduplicate rapid re-sweeps.
+      // Fail closed (skip the sweep this tick) if the bucket query returns
+      // no row — app-clock fallback would defeat the dedupe invariant.
       const bucketResult = await tx.execute(sql`
         SELECT FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) / 300)::int AS refresh_bucket
       `);
-      const refreshBucket =
-        (bucketResult as unknown as Array<{ refresh_bucket: number }>)[0]?.refresh_bucket ??
-        Math.floor(Date.now() / 300_000);
+      const bucketRow = (bucketResult as unknown as Array<{ refresh_bucket: number }>)[0];
+      if (!bucketRow || typeof bucketRow.refresh_bucket !== 'number') {
+        logger.warn('operator_session_refresh_sweep.bucket_query_empty', {
+          message: 'DB bucket query returned no row — skipping sweep tick (fail closed)',
+        });
+        return;
+      }
+      const refreshBucket = bucketRow.refresh_bucket;
 
+      // Expiry threshold computed inside SQL using transaction_timestamp() —
+      // no Date.now() in the predicate, so the sweep is immune to host-clock skew.
       const rows = await tx.execute(sql`
         SELECT id, organisation_id
         FROM integration_connections
         WHERE auth_type = 'operator_session'
           AND connection_status = 'active'
           AND usability_state = 'connected_usable'
-          AND token_expires_at <= ${expiryThreshold}
+          AND token_expires_at <= transaction_timestamp() + (${REFRESH_WINDOW_MINUTES} * interval '1 minute')
         ORDER BY token_expires_at ASC
         LIMIT ${SWEEP_BATCH_LIMIT}
       `);

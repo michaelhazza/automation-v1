@@ -130,10 +130,18 @@ export function ConnectAppModal({ app, subaccountId, onClose, onConnected }: Pro
       setBusy(true);
       setError(null);
       try {
+        // Preserve workspace context in returnPath so the OAuth callback lands
+        // back on /connections with the correct workspace selected. Without the
+        // ?workspace= query param the user sees an empty "Select a workspace"
+        // state (or the wrong workspace if getActiveClientId() resolves to a
+        // different one).
+        const returnPath = subaccountId
+          ? `/connections?tab=app-integrations&workspace=${encodeURIComponent(subaccountId)}`
+          : '/connections?tab=app-integrations';
         const params: Record<string, string> = {
           provider: variant.oauthProvider!,
           scope: subaccountId ? 'subaccount' : 'org',
-          returnPath: '/connections?tab=app-integrations',
+          returnPath,
         };
         if (subaccountId) params.subaccountId = subaccountId;
         const { data } = await api.get('/api/integrations/oauth2/auth-url', { params });
