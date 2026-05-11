@@ -17,7 +17,23 @@
  */
 export {};
 
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
+
+// PTH-CGT-CI Round 2: stub auth middleware so the integration tests in
+// section 2 actually reach the Zod parse + service path. The router was
+// defined with `authenticate, requireSubaccountPermission(...)` baked in;
+// without this mock, JWT-less test requests get 401'd before any business
+// logic runs. The test's existing buildTestApp stub was insufficient
+// because it set req fields but didn't bypass `authenticate`.
+vi.mock('../../middleware/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../middleware/auth.js')>();
+  return {
+    ...actual,
+    authenticate: (_req: unknown, _res: unknown, next: () => void) => next(),
+    requireSubaccountPermission: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+    hasOrgPermission: vi.fn(async () => true),
+  };
+});
 
 // ─── Section 1: Pure schema assertions ───────────────────────────────────────
 

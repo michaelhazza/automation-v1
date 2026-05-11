@@ -56,32 +56,45 @@ describe('integration_connections CHECK constraint (DB-level)', () => {
         return;
       }
 
+      // PTH-CGT-CI Round 2: wrap the bad insert in a transaction with the
+      // org GUC set first. integration_connections is FORCE-RLS; without the
+      // GUC, the insert silently returns no rows and the CHECK constraint
+      // never fires. Setting `app.organisation_id` first lets the insert
+      // reach the constraint, which then throws 23514 as expected.
+      const { sql } = await import('drizzle-orm');
       let insertedId: string | undefined;
       try {
-        // Bypass Zod by casting — this tests the DB constraint directly.
-        // Drizzle's $type<> is TypeScript-only; the cast makes TS happy while
-        // sending the invalid string to Postgres.
-        const [row] = await db.insert(integrationConnections).values({
-          organisationId: anchor.orgId,
-          subaccountId: anchor.subId,
-          providerType: 'custom',
-          authType: 'api_key',
-          connectionStatus: 'foo' as 'active', // intentional invalid value — tests DB CHECK
-          label: `test-c7-constraint-${Date.now()}`,
-          ownershipScope: 'subaccount',
-          classification: 'shared_mailbox',
-          visibilityScope: 'shared_subaccount',
-        }).returning();
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT set_config('app.organisation_id', ${anchor.orgId}, true)`);
+          // Bypass Zod by casting — this tests the DB constraint directly.
+          // Drizzle's $type<> is TypeScript-only; the cast makes TS happy while
+          // sending the invalid string to Postgres.
+          const [row] = await tx.insert(integrationConnections).values({
+            organisationId: anchor.orgId,
+            subaccountId: anchor.subId,
+            providerType: 'custom',
+            authType: 'api_key',
+            connectionStatus: 'foo' as 'active', // intentional invalid value — tests DB CHECK
+            label: `test-c7-constraint-${Date.now()}`,
+            ownershipScope: 'subaccount',
+            classification: 'shared_mailbox',
+            visibilityScope: 'shared_subaccount',
+          }).returning();
 
-        // If we reach here, the constraint is missing — record the id for cleanup
-        insertedId = row?.id;
-        expect.fail('Expected Postgres CHECK constraint violation (error code 23514) but insert succeeded. Confirm migration 0320 has been applied.');
+          // If we reach here, the constraint is missing — record the id for cleanup
+          insertedId = row?.id;
+          expect.fail('Expected Postgres CHECK constraint violation (error code 23514) but insert succeeded. Confirm migration 0320 has been applied.');
+        });
       } catch (err: unknown) {
         // Postgres error 23514 = check_violation
-        const pgErr = err as { code?: string; message?: string };
-        expect(pgErr.code).toBe('23514');
+        // drizzle may wrap the original pg error; check both common shapes
+        const pgErr = err as { code?: string; cause?: { code?: string }; message?: string };
+        const code = pgErr.code ?? pgErr.cause?.code;
+        expect(code).toBe('23514');
       } finally {
-        // Clean up if the insert unexpectedly succeeded
+        // Clean up if the insert unexpectedly succeeded (shouldn't be possible
+        // because the transaction rolls back on the expect.fail, but defensive
+        // cleanup is cheap).
         if (insertedId) {
           await db.delete(integrationConnections).where(eq(integrationConnections.id, insertedId));
         }
