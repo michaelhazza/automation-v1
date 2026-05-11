@@ -275,3 +275,5 @@ No additional `tasks/todo.md` updates needed in this re-verification pass — th
 ## Next step (re-verify)
 
 CONFORMANT — Chunk 9 is logically complete. Mechanical fixes touched 8 source files; `pr-reviewer` should be (re-)run on the expanded changed-code set if not already done after `e303f00e`. REQ #4 stays in `tasks/todo.md` as the V1 deferred capability.
+
+**Commit at re-verify finish:** `dd7d0178`
