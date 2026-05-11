@@ -42,9 +42,9 @@ while IFS= read -r file; do
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
   fi
-done < <(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' 2>/dev/null)
+done < <(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' -not -path '*/__tests__/*' 2>/dev/null)
 
-TOTAL_FILES=$(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
+TOTAL_FILES=$(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' -not -path '*/__tests__/*' | wc -l)
 
 emit_summary "$TOTAL_FILES" "$VIOLATIONS"
 

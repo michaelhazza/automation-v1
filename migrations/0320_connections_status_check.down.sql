@@ -1,0 +1,2 @@
+ALTER TABLE integration_connections
+  DROP CONSTRAINT IF EXISTS integration_connections_connection_status_check;

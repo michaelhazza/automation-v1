@@ -1208,6 +1208,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0315_support_eval_runs.sql',
     rationale: 'Per-org support agent evaluation run records — contains eval configurations, agent outputs, and quality verdicts. Cross-tenant leak exposes agent behavior patterns and quality assessment data.',
   },
+  // 0318 — Pre-Test Hardening: persistent webhook replay nonces (W3) — renumbered from 0313 post-S2 to avoid collision with PR #283
+  {
+    tableName: 'webhook_replay_nonces',
+    schemaFile: 'webhookReplayNonces.ts',
+    policyMigration: '0318_webhook_replay_nonces.sql',
+    rationale: 'Per-org webhook replay nonces (deliveryId from provider) — cross-tenant leak would reveal which webhook events any other org has received; UNIQUE constraint is the dedup invariant.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

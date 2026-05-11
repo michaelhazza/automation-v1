@@ -1,33 +1,33 @@
 import 'dotenv/config';
-
-if (process.env.NODE_ENV !== 'development') {
-  throw new Error(
-    `[reseed] Refusing to run: NODE_ENV is "${process.env.NODE_ENV ?? 'undefined'}", expected "development". This script DROPs and recreates the database.`,
-  );
-}
-
+import { assertDevTargetOrThrow } from './lib/prod-db-guard.js';
 import { Pool } from 'pg';
 
-const url = new URL(process.env.DATABASE_URL!);
-const targetDb = url.pathname.replace(/^\//, '');
-const adminUrl = new URL(url.toString());
-adminUrl.pathname = '/postgres';
+async function main(): Promise<void> {
+  assertDevTargetOrThrow(process.env.DATABASE_URL, process.env.NODE_ENV);
 
-console.log(`[reseed] target DB: ${targetDb}`);
-const admin = new Pool({ connectionString: adminUrl.toString() });
+  const url = new URL(process.env.DATABASE_URL!);
+  const targetDb = url.pathname.replace(/^\//, '');
+  const adminUrl = new URL(url.toString());
+  adminUrl.pathname = '/postgres';
 
-await admin.query(
-  `SELECT pg_terminate_backend(pid)
-     FROM pg_stat_activity
-    WHERE datname = $1 AND pid <> pg_backend_pid()`,
-  [targetDb]
-);
-console.log('[reseed] terminated any active connections');
+  console.log(`[reseed] target DB: ${targetDb}`);
+  const admin = new Pool({ connectionString: adminUrl.toString() });
 
-await admin.query(`DROP DATABASE IF EXISTS "${targetDb}"`);
-console.log(`[reseed] dropped database ${targetDb}`);
+  await admin.query(
+    `SELECT pg_terminate_backend(pid)
+       FROM pg_stat_activity
+      WHERE datname = $1 AND pid <> pg_backend_pid()`,
+    [targetDb]
+  );
+  console.log('[reseed] terminated any active connections');
 
-await admin.query(`CREATE DATABASE "${targetDb}"`);
-console.log(`[reseed] created database ${targetDb}`);
+  await admin.query(`DROP DATABASE IF EXISTS "${targetDb}"`);
+  console.log(`[reseed] dropped database ${targetDb}`);
 
-await admin.end();
+  await admin.query(`CREATE DATABASE "${targetDb}"`);
+  console.log(`[reseed] created database ${targetDb}`);
+
+  await admin.end();
+}
+
+await main();

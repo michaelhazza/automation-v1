@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { eq, and, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
@@ -137,6 +138,12 @@ export const connectorConfigService = {
     pollIntervalMinutes?: number;
     webhookSecret?: string;
   }) {
+    // Pre-Test Hardening W3 — Teamwork connectors require a per-connector
+    // webhook URL token at creation time. The tokenised webhook route
+    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
+    // token; a null token means deliveries are silently dropped with 401.
+    // Migration 0319 backfills existing rows (renumbered from 0314 post-S2 to clear collision with PR #283); this auto-generates for new ones.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
     const [config] = await db
       .insert(connectorConfigs)
       .values({
@@ -146,6 +153,7 @@ export const connectorConfigService = {
         configJson: data.configJson ?? null,
         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
         webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
       })
       .returning();
 
@@ -165,6 +173,8 @@ export const connectorConfigService = {
     pollIntervalMinutes?: number;
     webhookSecret?: string;
   }) {
+    // Pre-Test Hardening W3 — see `create` above for rationale.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
     const [config] = await db
       .insert(connectorConfigs)
       .values({
@@ -175,6 +185,7 @@ export const connectorConfigService = {
         configJson: data.configJson ?? null,
         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
         webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
       })
       .returning();
     return config;
@@ -238,6 +249,49 @@ export const connectorConfigService = {
       .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')))
       .limit(1);
     return config ?? null;
+  },
+
+  /**
+   * Find an active connector config by its per-connector webhook URL token.
+   * Used by webhook routes to route incoming webhooks to exactly one connector config
+   * without scanning all active configs.
+   *
+   * IMPORTANT: WHERE clause intentionally matches only `status = 'active'` — do NOT add
+   * disconnectedAt IS NULL or any other predicate; `status = 'active'` is the sole active guard.
+   * Returns null when the token is unknown or belongs to a non-active / non-teamwork config.
+   */
+  async findByWebhookToken(
+    token: string,
+    connectorType: 'teamwork',
+  ): Promise<typeof connectorConfigs.$inferSelect | null> {
+    // Guard: reject non-UUID-shaped tokens before the DB call to avoid Postgres
+    // cast errors. The unique index requires webhook_token IS NOT NULL, and NULL
+    // rows never match the equality predicate — so this guard is purely for
+    // invalid-format protection.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(token)) return null;
+
+    return await withAdminConnection(
+      { source: 'teamwork_webhook_token_lookup', skipAudit: true },
+      async (adminDb) => {
+        // SET LOCAL ROLE is transaction-scoped — safe here because
+        // withAdminConnection wraps the callback in db.transaction()
+        // (see server/lib/adminDbConnection.ts:82). Role resets on commit/rollback.
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select()
+          .from(connectorConfigs)
+          .where(
+            and(
+              eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+              eq(connectorConfigs.status, 'active'),
+              sql`${connectorConfigs.webhookToken} = ${token}::uuid`,
+            ),
+          )
+          .limit(1);
+        return row ?? null;
+      },
+    );
   },
 
   /** Find all active connector configs for a given type (across all orgs). Used by webhook routes that match by signature. */

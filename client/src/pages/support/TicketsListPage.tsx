@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { getActiveClientId } from '../../lib/auth';
 import StatusPill from '../../components/support/StatusPill';
 import PriorityPill from '../../components/support/PriorityPill';
 
@@ -38,10 +39,16 @@ export default function TicketsListPage() {
   const [syncHealth, setSyncHealth] = useState<'running' | 'degraded' | 'failed' | null>(null);
 
   useEffect(() => {
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) {
+      setError('No active client selected.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const params = statusGroup !== 'all' ? `?statusGroup=${statusGroup}` : '';
-    api.get<{ tickets: Ticket[] }>(`/api/support/tickets${params}`)
+    api.get<{ tickets: Ticket[] }>(`/api/subaccounts/${subaccountId}/support/tickets${params}`)
       .then(({ data }) => setTickets(data.tickets ?? []))
       .catch(() => setError('Failed to load tickets.'))
       .finally(() => setLoading(false));
@@ -53,14 +60,18 @@ export default function TicketsListPage() {
       setQuarantinedCount(0);
       return;
     }
-    api.get<{ tickets: Ticket[] }>('/api/support/tickets?statusGroup=quarantined')
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
+    api.get<{ tickets: Ticket[] }>(`/api/subaccounts/${subaccountId}/support/tickets?statusGroup=quarantined`)
       .then(({ data }) => setQuarantinedCount((data.tickets ?? []).length))
       .catch(() => { /* non-fatal */ });
   }, [statusGroup]);
 
   // Fetch inbox sync health
   useEffect(() => {
-    api.get<{ inboxes: Inbox[] }>('/api/support/inboxes')
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
+    api.get<{ inboxes: Inbox[] }>(`/api/subaccounts/${subaccountId}/support/inboxes`)
       .then(({ data }) => {
         const inboxes = data.inboxes ?? [];
         if (inboxes.some(i => i.syncHealth === 'failed')) {

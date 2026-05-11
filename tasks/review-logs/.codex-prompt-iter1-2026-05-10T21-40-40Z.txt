@@ -1,0 +1,10 @@
+Review this 14-item launch-blocker hardening sprint targeted at pre-test-hardening. Specifically interrogate hard:
+(1) Compile-time + runtime enforcement of caller-supplied tx in taskService.createTask. The transitional 4-arg overload (used by workflowEngineService.ts:2716 and :2962) — does it leak through to FORCE-RLS-bypass without the canonical org-scoped path?
+(2) Webhook replay-nonce correctness: row existence is the dedup, not wall-clock TTL.
+(3) Teamwork token lookup three-filter conjunction: connector_type='teamwork' AND status='active' AND webhook_token=$1 — does the actual query match the spec contract?
+(4) Atomic verify-then-insert in referenceDocumentService cross-org scope-link path.
+(5) pg_advisory_xact_lock(hashtextextended(blockId::text, 0)) — confirm cast is correct + lock is in same tx as MAX(version) read + insert.
+(6) Reseed prod-DB guards: are both layers active unconditionally (primary NODE_ENV + secondary host denylist)?
+(7) Migration 0315 preflight: does it actually abort on a bad row rather than silently coercing?
+
+Surface concrete bugs, RLS leaks, race conditions, and correctness gaps. Cite file:line. Prioritise critical/important issues, deprioritise style/cosmetic comments.

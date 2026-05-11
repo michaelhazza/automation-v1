@@ -3,6 +3,7 @@ import { WorkflowRunService } from './workflowRunService.js';
 import { taskService } from './taskService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
 import type { WorkflowRunStartOutput } from '../../shared/types/workflowRunStartSkill.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export const MAX_WORKFLOW_DEPTH = 3;
 
@@ -55,15 +56,19 @@ export async function handleWorkflowRunStartSkill(
   }
 
   // 5. Create a task for the run
+  const tx = getOrgScopedDb('service:workflowRunStartSkillService.start');
   const task = await taskService.createTask(
-    context.organisationId,
-    context.subaccountId,
     {
-      title: `Workflow run: ${template.name}`,
-      description: `Workflow run: ${template.name}`,
-      createdByAgentId: context.agentId,
-      isSubTask: true,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId,
+      data: {
+        title: `Workflow run: ${template.name}`,
+        description: `Workflow run: ${template.name}`,
+        createdByAgentId: context.agentId,
+        isSubTask: true,
+      },
     },
+    tx,
   );
 
   // 6. Start the workflow run

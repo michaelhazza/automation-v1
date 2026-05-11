@@ -1,5 +1,6 @@
 // supportDraftDispatchPreflightPure.ts — Pure preflight evaluator for the draft dispatch path.
 // Spec: docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md §8.1 + §8.6
+//       tasks/builds/pre-test-hardening/spec.md §4 (S1 + S2)
 //
 // No DB access, no async. All functions are deterministic given their inputs.
 // The dispatch service consumes evaluatePreflight(); tests cover every branch.
@@ -7,6 +8,11 @@
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+export type SupportDraftAction =
+  | 'support.propose_reply'
+  | 'support.add_internal_note'
+  | 'support.set_status';
 
 export type PreflightReason =
   | 'inbox_disabled'
@@ -167,5 +173,193 @@ function evaluateCollisionWindow(input: PreflightInput): PreflightResult {
     }
   }
 
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Named per-check exports — S1 checks 4-7 (pre-test-hardening §4.1)
+//
+// These are exported individually so callers can invoke and test each check
+// in isolation. The dispatch service wires them in order after checks 1-3.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Check 4 — Ticket-status eligibility
+// Status × action matrix (LOCKED per spec §4.1):
+//   open               → all actions ok
+//   pending_internal   → propose_reply NO; add_internal_note ok; set_status ok
+//   waiting_on_customer → propose_reply conditional (optIns.autonomousReplyOnWaitingOnCustomer)
+//                       ; add_internal_note ok; set_status ok
+//   resolved           → propose_reply conditional (optIns.postResolutionFollowUp)
+//                       ; add_internal_note ok; set_status ok
+//   closed             → all actions NO
+//   unknown_provider_status → all actions NO
+// ---------------------------------------------------------------------------
+
+export interface CheckTicketStatusInput {
+  ticket: { status: string };
+  action: SupportDraftAction;
+  agentConfig: {
+    optIns?: {
+      autonomousReplyOnWaitingOnCustomer?: boolean;
+      postResolutionFollowUp?: boolean;
+    };
+  };
+}
+
+export function checkTicketStatusEligibility(
+  input: CheckTicketStatusInput,
+): { ok: true } | { ok: false; reason: 'ticket_status_ineligible' } {
+  const { status } = input.ticket;
+  const { action, agentConfig } = input;
+
+  // Fully blocked statuses — no action allowed
+  if (status === 'closed' || status === 'unknown_provider_status') {
+    return { ok: false, reason: 'ticket_status_ineligible' };
+  }
+
+  // open — all actions allowed
+  if (status === 'open') {
+    return { ok: true };
+  }
+
+  // pending_internal — propose_reply blocked; others ok
+  if (status === 'pending_internal') {
+    if (action === 'support.propose_reply') {
+      return { ok: false, reason: 'ticket_status_ineligible' };
+    }
+    return { ok: true };
+  }
+
+  // waiting_on_customer — propose_reply conditional
+  if (status === 'waiting_on_customer') {
+    if (action === 'support.propose_reply') {
+      if (agentConfig.optIns?.autonomousReplyOnWaitingOnCustomer === true) {
+        return { ok: true };
+      }
+      return { ok: false, reason: 'ticket_status_ineligible' };
+    }
+    return { ok: true };
+  }
+
+  // resolved — propose_reply conditional
+  if (status === 'resolved') {
+    if (action === 'support.propose_reply') {
+      if (agentConfig.optIns?.postResolutionFollowUp === true) {
+        return { ok: true };
+      }
+      return { ok: false, reason: 'ticket_status_ineligible' };
+    }
+    return { ok: true };
+  }
+
+  // Unknown status — fail closed
+  return { ok: false, reason: 'ticket_status_ineligible' };
+}
+
+// ---------------------------------------------------------------------------
+// Check 5 — Collision window
+// Algorithm:
+//   if overrideCollision=true AND principalKind='human' → skip (ok)
+//   if respectHumanAssignee AND assigneeIsHuman → reject
+//   if (now - lastHumanActivityAt) < minMinutesSinceHumanActivity → reject
+//   else → ok
+//
+// The assigneeIsHuman boolean is resolved via DB OUTSIDE this function.
+// The `now` date is injected for determinism in tests.
+// ---------------------------------------------------------------------------
+
+export interface CheckCollisionWindowInput {
+  ticket: { lastHumanActivityAt: Date | null | undefined };
+  agentConfig: {
+    collisionWindow: {
+      minMinutesSinceHumanActivity: number;
+      respectHumanAssignee: boolean;
+    };
+  };
+  now: Date;
+  overrideCollision: boolean;
+  principalKind: 'human' | 'agent';
+  assigneeIsHuman: boolean;
+}
+
+export function checkCollisionWindow(
+  input: CheckCollisionWindowInput,
+): { ok: true } | { ok: false; reason: 'human_collision_blocked' } {
+  // Human override bypasses the entire collision check
+  if (input.overrideCollision && input.principalKind === 'human') {
+    return { ok: true };
+  }
+
+  // Respect-human-assignee: block if a human agent owns the ticket
+  if (input.agentConfig.collisionWindow.respectHumanAssignee && input.assigneeIsHuman) {
+    return { ok: false, reason: 'human_collision_blocked' };
+  }
+
+  // Time-based collision window
+  if (input.ticket.lastHumanActivityAt != null) {
+    const minutesSince = (input.now.getTime() - input.ticket.lastHumanActivityAt.getTime()) / 60_000;
+    if (minutesSince < input.agentConfig.collisionWindow.minMinutesSinceHumanActivity) {
+      return { ok: false, reason: 'human_collision_blocked' };
+    }
+  }
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Check 6 — Customer-match policy gate (forward-compat no-op in v1)
+// Locked behaviour:
+//   - If requireCustomerMatch NOT present → ok (v1 no-op gate; field reserved)
+//   - If requireCustomerMatch=true AND ticket.canonicalContactId IS NULL → reject
+//   - Otherwise → ok
+// The Zod schema does NOT change in this build.
+// ---------------------------------------------------------------------------
+
+export interface CheckCustomerMatchPolicyInput {
+  ticket: { canonicalContactId: string | null | undefined };
+  agentConfig: {
+    optIns?: {
+      requireCustomerMatch?: boolean;
+    };
+  };
+}
+
+export function checkCustomerMatchPolicy(
+  input: CheckCustomerMatchPolicyInput,
+): { ok: true } | { ok: false; reason: 'customer_match_required' } {
+  // v1 no-op: field not present in schema
+  if (input.agentConfig.optIns?.requireCustomerMatch == null) {
+    return { ok: true };
+  }
+
+  if (
+    input.agentConfig.optIns.requireCustomerMatch === true &&
+    (input.ticket.canonicalContactId == null)
+  ) {
+    return { ok: false, reason: 'customer_match_required' };
+  }
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Check 7 — Supersession
+// The hasNewerDraft boolean is computed by a DB query OUTSIDE this function.
+// The query uses tuple-comparison (created_at, id) > ($2, $3) to handle
+// same-millisecond ties — do NOT simplify to created_at > $2 alone.
+// ---------------------------------------------------------------------------
+
+export interface CheckSupersessionInput {
+  candidateDraft: { id: string; createdAt: Date };
+  hasNewerDraft: boolean;
+}
+
+export function checkSupersession(
+  input: CheckSupersessionInput,
+): { ok: true } | { ok: false; reason: 'superseded_by_newer_draft' } {
+  if (input.hasNewerDraft) {
+    return { ok: false, reason: 'superseded_by_newer_draft' };
+  }
   return { ok: true };
 }
