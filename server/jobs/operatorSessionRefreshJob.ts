@@ -27,7 +27,8 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import { operatorSessionLifecycleService } from '../services/operatorSessionLifecycleService.js';
-import { classifyRefreshFailure } from '../services/operatorSessionLifecycleServicePure.js';
+import { classifyRefreshFailure, type UsabilityState } from '../services/operatorSessionLifecycleServicePure.js';
+import { connectionTokenService } from '../services/connectionTokenService.js';
 import { auditService } from '../services/auditService.js';
 import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
@@ -133,8 +134,8 @@ export async function processOperatorSessionRefresh(
           await scopedDb
             .update(integrationConnections)
             .set({
-              accessToken: newToken.access,
-              refreshToken: newToken.refresh,
+              accessToken: connectionTokenService.encryptToken(newToken.access),
+              refreshToken: connectionTokenService.encryptToken(newToken.refresh),
               tokenExpiresAt: newToken.expiresAt,
               updatedAt: new Date(),
             })
@@ -156,7 +157,7 @@ export async function processOperatorSessionRefresh(
             await operatorSessionLifecycleService.transition({
               connectionId,
               organisationId: orgId,
-              from: 'connected_usable',
+              from: (conn.usabilityState ?? 'connected_usable') as UsabilityState,
               to: classification.nextState,
               cause: 'token_refresh_failed',
               actorUserId: null,
