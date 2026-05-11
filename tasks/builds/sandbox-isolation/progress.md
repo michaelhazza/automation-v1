@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C5 (commit pending)
-- head: 773150ea (C12)
+- last_chunk_committed: C6 (commit pending)
+- head: 53c243eb (C5)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T05:50:00Z
+- captured_at: 2026-05-11T06:05:00Z
 
 ---
 

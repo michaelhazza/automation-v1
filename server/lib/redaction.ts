@@ -75,6 +75,26 @@ export const DEFAULT_REDACTION_PATTERNS: readonly RedactionPattern[] = [
     regex: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     replacement: '[REDACTED:google_api_key]',
   },
+  // ---------------------------------------------------------------------------
+  // Sandbox-specific patterns (Spec B §11.5, §26 — first-to-land defines
+  // the shared bundle; Spec C appends OAuth refresh-token / consent-state markers).
+  // ---------------------------------------------------------------------------
+  {
+    name: 'sandbox_oauth_alias_token',
+    regex: /oauth_[a-z_]+_[a-z0-9_-]{8,}_token/gi,
+    replacement: '[REDACTED:sandbox_oauth_token]',
+  },
+  {
+    name: 'sandbox_aws_session_token',
+    // AWS session tokens are 40+ chars of base64url characters.
+    regex: /\b[A-Za-z0-9+/]{40,}={0,2}\b/g,
+    replacement: '[REDACTED:aws_session_token]',
+  },
+  {
+    name: 'sandbox_credential_injection_marker',
+    regex: /sandbox_credential_[a-z_]+_token/gi,
+    replacement: '[REDACTED:sandbox_credential]',
+  },
 ];
 
 // ---------------------------------------------------------------------------
