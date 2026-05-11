@@ -165,3 +165,45 @@ None. All 14 items shipped per spec §0.4 DEC-1..4 contracts. O5 (operator-appli
 - `REVIEW_GAP:` none (dual-reviewer ran)
 
 PR creation pending — `gh pr view` returns "no pull requests found for branch" as of handoff time. Finalisation-coordinator Step 4 creates the PR via `gh pr create --fill`.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #284
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/284
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-pre-test-hardening-2026-05-10T23-20-40Z.md`
+**spec_deviations reviewed:** yes (2 operator-approved spec deviations recorded in `progress.md` "Post-spec tightening": R5 F1 createTask side-effect split + R8 F1 reseed primary-guard allowlist)
+**Doc-sync sweep verdicts:** see chatgpt-pr-review log Final Summary block. Cross-check confirmed clean post-rounds:
+- `architecture.md`: yes (Support Desk Routes mount-path + escalateIncidentToAgent createTaskCore split documented in §Phase 3 Step 6 cross-check)
+- `docs/integration-reference.md`: yes (Teamwork entry: per-org URL shape + closed SDC-ADV-1/3 known_gaps + last_verified 2026-05-11)
+- `KNOWLEDGE.md`: yes (4 entries — 3 Phase 2 patterns + 1 R3 correction covering 3 lessons)
+- `docs/capabilities.md`: n/a (no skill/capability/integration add/remove/rename)
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md`: no (rules already documented)
+- `frontend-design-principles.md`: no (no new UI pattern; T1 client-side changes are URL path rewrites only)
+- `CONTRIBUTING.md`: no (no contributor-facing convention change)
+- `docs/decisions/`: no (DEC-1..4 captured in spec §0.4)
+- `docs/context-packs/`: no (no section anchor changed)
+- `references/test-gate-policy.md`: no
+- `.claude/FRAMEWORK_VERSION`: n/a
+- `docs/spec-context.md`: n/a (not a spec-review session)
+
+**KNOWLEDGE.md entries added:** 4 (3 Phase 2 + 1 R3 correction)
+**tasks/todo.md items closed:** 10 (audit row 22 W1, CONSOL-GOV-DEF-18 V2, CONSOL-GOV-DEF-19 V1, AKR-ADV-3 T2, AGW-DEF-6 O1, REQ #45 S1, REQ #50 S2, SDC-ADV-1 T1, SDC-ADV-3 W3, webhook 5xx coverage W2, reseed scripts O3+O4)
+**tasks/todo.md backlog items added:** 5 (PTH-CGT-R3-R2 weak 404 test; PTH-CGT-R6-F3 6 remaining createTask callers; PTH-CGT-R6-F6 resolveSubaccount 403 enumeration; PTH-CGT-R8-F1 spec amend; PTH-ADV-2/3/4 adversarial worth-confirming items)
+**ready-to-merge label applied at:** 2026-05-11T00:44:16Z
+
+### CI gate posture entering merge
+
+- Server typecheck CLEAN at HEAD
+- Lint CLEAN at HEAD (0 errors, 899 warnings — all pre-existing)
+- 30+ regression tests pass (taskService.createTask, systemIncidentService.escalation, supportDraftsRoutesInvalidAction, supportDraftDispatchService.approveDraft, integrationConnectionsValidation, prodDbGuard, referenceDocumentScopeVerification)
+- Migrations 0318/0319/0320 ship with `.down.sql` companions; no collision with main's 0313-0317
+- Sister-branch scope-out gate clean (no diff in §0.2 forbidden paths)
+
+### Loop summary across chatgpt-pr-review 8 rounds
+
+- 13 real fixes auto-applied + 2 operator-approved spec deviations
+- 4 backlog items routed (PTH-CGT-R3-R2, R6-F3, R6-F6, R8-F1)
+- 6 duplicate false positives on `withAdminConnection` import (auto-rejected per Round 3 KNOWLEDGE entry §3)
+- PTH-CGT-R2 (Round 2 deferral) closed inline in Round 5 F1 architectural refactor

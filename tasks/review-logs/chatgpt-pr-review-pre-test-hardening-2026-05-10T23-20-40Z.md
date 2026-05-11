@@ -189,3 +189,43 @@
 
 **Loop status:** ChatGPT acknowledged at the end of Round 8 that the loop has reached diminishing returns. Recommend closing here unless the operator wants one more round. The next signal-to-noise ratio is poor — 6 consecutive rounds of the same import false positive + Round 5/6/7/8 each producing 1 real finding while progressively re-litigating earlier deferrals.
 
+---
+
+## Final Summary
+
+**Closed at:** 2026-05-11T00:50:00Z
+**Operator signal:** "done, move to finalisation"
+**Total rounds:** 8
+**Final verdict:** APPROVED with 5 deferred (PTH-CGT-R3-R2, PTH-CGT-R6-F3, PTH-CGT-R6-F6, PTH-CGT-R8-F1 spec-amend, PTH-CGT-R2 closed in R5)
+
+### Round-by-round outcome
+
+| Round | Findings | Auto-applied | Auto-rejected | Escalated | Deferred |
+|-------|----------|--------------|---------------|-----------|----------|
+| R1 | 3 | R1 prune-rethrow | F1 import false-pos | F2 → APPLY (conditional withOrgTx wrap) | — |
+| R2 | 4 | F1/F2/R1 (regression test, mock paths, migration comment) | — | — | R2 PTH-CGT-R2 |
+| R3 | 6 | F2/F3/R1/R3 (peekOrgTxContext truthy, FK migration, comment, crypto import) | F1 import false-pos #2 | — | R2 PTH-CGT-R3-R2 |
+| R4 | 5 | F2/F3/T1 (Drizzle FK cascade, named index, SET LOCAL comment) | F1 import false-pos #3 | — | T2 (already deferred) |
+| R5 | 4 | F2 comment, F3 schema export+import, F4 doc fix | — | F1 → APPLY (createTask split, closes PTH-CGT-R2) | — |
+| R6 | 6 | F2 legacy shim post-commit emit | F1 import false-pos #4 | — | F3+F4 PTH-CGT-R6-F3, F6 PTH-CGT-R6-F6 |
+| R7 | 3 | F3 auditService.log | F1 import false-pos #5 | — | F2 (no action — re-litigated R6 defer) |
+| R8 | 3 | F3 test coverage | F1 import false-pos #6 | F1 → APPLY (allowlist primary guard) | — |
+
+**Real fixes applied:** 13 (B1-class + Strong + Tightening)
+**Operator-approved spec deviations:** 2 (R5 F1 createTask split; R8 F1 reseed allowlist)
+**Backlog items routed:** 4 active (PTH-CGT-R3-R2, R6-F3, R6-F6, R8-F1) + 1 closed inline (R2 closed in R5)
+**Duplicate false positives on `withAdminConnection` import:** 6 rounds in a row
+
+### Doc-sync verdicts (per docs/doc-sync.md)
+
+- **KNOWLEDGE.md updated:** yes (4 entries — 3 from Phase 2 doc-sync sweep + 1 correction entry from R3 covering 3 lessons: consistent DiD patterns, schema-vs-migration cross-check, ChatGPT scope-of-view false positives)
+- **architecture.md updated:** yes (§ Support Desk Routes mount-path updated to `/api/subaccounts/:subaccountId/support` per DEC-1/T1; legacy mount removed)
+- **capabilities.md updated:** n/a — no skill/capability/integration add/remove/rename in this PR; integration behaviour change is documented in integration-reference.md
+- **integration-reference.md updated:** yes (slug `teamwork`: setup_steps_summary updated to per-org URL shape per DEC-2/W3; known_gaps SDC-ADV-1 + SDC-ADV-3 removed; last_verified bumped to 2026-05-11)
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — PTH-ADV-1 explicit-organisationId-filter rule already documented in DEVELOPMENT_GUIDELINES §1; no build-discipline/conventions/agent-fleet change in this PR
+- **frontend-design-principles.md updated:** no — T1 client-side changes are URL path rewrites only; no new pattern/hard rule introduced
+
+### Closing note
+
+Loop closed at operator signal. Phase 3 closing steps now proceed: doc-sync cross-check, KNOWLEDGE.md cross-check, tasks/todo.md cleanup, MERGE_READY transition, ready-to-merge label, CI monitoring + fix loop, auto-merge.
+

@@ -4029,8 +4029,9 @@ Clients join via `socket.emit('join:sysadmin')` (system_admin role only).
 `escalateIncidentToAgent` in `systemIncidentService.ts`:
 1. `computeEscalationVerdict` — hard cap 3, 60s rate limit per incident
 2. `resolveSystemOpsContext()` — resolves System Operations org (is_system_org=true) + its sentinel subaccount
-3. Creates task via `taskService.createTask` in System Operations org
-4. Updates incident to `escalated`, increments `escalationCount`, writes escalation event
+3. Opens `db.transaction`, sets `app.organisation_id` GUC, calls `taskService.createTaskCore` (DB writes only) inside the tx in System Operations org
+4. Updates incident to `escalated`, increments `escalationCount`, writes escalation event — all inside the same tx
+5. After the tx commits, calls `taskService.emitCreateTaskSideEffects` so observers never see task-created events for rolled-back rows (pre-test-hardening PTH-CGT-R5-F1 — split createTask side effects across the transaction boundary)
 
 Guardrail failures write `escalation_blocked` event and throw 429.
 

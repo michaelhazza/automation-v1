@@ -44,7 +44,7 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 | 19 | **Security** | **[CLOSED 2026-04-29]** Helmet CSP enabled in production with non-trivial directives (`server/index.ts:188-213`); dev intentionally `false`. Originally: "Helmet CSP disabled" | `server/index.ts:188-213` | HIGH |
 | 20 | **Security** | **[CLOSED 2026-04-29]** CORS allowlist read from `env.CORS_ORIGINS`; prod fails fast on `*`. Originally: "CORS allows wildcard origins with credentials enabled" | `server/index.ts:215-228` | HIGH |
 | 21 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 2]** In-memory rate limiting lost on restart; bypassed in multi-process | `server/routes/auth.ts:14-30` | HIGH |
-| 22 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 3]** Webhook auth optional — no HMAC validation if WEBHOOK_SECRET unset | `server/services/webhookService.ts:74-77` | HIGH |
+| 22 | **Security** | **[CLOSED 2026-05-11 — pre-test-hardening W1 PR #284]** Webhook HMAC validation fails closed in production when WEBHOOK_SECRET is unset (401 webhook.signature_required). Dev preserves the existing skip with a one-time `logger.warn('webhook_secret_missing')` per process boot. | `server/services/webhookService.ts:74-77` | HIGH |
 | 23 | **Security** | **[CLOSED 2026-04-29]** Cross-org access logged via `auditService.log({ action: 'cross_org_access', … })` (persisted, queryable — stricter than the `logger.info` originally requested) | `server/middleware/auth.ts:82-96` | HIGH |
 | 24 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 1]** Multer memory storage accepts 500MB — OOM DoS risk | `server/middleware/validate.ts:17-20` | MEDIUM |
 | 25 | **Security** | **[CLOSED 2026-04-29 — route wiring; primitive swap remaining in pre-prod-boundary-and-brief-api Phase 2]** Forgot/reset-password rate-limited via `express-rate-limit` 5/15min at `server/routes/auth.ts:11-12,108,120`. Swap to DB-backed primitive folded into Phase 2. | `server/routes/auth.ts:11-12,108,120` | MEDIUM |
@@ -1370,15 +1370,9 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
     2. The watcher polls `references/.watcher.pid` every flush and exits if the PID file no longer matches its own pid. Cuts the failure window to the poll interval; requires care to avoid races on the `--rebuild` unlink step.
   - Not blocking merge per reviewer; add to Phase 1 hardening if telemetry shows shard corruption complaints.
 
-- [ ] Reseed restore script: wrap user-restore in a transaction (ChatGPT R1)
-  - File: `scripts/_reseed_restore_users.ts`
-  - Gap: restore inserts users (and any joined rows) outside of an explicit transaction. If interrupted mid-restore (Ctrl-C, machine sleep, DB blip), partial state is left in the DB and a re-run may collide on unique constraints or leave orphan FKs.
-  - Suggested approach: wrap the entire restore body in `db.transaction(async (tx) => { ... })`. Verify all DML inside uses `tx`, not the global `db`. No behavior change on the success path; on failure the DB is unchanged so re-run is idempotent.
+- [x] Reseed restore script: wrap user-restore in a transaction (ChatGPT R1) — **CLOSED 2026-05-11 by pre-test-hardening O4 PR #284.** Entire restore body wrapped in `db.transaction(async (tx) => { ... })`; all DML uses tx. Mid-restore throw leaves DB unchanged.
 
-- [ ] Reseed drop-create script: env guard against running outside development (ChatGPT R1)
-  - File: `scripts/_reseed_drop_create.ts`
-  - Gap: script drops and recreates the DB unconditionally. Production safety relies entirely on operator vigilance.
-  - Suggested approach: at the top of `main()`, fail-fast if `process.env.NODE_ENV !== 'development'` (or `process.env.DATABASE_URL` matches a known production host). Throw with a clear message explaining the guard.
+- [x] Reseed drop-create script: env guard against running outside development (ChatGPT R1) — **CLOSED 2026-05-11 by pre-test-hardening O3 + O4 PR #284.** `scripts/lib/prod-db-guard.ts::assertDevTargetOrThrow` shared by both reseed scripts. Round 8 F1 operator-approved tightening: primary guard is now an allowlist (only `NODE_ENV=development` passes); explicit fail when `DATABASE_URL` is unset; secondary host denylist (supabase/neon/render/rds.amazonaws/pooler.) as defence-in-depth. 14 tests cover the contract.
 
 - [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
   - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
@@ -1497,16 +1491,13 @@ Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items we
 
 ## Deferred findings — system-monitoring-coverage build (2026-04-28)
 
-### Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts
+### ~~Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts~~ — CLOSED 2026-05-11 by pre-test-hardening W2 PR #284
 
 `server/routes/webhooks/slackWebhook.ts` and `server/routes/webhooks/teamworkWebhook.ts`
-have inline `res.status(500)` paths that do not call `recordIncident`.
-These were out-of-scope for the system-monitoring-coverage build (spec §6.1.3 locked
-scope to GHL + GitHub only).
-
-Follow-up: apply the same `recordIncident` pattern to each inline 500 path in
-these files. Use `fingerprintOverride: 'webhook:slack:handler_failed'` and
-`fingerprintOverride: 'webhook:teamwork:handler_failed'` respectively.
+inline `res.status(500)` paths now route through `recordIncident` with stable
+fingerprints `webhook:slack:handler_failed` and `webhook:teamwork:handler_failed`.
+Targeted tests per webhook simulate a downstream throw and assert `recordIncident`
+is called with the correct fingerprint before the 500 response.
 
 ### workflow-bulk-parent-check JOB_CONFIG entry has no worker registration
 
@@ -3354,12 +3345,12 @@ Three findings — two in pre-existing code, one in new code — surfaced during
   - Gap: Soft-delete UPDATE filters only on `blockId`; prior SELECT verifies org, RLS protects in practice, but DEVELOPMENT_GUIDELINES §1 mandates explicit org filter on every by-id mutation.
   - Suggested approach: Add `eq(memoryBlocks.organisationId, organisationId)` to the UPDATE WHERE, matching the pattern in `overrideEntry`.
 
-- [ ] **CONSOL-GOV-DEF-18 — `overrideEntry` version-counter race can throw raw 500 under concurrency.**
+- [x] **CONSOL-GOV-DEF-18 — `overrideEntry` version-counter race can throw raw 500 under concurrency.** — **CLOSED 2026-05-11 by pre-test-hardening V2 PR #284.** `pg_advisory_xact_lock(hashtextextended(blockId::text, 0))` acquired inside the same outer `withOrgTx` that reads MAX(version) and inserts. Concurrency test asserts N concurrent overrides serialise without 23505 leakage. Round 3 F2 + Round 4 F2 + Round 5 F2 hardened the conditional `peekOrgTxContext()` wrapper for defence-in-depth.
   - File: `server/services/knowledgeService.ts:766-811` (NEW in this branch)
   - Gap: Version increment uses `MAX(version) + 1` in a sub-select. Two concurrent overrides with different bodies and identical ETag both pass the ETag check, both compute the same `MAX(version)`, both attempt INSERT with `version = N+1`. `onConflictDoNothing` is correctly targeted at `(memoryBlockId, bodyHash)` only, so the `(memoryBlockId, version)` collision bubbles as a raw 23505 (constraint name leaked in 500).
   - Suggested approach: Acquire `pg_advisory_xact_lock(hashtextextended(blockId, 0))` at the start of the transaction so concurrent overrides serialise. Alternative: catch 23505 specifically and retry once.
 
-- [ ] **CONSOL-GOV-DEF-19 — `PATCH /api/subaccounts/:subaccountId/connections/:id` accepts arbitrary `connectionStatus` strings.**
+- [x] **CONSOL-GOV-DEF-19 — `PATCH /api/subaccounts/:subaccountId/connections/:id` accepts arbitrary `connectionStatus` strings.** — **CLOSED 2026-05-11 by pre-test-hardening V1 PR #284.** Zod enum validation at the route layer (400 `connection.status_invalid`) plus CHECK constraint at the DB layer (migration 0320 with preflight RAISE that aborts on dirty data). Test coverage: pure Zod assertions + DB-level constraint test that bypasses Zod via raw drizzle insert.
   - File: `server/routes/integrationConnections.ts:123` (PRE-EXISTING route, not new in this branch)
   - Gap: `req.body.connectionStatus` flows straight into the column with no enum validation; a malformed value crashes every subsequent `GET /api/connections` response (UnknownEnumValueError throws). Self-inflicted DoS by an authorised CONNECTIONS_MANAGE user.
   - Suggested approach: Add Zod enum validation to the PATCH body (`connectionStatus: z.enum(['active','revoked','error']).optional()`); follow up with a Postgres CHECK constraint migration.
@@ -3492,7 +3483,7 @@ Three findings — two in pre-existing code, one in new code — surfaced during
 
 - [x] **AKR-ADV-2 — `server/routes/files.ts` imports `db` directly; `/api/files` GET runs outside the ALS org-scoped transaction.** ~~Tenant boundary relies solely on the explicit `eq(*, req.orgId!)` predicates and (if applicable) RLS.~~ CLOSED — fix shipped in PR #274 squash `b1c4d14d` via pre-merge commit `fa78a601`: `fileService.listFiles()` extracted using `getOrgScopedDb()`; route delegates to the service. Required to unblock `verify-rls-contract-compliance` blocking gate.
 
-- [ ] **AKR-ADV-3 — Promote endpoint accepts `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` from request body without org-membership verification.** `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` both pass scope IDs through to `referenceDocumentDataSources` insertion without verifying each ID belongs to `req.orgId!`. Direct cross-tenant data exposure is low (FK-walked retrieval queries scope by `organisationId` AND `agentId`), but writes corrupt the scope-link table with FK-valid references to other orgs' entities. Fix: verify each non-null scope ID against `WHERE id = :id AND organisationId = :orgId` before insert.
+- [x] **AKR-ADV-3 — Promote endpoint accepts `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` from request body without org-membership verification.** — **CLOSED 2026-05-11 by pre-test-hardening T2 PR #284.** `documentDataSourceService.verifyScopeIdsBelongToOrg` runs explicit `WHERE id = :id AND organisation_id = :orgId` checks for every supplied scope ID; mismatch → 403 `referenceDocument.scope_cross_org` with audit row (PTH-CGT-R7-F3 routes through canonical `auditService.log`). Atomicity: all verifications complete before any insert. `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` both pass scope IDs through to `referenceDocumentDataSources` insertion without verifying each ID belongs to `req.orgId!`. Direct cross-tenant data exposure is low (FK-walked retrieval queries scope by `organisationId` AND `agentId`), but writes corrupt the scope-link table with FK-valid references to other orgs' entities. Fix: verify each non-null scope ID against `WHERE id = :id AND organisationId = :orgId` before insert.
 
 - [ ] **AKR-ADV-5 — No per-org chunk-count cap or embedding cost quota in `documentChunkEmbedJob`.** A user with `REFERENCE_DOCUMENTS_WRITE` can promote large documents rapidly, each producing hundreds of OpenAI embedding API batches. The job's `expireInSeconds: 300` timeout fires after API calls are already billed. Fix: add `MAX_CHUNKS_PER_DOCUMENT = 500` constant in `documentChunkingServicePure.ts` (truncate + warn-log if exceeded); add per-org `document:chunk-embed` queue rate-limit or daily embedding-token counter.
 
@@ -3589,7 +3580,7 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Gap: heartbeat payload field missing.
   - Suggested approach: emit `data: { eventTimestamp, serverNow, lastEventId }` in the heartbeat (where `lastEventId` is the most-recently-emitted real event for the scope); confirm whether the canonical `lastEventId` should be drawn from the ring buffer's last entry per scope or from a separate per-connection tracker.
 
-- [ ] **AGW-DEF-6 — `workingTimeRollupCompactJob` uses `RETURNING id` against composite-PK table.** `server/jobs/workingTimeRollupCompactJob.ts:99` does `DELETE FROM agent_working_time_rollups ... RETURNING id`, but `agent_working_time_rollups` has no `id` column (composite PK on `organisation_id, agent_id, bucket_date`). The job will fail at runtime on the first execution against any non-empty data set. This is a code-quality bug rather than a spec deviation (spec doesn't pin SQL details), but it nullifies the §6.7 retention/compaction policy in production.
+- [x] **AGW-DEF-6 — `workingTimeRollupCompactJob` uses `RETURNING id` against composite-PK table.** — **CLOSED 2026-05-11 by pre-test-hardening O1 PR #284.** Dropped `RETURNING id` from the DELETE; job runs to completion against seeded retention data. `server/jobs/workingTimeRollupCompactJob.ts:99` does `DELETE FROM agent_working_time_rollups ... RETURNING id`, but `agent_working_time_rollups` has no `id` column (composite PK on `organisation_id, agent_id, bucket_date`). The job will fail at runtime on the first execution against any non-empty data set. This is a code-quality bug rather than a spec deviation (spec doesn't pin SQL details), but it nullifies the §6.7 retention/compaction policy in production.
   - Spec section: §6.7 retention policy row "Working Time aggregates".
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
@@ -3611,7 +3602,7 @@ Phase 2 (`feature-coordinator`) entered the build pipeline with one of the two P
 
 Branch-level Phase 2 review pass against the integrated `claude/support-ticket-structure-xMcy8` branch (head `d96fb728`). All 15 chunks (C1–C15) of the build are present and most of the spec surface area is implemented faithfully. Seven gaps require human design judgement before the build is merge-ready. The most urgent (REQ #45) silently breaks the brief's collision-avoidance invariant.
 
-- [ ] **REQ #45 — §8.1 preflight checks 4, 5, 6, 7 missing in `supportDraftDispatchService.approveDraft`.** Spec §8.1 enumerates seven preflight checks; the implementation performs only checks 1, 2, 3 (in part). Missing: (4) ticket status eligibility per §5.1.A column 3 (e.g. `support.propose_reply` not allowed on `pending_internal`), (5) collision-window check (`now - last_human_activity_at >= agent_config.collisionWindow.minMinutesSinceHumanActivity` AND respect-human-assignee), (6) customer-match policy gate, (7) supersession check (no newer draft exists). Without these the dispatch service can issue a public reply on top of fresh human activity — direct violation of brief §5.4 (collision avoidance) and brief §6.5 (assisted/autonomous mode separation). The `overrideCollision` parameter on `approveDraft` is plumbed but the underlying check it bypasses does not exist; the parameter is therefore inert today.
+- [x] **REQ #45 — §8.1 preflight checks 4, 5, 6, 7 missing in `supportDraftDispatchService.approveDraft`.** — **CLOSED 2026-05-11 by pre-test-hardening S1 PR #284.** All four checks (status eligibility, collision window with `respect-human-assignee`, customer-match policy, supersession with `(created_at, id)` tuple ordering) implemented as pure helpers in `supportDraftDispatchPreflightPure.ts`. Source-rule snapshot pinned via unit tests so any later edit to the source spec that contradicts the snapshot is caught. Spec §8.1 enumerates seven preflight checks; the implementation performs only checks 1, 2, 3 (in part). Missing: (4) ticket status eligibility per §5.1.A column 3 (e.g. `support.propose_reply` not allowed on `pending_internal`), (5) collision-window check (`now - last_human_activity_at >= agent_config.collisionWindow.minMinutesSinceHumanActivity` AND respect-human-assignee), (6) customer-match policy gate, (7) supersession check (no newer draft exists). Without these the dispatch service can issue a public reply on top of fresh human activity — direct violation of brief §5.4 (collision avoidance) and brief §6.5 (assisted/autonomous mode separation). The `overrideCollision` parameter on `approveDraft` is plumbed but the underlying check it bypasses does not exist; the parameter is therefore inert today.
   - Spec section: §8.1 (preflight checks) + §5.4 (brief invariant) + §15 (`support.ticket.human_collision_blocked` log code)
   - Suggested approach: Read `canonical_inboxes.agent_config` once during preflight (already loaded for the inbox-disabled check). For check 5, compare `ticket.lastHumanActivityAt` against `now - minMinutesSinceHumanActivity` and inspect `ticket.assigneeAgentId` joined to `canonical_support_agents.agentKind` when `respectHumanAssignee=true`. For check 7, query for newer drafts on the same ticket in `awaiting_review`+ states. Each failure returns `{ statusCode: 422, errorCode: <reason> }`. Emit `SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED` on collision fail. Pure helpers belong in `supportDraftDispatchServicePure.ts` for fixture testing.
 
@@ -3619,7 +3610,7 @@ Branch-level Phase 2 review pass against the integrated `claude/support-ticket-s
   - Spec section: §8.6 #2
   - Suggested approach: Once REQ #45 lands the collision-window check, gate the `overrideCollision=true` path on `assertScope(principal, 'support.draft.override_collision')` (already gated at the route layer; the service should re-assert defensively), then before re-running preflight without the collision check, insert an `auditEvents` row capturing the snapshot. Use the existing `auditEvents` schema. The route already enforces the permission key (`server/routes/support/supportDraftsRoutes.ts:39`), so the service-level guard is defence-in-depth.
 
-- [ ] **REQ #50 — §8.6 autonomous-agent guard for `overrideCollision: true` missing.** Spec §8.6 paragraph 5 explicitly requires that `overrideCollision: true` from an agent-run principal (no human user id) be rejected with `{ statusCode: 403, errorCode: 'support.draft.override_collision_human_only' }`. The current implementation silently records `reviewerUserId = null` for non-user principals and proceeds.
+- [x] **REQ #50 — §8.6 autonomous-agent guard for `overrideCollision: true` missing.** — **CLOSED 2026-05-11 by pre-test-hardening S2 PR #284.** `approveDraft` rejects agent-principal `overrideCollision=true` with 403 `support.draft.override_collision_human_only`; ZERO DB writes on the reject path. Integration test asserts both reject (agent + override) and success (human + override). Spec §8.6 paragraph 5 explicitly requires that `overrideCollision: true` from an agent-run principal (no human user id) be rejected with `{ statusCode: 403, errorCode: 'support.draft.override_collision_human_only' }`. The current implementation silently records `reviewerUserId = null` for non-user principals and proceeds.
   - Spec section: §8.6 paragraph 5
   - Suggested approach: At the top of `approveDraft`, when `options?.overrideCollision === true`, throw the spec-named typed error if `principalCtx.type !== 'user'`. Single-line guard.
 
@@ -3658,14 +3649,14 @@ Round-2 verification against the integrated `claude/support-ticket-structure-xMc
 **Branch HEAD at review:** `62f9a28e`
 **Verdict:** HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming) — non-blocking advisory per playbook §8.2
 
-- [ ] **SDC-ADV-1 (confirmed-hole, partial spec-contradiction) — Read-pathway sub-account scoping not enforced.** `GET /api/support/{tickets,tickets/:id,drafts,drafts/:id,inboxes}` are gated only by `authenticate`. Any authenticated org user can read all support drafts (full `proposedBodyText` + `reviewNotes`), all ticket message threads (customer email bodies), all inbox `agent_config` (mode, collision-window, opt-ins). Spec chatgpt-spec-review R2 explicitly removed read permission keys ("read access is implicit in org membership + sub-account scoping") — but the route handlers pass `subaccountId: null` hardcoded (`supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21`), and the service-layer queries do not filter by subaccountId. Net: implementation enforces "read = org membership" only; spec-mandated subaccount scoping is missing.
+- [x] **SDC-ADV-1 (confirmed-hole, partial spec-contradiction) — Read-pathway sub-account scoping not enforced.** — **CLOSED 2026-05-11 by pre-test-hardening T1 PR #284.** All 5 read endpoints moved under `/api/subaccounts/:subaccountId/support/...`; route handlers call `resolveSubaccount(req.params.subaccountId, req.orgId!)` first; service-layer queries filter by `eq(table.subaccountId, subaccountId)`. Legacy unscoped mount removed (no compatibility shim per spec DEC-1). 11 client call-sites rewritten. `GET /api/support/{tickets,tickets/:id,drafts,drafts/:id,inboxes}` are gated only by `authenticate`. Any authenticated org user can read all support drafts (full `proposedBodyText` + `reviewNotes`), all ticket message threads (customer email bodies), all inbox `agent_config` (mode, collision-window, opt-ins). Spec chatgpt-spec-review R2 explicitly removed read permission keys ("read access is implicit in org membership + sub-account scoping") — but the route handlers pass `subaccountId: null` hardcoded (`supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21`), and the service-layer queries do not filter by subaccountId. Net: implementation enforces "read = org membership" only; spec-mandated subaccount scoping is missing.
   - **Operator triage:** (a) implement subaccount scoping by extracting `req.subaccountId` from the auth middleware and passing through to the service layer's RLS-aware queries (preferred — matches spec); or (b) override the spec decision and add `support.{ticket,draft,inbox}.view` read permission keys to gate these routes (spec amendment required).
 
 - [ ] **SDC-ADV-2 (likely-hole) — `action_attempts` TOCTOU on crash-recovery path.** `supportDraftDispatchService.ts:367-402` — Phase 2 CAS and `action_attempts` INSERT are not in the same transaction. If process A wins Phase 2 (sets `dispatching`), calls the adapter, but crashes before inserting the `in_flight` ledger row, boot-recovery transitions to `needs_reconciliation` and re-enqueues. The retry finds no `action_attempts` row, calls the adapter again. Result: duplicate provider send if the Teamwork Desk adapter's `idempotencyKey` is not provider-side honored.
   - **Confirmation needed:** does Teamwork Desk's `addReply` honor the `idempotencyKey` parameter as provider-side dedup? If yes → not exploitable. If no → confirmed duplicate-send hole.
   - **Suggested:** add a Teamwork Desk API smoke test in C7 follow-up that submits two `addReply` calls with the same key and verifies provider behavior. Document in spec §14.1 next to OQ-3.
 
-- [ ] **SDC-ADV-3 (likely-hole) — Teamwork webhook cross-tenant attribution + in-memory dedup.** `teamworkWebhook.ts:37-67` enumerates all active Teamwork connector configs across all orgs and breaks at first HMAC match. If two orgs configure the same `webhookSecret` (no platform-side uniqueness enforcement), webhook events from org A can be attributed to org B. Currently the post-processing is a no-op (`Future: publish to event bus`) — when canonical mutations land, this becomes a cross-tenant data injection path. Replay protection is in-memory (`webhookDedupeStore`, 10-min TTL) — multi-instance deployments have independent stores; manual replay against a different instance bypasses dedup.
+- [x] **SDC-ADV-3 (likely-hole) — Teamwork webhook cross-tenant attribution + in-memory dedup.** — **CLOSED 2026-05-11 by pre-test-hardening W3 PR #284.** Per-org URL token route `/api/webhooks/teamwork/:orgWebhookToken`; `connectorConfigService.findByWebhookToken` lookup filters by `connector_type='teamwork' AND status='active' AND webhook_token=$1::uuid` with UUID-regex pre-validation. DB-backed replay nonces (migration 0318) with `UNIQUE (organisation_id, webhook_source, nonce)` enforce dedup correctness; row existence (not wall-clock TTL) is the dedup invariant. Auto-generate `webhook_token` on Teamwork connector create (dual-reviewer Codex iter4 fix). Token-rotation runbook at `docs/runbooks/teamwork-webhook-token-rotation.md`. `teamworkWebhook.ts:37-67` enumerates all active Teamwork connector configs across all orgs and breaks at first HMAC match. If two orgs configure the same `webhookSecret` (no platform-side uniqueness enforcement), webhook events from org A can be attributed to org B. Currently the post-processing is a no-op (`Future: publish to event bus`) — when canonical mutations land, this becomes a cross-tenant data injection path. Replay protection is in-memory (`webhookDedupeStore`, 10-min TTL) — multi-instance deployments have independent stores; manual replay against a different instance bypasses dedup.
   - **Suggested:** (a) add a unique constraint or platform-side check that `connector_configs.config->>'webhookSecret'` cannot collide across orgs for the same connector type; (b) persist webhook dedup in a shared store (Postgres `webhook_dedup_keys` table with TTL cleanup, or Redis with TTL).
 
 - [ ] **SDC-ADV-4 (worth-confirming) — Multiple UPDATEs in `approveDraft` omit `organisationId` predicate.** `supportDraftDispatchService.ts` lines 295-312, 339-341, 346-350, 381-384, 443-446, 455-458, 470-473, 478-481. RLS provides the backstop, but `DEVELOPMENT_GUIDELINES.md §1` requires explicit application-layer org filtering for defence-in-depth. Pattern violation — not exploitable in isolation.
@@ -4097,3 +4088,44 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
 2. Hybrid: keep current behaviour for known-trusted admin paths; return 404 elsewhere.
 
 **Suggested classification:** P3 (defence-in-depth; not actively exploitable without further chained vulns).
+
+### PTH-ADV-2 — Teamwork webhook admin-bypass with skipAudit:true (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/services/connectorConfigService.ts::findByWebhookToken` uses `withAdminConnection(..., skipAudit: true)` to bypass RLS for the unauthenticated webhook routing path. Returns a full `connector_configs` row including `accessToken`, `refreshToken`, `webhookSecret`, `configJson` keyed by UUID token.
+
+**Concern:** the admin bypass fires on every inbound Teamwork webhook with no audit-log footprint. If the webhook endpoint is ever exposed to a scanning attack (automated UUID enumeration), the admin bypass would fire silently at high frequency with no alerting. The UUID uniqueness makes token collisions cryptographically improbable but doesn't address the audit-trail gap.
+
+**Recommendation:** either (a) remove `skipAudit: true` and accept the audit log overhead, or (b) emit a counter metric (not a per-request log line) so anomalous enumeration rates are visible. Document why audit suppression is the right choice if (a) and (b) are both rejected.
+
+**Suggested classification:** P3 (defence-in-depth).
+
+---
+
+### PTH-ADV-3 — pg_advisory_xact_lock requires real db.transaction in middleware (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/services/knowledgeService.ts::overrideEntry` acquires `pg_advisory_xact_lock` against the handle returned by `getOrgScopedDb()`. The lock is transaction-scoped — only safe if the caller opened a real `db.transaction()`.
+
+**Verified safe for HTTP path:** auth middleware at `server/middleware/auth.ts:148` opens `db.transaction(...)` per request. The advisory lock is bound to that outer transaction; releases on commit/rollback.
+
+**Worth-confirming:** any background-job caller of `overrideEntry` must also pre-establish a real transaction (typical job pattern is `withOrgTx({ tx, organisationId, source }, fn)` after opening `db.transaction`). Today there are no non-HTTP callers. If a future job adds a caller, the conditional `peekOrgTxContext()` wrapper in `overrideEntry` opens its own tx via the no-ALS branch — also safe. The PTH-CGT-R3-F2 fix made this robust.
+
+**Recommended action:** add a sentinel test that asserts `overrideEntry` from outside withOrgTx opens its own tx (the no-ALS branch). Already partially covered by the existing concurrency test.
+
+**Suggested classification:** P3 (defence-in-depth; current state is safe).
+
+---
+
+### PTH-ADV-4 — Webhook replay-nonce 10-min TTL vs Teamwork retry window (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/jobs/webhookReplayNoncePruneJob.ts` runs hourly, deletes nonces older than 10 minutes.
+
+**Concern:** Teamwork Desk's documented webhook retry window is up to 72 hours (varies by provider). After the 10-minute prune, a delivery ID that was already processed can be re-ingested because the nonce row no longer exists. For the current handler (which only logs and emits to a future event bus), this is low-risk. Once downstream agent processing wires up, the 10-minute window becomes a correctness gap.
+
+**Trigger:** downstream agent dispatch on Teamwork webhook events.
+
+**Recommendation:** before wiring downstream agent dispatch, extend the prune window to match the provider's maximum retry horizon (e.g. 96 hours, matching the Stripe webhook TTL used elsewhere in this codebase per `architecture.md`).
+
+**Suggested classification:** P2 (correctness gap once downstream handlers ship).
