@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-11
-**Last updated:** 2026-05-11 (spec-reviewer iteration 1 mechanical pass applied)
+**Last updated:** 2026-05-11 (spec-reviewer iteration 2 mechanical pass applied)
 **Author:** claude-opus-4-7
 **Build slug:** operator-session-identity
 **Source branch:** claude/evolve-session-identity-brief-17LO4
@@ -49,7 +49,7 @@ This spec also absorbs a **scope amendment** (Section 5): the `/connections` Gov
 ## 2. Goals
 
 1. Add `auth_type: 'operator_session'` to the Credential Broker (`credentialBrokerService.ts`) and `integration_connections` schema.
-2. Ship five new columns on `integration_connections`: `usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, `consent_record_id`.
+2. Ship six new columns on `integration_connections`: `usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, `consent_record_id`, `is_default` (the last enforces the single-Default invariant per subaccount via partial unique index — see §7.1).
 3. Create two new append-only, RLS-protected tables: `operator_session_consents` and `operator_session_consent_events`.
 4. Implement the provider connection flow (conditioned on verified OpenAI provider support; if not verified at time of build, the connect route returns `501 provider_mechanism_not_verified` per §11.1 — the rest of the schema, consent model, and UI ship and light up when the mechanism is confirmed).
 5. Implement plan-tier detection (self-declaration fallback per §7.4).
@@ -205,11 +205,14 @@ All UI surfaces in this spec were designed across 13 mockup rounds. These files 
 
 ### 7.1 Modified table — integration_connections
 
-**Migration:** `0318_operator_session_columns.sql`
+**Migrations ship in dependency order:**
+- `0318_operator_session_consents.sql` (this section: §7.2 + §7.3 — creates the two new consent tables FIRST so the FK target exists)
+- `0319_operator_session_columns.sql` (this section: adds 6 columns + partial unique index on `integration_connections`, including the `consent_record_id` FK pointing at the table created in 0318)
 
-Add the following columns to the existing `integration_connections` table. All are nullable so that existing rows (non-operator_session) are unaffected.
+The migration ordering is critical: `integration_connections.consent_record_id` references `operator_session_consents.id`, so the referenced table must be created first. Migration 0319 also adds `'operator_session'` to the `auth_type` CHECK constraint.
 
 ```sql
+-- Migration 0319_operator_session_columns.sql
 ALTER TABLE integration_connections
   ADD COLUMN usability_state          text,
   ADD COLUMN plan_tier                text,
@@ -222,6 +225,8 @@ CREATE UNIQUE INDEX ic_subaccount_operator_session_default_unique
   ON integration_connections (subaccount_id)
   WHERE auth_type = 'operator_session' AND is_default = true;
 ```
+
+Nullability: `usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, and `consent_record_id` are nullable so existing non-operator_session rows are unaffected. `is_default` is `NOT NULL DEFAULT false` so existing rows are populated automatically with the safe default and the partial unique index applies only to operator_session rows.
 
 Add `'operator_session'` to the `auth_type` enum. Because Drizzle uses text with runtime enum, this is a CHECK constraint addition on the column — no Postgres ENUM DDL required.
 
@@ -252,9 +257,9 @@ isDefault: boolean('is_default').notNull().default(false),  // partial unique in
 
 ### 7.2 New table — operator_session_consents
 
-**Migration:** `0319_operator_session_consents.sql`
+**Migration:** `0318_operator_session_consents.sql`
 
-Append-only. Rows are NEVER updated or deleted. Revocation, supersession, and re-acceptance are modelled as events in `operator_session_consent_events`.
+Append-only with one narrow, service-enforced exception. Rows are NEVER deleted. The only UPDATE permitted on this table is a one-time write that fills `connection_id` from NULL to a non-NULL UUID, performed inside the same transaction as the corresponding initial-connect INSERT (see §11.1 step 4). This exception exists because the FK target for `integration_connections.consent_record_id` must be created before the connection row, but the consent row's reverse pointer `connection_id` is itself a FK that needs the connection UUID — a circular dependency that the spec resolves with a single-shot post-INSERT UPDATE inside the connect transaction. The `operatorSessionConsentService` layer is the only code path permitted to perform this UPDATE; direct DB access is rejected by the service contract. After commit, the row is fully immutable for the rest of its 7-year retention window. Revocation, supersession, and re-acceptance are modelled as events in `operator_session_consent_events`; no consent row is ever updated to reflect them.
 
 ```sql
 CREATE TABLE operator_session_consents (
@@ -293,7 +298,7 @@ CREATE POLICY operator_session_consents_org_isolation ON operator_session_consen
 
 ### 7.3 New table — operator_session_consent_events
 
-**Migration:** `0319_operator_session_consents.sql` (same migration)
+**Migration:** `0318_operator_session_consents.sql` (same migration)
 
 Append-only event log for consent lifecycle. Supersession lives here; consent rows are immutable.
 
@@ -357,6 +362,17 @@ export const OPERATOR_SESSION_PROVIDERS: Record<string, ProviderCapabilityEntry>
 
 **Update rule:** When the OpenAI connection mechanism is confirmed, `connectionMechanism` is updated to the correct value (e.g., `'oauth_pkce'`) and `runtimeUseEnabled` remains `false` until the OpenClaw adapter ships. Future providers add a new entry without schema or service changes.
 
+**Plan verification outcome by detection mechanism.** A given provider's `planDetectionMechanism` determines the `plan_verification_status` written when a connection is created:
+
+| `planDetectionMechanism` | Plan classified as sanctioned (pro/team/enterprise) | Plan classified as Plus | Plan ambiguous or unparseable |
+|---|---|---|---|
+| `introspection_api` | `'verified'` — usability_state = `'connected_usable'` directly | `'verified'` — usability_state = `'connected_usable'` after disclosure | `'failed'` — usability_state = `'connected_unverified'`, treat as Plus-equivalent (consent required to proceed) |
+| `probe` | `'verified'` if probe signal is unambiguous; `'self_declared'` otherwise | `'verified'` if probe + user input agree; `'self_declared'` otherwise | `'failed'` — `'connected_unverified'` |
+| `self_declaration` | `'self_declared'` always — `usability_state = 'connected_unverified'` per §11.1; the connection requires a disclosure acceptance even for nominally-sanctioned tiers, because we cannot independently verify the user's tier claim | `'self_declared'` — `'connected_unverified'`, identical to sanctioned tiers under self-declaration | `'failed'` — `'connected_unverified'` |
+| `none` | (this branch is unreachable — if no detection mechanism is available, the spec MUST mark `runtimeUseEnabled: false` and gate the connect route) | (same) | (same) |
+
+The V1 OpenAI entry uses `self_declaration`, so EVERY new operator_session connection in V1 lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`, and EVERY connect attempt requires a `disclosureAcceptance` block per §11.1. When the OpenAI introspection mechanism is verified, the registry entry flips to `'introspection_api'`, and the verification branch in `operatorSessionService` will start producing `'verified'` + `'connected_usable'` rows automatically — no schema change needed.
+
 ---
 
 ### 7.5 usability_state state machine
@@ -409,8 +425,8 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | Migration | Purpose |
 |---|---|
-| `migrations/0318_operator_session_columns.sql` | Add 6 columns to `integration_connections` (usability_state, plan_tier, plan_verification_status, plan_verified_at, consent_record_id, is_default) + partial unique index for Default; add `'operator_session'` to auth_type |
-| `migrations/0319_operator_session_consents.sql` | Create `operator_session_consents` (with `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)`) + `operator_session_consent_events`, both with RLS |
+| `migrations/0318_operator_session_consents.sql` | Create `operator_session_consents` (with `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)`) + `operator_session_consent_events`, both with RLS. Ships FIRST so the FK target exists before migration 0319. |
+| `migrations/0319_operator_session_columns.sql` | Add 6 columns to `integration_connections` (usability_state, plan_tier, plan_verification_status, plan_verified_at, consent_record_id, is_default) + partial unique index `ic_subaccount_operator_session_default_unique`; add `'operator_session'` to auth_type. Depends on 0318. |
 
 ### 8.2 New schema files
 
@@ -438,7 +454,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | File | Purpose |
 |---|---|
 | `server/services/operatorSessionService.ts` | Connect flow, plan detection, `usability_state` management |
-| `server/services/operatorSessionConsentService.ts` | Consent record CRUD, version-bump detection, retention enforcement |
+| `server/services/operatorSessionConsentService.ts` | Append-only consent row writer (with the one-time `connection_id` back-fill exception per §7.2 / §11.1), consent-event recording, disclosure-version-bump detection (on-read per §11.4), retention enforcement. No UPDATE or DELETE primitives beyond the back-fill — historical changes are recorded as new event rows. |
 | `server/services/operatorSessionLifecycleService.ts` | State machine transitions (the only code allowed to write `usability_state`) |
 | `server/services/operatorSessionLifecycleServicePure.ts` | Pure functions for failure classification, state-transition logic (testable) |
 
@@ -585,7 +601,14 @@ interface AiSubscriptionConnection {
   planVerificationStatus: 'verified' | 'self_declared' | 'unverified' | 'failed';
   planVerifiedAt: string | null;           // ISO 8601
   usabilityState: 'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled';
-  disabledReason: 'owner_inactive' | 'admin_disabled' | 'needs_new_consent' | null;
+  /**
+   * Sub-label for the visible state pill — populated only when usabilityState !== 'connected_usable'.
+   * The values align with the state machine in §7.5: `disabled` states emit a `disabledReason`,
+   * `connected_needs_consent`/`connected_needs_reauth`/`connected_unverified` emit a `pendingReason`,
+   * `revoked` carries no sub-label (the source is always the provider, surfaced via the audit event type).
+   */
+  disabledReason: 'owner_inactive' | 'admin_disabled' | 'disclosure_superseded' | null;  // populated only when usabilityState === 'disabled'
+  pendingReason:  'needs_new_consent' | 'needs_reauth' | 'plan_unverified' | null;       // populated only when usabilityState ∈ {connected_needs_consent, connected_needs_reauth, connected_unverified}
   isDefault: boolean;
   availabilityScope: 'all_agents' | 'specific_agents';
   allowedAgentIds: string[] | null;       // null when scope = 'all_agents'
@@ -623,7 +646,7 @@ interface OperatorSessionConsent {
 ### 9.4 Consent event shape
 
 ```typescript
-// Produced by: operatorSessionConsentService.{recordConsent | revokeConsent | supersedConsent}
+// Produced by: operatorSessionConsentService.{recordConsent | revokeConsent | supersedeConsent}
 interface OperatorSessionConsentEvent {
   id: string;
   organisationId: string;
@@ -675,6 +698,19 @@ When the same fact appears in multiple representations:
 | Connection's current consent | `integration_connections.consent_record_id` (forward pointer on the connection row) is canonical. `operator_session_consents.connection_id` is a historical reverse pointer for compliance lookups and audit only — it MUST NOT be used to determine which consent currently authorises a connection. When the two diverge (e.g. consent superseded), the connection's `consent_record_id` wins; the consent row's `connection_id` stays at the original value forever (immutable). | Read `consent_record_id` from the connection; never traverse from consent → connection for "which consent authorises this credential". |
 | Plan tier | `integration_connections.plan_tier` column | DB; never inferred from token at runtime |
 | Token expiry | `integration_connections.token_expires_at` | DB; compared to `now()` by the lifecycle service before injecting |
+| Failover order for an agent run | `credentialBrokerService.resolveAvailableCredentials` returns the ordered list per the rule below; the agent run loop reads positions left-to-right and never re-sorts | Broker is single source of truth for ordering; consumers MUST NOT reorder |
+
+### 9.7 Failover ordering contract (locked, Goal §2 item 14)
+
+`credentialBrokerService.resolveAvailableCredentials` for an operator_session-capable agent run returns a deterministic ordered array of resolved credentials. The ordering rule is:
+
+1. The subaccount's Default operator_session connection (the row with `is_default = true`), if it is in `usability_state = 'connected_usable'` AND the agent is in its `allowedAgentIds` allowlist (or the connection's `availabilityScope = 'all_agents'`).
+2. All other operator_session connections in the same subaccount that are in `usability_state = 'connected_usable'` AND allow the agent, sorted by `label ASC NULLS LAST, id ASC` (label-driven alphabetical order; `id` tiebreaker for determinism when labels are identical or NULL).
+3. Platform-managed providers (existing `oauth2` / `api_key` connection rows that previously served the agent's model needs) sorted by their existing resolution rule (unchanged by this spec).
+
+The agent run loop consumes the array in order: try position 0, on retryable failure proceed to position 1, etc. Connections that move out of `connected_usable` mid-run are excluded from re-resolution but already-consumed positions are not re-evaluated within the same run.
+
+`label ASC NULLS LAST` ordering uses Postgres `ORDER BY label ASC NULLS LAST, id ASC` and is implemented in the broker's SQL — not in JavaScript — so the order is deterministic regardless of caller. The acceptance criteria in §17 add a test that confirms (a) Default-first, (b) alphabetical-by-label thereafter, (c) NULLS LAST, (d) `id` tiebreaker.
 
 ---
 
@@ -715,7 +751,7 @@ Raw token material is broker-internal at all permission levels — never accessi
 - FORCE RLS: YES (fail-closed when GUC unset)
 - Policy: org-isolation (standard three-guard pattern, §7.2)
 - Manifest entry: add to `server/config/rlsProtectedTables.ts`
-- Migration: `0319_operator_session_consents.sql`
+- Migration: `0318_operator_session_consents.sql`
 - Route guard: all reads/writes go through `operatorSessionConsentService` which sets GUC via `withOrgTx`
 - Principal-scoped context: not accessed from agent execution paths in V1; no P3B principal context needed yet
 
@@ -763,14 +799,23 @@ New Add/Edit/Test routes exposed via the Govern surface MUST use the same guards
 
 ### 11.1 Connection flow (sync, inline)
 
-The provider connection handshake is inline / synchronous from the client's perspective:
+The provider connection handshake is inline / synchronous from the client's perspective. All DB writes for a single connect attempt happen inside ONE transaction so partial-success is impossible.
 
-1. Client POST to `connect` route.
+1. Client POST to `connect` route. For Plus tier, the client UI has already gathered the typed-confirmation disclosure acceptance; the `connect` POST body includes a `disclosureAcceptance: { disclosureVersion, consentText }` block. Pre-flight validation rejects a Plus connect without this block (422 `plus_consent_required`) before any provider call.
 2. Server calls provider OAuth endpoint (or equivalent verified mechanism).
 3. Server receives token, validates plan tier.
-4. Server writes `integration_connections` row with `usability_state = 'connected_usable'` (or `connected_unverified` if plan detection fails).
-5. If plan_tier = `plus`: server writes consent row before storing token. If consent is absent, the row is NOT saved — fail the connection.
-6. Server responds 201 with the `AiSubscriptionConnection` shape (no token material).
+4. BEGIN transaction:
+   - For Plus tier: INSERT the `operator_session_consents` row using the `disclosureAcceptance` block from the request. Also INSERT a `granted` event into `operator_session_consent_events`. Capture the new `consent_id`.
+   - INSERT the `integration_connections` row with `usability_state = 'connected_usable'` (or `connected_unverified` if plan verification could not classify the plan as sanctioned), `consent_record_id = <consent_id or NULL for sanctioned tiers without disclosure>`, and the encrypted token material.
+   - For Plus tier: UPDATE the consent row to set `connection_id = <new connection id>` (the only mutation ever permitted on a consent row, because the FK target did not exist when the row was first inserted). This is the documented exception to the "append-only" rule and is enforced at the service layer (no other code path may UPDATE a consent row).
+   - COMMIT.
+5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material).
+
+**Why the back-pointer is mutable exactly once:** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link.
+
+**Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump. That route writes a NEW consent row (linked to the existing `connId` from the start, so no UPDATE-of-connection_id is needed), writes a `superseded` event linking the prior consent, updates `integration_connections.consent_record_id` to the new consent, and transitions `usability_state` back to `connected_usable`. The route returns 422 if no prior consent record exists for the connection — that case must go through the initial `connect` flow instead.
+
+**Unverified plan-tier branch:** When `plan_verification_status` cannot resolve the plan to a sanctioned tier (provider self-declaration unverified or returns ambiguous data), the connection lands in `usability_state = 'connected_unverified'`. The spec treats this as Plus-equivalent: the connect request MUST include a `disclosureAcceptance` block, and the consent row is recorded the same way as for explicit Plus tier (the disclosure_text_snapshot reflects the unverified-tier wording). The credential is NOT usable by adapters until verification succeeds or the user explicitly re-confirms it as Plus-tier via the detail page.
 
 **If provider mechanism is unverified at build time:** Step 2 and 3 are gated. The `connect` route returns `501 provider_mechanism_not_verified` with a body explaining the gate. Schema and consent model are deployed; connection wiring activates when the mechanism is confirmed.
 
@@ -786,9 +831,11 @@ The provider connection handshake is inline / synchronous from the client's pers
 
 ### 11.3 Consent recording (sync, inline)
 
-Consent is recorded synchronously inside the connect transaction. A consent row is written BEFORE the credential is stored. If consent write fails, the credential is NOT stored — no silent partial success.
+Consent is recorded synchronously inside the same DB transaction that creates the connection (see §11.1 step 4). The consent INSERT is the first statement in the transaction so the FK from `integration_connections.consent_record_id` is satisfiable; the one-time UPDATE of `operator_session_consents.connection_id` happens later in the same transaction once the connection's UUID is available. If any write in this transaction fails, the entire transaction rolls back — neither the consent nor the credential is persisted. The `connect` route returns 422 with the specific failure reason.
 
-### 11.4 Disclosure version bump detection (queued or on-read)
+Re-acceptance after a disclosure-version bump uses the dedicated `/consent` route (§10.4) which writes a new consent row (with `connection_id` set at INSERT time, since the connection already exists), a `superseded` event, and updates the connection's `consent_record_id` forward pointer.
+
+### 11.4 Disclosure version bump detection
 
 When `OPERATOR_SESSION_DISCLOSURE_VERSION` config increments:
 
@@ -813,9 +860,9 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 
 ### Chunk 1 — Schema foundations (migrations + Drizzle)
 
-**Deliverables:**
-- Migration 0318: 5 new columns on `integration_connections`, add `'operator_session'` to authType
-- Migration 0319: `operator_session_consents` + `operator_session_consent_events` tables with RLS
+**Deliverables (ship in migration order — 0318 first, 0319 depends on it):**
+- Migration 0318 (`0318_operator_session_consents.sql`): `operator_session_consents` + `operator_session_consent_events` tables with RLS, FORCE RLS, org-isolation policy, and the `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` constraint
+- Migration 0319 (`0319_operator_session_columns.sql`): 6 new columns on `integration_connections` (`usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, `consent_record_id`, `is_default`); partial unique index `ic_subaccount_operator_session_default_unique`; add `'operator_session'` to the `auth_type` CHECK constraint
 - Drizzle schema files for both new tables
 - Update `server/db/schema/index.ts`
 - Add both new tables to `server/config/rlsProtectedTables.ts`
@@ -835,7 +882,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 ### Chunk 3 — Consent service + lifecycle service (DB writes)
 
 **Deliverables:**
-- `operatorSessionConsentService.ts` full implementation: `recordConsent`, `revokeConsent`, `supersedConsent`, `checkConsentStatus`
+- `operatorSessionConsentService.ts` full implementation: `recordConsent`, `revokeConsent`, `supersedeConsent`, `checkConsentStatus`
 - `operatorSessionLifecycleService.ts`: state transition writes (the only code that writes `usability_state`)
 - `operatorSessionService.ts`: connect flow skeleton (plan-tier detection, consent check, initial usability_state assignment)
 
@@ -1018,18 +1065,32 @@ Per `docs/spec-context.md`:
 
 ### 16.3 Concurrency guards
 
-**Make default race:** Two concurrent `make-default` requests for different subscriptions in the same subaccount could produce two Default rows. Guard: wrap the two UPDATE statements (clear existing default, set new default) in a single transaction with `FOR UPDATE` lock on the subaccount's connection rows.
+**Make default race:** Two concurrent `make-default` requests for different subscriptions in the same subaccount could attempt to produce two Default rows. The partial unique index `ic_subaccount_operator_session_default_unique` is the primary guard — at most one row per subaccount can have `is_default = true` for `auth_type = 'operator_session'`. The two-UPDATE pattern below runs inside a single transaction so Postgres acquires row locks on the UPDATEd rows automatically; the optional `SELECT ... FOR UPDATE` first acquires the lock on the current default explicitly, preventing the lost-update race even before the partial index has to reject a duplicate.
 
 ```sql
--- Inside a transaction:
-UPDATE integration_connections SET is_default = false
-  WHERE subaccount_id = $1 AND auth_type = 'operator_session' AND is_default = true
+-- Inside a transaction (BEGIN; ...; COMMIT;):
+-- 1. Lock the current default row (if any) so the other concurrent caller blocks here.
+SELECT id FROM integration_connections
+  WHERE subaccount_id = $1
+    AND auth_type = 'operator_session'
+    AND is_default = true
   FOR UPDATE;
-UPDATE integration_connections SET is_default = true
-  WHERE id = $2 AND subaccount_id = $1;
+-- 2. Clear it.
+UPDATE integration_connections SET is_default = false, updated_at = now()
+  WHERE subaccount_id = $1
+    AND auth_type = 'operator_session'
+    AND is_default = true;
+-- 3. Promote the new default.
+UPDATE integration_connections SET is_default = true, updated_at = now()
+  WHERE id = $2
+    AND subaccount_id = $1
+    AND auth_type = 'operator_session';
 ```
 
-Losing concurrent request: sees 0 rows affected on the second UPDATE (connection was already promoted by the winner) or a serialization error. Return 409 with `{ error: 'concurrent_default_change' }`.
+Failure modes for the losing caller:
+- The `SELECT ... FOR UPDATE` blocks until the winner's transaction commits, then proceeds and sees its own UPDATEs work — both transactions complete; the *last* committed promotion wins. This is the desired idempotent behaviour for two callers concurrently pressing Make Default on different rows.
+- If the partial unique index rejects an insert (e.g. a race against a brand-new operator_session row inserted with `is_default = true`), the caller receives a DB `23505 unique_violation`, mapped to 409 with `{ error: 'concurrent_default_change' }` per §16.6.
+- If the third UPDATE matches zero rows (target connection deleted or no longer operator_session), the route returns 404 and the first two writes are rolled back with the transaction.
 
 **Token refresh race:** Multiple refresh job instances for the same connection could write conflicting `usability_state` values. Guard: refresh job uses `UPDATE ... WHERE usability_state = 'connected_usable' AND id = $connId`. If 0 rows: another instance already transitioned — discard this result, do not retry.
 
@@ -1061,11 +1122,13 @@ Post-terminal prohibition: once `usability_state` is `revoked` or `disabled`, no
 
 | Constraint | Table | HTTP response on violation |
 |---|---|---|
-| `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` | `operator_session_consents` | 200 — idempotent consent already exists; return existing record |
+| `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` (named `operator_session_consents_user_disclosure_unique`) | `operator_session_consents` | 200 — idempotent consent already exists; return existing record |
+| `ic_subaccount_operator_session_default_unique` partial unique index on `(subaccount_id) WHERE auth_type = 'operator_session' AND is_default = true` | `integration_connections` | 409 with `{ error: 'concurrent_default_change' }` — a competing Make Default already promoted a different row; the caller should refetch and retry |
+| `ic_subaccount_provider_label_unique` (existing index, reused for operator_session multi-row support) on `(subaccount_id, provider_type, label)` | `integration_connections` | 409 with `{ error: 'duplicate_subscription_label' }` — the user must choose a different label or reuse the existing label's connection |
 | pg-boss `singletonKey = ${connection_id}:${refresh_bucket}` | (not a DB constraint) — pg-boss queue table | Not user-facing; pg-boss collapses the duplicate enqueue internally |
-| `PRIMARY KEY` on `id` (uuid) | both new tables | Never a user-facing collision (UUIDs); if it occurs: 500 + alert |
+| `PRIMARY KEY` on `id` (uuid) | both new tables | UUID collisions are astronomically unlikely with `gen_random_uuid()`; this row exists only for completeness. If it occurs, treat as an infrastructure incident: log + alert + return 500. This is the single permitted 500 path on a constraint violation, scoped narrowly to UUID PK collisions only. |
 
-No constraint violations should surface as 500. Any DB 23505 from the consent unique constraint maps to 200 (idempotent).
+All other constraint violations MUST map to a deterministic 4xx (200, 409, 422, etc.) — no other 500 path is acceptable.
 
 ### 16.7 State machine closure
 
@@ -1113,10 +1176,17 @@ All criteria must pass before the build is marked complete.
 
 ### 17.5 Consent lifecycle
 
-- [ ] A Plus-tier connect attempt without a prior consent record: route returns 422 — credential NOT stored.
-- [ ] A Plus-tier connect attempt WITH a valid consent record: connection stored with `usability_state = connected_usable`.
-- [ ] Duplicate consent write (same user + disclosure version): returns 200 with the existing consent record, no new row.
-- [ ] Disclosure version bump: credential transitions to `connected_needs_consent`; agent-use blocked until re-acceptance; re-acceptance creates a new consent row and a `superseded` event.
+- [ ] A Plus-tier connect attempt without a `disclosureAcceptance` block in the POST body: route returns 422 `plus_consent_required` — no consent row, no credential row written.
+- [ ] A Plus-tier connect attempt WITH a valid `disclosureAcceptance` block: single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_usable'`.
+- [ ] Duplicate consent write at same user + disclosure version (concurrent connect race): DB UNIQUE constraint rejects the second; route returns 200 with the existing consent record, no new row.
+- [ ] Disclosure version bump: existing Plus-tier credential transitions to `connected_needs_consent` on first read after the version bump (§11.4). Agent-use blocked. `/consent` route handles re-acceptance: writes a new consent row (with `connection_id` set at INSERT time, no UPDATE needed), writes a `superseded` event linking the prior consent, updates the connection's `consent_record_id` forward pointer, transitions usability back to `connected_usable`.
+- [ ] Static check: `operatorSessionConsentService` is the ONLY code path that performs the one-time UPDATE on `operator_session_consents.connection_id`. A repo-grep test verifies no other file UPDATEs this table.
+
+### 17.5b Failover ordering contract
+
+- [ ] Unit test on `credentialBrokerService.resolveAvailableCredentials` (operator_session branch): given a subaccount with one Default and three non-Default `connected_usable` operator_session rows + two other-auth-type rows, returns an array in the order specified by §9.7 (Default first; non-Default sorted by `label ASC NULLS LAST, id ASC`; other-auth-type after).
+- [ ] Unit test: rows with `usability_state !== 'connected_usable'` are excluded from the array entirely (not just deprioritised).
+- [ ] Unit test: rows where the requesting agent is NOT in `allowedAgentIds` are excluded (when `availabilityScope = 'specific_agents'`).
 
 ### 17.6 Failure classification
 
@@ -1155,14 +1225,15 @@ All criteria must pass before the build is marked complete.
 
 ## 18. Open questions
 
-1. **Default subscription storage pattern — RESOLVED.** Option (a) chosen: a boolean `is_default` column on `integration_connections` with a partial unique index `ic_subaccount_operator_session_default_unique` enforcing at most one Default operator_session row per subaccount (see §7.1). Option (b) — a `default_operator_session_connection_id` FK on `subaccounts` — was rejected because it requires a circular FK and provides no win at current scale. The two-UPDATE concurrency guard in §16.3 stays as written and is the canonical Make-Default code path.
+1. **Provider connection mechanism verification.** The brief mandates verifying the OpenAI-supported mechanism before shipping the connect wiring. At spec-review time (2026-05-11), the mechanism is `none_verified` in the registry. When verification completes, the builder updates `connectionMechanism` in `operatorSessionProviders.ts` and activates the connect route (removes the 501 gate). This is an open runtime gate, not a spec change.
 
-2. **Disclosure version bump detection: on-read vs. sweep.** §11.4 picks "on-read" (Option A). If the subaccount has hundreds of Plus-tier connections and the disclosure version bumps, the first read after the bump triggers multiple state transitions simultaneously. This is fine at current scale (pre-production); revisit at Phase 3+ when Operator Controller agents are active and reads are high-frequency.
+2. **Agent allowlist persistence.** The per-subscription agent allowlist (§9.2 `allowedAgentIds`) is stored in `configJson` on the `integration_connections` row. If the allowlist grows large (100+ agents), JSONB scanning may be slow. For V1 (small subaccounts), this is fine. Post-Phase 3+ if scale demands it, a join table `operator_session_connection_agents` replaces the JSONB list.
 
-3. **Provider connection mechanism verification.** The brief mandates verifying the OpenAI-supported mechanism before shipping the connect wiring. At spec-review time (2026-05-11), the mechanism is `none_verified` in the registry. When verification completes, the builder updates `connectionMechanism` in `operatorSessionProviders.ts` and activates the connect route (removes the 501 gate). This is an open runtime gate, not a spec change.
+3. **Subaccount vs. org scope for Plus consent.** The brief §2.4 default posture is subaccount-scoped storage, user-attributed consent. If an org has 50 subaccounts and each has a Plus subscription, each user signs a separate disclosure. There is no org-level "umbrella consent." Confirm this is intentional before implementation.
 
-4. **Agent allowlist persistence.** The per-subscription agent allowlist (§9.2 `allowedAgentIds`) is stored in `configJson` on the `integration_connections` row. If the allowlist grows large (100+ agents), JSONB scanning may be slow. For V1 (small subaccounts), this is fine. Post-Phase 3+ if scale demands it, a join table `operator_session_connection_agents` replaces the JSONB list.
+4. **Re-auth identity mismatch.** §11.1 and Screen 20 assume the re-auth-ing user is the same identity as the original consent owner. If the identity differs (e.g., original owner departed), the flow should detect the mismatch and route to Transfer Ownership instead of Sign in again. The spec currently handles this via an offramp note on Screen 20 but does not define the server-side identity-comparison check. Builder should clarify before implementation of Chunk 7.
 
-5. **Subaccount vs. org scope for Plus consent.** The brief §2.4 default posture is subaccount-scoped storage, user-attributed consent. If an org has 50 subaccounts and each has a Plus subscription, each user signs a separate disclosure. There is no org-level "umbrella consent." Confirm this is intentional before implementation.
+## 18b. Resolved during spec-review
 
-6. **Re-auth identity mismatch.** §11.1 and Screen 20 assume the re-auth-ing user is the same identity as the original consent owner. If the identity differs (e.g., original owner departed), the flow should detect the mismatch and route to Transfer Ownership instead of Sign in again. The spec currently handles this via an offramp note on Screen 20 but does not define the server-side identity-comparison check. Builder should clarify before implementation of Chunk 7.
+- **Default subscription storage pattern.** Option (a) chosen: a boolean `is_default` column on `integration_connections` with a partial unique index `ic_subaccount_operator_session_default_unique` enforcing at most one Default operator_session row per subaccount (see §7.1). Option (b) — a `default_operator_session_connection_id` FK on `subaccounts` — was rejected because it requires a circular FK and provides no win at current scale. The two-UPDATE concurrency guard in §16.3 is the canonical Make-Default code path.
+- **Disclosure version bump detection: on-read.** §11.4 commits to on-read detection. If the subaccount has hundreds of Plus-tier connections and the disclosure version bumps, the first read after the bump triggers multiple state transitions simultaneously. This is fine at current scale (pre-production); a background-sweep alternative is deferred (see §13).
