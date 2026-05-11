@@ -239,6 +239,14 @@ export const operatorSessionService = {
       Boolean(input.disclosureAcceptance),
     );
 
+    // Defence-in-depth: if the registry mechanism is verified in the future,
+    // this assertion ensures token encryption is wired before this path activates.
+    // Cast to the full union to keep the guard live after TypeScript narrows out
+    // 'none_verified' in the step-1 control-flow check above.
+    if ((providerEntry.connectionMechanism as string) !== 'none_verified') {
+      throw { statusCode: 500, errorCode: 'token_encryption_required', message: 'Token encryption must be wired before activating a verified connection mechanism.' };
+    }
+
     const db = getOrgScopedDb('operatorSessionService.connect');
 
     try {
@@ -321,7 +329,12 @@ export const operatorSessionService = {
       return mapToAiSubscriptionConnection(connection);
     } catch (err) {
       if (isPostgresUniqueViolation(err)) {
-        throw { statusCode: 409, errorCode: 'duplicate_subscription_label' };
+        const pgErr = err as { code?: string; constraint?: string };
+        const constraintName = pgErr.constraint ?? '';
+        if (constraintName.includes('provider_label')) {
+          throw { statusCode: 409, errorCode: 'duplicate_subscription_label', message: 'A subscription with this label already exists.' };
+        }
+        throw { statusCode: 500, errorCode: 'unexpected_unique_violation', message: `Unexpected unique constraint violation: ${constraintName}` };
       }
       throw err;
     }
@@ -411,17 +424,19 @@ export const operatorSessionService = {
       .set({ consentRecordId: newConsent.id, updatedAt: new Date() })
       .where(eq(integrationConnections.id, input.connectionId));
 
-    // Transition state to connected_usable
-    const { transitioned } = await operatorSessionLifecycleService.transition({
-      connectionId: input.connectionId,
-      organisationId: input.organisationId,
-      from: currentUsabilityState,
-      to: 'connected_usable',
-      cause: 'user_reaccepted',
-      actorUserId: input.actorUserId,
-    });
-
-    const newState: UsabilityState = transitioned ? 'connected_usable' : currentUsabilityState;
+    // Transition state to connected_usable (skip if already in target state to
+    // avoid InvalidStateTransitionError on connected_usable → connected_usable)
+    if (currentUsabilityState !== 'connected_usable') {
+      await operatorSessionLifecycleService.transition({
+        connectionId: input.connectionId,
+        organisationId: input.organisationId,
+        from: currentUsabilityState,
+        to: 'connected_usable',
+        cause: 'user_reaccepted',
+        actorUserId: input.actorUserId,
+      });
+    }
+    const newState: UsabilityState = 'connected_usable';
 
     return { consent: newConsent, newState };
   },
@@ -453,6 +468,10 @@ export const operatorSessionService = {
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
+          sql`(
+            ${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'
+            OR ${integrationConnections.configJson} -> 'operator_session' -> 'allowedAgentIds' ? ${input.agentId}::text
+          )`,
         ),
       )
       .orderBy(
@@ -479,6 +498,10 @@ export const operatorSessionService = {
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
+          sql`(
+            ${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'
+            OR ${integrationConnections.configJson} -> 'operator_session' -> 'allowedAgentIds' ? ${input.agentId}::text
+          )`,
         ),
       )
       .orderBy(

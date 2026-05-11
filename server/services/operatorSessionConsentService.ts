@@ -12,7 +12,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { getOrgScopedDb, getOrgScopedOrgId } from '../lib/orgScopedDb.js';
+import { getOrgScopedDb, getOrgScopedOrgId, peekOrgTxContext } from '../lib/orgScopedDb.js';
 import { operatorSessionConsents, operatorSessionConsentEvents, integrationConnections } from '../db/schema/index.js';
 import type { OperatorSessionConsent, OperatorSessionConsentEvent } from '../db/schema/index.js';
 import { auditService } from './auditService.js';
@@ -74,7 +74,13 @@ export const operatorSessionConsentService = {
     consentId: string;
     connectionId: string;
   }): Promise<void> {
-    // Peek without throwing — we provide a better error if context is missing
+    if (!peekOrgTxContext()) {
+      throw {
+        statusCode: 500,
+        errorCode: 'backfill_requires_org_tx_context',
+        message: 'backfillConnectionId requires an active withOrgTx context.',
+      };
+    }
     const db = getOrgScopedDb('operatorSessionConsentService.backfillConnectionId');
 
     const result = await db
