@@ -98,3 +98,43 @@ launch finalisation
 ```
 
 The finalisation-coordinator reads this handoff and begins Phase 3 (FINALISATION). It will run S2 branch-sync, G4 regression guard, chatgpt-pr-review (manual ChatGPT-web rounds), doc-sync sweep, KNOWLEDGE.md pattern extraction, and transition `current-focus.md` to `MERGE_READY`.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #286
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/286
+
+**S2 branch-sync:**
+- First S2 attempt (post-review-finalisation commit `c3af40b3`): clean, 0 commits behind main at the time the chatgpt-pr-review sub-agent finalised.
+- Second S2 attempt (post-Round-2-paste, finalisation-coordinator resumption): main had moved — `9b151741` (sandbox-isolation, PR #287) shipped migrations 0321-0324 and 6 content conflicts.
+- Migration renumber: `0321_operator_session_consents.{sql,down.sql}` → `0325_*`; `0322_operator_session_columns.{sql,down.sql}` → `0326_*`. Internal headers, schema-file comments, `rlsProtectedTables.ts` `policyMigration`, `architecture.md` 2 rows, `plan.md` 4 lines, `tasks/todo.md` 2 OSI-DEF entries swept. Review logs left at historical 0321/0322 (append-only). Commit `be62bb29`.
+- S2 merge: 6 conflicts (KNOWLEDGE.md, tasks/current-focus.md, tasks/todo.md, server/config/jobConfig.ts, server/config/rlsProtectedTables.ts, server/db/schema/index.ts). 3 auto-resolved (union or ours per known-shape table). 3 code-area conflicts manually resolved as clean structural unions (both sides added independent entries to literal/array/export blocks). Commit `1de683c8`.
+
+**chatgpt-pr-review:**
+- Round 1: 4 fixes auto-applied (F1 token-redaction-gate path normalisation; F2 hasSubaccountPermission for OPERATOR_SESSION_VIEW; F3 OAuth returnPath preserves workspace; F4 runOperatorSessionRefreshSweep fails closed + SQL-side expiry threshold). Commit `25db99bb`. T1 (raw agent-ID textarea entry) deferred as OSI-DEF-13.
+- Round 2: APPROVED, no new blockers. T1 deferral confirmed acceptable. Finalisation commit `c3af40b3`.
+- Session log: `tasks/review-logs/chatgpt-pr-review-operator-session-identity-2026-05-11T22-01-13Z.md`
+
+**spec_deviations reviewed:** n/a (none recorded in Phase 2 handoff)
+
+**Doc-sync sweep verdicts (coordinator cross-check):**
+- architecture.md: no — verified operator-session content (lines 3744 + 3824 — Key files per domain rows, post-renumber) is current; checked grep terms `operator_session_consents`, `operator_session_consent_events`, `AiSubscriptionsTab`, `AppIntegrationsTab`, `WebLoginsTab`, `OPERATOR_SESSION_VIEW`, `OPERATOR_SESSION_DISCLOSURE_VERSION` — all references current and accurate.
+- docs/capabilities.md: no — AI Subscriptions sub-bullet under Connect & Identity Access added in Phase 2 (Chunk 11); no further capability add/remove/rename in chatgpt-pr-review Round 1 or 2.
+- docs/integration-reference.md: n/a — no new integration slug, scope, skill, OAuth provider, or MCP preset added by this build (operator_session is a credential primitive, not an integration registry entry).
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — checked grep terms `operator_session`, `AI Subscription`, `OPERATOR_SESSION_VIEW`; zero stale references. No fleet, pipeline, build-discipline, RLS-rule, schema-invariant, gate, or §8 development-discipline rule changed by this build.
+- CONTRIBUTING.md: n/a — no lint-suppression or contributor-facing convention changed.
+- docs/frontend-design-principles.md: n/a — all new modals/drawers/screens use existing primitives (Modal, Drawer, PageShell, SortableTable, EmptyState, StatusPill); no new UI rule or worked example introduced.
+- KNOWLEDGE.md: yes (2 new entries appended in Round 1 finalisation by chatgpt-pr-review sub-agent — `[2026-05-11] Gotcha — Permission-helper-tier mismatch: hasOrgPermission does NOT accept a SUBACCOUNT_PERMISSIONS.* constant`, and `[2026-05-11] Gotcha — DB-time bucket queries must fail closed; never fall back to Date.now() for ordering / dedupe keys`).
+- docs/decisions/: n/a — no new ADR required; durable decisions already captured in spec §6 (vocabulary palette), §11 (disclosure-bump-on-read), §16.6 (23505→409 mapping).
+- docs/context-packs/: n/a — no architecture.md anchor renamed or removed.
+- references/test-gate-policy.md: n/a — no test-gate posture change.
+- references/spec-review-directional-signals.md: n/a — no spec-reviewer directional signal surfaced >2 times.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md: n/a — no framework-level change.
+
+**KNOWLEDGE.md entries added:** 2 (per chatgpt-pr-review Round 1 sub-agent finalisation)
+
+**tasks/todo.md items removed:** 0 (no pre-existing items were closed by this build — the 12 OSI-DEF entries from Phase 2 + OSI-DEF-13 from Round 1 are this build's own deferred backlog)
+
+**ready-to-merge label applied at:** 2026-05-11T22:29:13Z
