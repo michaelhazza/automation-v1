@@ -66,13 +66,13 @@
 |---|---|---|---|---|---|
 | 1 | C1a — Shared types + scaffolding | done | 1 | `babc3354` | 254 lines, 19 exports; tasks/current-focus.md was already at BUILDING (no-op for that file) |
 | 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | done | 1 | `951e62cb` | Migrations 0321/0322/0323; sandbox_logs MAX_LOG_LINE_BYTES intentionally deferred from DB CHECK to service-layer truncation (write-amplification avoidance); flag for spec-conformance |
-| 3 | C2 — FailureReason enum extension | done | 1 | (next) | Plan said `shared/iee/failure.ts`; actual enum lives in `shared/iee/failureReason.ts`. Builder routed to correct file. Plan-doc inaccuracy only — not a plan gap. |
-| 4 | C3 — llm_requests extension | done | 1 | (next) | Migration 0324. Two CHECK constraints extended (`llm_requests_attribution_ck` + `llm_requests_execution_phase_ck` — second one was a consequential fix because sandbox rows need execution_phase=NULL). Approved scope expansion: `shared/types/systemPnl.ts` 1-line `InFlightSourceType` superset extension to keep router's `ctx.sourceType: SourceType` assignment typecheck-clean. |
-| 5 | C4 — Provider resolver + inlineSandbox | done | 1 | (next) | Registration-seam pattern (no static import of e2bSandbox/localDocker). 22 test cases cover NODE_ENV × SANDBOX_PROVIDER × SANDBOX_ALLOW_INLINE matrix. Cleaned up 6 stale gitignored `.js` artifacts in `shared/iee/` (pre-April-30, no longer in sync with current `.ts` sources) — unblocks `failure('sandbox_*', ...)` in subsequent chunks' tests. |
-| 6 | C12 — Template + CI publish + version parser | done | 1 | (next) | 16 files. synthetos-sandbox template + openclaw-session placeholders + parser + docker-compose + GH workflow + 16 pure tests. CURRENT_VERSION.deps_lockfile_hash = sha256:000... (operator computes real hash before first tag push, per spec §15.2). PUBLISHED_VERSION all-zeros placeholder (CI attestation PR writes real values on first publish). e2b publish CLI invocation is TODO pending e2b account provisioning — workflow structurally complete otherwise. docker-compose uses `sandbox-build` profile (no auto-start). |
-| 7 | C5 — SandboxExecutionService skeleton + pure helpers | done | 1 | (next) | 36 pure tests; 7-case start-claim lease state machine; harvest seam stubbed for C7; ceiling-monitor enqueue stubbed for C11a. Approved scope expansion: `shared/stateMachineGuards.ts` added `sandbox_execution` kind + paired sets/case for `assertValidTransition` per DEVELOPMENT_GUIDELINES §8.18. |
-| 8 | C6 — Output validation + redaction wiring | pending | — | — | — |
-| 9 | C7 — Harvest pipeline | pending | — | — | — |
+| 3 | C2 — FailureReason enum extension | done | 1 | `4056f455` | Plan said `shared/iee/failure.ts`; actual enum lives in `shared/iee/failureReason.ts`. Builder routed to correct file. Plan-doc inaccuracy only — not a plan gap. |
+| 4 | C3 — llm_requests extension | done | 1 | `58860bcb` | Migration 0324. Two CHECK constraints extended (`llm_requests_attribution_ck` + `llm_requests_execution_phase_ck` — second one was a consequential fix because sandbox rows need execution_phase=NULL). Approved scope expansion: `shared/types/systemPnl.ts` 1-line `InFlightSourceType` superset extension to keep router's `ctx.sourceType: SourceType` assignment typecheck-clean. |
+| 5 | C4 — Provider resolver + inlineSandbox | done | 1 | `5651ff45` | Registration-seam pattern (no static import of e2bSandbox/localDocker). 22 test cases cover NODE_ENV × SANDBOX_PROVIDER × SANDBOX_ALLOW_INLINE matrix. Cleaned up 6 stale gitignored `.js` artifacts in `shared/iee/` (pre-April-30, no longer in sync with current `.ts` sources) — unblocks `failure('sandbox_*', ...)` in subsequent chunks' tests. |
+| 6 | C12 — Template + CI publish + version parser | done | 1 | `773150ea` | 16 files. synthetos-sandbox template + openclaw-session placeholders + parser + docker-compose + GH workflow + 16 pure tests. CURRENT_VERSION.deps_lockfile_hash = sha256:000... (operator computes real hash before first tag push, per spec §15.2). PUBLISHED_VERSION all-zeros placeholder (CI attestation PR writes real values on first publish). e2b publish CLI invocation is TODO pending e2b account provisioning — workflow structurally complete otherwise. docker-compose uses `sandbox-build` profile (no auto-start). |
+| 7 | C5 — SandboxExecutionService skeleton + pure helpers | done | 1 | `53c243eb` | 36 pure tests; 7-case start-claim lease state machine; harvest seam stubbed for C7; ceiling-monitor enqueue stubbed for C11a. Approved scope expansion: `shared/stateMachineGuards.ts` added `sandbox_execution` kind + paired sets/case for `assertValidTransition` per DEVELOPMENT_GUIDELINES §8.18. |
+| 8 | C6 — Output validation + redaction wiring | done | 1 | `31cec382` | 3 helpers (composeRedactionPatternSet, classifyHarvestOutcome with 12-step first-failed semantics, validateOutputAgainstSchema). 34 pure tests. redaction.ts +3 sandbox patterns. |
+| 9 | C7 — Harvest pipeline (12 ordered steps) | done | 1 | (next) | runHarvest + runHarvestReconciliation. Provider file API calls guarded by providerCallStub with TODO(C8) — replaced when C8 lands. Step 6 has credential-leak defense per spec §11.4. Step 12 wraps assertValidTransition. C6 Pure file extended with 2 new helpers (extractTerminalReasonFromProviderSignal, pickHarvestStepFromError); test file now 61 tests. credentialBrokerService.issueCredential gained optional redactionPattern?: RegExp. resolveOutputSchema is TODO(C7-schema-registry) — returns null falling back to z.unknown(). |
 | 10 | C8 — withSandboxProvider + sandboxJobNames | pending | — | — | — |
 | 11 | C9 — e2bSandbox provider | pending | — | — | — |
 | 12 | C10 — localDockerSandbox provider | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C6 (commit pending)
-- head: 53c243eb (C5)
+- last_chunk_committed: C7 (commit pending)
+- head: 31cec382 (C6)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T06:05:00Z
+- captured_at: 2026-05-11T06:30:00Z
 
 ---
 

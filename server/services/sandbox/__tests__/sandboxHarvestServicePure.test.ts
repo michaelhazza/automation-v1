@@ -7,6 +7,10 @@
  *   - classifyHarvestOutcome: every step-failure → expected terminal state,
  *     all-green → completed, step 1 relay semantics.
  *   - validateOutputAgainstSchema: missing input, schema_failed, valid parse.
+ *   - extractTerminalReasonFromProviderSignal: provider signal → SandboxTerminalState
+ *     mapping (C7 — spec §8.4 step 1 normalisation).
+ *   - pickHarvestStepFromError: error kind → 1-based harvest step index
+ *     (C7 — spec §14.5 harvestStepReached population).
  *
  * No DB, no network, no real provider SDKs.
  *
@@ -20,6 +24,8 @@ import {
   composeRedactionPatternSet,
   classifyHarvestOutcome,
   validateOutputAgainstSchema,
+  extractTerminalReasonFromProviderSignal,
+  pickHarvestStepFromError,
   DEFAULT_REDACTION_PATTERNS,
   type ExecutionAlias,
   type HarvestStepResult,
@@ -327,5 +333,153 @@ describe('validateOutputAgainstSchema', () => {
     const emptySchema = z.object({});
     const result = validateOutputAgainstSchema({}, emptySchema);
     expect(result.ok).toBe(true);
+  });
+});
+
+// ─── extractTerminalReasonFromProviderSignal ──────────────────────────────────
+// C7 addition — spec §8.4 step 1 signal normalisation (§14.5 minimum-events).
+
+describe('extractTerminalReasonFromProviderSignal', () => {
+  test('"timeout" → timed_out', () => {
+    expect(extractTerminalReasonFromProviderSignal('timeout')).toBe('timed_out');
+  });
+
+  test('"wall_clock_exceeded" → timed_out', () => {
+    expect(extractTerminalReasonFromProviderSignal('wall_clock_exceeded')).toBe('timed_out');
+  });
+
+  test('"cost_ceiling" → cost_ceiling_hit', () => {
+    expect(extractTerminalReasonFromProviderSignal('cost_ceiling')).toBe('cost_ceiling_hit');
+  });
+
+  test('"budget_exceeded" → cost_ceiling_hit', () => {
+    expect(extractTerminalReasonFromProviderSignal('budget_exceeded')).toBe('cost_ceiling_hit');
+  });
+
+  test('"non_zero_exit" → crashed', () => {
+    expect(extractTerminalReasonFromProviderSignal('non_zero_exit')).toBe('crashed');
+  });
+
+  test('"crash" → crashed', () => {
+    expect(extractTerminalReasonFromProviderSignal('crash')).toBe('crashed');
+  });
+
+  test('"clean_exit" → completed', () => {
+    expect(extractTerminalReasonFromProviderSignal('clean_exit')).toBe('completed');
+  });
+
+  test('"provider_unavailable" → provider_unavailable', () => {
+    expect(extractTerminalReasonFromProviderSignal('provider_unavailable')).toBe('provider_unavailable');
+  });
+
+  test('unknown signal → provider_unavailable (fail-closed)', () => {
+    expect(extractTerminalReasonFromProviderSignal('some_unknown_vendor_signal')).toBe('provider_unavailable');
+  });
+
+  test('empty string → provider_unavailable (fail-closed)', () => {
+    expect(extractTerminalReasonFromProviderSignal('')).toBe('provider_unavailable');
+  });
+
+  // All 4 provider-caused terminal states are reachable from known signals.
+  test('all provider-caused terminal states are reachable', () => {
+    const reachable = new Set([
+      extractTerminalReasonFromProviderSignal('timeout'),
+      extractTerminalReasonFromProviderSignal('cost_ceiling'),
+      extractTerminalReasonFromProviderSignal('non_zero_exit'),
+      extractTerminalReasonFromProviderSignal('clean_exit'),
+      extractTerminalReasonFromProviderSignal('provider_unavailable'),
+    ]);
+    expect(reachable).toContain('timed_out');
+    expect(reachable).toContain('cost_ceiling_hit');
+    expect(reachable).toContain('crashed');
+    expect(reachable).toContain('completed');
+    expect(reachable).toContain('provider_unavailable');
+  });
+});
+
+// ─── pickHarvestStepFromError ────────────────────────────────────────────────
+// C7 addition — spec §14.5 harvestStepReached field population.
+
+describe('pickHarvestStepFromError', () => {
+  test('"output_missing" → step 2', () => {
+    expect(pickHarvestStepFromError('output_missing')).toBe(2);
+  });
+
+  test('"output_over_size" → step 2', () => {
+    expect(pickHarvestStepFromError('output_over_size')).toBe(2);
+  });
+
+  test('"output_schema_failed" → step 3', () => {
+    expect(pickHarvestStepFromError('output_schema_failed')).toBe(3);
+  });
+
+  test('"output_redact_error" → step 4', () => {
+    expect(pickHarvestStepFromError('output_redact_error')).toBe(4);
+  });
+
+  test('"log_overflow" → step 5', () => {
+    expect(pickHarvestStepFromError('log_overflow')).toBe(5);
+  });
+
+  test('"log_read_error" → step 5', () => {
+    expect(pickHarvestStepFromError('log_read_error')).toBe(5);
+  });
+
+  test('"artefact_enumeration_error" → step 6', () => {
+    expect(pickHarvestStepFromError('artefact_enumeration_error')).toBe(6);
+  });
+
+  test('"artefact_oversized" → step 6', () => {
+    expect(pickHarvestStepFromError('artefact_oversized')).toBe(6);
+  });
+
+  test('"artefact_metadata_redact_error" → step 7', () => {
+    expect(pickHarvestStepFromError('artefact_metadata_redact_error')).toBe(7);
+  });
+
+  test('"artefact_upload_io_error" → step 8', () => {
+    expect(pickHarvestStepFromError('artefact_upload_io_error')).toBe(8);
+  });
+
+  test('"log_persist_error" → step 9', () => {
+    expect(pickHarvestStepFromError('log_persist_error')).toBe(9);
+  });
+
+  test('"cost_row_write_error" → step 10', () => {
+    expect(pickHarvestStepFromError('cost_row_write_error')).toBe(10);
+  });
+
+  test('"telemetry_event_error" → step 11', () => {
+    expect(pickHarvestStepFromError('telemetry_event_error')).toBe(11);
+  });
+
+  test('"status_update_error" → step 12', () => {
+    expect(pickHarvestStepFromError('status_update_error')).toBe(12);
+  });
+
+  test('unknown error kind → 0 (pre-step)', () => {
+    // TypeScript cast needed to test the default branch.
+    expect(pickHarvestStepFromError('completely_unknown_error' as import('../../sandboxHarvestServicePure.js').HarvestErrorKind)).toBe(0);
+  });
+
+  // Verify that every step 2-12 is reachable from at least one error kind.
+  test('every step 2..12 is reachable from at least one error kind', () => {
+    const kinds: import('../../sandboxHarvestServicePure.js').HarvestErrorKind[] = [
+      'output_missing',
+      'output_schema_failed',
+      'output_redact_error',
+      'log_overflow',
+      'artefact_enumeration_error',
+      'artefact_metadata_redact_error',
+      'artefact_upload_io_error',
+      'log_persist_error',
+      'cost_row_write_error',
+      'telemetry_event_error',
+      'status_update_error',
+    ];
+    const reachedSteps = new Set(kinds.map(pickHarvestStepFromError));
+    for (let step = 2; step <= 12; step++) {
+      expect(reachedSteps.has(step)).toBe(true);
+    }
   });
 });

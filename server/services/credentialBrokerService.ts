@@ -18,6 +18,16 @@ export interface IssuedCredential {
   authType: 'oauth2' | 'api_key' | 'web_login';
   issuedAt: Date;
   expiresAt?: Date;
+  /**
+   * Per-execution redaction pattern (spec B §11.3). When set, the harvest
+   * pipeline registers this RegExp for the lifetime of the sandbox execution
+   * to scrub any occurrence of the credential value from output.json, logs,
+   * and artefact metadata. The pattern is discarded on sandbox close.
+   *
+   * Existing callers that do not consume sandbox execution outputs may safely
+   * ignore this field — it is optional and additive.
+   */
+  redactionPattern?: RegExp;
 }
 
 export interface ResolvedCredential {
