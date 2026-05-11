@@ -7,6 +7,7 @@
 **Scope:** Branch-level integration audit (per-chunk audits for chunks 8/9/10/11 already on disk)
 **Changed-code set:** 121 files vs `origin/main`
 **Run at:** 2026-05-11T12:14:31Z
+**Commit at finish:** `2300db1abb9094a74af7a6808d29d4a2d47efd8a`
 
 ---
 
