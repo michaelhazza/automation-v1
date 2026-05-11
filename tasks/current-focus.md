@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/phase-1-showcase-mvps/spec.md
-active_plan: tasks/builds/phase-1-showcase-mvps/plan.md
-build_slug: phase-1-showcase-mvps
-branch: feat/phase-1-showcase-mvps
-status: MERGE_READY
+active_spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md
+active_plan: tasks/builds/operator-session-identity/plan.md
+build_slug: operator-session-identity
+branch: claude/evolve-session-identity-brief-17LO4
+status: BUILDING
 last_updated: 2026-05-11
-last_merged_pr: #279
-last_merged_slug: synthetos-foundation-refactor
-last_merged_branch: claude/openclaw-worker-mode-VnjQT
-last_merged_at: 2026-05-09T23:39:33Z
-last_merged_commit: 53dabb69
+last_merged_pr: #283
+last_merged_slug: phase-1-showcase-mvps
+last_merged_branch: feat/phase-1-showcase-mvps
+last_merged_at: 2026-05-10T21:54:20Z
+last_merged_commit: f3dac9f3
 -->
 
 # Current Focus
@@ -24,13 +24,17 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/phase-1-showcase-mvps/spec.md`
-**Active plan:** `tasks/builds/phase-1-showcase-mvps/plan.md`
-**Active build slug:** phase-1-showcase-mvps
-**Branch:** feat/phase-1-showcase-mvps
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered in `RunTracePage.tsx` / `RunTraceEventRenderer.tsx`); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (N1 phase1.* filter posture deferred to `tasks/todo.md` as PHASE1-N1 — non-blocking). Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). PR #283. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`. **Next:** CI auto-fix loop if needed, then auto-merge. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) + 1 PHASE1-N1 deferred to post-merge backlog in `tasks/todo.md`.
+**Active spec:** `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`
+**Active plan:** `tasks/builds/operator-session-identity/plan.md` *(Phase 2: authored by feature-coordinator)*
+**Active build slug:** operator-session-identity
+**Branch:** claude/evolve-session-identity-brief-17LO4
+**Status:** **BUILDING** — Phase 1 (SPEC) complete. Spec C — Operator Session Identity. 18-section Major spec covering: `auth_type: 'operator_session'` credential broker primitive, 2 new RLS tables (`operator_session_consents`, `operator_session_consent_events`), 3 migrations (0318-0320), token lifecycle refresh job, /connections CRUD consolidation refactor (3-tab App Integrations/Web Logins/AI Subscriptions), 11 implementation chunks. 22 hi-fi mockup screens at `prototypes/operator-session-identity/`. spec-reviewer: 5/5 iterations (54 mechanical fixes, 0 directional). REVIEW_GAP: chatgpt-spec-review agent not registered — manual ChatGPT review recommended before build. Handoff at `tasks/builds/operator-session-identity/handoff.md`. Next: `launch feature coordinator` in a new session.
 
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Pointer was overwritten by the active `phase-1-showcase-mvps` work; recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Pointer was overwritten by `phase-1-showcase-mvps` and is now overwritten again by this Spec C build; recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+
+---
+
+**Just merged:** PR #283 — `phase-1-showcase-mvps` (squash-commit `f3dac9f3`, 2026-05-10T21:54:20Z). Phase 1 showcase MVPs build. Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered in `RunTracePage.tsx` / `RunTraceEventRenderer.tsx`); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (N1 phase1.* filter posture deferred to `tasks/todo.md` as PHASE1-N1 — non-blocking). Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) + 1 PHASE1-N1 deferred to post-merge backlog in `tasks/todo.md`.
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 

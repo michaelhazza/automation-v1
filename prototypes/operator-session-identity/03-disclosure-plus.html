@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<!--
+  Screen 03: Disclosure — Plus tier (or unverified treated as Plus)
+  Location: /connections > Connect AI Subscription > Consent required
+  Interruption screen shown BEFORE credential is stored when plan_tier = 'plus'.
+  Primary action: type "I accept the risk" into the confirmation field, then Submit.
+  Cancel = credential discarded, user returns to connections list.
+  Disclosure version shown in footer for evidence trail.
+  All text is placeholder copy: Legal/product will replace before launch.
+  No em-dashes used anywhere on this page.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consent Required | Connect AI Subscription | Connections | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.page-header { margin-bottom: 24px; }
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.page-subtitle { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+.wizard-wrap { max-width: 580px; margin: 0 auto; }
+
+/* Disclosure card */
+.disclosure-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.disclosure-card-head {
+  padding: 18px 24px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex; align-items: center; gap: 12px;
+}
+.disclosure-head-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px; background: #fffbeb;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.disclosure-head-text h2 { font-size: 16px; font-weight: 700; color: #0f172a; }
+.disclosure-head-text p { font-size: 13px; color: #64748b; margin-top: 3px; }
+
+.disclosure-card-body { padding: 24px; }
+.disclosure-card-foot {
+  padding: 16px 24px;
+  border-top: 1px solid #f1f5f9;
+  background: #f8fafc;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+
+/* Plan detected chip */
+.plan-chip-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 18px;
+  font-size: 13px; color: #475569;
+}
+
+/* Disclosure text block */
+.disclosure-text {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  font-size: 13px; line-height: 1.65; color: #78350f;
+}
+.disclosure-text h4 {
+  font-size: 13.5px; font-weight: 700; color: #92400e;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.disclosure-text p { margin-bottom: 10px; }
+.disclosure-text p:last-child { margin-bottom: 0; }
+.disclosure-text ul { padding-left: 18px; margin: 8px 0; }
+.disclosure-text ul li { margin-bottom: 6px; }
+
+.disclosure-version-line {
+  font-size: 10.5px; color: #a16207;
+  border-top: 1px solid #fde68a;
+  margin-top: 14px; padding-top: 10px;
+}
+
+/* Confirmation field */
+.confirm-field { margin-bottom: 6px; }
+.confirm-label {
+  display: block; font-size: 13px; font-weight: 600; color: #0f172a;
+  margin-bottom: 8px;
+}
+.confirm-hint { font-size: 12px; color: #64748b; margin-bottom: 8px; }
+.confirm-code {
+  display: inline-block;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  background: #f1f5f9; border: 1px solid #cbd5e1;
+  padding: 2px 7px; border-radius: 5px;
+  font-size: 12px; color: #334155; letter-spacing: 0.04em;
+}
+.confirm-input {
+  width: 100%; padding: 10px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 13px; color: #0f172a; outline: none;
+  transition: border-color 0.12s;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.confirm-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.confirm-input.valid { border-color: #10b981; }
+.confirm-input.invalid { border-color: #ef4444; }
+
+/* Submit button states */
+.btn-consent {
+  padding: 9px 22px;
+  font-size: 13.5px; font-weight: 600;
+  border-radius: 8px; border: none; cursor: pointer;
+  background: #e2e8f0; color: #94a3b8;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.btn-consent.ready { background: #4f46e5; color: white; }
+.btn-consent.ready:hover { background: #4338ca; }
+
+/* Accepted state */
+.accepted-banner {
+  background: #ecfdf5; border: 1.5px solid #a7f3d0;
+  border-radius: 10px; padding: 16px 20px;
+  display: none; align-items: center; gap: 12px;
+}
+.accepted-banner.show { display: flex; }
+.accepted-check { font-size: 22px; }
+.accepted-text h4 { font-size: 14px; font-weight: 700; color: #14532d; margin-bottom: 3px; }
+.accepted-text p { font-size: 12.5px; color: #166534; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="01-connections-list.html" style="color:#64748b;text-decoration:none;">Connections</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <a href="02-connect-wizard.html" style="color:#64748b;text-decoration:none;">Connect AI Subscription</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Consent required</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <div class="page-title">Connect ChatGPT Plus</div>
+        <div class="page-subtitle">Plus is a personal plan. Confirm you accept the risks before connecting.</div>
+      </div>
+
+      <div class="wizard-wrap">
+        <!-- Step bar — 4 steps always (R): step 3 active on Plus path -->
+        <div class="wizard-step-bar" style="margin-bottom:24px;">
+          <div class="wstep done"><div class="num">1</div>Connect account</div>
+          <div class="wstep-divider"></div>
+          <div class="wstep done"><div class="num">2</div>Plan detected</div>
+          <div class="wstep-divider"></div>
+          <div class="wstep current">
+            <div class="num">3</div>
+            <span>Accept terms <span style="font-size:10px;color:#a16207;font-weight:400;display:block;margin-top:1px;">personal plans only</span></span>
+          </div>
+          <div class="wstep-divider"></div>
+          <div class="wstep"><div class="num">4</div>Done</div>
+        </div>
+
+        <div class="disclosure-card">
+          <div class="disclosure-card-head">
+            <div class="disclosure-head-icon">&#9888;</div>
+            <div class="disclosure-head-text">
+              <h2>Connect ChatGPT Plus</h2>
+              <p>Plus is a personal plan. Review the risks before connecting.</p>
+            </div>
+          </div>
+
+          <div class="disclosure-card-body">
+            <!-- Plan detected -->
+            <div class="plan-chip-row">
+              <span style="font-size:12px;color:#64748b;">AI Subscription detected:</span>
+              <span class="tier-badge tier-plus">Plus</span>
+              <span style="font-size:12px;color:#64748b;">by</span>
+              <span style="font-size:12px;font-weight:600;color:#334155;">OpenAI plan verification</span>
+            </div>
+
+            <!-- Disclosure text (placeholder: Legal will replace) -->
+            <div class="disclosure-text">
+              <h4>
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                Risk disclosure (placeholder copy, pending Legal review)
+              </h4>
+              <p>
+                ChatGPT Plus is a personal consumer subscription not designed or approved by OpenAI for business automation use. Connecting a Plus AI Subscription to this platform may violate OpenAI's Terms of Service <span style="font-size:11px;color:#a16207;font-style:italic;">[Legal will add link]</span>.
+              </p>
+              <p>By connecting this subscription, you acknowledge the following risks:</p>
+              <ul>
+                <li>Your subscription may be rate-limited or suspended by OpenAI if automated usage is detected.</li>
+                <li>OpenAI may modify or revoke access to Plus accounts used for business automation at any time, with or without notice.</li>
+                <li>This platform accepts no liability for suspension, data loss, or service interruption resulting from use of a Plus AI Subscription for business automation.</li>
+                <li>Your organisation is solely responsible for compliance with OpenAI's usage policies.</li>
+              </ul>
+              <p>
+                This disclosure was presented to you on 11 May 2026. Your acceptance is recorded and retained for compliance purposes.
+              </p>
+              <div class="disclosure-version-line">Disclosure version: v1.0.0 &nbsp;|&nbsp; Requires re-acceptance if disclosure is updated</div>
+            </div>
+
+            <!-- Confirmation input -->
+            <div class="confirm-field" id="confirm-section">
+              <label class="confirm-label" for="confirm-input">Type to confirm acceptance</label>
+              <p class="confirm-hint">
+                Type exactly <span class="confirm-code">I accept the risk</span> in the box below to continue.
+              </p>
+              <p style="font-size:11.5px;color:#a16207;margin-bottom:8px;line-height:1.5;">
+                First-time connection requires you to type the phrase below. Future Plus-related confirmations will be a checkbox.
+              </p>
+              <input
+                class="confirm-input"
+                id="confirm-input"
+                type="text"
+                placeholder="Type: I accept the risk"
+                oninput="checkConsent(this)"
+                autocomplete="off"
+                spellcheck="false"
+              >
+            </div>
+
+            <!-- Accepted state (shown after valid input) -->
+            <div class="accepted-banner" id="accepted-banner">
+              <div class="accepted-check">&#10003;</div>
+              <div class="accepted-text">
+                <h4>Acceptance recorded</h4>
+                <p>Your consent will be saved when you click "Save subscription" below.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="disclosure-card-foot">
+            <a href="01-connections-list.html" class="btn btn-secondary btn-sm" style="text-decoration:none;" onclick="return confirmCancel()">
+              Cancel
+            </a>
+            <button class="btn-consent" id="submit-btn" disabled onclick="submitConsent()">
+              Connect ChatGPT Plus
+            </button>
+          </div>
+        </div>
+
+        <!-- Nav hint -->
+        <div style="margin-top:12px;text-align:right;font-size:11.5px;color:#94a3b8;">
+          &larr; <a href="02-connect-wizard.html" style="color:#6366f1;text-decoration:none;">Back to handshake</a>
+          &nbsp;&nbsp;
+          Next: <a href="04-subscription-detail.html" style="color:#6366f1;text-decoration:none;">Subscription detail &rarr;</a>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const REQUIRED_TEXT = 'I accept the risk';
+
+function checkConsent(input) {
+  const val = input.value;
+  const btn = document.getElementById('submit-btn');
+  const banner = document.getElementById('accepted-banner');
+
+  if (val === REQUIRED_TEXT) {
+    input.classList.remove('invalid');
+    input.classList.add('valid');
+    btn.classList.add('ready');
+    btn.disabled = false;
+    banner.classList.add('show');
+  } else {
+    input.classList.remove('valid');
+    input.classList.add('invalid');
+    btn.classList.remove('ready');
+    btn.disabled = true;
+    banner.classList.remove('show');
+  }
+}
+
+function submitConsent() {
+  window.location.href = '04-subscription-detail.html';
+}
+
+function confirmCancel() {
+  return confirm('Cancel will discard this connection. The credential will not be stored. Continue?');
+}
+</script>
+</body>
+</html>

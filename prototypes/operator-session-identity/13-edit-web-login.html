@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<!--
+  Screen 13: Edit Web Login Connection modal
+  Pre-filled with existing values. Password field shows "leave blank" treatment.
+  Status indicator at top with re-test link.
+  Advanced section: collapsed by default.
+  Round 8 — Spec C CRUD consolidation scope expansion.
+  Primary action: "Save changes"
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edit Web Login | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,0.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  z-index: 200;
+  padding: 40px 24px;
+  overflow-y: auto;
+}
+.modal {
+  background: white; border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.22);
+  width: 520px; max-width: calc(100vw - 48px);
+  padding: 32px 32px 28px;
+  position: relative;
+}
+.modal-close {
+  position: absolute; top: 18px; right: 18px;
+  width: 30px; height: 30px; border-radius: 8px;
+  background: transparent; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #94a3b8; font-size: 18px;
+}
+.modal-close:hover { background: #f1f5f9; color: #334155; }
+
+/* Title row */
+.modal-title-row {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 20px; gap: 12px;
+}
+.modal-title {
+  font-size: 18px; font-weight: 700; color: #0f172a;
+  letter-spacing: -0.02em;
+}
+.modal-title-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+/* Current test status strip */
+.test-status-strip {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 9px;
+  padding: 10px 14px; margin-bottom: 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.test-status-left { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.test-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.test-dot-failed { background: #ef4444; }
+.test-status-label { font-weight: 600; color: #0f172a; }
+.test-status-detail { color: #64748b; font-size: 11.5px; margin-top: 1px; }
+.test-again-link {
+  font-size: 12px; font-weight: 600; color: #4f46e5; text-decoration: none;
+  white-space: nowrap; flex-shrink: 0;
+}
+.test-again-link:hover { color: #4338ca; text-decoration: underline; }
+
+.form-group { margin-bottom: 18px; }
+.form-label {
+  display: block; font-size: 12.5px; font-weight: 600; color: #374151;
+  margin-bottom: 5px;
+}
+.form-label .optional { font-weight: 400; color: #94a3b8; margin-left: 5px; }
+.form-label .required-star { color: #ef4444; margin-left: 2px; }
+.form-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 13.5px; color: #0f172a; font-family: inherit;
+  background: white; outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  box-sizing: border-box;
+}
+.form-input:focus {
+  border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+.form-input.monospace { font-family: 'Courier New', monospace; font-size: 12.5px; }
+.form-hint { font-size: 11.5px; color: #64748b; margin-top: 4px; line-height: 1.4; }
+
+/* Password keep-current treatment */
+.password-wrap { position: relative; }
+.password-wrap .form-input { padding-right: 44px; }
+.show-hide-btn {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 13px; padding: 4px;
+}
+.show-hide-btn:hover { color: #64748b; }
+/* "Leave blank" input looks distinct */
+.form-input.keep-current {
+  background: #f8fafc; color: #94a3b8; font-style: italic;
+  border-style: dashed;
+}
+.form-input.keep-current:focus {
+  background: white; color: #0f172a; font-style: normal;
+  border-style: solid; border-color: #6366f1;
+}
+
+/* Advanced expander */
+.advanced-expander {
+  border: 1.5px solid #e2e8f0; border-radius: 10px;
+  margin-top: 8px; overflow: hidden;
+}
+.advanced-toggle {
+  width: 100%; background: #f8fafc; border: none; cursor: pointer;
+  padding: 11px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; font-weight: 600; color: #475569;
+  font-family: inherit; transition: background 0.1s;
+}
+.advanced-toggle:hover { background: #f1f5f9; }
+.advanced-toggle-chevron { font-size: 11px; color: #94a3b8; transition: transform 0.2s; }
+.advanced-toggle-chevron.open { transform: rotate(180deg); }
+.advanced-body { display: none; padding: 16px 14px 4px; border-top: 1px solid #f1f5f9; }
+.advanced-body.open { display: block; }
+.advanced-banner {
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
+  padding: 9px 12px; font-size: 11.5px; color: #0369a1;
+  line-height: 1.5; margin-bottom: 14px;
+}
+
+/* Primary action block */
+.primary-action-block {
+  margin-top: 24px; padding-top: 20px; border-top: 1px solid #f1f5f9;
+}
+.btn-primary {
+  width: 100%; padding: 10px 20px; border-radius: 9px;
+  background: #4f46e5; color: white;
+  font-size: 14px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; transition: background 0.12s;
+}
+.btn-primary:hover { background: #4338ca; }
+
+.modal-footer {
+  border-top: 1px solid #f1f5f9; padding-top: 16px; margin-top: 20px;
+  display: flex; align-items: center; gap: 8px;
+}
+.btn-cancel {
+  padding: 8px 16px; border-radius: 8px;
+  background: transparent; color: #64748b;
+  font-size: 13px; font-weight: 500; border: 1px solid #e2e8f0;
+  cursor: pointer; font-family: inherit;
+}
+.btn-cancel:hover { background: #f8fafc; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" style="opacity:0.4;pointer-events:none;">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link active" href="#">Connections</a>
+    </div>
+  </aside>
+
+  <main class="main" style="position:relative;">
+    <div class="topbar" style="opacity:0.4;">
+      <div class="topbar-breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span>Connections</span>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Edit: Bloomberg portal</span>
+      </div>
+    </div>
+
+    <div class="modal-overlay">
+      <div class="modal">
+        <button class="modal-close" onclick="window.location='01c-web-logins-tab.html'" title="Close">&times;</button>
+
+        <div class="modal-title-row">
+          <div>
+            <div class="modal-title">Edit Web Login</div>
+            <div class="modal-title-sub">Bloomberg portal &middot; bloomberg.com</div>
+          </div>
+        </div>
+
+        <!-- Current test status strip -->
+        <div class="test-status-strip">
+          <div class="test-status-left">
+            <span class="test-dot test-dot-failed"></span>
+            <div>
+              <div class="test-status-label">Last test failed</div>
+              <div class="test-status-detail">3 days ago: Login form not found at login URL. Success selector did not appear within 30s.</div>
+            </div>
+          </div>
+          <a class="test-again-link" href="14-test-web-login.html">Test again &rarr;</a>
+        </div>
+
+        <!-- Label -->
+        <div class="form-group">
+          <label class="form-label" for="label-input">Label <span class="optional">(optional)</span></label>
+          <input class="form-input" type="text" id="label-input" value="Bloomberg portal">
+        </div>
+
+        <!-- Login URL -->
+        <div class="form-group">
+          <label class="form-label" for="login-url">Login URL <span class="required-star">*</span></label>
+          <input class="form-input" type="url" id="login-url" value="https://bloomberg.com/login">
+        </div>
+
+        <!-- Username -->
+        <div class="form-group">
+          <label class="form-label" for="username-input">Username or email <span class="required-star">*</span></label>
+          <input class="form-input" type="text" id="username-input" value="sarah@acmecorp.com">
+        </div>
+
+        <!-- Password — keep-current treatment -->
+        <div class="form-group">
+          <label class="form-label" for="password-input">Password <span class="required-star">*</span></label>
+          <div class="password-wrap">
+            <input class="form-input keep-current" type="password" id="password-input"
+              placeholder="Leave blank to keep current password"
+              onfocus="activatePasswordField(this)"
+              onblur="resetPasswordIfEmpty(this)">
+            <button class="show-hide-btn" type="button" onclick="togglePwd()" id="pwd-toggle-btn" title="Show or hide">&#128065;</button>
+          </div>
+        </div>
+
+        <!-- Advanced expander -->
+        <div class="advanced-expander">
+          <button class="advanced-toggle" type="button" onclick="toggleAdvanced()" id="adv-toggle">
+            <span>Advanced settings</span>
+            <span class="advanced-toggle-chevron" id="adv-chevron">&#9660;</span>
+          </button>
+          <div class="advanced-body" id="adv-body">
+            <div class="advanced-banner">Most logins work without these. Override only if the default selectors fail.</div>
+
+            <div class="form-group">
+              <label class="form-label" for="content-url">Content URL <span class="optional">(optional)</span></label>
+              <input class="form-input" type="url" id="content-url" value="">
+              <div class="form-hint">URL to navigate to after login. Defaults to the login URL.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="username-sel">Username selector <span class="optional">(optional)</span></label>
+              <input class="form-input monospace" type="text" id="username-sel" value="#loginEmail">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="password-sel">Password selector <span class="optional">(optional)</span></label>
+              <input class="form-input monospace" type="text" id="password-sel" value="#loginPassword">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="submit-sel">Submit selector <span class="optional">(optional)</span></label>
+              <input class="form-input monospace" type="text" id="submit-sel" value="button[data-testid='login-submit']">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="success-sel">Success selector <span class="optional">(optional)</span></label>
+              <input class="form-input monospace" type="text" id="success-sel" value="">
+              <div class="form-hint">CSS selector that appears only when login succeeds.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="timeout-ms">Timeout (ms) <span class="optional">(optional)</span></label>
+              <input class="form-input" type="number" id="timeout-ms" value="30000" style="max-width:160px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Primary action -->
+        <div class="primary-action-block">
+          <button class="btn-primary" onclick="window.location='01c-web-logins-tab.html'">Save changes</button>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-cancel" onclick="window.location='01c-web-logins-tab.html'">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div style="position:fixed;bottom:12px;left:50%;transform:translateX(-50%);font-size:11.5px;color:white;background:rgba(15,23,42,0.7);padding:5px 14px;border-radius:20px;z-index:300;">
+  &larr; <a href="01c-web-logins-tab.html" style="color:#a5b4fc;text-decoration:none;">Web Logins (01c)</a>
+  &nbsp;|&nbsp; Add variant: <a href="12-add-web-login.html" style="color:#a5b4fc;text-decoration:none;">12</a>
+  &nbsp;|&nbsp; Test: <a href="14-test-web-login.html" style="color:#a5b4fc;text-decoration:none;">14</a>
+  &nbsp;|&nbsp; <a href="index.html" style="color:#a5b4fc;text-decoration:none;">Index</a>
+</div>
+
+<script>
+var pwdVisible = false;
+function togglePwd() {
+  var inp = document.getElementById('password-input');
+  pwdVisible = !pwdVisible;
+  inp.type = pwdVisible ? 'text' : 'password';
+  document.getElementById('pwd-toggle-btn').innerHTML = pwdVisible ? '&#128274;' : '&#128065;';
+}
+function activatePasswordField(el) {
+  el.classList.remove('keep-current');
+  el.placeholder = '';
+}
+function resetPasswordIfEmpty(el) {
+  if (!el.value) {
+    el.classList.add('keep-current');
+    el.placeholder = 'Leave blank to keep current password';
+  }
+}
+function toggleAdvanced() {
+  var body = document.getElementById('adv-body');
+  var chevron = document.getElementById('adv-chevron');
+  body.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+</script>
+</body>
+</html>

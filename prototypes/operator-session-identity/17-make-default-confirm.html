@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<!--
+  Screen 17: Make Default confirmation modal (Round 11)
+  Shows BOTH states on one page for operator review:
+    - State A: Standard case (sanctioned tier promotion: Pro / Team / Enterprise)
+    - State B: Plus tier promotion (requires re-acknowledgement)
+  Entry points:
+    - "Make default" in 3-dot menu on a non-default AI Subscription row (screen 01)
+    - "Set as subaccount default" button on a non-default subscription detail page (screen 04 variant)
+  Primary task: confirm the blast-radius change, with Plus requiring explicit re-acknowledgement.
+  No em-dashes used. Plain-English copy throughout.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Make Default — Confirmation Modal | Connections | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+
+/* Page layout: show both states stacked */
+.states-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+/* State section label */
+.state-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.state-section-divider::before,
+.state-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
+}
+
+/* Modal shell */
+.modal-shell {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+  overflow: hidden;
+}
+
+/* Standard modal header */
+.modal-head {
+  padding: 20px 24px 18px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.modal-head-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 3px;
+  letter-spacing: -0.01em;
+}
+.modal-head-sub {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* Plus-tier modal header: amber/warm tint */
+.modal-head-plus {
+  padding: 20px 24px 18px;
+  border-bottom: 1px solid #fcd34d;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+.modal-head-plus .modal-head-title {
+  color: #78350f;
+}
+.modal-head-plus .modal-head-sub {
+  color: #92400e;
+}
+.modal-head-caution-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.modal-head-caution-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #fde68a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* Modal body */
+.modal-body {
+  padding: 22px 24px;
+}
+
+/* Body intro paragraph */
+.modal-intro {
+  font-size: 13.5px;
+  color: #334155;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+/* Impact preview block */
+.impact-block {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.impact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: #334155;
+  padding: 5px 0;
+}
+.impact-row:not(:last-child) {
+  border-bottom: 1px solid #e0f2fe;
+}
+.impact-label {
+  color: #64748b;
+  font-weight: 500;
+}
+.impact-value {
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.impact-arrow {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0 4px;
+}
+
+/* Agent count with tooltip */
+.agent-count-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.agent-count-link {
+  color: #0ea5e9;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: help;
+  font-size: 12.5px;
+}
+.agent-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: #1e293b;
+  color: white;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 11.5px;
+  font-weight: 400;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  display: none;
+  z-index: 100;
+  line-height: 1.7;
+}
+.agent-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  border: 5px solid transparent;
+  border-top-color: #1e293b;
+}
+.agent-count-wrap:hover .agent-tooltip { display: block; }
+
+/* Timing reassurance line */
+.timing-note {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border-left: 3px solid #e2e8f0;
+}
+
+/* Warning callout (Plus state) */
+.warning-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.6;
+}
+.warning-callout-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Disclosure text (Plus re-ack) */
+.disclosure-block {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #78350f;
+}
+.disclosure-block-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #a16207;
+  margin-bottom: 8px;
+}
+.disclosure-version {
+  font-size: 10.5px;
+  color: #a16207;
+  border-top: 1px solid #fde68a;
+  margin-top: 12px;
+  padding-top: 8px;
+}
+
+/* Re-acknowledgement field: checkbox variant */
+.reack-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff7ed;
+  border: 1.5px solid #fed7aa;
+  border-radius: 10px;
+  margin-top: 14px;
+  cursor: pointer;
+}
+.reack-checkbox-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  cursor: pointer;
+  accent-color: #f59e0b;
+}
+.reack-checkbox-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #78350f;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+/* Modal footer */
+.modal-foot {
+  padding: 16px 24px;
+  border-top: 1px solid #f1f5f9;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.modal-foot-plus {
+  padding: 16px 24px;
+  border-top: 1px solid #fcd34d;
+  background: #fffbeb;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Buttons */
+.btn-cancel {
+  padding: 9px 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+.btn-cancel:hover { background: #f8fafc; border-color: #cbd5e1; }
+
+.btn-confirm {
+  padding: 9px 22px;
+  border-radius: 8px;
+  border: none;
+  background: #4f46e5;
+  color: white;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, opacity 0.12s;
+}
+.btn-confirm:hover:not(:disabled) { background: #4338ca; }
+.btn-confirm:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.btn-confirm-plus {
+  padding: 9px 22px;
+  border-radius: 8px;
+  border: none;
+  background: #d97706;
+  color: white;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, opacity 0.12s;
+}
+.btn-confirm-plus:hover:not(:disabled) { background: #b45309; }
+.btn-confirm-plus:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+/* Success confirmation (inline, post-confirm) */
+.success-banner {
+  display: none;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  background: #ecfdf5;
+  border: 1.5px solid #a7f3d0;
+  border-radius: 10px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: #14532d;
+  line-height: 1.6;
+}
+.success-banner.show { display: flex; }
+.success-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+/* Tier badges inline in modal */
+.tier-badge-inline {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+/* Context label above each state */
+.state-context-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border-left: 3px solid #e2e8f0;
+}
+
+/* Breadcrumb note at top */
+.page-context-note {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 24px;
+}
+.page-context-note a { color: #6366f1; text-decoration: none; }
+.page-context-note a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="01-connections-list.html" style="color:#64748b;text-decoration:none;">Connections</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Make Default</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:6px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <!-- Page heading (prototype context) -->
+      <div style="margin-bottom:28px;">
+        <div style="font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;margin-bottom:6px;">
+          Make Default: confirmation modal
+        </div>
+        <div class="page-context-note">
+          This screen shows both modal states for operator review. In production, only one state appears at a time, triggered from: (a) "Make default" in the 3-dot menu on <a href="01-connections-list.html">the AI Subscriptions table</a>, or (b) "Set as Default" on a non-default subscription detail page.
+        </div>
+      </div>
+
+      <div class="states-wrapper">
+
+        <!-- ═══════════════════════════════════════════════════════════
+             STATE A: Business plan (Pro / Team / Enterprise)
+             ═══════════════════════════════════════════════════════════ -->
+        <div>
+          <div class="state-section-divider">State A: Business plan (Pro / Team / Enterprise)</div>
+          <div style="height:16px;"></div>
+          <div class="state-context-label">
+            Example: promoting ChatGPT Team (Sandbox) to workspace default. Standard two-click confirm.
+          </div>
+
+          <div class="modal-shell" id="modal-a">
+            <!-- Header -->
+            <div class="modal-head">
+              <div class="modal-head-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Make ChatGPT Team the Default? <span class="admin-only-pill">Org admin only</span></div>
+            </div>
+
+            <!-- Body -->
+            <div class="modal-body">
+              <!-- Intro: one sentence -->
+              <p class="modal-intro">
+                ChatGPT Team will replace ChatGPT Pro as the Default for ~5 agents.
+              </p>
+
+              <!-- Impact preview block -->
+              <div class="impact-block">
+                <div class="impact-row">
+                  <span class="impact-label">Now Default</span>
+                  <span class="impact-value">
+                    <span>&#129302;</span>
+                    ChatGPT Pro (Marketing)
+                    <span class="tier-badge-inline tier-pro">Pro</span>
+                  </span>
+                </div>
+                <div class="impact-row">
+                  <span class="impact-label">New Default</span>
+                  <span class="impact-value">
+                    <span>&#129302;</span>
+                    ChatGPT Team (Sandbox)
+                    <span class="tier-badge-inline tier-team">Team</span>
+                  </span>
+                </div>
+                <div class="impact-row">
+                  <span class="impact-label">Agents affected</span>
+                  <span class="impact-value">
+                    <div class="agent-count-wrap">
+                      <span class="agent-count-link" tabindex="0">5</span>
+                      <div class="agent-tooltip">
+                        Marketing Assistant<br>
+                        Research Agent<br>
+                        Support Triage<br>
+                        Lead Qualifier<br>
+                        Sales Followup
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Timing note: tiny grey footer -->
+              <p style="font-size:11.5px;color:#94a3b8;margin-top:10px;margin-bottom:0;">Takes effect on the next run.</p>
+
+              <!-- Success banner (shown after confirm) -->
+              <div class="success-banner" id="success-a">
+                <span class="success-icon">&#10003;</span>
+                <div>
+                  <strong style="display:block;margin-bottom:3px;">ChatGPT Team (Sandbox) is now the Default.</strong>
+                  Agents allowed to use it will pick it up on their next run.
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="modal-foot">
+              <button class="btn-cancel" onclick="cancelA()">Cancel</button>
+              <button class="btn-confirm" id="btn-confirm-a" onclick="confirmA()">Make Default</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             STATE B: Personal plan (requires re-acknowledgement)
+             ═══════════════════════════════════════════════════════════ -->
+        <div>
+          <div class="state-section-divider">State B: Personal plan (requires re-acknowledgement)</div>
+          <div style="height:16px;"></div>
+          <div class="state-context-label">
+            Example: promoting ChatGPT Plus (Marketing) to workspace default. Plus is a personal plan. Re-acknowledgement required.
+          </div>
+
+          <div class="modal-shell" id="modal-b">
+            <!-- Header: amber/warm tint -->
+            <div class="modal-head-plus">
+              <div class="modal-head-caution-row">
+                <div class="modal-head-caution-icon">&#9888;</div>
+                <div>
+                  <div class="modal-head-title" style="font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Make ChatGPT Plus the Default? <span class="admin-only-pill" style="background:#fef3c7;border-color:#fde68a;color:#92400e;">Org admin only</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="modal-body">
+              <!-- Warning callout: one sentence -->
+              <div class="warning-callout">
+                <span class="warning-callout-icon">&#9888;</span>
+                <div>
+                  ChatGPT Plus is a personal plan. Confirm you accept the risks before making it the Default.
+                </div>
+              </div>
+
+              <!-- Impact preview block -->
+              <div class="impact-block">
+                <div class="impact-row">
+                  <span class="impact-label">Now Default</span>
+                  <span class="impact-value">
+                    <span>&#129302;</span>
+                    ChatGPT Pro (Marketing)
+                    <span class="tier-badge-inline tier-pro">Pro</span>
+                  </span>
+                </div>
+                <div class="impact-row">
+                  <span class="impact-label">New Default</span>
+                  <span class="impact-value">
+                    <span>&#129302;</span>
+                    ChatGPT Plus (Marketing)
+                    <span class="tier-badge-inline tier-plus">Plus</span>
+                  </span>
+                </div>
+                <div class="impact-row">
+                  <span class="impact-label">Agents affected</span>
+                  <span class="impact-value">
+                    <div class="agent-count-wrap">
+                      <span class="agent-count-link" tabindex="0">5</span>
+                      <div class="agent-tooltip">
+                        Marketing Assistant<br>
+                        Research Agent<br>
+                        Support Triage<br>
+                        Lead Qualifier<br>
+                        Sales Followup
+                      </div>
+                    </div>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Timing note -->
+              <p style="font-size:11.5px;color:#94a3b8;margin-top:10px;margin-bottom:0;">Takes effect on the next run.</p>
+
+              <!-- Risk disclosure (placeholder copy, Legal will review) -->
+              <div style="margin-top:18px;">
+                <div class="disclosure-block">
+                  <div class="disclosure-block-label">Risk disclosure (placeholder copy, pending Legal review)</div>
+                  <p>
+                    ChatGPT Plus is a personal consumer subscription. Using it for business automation may not comply with OpenAI's terms of service. Your subscription may be rate-limited or suspended if OpenAI detects automated usage.
+                  </p>
+                  <p>
+                    Your organisation is responsible for compliance with OpenAI's usage policies. We are not liable for interruptions or suspensions resulting from personal plan use.
+                  </p>
+                  <div class="disclosure-version">Disclosure version: v1.0 (placeholder)</div>
+                </div>
+
+                <!-- Re-acknowledgement: checkbox -->
+                <label class="reack-checkbox-row" for="ack-checkbox">
+                  <input type="checkbox" id="ack-checkbox" onchange="onAckChange(this)">
+                  <span class="reack-checkbox-label">
+                    I accept the risk of using a personal plan for business automation.
+                  </span>
+                </label>
+              </div>
+
+              <!-- Success banner (shown after confirm) -->
+              <div class="success-banner" id="success-b">
+                <span class="success-icon">&#10003;</span>
+                <div>
+                  <strong style="display:block;margin-bottom:3px;">ChatGPT Plus (Marketing) is now the Default.</strong>
+                  Agents allowed to use it will pick it up on their next run. Your acknowledgement is recorded.
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer: amber tint -->
+            <div class="modal-foot-plus">
+              <button class="btn-cancel" onclick="cancelB()">Cancel</button>
+              <button class="btn-confirm-plus" id="btn-confirm-b" disabled onclick="confirmB()">
+                Make Plus the Default
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /states-wrapper -->
+
+      <!-- Nav hints -->
+      <div style="margin-top:32px;font-size:11.5px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;max-width:620px;margin-left:auto;margin-right:auto;">
+        <span>Entry points: <a href="01-connections-list.html" style="color:#6366f1;text-decoration:none;">AI Subscriptions tab (3-dot menu)</a> | <a href="04-subscription-detail.html" style="color:#6366f1;text-decoration:none;">Subscription detail (Set as default button)</a></span>
+        <a href="index.html" style="color:#6366f1;text-decoration:none;">&larr; Prototype index</a>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ── State A: Standard confirmation ──────────────────────────
+function cancelA() {
+  // In production: closes modal, returns to connections list
+  alert('Cancelled. No changes made.');
+}
+function confirmA() {
+  const btn = document.getElementById('btn-confirm-a');
+  btn.textContent = 'Making default...';
+  btn.disabled = true;
+  setTimeout(function() {
+    document.getElementById('success-a').classList.add('show');
+    btn.textContent = 'Done';
+    // Footer cancel becomes "Close"
+    const foot = btn.closest('.modal-foot');
+    const cancel = foot.querySelector('.btn-cancel');
+    cancel.textContent = 'Close';
+    cancel.onclick = function() { alert('In production: modal closes and list refreshes with new default.'); };
+  }, 800);
+}
+
+// ── State B: Plus tier with re-acknowledgement ───────────────
+function onAckChange(checkbox) {
+  const btn = document.getElementById('btn-confirm-b');
+  btn.disabled = !checkbox.checked;
+}
+function cancelB() {
+  document.getElementById('ack-checkbox').checked = false;
+  document.getElementById('btn-confirm-b').disabled = true;
+  alert('Cancelled. No changes made.');
+}
+function confirmB() {
+  const btn = document.getElementById('btn-confirm-b');
+  btn.textContent = 'Making Plus the default...';
+  btn.disabled = true;
+  setTimeout(function() {
+    document.getElementById('success-b').classList.add('show');
+    btn.textContent = 'Done';
+    const foot = btn.closest('.modal-foot-plus');
+    const cancel = foot.querySelector('.btn-cancel');
+    cancel.textContent = 'Close';
+    cancel.onclick = function() { alert('In production: modal closes and list refreshes with new default.'); };
+  }, 800);
+}
+</script>
+</body>
+</html>
