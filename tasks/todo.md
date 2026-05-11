@@ -4171,3 +4171,16 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Gap: `WebLoginsTab.tsx:210-212` carries an explanatory comment ("the shared DisconnectConfirmDialog requires a unified Connection type; web login connections use a different shape") and uses `window.confirm(...)` at line 293 instead of mounting the shared dialog. No type-to-confirm gate; no impact preview.
   - Distinct from the existing Chunk 8 REQ #9 entry above: that one is about the shared dialog gating on the literal `"disconnect"` rather than on the label. This Chunk 9 gap is that the shared dialog is not used AT ALL on the Web Logins surface.
   - Suggested approach: decide whether to (a) generalise `DisconnectConfirmDialog`'s `Connection` prop to a discriminated union covering both AI Subscriptions and Web Logins (plus widening `getConnectionUsage` / `disconnectConnection` to dispatch on type), (b) build a thin Web-Login-specific adapter that wraps the shared dialog with a synthetic `Connection` shape, or (c) accept the inline `window.confirm` as the V1 posture (matching the deferred-capability pattern used for Chunk 7's master toggle and Chunk 8's Edit label) and amend the plan §Chunk 9 disconnect-flow contract to match. Cross-chunk design choice — same scope as REQ #9 above.
+
+## Deferred from spec-conformance review — operator-session-identity chunk 10 (2026-05-11)
+
+**Captured:** 2026-05-11T11:29:02Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-10-2026-05-11T11-29-02Z.md`
+**Spec:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10 + `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md` §5.3, §6, §8.13, §8.15, §10.4, §17.7
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10
+
+- [ ] REQ #13 — `getAgentAllowedSubscriptions` argument order does not match the plan's named signature.
+  - Spec section: plan §Chunk 10 "Files to modify" — "Add `getAgentAllowedSubscriptions(agentId, subaccountId)` — calls `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions`."
+  - Gap: `client/src/api/governApi.ts:125-131` declares `getAgentAllowedSubscriptions(subaccountId: string, agentId: string)` — `(subaccountId, agentId)` — reversed from the plan's `(agentId, subaccountId)`. The single call site (`ModelAccessSection.tsx:109`) matches the implementation, so the helper is functionally correct; the divergence is the public signature contract.
+  - Note: every other AI-subscription helper in the same file (`getAiSubscription`, `connectAiSubscription`, `updateAiSubscriptionLabel`, `makeAiSubscriptionDefault`, `editAiSubscriptionAvailability`, `disconnectAiSubscription`, `reacceptConsent`, `triggerReauth`) takes `(subaccountId, ...)` first, so the current order is consistent with the file's convention. The plan diverges from that convention.
+  - Suggested approach: decide whether to (a) flip the helper's parameters to `(agentId, subaccountId)` per the plan (one-line signature change + update the single call site in `ModelAccessSection.tsx`) and accept the inconsistency with sibling helpers, or (b) accept the current `(subaccountId, agentId)` order as the V1 contract and amend the plan to match. Option (b) keeps file-level consistency; option (a) follows the plan literally. Non-blocking — the function works either way.

@@ -231,7 +231,7 @@ export function ModelAccessSection({ agentId, subaccountId }: Props) {
                 to="/connections?tab=ai-subscriptions"
                 className="text-[12.5px] text-indigo-600 hover:text-indigo-800 no-underline hover:underline"
               >
-                Edit availability
+                Edit availability →
               </Link>
             </div>
           )}
