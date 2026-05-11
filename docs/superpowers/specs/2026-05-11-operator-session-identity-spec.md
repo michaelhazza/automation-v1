@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-11
-**Last updated:** 2026-05-11 (spec-reviewer iteration 3 mechanical pass applied)
+**Last updated:** 2026-05-11 (spec-reviewer iteration 4 mechanical pass applied)
 **Author:** claude-opus-4-7
 **Build slug:** operator-session-identity
 **Source branch:** claude/evolve-session-identity-brief-17LO4
@@ -299,7 +299,13 @@ CREATE POLICY operator_session_consents_org_isolation ON operator_session_consen
   );
 ```
 
-**7-year retention invariant:** Rows MUST be excluded from all org-deletion and subaccount-deletion cleanup paths. When the originating user or subaccount is deleted: PII in `disclosure_text_snapshot` / `consent_text_snapshot` may be minimised (stripped to hash) where legally permissible; `user_id` and `subaccount_id` are nulled automatically via `ON DELETE SET NULL`; the row itself is retained. The `organisation_id` FK uses `ON DELETE RESTRICT` because it is the RLS partitioning key — orphaned consent rows would leak across tenants. Org-level deletion goes through a separate compliance-reviewed path that explicitly handles or archives consent rows before the org row is dropped. Access to retained rows is compliance-role restricted post-deletion.
+**7-year retention invariant:** Rows MUST be excluded from all org-deletion and subaccount-deletion cleanup paths. When the originating user or subaccount is deleted: PII in `disclosure_text_snapshot` / `consent_text_snapshot` may be minimised (stripped to hash) where legally permissible; `user_id` and `subaccount_id` are nulled automatically via `ON DELETE SET NULL`; the row itself is retained. The `organisation_id` FK uses `ON DELETE RESTRICT` because it is the RLS partitioning key — orphaned consent rows would leak across tenants. Access to retained rows is compliance-role restricted post-deletion.
+
+**Enforcement mechanism (V1 surface; full compliance flow deferred):**
+- The FK constraints encoded in the DDL (`ON DELETE SET NULL` for `user_id` and `subaccount_id`; `ON DELETE RESTRICT` for `organisation_id`) are the primary mechanical enforcement: a `DELETE FROM users` or `DELETE FROM subaccounts` automatically nullifies the consent's pointer; a `DELETE FROM organisations` that has any consent rows fails with `23503 foreign_key_violation` and surfaces a 409 / 422 from whatever route attempted the org delete — surfacing "this org has retained consent records, escalate to compliance" rather than silent deletion.
+- The PII-minimisation step (hashing `disclosure_text_snapshot` / `consent_text_snapshot` on user deletion) is NOT implemented in V1. It lives in `operatorSessionConsentService.minimisePiiForDeletedUser(userId)` as a stub that throws `not_implemented` — V1 builds the schema and the FK posture; the actual hashing job lands when compliance defines the hashing rule. See §13 Deferred items.
+- Compliance-role access controls (a dedicated read-only view of retained consent rows post-deletion) are NOT implemented in V1. There is no compliance UI in this spec; the only access path is direct DB inspection by an org_admin role + the existing audit-events stream. The full compliance view is deferred to a separate spec (§13).
+- The org-level deletion compliance flow is NOT implemented in V1. The FK `ON DELETE RESTRICT` is the V1 hard stop; any future org-deletion path must explicitly handle consent rows before the org delete can proceed. The "separate compliance-reviewed path" referenced in the brief is operational, not code; it will be specified when the first org-deletion request arrives.
 
 ---
 
@@ -378,7 +384,13 @@ export const OPERATOR_SESSION_PROVIDERS: Record<string, ProviderCapabilityEntry>
 | `self_declaration` | `'self_declared'` always — `usability_state = 'connected_unverified'` per §11.1; the connection requires a disclosure acceptance even for nominally-sanctioned tiers, because we cannot independently verify the user's tier claim | `'self_declared'` — `'connected_unverified'`, identical to sanctioned tiers under self-declaration | `'failed'` — `'connected_unverified'` |
 | `none` | (this branch is unreachable — if no detection mechanism is available, the spec MUST mark `runtimeUseEnabled: false` and gate the connect route) | (same) | (same) |
 
-The V1 OpenAI entry uses `self_declaration`, so EVERY new operator_session connection in V1 lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`, and EVERY connect attempt requires a `disclosureAcceptance` block per §11.1. When the OpenAI introspection mechanism is verified, the registry entry flips to `'introspection_api'`, and the verification branch in `operatorSessionService` will start producing `'verified'` + `'connected_usable'` rows automatically — no schema change needed.
+**Build-time gating + verification rollout.** The V1 registry entry as committed has `connectionMechanism: 'none_verified'` AND `planDetectionMechanism: 'self_declaration'`. The two flags interact:
+
+- `connectionMechanism: 'none_verified'` → `connect` route returns 501 (per §11.1 build-time gate). No connect attempt succeeds until this is flipped. This is the spec-review-time reality.
+- `connectionMechanism: 'oauth_pkce'` (or another verified value) + `planDetectionMechanism: 'self_declaration'` → connects succeed; every connect lands in `connected_unverified` + `self_declared` + requires `disclosureAcceptance`. This is the post-verification reality.
+- `connectionMechanism: 'oauth_pkce'` + `planDetectionMechanism: 'introspection_api'` → connects succeed; sanctioned tiers land in `connected_usable` + `verified` directly; Plus / unverified follow the disclosure branch. This is the post-introspection reality.
+
+The two flags flip independently; the schema, services, and routes are all written so that either flag flipping later activates the corresponding branch with no code change beyond updating the registry. Acceptance criteria in §17 cover both pre- and post-verification behaviour to keep them honest.
 
 ---
 
@@ -466,6 +478,10 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | `server/services/operatorSessionLifecycleServicePure.ts` | Pure functions for failure classification, state-transition logic (testable) |
 | `server/services/operatorSessionConsentServicePure.ts` | Pure functions for disclosure-version comparison and consent-state derivation (testable) |
 | `server/services/credentialBrokerServicePure.ts` | Pure helpers extracted from the broker: `assertCredentialUsableOrThrow(state, decryptHook)` (broker retrieval invariant) + `orderResolvedCredentials(rows)` (§9.7 failover ordering). Single source of truth for those two invariants. |
+| `server/services/__tests__/operatorSessionLifecycleServicePure.test.ts` | Pure unit tests: failure classification (all 6 buckets), state-transition table, forbidden transitions throw, terminal-state transitions throw |
+| `server/services/__tests__/operatorSessionConsentServicePure.test.ts` | Pure unit tests: `disclosureVersion` < / == / > current; needs-reaccept derivation |
+| `server/services/__tests__/credentialBrokerServicePure.test.ts` | Pure unit tests: `assertCredentialUsableOrThrow` for each state (decrypt hook never invoked on non-usable; invoked exactly once on usable); `orderResolvedCredentials` with NULL labels, identical labels, exclusion of non-usable states, default-first |
+| `server/config/__tests__/operatorSessionProviders.test.ts` | Pure unit test: every registry entry has all required fields; `sanctionedTiers` ∩ `optInTiers` = ∅; `connectionMechanism` ∈ enum |
 
 ### 8.6 Modified services
 
@@ -492,7 +508,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | File | Change |
 |---|---|
-| `server/services/connectionsService.ts` | Extend `listConnections` to include `auth_type = 'operator_session'` rows in the Govern surface response |
+| `server/services/connectionsService.ts` | Extend `listConnections` to include `auth_type = 'operator_session'` rows in the Govern surface response, gated by an additional `subaccount.operator_session.view` permission check per §10.5 (rows are filtered out for principals who hold `connections.view` but not `operator_session.view`). |
 | `server/index.ts` | Mount `operatorSessionConnections` + `webLoginConnectionsGovern` routers (this repo mounts all routers in `server/index.ts`; there is no `server/routes/index.ts` aggregator) |
 
 ### 8.10 Shared types
@@ -533,7 +549,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 |---|---|
 | `client/src/pages/govern/ConnectionsPage.tsx` | Add 3-tab strip; mount AiSubscriptionsTab, AppIntegrationsTab, WebLoginsTab |
 | `client/src/api/governApi.ts` | Add API calls for AI Subscription CRUD, consent, availability |
-| `client/src/config/routes.ts` | No new routes (all surfaces live under `/connections`) |
+| `client/src/config/routes.ts` | (No edit required — this row is informational; all UI surfaces in this spec mount under the existing `/connections` route. Listed here only so the inventory-lock check confirms `routes.ts` was considered and intentionally left unchanged.) |
 
 ### 8.14 Deprecated / removed client files
 
@@ -803,11 +819,15 @@ Specific mappings:
 
 ---
 
-### 10.5 /connections page consolidation — existing guards
+### 10.5 /connections page consolidation — existing guards + operator_session bridge
 
 The existing `GET /api/subaccounts/:id/connections` (and web-login routes migrated into `ConnectionsPage`) already use `subaccount.connections.view` / `subaccount.connections.manage`. These are unchanged.
 
-New Add/Edit/Test routes exposed via the Govern surface MUST use the same guards as their legacy equivalents — no permission gap should be introduced by the consolidation.
+**Operator-session bridging at the list endpoint.** When the unified list endpoint returns rows where `auth_type = 'operator_session'`, the row inclusion is gated by an additional check inside `connectionsService.listConnections`: the principal MUST hold `subaccount.operator_session.view` in addition to `subaccount.connections.view`. If they hold `connections.view` but NOT `operator_session.view`, the operator_session rows are filtered out of the response (other auth-type rows still appear). This is the enforcement point that prevents operator_session metadata from leaking through the generic list while keeping the unified list as the single read surface.
+
+The bridge lives in `server/services/connectionsService.ts` (a modified service per §8.9), not in a new middleware. Implementation note: the service has access to the authenticated principal via the calling route's `withOrgTx` context; it reads `permissions.user.has(OPERATOR_SESSION_VIEW)` and conditionally excludes operator_session rows.
+
+New Add/Edit/Test routes for Web Login exposed via the Govern surface MUST use the same guards as their legacy equivalents — no permission gap should be introduced by the consolidation.
 
 ---
 
@@ -823,12 +843,13 @@ The provider connection handshake is inline / synchronous from the client's pers
 - Verified tier is in `optInTiers` (Plus): disclosure required; connection lands in `connected_usable` after the disclosure write, with `plan_verification_status = 'verified'`.
 - Tier cannot be verified or detection mechanism is `probe` / `self_declaration`: disclosure required; connection lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'` or `'failed'` per the §7.4 table.
 
-**V1 reality.** The V1 OpenAI registry entry uses `planDetectionMechanism: 'self_declaration'`. By the rule above, EVERY V1 connect:
-- Requires a `disclosureAcceptance` block in the POST body. Pre-flight rejects missing/invalid blocks with 422 `disclosure_required` (the error code does NOT presume Plus — it covers all self-declared connects).
-- Lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`.
-- Stays not-usable by adapters until either the OpenAI registry entry flips to `'introspection_api'` (mechanism verified) and the connection is re-verified, or the user explicitly accepts a Plus-equivalent disclosure that opts the credential into use.
+**Two flags, two flips (build-time vs runtime).** Per §7.4 "Build-time gating + verification rollout", the OpenAI registry entry has two independent flags that gate the connect flow:
 
-When the OpenAI registry entry is later updated to `'introspection_api'`, the connect flow can produce `connected_usable` directly for verified sanctioned tiers — no code change beyond the registry update.
+- At spec-review time, `connectionMechanism: 'none_verified'` — connect returns 501; no rows are written, no consents recorded. This is the only behaviour exercised by the V1 build until the OpenAI mechanism is verified.
+- Once `connectionMechanism` flips to a verified value (e.g. `'oauth_pkce'`), but `planDetectionMechanism` is still `'self_declaration'`: every connect requires a `disclosureAcceptance` block (422 `disclosure_required` on omission, which is the universal error code — it doesn't presume Plus), lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`, and stays not-usable by adapters until the user re-confirms or `planDetectionMechanism` flips to `'introspection_api'`.
+- Once `planDetectionMechanism` flips to `'introspection_api'`, sanctioned tiers can land in `connected_usable` + `verified` directly per the §7.4 outcome table; Plus / unverified still require disclosure.
+
+The §17 acceptance criteria are structured so they exercise the right branch given the current registry state — pre-verification tests confirm 501; post-verification tests confirm the disclosure-required flow.
 
 **Connect sequence (the canonical one transaction):**
 
@@ -844,7 +865,15 @@ When the OpenAI registry entry is later updated to `'introspection_api'`, the co
 
 **Why the back-pointer is mutable exactly once:** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link.
 
-**Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump, or when the user re-confirms a `connected_unverified` connection by accepting Plus-equivalent disclosure. That route writes a NEW consent row (linked to the existing `connId` from the start, so no UPDATE-of-connection_id is needed), writes a `superseded` event linking the prior consent, updates `integration_connections.consent_record_id` to the new consent, and transitions `usability_state` back to `connected_usable`. The route returns 422 if no prior consent record exists for the connection — that case must go through the initial `connect` flow instead.
+**Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump, or when the user re-confirms a `connected_unverified` connection by accepting Plus-equivalent disclosure. Inside ONE transaction the route writes:
+
+1. A NEW consent row (with `connection_id` set at INSERT time, so no back-fill UPDATE is needed).
+2. A `granted` event in `operator_session_consent_events` for the new consent — required so the §9.6 "latest event wins" source-of-truth can evaluate the new consent's status.
+3. A `superseded` event in `operator_session_consent_events` linking the prior consent (the same consent that was being re-accepted), with `superseded_by_consent_id` pointing at the new consent.
+4. UPDATE on `integration_connections.consent_record_id` to point at the new consent.
+5. State transition: `usability_state` → `connected_usable` via `operatorSessionLifecycleService.transition`.
+
+The route returns 422 if no prior consent record exists for the connection — that case must go through the initial `connect` flow instead. The route returns 200 with the new consent shape on success.
 
 **If provider mechanism is unverified at build time:** Steps 2 and 3 are gated. The `connect` route returns `501 provider_mechanism_not_verified` with a body explaining the gate. Schema and consent model are deployed; connection wiring activates when the mechanism is confirmed.
 
@@ -903,8 +932,9 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 
 **Deliverables:**
 - `operatorSessionLifecycleServicePure.ts`: failure classification, state-transition decision logic
-- Unit tests (vitest): `classifyRefreshFailure` for all 6 buckets; state-transition pure functions
-- `operatorSessionConsentService.ts`: pure validation logic (disclosure version check, consent exists check)
+- `operatorSessionConsentServicePure.ts`: disclosure-version comparison, consent-state derivation, "needs-reaccept" pure check
+- `credentialBrokerServicePure.ts`: `assertCredentialUsableOrThrow(state, decryptHook)` (broker retrieval invariant) + `orderResolvedCredentials(rows)` (§9.7 failover ordering)
+- Unit tests (vitest) for every exported pure function: failure-classification buckets, state-transition validity table, disclosure-version comparison, broker assertion order-of-calls, failover ordering with edge cases (NULL labels, identical labels, exclusion of non-usable states)
 
 **Depends on:** Chunk 1 (types from schema).
 
@@ -1023,6 +1053,9 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 - **Revocation signal support / webhook push.** V1 detects revocation via token refresh failure (classified as `provider_revoked`); proactive push events from OpenAI are not implemented. Registry entry marks `revocationSignalSupport: 'none'` until supported.
 - **Failure classification UX for `provider_unavailable` / `rate_limited`.** These buckets keep the credential usable with exponential backoff retry. No UI indicator for "temporarily degraded." Deferred to a future observability pass.
 - **Disclosure version bump via background sweep.** Spec picks "on-read" detection (§11.4 Option A) for V1. Option B (background sweep job) deferred.
+- **PII minimisation hashing job for retained consent rows.** §7.2 declares the policy and stubs `operatorSessionConsentService.minimisePiiForDeletedUser(userId)` as `not_implemented`. The actual hashing rule (which fields, which hash algorithm, what's kept for legal evidence) is defined by compliance and ships in a follow-up spec when the first user-deletion request arrives.
+- **Org-level deletion compliance flow.** V1 enforces the retention invariant via `ON DELETE RESTRICT` on `organisation_id`; an attempt to delete an org with consent rows fails with `23503`. The operational flow for archiving / handling consent rows before an org delete is deferred; will be specified when the first org-deletion request lands.
+- **Transfer ownership flow.** §18 references re-auth identity mismatch routing to "Transfer ownership"; vocabulary palette (§6) names the verb. The actual transfer-ownership route, service, and UI are out of scope for V1. V1 surfaces only the `disabled` state when the owning user is removed (§7.5 `owner_inactive`); the transfer flow lands in a follow-up spec when there is a concrete customer ask. The mockup set (`06-offboarding-state.html`) shows the offboarding state but does NOT include the transfer flow.
 
 ---
 
@@ -1210,8 +1243,9 @@ All criteria must pass before the build is marked complete.
 
 ### 17.5 Consent lifecycle
 
-- [ ] V1 connect attempt (self_declaration registry) without a `disclosureAcceptance` block in the POST body: route returns 422 `disclosure_required` — no consent row, no credential row written.
-- [ ] V1 connect attempt WITH a valid `disclosureAcceptance` block: single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_unverified'` + `plan_verification_status = 'self_declared'`.
+- [ ] Pre-verification V1 connect attempt (registry `connectionMechanism: 'none_verified'`): route returns 501 `provider_mechanism_not_verified` — no consent row, no credential row written. This is the spec-review-time reality.
+- [ ] Post-verification connect attempt (registry `connectionMechanism` flipped, `planDetectionMechanism: 'self_declaration'`) without a `disclosureAcceptance` block in the POST body: route returns 422 `disclosure_required` — no consent row, no credential row written.
+- [ ] Post-verification connect attempt WITH a valid `disclosureAcceptance` block (registry mechanism verified, `planDetectionMechanism: 'self_declaration'`): single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_unverified'` + `plan_verification_status = 'self_declared'`.
 - [ ] Post-registry-flip connect attempt (introspection_api with a sanctioned tier verified): single transaction writes the credential row with `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`; no consent row required (disclosure flow only triggers for Plus tier or unverified outcomes).
 - [ ] Post-registry-flip connect attempt with verified Plus tier: single transaction writes consent row + credential row + one-time back-fill; final state `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`.
 - [ ] Disclosure version bump: existing credential transitions to `connected_needs_consent` on first read after the version bump (§11.4). Agent-use blocked. `/consent` route handles re-acceptance: writes a new consent row (with `connection_id` set at INSERT time, no UPDATE needed), writes a `superseded` event linking the prior consent, updates the connection's `consent_record_id` forward pointer, transitions usability back to `connected_usable`.
@@ -1266,7 +1300,7 @@ All criteria must pass before the build is marked complete.
 
 3. **Subaccount vs. org scope for Plus consent.** The brief §2.4 default posture is subaccount-scoped storage, user-attributed consent. If an org has 50 subaccounts and each has a Plus subscription, each user signs a separate disclosure. There is no org-level "umbrella consent." Confirm this is intentional before implementation.
 
-4. **Re-auth identity mismatch.** §11.1 and Screen 20 assume the re-auth-ing user is the same identity as the original consent owner. If the identity differs (e.g., original owner departed), the flow should detect the mismatch and route to Transfer Ownership instead of Sign in again. The spec currently handles this via an offramp note on Screen 20 but does not define the server-side identity-comparison check. Builder should clarify before implementation of Chunk 7.
+4. **Re-auth identity mismatch.** §11.1 and Screen 20 assume the re-auth-ing user is the same identity as the original consent owner. If the identity differs (e.g., original owner departed), the flow should detect the mismatch and route to Transfer Ownership instead of Sign in again. Transfer Ownership itself is deferred (§13); V1 surfaces the offramp note on Screen 20 and the `disabled` state with `owner_inactive` cause. Builder should treat any identity-mismatch path as an error state in V1 (route returns 422 `owner_mismatch_transfer_ownership_required` with no state change) and not attempt to silently re-attribute the credential.
 
 ## 18b. Resolved during spec-review
 
