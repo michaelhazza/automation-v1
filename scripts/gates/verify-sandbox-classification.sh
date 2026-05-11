@@ -36,7 +36,37 @@ SANDBOX_REQUIRED_ADAPTERS=(
   "ieeDevBackend.ts"
 )
 
-# ── Check 1: each adapter with sandboxRequirement must call runTask ───────────
+# ── Check 0: auto-detect missing calibrations ─────────────────────────────────
+# Any adapter file that declares sandboxRequirement: 'code_execution' MUST be
+# listed in SANDBOX_REQUIRED_ADAPTERS above. This protects against a new adapter
+# being added without updating the calibration list, which would let it bypass
+# the routing check below entirely.
+if [ -d "$ADAPTER_DIR" ]; then
+  while IFS= read -r declared_file; do
+    [ -z "$declared_file" ] && continue
+    declared_basename="$(basename "$declared_file")"
+    listed=0
+    for listed_adapter in "${SANDBOX_REQUIRED_ADAPTERS[@]}"; do
+      if [ "$declared_basename" = "$listed_adapter" ]; then
+        listed=1
+        break
+      fi
+    done
+    if [ "$listed" -eq 0 ]; then
+      echo "[FAIL] $declared_basename declares sandboxRequirement: 'code_execution' but is not listed in SANDBOX_REQUIRED_ADAPTERS — add it to the calibration list in scripts/gates/verify-sandbox-classification.sh"
+      FAIL=1
+    fi
+  done < <(grep -lE "sandboxRequirement\s*:\s*['\"]code_execution['\"]" "$ADAPTER_DIR"/*.ts 2>/dev/null || true)
+fi
+
+# ── Check 1: each adapter with sandboxRequirement must actually route to the service ──
+# Strengthened: a bare mention of "SandboxExecutionService" or ".runTask(" anywhere
+# in the file does not prove the sandbox-class branch is wired. We require both:
+#   (a) the adapter imports the sandboxExecutionService module (static OR dynamic
+#       `await import('.../sandboxExecutionService...')`), AND
+#   (b) the adapter actually invokes runTask in its body — either
+#       sandboxExecutionService.runTask( on a typed instance OR a runTask( call
+#       on a name destructured from the dynamic import.
 for adapter in "${SANDBOX_REQUIRED_ADAPTERS[@]}"; do
   adapter_file="$ADAPTER_DIR/$adapter"
 
@@ -51,9 +81,18 @@ for adapter in "${SANDBOX_REQUIRED_ADAPTERS[@]}"; do
     continue
   fi
 
-  # Verify the adapter calls SandboxExecutionService.runTask
-  if ! grep -v "import type" "$adapter_file" | grep -q "SandboxExecutionService\|sandboxExecutionService\|\.runTask("; then
-    echo "[FAIL] $adapter declares sandboxRequirement but does not call SandboxExecutionService.runTask"
+  # (a) Module is imported (static `from '...sandboxExecutionService...'` OR
+  #     dynamic `await import('...sandboxExecutionService...')`).
+  if ! grep -qE "from[[:space:]]+['\"][^'\"]*sandboxExecutionService[^'\"]*['\"]|await[[:space:]]+import\(['\"][^'\"]*sandboxExecutionService[^'\"]*['\"]\)" "$adapter_file"; then
+    echo "[FAIL] $adapter declares sandboxRequirement but does not import sandboxExecutionService (static or dynamic)"
+    FAIL=1
+    continue
+  fi
+
+  # (b) Actual invocation in the body — strip import lines and comments before grepping.
+  body_lines=$(grep -vE "^[[:space:]]*(import|\\*|//|/\\*)" "$adapter_file" || true)
+  if ! echo "$body_lines" | grep -qE "sandboxExecutionService\.runTask\(|\\brunTask\("; then
+    echo "[FAIL] $adapter declares sandboxRequirement but does not invoke runTask() in its body"
     FAIL=1
   fi
 done

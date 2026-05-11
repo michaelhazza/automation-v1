@@ -39,17 +39,30 @@ SCAN_DIRS=(
 # Both variants are checked. Imports of the table name for read purposes are
 # excluded via the `grep -v "import type"` filter and are not a violation —
 # only actual update() call-sites are flagged.
+#
+# Narrowing per spec §12.4 strict reading: the insert-only invariant applies
+# to SANDBOX source-type rows, not all llmRequests rows. Maintenance jobs that
+# update non-sandbox llmRequests fields (e.g. audit metadata on completion
+# rows) are legitimate. We narrow the gate to files that mix llmRequests
+# updates with references to sandbox source-type strings — those are the
+# updates plausibly targeting sandbox rows and warrant human review. Files
+# that update llmRequests without any sandbox-context references in the same
+# file are presumed non-sandbox and pass.
 
 FORBIDDEN_PATTERNS=(
   "\.update\(llmRequests\)"
   "db\.update\(llmRequests\)"
 )
 
+# Sandbox source-type markers — presence in the same file flags the update as
+# in-scope for the §12.4 insert-only invariant.
+SANDBOX_SOURCE_TYPE_PATTERN="sandbox_compute(_correction)?"
+
 for dir in "${SCAN_DIRS[@]}"; do
   [ -d "$dir" ] || continue
 
   for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    matches=$(
+    raw_matches=$(
       grep -rn "$pattern" "$dir" \
         --include="*.ts" \
         --exclude-glob="*.test.ts" \
@@ -59,11 +72,17 @@ for dir in "${SCAN_DIRS[@]}"; do
         || true
     )
 
-    if [ -n "$matches" ]; then
-      echo "[FAIL] UPDATE against llmRequests detected — sandbox cost rows are insert-only (spec §12.4). Found:"
-      echo "$matches"
-      FAIL=1
-    fi
+    [ -z "$raw_matches" ] && continue
+
+    # Narrow: only flag matches whose file also references a sandbox source type.
+    while IFS=: read -r match_file match_line match_content; do
+      [ -z "$match_file" ] && continue
+      if grep -qE "$SANDBOX_SOURCE_TYPE_PATTERN" "$match_file"; then
+        echo "[FAIL] UPDATE against llmRequests in a file that also references sandbox source types — spec §12.4 insert-only invariant applies:"
+        echo "  $match_file:$match_line: $match_content"
+        FAIL=1
+      fi
+    done <<< "$raw_matches"
   done
 done
 

@@ -418,6 +418,26 @@ export class E2bSandbox implements SandboxExecutionService {
 
 registerSandboxProvider('e2b', () => {
   const nodeEnv = process.env['NODE_ENV'] ?? 'development';
+  const stubAllowed = process.env['E2B_SDK_STUBBED'] === 'true';
+
+  // Fail-fast guard: the e2b SDK is not installed yet. Refusing to construct
+  // an e2b provider when the SDK is absent prevents the resolver from handing
+  // back a provider that "looks valid" at boot but throws on first real call.
+  // Tests construct E2bSandbox directly with an injected client and never
+  // reach this factory. Local / dev work that wants the not-installed stub
+  // must opt in explicitly via E2B_SDK_STUBBED=true; production NEVER opts in.
+  if (nodeEnv === 'production' || !stubAllowed) {
+    throw new FailureError(
+      failure(
+        'sandbox_provider_unavailable',
+        nodeEnv === 'production'
+          ? 'e2b SDK is not installed — production cannot use the not-installed stub; install the SDK and inject a real client before setting SANDBOX_PROVIDER=e2b'
+          : 'e2b SDK is not installed — set E2B_SDK_STUBBED=true to use the not-installed stub in non-production, or install the SDK and inject a real client at module init',
+        { nodeEnv, sdkInstalled: false, stubAllowed },
+      ),
+    );
+  }
+
   const projectEnvKey =
     nodeEnv === 'production' ? 'E2B_PROJECT_PROD' : 'E2B_PROJECT_STAGING';
   const projectName = process.env[projectEnvKey];

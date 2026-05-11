@@ -4152,6 +4152,13 @@ These items were classified ambiguous/directional during spec review. Spec mecha
   - Rationale: cleaner RLS surface (symmetric with the other four sandbox tables); line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` enforceable at the DB layer (a JSONB column couldn't); 90d retention lifecycle decoupled from the general application log layer.
   - Build impact: schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). No longer a chunk-zero gating decision.
 
+- [ ] **SANDBOX-F1 — Compute real digests + hashes for synthetos-sandbox template (deferred Phase 3 chatgpt-pr-review R1)**
+  - Captured 2026-05-11 via Phase 3 `chatgpt-pr-review` Round 1 finding F1 (recommended `defer`).
+  - Spec section: §15.2 (CURRENT_VERSION is human-committed pre-build), §15.3 (PUBLISHED_VERSION is CI-attested post-publish).
+  - Current state per `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION`: `deps_lockfile_hash = sha256:000...` placeholder; Dockerfile base image digest also placeholder; pip package hashes in requirements.txt similarly placeholder.
+  - **Why deferred for V1 ship:** all of these are intentionally placeholder until the e2b account is provisioned (see SANDBOX-DEF-EGRESS-MECH above). The CURRENT_VERSION / PUBLISHED_VERSION contract is structurally complete; values are operator-computed pre-first-publish per spec §15.2.
+  - **Operator action when e2b account is provisioned:** (1) `docker pull` the real base image and capture the digest; (2) update `infra/sandbox-templates/synthetos-sandbox/Dockerfile` `FROM` line + CURRENT_VERSION `base_image_digest`; (3) regenerate `requirements.txt` with `pip-compile --generate-hashes` and capture real package hashes; (4) recompute `deps_lockfile_hash = sha256(requirements.txt || package-lock.json)`; (5) update CURRENT_VERSION; (6) flip repo variable `E2B_PUBLISH_ENABLED=true` AFTER wiring the real `e2b template publish` + `e2b template inspect` commands in `.github/workflows/publish-sandbox-templates.yml` (per Phase 3 F2 fix — the workflow now hard-fails until both wiring + variable flip are done); (7) push the `sandbox-template/synthetos-sandbox/v{version}` tag to trigger the publish workflow; (8) merge the auto-generated attestation PR within the 24h grace window so PUBLISHED_VERSION lands.
+
 ---
 
 ## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)

@@ -108,10 +108,17 @@ for template_rel_dir in "${TEMPLATE_DIRS[@]}"; do
     if echo "$current_version" | grep -q "^local-dev-"; then
       echo "[INFO] $template_rel_dir: local-dev version '$current_version' — git tag check skipped"
     else
-      # Tag not found — this is only a warning on the main branch if CURRENT_VERSION was
-      # modified in the current commit and the attestation workflow hasn't run yet.
-      # The gate records it as informational to avoid blocking WIP branches.
-      echo "[INFO] $template_rel_dir: git tag '$expected_tag' not found — CURRENT_VERSION declares version '$current_version' but no matching publish tag exists yet"
+      # Tag not found. Behaviour depends on run mode:
+      #   STRICT_TEMPLATE_TAG_CHECK=1 → hard fail (main / ready-to-merge workflow)
+      #   default                     → informational (PR mode; WIP iteration allowed)
+      # Spec §15.2 requires that every committed CURRENT_VERSION.version outside
+      # local-dev-* MUST have a matching publish tag before the change reaches main.
+      if [ "${STRICT_TEMPLATE_TAG_CHECK:-0}" = "1" ]; then
+        echo "[FAIL] $template_rel_dir: git tag '$expected_tag' not found — CURRENT_VERSION declares version '$current_version' but no matching publish tag exists. On strict runs (main / ready-to-merge) this is required by spec §15.2."
+        FAIL=1
+      else
+        echo "[INFO] $template_rel_dir: git tag '$expected_tag' not found — CURRENT_VERSION declares version '$current_version' but no matching publish tag exists yet (PR mode — informational; will block on strict runs)"
+      fi
     fi
   fi
 
