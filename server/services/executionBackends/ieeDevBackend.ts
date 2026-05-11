@@ -3,6 +3,7 @@
  *
  * Spec: tasks/builds/execution-backend-adapter-contract/spec.md § 7
  *       (IEE rows), § 11 (IEE adapter rows), § 13.1.1, § 14 Chunk 3.
+ *       Spec B (sandbox-isolation) §18, §7.2.
  *
  * The dev variant of the IEE adapter pair. Shares storage (`iee_runs`),
  * event queue (`iee-run-completed`), and dispatch / lifecycle plumbing with
@@ -10,10 +11,13 @@
  * discriminator (`'dev'` here vs `'browser'` in the sibling). Common code
  * lives in `_ieeShared.ts`.
  *
- * `sandboxRequirement: 'code_execution'` is declared but not enforced — the
- * Sandbox executor primitive is a future spec (Spec B). Declaring it now
- * keeps the registry validation honest without blocking V1 registration.
+ * Dispatch is now classification-aware (Spec B §18.2):
+ *   - classifyExecutionClass() is consulted on every dispatch.
+ *   - 'sandbox' class → SandboxExecutionService.runTask (Tier 4).
+ *   - 'worker_trusted' / 'worker_orchestration' → ieeDispatch (unchanged).
  */
+
+import { randomUUID } from 'node:crypto';
 
 import {
   ieeRunCompletedPayloadSchema,
@@ -25,8 +29,40 @@ import {
   ieeReconcile,
   ieeCancel,
 } from './_ieeShared.js';
+import { classifyExecutionClass } from './ieeDevBackendPure.js';
+import { FailureError } from '../../../shared/iee/failure.js';
+import { failure } from '../../../shared/iee/failure.js';
 
 import type { ExecutionBackend } from './types.js';
+import { BackendOptionsMismatch } from './types.js';
+import type { SandboxPolicy } from '../../../shared/types/sandbox.js';
+
+// ---------------------------------------------------------------------------
+// V1 default sandbox policy — applied when a sandbox-class task is dispatched
+// without an explicit policy in the payload. All Tier 4 tasks in V1 operate
+// with network deny-all, /workspace writable, and spec §10.1 default ceilings.
+// ---------------------------------------------------------------------------
+
+const V1_DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
+  network: { mode: 'none' },
+  filesystem: { writableRoot: '/workspace' },
+  ceilings: {
+    wallClockMs: 600_000,  // 10 min (spec §10.1 default)
+    costCents: 50,         // 50 cents (spec §10.1 default)
+  },
+  artefactLimits: {
+    perArtefactBytes: 10_485_760,   // 10 MB
+    totalBytes: 104_857_600,        // 100 MB
+  },
+  allowRuntimeInstall: false,
+  inputLimits: {
+    maxBytes: 26_214_400,           // 25 MB
+    allowedMimes: [],               // any MIME allowed by default; tasks restrict if needed
+  },
+  providerThresholds: {
+    startTimeoutMs: 30_000,         // 30 s provider-start soft timeout
+  },
+};
 
 export const ieeDevBackend: ExecutionBackend = {
   // Identity
@@ -41,6 +77,94 @@ export const ieeDevBackend: ExecutionBackend = {
   completedEventPayload: ieeRunCompletedPayloadSchema,
 
   async dispatch(input) {
+    const opts = input.backendOptions;
+
+    // Mismatch check — adapter first statement invariant (Spec A § 4.1).
+    if (opts.backendId !== 'iee_dev') {
+      throw new BackendOptionsMismatch('iee_dev', opts.backendId);
+    }
+
+    const ieeTask = opts.ieeTask;
+    if (!ieeTask) {
+      throw Object.assign(new Error(`adapter 'iee_dev' requires ieeTask but received undefined`), {
+        statusCode: 400,
+        errorCode: 'IEE_TASK_REQUIRED',
+      });
+    }
+    if (ieeTask.type !== 'dev') {
+      throw Object.assign(new Error(`adapter 'iee_dev' requires ieeTask.type='dev', got '${ieeTask.type}'`), {
+        statusCode: 400,
+        errorCode: 'IEE_TASK_TYPE_MISMATCH',
+      });
+    }
+
+    // Classification — Spec B §18.2. classifyExecutionClass is the single
+    // producer of dispatch-class verdicts for this adapter.
+    const executionClass = classifyExecutionClass(ieeTask);
+
+    if (executionClass === 'sandbox') {
+      // Tier 4 sandbox path. subaccountId must be non-null for all sandbox
+      // tasks — sandbox isolation is scoped per subaccount (Spec B §11).
+      if (!input.subaccountId) {
+        throw new FailureError(
+          failure(
+            'sandbox_input_rejected',
+            'sandbox-class task requires a non-null subaccountId for isolation scoping',
+            { runId: input.runId, agentId: input.agentId },
+          ),
+        );
+      }
+
+      // Late import — avoids import cycle through the adapter registry.
+      const { runTask } = await import('../sandboxExecutionService.js');
+
+      const sandboxOutput = await runTask({
+        sandboxExecutionId: randomUUID(),
+        organisationId: input.organisationId,
+        subaccountId: input.subaccountId,
+        runId: input.runId,
+        agentId: input.agentId,
+        // One sandbox execution per adapter dispatch; use runId as the
+        // proxy task identifier until payload variants carry explicit taskIds.
+        taskId: input.runId,
+        templateName: 'synthetos-sandbox',
+        templateVersion: process.env['SANDBOX_TEMPLATE_VERSION'] ?? 'v1.0.0',
+        policy: V1_DEFAULT_SANDBOX_POLICY,
+        inputBytes: 0,
+        inputFiles: [],
+        credentialIssuanceContext: { aliases: [] },
+        outputSchemaRef: 'generic',
+      });
+
+      // Translate sandbox output → BackendDispatchResult (lifecycle: in_process).
+      // The calling orchestrator finalises the agent run inline using loopResult.
+      const summary = sandboxOutput.terminalState === 'completed'
+        ? `Sandbox completed (${sandboxOutput.templateName}@${sandboxOutput.templateVersion})`
+        : `Sandbox ${sandboxOutput.terminalState} (sandboxExecutionId=${sandboxOutput.sandboxExecutionId})`;
+
+      return {
+        lifecycle: 'in_process',
+        backendTaskId: sandboxOutput.sandboxExecutionId,
+        loopResult: {
+          summary,
+          toolCallsLog: [],
+          totalToolCalls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+          finalStatus: sandboxOutput.terminalState,
+        },
+        deduplicated: false,
+      };
+    }
+
+    // 'worker_trusted' and 'worker_orchestration' — existing IEE delegated
+    // path. Unchanged from Spec A. ieeDispatch repeats the mismatch and task
+    // type guards; that duplication is harmless and preserves the shared
+    // helper's self-contained contract.
     return ieeDispatch({ type: 'dev', adapterId: 'iee_dev', input });
   },
 

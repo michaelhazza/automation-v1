@@ -1,0 +1,252 @@
+name: Publish sandbox templates
+
+# Fires on tags of the form: sandbox-template/{name}/v{version}
+# Explicitly EXCLUDES sandbox-template/openclaw-session/v* in V1 — the OpenClaw
+# adapter spec activates that template; until then the directory is placeholder
+# scaffolding only and must not be accidentally published.
+on:
+  push:
+    tags:
+      - 'sandbox-template/synthetos-sandbox/v*'
+      # Add additional V1 template names here as they are introduced.
+      # DO NOT add sandbox-template/openclaw-session/v* until the OpenClaw adapter spec lands.
+
+concurrency:
+  group: publish-sandbox-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a publish in progress — partial publish is worse than a queue
+
+jobs:
+  publish:
+    name: Build, scan, and publish sandbox template
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: write        # open attestation PR writing PUBLISHED_VERSION
+      pull-requests: write   # create the attestation PR
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — needed for tag verification
+
+      # ── Extract template name and version from the tag ────────────────────
+      # Tag format: sandbox-template/{name}/v{version}
+      - name: Extract template metadata from tag
+        id: meta
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          TEMPLATE_NAME=$(echo "$TAG" | cut -d'/' -f2)
+          VERSION=$(echo "$TAG" | cut -d'/' -f3)
+          TEMPLATE_DIR="infra/sandbox-templates/${TEMPLATE_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "template_name=${TEMPLATE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "template_dir=${TEMPLATE_DIR}" >> "$GITHUB_OUTPUT"
+
+      # ── Read and validate CURRENT_VERSION ────────────────────────────────
+      - name: Validate CURRENT_VERSION
+        id: current
+        run: |
+          TEMPLATE_DIR="${{ steps.meta.outputs.template_dir }}"
+          CURRENT_FILE="${TEMPLATE_DIR}/CURRENT_VERSION"
+
+          if [[ ! -f "$CURRENT_FILE" ]]; then
+            echo "ERROR: ${CURRENT_FILE} not found" >&2
+            exit 1
+          fi
+
+          declare -A fields
+          while IFS='=' read -r key value; do
+            [[ -z "$key" ]] && continue
+            fields["$key"]="$value"
+          done < "$CURRENT_FILE"
+
+          required_fields=(version template_resource_class max_cost_cents_per_second base_image_digest deps_lockfile_hash)
+          for field in "${required_fields[@]}"; do
+            if [[ -z "${fields[$field]:-}" ]]; then
+              echo "ERROR: CURRENT_VERSION missing required field: $field" >&2
+              exit 1
+            fi
+          done
+
+          # Verify that CURRENT_VERSION.version matches the tag version
+          TAG_VERSION="${{ steps.meta.outputs.version }}"
+          FILE_VERSION="${fields[version]}"
+          if [[ "$FILE_VERSION" != "$TAG_VERSION" ]]; then
+            echo "ERROR: CURRENT_VERSION.version=${FILE_VERSION} does not match tag version=${TAG_VERSION}" >&2
+            exit 1
+          fi
+
+          echo "version=${fields[version]}" >> "$GITHUB_OUTPUT"
+          echo "template_resource_class=${fields[template_resource_class]}" >> "$GITHUB_OUTPUT"
+          echo "max_cost_cents_per_second=${fields[max_cost_cents_per_second]}" >> "$GITHUB_OUTPUT"
+          echo "base_image_digest=${fields[base_image_digest]}" >> "$GITHUB_OUTPUT"
+          echo "deps_lockfile_hash=${fields[deps_lockfile_hash]}" >> "$GITHUB_OUTPUT"
+
+      # ── Verify deterministic-build prerequisites ──────────────────────────
+      - name: Verify deterministic-build prerequisites
+        run: |
+          TEMPLATE_DIR="${{ steps.meta.outputs.template_dir }}"
+
+          # Fail if Dockerfile contains floating :latest or un-digested FROM lines
+          if grep -qP '^FROM\s+(?!--platform)\S+:latest' "${TEMPLATE_DIR}/Dockerfile"; then
+            echo "ERROR: Dockerfile uses :latest tag — pin the base image by digest" >&2
+            exit 1
+          fi
+          if ! grep -qP '^FROM.*@sha256:' "${TEMPLATE_DIR}/Dockerfile"; then
+            echo "ERROR: Dockerfile FROM line must pin by digest (@sha256:...)" >&2
+            exit 1
+          fi
+
+          # Verify committed lockfiles exist
+          if [[ ! -f "${TEMPLATE_DIR}/requirements.txt" ]]; then
+            echo "ERROR: requirements.txt not found" >&2
+            exit 1
+          fi
+          if [[ ! -f "${TEMPLATE_DIR}/package-lock.json" ]]; then
+            echo "ERROR: package-lock.json not found" >&2
+            exit 1
+          fi
+
+          # Verify deps_lockfile_hash matches the committed lockfiles
+          EXPECTED_HASH="${{ steps.current.outputs.deps_lockfile_hash }}"
+          COMPUTED_HASH="sha256:$(cat "${TEMPLATE_DIR}/requirements.txt" "${TEMPLATE_DIR}/package-lock.json" | sha256sum | cut -d' ' -f1)"
+          if [[ "$COMPUTED_HASH" != "$EXPECTED_HASH" ]]; then
+            echo "ERROR: deps_lockfile_hash mismatch" >&2
+            echo "  CURRENT_VERSION declares: ${EXPECTED_HASH}" >&2
+            echo "  Computed from committed lockfiles: ${COMPUTED_HASH}" >&2
+            echo "  Update deps_lockfile_hash in CURRENT_VERSION to match" >&2
+            exit 1
+          fi
+
+      # ── Set up Docker Buildx ──────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Build the template image ──────────────────────────────────────────
+      - name: Build template image
+        id: build
+        run: |
+          TEMPLATE_DIR="${{ steps.meta.outputs.template_dir }}"
+          TEMPLATE_NAME="${{ steps.meta.outputs.template_name }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          IMAGE_TAG="${TEMPLATE_NAME}:${VERSION}"
+
+          docker build \
+            --platform linux/amd64 \
+            --tag "${IMAGE_TAG}" \
+            "${TEMPLATE_DIR}"
+
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      # ── Vulnerability scan with Trivy ────────────────────────────────────
+      - name: Scan image with Trivy
+        id: scan
+        run: |
+          IMAGE_TAG="${{ steps.build.outputs.image_tag }}"
+
+          # Install Trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+          # Run scan — Critical or High CVE blocks publish
+          trivy image \
+            --exit-code 1 \
+            --severity CRITICAL,HIGH \
+            --format json \
+            --output trivy-results.json \
+            "${IMAGE_TAG}" || {
+              echo "ERROR: Trivy found Critical or High CVEs — publish blocked" >&2
+              cat trivy-results.json >&2
+              exit 1
+            }
+
+          # Record scanner result hash for attestation
+          SCANNER_RESULT_HASH="sha256:$(sha256sum trivy-results.json | cut -d' ' -f1)"
+          echo "scanner_result_hash=${SCANNER_RESULT_HASH}" >> "$GITHUB_OUTPUT"
+
+      # ── Publish to e2b template registry ─────────────────────────────────
+      # The e2b CLI publish command + registry-inspect must be wired before this
+      # step can produce a real registry-returned immutable digest. Until the
+      # operator wires the real commands and flips the gating variable, this
+      # step hard-fails to prevent a placeholder/local-derived digest from
+      # being attested into PUBLISHED_VERSION (spec §15.3 — PUBLISHED_VERSION
+      # MUST carry the digest returned by the registry, not derived locally).
+      - name: Publish to e2b registry
+        id: publish
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          E2B_PUBLISH_ENABLED: ${{ vars.E2B_PUBLISH_ENABLED }}
+        run: |
+          IMAGE_TAG="${{ steps.build.outputs.image_tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+
+          # Hard gate: until the real e2b publish is wired, this step must not
+          # produce a digest. Set repo variable E2B_PUBLISH_ENABLED=true ONLY
+          # after replacing the placeholder block below with the real CLI calls.
+          if [[ "${E2B_PUBLISH_ENABLED:-}" != "true" ]]; then
+            echo "ERROR: e2b publish not enabled — set repo variable E2B_PUBLISH_ENABLED=true after wiring the real e2b CLI publish + inspect commands. Aborting to avoid attesting a placeholder digest." >&2
+            exit 1
+          fi
+
+          # TODO: replace with the actual e2b CLI publish + inspect commands
+          # once the SDK + account are provisioned. IMAGE_DIGEST MUST be the
+          # immutable digest returned by the registry, never derived locally.
+          # e2b template publish --tag "${VERSION}" --image "${IMAGE_TAG}"
+          # IMAGE_DIGEST=$(e2b template inspect "${VERSION}" --format '{{.Digest}}')
+          IMAGE_DIGEST=""  # placeholder — wiring above must set this
+
+          # Invariant: digest must be a real registry sha256:<64 hex>. Anything
+          # else (empty, placeholder, locally-derived) is a hard fail.
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "ERROR: image digest is missing or invalid ('$IMAGE_DIGEST') — refusing to write PUBLISHED_VERSION with a non-registry digest" >&2
+            exit 1
+          fi
+          echo "image_digest=${IMAGE_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # ── Open attestation PR writing PUBLISHED_VERSION ────────────────────
+      - name: Create attestation PR for PUBLISHED_VERSION
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TEMPLATE_DIR="${{ steps.meta.outputs.template_dir }}"
+          TEMPLATE_NAME="${{ steps.meta.outputs.template_name }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          IMAGE_DIGEST="${{ steps.publish.outputs.image_digest }}"
+          CI_BUILD_COMMIT="${GITHUB_SHA}"
+          REGISTRY_PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SCANNER_RESULT_HASH="${{ steps.scan.outputs.scanner_result_hash }}"
+
+          BRANCH="ci/sandbox-attestation/${TEMPLATE_NAME}/${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+
+          cat > "${TEMPLATE_DIR}/PUBLISHED_VERSION" <<EOF
+          version=${VERSION}
+          image_digest=${IMAGE_DIGEST}
+          ci_build_commit=${CI_BUILD_COMMIT}
+          registry_published_at=${REGISTRY_PUBLISHED_AT}
+          scanner_result_hash=${SCANNER_RESULT_HASH}
+          EOF
+
+          git add "${TEMPLATE_DIR}/PUBLISHED_VERSION"
+          git commit -m "ci(sandbox): attest ${TEMPLATE_NAME} ${VERSION} publish"
+          git push origin "${BRANCH}"
+
+          gh pr create \
+            --title "ci(sandbox): attest ${TEMPLATE_NAME} ${VERSION} publish" \
+            --body "Automated attestation PR from the sandbox template publish job.
+
+          Template: \`${TEMPLATE_NAME}\`
+          Version: \`${VERSION}\`
+          Image digest: \`${IMAGE_DIGEST}\`
+          CI commit: \`${CI_BUILD_COMMIT}\`
+          Published at: \`${REGISTRY_PUBLISHED_AT}\`
+          Scanner result hash: \`${SCANNER_RESULT_HASH}\`
+
+          Merge this PR to make the published digest live for runtime consumption (spec B §15.2).
+          Grace window: 24h after publish tag (spec §25.2)." \
+            --head "${BRANCH}" \
+            --base main
