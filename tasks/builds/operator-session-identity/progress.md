@@ -3,6 +3,40 @@
 **Brief:** `tasks/builds/operator-session-identity/brief.md` (LOCKED v4, 2026-05-10)
 **Parent strategy:** `tasks/builds/sandbox-and-executionbackend-strategy/brief.md` (Decision 3)
 **Predecessor:** Spec A — `tasks/builds/execution-backend-adapter-contract/spec.md` (shipped PR #281)
+
+---
+
+## Session 2026-05-11 — Implementation progress (subagent-driven-development)
+
+**Branch:** `claude/evolve-session-identity-brief-17LO4`
+
+### Completed chunks (Chunks 1–8)
+
+| Chunk | Commits | Status |
+|---|---|---|
+| 1 — Schema foundations | `2ea1279c` + fix | DONE — migrations 0321/0322, Drizzle schemas, provider registry, RLS manifest, CI gates wired |
+| 2 — Pure service layer | `c273b6cf` + fix | DONE — 3 pure helpers, 94 Vitest tests pass; classifier casing fix applied |
+| 3 — Consent + lifecycle + connect | `8e4a6efa` + fix `a75067d9` | DONE — backfillConnectionId, lifecycle.transition, connect/reaccept/listForSubaccount |
+| 4 — Credential broker extension | `2e0231b7` + fix `d3b6c796` | DONE — OperatorSessionEnvelope, issueCredential branch, baseline-snapshot redaction gate |
+| 5 — Permissions + API routes | `56a6b709` + fix `a58588d5` | DONE — 5 permission keys, 10 routes, AiSubscriptionConnection type, connections bridge |
+| 6 — Token refresh job | `900cdbe5` + fix `35fc3600` | DONE — pg-boss handler + sweep; encryptToken wired; GAP-1 documented in gaps.md |
+| 7 — AI Subscriptions tab | `9cdc11ec` + fix `2885319b` | DONE — 7 React components + governApi; master toggle deferred V1; pill null-label fixed |
+| 8 — App Integrations tab | `76277bf9` | DONE (not yet reviewed) — AppIntegrationsTab, ConnectAppModal, ManageMultiConnectDrawer |
+
+### Remaining chunks
+
+- **Chunk 8 review still pending** — was implemented but session interrupted before spec+quality review. Resume by reviewing Chunk 8 (base: `2885319b`, head: `76277bf9`) before proceeding.
+- **Chunk 9** — Web Logins tab + CRUD consolidation (WebLoginsTab, AddWebLoginModal, EditWebLoginModal, TestWebLoginModal; delete CredentialsTab.tsx; convert IntegrationsAndCredentialsPage.tsx to redirect)
+- **Chunk 10** — ConnectionsPage 3-tab strip + Model Access sections in AgentEditPage + SubaccountAgentEditPage
+- **Chunk 11** — architecture.md + capabilities.md + KNOWLEDGE.md doc sync
+
+### Key decisions made this session
+
+1. `webLoginConnectionsGovern.ts` was deleted — existing `webLoginConnections.ts` already serves those paths; consolidation is frontend-only
+2. Master toggle ("Turn off agent use") deferred — no pause endpoint in V1; commented out with `// V1:` marker
+3. Token redaction gate uses baseline-snapshot approach (`scripts/.token-read-allowlist.txt`), not a 2-file allowlist
+4. `mapToAiSubscriptionConnection` exported from `operatorSessionService.ts` — shared across broker and routes
+5. GAP-1 documented: `runOperatorSessionRefreshSweep()` needs `boss.schedule()` wiring when registry flips
 **Sibling (concurrent):** Spec B — `tasks/builds/sandbox-isolation/brief.md`
 **Successor:** OpenClaw adapter — `tasks/builds/openclaw-adapter/scope.md`
 **Branch:** `claude/evolve-session-identity-brief-17LO4`
