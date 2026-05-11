@@ -4210,3 +4210,41 @@ These items were classified ambiguous/directional during spec review. Spec mecha
   - Spec section: §11.1 (sandbox receives task-scoped, sub-account-scoped credentials mounted as files).
   - Gap: `server/services/sandbox/e2bSandbox.ts:258-265` declares the file-mount intent but the loop body is a no-op with `void alias.alias + targetPath` and a comment "credential value is not available in the input descriptor in V1. C13 (adapter rewiring) threads the issued credential value through". The C13 adapter passes `credentialIssuanceContext: { aliases: [] }` — no value-threading happens. Sandbox cannot receive credentials in V1.
   - Suggested approach: extend `SandboxRunTaskInput.credentialIssuanceContext` to carry pre-issued credential values (or a callable to issue at sandbox start). Plumb the calling adapter (`ieeDevBackend.dispatch`) to call `credentialBrokerService.issueCredential` for each requested alias before invoking `runTask`, attach the materialised credential value, and let `e2bSandbox` write each via `sdkClient.writeFile(sandboxId, '/workspace/secrets/{alias}.token', Buffer.from(value), { mode: 0o400 })`. Verify the `redactionPattern: RegExp` returned by the broker (REQ #13 PASS) is registered in the harvest pipeline's per-execution pattern set so the value is redacted from harvested outputs.
+
+---
+
+## Deferred from adversarial-reviewer review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/adversarial-review-log-sandbox-isolation-2026-05-11T08-47-38Z.md` — verdict HOLES_FOUND (2 confirmed + 4 likely + 5 worth-confirming). Per `feature-coordinator §8.2`, advisory non-blocking. Operator may prioritise selected items pre-merge during Phase 3 chatgpt-pr-review.
+
+### High-priority pre-merge candidates
+
+- [ ] **SANDBOX-ADV-1.1 (confirmed-hole) — Reconciliation job missing `withOrgTx` wrap**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:120-195`
+  - Issue: `runHarvestReconciliation` calls `getOrgScopedDb()` but the reconciliation job never wraps in `withOrgTx({ tx, organisationId })`. Every reconciliation will throw `missing_org_context` (silently caught by per-row try/catch). Stuck executions cannot recover. Separately, the `UPDATE sandbox_executions WHERE id = ANY(...)` runs on admin connection without `organisation_id` predicate.
+  - Fix: Wrap reconcile call in `db.transaction(async (orgTx) => { withOrgTx({ tx: orgTx, organisationId: row.organisation_id }, async () => { await reconcileExecution(orgTx, row); }); })`. Add `AND organisation_id = ${row.organisation_id}::uuid` to UPDATE WHERE. Pattern: `sandboxTelemetryPruneJob.ts:91-105`.
+
+- [ ] **SANDBOX-ADV-5.1 (likely-hole) — Ceiling-monitor + wall-clock-kill jobs never enqueued**
+  - File: `server/services/sandboxExecutionService.ts:380-383` (TODO unimplemented)
+  - Issue: Both jobs registered as workers but never enqueued. Wall-clock enforcement is provider-side only (best-effort). Tenant code can run beyond spec §10.1 30-min hard cap with cost charged but unenforced.
+  - Fix: After `pending → running` UPDATE in `_attemptProviderStart`, enqueue both via `boss.send` with `singletonKey: sandboxExecutionId` and appropriate `startAfter`.
+
+- [ ] **SANDBOX-ADV-4.1 (confirmed-hole) — Credential-leak defense is case-sensitive**
+  - File: `server/services/sandboxHarvestService.ts:411-421`
+  - Issue: Step 6 of harvest blocks `/workspace/secrets/` (case-sensitive). Bypass: `/workspace/Secrets/foo.token`, `../secrets/foo`. e2b `listFiles` response not normalised.
+  - Fix: Normalise: `const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');` then check on `norm`. Reject `..` paths.
+  - Severity: Latent until C13 wires credentials. Fix BEFORE C13 lands.
+
+### Medium-priority post-merge backlog
+
+- [ ] **SANDBOX-ADV-2.1 (likely-hole) — `templateVersion` from env var unvalidated** (`server/services/executionBackends/ieeDevBackend.ts:131`). env-var value flows verbatim to audit rows. e2b sandbox image is safe (uses pinned digest) but audit rows can carry forged version strings, breaking spec G12 audit guarantee. Fix: read pinned digest from `E2bSandbox.templateDigest`.
+- [ ] **SANDBOX-ADV-3.1 (likely-hole) — Telemetry sequence allocator race silently drops events** (`sandboxExecutionService.ts:63-73` + `sandboxHarvestService.ts:81-91`). `criticality='error'` events may be lost. Fix: `INSERT ... ON CONFLICT DO UPDATE SET sequence = ... RETURNING sequence` with retry, OR Postgres advisory lock. At minimum: log dropped events at warn/error level.
+- [ ] **SANDBOX-ADV-6.1 (likely-hole) — Reconciliation hardcodes `credentialAliases: []`** (`sandboxHarvestReconciliationJob.ts:183-187`). Latent until C13. Fix: add `credential_aliases` JSONB column to `sandbox_executions`.
+
+### Low-priority / observations (worth-confirming)
+
+- [ ] **SANDBOX-ADV-1.2 — Subaccount FK missing on all 5 new sandbox tables.** No DB-level cross-org subaccount validation; relies on service layer.
+- [ ] **SANDBOX-ADV-2.2 — Inline-sandbox env-injection bypass possible** if non-test caller passes forged `env` object to `resolveSandboxProvider`. CI gate catches static imports only.
+- [ ] **SANDBOX-ADV-3.2 — Race between provider success and ceiling-monitor `markForHarvest`** can cause completed execution to be billed as timed-out with no cost row.
+- [ ] **SANDBOX-ADV-4.2 — S3 path-traversal via filename.** `${ctx.subaccountId}/${ctx.sandboxExecutionId}/${artefact.filename}` — `..` could overwrite another execution's artefact. Sanitise filename.
+- [ ] **SANDBOX-ADV-5.2 — No per-tenant log-storage quota.** Per-execution caps (10MB stdout + 10MB stderr) but tenant could fill DB before 90d prune.
