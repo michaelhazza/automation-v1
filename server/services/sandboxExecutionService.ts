@@ -15,6 +15,8 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import type { SandboxExecution, NewSandboxExecution } from '../db/schema/sandboxExecutions.js';
+import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
+import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../db/schema/sandboxTelemetryEvents.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSandboxProvider } from './sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService as ISandboxExecutionService } from './sandbox/sandboxProviderResolver.js';
@@ -23,6 +25,7 @@ import { failure } from '../../shared/iee/failure.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import type { SandboxRunTaskInput, SandboxRunTaskOutput } from '../../shared/types/sandbox.js';
 import { resolveSandboxCeilings } from './sandboxExecutionServicePure.js';
+import { runHarvest } from './sandboxHarvestService.js';
 
 // ---------------------------------------------------------------------------
 // Module-level singleton provider (boot-time resolution; fails fast on
@@ -50,6 +53,57 @@ const MAX_START_ATTEMPTS = 3;
  * Allows a slow provider start to complete without premature reclaim.
  */
 const LEASE_WINDOW_MULTIPLIER = 2;
+
+// ---------------------------------------------------------------------------
+// Telemetry helpers — mirrors the pattern in sandboxHarvestService.ts.
+// Used for lifecycle events owned by the execution service (sandbox_start,
+// sandbox_start_failed) rather than by the harvest pipeline.
+// ---------------------------------------------------------------------------
+
+async function _allocateTelemetrySequence(
+  db: ReturnType<typeof getOrgScopedDb>,
+  sandboxExecutionId: string,
+): Promise<number> {
+  type SeqRow = { next_seq: number };
+  const rows = (await db.execute(sql`
+    SELECT COALESCE(MAX(sequence) + 1, 1) AS next_seq
+    FROM sandbox_telemetry_events
+    WHERE sandbox_execution_id = ${sandboxExecutionId}
+  `)) as unknown as SeqRow[];
+  return (rows[0]?.next_seq as number) ?? 1;
+}
+
+async function _writeTelemetryEvent(
+  row: SandboxExecution,
+  eventType: SandboxTelemetryEventType,
+  criticality: SandboxTelemetryCriticality,
+  payloadJson: Record<string, unknown>,
+): Promise<void> {
+  const db = getOrgScopedDb('sandboxExecutionService._writeTelemetryEvent');
+  const sequence = await _allocateTelemetrySequence(db, row.id);
+  try {
+    await db.insert(sandboxTelemetryEvents).values({
+      sandboxExecutionId: row.id,
+      organisationId: row.organisationId,
+      subaccountId: row.subaccountId,
+      runId: row.runId,
+      agentId: row.agentId,
+      taskId: row.taskId,
+      provider: row.provider,
+      templateName: row.templateName,
+      templateVersion: row.templateVersion,
+      eventType,
+      criticality,
+      sequence,
+      payloadJson,
+    });
+  } catch (err: unknown) {
+    // 23505 = unique_violation on (sandbox_execution_id, sequence) — race between
+    // two concurrent writes. Non-fatal: log and continue (matches harvest service).
+    if ((err as { code?: string }).code === '23505') return;
+    throw err;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // getExecution — read-side helper for reconciliation paths (spec §8.1).
@@ -248,6 +302,12 @@ async function _handleExistingRow(
           ),
         );
 
+      // Spec §14.5: pre-start failure path MUST emit sandbox_start_failed.
+      await _writeTelemetryEvent(row, 'sandbox_start_failed', 'error', {
+        reason: 'provider_unavailable',
+        providerErrorCode: `start_attempt_count_cap_${MAX_START_ATTEMPTS}`,
+      });
+
       throw new FailureError(
         failure(
           'sandbox_provider_unavailable',
@@ -348,6 +408,12 @@ async function _attemptProviderStart(
         ),
       );
 
+    // Spec §14.5: pre-start failure path MUST emit sandbox_start_failed.
+    await _writeTelemetryEvent(row, 'sandbox_start_failed', 'error', {
+      reason: 'provider_unavailable',
+      providerErrorCode: err instanceof FailureError ? err.failure.failureReason : undefined,
+    });
+
     if (err instanceof FailureError) throw err;
     throw new FailureError(
       failure('sandbox_provider_unavailable', `provider.runTask failed: ${String(err)}`),
@@ -356,24 +422,51 @@ async function _attemptProviderStart(
 
   // ── Case 6 success: provider returned a terminal output ───────────────────
   // The provider (C9 / C10) handles the running → terminal lifecycle internally.
-  // Update our row to reflect the terminal state from the provider output.
+  // Spec §14.5: post-start path MUST emit sandbox_start at the pending → running
+  // transition. Emitted here, immediately after the provider confirms successful
+  // start (the provider's runTask encapsulates the full start→run→terminal cycle).
+  await _writeTelemetryEvent(row, 'sandbox_start', 'info', {
+    ceilings: input.policy.ceilings,
+    network_policy: input.policy.network.mode,
+    alias_count: input.credentialIssuanceContext.aliases.length,
+  });
+
+  // Transition to harvesting so the harvest pipeline sees the expected status.
+  // Spec §13.1: running → harvesting is the gateway to all terminal writes.
+  // The provider's runTask encapsulates the full start→run lifecycle; we write
+  // harvesting immediately after the successful provider return.
   assertValidTransition({
     kind: 'sandbox_execution',
     recordId: row.id,
     from: row.status,
-    to: providerOutput.terminalState,
+    to: 'harvesting',
   });
+  await db
+    .update(sandboxExecutions)
+    .set({ status: 'harvesting' })
+    .where(
+      and(
+        eq(sandboxExecutions.id, row.id),
+        eq(sandboxExecutions.status, 'pending'),
+      ),
+    );
 
-  // Harvest seam: the harvest pipeline (C7) would be called here to write output,
-  // artefacts, logs, and the cost-ledger row. Deferred until C7 lands.
-  // TODO(C7): wire to runHarvest() — harvest pipeline lands in C7.
-  throw new FailureError(
-    failure(
-      'sandbox_harvest_failed',
-      'not implemented in C5; harvest pipeline lands in C7',
-      { sandboxExecutionId: row.id },
-    ),
-  );
+  // Wire the harvest pipeline (spec §8.4, §22). The harvest service handles
+  // all 12 ordered steps (output read, validate, redact, artefact upload,
+  // log persistence, cost row, telemetry terminal event, row terminal UPDATE).
+  return runHarvest(input.sandboxExecutionId, {
+    organisationId: input.organisationId,
+    subaccountId: input.subaccountId,
+    runId: input.runId,
+    agentId: input.agentId,
+    taskId: input.taskId,
+    provider: providerOutput.provider,
+    templateName: providerOutput.templateName,
+    templateVersion: providerOutput.templateVersion,
+    outputSchemaRef: input.outputSchemaRef,
+    credentialAliases: input.credentialIssuanceContext.aliases,
+    policyArtefactLimits: input.policy.artefactLimits,
+  });
 }
 
 /**
