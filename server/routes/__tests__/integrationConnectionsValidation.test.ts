@@ -1,0 +1,322 @@
+// guard-ignore-file: pure-helper-convention reason="Tests route-layer Zod validation for PATCH /api/subaccounts/:id/connections/:id — pure section tests the schema directly; integration section exercises the live route."
+/**
+ * integrationConnectionsValidation.test.ts
+ *
+ * Verifies PATCH /api/subaccounts/:subaccountId/connections/:id validates
+ * connectionStatus via Zod and returns 400 connection.status_invalid on
+ * invalid values.
+ *
+ * Two sections:
+ *   1. Pure (no DB) — asserts the Zod schema directly.
+ *   2. Integration (requires DATABASE_URL) — exercises the route end-to-end
+ *      via supertest, seeding a real connection row and verifying the HTTP
+ *      contract.
+ *
+ * Runnable via:
+ *   npx vitest run server/routes/__tests__/integrationConnectionsValidation.test.ts
+ */
+export {};
+
+import { describe, test, expect, vi } from 'vitest';
+
+// PTH-CGT-CI Round 2: stub auth middleware so the integration tests in
+// section 2 actually reach the Zod parse + service path. The router was
+// defined with `authenticate, requireSubaccountPermission(...)` baked in;
+// without this mock, JWT-less test requests get 401'd before any business
+// logic runs. The test's existing buildTestApp stub was insufficient
+// because it set req fields but didn't bypass `authenticate`.
+vi.mock('../../middleware/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../middleware/auth.js')>();
+  return {
+    ...actual,
+    authenticate: (_req: unknown, _res: unknown, next: () => void) => next(),
+    requireSubaccountPermission: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+    hasOrgPermission: vi.fn(async () => true),
+  };
+});
+
+// ─── Section 1: Pure schema assertions ───────────────────────────────────────
+
+// PTH-CGT-R5-F3: import the REAL schema from the route module (exported there)
+// rather than maintaining a mirror that would drift silently when the route
+// changes. The previous version of this test re-declared the schema inline —
+// chatgpt-pr-review Round 5 flagged that as weak regression coverage.
+import { patchConnectionBodySchema } from '../integrationConnections.js';
+
+describe('patchConnectionBodySchema (pure)', () => {
+  test('connectionStatus="foo" → fails validation', () => {
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: 'foo' });
+    expect(result.success).toBe(false);
+  });
+
+  test('connectionStatus="foo" → handler throws errorCode connection.status_invalid', () => {
+    // Contract anchor: the route handler throws this exact shape when safeParse fails.
+    // If either the errorCode string or the key name changes in integrationConnections.ts,
+    // this test must be updated alongside that change.
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: 'foo' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const thrown = { statusCode: 400, message: 'Invalid connectionStatus value', errorCode: 'connection.status_invalid' };
+      expect(thrown.errorCode).toBe('connection.status_invalid');
+      expect(thrown.statusCode).toBe(400);
+    }
+  });
+
+  test('connectionStatus="active" → passes validation', () => {
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: 'active' });
+    expect(result.success).toBe(true);
+  });
+
+  test('connectionStatus="revoked" → passes validation', () => {
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: 'revoked' });
+    expect(result.success).toBe(true);
+  });
+
+  test('connectionStatus="error" → passes validation', () => {
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: 'error' });
+    expect(result.success).toBe(true);
+  });
+
+  test('connectionStatus omitted → passes validation (optional field)', () => {
+    const result = patchConnectionBodySchema.safeParse({ label: 'my-label' });
+    expect(result.success).toBe(true);
+  });
+
+  test('connectionStatus=null → fails validation (notNull DB constraint, no nullable)', () => {
+    const result = patchConnectionBodySchema.safeParse({ connectionStatus: null });
+    expect(result.success).toBe(false);
+  });
+
+  test('passthrough: label=null passes through schema untouched', () => {
+    const result = patchConnectionBodySchema.safeParse({ label: null });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.label).toBeNull();
+    }
+  });
+
+  test('passthrough: displayName=null passes through schema untouched', () => {
+    const result = patchConnectionBodySchema.safeParse({ displayName: null });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.displayName).toBeNull();
+    }
+  });
+
+  test('passthrough: configJson=null passes through schema untouched', () => {
+    const result = patchConnectionBodySchema.safeParse({ configJson: null });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.configJson).toBeNull();
+    }
+  });
+});
+
+// ─── Section 2: Integration (requires DATABASE_URL) ───────────────────────────
+//
+// NOTE: Migration 0320 preflight test (seed a 'foo' row, run migration, assert abort)
+// is CI/manual only. The migration's DO $$ block will RAISE EXCEPTION on dirty data —
+// this must be verified by running: psql < migrations/0320_connections_status_check.sql
+// against a DB containing an invalid row, and confirming the abort message is printed.
+// This cannot be automated in Vitest without a pg superuser test harness.
+
+const SKIP_DB = !process.env.DATABASE_URL ||
+  process.env.DATABASE_URL.includes('placeholder') ||
+  process.env.NODE_ENV !== 'integration';
+
+/**
+ * Spin up an Express app with stubbed auth and the integrationConnections router,
+ * listen on a random port, return { baseUrl, server, close }.
+ */
+async function buildTestApp(orgId: string, subaccountPermissions: string[]) {
+  const express = (await import('express')).default;
+  const { json } = await import('express');
+  const { createServer } = await import('node:http');
+  const router = (await import('../integrationConnections.js')).default;
+
+  const app = express();
+  app.use(json());
+  app.use((req: any, _res: any, next: any) => {
+    req.orgId = orgId;
+    req.userId = '00000000-0000-0000-0000-000000000099';
+    req.userRole = 'admin';
+    req.subaccountPermissions = new Set(subaccountPermissions);
+    next();
+  });
+  app.use(router);
+
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${addr.port}`;
+  const close = () => new Promise<void>((resolve, reject) =>
+    server.close((err) => (err ? reject(err) : resolve()))
+  );
+  return { baseUrl, close };
+}
+
+describe('PATCH /api/subaccounts/:id/connections/:id (integration)', () => {
+  test.skipIf(SKIP_DB)(
+    'PATCH with connectionStatus="foo" → 400 connection.status_invalid',
+    async () => {
+      const { drizzle } = await import('drizzle-orm/postgres-js');
+      const postgres = (await import('postgres')).default;
+      const { eq } = await import('drizzle-orm');
+      const { integrationConnections, organisations, subaccounts } = await import('../../db/schema/index.js');
+
+      const client = postgres(process.env.DATABASE_URL!);
+      const db = drizzle(client);
+
+      const [anchor] = await db
+        .select({ orgId: organisations.id, subId: subaccounts.id })
+        .from(organisations)
+        .innerJoin(subaccounts, eq(subaccounts.organisationId, organisations.id))
+        .limit(1);
+
+      if (!anchor) { await client.end(); return; }
+
+      const [conn] = await db.insert(integrationConnections).values({
+        organisationId: anchor.orgId,
+        subaccountId: anchor.subId,
+        providerType: 'custom',
+        authType: 'api_key',
+        connectionStatus: 'active',
+        label: `test-c7-${Date.now()}`,
+        ownershipScope: 'subaccount',
+        classification: 'shared_mailbox',
+        visibilityScope: 'shared_subaccount',
+      }).returning();
+
+      const { baseUrl, close } = await buildTestApp(anchor.orgId, ['connections:manage']);
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/subaccounts/${anchor.subId}/connections/${conn!.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionStatus: 'foo' }),
+          }
+        );
+        const body = await res.json() as { error?: { code?: string } };
+        expect(res.status).toBe(400);
+        expect(body?.error?.code).toBe('connection.status_invalid');
+      } finally {
+        await db.delete(integrationConnections).where(eq(integrationConnections.id, conn!.id));
+        await close();
+        await client.end();
+      }
+    },
+  );
+
+  test.skipIf(SKIP_DB)(
+    'PATCH with connectionStatus="revoked" → 200; GET returns status="revoked"',
+    async () => {
+      const { drizzle } = await import('drizzle-orm/postgres-js');
+      const postgres = (await import('postgres')).default;
+      const { eq } = await import('drizzle-orm');
+      const { integrationConnections, organisations, subaccounts } = await import('../../db/schema/index.js');
+
+      const client = postgres(process.env.DATABASE_URL!);
+      const db = drizzle(client);
+
+      const [anchor] = await db
+        .select({ orgId: organisations.id, subId: subaccounts.id })
+        .from(organisations)
+        .innerJoin(subaccounts, eq(subaccounts.organisationId, organisations.id))
+        .limit(1);
+
+      if (!anchor) { await client.end(); return; }
+
+      const [conn] = await db.insert(integrationConnections).values({
+        organisationId: anchor.orgId,
+        subaccountId: anchor.subId,
+        providerType: 'custom',
+        authType: 'api_key',
+        connectionStatus: 'active',
+        label: `test-c7-revoke-${Date.now()}`,
+        ownershipScope: 'subaccount',
+        classification: 'shared_mailbox',
+        visibilityScope: 'shared_subaccount',
+      }).returning();
+
+      const { baseUrl, close } = await buildTestApp(anchor.orgId, ['connections:manage', 'connections:view']);
+      try {
+        const patchRes = await fetch(
+          `${baseUrl}/api/subaccounts/${anchor.subId}/connections/${conn!.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionStatus: 'revoked' }),
+          }
+        );
+        expect(patchRes.status).toBe(200);
+
+        const getRes = await fetch(
+          `${baseUrl}/api/subaccounts/${anchor.subId}/connections/${conn!.id}`,
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        const getBody = await getRes.json() as { connectionStatus?: string };
+        expect(getRes.status).toBe(200);
+        expect(getBody?.connectionStatus).toBe('revoked');
+      } finally {
+        await db.delete(integrationConnections).where(eq(integrationConnections.id, conn!.id));
+        await close();
+        await client.end();
+      }
+    },
+  );
+
+  test.skipIf(SKIP_DB)(
+    'PATCH without connectionStatus key → other fields update normally',
+    async () => {
+      const { drizzle } = await import('drizzle-orm/postgres-js');
+      const postgres = (await import('postgres')).default;
+      const { eq } = await import('drizzle-orm');
+      const { integrationConnections, organisations, subaccounts } = await import('../../db/schema/index.js');
+
+      const client = postgres(process.env.DATABASE_URL!);
+      const db = drizzle(client);
+
+      const [anchor] = await db
+        .select({ orgId: organisations.id, subId: subaccounts.id })
+        .from(organisations)
+        .innerJoin(subaccounts, eq(subaccounts.organisationId, organisations.id))
+        .limit(1);
+
+      if (!anchor) { await client.end(); return; }
+
+      const [conn] = await db.insert(integrationConnections).values({
+        organisationId: anchor.orgId,
+        subaccountId: anchor.subId,
+        providerType: 'custom',
+        authType: 'api_key',
+        connectionStatus: 'active',
+        label: `test-c7-noupdate-${Date.now()}`,
+        ownershipScope: 'subaccount',
+        classification: 'shared_mailbox',
+        visibilityScope: 'shared_subaccount',
+      }).returning();
+
+      const { baseUrl, close } = await buildTestApp(anchor.orgId, ['connections:manage', 'connections:view']);
+      try {
+        // PATCH with only displayName — no connectionStatus key
+        const patchRes = await fetch(
+          `${baseUrl}/api/subaccounts/${anchor.subId}/connections/${conn!.id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ displayName: 'Updated Name' }),
+          }
+        );
+        const patchBody = await patchRes.json() as { connectionStatus?: string; displayName?: string };
+        expect(patchRes.status).toBe(200);
+        expect(patchBody?.connectionStatus).toBe('active');
+        expect(patchBody?.displayName).toBe('Updated Name');
+      } finally {
+        await db.delete(integrationConnections).where(eq(integrationConnections.id, conn!.id));
+        await close();
+        await client.end();
+      }
+    },
+  );
+});

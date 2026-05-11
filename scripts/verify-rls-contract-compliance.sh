@@ -146,7 +146,7 @@ while IFS= read -r line; do
     "Route/middleware calls db.transaction() directly. Nested tx must live in services." \
     "Move the transaction into a service, or use the ALS-managed request tx via getOrgScopedDb()."
   VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE "db\.transaction\s*\(" "$ROOT_DIR/server/routes/" "$ROOT_DIR/server/middleware/" --include='*.ts' 2>/dev/null || true)
+done < <(grep -rnE "db\.transaction\s*\(" "$ROOT_DIR/server/routes/" "$ROOT_DIR/server/middleware/" --include='*.ts' --exclude-dir=__tests__ 2>/dev/null || true)
 
 FILES_SCANNED=$(find "$ROOT_DIR/server/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
 

@@ -16,6 +16,7 @@ import { WorkflowRunService } from '../services/workflowRunService.js';
 import { WorkflowRunPauseStopService } from '../services/workflowRunPauseStopService.js';
 import { taskService } from '../services/taskService.js';
 import { resolveActiveRunForTask } from '../services/workflowRunResolverService.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 const router = Router();
 
@@ -66,11 +67,16 @@ router.post(
       res.status(400).json({ error: 'bulkTargets is required for bulk run mode' });
       return;
     }
-    const task = await taskService.createTask(req.orgId!, subaccountId, {
-      title: templateId ? `Workflow run` : `System workflow run`,
-      status: 'inbox',
-      brief: JSON.stringify(input ?? {}),
-    }, req.user!.id);
+    const tx = getOrgScopedDb('route:workflowRuns.start');
+    const task = await taskService.createTask(
+      {
+        organisationId: req.orgId!,
+        subaccountId,
+        data: { title: templateId ? `Workflow run` : `System workflow run`, status: 'inbox', brief: JSON.stringify(input ?? {}) },
+        userId: req.user!.id,
+      },
+      tx,
+    );
     const result = await WorkflowRunService.startRun({
       organisationId: req.orgId!,
       subaccountId,

@@ -48,6 +48,10 @@ function notFoundError(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 404, message });
 }
 
+function forbiddenError(errorCode: string, message?: string): Error {
+  return Object.assign(new Error(message ?? errorCode), { statusCode: 403, errorCode });
+}
+
 function agentConfigInvalidError(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 422, message });
 }
@@ -73,7 +77,14 @@ export async function listInboxes(
     })
     .from(canonicalInboxes)
     .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
-    .where(eq(canonicalInboxes.organisationId, principalCtx.organisationId))
+    .where(
+      principalCtx.subaccountId !== null
+        ? and(
+            eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+            eq(canonicalInboxes.subaccountId, principalCtx.subaccountId),
+          )
+        : eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+    )
     .orderBy(canonicalInboxes.createdAt);
 
   return rows.map(r => ({
@@ -151,6 +162,29 @@ export async function updateAgentConfig(
   }
 
   const db = getOrgScopedDb('supportInboxService.updateAgentConfig');
+
+  // Load the inbox first to assert subaccount ownership
+  const [existingRow] = await db
+    .select()
+    .from(canonicalInboxes)
+    .where(
+      and(
+        eq(canonicalInboxes.id, inboxId),
+        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+      ),
+    )
+    .limit(1);
+
+  if (!existingRow) {
+    throw notFoundError('support.inbox.not_found');
+  }
+
+  if (
+    principalCtx.subaccountId !== null &&
+    existingRow.subaccountId !== principalCtx.subaccountId
+  ) {
+    throw forbiddenError('support.inbox.scope_mismatch');
+  }
 
   const [updated] = await db
     .update(canonicalInboxes)

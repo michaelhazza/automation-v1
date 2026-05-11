@@ -19,13 +19,14 @@
  */
 
 import { randomUUID } from 'crypto';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { logger } from '../lib/logger.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
 import {
   DELIVERY_RETRY_CONFIG,
   shouldDispatchChannel,
@@ -237,12 +238,34 @@ export const deliveryService = {
     // ── Step 1: Always write to inbox (system guarantee, §10.5) ─────────────
     // This write happens unconditionally regardless of config.email.
     // The inbox is the enforcement boundary — failure here is fatal and throws.
-    const task = await taskService.createTask(orgId, subaccountId, {
-      title: artefact.title,
-      description: artefact.content,
-      status: 'inbox',
-      createdByAgentId: artefact.createdByAgentId,
-    });
+    //
+    // PTH-CGT-F2 defence-in-depth: deliveryService.deliver may be called from
+    // non-HTTP code paths (workflow steps, pg-boss jobs) that don't always
+    // pre-establish ALS context. Detect ALS absence via peekOrgTxContext() and
+    // open our own tx + GUC; when already inside withOrgTx, reuse the existing
+    // tx so we don't create a redundant savepoint.
+    const taskInput = {
+      organisationId: orgId,
+      subaccountId,
+      data: { title: artefact.title, description: artefact.content, status: 'inbox' as const, createdByAgentId: artefact.createdByAgentId },
+    };
+    // PTH-CGT-R5-F1: split DB write (createTaskCore) from side effects so
+    // observers never see task-created events for rolled-back rows. In the
+    // ALS-present branch, the caller's outer tx is in control of commit
+    // timing — side effects fire INLINE (current behaviour, the caller is
+    // responsible). In the fallback branch, we own the tx; side effects
+    // defer until after this function's own commit.
+    let task: import('../db/schema/tasks.js').Task;
+    if (peekOrgTxContext()) {
+      task = await taskService.createTaskCore(taskInput, getOrgScopedDb('service:deliveryService.deliver'));
+      taskService.emitCreateTaskSideEffects(task, taskInput);
+    } else {
+      task = await db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+        return taskService.createTaskCore(taskInput, innerTx);
+      });
+      taskService.emitCreateTaskSideEffects(task, taskInput);
+    }
 
     const channels: ChannelDispatchResult[] = [];
 
