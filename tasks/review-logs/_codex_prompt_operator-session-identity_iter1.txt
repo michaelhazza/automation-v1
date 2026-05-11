@@ -1,0 +1,36 @@
+You are reviewing a draft architecture/implementation spec for an internal SaaS codebase ("Automation OS"). The spec is at `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`.
+
+Context for your review:
+- This is a PRE-PRODUCTION codebase with no live users, rapid evolution, breaking changes expected.
+- Testing posture: static gates primary; runtime tests for pure functions only. NO E2E, NO frontend unit tests, NO API contract tests in this codebase. Do not recommend adding them.
+- Rollout model: commit_and_revert. No feature flags (except for behaviour modes). No staged rollouts. Do not recommend feature flags for new migrations.
+- Prefer extending existing primitives over inventing new ones. The codebase already has: credentialBrokerService, integrationConnections schema, withBackoff, TripWire, runCostBreaker, withOrgTx (RLS three-layer pattern), createWorker (pg-boss), RLS_PROTECTED_TABLES manifest, verify-rls-coverage.sh CI gate.
+- Migration numbering: project-root `migrations/` directory; latest existing is 0317. New migrations in this spec are 0318 and 0319.
+- Brief (locked v4): `tasks/builds/operator-session-identity/brief.md`
+- Spec-context (framing ground truth): `docs/spec-context.md`
+- Spec authoring checklist (rubric): `docs/spec-authoring-checklist.md`
+
+Review the spec for MECHANICAL problems (NOT directional / scope / posture changes). Specifically check for:
+
+1. **Internal contradictions** between sections (e.g. one section says X, another says NOT X).
+2. **Stale or inconsistent language** — terms or phrases that no longer match the spec's final framing.
+3. **Load-bearing claims without backing mechanisms** — "X is idempotent" / "X is the source of truth" without naming HOW.
+4. **File inventory drift** — files/columns/tables/services referenced in prose but missing from the §8 "File inventory lock" table.
+5. **Schema overlaps** — two tables/columns with adjacent purposes, no declared source-of-truth.
+6. **Sequencing / dependency bugs** — Chunk N depends on something in Chunk N+k.
+7. **Invariants protected in one section but violated by another.**
+8. **Missing per-item verdicts.**
+9. **Unnamed new primitives** — "a new service" without a concrete name + path + exported function signature.
+10. **Spec-authoring-checklist compliance** — frontmatter, Deferred Items section, Contracts section, RLS checklist, idempotency posture, retry classification, concurrency guards, state machine closure, unique-constraint-to-HTTP mapping, terminal-event-guarantee.
+11. **Specific path/numbering accuracy** — migration paths, file paths, type names.
+
+DO NOT recommend:
+- Adding tests (frontend, E2E, API contract, performance baselines, composition, integration beyond pure-function/static-gate envelope).
+- Feature flags, staged rollouts, kill switches, canaries.
+- New monitoring/observability beyond what the spec already includes.
+- Replacing existing primitives with new abstractions.
+- Production-readiness hardening that assumes live users.
+
+Be concrete and specific: cite section numbers, line text, exact file paths. Severity-label each finding (critical / important / minor / nit). One finding per paragraph or bullet so they can be parsed.
+
+Return your findings now.
