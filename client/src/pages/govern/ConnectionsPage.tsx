@@ -1,177 +1,44 @@
 // client/src/pages/govern/ConnectionsPage.tsx
-// Govern surface — Connections page.
-// Spec: tasks/builds/consolidation-govern/spec.md §4.6, §4.7, §4.8, §4.9, §4.10, §4.13, §4.14
+// Govern surface — Connections page (3-tab strip).
+// Spec: tasks/builds/operator-session-identity/spec.md §Chunk 10
 
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageShell } from '../../components/PageShell';
-import { SearchBox } from '../../components/SearchBox';
-import { EmptyState } from '../../components/EmptyState';
-import { ErrorState } from '../../components/ErrorState';
-import { SortableTable, type ColumnDef } from '../../components/SortableTable';
-import ViewModeSwitcher from '../../components/ViewModeSwitcher';
-import { WorkspaceBadge } from '../../components/WorkspaceBadge';
+import { getActiveClientId } from '../../lib/auth';
 import { useViewMode } from '../../hooks/useViewMode';
-import { listConnections } from '../../api/governApi';
-import { getUserRole, getActiveClientId } from '../../lib/auth';
-import type { Connection } from '../../../../shared/types/govern.js';
-import { ConnectionTestButton } from './components/ConnectionTestButton';
-import { DisconnectConfirmDialog } from './components/DisconnectConfirmDialog';
+import ViewModeSwitcher from '../../components/ViewModeSwitcher';
+import { AppIntegrationsTab } from './components/AppIntegrationsTab';
+import { WebLoginsTab } from './components/WebLoginsTab';
+import { AiSubscriptionsTab } from './components/AiSubscriptionsTab';
 
-const STATUS_PILL: Record<Connection['status'], { label: string; className: string }> = {
-  connected: { label: 'Connected', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  expired:   { label: 'Expired',   className: 'bg-amber-50 text-amber-700 border-amber-200' },
-  failed:    { label: 'Failed',    className: 'bg-red-50 text-red-700 border-red-200' },
-  pending:   { label: 'Pending',   className: 'bg-slate-100 text-slate-600 border-slate-200' },
-};
+type TabKey = 'app-integrations' | 'web-logins' | 'ai-subscriptions';
 
-const AUTH_LABEL: Record<Connection['authMethod'], string> = {
-  oauth:           'OAuth',
-  api_key:         'API Key',
-  web_login:       'Web Login',
-  mcp:             'MCP',
-  cookie:          'Cookie',
-  ai_subscription: 'AI Subscription',
-};
+const VALID_TABS: TabKey[] = ['app-integrations', 'web-logins', 'ai-subscriptions'];
 
-function isOrgAdmin(): boolean {
-  const role = getUserRole();
-  return role === 'org_admin' || role === 'system_admin';
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
+const TAB_DEFS: { id: TabKey; label: string; subtitle: string }[] = [
+  { id: 'app-integrations', label: 'App Integrations', subtitle: 'Connect the apps your agents use to do work.' },
+  { id: 'web-logins',       label: 'Web Logins',       subtitle: 'Store logins for sites without an API.' },
+  { id: 'ai-subscriptions', label: 'AI Subscriptions', subtitle: 'Connect a ChatGPT plan for your autonomous agents.' },
+];
 
 export default function ConnectionsPage() {
   const { viewMode, availableModes, setViewMode } = useViewMode();
-  const [q, setQ] = useState('');
-  const [rows, setRows] = useState<Connection[] | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [fetchKey, setFetchKey] = useState(0);
-  const [disconnectTarget, setDisconnectTarget] = useState<Connection | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const orgAdmin = isOrgAdmin();
+  const rawTab = searchParams.get('tab') as TabKey | null;
+  const validInitial: TabKey = rawTab && VALID_TABS.includes(rawTab) ? rawTab : 'app-integrations';
+  const [activeTab, setActiveTab] = useState<TabKey>(validInitial);
 
+  // Keep URL ?tab=… in sync
   useEffect(() => {
-    setRows(null);
-    setError(null);
-    const isWorkspace = viewMode !== 'org';
-    const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
-    if (isWorkspace && !subaccountId) {
-      setError(new Error('No active workspace selected.'));
-      return;
-    }
-    listConnections({ scope: isWorkspace ? 'workspace' : 'org', subaccountId, q })
-      .then((r) => setRows(r.rows))
-      .catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
-  }, [viewMode, q, fetchKey]);
+    setSearchParams(p => { p.set('tab', activeTab); return p; }, { replace: true });
+  }, [activeTab, setSearchParams]);
 
-  const columns: ColumnDef<Connection>[] = useMemo(() => {
-    const cols: ColumnDef<Connection>[] = [
-      {
-        key: 'name',
-        label: 'Name',
-        sortable: true,
-        filterable: false,
-        getValue: (r) => r.name,
-        render: (r) => (
-          <span className="font-medium text-slate-900 text-sm">{r.name}</span>
-        ),
-      },
-      {
-        key: 'provider',
-        label: 'Provider',
-        sortable: true,
-        filterable: true,
-        getValue: (r) => r.provider,
-        render: (r) => <span className="text-sm text-slate-700">{r.provider}</span>,
-      },
-      {
-        key: 'authMethod',
-        label: 'Auth method',
-        sortable: true,
-        filterable: true,
-        getValue: (r) => r.authMethod,
-        render: (r) => <span className="text-sm text-slate-600">{AUTH_LABEL[r.authMethod]}</span>,
-      },
-      {
-        key: 'status',
-        label: 'Status',
-        sortable: true,
-        filterable: true,
-        getValue: (r) => r.status,
-        render: (r) => {
-          const pill = STATUS_PILL[r.status];
-          return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${pill.className}`}>
-              {pill.label}
-            </span>
-          );
-        },
-      },
-      {
-        key: 'lastSyncAt',
-        label: 'Last sync',
-        sortable: true,
-        filterable: false,
-        getValue: (r) => r.lastSyncAt ?? '',
-        render: (r) => <span className="text-sm text-slate-500">{formatDate(r.lastSyncAt)}</span>,
-      },
-      {
-        key: 'owner',
-        label: 'Owner',
-        sortable: false,
-        filterable: false,
-        render: (r) =>
-          r.owner.kind === 'workspace' ? (
-            <WorkspaceBadge clientId={r.owner.id} clientName={r.owner.name} />
-          ) : (
-            <span className="text-xs text-slate-500 font-medium">Org</span>
-          ),
-      },
-      {
-        key: 'actions',
-        label: 'Actions',
-        sortable: false,
-        filterable: false,
-        render: (r) => {
-          // Spec §4.14: hide connect/disconnect/refresh for non-org-admin on org-owned connections
-          const hideActions = r.owner.kind === 'org' && !orgAdmin;
-          return (
-            <div className="flex items-center gap-2">
-              <ConnectionTestButton connectionId={r.id} />
-              {!hideActions && (
-                <button
-                  type="button"
-                  onClick={() => setDisconnectTarget(r)}
-                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded border border-slate-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-200 transition-colors"
-                >
-                  Disconnect
-                </button>
-              )}
-            </div>
-          );
-        },
-      },
-    ];
+  const isWorkspace = viewMode !== 'org';
+  const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
 
-    return cols;
-  }, [orgAdmin]);
-
-  if (error) {
-    return (
-      <PageShell
-        header={
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-            <h1 className="text-lg font-semibold text-slate-900">Connections</h1>
-          </div>
-        }
-      >
-        <ErrorState error={error} retry={() => setFetchKey((k) => k + 1)} />
-      </PageShell>
-    );
-  }
+  const activeTabDef = TAB_DEFS.find(t => t.id === activeTab)!;
 
   return (
     <PageShell
@@ -184,43 +51,52 @@ export default function ConnectionsPage() {
               onChange={setViewMode}
               availableModes={availableModes}
             />
-            <SearchBox
-              value={q}
-              onChange={setQ}
-              placeholder="Search name, provider..."
-            />
           </div>
         </div>
       }
     >
-      {rows === null ? (
-        <div className="text-sm text-slate-500 py-8 px-6">Loading...</div>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="No connections match your filters"
-          body={q ? 'Try a different search term or clear the search.' : 'No connections found.'}
-          primaryAction={q ? { label: 'Clear search', onClick: () => setQ('') } : undefined}
-        />
-      ) : (
-        <SortableTable
-          rows={rows}
-          columns={columns}
-          rowKey={(r) => r.id}
-          persistKey={`connections-${viewMode}`}
-          initialSort={{ key: 'name', dir: 'asc' }}
-        />
-      )}
+      {/* Tab strip */}
+      <div className="flex border-b border-slate-200 px-6 pt-2 gap-1">
+        {TAB_DEFS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors bg-transparent cursor-pointer font-[inherit] ${
+              activeTab === t.id
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {disconnectTarget && (
-        <DisconnectConfirmDialog
-          connectionId={disconnectTarget.id}
-          onClose={() => setDisconnectTarget(null)}
-          onDisconnected={() => {
-            setDisconnectTarget(null);
-            setFetchKey((k) => k + 1);
-          }}
-        />
-      )}
+      {/* Tab subtitle */}
+      <div className="px-6 pt-3 pb-1">
+        <p className="text-xs text-slate-500 m-0">{activeTabDef.subtitle}</p>
+      </div>
+
+      {/* Tab body */}
+      <div className="px-6 py-3">
+        {!isWorkspace || !subaccountId ? (
+          <div className="py-12 text-center text-sm text-slate-500">
+            Select a workspace to view connections.
+          </div>
+        ) : (
+          <>
+            {activeTab === 'app-integrations' && (
+              <AppIntegrationsTab subaccountId={subaccountId} />
+            )}
+            {activeTab === 'web-logins' && (
+              <WebLoginsTab subaccountId={subaccountId} />
+            )}
+            {activeTab === 'ai-subscriptions' && (
+              <AiSubscriptionsTab subaccountId={subaccountId} />
+            )}
+          </>
+        )}
+      </div>
     </PageShell>
   );
 }

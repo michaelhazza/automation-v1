@@ -121,3 +121,11 @@ export const reacceptConsent = (
 export const triggerReauth = (subaccountId: string, id: string): Promise<unknown> =>
   api.post(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}/reauth`)
     .then(r => r.data);
+
+export const getAgentAllowedSubscriptions = (
+  subaccountId: string,
+  agentId: string,
+): Promise<AiSubscriptionConnection[]> =>
+  api.get(
+    `/api/subaccounts/${encodeURIComponent(subaccountId)}/agents/${encodeURIComponent(agentId)}/allowed-subscriptions`,
+  ).then(r => r.data as AiSubscriptionConnection[]);
