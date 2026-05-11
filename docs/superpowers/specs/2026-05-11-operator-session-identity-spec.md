@@ -238,7 +238,7 @@ Add `'operator_session'` to the `auth_type` enum. Because Drizzle uses text with
 // New columns (operator_session only; null/default for other auth types)
 usabilityState: text('usability_state'),          // 'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled'
 planTier: text('plan_tier'),                        // 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown'
-planVerificationStatus: text('plan_verification_status'), // 'verified' | 'self_declared' | 'unverified' | 'failed'
+planVerificationStatus: text('plan_verification_status'), // 'verified' | 'self_declared' | 'failed'
 planVerifiedAt: timestamp('plan_verified_at', { withTimezone: true }),
 consentRecordId: uuid('consent_record_id').references(() => operatorSessionConsents.id),
 isDefault: boolean('is_default').notNull().default(false),  // partial unique index enforces ≤1 default per subaccount for operator_session
@@ -383,13 +383,13 @@ export const OPERATOR_SESSION_PROVIDERS: Record<string, ProviderCapabilityEntry>
 |---|---|---|---|
 | `introspection_api` | `'verified'` — usability_state = `'connected_usable'` directly | `'verified'` — usability_state = `'connected_usable'` after disclosure | `'failed'` — usability_state = `'connected_unverified'`, treat as Plus-equivalent (consent required to proceed) |
 | `probe` | `'verified'` if probe signal is unambiguous; `'self_declared'` otherwise | `'verified'` if probe + user input agree; `'self_declared'` otherwise | `'failed'` — `'connected_unverified'` |
-| `self_declaration` | `'self_declared'` always — `usability_state = 'connected_unverified'` per §11.1; the connection requires a disclosure acceptance even for nominally-sanctioned tiers, because we cannot independently verify the user's tier claim | `'self_declared'` — `'connected_unverified'`, identical to sanctioned tiers under self-declaration | `'failed'` — `'connected_unverified'` |
+| `self_declaration` | `'self_declared'` — `usability_state = 'connected_usable'` when disclosure accepted at connect time. The tier is unconfirmed but the broker can issue credentials; `plan_verification_status = 'self_declared'` carries the audit signal. | `'self_declared'` — `usability_state = 'connected_usable'` after disclosure; identical treatment to sanctioned tiers under self-declaration (Option B — accepted disclosure is sufficient to unblock the broker). | `'failed'` — `'connected_unverified'`; user must explicitly accept Plus-equivalent disclosure to transition to `connected_usable`. |
 | `none` | (this branch is unreachable — if no detection mechanism is available, the spec MUST mark `runtimeUseEnabled: false` and gate the connect route) | (same) | (same) |
 
 **Build-time gating + verification rollout.** The V1 registry entry as committed has `connectionMechanism: 'none_verified'` AND `planDetectionMechanism: 'self_declaration'`. The two flags interact:
 
 - `connectionMechanism: 'none_verified'` → `connect` route returns 501 (per §11.1 build-time gate). No connect attempt succeeds until this is flipped. This is the spec-review-time reality.
-- `connectionMechanism: 'oauth_pkce'` (or another verified value) + `planDetectionMechanism: 'self_declaration'` → connects succeed; every connect lands in `connected_unverified` + `self_declared` + requires `disclosureAcceptance`. This is the post-verification reality.
+- `connectionMechanism: 'oauth_pkce'` (or another verified value) + `planDetectionMechanism: 'self_declaration'` → connects succeed; every connect with disclosure accepted lands in `connected_usable` + `self_declared` (Option B — accepted disclosure gates the broker immediately). `connected_unverified` only results from a `'failed'` plan detection outcome. This is the post-verification reality.
 - `connectionMechanism: 'oauth_pkce'` + `planDetectionMechanism: 'introspection_api'` → connects succeed; sanctioned tiers land in `connected_usable` + `verified` directly; Plus / unverified follow the disclosure branch. This is the post-introspection reality.
 
 The two flags flip independently; the schema, services, and routes are all written so that either flag flipping later activates the corresponding branch with no code change beyond updating the registry. Acceptance criteria in §17 cover both pre- and post-verification behaviour to keep them honest.
@@ -401,10 +401,14 @@ The two flags flip independently; the schema, services, and routes are all writt
 The six `usability_state` values form a closed set. Transitions:
 
 ```
-                    Connect + plan verified (sanctioned tier)
+                    Connect + plan verified (sanctioned tier, introspection_api)
 (none) ──────────────────────────────────────────────────────► connected_usable
-                    Connect + plan = plus + consent accepted
+                    Connect + plan = plus + consent accepted (introspection_api)
 (none) ──────────────────────────────────────────────────────► connected_usable
+                    Connect + self_declaration + disclosure accepted (Option B)
+(none) ──────────────────────────────────────────────────────► connected_usable
+                    Connect + plan_verification_status = 'failed' (any mechanism)
+(none) ──────────────────────────────────────────────────────► connected_unverified
 
 connected_usable ──── plan = plus, disclosure_version bumped ──► connected_needs_consent
 connected_usable ──── token refresh failed (auth/scope error) ──► connected_needs_reauth
@@ -418,12 +422,14 @@ connected_needs_reauth ──── user signs in again ────────
 connected_needs_reauth ──── admin disable ───────────────────────► disabled
 
 connected_unverified ──── plan verification succeeds ────────────► connected_usable
-connected_unverified ──── treat as plus-equivalent, consent OK ──► connected_usable
+connected_unverified ──── user accepts Plus-equiv disclosure ────► connected_usable
 connected_unverified ──── admin disable ─────────────────────────► disabled
 
 revoked ─── (terminal; re-connect creates a NEW row; this row stays revoked)
 disabled ── (terminal; re-connect creates a NEW row; this row stays disabled)
 ```
+
+**Note on `connected_unverified` entry point (Option B).** With self-declaration connects going directly to `connected_usable`, `connected_unverified` is now only reached when `plan_verification_status = 'failed'` — i.e., the plan tier came back ambiguous or unparseable from whatever detection mechanism was used. The user can exit `connected_unverified` by accepting Plus-equivalent disclosure (explicit action via the `/consent` route) or by waiting for a plan verification re-run to succeed.
 
 **Forbidden transitions:**
 - `revoked → connected_usable` (revoke is provider-side, immutable on this row)
@@ -467,12 +473,12 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | `server/db/schema/integrationConnections.ts` | Add 6 new columns (`usabilityState`, `planTier`, `planVerificationStatus`, `planVerifiedAt`, `consentRecordId`, `isDefault`); add `'operator_session'` to authType union |
 | `server/db/schema/index.ts` | Export new schema files |
 
-### 8.4 New config files
+### 8.4 New and modified config files
 
 | File | Purpose |
 |---|---|
-| `server/config/operatorSessionProviders.ts` | Provider capability registry (§7.4) |
-| `server/config/rlsProtectedTables.ts` | ADD entries for two new tables |
+| `server/config/operatorSessionProviders.ts` | **New** — Provider capability registry (§7.4) |
+| `server/config/rlsProtectedTables.ts` | **Modified** — add entries for two new tables (`operator_session_consents`, `operator_session_consent_events`) to the existing manifest |
 
 ### 8.5 New services
 
@@ -635,7 +641,7 @@ interface AiSubscriptionConnection {
   authMethod: 'ai_subscription';          // maps to auth_type = 'operator_session' internally
   provider: string;                        // 'openai'
   planTier: 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown';
-  planVerificationStatus: 'verified' | 'self_declared' | 'unverified' | 'failed';
+  planVerificationStatus: 'verified' | 'self_declared' | 'failed';
   planVerifiedAt: string | null;           // ISO 8601
   usabilityState: 'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled';
   /**
@@ -884,12 +890,13 @@ The provider connection handshake is inline / synchronous from the client's pers
 
 - Provider has `planDetectionMechanism = 'introspection_api'` AND the verified tier is one of `sanctionedTiers`: no disclosure required; connection lands in `usability_state = 'connected_usable'` with `plan_verification_status = 'verified'`.
 - Verified tier is in `optInTiers` (Plus): disclosure required; connection lands in `connected_usable` after the disclosure write, with `plan_verification_status = 'verified'`.
-- Tier cannot be verified or detection mechanism is `probe` / `self_declaration`: disclosure required; connection lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'` or `'failed'` per the §7.4 table.
+- Detection mechanism is `probe` / `self_declaration` AND plan tier is parseable: disclosure required; connection lands in `usability_state = 'connected_usable'` with `plan_verification_status = 'self_declared'`. The accepted disclosure is the gate — tier is unconfirmed but the broker can issue credentials; `plan_verification_status` carries the audit signal.
+- Tier ambiguous or unparseable (`plan_verification_status = 'failed'`): connection lands in `usability_state = 'connected_unverified'` regardless of disclosure acceptance. User must explicitly accept Plus-equivalent disclosure via the `/consent` route to transition to `connected_usable`.
 
 **Two flags, two flips (build-time vs runtime).** Per §7.4 "Build-time gating + verification rollout", the OpenAI registry entry has two independent flags that gate the connect flow:
 
 - At spec-review time, `connectionMechanism: 'none_verified'` — connect returns 501; no rows are written, no consents recorded. This is the only behaviour exercised by the V1 build until the OpenAI mechanism is verified.
-- Once `connectionMechanism` flips to a verified value (e.g. `'oauth_pkce'`), but `planDetectionMechanism` is still `'self_declaration'`: every connect requires a `disclosureAcceptance` block (422 `disclosure_required` on omission, which is the universal error code — it doesn't presume Plus), lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`, and stays not-usable by adapters until the user re-confirms or `planDetectionMechanism` flips to `'introspection_api'`.
+- Once `connectionMechanism` flips to a verified value (e.g. `'oauth_pkce'`), but `planDetectionMechanism` is still `'self_declaration'`: every connect requires a `disclosureAcceptance` block (422 `disclosure_required` on omission); with disclosure accepted, connection lands in `usability_state = 'connected_usable'` + `plan_verification_status = 'self_declared'` (Option B — broker can issue credentials immediately). `connected_unverified` is only reached when plan tier comes back `'failed'` (ambiguous/unparseable). This is the post-verification reality.
 - Once `planDetectionMechanism` flips to `'introspection_api'`, sanctioned tiers can land in `connected_usable` + `verified` directly per the §7.4 outcome table; Plus / unverified still require disclosure.
 
 The §17 acceptance criteria are structured so they exercise the right branch given the current registry state — pre-verification tests confirm 501; post-verification tests confirm the disclosure-required flow.
@@ -918,7 +925,7 @@ The disclosure-requirement gate above decides which branch runs. Pre-flight (bef
    - INSERT `integration_connections` row with the correct `usability_state` and `plan_verification_status`, `consent_record_id = <consent_id>`, and the encrypted token material.
    - UPDATE the consent row to set `connection_id = <new connection id>` — the single permitted UPDATE on `operator_session_consents`, scoped to a one-time NULL → non-NULL transition inside this transaction. Enforced at the service layer.
    - COMMIT.
-5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material). For `connected_unverified` results, the response makes the gating explicit so the UI can display the Plan-not-verified state immediately.
+5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material). For `connected_unverified` results (i.e. when plan detection returned `'failed'`), the response makes the gating explicit so the UI can display the Plan-not-verified state immediately. For self-declaration connects with accepted disclosure, the response reflects `usability_state = 'connected_usable'` (Option B).
 
 **Why the back-pointer is mutable exactly once (Branch B only):** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link. Branch A never UPDATEs a consent row because it never INSERTs one.
 
@@ -1009,7 +1016,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 ### Chunk 4 — Credential broker extension
 
 **Deliverables:**
-- New `server/services/credentialBrokerServicePure.ts` (sibling of the existing facade): exports `assertCredentialUsableOrThrow(state, decryptHook)` (the broker retrieval invariant in pure form) and `orderResolvedCredentials(rows)` (the §9.7 failover ordering in pure form).
+- Uses the **existing** `server/services/credentialBrokerServicePure.ts` created in Chunk 2. Chunk 4 only wires `credentialBrokerService.ts` to the helpers (`assertCredentialUsableOrThrow` and `orderResolvedCredentials`) already exported by that module — no re-creation of the file.
 - Extend `credentialBrokerService.ts`:
   - `issueCredential` branch for `operator_session` — delegates the state check to `assertCredentialUsableOrThrow`; only invokes the decrypt hook on `connected_usable`.
   - Redacted envelope return shape (`OperatorSessionEnvelope`)
@@ -1080,7 +1087,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 **Deliverables:**
 - `ConnectionsPage.tsx`: add 3-tab strip, mount all three tab components, tab subtitles, tab count chips
 - Agent edit pages (`AgentEditPage.tsx`, `SubaccountAgentEditPage.tsx`): read-only Model Access section (Standard runs / Autonomous runs split, links to Connections)
-- Server route: `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` in `server/routes/operatorSessionConnections.ts`. Returns the ordered list of `AiSubscriptionConnection` shapes the agent is allowed to consume per §9.7 (Default first, then alphabetical-by-label, then platform-managed). Calls a new service method on `operatorSessionService.ts`: `listAllowedSubscriptionsForAgent(agentId, subaccountId)` which is a thin wrapper around `credentialBrokerService.resolveAvailableCredentials` filtered to operator_session rows. Permission guard: `operator_session.view`. No token material in the response.
+- Server route: `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` in `server/routes/operatorSessionConnections.ts`. Returns the ordered list of `AiSubscriptionConnection` shapes for **operator_session connections only** the agent is allowed to consume (Default first, then non-default sorted by `label ASC NULLS LAST, id ASC`). Platform-managed fallback rows are excluded from this read-only UI summary route — they remain part of `credentialBrokerService.resolveAvailableCredentials` only. Calls `operatorSessionService.listAllowedSubscriptionsForAgent(agentId, subaccountId)`, which queries the operator_session rows directly (does NOT delegate to the broker's full `resolveAvailableCredentials` to avoid shape mixing). Permission guard: `operator_session.view`. No token material in the response.
 - `governApi.ts`: `getAgentAllowedSubscriptions(agentId, subaccountId)` for the agent-side Model Access summary — calls the new route above.
 
 **Depends on:** Chunks 4 (broker resolveAvailableCredentials extension), 7, 8, 9.
@@ -1189,7 +1196,7 @@ Per `docs/spec-context.md`:
 
 ### 16.3 Concurrency guards
 
-**Make default race:** Two concurrent `make-default` requests for different subscriptions in the same subaccount could attempt to produce two Default rows. The partial unique index `ic_subaccount_operator_session_default_unique` is the primary guard — at most one row per subaccount can have `is_default = true` for `auth_type = 'operator_session'`. The two-UPDATE pattern below runs inside a single transaction so Postgres acquires row locks on the UPDATEd rows automatically; the optional `SELECT ... FOR UPDATE` first acquires the lock on the current default explicitly, preventing the lost-update race even before the partial index has to reject a duplicate.
+**Make default race:** Two concurrent `make-default` requests for different subscriptions in the same subaccount could attempt to produce two Default rows. The partial unique index `ic_subaccount_operator_session_default_unique` is the primary guard — at most one row per subaccount can have `is_default = true` for `auth_type = 'operator_session'`. The two-UPDATE pattern below runs inside a single transaction so Postgres acquires row locks on the UPDATEd rows automatically; the optional `SELECT ... FOR UPDATE` first acquires the lock on the current default explicitly — **when a current default row exists** — preventing the lost-update race between concurrent Make-Default calls for that subaccount. When no current default exists, the `SELECT ... FOR UPDATE` locks nothing; two concurrent first-Make-Default calls for different rows rely on the partial unique index to reject one, surfacing `23505 → 409 concurrent_default_change`.
 
 ```sql
 -- Inside a transaction (BEGIN; ...; COMMIT;):
@@ -1304,7 +1311,7 @@ All criteria must pass before the build is marked complete.
 
 - [ ] Pre-verification V1 connect attempt (registry `connectionMechanism: 'none_verified'`): route returns 501 `provider_mechanism_not_verified` — no consent row, no credential row written. This is the spec-review-time reality.
 - [ ] Post-verification connect attempt (registry `connectionMechanism` flipped, `planDetectionMechanism: 'self_declaration'`) without a `disclosureAcceptance` block in the POST body: route returns 422 `disclosure_required` — no consent row, no credential row written.
-- [ ] Post-verification connect attempt WITH a valid `disclosureAcceptance` block (registry mechanism verified, `planDetectionMechanism: 'self_declaration'`): single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_unverified'` + `plan_verification_status = 'self_declared'`.
+- [ ] Post-verification connect attempt WITH a valid `disclosureAcceptance` block (registry mechanism verified, `planDetectionMechanism: 'self_declaration'`, parseable tier): single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_usable'` + `plan_verification_status = 'self_declared'`; broker can issue credentials; UI signals plan tier is self-declared (Option B).
 - [ ] Post-registry-flip connect attempt (introspection_api with a sanctioned tier verified): single transaction writes the credential row with `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`; no consent row required (disclosure flow only triggers for Plus tier or unverified outcomes).
 - [ ] Post-registry-flip connect attempt with verified Plus tier: single transaction writes consent row + credential row + one-time back-fill; final state `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`.
 - [ ] Disclosure version bump: existing credential transitions to `connected_needs_consent` on first read after the version bump (§11.4). Agent-use blocked. `/consent` route handles re-acceptance: writes a new consent row (with `connection_id` set at INSERT time, no UPDATE needed), writes a `superseded` event linking the prior consent, updates the connection's `consent_record_id` forward pointer, transitions usability back to `connected_usable`.
@@ -1312,7 +1319,7 @@ All criteria must pass before the build is marked complete.
 
 ### 17.5b Failover ordering contract
 
-- [ ] Unit test on `credentialBrokerService.resolveAvailableCredentials` (operator_session branch): given a subaccount with one Default and three non-Default `connected_usable` operator_session rows + two other-auth-type rows, returns an array in the order specified by §9.7 (Default first; non-Default sorted by `label ASC NULLS LAST, id ASC`; other-auth-type after).
+- [ ] Unit test on `credentialBrokerServicePure.orderResolvedCredentials`: given an unordered input array with one Default row, three non-Default `connected_usable` operator_session rows, and two other-auth-type rows, returns the ordered array specified by §9.7 (Default first; non-Default sorted by `label ASC NULLS LAST, id ASC`; other-auth-type after). A static/code-review acceptance additionally confirms that the non-pure broker feeds its SQL-query result rows through this pure helper before returning — the broker test itself is deferred to Phase 2+ integration testing per §15.
 - [ ] Unit test: rows with `usability_state !== 'connected_usable'` are excluded from the array entirely (not just deprioritised).
 - [ ] Unit test: rows where the requesting agent is NOT in `allowedAgentIds` are excluded (when `availabilityScope = 'specific_agents'`).
 
@@ -1365,3 +1372,4 @@ All criteria must pass before the build is marked complete.
 
 - **Default subscription storage pattern.** Option (a) chosen: a boolean `is_default` column on `integration_connections` with a partial unique index `ic_subaccount_operator_session_default_unique` enforcing at most one Default operator_session row per subaccount (see §7.1). Option (b) — a `default_operator_session_connection_id` FK on `subaccounts` — was rejected because it requires a circular FK and provides no win at current scale. The two-UPDATE concurrency guard in §16.3 is the canonical Make-Default code path.
 - **Disclosure version bump detection: on-read.** §11.4 commits to on-read detection. If the subaccount has hundreds of Plus-tier connections and the disclosure version bumps, the first read after the bump triggers multiple state transitions simultaneously. This is fine at current scale (pre-production); a background-sweep alternative is deferred (see §13).
+- **Subaccount-scoped Plus consent — RESOLVED.** V1 uses one consent per credential/subaccount; there is no org-level umbrella consent. Liability, ownership, and offboarding semantics are all scoped to the credential actually used by agents. This resolves Open Question §18.3.
