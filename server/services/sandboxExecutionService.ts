@@ -20,6 +20,16 @@ import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveSandboxProvider } from './sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService as ISandboxExecutionService } from './sandbox/sandboxProviderResolver.js';
+// Side-effect imports — trigger `registerSandboxProvider('e2b' | 'local_docker', ...)`
+// at module-init time so the resolver's in-memory registry is populated before
+// `getProvider()` (and therefore `resolveSandboxProvider()`) is first called.
+// Without these imports the resolver throws `sandbox provider X not registered`
+// for any non-inline provider, which would brick every production sandbox call.
+// The `inline` provider is wired directly by the resolver and does not need
+// a bootstrap import. See plan.md C4 § "registration-seam pattern" and
+// sandboxProviderResolver.ts:14-16 for the fail-fast semantics this avoids.
+import './sandbox/e2bSandbox.js';
+import './sandbox/localDockerSandbox.js';
 import { FailureError } from '../../shared/iee/failure.js';
 import { failure } from '../../shared/iee/failure.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
@@ -162,6 +172,11 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
   const leaseExpiry = new Date(now.getTime() + leaseWindowMs);
 
   // ── Case 1: attempt the initial INSERT ─────────────────────────────────────
+  // `startedAt` is set at lease-claim time so the reconciliation sweep
+  // (§20.3) can identify orphaned rows via its `started_at IS NOT NULL AND
+  // started_at < cutoff` predicate. Without setting it here, a crash between
+  // INSERT and provider start (the most common orphan case) would leave the
+  // row permanently invisible to reconciliation.
   const newRow: NewSandboxExecution = {
     id: input.sandboxExecutionId,
     organisationId: input.organisationId,
@@ -180,6 +195,7 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
       fileCount: input.inputFiles.length,
       mimes: input.inputFiles.map((f) => f.mime),
     },
+    startedAt: now,
     startClaimedAt: now,
     startClaimExpiresAt: leaseExpiry,
     startAttemptCount: 1,
@@ -325,6 +341,13 @@ async function _handleExistingRow(
     const reclaimed = await db
       .update(sandboxExecutions)
       .set({
+        // Refresh `startedAt` so the reconciliation sweep's wall-clock+buffer
+        // deadline is measured from the reclaimed attempt, not the original
+        // (crashed) attempt. Without this, a freshly-reclaimed execution would
+        // be marked orphaned immediately by the next sweep tick because its
+        // started_at would still point at the original lease-claim timestamp
+        // from up to wall-clock+buffer minutes ago.
+        startedAt: now,
         startClaimedAt: now,
         startClaimExpiresAt: newExpiry,
         startAttemptCount: sql`${sandboxExecutions.startAttemptCount} + 1`,
@@ -441,6 +464,8 @@ async function _attemptProviderStart(
     from: row.status,
     to: 'harvesting',
   });
+  // `startedAt` was set at the initial lease-claim INSERT (see Case 1) so the
+  // reconciliation sweep can identify orphans — no re-write needed here.
   await db
     .update(sandboxExecutions)
     .set({

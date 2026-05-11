@@ -201,7 +201,41 @@ interface OutputReadResult {
 
 const MAX_OUTPUT_BYTES = 1_048_576; // 1 MB default cap
 
-async function step2OutputRead(ctx: HarvestContext): Promise<OutputReadResult> {
+async function step2OutputRead(
+  ctx: HarvestContext,
+  storedOutputJson: unknown | null,
+): Promise<OutputReadResult> {
+  // Fast-path: the execution service persists the provider's terminal output
+  // onto `sandbox_executions.output_json` BEFORE invoking the harvest pipeline
+  // (see sandboxExecutionService._attemptProviderStart). Step 1 surfaced it
+  // via `step1.outputJson`. Until the provider SDK file-read API for
+  // `/workspace/output.json` is wired, use the stored row output as the
+  // authoritative source so the normal harvest path does not route every
+  // successful sandbox call to `output_validation_failed`.
+  //
+  // Canonical mode (reconciliationAttempt === 0): the execution service has
+  // just written `outputJson` immediately before invoking runHarvest, so the
+  // stored value is authoritative even when it is `null` (a provider may
+  // legitimately return JSON null for a completed task with no structured
+  // output). Trust the stored value as-is.
+  //
+  // Reconciliation mode (reconciliationAttempt > 0): the row's output_json may
+  // be null because the original worker died before persisting output. Only
+  // short-circuit when a non-null/non-undefined value is present; otherwise
+  // fall through to the provider SDK file-read path (currently stubbed).
+  const canonical = ctx.reconciliationAttempt === 0;
+  const storedAvailable = canonical
+    ? storedOutputJson !== undefined
+    : storedOutputJson !== null && storedOutputJson !== undefined;
+  if (storedAvailable) {
+    const serialised = JSON.stringify(storedOutputJson);
+    const bytes = Buffer.byteLength(serialised, 'utf8');
+    if (bytes > MAX_OUTPUT_BYTES) {
+      return { result: { ok: false, reason: 'output_validation_failed' }, parsed: null, bytes };
+    }
+    return { result: { ok: true }, parsed: storedOutputJson, bytes };
+  }
+
   try {
     const rawContent = await withSandboxProvider({
       phase: 'harvest',
@@ -990,7 +1024,11 @@ async function runHarvestPipeline(
   }
 
   // --- Step 2: Output read ---
-  const step2 = await step2OutputRead(ctx);
+  // Pass step1.outputJson so step 2 can short-circuit when the execution service
+  // has already persisted the provider's terminal output onto the row (the
+  // normal success path). The provider SDK file-read fallback remains in step 2
+  // for the reconciliation path where the row may not carry pre-stored output.
+  const step2 = await step2OutputRead(ctx, step1.outputJson);
   stepResults.push(step2.result);
   harvestStepReached = 2;
 

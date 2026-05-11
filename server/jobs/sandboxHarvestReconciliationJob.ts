@@ -31,6 +31,14 @@ import {
 // Recoverable terminal states: harvest or upload failed — re-enter harvesting to retry.
 const RECOVERABLE_TERMINAL = ['harvest_failed', 'artefact_upload_failed'] as const;
 
+// Stuck pre-terminal states whose worker has presumably died past the wall-clock
+// ceiling-plus-buffer window. Sweep query is gated on (status, started_at) so
+// any row reaching this flip is definitively orphaned — flipping to `harvesting`
+// hands the row off to the harvest pipeline's reconciliation path so step 1's
+// "row is already terminal" branch does not misclassify pending/running as a
+// terminal SandboxTerminalState.
+const STUCK_PRE_TERMINAL = ['pending', 'running'] as const;
+
 // Page size for the reconciliation sweep.
 const PAGE_SIZE = 50;
 
@@ -178,6 +186,24 @@ async function reconcileExecution(
       WHERE id = ${sandboxExecutionId}::uuid
         AND organisation_id = ${row.organisation_id}::uuid
         AND status = ANY(ARRAY['harvest_failed','artefact_upload_failed'])
+    `);
+  }
+
+  // For stuck pre-terminal rows (worker died after start-claim but before harvest),
+  // flip status to 'harvesting' so step 1 sees the expected non-terminal status
+  // and enters the recovery path. Without this flip, step 1's `row.status !==
+  // 'harvesting'` branch would cast `pending`/`running` as SandboxTerminalState
+  // and downstream writes would fail the CHECK constraint or surface a synthetic
+  // non-terminal value to callers as if it were terminal.
+  if ((STUCK_PRE_TERMINAL as readonly string[]).includes(row.status)) {
+    await tx.execute(sql`
+      UPDATE sandbox_executions
+      SET
+        status = 'harvesting',
+        attempt_number = attempt_number + 1
+      WHERE id = ${sandboxExecutionId}::uuid
+        AND organisation_id = ${row.organisation_id}::uuid
+        AND status = ANY(ARRAY['pending','running'])
     `);
   }
 
