@@ -27,5 +27,5 @@ Operator authorization: explicit override of G3 escalate-on-test-failure rule �
 - **Fix:**
   - `server/config/jobConfig.ts` — added `deadLetter: 'operator-session-refresh__dlq'` to the `operator-session-refresh` entry, matching the convention used by all 19 sibling entries.
   - `server/services/operatorSessionConsentService.ts:157` — appended `// guard-ignore: org-scoped-writes reason="standalone read inside withOrgTx context via getOrgScopedDb — RLS enforces org isolation"` matching the precedent in `scopeResolutionService.ts:192`.
-- **Diff:** pending commit
-- **CI re-fire result:** pending next poll
+- **Diff:** commit `9bffeadf`
+- **CI re-fire result:** green — all 6 required checks SUCCESS, mergeStateStatus CLEAN. Fix-loop closed after 1 iteration.

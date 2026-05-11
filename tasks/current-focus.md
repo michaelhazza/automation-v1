@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-11
-last_merge_ready_pr: #286
-last_merge_ready_slug: operator-session-identity
-last_merge_ready_branch: claude/evolve-session-identity-brief-17LO4
-last_merged_pr: #287
-last_merged_slug: sandbox-isolation
-last_merged_branch: claude/evolve-sandbox-isolation-brief-Q51hc
-last_merged_at: 2026-05-11T20:00:00Z
-last_merged_commit: 9b151741
+last_merged_pr: #286
+last_merged_slug: operator-session-identity
+last_merged_branch: claude/evolve-session-identity-brief-17LO4
+last_merged_at: 2026-05-11T23:05:49Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — `operator-session-identity` Phase 3 (FINALISATION) complete. PR [#286](https://github.com/michaelhazza/automation-v1/pull/286) ready for CI + auto-merge. chatgpt-pr-review APPROVED after Round 2 (F1-F4 closed, T1 deferred as OSI-DEF-13). S2 sync of `sandbox-isolation` (PR #287, squash `9b151741`) merged cleanly with migration renumber (`0321/0322` → `0325/0326`) and 6 conflicts resolved (3 auto-resolved known-shape, 3 code-area structural unions in `jobConfig.ts` / `rlsProtectedTables.ts` / `db/schema/index.ts`). G4 regression guard PASS (lint 0 errors / typecheck clean). KNOWLEDGE.md +2 entries (permission-helper-tier mismatch; DB-time bucket fail-closed). Doc-sync sweep complete (13 verdicts). 13 deferred items (OSI-DEF-1..13) in `tasks/todo.md`. Branch HEAD before ready-to-merge label: `1de683c8`.
+**Status:** **NONE** — no active build.
+
+**Just merged:** PR #286 — `operator-session-identity` (squash-commit `pending-squash`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
@@ -99,7 +98,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11T22:29:13Z (Phase 3 close for `operator-session-identity` PR #286 → MERGE_READY; ready-to-merge label about to be applied)
+**Last updated:** 2026-05-11T23:05:49Z (PR #286 `operator-session-identity` MERGED to main; squash sha pending; finalisation-coordinator Step 12 in flight)
 
 ---
 
