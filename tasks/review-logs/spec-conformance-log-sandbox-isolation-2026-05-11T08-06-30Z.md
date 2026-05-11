@@ -7,6 +7,7 @@
 **Scope:** ENTIRE spec verified against ENTIRE changed-code set (Setup §C path 3 — completed implementation, all 16 chunks done per `tasks/builds/sandbox-isolation/progress.md`)
 **Changed-code set:** 105 files (`git diff origin/main...HEAD --name-only`); review-log / scratch / spec / progress / todo files excluded
 **Run at:** 2026-05-11T08:06:30Z
+**Commit at finish:** `f5d269db`
 
 ---
 
