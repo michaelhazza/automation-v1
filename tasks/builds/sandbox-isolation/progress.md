@@ -79,7 +79,7 @@
 | 13 | C11a — Execution-scoped pg-boss jobs | done | 1 | (next) | 4 jobs (harvestReconciliation, ceilingMonitor, wallClockKill, artefactPurge) + 2 pure modules + 2 tests (44 pure-test cases) + queueService.ts and jobConfig.ts wiring. Approved scope: jobConfig.ts inclusion (pg-boss job config registry). Reconciliation cron 5min; ceiling monitor singletonKey = sandbox_execution_id. |
 | 14 | C11b — Retention-scoped pg-boss jobs | done | 1 | (next) | 3 prune jobs (telemetry 90d, logs 90d-AND-soft-deleted, egress 180d) + sandboxRetentionPure (UTC-deterministic cutoff helper, 11 pure tests). Daily cron at distinct times (02:00/02:30/03:00 UTC). withAdminConnection + per-org withOrgTx pattern (mirrors fastPathDecisionsPruneJob). Logs prune deletes both age-expired AND `is_active=false` per spec §17.3. |
 | 15 | C13 — iee_dev adapter rewiring + classifyExecutionClass | done | 1 | (next) | classifyExecutionClass + ieeDevBackend dispatch rewire. 13 pure tests + 9-assertion dry-run script. Notable finding for spec-conformance: current DevTaskPayload has no sub-kind discriminator — all V1 variants classify as `worker_trusted`, so the sandbox branch is structurally correct but unreachable until future payload variants (Revenue Ops CSV parsing, Research Intelligence PDF, LLM-emitted transforms) add an explicit `kind`/`executionClass` field. Wiring complete; activation deferred to consuming features. |
-| 16 | C14 — CI gates + doc-sync | pending | — | — | — |
+| 16 | C14 — CI gates + doc-sync (closes the build) | done | 1 | (next) | 5 CI gate scripts (classification, minimum-events, template-version-coherence, no-cost-update, no-inline-outside-test) + architecture.md "Sandbox Isolation primitive" section + docs/capabilities.md vendor-neutral row + docs/env-manifest.json (5 env vars: SANDBOX_PROVIDER, SANDBOX_ALLOW_INLINE, E2B_API_KEY, E2B_PROJECT_PROD, E2B_PROJECT_STAGING) + ADR 0010-sandbox-execution-service.md (spec said 0009 but already taken) + KNOWLEDGE.md +4 patterns. **Notable: verify-sandbox-minimum-events.sh CURRENTLY FAILS** because C9/C10 providers stub SDK calls and don't emit `sandbox_start`/`sandbox_start_failed` events yet — this is a real spec-conformance gap to surface (events should likely be emitted by C5's service layer). |
 
 ### Pre-existing branch state (informational)
 
@@ -90,11 +90,30 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C13 (commit pending)
-- head: ae7bdafd (C11b)
+- last_chunk_committed: C14 (commit pending)
+- head: 25347817 (C13)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T08:50:00Z
+- captured_at: 2026-05-11T09:15:00Z
+
+## Phase 2 BUILD complete — pending G2 + branch-level review
+
+All 16 chunks committed and pushed. Next steps:
+- G2 (lint + typecheck on integrated state)
+- Spec-validity checkpoint (operator pre-authorised proceed under autonomous mode)
+- Branch-level review pass: spec-conformance → adversarial-reviewer (conditional) → pr-reviewer → fix-loop → dual-reviewer
+- Doc-sync gate
+- Phase 2 handoff write
+- current-focus.md → REVIEWING
+
+### Known issues to surface at spec-conformance review
+
+1. **verify-sandbox-minimum-events.sh fails** — providers stub SDK calls; `sandbox_start`/`sandbox_start_failed` events not emitted by C5's service layer. Likely fix: extend C5's runTask to emit these telemetry events at the appropriate state transitions.
+2. **MAX_LOG_LINE_BYTES (spec §20.8)** intentionally deferred from DB CHECK to service-layer truncation in C7.
+3. **Pre-existing branch typecheck errors** — `@react-pdf/renderer` missing types in 2 report files. Confirmed pre-existing on branch since before Phase 2 started.
+4. **e2b SDK stub** — real installation deferred post-merge pending account provisioning.
+5. **SANDBOX-DEF-EGRESS-MECH** — decision deferred to actual SDK install (audit-row schema unaffected by mechanism choice).
+6. **classifyExecutionClass currently routes all V1 DevTaskPayload variants to `worker_trusted`** — sandbox branch is structurally complete but unreachable until future payload variants add an explicit executionClass field.
 
 ---
 

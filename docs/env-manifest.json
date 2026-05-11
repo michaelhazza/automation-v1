@@ -230,6 +230,47 @@
       "purpose": "Number of hours an email invitation link remains valid before expiring",
       "exampleValue": "72",
       "defaultValue": "72"
+    },
+    {
+      "name": "SANDBOX_PROVIDER",
+      "required": true,
+      "variableType": "identifier",
+      "purpose": "Sandbox execution provider. Selects which isolated compute backend runs Tier 4 untrusted code tasks. 'e2b' uses the external compute provider (production/staging). 'local_docker' uses docker run against the same template image (local dev only, rejected in NODE_ENV=production). 'inline' runs in-process for unit tests only (rejected outside NODE_ENV=test + SANDBOX_ALLOW_INLINE=1).",
+      "exampleValue": "e2b",
+      "allowedValues": ["e2b", "local_docker", "inline"]
+    },
+    {
+      "name": "SANDBOX_ALLOW_INLINE",
+      "required": false,
+      "variableType": "identifier",
+      "purpose": "Test-only flag that permits the 'inline' sandbox provider. Must NOT be set in production, staging, or local-dev environments. Only valid when SANDBOX_PROVIDER=inline AND NODE_ENV=test. The inline provider runs tasks in-process with no isolation — intended exclusively for unit tests of harvest-layer logic and pure helpers.",
+      "exampleValue": "1",
+      "securityNotes": "Never set this flag outside a test harness. The sandbox service hard-guards against inline use outside the test environment and this flag must not appear in .env.example, .env.development, or any deployment manifest."
+    },
+    {
+      "name": "E2B_API_KEY",
+      "required": false,
+      "requiredIf": "SANDBOX_PROVIDER is e2b",
+      "variableType": "secret",
+      "purpose": "API key for the external compute provider used for Tier 4 isolated code execution. Required when SANDBOX_PROVIDER=e2b.",
+      "exampleValue": "e2b_sk_your-api-key-here",
+      "securityNotes": "This key grants the ability to provision isolated compute environments. Treat as a high-privilege secret. Rotate on suspected compromise."
+    },
+    {
+      "name": "E2B_PROJECT_PROD",
+      "required": false,
+      "requiredIf": "SANDBOX_PROVIDER is e2b AND NODE_ENV is production",
+      "variableType": "identifier",
+      "purpose": "External compute provider project name for the production environment. Used to scope sandbox provisioning to the correct project and billing account.",
+      "exampleValue": "synthetos-prod"
+    },
+    {
+      "name": "E2B_PROJECT_STAGING",
+      "required": false,
+      "requiredIf": "SANDBOX_PROVIDER is e2b AND NODE_ENV is not production",
+      "variableType": "identifier",
+      "purpose": "External compute provider project name for the staging and development environments. Keeps staging compute provisioning isolated from production billing.",
+      "exampleValue": "synthetos-staging"
     }
   ]
 }
