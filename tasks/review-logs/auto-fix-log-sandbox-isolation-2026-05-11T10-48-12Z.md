@@ -34,3 +34,24 @@ Guardrails active: G1 (test files off-limits), G2 (50-line diff cap), G3 (catego
 - 5 of 6 required checks **SUCCESS**: verify, integration tests (after iteration 1 fix), Lint + Typecheck, Grep invariants (Phase 3 B.1-B.4) — including all 5 sandbox gates, Portable framework tests
 - 1 of 6 required checks **FAILURE**: unit tests — single test `reportRenderingServicePure.test.ts > determinism contract`. Failing assertion is byte-equality of two PDF renders; pre-existing flake in `reportRenderingService.normalizePdfBytes` (file not in this PR's diff).
 - Auto-fix iteration count: 2 / 5. Stopping per G3 escalation rule. Operator decides.
+
+### Operator response to escalation (2026-05-12T00:00:00Z)
+
+> *Attempt fix in `reportRenderingService.ts`.*
+
+Operator chose path 1 from the escalation. Proceeding to iteration 3 (out-of-original-PR-scope but explicitly authorised).
+
+## Iteration 3 — 2026-05-12T00:00:00Z
+
+- **Failed check:** `unit tests` (same as iteration 2 — `reportRenderingServicePure.test.ts > determinism contract`)
+- **Root cause hypothesis:** `@react-pdf/renderer` generates a fresh six-character uppercase prefix on each render for font-subset names (PDF convention — `/BaseFont /XYZABC+Helvetica`), regenerated per render. The existing `normalizePdfBytes` strips `/CreationDate`, `/ModDate`, and `/ID` but does NOT canonicalise font-subset prefixes — byte differences in font dictionaries between two renders are the most likely remaining source given the rest of the structure is deterministic in zlib output for identical input.
+- **Category (G3 allowlist match):** **operator-authorised out-of-scope** — vitest assertion failure in unrelated code, fix targets the implementation (`reportRenderingService.ts`), NOT the test (G1 preserved).
+- **Guardrail status:** G1=PASS (test file untouched), G2=15/50, G3=operator-override (recorded above), G4=logged
+- **Fix:** added one extra `replace` to `normalizePdfBytes` — `/[A-Z]{6}\+/g → 'AAAAAA+'` — canonicalises font-subset prefixes everywhere they appear in the PDF bytes. The match is strict (exactly six uppercase letters followed by `+`), so plain content text is not affected.
+- **Diff:** pending push
+- **CI re-fire result:** pending at next poll
+
+### Confidence notes
+
+- This is a hypothesis-driven fix. Without local repro (@react-pdf/renderer not installed), the patch is best-effort. If CI re-poll still shows `unit tests FAILURE` with byte differences NOT in font-subset prefixes, escalate again with the specific binary-diff location for the operator to triage.
+- The fix is conservative: only six-uppercase-letter + `+` sequences are normalised. Real document content rarely has six consecutive uppercase letters followed by `+`; if it does, false-positive normalisation would still produce a deterministic output (since BOTH renders would normalise identically) — so the assertion would still hold either way.
