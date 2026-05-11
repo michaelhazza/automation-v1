@@ -4151,3 +4151,62 @@ These items were classified ambiguous/directional during spec review. Spec mecha
   - Spec section: §8.4 step 9 (log persistence), §17.1 + §17.3 (retention), §20.8 (contract), §21.1 (RLS), §19.1 (schema file + prune job), §19.4 (migration).
   - Rationale: cleaner RLS surface (symmetric with the other four sandbox tables); line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` enforceable at the DB layer (a JSONB column couldn't); 90d retention lifecycle decoupled from the general application log layer.
   - Build impact: schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). No longer a chunk-zero gating decision.
+
+---
+
+## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11T08:06:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-sandbox-isolation-2026-05-11T08-06-30Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Verdict:** NON_CONFORMANT — 14 directional / ambiguous gaps. The 3 critical items (REQ #11, #28, #29) together prevent the feature from working end-to-end on the happy path; address them as a single focused builder pass before invoking `pr-reviewer`.
+
+- [ ] **REQ #11 (Critical) — `runTask` does not call `runHarvest` on the happy path**
+  - Spec section: §8.4, §22 (harvest happens inline within `runTask` for the happy path).
+  - Gap: `server/services/sandboxExecutionService.ts:367-376` throws `sandbox_harvest_failed` with comment `TODO(C7): wire to runHarvest()`. The harvest pipeline IS implemented in `sandboxHarvestService.ts` but `runTask` never invokes it after the provider returns terminal. Result: every successful sandbox call fails with a synthetic harvest error.
+  - Suggested approach: in `_attemptProviderStart` after the provider returns `providerOutput`, replace the throw with a call to `runHarvest(input.sandboxExecutionId, { ...tenancy from input, outputSchemaRef: input.outputSchemaRef, credentialAliases: input.credentialIssuanceContext.aliases.map(a => ({ alias: a.alias, connectionId: a.connectionId })), policyArtefactLimits: input.policy.artefactLimits })` and return its result. Before the call, transition the row from `running` (or current pre-terminal state) to `harvesting` via an atomic UPDATE WHERE status predicate so the harvest pipeline's own §24.3 race semantics engage. The harvest pipeline will own the terminal write in step 12.
+
+- [ ] **REQ #28 (Critical) — `sandbox_start_failed` telemetry event never emitted**
+  - Spec section: §14.5 (pre-start failure path MUST emit `sandbox_start_failed`).
+  - Gap: grep finds the string only in the schema enum and in `verify-sandbox-minimum-events.sh`. No production code writes this event row. CI gate already FAILS for this reason.
+  - Suggested approach: add a telemetry event writer in C5's `_handleExistingRow` (Case 7 — MAX_START_ATTEMPTS reached) and in `_attemptProviderStart` (catch branch, before the `provider_unavailable` UPDATE). Use `sandboxHarvestService`'s `writeTelemetryEvent` shape extracted into a smaller helper, or call into it directly. Payload per spec §14.2 row `sandbox_start_failed`: `{ reason, providerErrorCode? }`.
+
+- [ ] **REQ #29 (Critical) — `sandbox_start` telemetry event never emitted**
+  - Spec section: §14.5 (post-start path MUST emit `sandbox_start`).
+  - Gap: same shape as #28 — only present in schema enum + gate script. No production writer.
+  - Suggested approach: emit `sandbox_start` from `_attemptProviderStart` immediately after `provider.runTask(input)` returns successfully and BEFORE the harvest invocation (added in REQ #11). Payload per spec §14.2 row `sandbox_start`: `{ ceilings, network_policy, alias_count }` — derive from the resolved ceilings, `input.policy.network`, and `input.credentialIssuanceContext.aliases.length`.
+
+- [ ] **REQ #6 (High) — `sandbox_logs.line` length CHECK constraint**
+  - Spec section: §20.8 (`CHECK (length(line) <= MAX_LOG_LINE_BYTES)` — V1 default 64 KB per line).
+  - Gap: schema and migration `0322` carry no length CHECK. Service-layer truncation at `sandboxHarvestService.ts:333-337` partially substitutes but spec pins this as a DB constraint (defence-in-depth against bypass).
+  - Suggested approach: write a corrective migration `0325_add_sandbox_logs_line_length_check.sql` with `ALTER TABLE sandbox_logs ADD CONSTRAINT sandbox_logs_line_length_check CHECK (length(line) <= 65536)`. Paired down. Update the Drizzle schema to declare the constraint so generated migrations align. Verify the service-layer truncation at line 333 already keeps lines under the limit (it does — `MAX_LOG_LINE_BYTES = 65536`).
+
+- [ ] **REQ #20 (High) — `sandboxMeteringQueryPure.ts` missing**
+  - Spec section: §12.6, §19.1, §25.1.
+  - Gap: spec names the file path, the function names (`getOrgSandboxMinutes(orgId, monthRange)`, `getSubaccountSandboxMinutes(orgId, subaccountId, monthRange)`), and the test file. None exist.
+  - Suggested approach: create `server/services/sandboxMeteringQueryPure.ts` exposing the two functions as pure SQL composers (return `SQL` fragments, callers wrap with `withOrgTx`). The rollup is over `llm_requests` filtered by `source_type = 'sandbox_compute'`, summing `sandbox_wall_clock_ms / 60_000` for "minutes". Decide month-range semantics (closed-open interval on `billing_month`) and pure-test the SQL string output against fixtures. Add `server/services/__tests__/sandboxMeteringQueryPure.test.ts`.
+
+- [ ] **REQ #31 (Medium) — `withSandboxProvider` emits diagnostics only as logs, not DB rows**
+  - Spec section: §14.2 (DB telemetry events) + §14.3 (structured log events) — both required.
+  - Gap: `server/lib/withSandboxProvider.ts` emits `provider_diagnostic` and `provider_unavailable` to the logger only. Progress.md acknowledges the lib wrapper doesn't carry the HarvestContext required for DB rows.
+  - Suggested approach: extend the `withSandboxProvider` options type with optional tenancy fields (`organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `provider`); when present, write a `sandbox_telemetry_events` row alongside the log line. Audit every call site and pass the context. For call sites without context (rare — mostly the harvest-step provider reads), keep the log-only path as a documented fallback with a `// no-tenancy-context: defaults to log-only` comment.
+
+- [ ] **REQ #35 (Medium, AMBIGUOUS) — `sandboxArtefactPurgeJob` trigger from run-soft-delete**
+  - Spec section: §17.4 (artefacts physically deleted from object storage by `sandbox-artefact-purge` job triggered by the soft-delete event).
+  - Gap: job exists and is registered, but the trigger from the run-soft-delete cascade was not surveyed end-to-end during this conformance run.
+  - Suggested approach: confirm whether the existing run-deletion path (the soft-delete handler used elsewhere in the codebase) calls `boss.send(SANDBOX_ARTEFACT_PURGE_JOB, { agentRunId })` for the affected runs. If yes, mark this PASS; if no, wire the call from the soft-delete service.
+
+- [ ] **REQ #36 (Medium) — Ceiling-monitor + wall-clock-kill jobs do not call provider terminate**
+  - Spec section: §10.2 ("calls the provider terminate API and writes `timed_out`" / "calls the provider terminate API directly").
+  - Gap: both jobs in `server/jobs/sandboxCeilingMonitorJob.ts` and `server/jobs/sandboxWallClockKillJob.ts` only update the DB row to `harvesting` with an `errorReason`. Neither calls `provider.terminate(provider_sandbox_id)` via `withSandboxProvider`. The conservative choice (let harvest pipeline handle teardown via its own close path) is defensible but diverges from the spec's named mechanism.
+  - Suggested approach (operator-decision): either (a) wire `withSandboxProvider({ phase: 'terminal', sandboxExecutionId, call: () => provider.terminate(providerSandboxId) })` into both jobs before the DB UPDATE, importing the provider via the resolver registry; or (b) write a one-paragraph spec amendment clarifying that "calls the provider terminate API" is satisfied by transitioning to `harvesting` + harvest pipeline's existing teardown call (which IS via withSandboxProvider). Option (b) is lower-risk but rewrites spec wording.
+
+- [ ] **REQ #55 (Medium) — Sandbox teardown verification missing entirely**
+  - Spec section: §17.5 (`sandbox.teardown.verified` / `sandbox.teardown.unverified` log events; operator-paging on unverified after 60s + backoff).
+  - Gap: zero matches for either event name in `server/`. e2bSandbox calls `terminateSandbox` but does not verify-then-emit. localDockerSandbox similar.
+  - Suggested approach: add a `verifyTeardown(providerSandboxId, sandboxExecutionId)` method on each provider that polls (with `withBackoff`) until the sandbox is no longer enumerable in the provider's sandbox list, with a 60s grace + retry. On success, emit `sandbox.teardown.verified` log. On failure, emit `sandbox.teardown.unverified` log + write a structured op-paging event (path TBD per existing operator-paging convention in the codebase). Call from the harvest pipeline's terminal step (after `assertValidTransition`).
+
+- [ ] **REQ #57 (High, AMBIGUOUS) — Credential value-threading into `/workspace/secrets/` is acknowledged-incomplete**
+  - Spec section: §11.1 (sandbox receives task-scoped, sub-account-scoped credentials mounted as files).
+  - Gap: `server/services/sandbox/e2bSandbox.ts:258-265` declares the file-mount intent but the loop body is a no-op with `void alias.alias + targetPath` and a comment "credential value is not available in the input descriptor in V1. C13 (adapter rewiring) threads the issued credential value through". The C13 adapter passes `credentialIssuanceContext: { aliases: [] }` — no value-threading happens. Sandbox cannot receive credentials in V1.
+  - Suggested approach: extend `SandboxRunTaskInput.credentialIssuanceContext` to carry pre-issued credential values (or a callable to issue at sandbox start). Plumb the calling adapter (`ieeDevBackend.dispatch`) to call `credentialBrokerService.issueCredential` for each requested alias before invoking `runTask`, attach the materialised credential value, and let `e2bSandbox` write each via `sdkClient.writeFile(sandboxId, '/workspace/secrets/{alias}.token', Buffer.from(value), { mode: 0o400 })`. Verify the `redactionPattern: RegExp` returned by the broker (REQ #13 PASS) is registered in the harvest pipeline's per-execution pattern set so the value is redacted from harvested outputs.
