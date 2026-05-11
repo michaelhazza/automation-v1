@@ -1328,7 +1328,7 @@ UNINSTALL webhook flips agency status to `disconnected` AND mass-soft-deletes ch
 <a id="credential-broker-operator-session-mode"></a>
 ## Credential Broker — operator_session mode
 
-Spec: `tasks/builds/operator-session-identity/spec.md`. Plan: `tasks/builds/operator-session-identity/plan.md`. Tables: `operator_session_consents` (migration 0321) + four columns on `integration_connections` (0322).
+Spec: `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`. Plan: `tasks/builds/operator-session-identity/plan.md`. Tables: `operator_session_consents` (migration 0321) + four columns on `integration_connections` (0322).
 
 ### Key decisions
 - **Two-column credential state** — `usability_state` (broker gate, only `connected_usable` returns token material) vs `plan_verification_status` (audit signal). See KNOWLEDGE.md entry on the same pattern.

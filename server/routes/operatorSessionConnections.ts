@@ -250,6 +250,7 @@ router.post(
       await db.execute(sql`
         SELECT id FROM integration_connections
         WHERE subaccount_id = ${subaccount.id}::uuid
+          AND organisation_id = ${req.orgId!}::uuid
           AND auth_type = 'operator_session'
           AND is_default = true
         FOR UPDATE
@@ -262,6 +263,7 @@ router.post(
         .where(
           and(
             eq(integrationConnections.subaccountId, subaccount.id),
+            eq(integrationConnections.organisationId, req.orgId!),
             eq(integrationConnections.authType, 'operator_session'),
             eq(integrationConnections.isDefault, true),
           ),
@@ -275,6 +277,7 @@ router.post(
           and(
             eq(integrationConnections.id, req.params.connId),
             eq(integrationConnections.subaccountId, subaccount.id),
+            eq(integrationConnections.organisationId, req.orgId!),
             eq(integrationConnections.authType, 'operator_session'),
           ),
         )
@@ -401,8 +404,19 @@ router.patch(
     const [updated] = await db
       .update(integrationConnections)
       .set({ configJson: updatedConfig, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, req.params.connId))
+      .where(
+        and(
+          eq(integrationConnections.id, req.params.connId),
+          eq(integrationConnections.organisationId, req.orgId!),
+          eq(integrationConnections.subaccountId, subaccount.id),
+          eq(integrationConnections.authType, 'operator_session'),
+        ),
+      )
       .returning();
+
+    if (!updated) {
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
 
     const cfg = (updated.configJson as { operator_session?: { availabilityScope?: string; allowedAgentIds?: string[] | null } } | null)?.operator_session;
     res.json({

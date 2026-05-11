@@ -6,7 +6,7 @@
 // refresh/revocation capabilities, and which tiers are sanctioned for
 // runtime use vs opt-in only.
 //
-// Spec: docs/operator-session-identity-spec.md §10.2, §10.3
+// Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §10.2, §10.3
 // ---------------------------------------------------------------------------
 
 export type ProviderCapabilityEntry = {

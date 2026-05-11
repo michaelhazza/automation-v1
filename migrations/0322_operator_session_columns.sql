@@ -8,7 +8,7 @@
 -- and the auth_type CHECK constraint (no prior constraint exists — verified by
 -- grepping all migrations).
 --
--- Spec: docs/operator-session-identity-spec.md §7.3, §7.4, §8.3, §8.4
+-- Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §7.3, §7.4, §8.3, §8.4
 
 ALTER TABLE integration_connections
   ADD COLUMN IF NOT EXISTS usability_state          text,

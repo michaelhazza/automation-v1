@@ -8,7 +8,7 @@
  * for listing allowed subscriptions for an agent.
  *
  * All methods assume they are called within an active withOrgTx context
- * (opened by the calling route). They call getOrgScopedDb() internally.
+ * (opened by the `authenticate` middleware). They call getOrgScopedDb() internally.
  *
  * Write-ownership rules (spec §7.5):
  *   - connect() is the SOLE owner of the initial usability_state value on INSERT.
@@ -175,7 +175,7 @@ export const operatorSessionService = {
   /**
    * Connect a new AI Subscription (operator session) for the given user.
    *
-   * Called within an active withOrgTx context (the route opens the transaction).
+   * Called within an active withOrgTx context (the `authenticate` middleware opens the org-scoped transaction).
    *
    * Steps (Branch B — self_declaration with disclosure):
    *   1. Registry guard: connectionMechanism === 'none_verified' → 501
@@ -346,7 +346,7 @@ export const operatorSessionService = {
    * Called when the connection is in connected_needs_consent (disclosure version bumped)
    * or connected_unverified (post-initial-connect with no prior acceptance).
    *
-   * Must be called within an active withOrgTx context.
+   * Must be called within an active withOrgTx context (opened by the `authenticate` middleware).
    */
   async reaccept(input: {
     organisationId: string;
@@ -453,7 +453,7 @@ export const operatorSessionService = {
    * Result is ordered: Default first, then non-default by label ASC NULLS LAST,
    * then by id ASC as a tiebreaker.
    *
-   * Must be called within an active withOrgTx context.
+   * Must be called within an active withOrgTx context (opened by the `authenticate` middleware).
    */
   async listAllowedSubscriptionsForAgent(input: {
     organisationId: string;
@@ -523,7 +523,7 @@ export const operatorSessionService = {
    *
    * Result is ordered: Default first, then label ASC NULLS LAST, then id ASC.
    *
-   * Must be called within an active withOrgTx context.
+   * Must be called within an active withOrgTx context (opened by the `authenticate` middleware).
    */
   async listForSubaccount(input: {
     organisationId: string;
@@ -586,7 +586,7 @@ export const operatorSessionService = {
    * Returns { transitioned: false } if the connection is already in a
    * non-usable state or if the disclosure is current.
    *
-   * Must be called within an active withOrgTx context.
+   * Must be called within an active withOrgTx context (opened by the `authenticate` middleware).
    */
   async detectAndTransitionStaleDisclosure(input: {
     organisationId: string;

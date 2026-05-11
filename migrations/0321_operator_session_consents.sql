@@ -4,7 +4,7 @@
 -- with RLS, FORCE RLS, and the canonical three-guard org-isolation policy.
 --
 -- Manifest: see server/config/rlsProtectedTables.ts — keep in sync.
--- Spec: docs/operator-session-identity-spec.md §7.1, §7.2, §8.1, §8.2
+-- Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §7.1, §7.2, §8.1, §8.2
 
 -- ---------------------------------------------------------------------------
 -- operator_session_consents

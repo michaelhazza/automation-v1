@@ -14,7 +14,7 @@ set -euo pipefail
 #
 # This is CI-only — do NOT run locally during development.
 #
-# Spec: docs/operator-session-identity-spec.md §12 Chunk 1
+# Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §12 Chunk 1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

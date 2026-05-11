@@ -1,6 +1,6 @@
 // client/src/pages/govern/ConnectionsPage.tsx
 // Govern surface — Connections page (3-tab strip).
-// Spec: tasks/builds/operator-session-identity/spec.md §Chunk 10
+// Spec: tasks/builds/operator-session-identity/plan.md §Chunk 10
 
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -36,7 +36,13 @@ export default function ConnectionsPage() {
   }, [activeTab, setSearchParams]);
 
   const isWorkspace = viewMode !== 'org';
-  const subaccountId = isWorkspace ? getActiveClientId() ?? undefined : undefined;
+  // Prefer ?workspace= query param (set by SubaccountIntegrationsRoute redirect) when it looks
+  // like a valid UUID, so the subaccount context is preserved across the redirect.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const workspaceParam = searchParams.get('workspace');
+  const subaccountId = isWorkspace
+    ? (workspaceParam && UUID_RE.test(workspaceParam) ? workspaceParam : getActiveClientId() ?? undefined)
+    : undefined;
 
   const activeTabDef = TAB_DEFS.find(t => t.id === activeTab)!;
 
