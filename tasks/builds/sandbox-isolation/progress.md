@@ -65,7 +65,7 @@
 | # | Chunk | Status | G1 attempts | Commit | Notes |
 |---|---|---|---|---|---|
 | 1 | C1a — Shared types + scaffolding | done | 1 | `babc3354` | 254 lines, 19 exports; tasks/current-focus.md was already at BUILDING (no-op for that file) |
-| 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | pending | — | — | — |
+| 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | done | 1 | (next) | Migrations 0321/0322/0323; sandbox_logs MAX_LOG_LINE_BYTES intentionally deferred from DB CHECK to service-layer truncation (write-amplification avoidance); flag for spec-conformance |
 | 3 | C2 — FailureReason enum extension | pending | — | — | — |
 | 4 | C3 — llm_requests extension | pending | — | — | — |
 | 5 | C4 — Provider resolver + inlineSandbox | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C1a
-- head: babc33540561574905c6cf18d35c6ba23c828573
+- last_chunk_committed: C1b (commit pending)
+- head: 0948ebbd36985ed167e2c6942bf919e5674e7a11
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
-- migration_count: 373
-- captured_at: 2026-05-11T04:17:41Z
+- migration_count: 379
+- captured_at: 2026-05-11T04:30:59Z
 
 ---
 
