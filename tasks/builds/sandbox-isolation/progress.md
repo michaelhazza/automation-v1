@@ -45,11 +45,56 @@
 
 ---
 
-## Phase 2 — BUILD (queued)
+## Phase 2 — BUILD (in progress)
 
-Awaits operator launching `feature-coordinator` in a new Claude Code session. Plan authoring is feature-coordinator's first step (invoking `architect` against this spec).
+**Coordinator:** feature-coordinator (inline in main session, Opus)
+**Mode:** autonomous (operator pre-authorised proceed at plan-gate; no per-chunk confirmation)
+**Started:** 2026-05-11T03:25:00Z
 
-Per spec §23.1, the build is 14 chunks (C1-C14) with explicit dependency graph. C1 builds the five Drizzle schemas + four SQL migrations + sequencing script. C12 builds the template Dockerfile + CI publish pipeline (must complete before C13 adapter rewiring goes live). C13 rewires `iee_dev` to consume `SandboxExecutionService`. C14 closes with CI gates + doc-sync.
+### Plan authoring + review
+
+| Step | Status | Notes |
+|---|---|---|
+| S1 branch sync | done | 0 behind origin/main; no migration collisions; no merge needed |
+| architect plan authoring | done | 16 chunks (split spec §23's 14: C1→C1a/C1b; C11→C11a/C11b). ≈56 files. Plan: `tasks/builds/sandbox-isolation/plan.md` |
+| chatgpt-plan-review | done | 2 rounds, 16 findings auto-applied (10 Round 1 + 6 Round 2). Verdict APPROVED. Log: `tasks/review-logs/chatgpt-plan-review-sandbox-isolation-2026-05-11T03-53-38Z.md` |
+| Plan gate | autonomous-skip | Operator pre-authorised proceed; no manual confirmation required |
+
+### Chunk progress
+
+| # | Chunk | Status | G1 attempts | Commit | Notes |
+|---|---|---|---|---|---|
+| 1 | C1a — Shared types + scaffolding | done | 1 | `babc3354` | 254 lines, 19 exports; tasks/current-focus.md was already at BUILDING (no-op for that file) |
+| 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | pending | — | — | — |
+| 3 | C2 — FailureReason enum extension | pending | — | — | — |
+| 4 | C3 — llm_requests extension | pending | — | — | — |
+| 5 | C4 — Provider resolver + inlineSandbox | pending | — | — | — |
+| 6 | C12 — Template + CI publish + version parser | pending | — | — | — |
+| 7 | C5 — SandboxExecutionService skeleton + pure helpers | pending | — | — | — |
+| 8 | C6 — Output validation + redaction wiring | pending | — | — | — |
+| 9 | C7 — Harvest pipeline | pending | — | — | — |
+| 10 | C8 — withSandboxProvider + sandboxJobNames | pending | — | — | — |
+| 11 | C9 — e2bSandbox provider | pending | — | — | — |
+| 12 | C10 — localDockerSandbox provider | pending | — | — | — |
+| 13 | C11a — Execution-scoped pg-boss jobs | pending | — | — | — |
+| 14 | C11b — Retention-scoped pg-boss jobs | pending | — | — | — |
+| 15 | C13 — iee_dev adapter rewiring | pending | — | — | — |
+| 16 | C14 — CI gates + doc-sync | pending | — | — | — |
+
+### Pre-existing branch state (informational)
+
+Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolation:
+- `server/services/reportRenderingService.ts` — `@react-pdf/renderer` types missing
+- `server/services/reportTemplates/MacroReport.tsx` — same root cause
+
+Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
+
+## Environment snapshot
+- last_chunk_committed: C1a
+- head: babc33540561574905c6cf18d35c6ba23c828573
+- package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
+- migration_count: 373
+- captured_at: 2026-05-11T04:17:41Z
 
 ---
 
