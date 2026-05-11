@@ -76,7 +76,7 @@
 | 10 | C8 — withSandboxProvider + sandboxJobNames | done | 1 | (next) | sandboxJobNames.ts (all 7 queue constants for C11a/C11b consumption). withSandboxProvider with 3-attempt backoff + retry-after + slow-start diagnostics + ambiguous-terminal reconciliation enqueue (string-constant seam, no handler import). withSandboxProviderPure.ts with classifyProviderSignal + extractRetryAfterMs. 17 pure tests. Approved scope: replaced C7's providerCallStub with withSandboxProvider at 4 call sites. Diagnostics emitted as structured log events (not DB rows) — lib wrapper doesn't hold the full HarvestContext that telemetry rows require. |
 | 11 | C9 — e2bSandbox provider | done | 1 | (next) | e2bSandbox + e2bSandboxPure (4 helpers: terminal-signal mapper, latest-version guard, metadata-tag builder, credentialAliasPath). 29 pure tests. Module-init registerSandboxProvider('e2b', ...) per F1 fix. e2b SDK is interface-stubbed (real install post-merge once account provisioned); credential value-threading stubbed for C13. SANDBOX-DEF-EGRESS-MECH decision: DEFERRED to actual SDK install (audit-row schema unaffected) — recorded in tasks/todo.md. |
 | 12 | C10 — localDockerSandbox provider | done | 1 | (next) | localDockerSandbox + localDockerSandboxPure (dockerExitCodeToTerminal mapper + assertNotLatestLocalTemplateVersion guard). 24 pure tests. docker run --rm --network=none --read-only --stop-timeout via child_process.spawn with SIGTERM forwarding. Zero-cost rows per spec §12.5. Module-init registerSandboxProvider('local_docker', ...). |
-| 13 | C11a — Execution-scoped pg-boss jobs | pending | — | — | — |
+| 13 | C11a — Execution-scoped pg-boss jobs | done | 1 | (next) | 4 jobs (harvestReconciliation, ceilingMonitor, wallClockKill, artefactPurge) + 2 pure modules + 2 tests (44 pure-test cases) + queueService.ts and jobConfig.ts wiring. Approved scope: jobConfig.ts inclusion (pg-boss job config registry). Reconciliation cron 5min; ceiling monitor singletonKey = sandbox_execution_id. |
 | 14 | C11b — Retention-scoped pg-boss jobs | pending | — | — | — |
 | 15 | C13 — iee_dev adapter rewiring | pending | — | — | — |
 | 16 | C14 — CI gates + doc-sync | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C10 (commit pending)
-- head: 178c865e (C9)
+- last_chunk_committed: C11a (commit pending)
+- head: 26a87f7a (C10)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T07:35:00Z
+- captured_at: 2026-05-11T08:00:00Z
 
 ---
 

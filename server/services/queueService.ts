@@ -12,6 +12,7 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 import { setSystemWorkerContext } from './connectionTokenService.js';
+import { SANDBOX_HARVEST_RECONCILIATION_JOB } from '../lib/sandboxJobNames.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -1553,6 +1554,28 @@ export const queueService = {
         }
       });
       await boss.schedule('correction:pattern-detect', '0 5 * * *', {}); // 5am daily
+
+      // Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a)
+      {
+        const { registerSandboxHarvestReconciliationJob } = await import('../jobs/sandboxHarvestReconciliationJob.js');
+        await registerSandboxHarvestReconciliationJob(boss as any);
+        await boss.schedule(SANDBOX_HARVEST_RECONCILIATION_JOB, '*/5 * * * *', {}); // every 5 minutes
+      }
+      {
+        const { registerSandboxCeilingMonitorJob } = await import('../jobs/sandboxCeilingMonitorJob.js');
+        await registerSandboxCeilingMonitorJob(boss as any);
+        // No schedule — enqueued ad-hoc at sandbox start via boss.send with singletonKey.
+      }
+      {
+        const { registerSandboxWallClockKillJob } = await import('../jobs/sandboxWallClockKillJob.js');
+        await registerSandboxWallClockKillJob(boss as any);
+        // No schedule — one-shot, scheduled at sandbox start with startAfter = wallClockMs + buffer.
+      }
+      {
+        const { registerSandboxArtefactPurgeJob } = await import('../jobs/sandboxArtefactPurgeJob.js');
+        await registerSandboxArtefactPurgeJob(boss as any);
+        // No schedule — event-driven, enqueued on run soft-delete.
+      }
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
