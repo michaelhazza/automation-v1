@@ -1,7 +1,7 @@
--- Down migration for 0322_operator_session_columns.sql
+-- Down migration for 0326_operator_session_columns.sql
 --
--- Reverses all changes made to integration_connections in 0322.
--- Run this before 0321 down migration.
+-- Reverses all changes made to integration_connections in 0326.
+-- Run this before 0325 down migration.
 
 DROP INDEX IF EXISTS ic_subaccount_operator_session_default_unique;
 

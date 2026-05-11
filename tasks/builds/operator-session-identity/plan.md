@@ -15,14 +15,14 @@
 
 ## Migration number assignment (CRITICAL)
 
-The spec text (§7.1, §8.1, §12 Chunk 1) names migrations `0318` and `0319`. Those numbers are STALE. Main has already merged migrations through `0320`. This plan uses:
+The spec text (§7.1, §8.1, §12 Chunk 1) names migrations `0318` and `0319`. Those numbers are STALE. Main has already merged migrations through `0324`. This plan uses:
 
 | Spec text says | Use this number instead | Filename |
 |---|---|---|
-| `0318_operator_session_consents.sql` | `0321` | `migrations/0321_operator_session_consents.sql` |
-| `0319_operator_session_columns.sql` | `0322` | `migrations/0322_operator_session_columns.sql` |
+| `0318_operator_session_consents.sql` | `0325` | `migrations/0325_operator_session_consents.sql` |
+| `0319_operator_session_columns.sql` | `0326` | `migrations/0326_operator_session_columns.sql` |
 
-Dependency order (0321 first, 0322 depends on it) is preserved exactly as the spec specifies, only the numeric prefixes change. Every reference to the old numbers across this plan, in code comments, in `rlsProtectedTables.ts` `policyMigration` entries, in `RAISE EXCEPTION` strings, in test files, and in build artefacts uses the new numbers. Source: `KNOWLEDGE.md` (Pattern: Migration-number collision after S2 sync requires renumbering forward).
+Dependency order (0325 first, 0326 depends on it) is preserved exactly as the spec specifies, only the numeric prefixes change. Every reference to the old numbers across this plan, in code comments, in `rlsProtectedTables.ts` `policyMigration` entries, in `RAISE EXCEPTION` strings, in test files, and in build artefacts uses the new numbers. Source: `KNOWLEDGE.md` (Pattern: Migration-number collision after S2 sync requires renumbering forward). The 0321/0322 → 0325/0326 step in Phase 3 happened after a second S2 sync when main shipped the sandbox-isolation feature (migrations 0321-0324).
 
 Pre-Chunk-1 verification (the builder must run this):
 
@@ -30,7 +30,7 @@ Pre-Chunk-1 verification (the builder must run this):
 git ls-tree -r origin/main migrations/ | Select-String "032[0-9]"
 ```
 
-Confirm `0320` is present on main and `0321`/`0322` are absent before claiming those numbers. If main has advanced again, take the next free pair (`0323`/`0324`) and update every reference in this plan.
+Confirm the migration files are present on main and the chosen numbers are absent before claiming them. Phase 3 (2026-05-12) re-renumbered from 0321/0322 → 0325/0326 after main shipped sandbox-isolation (migrations 0321-0324).
 
 ---
 
@@ -364,10 +364,10 @@ Chunks are forward-only: no chunk references files created in a later chunk. Eac
 
 | Path | Purpose |
 |---|---|
-| `migrations/0321_operator_session_consents.sql` | Creates `operator_session_consents` + `operator_session_consent_events` tables with RLS, FORCE RLS, three-guard org-isolation policy, FK constraints, and `UNIQUE (connection_id, disclosure_version)` named `operator_session_consents_connection_disclosure_unique` |
-| `migrations/0321_operator_session_consents.down.sql` | Drop both tables and policies |
-| `migrations/0322_operator_session_columns.sql` | Adds 6 columns to `integration_connections`; partial unique index `ic_subaccount_operator_session_default_unique`; adds `'operator_session'` to `auth_type` CHECK constraint |
-| `migrations/0322_operator_session_columns.down.sql` | Reverse |
+| `migrations/0325_operator_session_consents.sql` | Creates `operator_session_consents` + `operator_session_consent_events` tables with RLS, FORCE RLS, three-guard org-isolation policy, FK constraints, and `UNIQUE (connection_id, disclosure_version)` named `operator_session_consents_connection_disclosure_unique` |
+| `migrations/0325_operator_session_consents.down.sql` | Drop both tables and policies |
+| `migrations/0326_operator_session_columns.sql` | Adds 6 columns to `integration_connections`; partial unique index `ic_subaccount_operator_session_default_unique`; adds `'operator_session'` to `auth_type` CHECK constraint |
+| `migrations/0326_operator_session_columns.down.sql` | Reverse |
 | `server/db/schema/operatorSessionConsents.ts` | Drizzle schema for the consents table |
 | `server/db/schema/operatorSessionConsentEvents.ts` | Drizzle schema for the consent events table |
 | `server/config/operatorSessionProviders.ts` | Provider capability registry + `OPERATOR_SESSION_DISCLOSURE_VERSION` constant (canonical declaration in §4.2) |
@@ -380,9 +380,9 @@ Chunks are forward-only: no chunk references files created in a later chunk. Eac
 |---|---|
 | `server/db/schema/integrationConnections.ts` | Add 6 new columns (`usabilityState`, `planTier`, `planVerificationStatus`, `planVerifiedAt`, `consentRecordId`, `isDefault`); add `'operator_session'` to the `authType` `$type<>` union (current union: `'oauth2' \| 'api_key' \| 'service_account' \| 'github_app' \| 'web_login'`, becomes `... \| 'operator_session'`); add Drizzle relation to `operatorSessionConsents.id` via `consentRecordId` |
 | `server/db/schema/index.ts` | Re-export the two new schema files |
-| `server/config/rlsProtectedTables.ts` | Add manifest entries for `operator_session_consents` and `operator_session_consent_events`; both with `policyMigration: '0321_operator_session_consents.sql'` |
+| `server/config/rlsProtectedTables.ts` | Add manifest entries for `operator_session_consents` and `operator_session_consent_events`; both with `policyMigration: '0325_operator_session_consents.sql'` |
 
-**Migration 0321 (consents + consent_events) — key DDL contracts:**
+**Migration 0325 (consents + consent_events) — key DDL contracts:**
 
 - `operator_session_consents`:
   - PK `id uuid DEFAULT gen_random_uuid()`
@@ -404,7 +404,7 @@ Chunks are forward-only: no chunk references files created in a later chunk. Eac
   - FK `superseded_by_consent_id` `REFERENCES operator_session_consents(id) ON DELETE SET NULL` (NOT NULL only for 'superseded')
   - RLS: same three-guard pattern
 
-**Migration 0322 (integration_connections columns) — key DDL contracts:**
+**Migration 0326 (integration_connections columns) — key DDL contracts:**
 
 - `ALTER TABLE integration_connections ADD COLUMN`:
   - `usability_state text` (nullable; existing rows undisturbed)
@@ -1437,7 +1437,7 @@ No token material.
 
 **Risk.** The spec text names migrations `0318`/`0319`, but `0318-0320` are already on main from PR #284 pre-test-hardening. If the builder copy-pastes the spec numbers without reading the header constraint in this plan, the migration sequence breaks at CI.
 
-**Mitigation.** This plan's opening section ("Migration number assignment") sets `0321`/`0322` as the canonical numbers. The pre-Chunk-1 verification command (`git ls-tree -r origin/main migrations/ | Select-String "032[0-9]"`) is mandatory before the builder claims those numbers. If main has advanced further between plan-author time and build time, the builder takes the next free pair (`0323`/`0324`) and re-applies the rename. Source lesson: `KNOWLEDGE.md` (Pattern: Migration-number collision after S2 sync).
+**Mitigation.** This plan's opening section ("Migration number assignment") sets the canonical numbers. Phase 2 originally claimed `0321`/`0322`; Phase 3 (2026-05-12) re-renumbered to `0325`/`0326` after main shipped sandbox-isolation (migrations 0321-0324). The pre-Chunk-1 verification command (`git ls-tree -r origin/main migrations/ | Select-String "032[0-9]"`) is mandatory before any future builder claims migration numbers. Source lesson: `KNOWLEDGE.md` (Pattern: Migration-number collision after S2 sync).
 
 ### R2. Build-time gate creates a "complete-but-dark" surface (MEDIUM likelihood / LOW blast radius)
 
@@ -1543,7 +1543,7 @@ The handoff doc lists 6 open questions; this plan resolves or operationally pins
 | 10 | yes | yes | `build:client` | none new this chunk |
 | 11 | yes (markdown only) | — | — | none |
 
-**Migration number assignment is non-negotiable.** The opening section of this plan and the Chunk 1 detail both name `0321`/`0322`. Do NOT use the spec's `0318`/`0319` numbers. Do NOT pick a different pair without re-running `git ls-tree -r origin/main migrations/ | Select-String "032[0-9]"` and updating EVERY reference in this plan, the migration files, `rlsProtectedTables.ts` `policyMigration`, audit-event metadata, and any test file that quotes the migration number.
+**Migration number assignment is non-negotiable.** The opening section of this plan and the Chunk 1 detail both name `0325`/`0326` (re-renumbered from 0321/0322 in Phase 3 after sandbox-isolation shipped). Do NOT use the spec's `0318`/`0319` numbers. Do NOT pick a different pair without re-running `git ls-tree -r origin/main migrations/ | Select-String "032[0-9]"` and updating EVERY reference in this plan, the migration files, `rlsProtectedTables.ts` `policyMigration`, audit-event metadata, and any test file that quotes the migration number.
 
 **Chunk ordering is forward-only.** No chunk references files created in a later chunk. The order of merge to the integration branch should be: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11. Chunks 7-9 may proceed in parallel after Chunk 5 ships (different files), but Chunk 10 must run after all three to coordinate the `ConnectionsPage.tsx` mount.
 

@@ -12,7 +12,7 @@ import { users } from './users';
 // scripts/verify-operator-session-consent-immutable.sh).
 //
 // Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §7.1, §8.1
-// Migration: 0321_operator_session_consents.sql
+// Migration: 0325_operator_session_consents.sql
 // ---------------------------------------------------------------------------
 
 export const operatorSessionConsents = pgTable(

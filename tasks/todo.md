@@ -4219,8 +4219,8 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
 
 - **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
-  - Files: `migrations/0322_operator_session_columns.down.sql:3`, `migrations/0321_operator_session_consents.down.sql:7`
-  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0322.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
+  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
+  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
   - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
 
 - **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
@@ -4239,9 +4239,9 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
 
 - **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
-  - File: `migrations/0322_operator_session_columns.sql` (`usability_state text` column)
+  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
   - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
-  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0322 stays append-only.
+  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
 
 - **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
   - File: `server/services/operatorSessionConsentService.ts` lines 197-209

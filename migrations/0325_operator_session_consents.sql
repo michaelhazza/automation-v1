@@ -1,4 +1,4 @@
--- Migration 0321: Operator Session Identity — consent ledger tables
+-- Migration 0325: Operator Session Identity — consent ledger tables
 --
 -- Creates operator_session_consents and operator_session_consent_events
 -- with RLS, FORCE RLS, and the canonical three-guard org-isolation policy.

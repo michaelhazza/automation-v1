@@ -1,4 +1,4 @@
--- Migration 0322: Operator Session Identity — integration_connections columns
+-- Migration 0326: Operator Session Identity — integration_connections columns
 --
 -- Adds 6 new columns to integration_connections for operator-session auth type
 -- support: usability_state, plan_tier, plan_verification_status, plan_verified_at,

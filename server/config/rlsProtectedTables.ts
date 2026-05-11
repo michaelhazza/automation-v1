@@ -1215,17 +1215,17 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0318_webhook_replay_nonces.sql',
     rationale: 'Per-org webhook replay nonces (deliveryId from provider) — cross-tenant leak would reveal which webhook events any other org has received; UNIQUE constraint is the dedup invariant.',
   },
-  // 0321 — Operator Session Identity: consent ledger + event log
+  // 0325 — Operator Session Identity: consent ledger + event log
   {
     tableName: 'operator_session_consents',
     schemaFile: 'operatorSessionConsents.ts',
-    policyMigration: '0321_operator_session_consents.sql',
+    policyMigration: '0325_operator_session_consents.sql',
     rationale: 'Consent audit log — contains user identity, plan tier, and disclosure acceptance for AI Subscription connections.',
   },
   {
     tableName: 'operator_session_consent_events',
     schemaFile: 'operatorSessionConsentEvents.ts',
-    policyMigration: '0321_operator_session_consents.sql',
+    policyMigration: '0325_operator_session_consents.sql',
     rationale: 'Consent event ledger — records granted/revoked/superseded events; cross-tenant leak would allow one org to see another org\'s consent history.',
   },
 ];
