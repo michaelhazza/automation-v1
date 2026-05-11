@@ -67,7 +67,7 @@
 | 1 | C1a — Shared types + scaffolding | done | 1 | `babc3354` | 254 lines, 19 exports; tasks/current-focus.md was already at BUILDING (no-op for that file) |
 | 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | done | 1 | `951e62cb` | Migrations 0321/0322/0323; sandbox_logs MAX_LOG_LINE_BYTES intentionally deferred from DB CHECK to service-layer truncation (write-amplification avoidance); flag for spec-conformance |
 | 3 | C2 — FailureReason enum extension | done | 1 | (next) | Plan said `shared/iee/failure.ts`; actual enum lives in `shared/iee/failureReason.ts`. Builder routed to correct file. Plan-doc inaccuracy only — not a plan gap. |
-| 4 | C3 — llm_requests extension | pending | — | — | — |
+| 4 | C3 — llm_requests extension | done | 1 | (next) | Migration 0324. Two CHECK constraints extended (`llm_requests_attribution_ck` + `llm_requests_execution_phase_ck` — second one was a consequential fix because sandbox rows need execution_phase=NULL). Approved scope expansion: `shared/types/systemPnl.ts` 1-line `InFlightSourceType` superset extension to keep router's `ctx.sourceType: SourceType` assignment typecheck-clean. |
 | 5 | C4 — Provider resolver + inlineSandbox | pending | — | — | — |
 | 6 | C12 — Template + CI publish + version parser | pending | — | — | — |
 | 7 | C5 — SandboxExecutionService skeleton + pure helpers | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C2 (commit pending)
-- head: 951e62cb (C1b)
+- last_chunk_committed: C3 (commit pending)
+- head: 4056f455 (C2)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
-- migration_count: 379
-- captured_at: 2026-05-11T04:30:59Z
+- migration_count: 381
+- captured_at: 2026-05-11T04:55:00Z
 
 ---
 
