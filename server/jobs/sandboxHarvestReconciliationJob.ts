@@ -51,6 +51,7 @@ interface StuckRow {
   task_id: string;
   status: string;
   provider: string;
+  provider_sandbox_id: string | null;
   template_name: string;
   template_version: string;
   started_at: string | null;
@@ -86,6 +87,7 @@ export async function sandboxHarvestReconciliationHandler(): Promise<void> {
           task_id,
           status,
           provider,
+          provider_sandbox_id,
           template_name,
           template_version,
           started_at,
@@ -189,22 +191,68 @@ async function reconcileExecution(
     `);
   }
 
-  // For stuck pre-terminal rows (worker died after start-claim but before harvest),
-  // flip status to 'harvesting' so step 1 sees the expected non-terminal status
-  // and enters the recovery path. Without this flip, step 1's `row.status !==
-  // 'harvesting'` branch would cast `pending`/`running` as SandboxTerminalState
-  // and downstream writes would fail the CHECK constraint or surface a synthetic
-  // non-terminal value to callers as if it were terminal.
+  // For stuck pre-terminal rows the worker has presumably died. Split the
+  // recovery path by (status, provider_sandbox_id):
+  //
+  //   pending  + null     → never claimed a provider sandbox; mark terminal as
+  //                         `provider_unavailable` directly (NO harvest call).
+  //                         Flipping to `harvesting` here would violate the DB
+  //                         CHECK `sandbox_executions_running_harvesting_needs_provider_id`
+  //                         and there is nothing to harvest.
+  //   running  + non-null → worker died mid-execution after start-claim; flip
+  //                         to `harvesting` and invoke the harvest pipeline
+  //                         (it will read provider state via the SDK).
+  //   pending  + non-null → anomalous — would already have violated the paired
+  //                         CHECK `provider_sandbox_id_not_pending` on write,
+  //                         so this case is impossible. Skip with a warning.
+  //   running  + null     → anomalous — would already have violated the
+  //                         running/harvesting CHECK on write. Skip with a warning.
+  //
+  // Closes Phase 3 chatgpt-pr-review R2-F1.
   if ((STUCK_PRE_TERMINAL as readonly string[]).includes(row.status)) {
-    await tx.execute(sql`
-      UPDATE sandbox_executions
-      SET
-        status = 'harvesting',
-        attempt_number = attempt_number + 1
-      WHERE id = ${sandboxExecutionId}::uuid
-        AND organisation_id = ${row.organisation_id}::uuid
-        AND status = ANY(ARRAY['pending','running'])
-    `);
+    if (row.status === 'pending' && row.provider_sandbox_id === null) {
+      // Direct terminal write — no harvest pipeline.
+      await tx.execute(sql`
+        UPDATE sandbox_executions
+        SET
+          status = 'provider_unavailable',
+          error_reason = 'sandbox_provider_unavailable',
+          terminated_at = NOW(),
+          attempt_number = attempt_number + 1
+        WHERE id = ${sandboxExecutionId}::uuid
+          AND organisation_id = ${row.organisation_id}::uuid
+          AND status = 'pending'
+      `);
+
+      logger.info('sandbox.harvest_reconciliation.start_failed_terminal', {
+        sandboxExecutionId,
+        organisationId: row.organisation_id,
+        attempt,
+        priorStatus: row.status,
+      });
+      return;
+    }
+
+    if (row.status === 'running' && row.provider_sandbox_id !== null) {
+      await tx.execute(sql`
+        UPDATE sandbox_executions
+        SET
+          status = 'harvesting',
+          attempt_number = attempt_number + 1
+        WHERE id = ${sandboxExecutionId}::uuid
+          AND organisation_id = ${row.organisation_id}::uuid
+          AND status = 'running'
+      `);
+    } else {
+      // Anomalous shape that the CHECK constraints should already have prevented.
+      logger.warn('sandbox.harvest_reconciliation.anomalous_pre_terminal_row', {
+        sandboxExecutionId,
+        organisationId: row.organisation_id,
+        priorStatus: row.status,
+        hasProviderSandboxId: row.provider_sandbox_id !== null,
+      });
+      return;
+    }
   }
 
   // Invoke the harvest reconciliation function from C7.

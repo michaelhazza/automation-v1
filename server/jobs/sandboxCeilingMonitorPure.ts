@@ -56,3 +56,57 @@ export function isCostCeilingTripped(
 ): boolean {
   return estimatedCostCents >= costCeilCents;
 }
+
+/**
+ * The shape of a ceiling-tripped transition the caller must execute.
+ *
+ * `harvesting`    — the row is in `running` AND has a provider_sandbox_id;
+ *                   may safely move to `harvesting` with the ceiling-trip
+ *                   reason recorded.
+ * `start_failed`  — the row is still in `pending` with NULL
+ *                   provider_sandbox_id; the sandbox never claimed a
+ *                   provider-side handle, so it must terminate directly as
+ *                   `provider_unavailable` (no harvest call).
+ * `noop`          — the row is in `harvesting` (already in flight) or some
+ *                   other non-eligible state; the caller skips the write.
+ */
+export type CeilingTransition =
+  | { kind: 'harvesting'; reason: 'timed_out' | 'cost_ceiling_hit' }
+  | { kind: 'start_failed'; terminalStatus: 'provider_unavailable'; errorReason: 'sandbox_provider_unavailable' }
+  | { kind: 'noop'; rationale: 'already_harvesting' | 'unexpected_state' };
+
+/**
+ * Classify how a ceiling-tripped sandbox execution row should transition.
+ *
+ * Required because the DB CHECK constraint
+ * `sandbox_executions_running_harvesting_needs_provider_id` rejects any row
+ * that has status='running' or 'harvesting' with NULL provider_sandbox_id. A
+ * pending row (which has NULL provider_sandbox_id by the paired
+ * `provider_sandbox_id_not_pending` CHECK) cannot be moved to 'harvesting' —
+ * it never started, so the only legal terminal transition is
+ * 'provider_unavailable' direct.
+ *
+ * Pure function: no DB, no time, no side effects. Caller supplies the row's
+ * current status + providerSandboxId + which ceiling tripped, gets a
+ * machine-readable instruction back.
+ */
+export function classifyCeilingTransition(
+  status: string,
+  providerSandboxId: string | null,
+  ceilingType: 'timed_out' | 'cost_ceiling_hit',
+): CeilingTransition {
+  if (status === 'running' && providerSandboxId !== null) {
+    return { kind: 'harvesting', reason: ceilingType };
+  }
+  if (status === 'pending' && providerSandboxId === null) {
+    return {
+      kind: 'start_failed',
+      terminalStatus: 'provider_unavailable',
+      errorReason: 'sandbox_provider_unavailable',
+    };
+  }
+  if (status === 'harvesting') {
+    return { kind: 'noop', rationale: 'already_harvesting' };
+  }
+  return { kind: 'noop', rationale: 'unexpected_state' };
+}

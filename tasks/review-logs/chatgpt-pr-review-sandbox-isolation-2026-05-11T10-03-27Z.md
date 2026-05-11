@@ -77,4 +77,37 @@ Doc-sync gate PASS (4 docs updated + 9 n/a with rationale).
 - `tasks/todo.md` (F1 deferred + SANDBOX-F1 operator runbook)
 - `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md` (this log)
 
+### Round 2 — 2026-05-11T10:30:00Z
+
+**Operator directive (before triage):** *"whatever it is, let's fix it in this branch"* — overrides any defer instinct for this round. All findings implement-in-branch unless physically impossible.
+
+**Verdict from ChatGPT:** CHANGES_REQUESTED — *"fix the pending-to-harvesting CHECK violation before locking. The CI strict env wiring is the next most important."*
+
+**Top themes (finding_type vocabulary):** architecture (F1 transition classifier), test_coverage (T2 CI wiring), correctness/timing (T1 DB-anchored time).
+
+#### Findings — Recommendations and Decisions
+
+| ID | Title | Triage | Severity | Scope | My recommendation | Final decision | Rationale |
+|---|---|---|---|---|---|---|---|
+| F1-R2 | DB CHECK constraint violation on `pending → harvesting` flip in ceiling monitor + reconciliation | technical-escalated *(reason: severity=high)* | high | architectural | implement | **implement (operator: `whatever it is, let's fix it`)** | Real runtime bug — `sandbox_executions_running_harvesting_needs_provider_id` rejects status='harvesting' with NULL provider_sandbox_id; a pending row has NULL provider_sandbox_id by the paired CHECK. Confirmed in `sandboxCeilingMonitorJob.markForHarvest()` (line 186 `inArray(status, ['pending', 'running'])`) AND `sandboxHarvestReconciliationJob.reconcileExecution()` (line 206 `status = ANY(ARRAY['pending','running'])`). Both jobs would write a row that violates the CHECK constraint when a pending+null-provider-id row is swept. Fix: added pure classifier `classifyCeilingTransition(status, providerSandboxId, ceilingType): CeilingTransition` in `sandboxCeilingMonitorPure.ts` with 4 outcomes (`harvesting` / `start_failed` / `noop:already_harvesting` / `noop:unexpected_state`); ceiling monitor's `applyCeilingTransition` routes accordingly — `running+non-null → harvesting` (with race-safe `status='running'` WHERE), `pending+null → provider_unavailable` direct terminal write (skip harvest). Reconciliation job extended `SELECT` to include `provider_sandbox_id`, extended `StuckRow` type, and split `STUCK_PRE_TERMINAL` branch: `pending+null → provider_unavailable` direct terminal write + return (no harvest call), `running+non-null → harvesting` then invoke harvest. Pure tests added (8 cases covering all branches including anomalous shapes that the CHECK should already have prevented). |
+| T1-R2 | `Date.now()` in ceiling monitor should be DB-anchored | technical | medium | standard | implement | **implement (auto-applied)** | Project has documented DB-anchored / monotonic-time invariants for correctness-sensitive paths (`inboundRateLimiter.ts` uses `extract(epoch from now())` from DB query; `agentWorkingTimeService.ts` uses `process.hrtime.bigint()` for elapsed). Ceiling monitor enforces wall-clock + cost ceilings — drives timeout + billing — fits the same invariant. Fix: extended the row-load `SELECT` in `sandboxCeilingMonitorJob.ts` to compute `(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint` DB-side, returning elapsedMs anchored at both endpoints; removed `Date.now()` and `new Date(startedAt).getTime()` from the elapsed calc; left `startedAt` on the payload type for backwards-compat with prior queue entries (commented as no longer consumed). |
+| T2-R2 | `STRICT_TEMPLATE_TAG_CHECK` needs CI wiring | technical-escalated *(reason: scope expanded to high)* | high | architectural | implement | **implement (operator: `whatever it is, let's fix it`)** | ChatGPT caught the symptom (strict env var not wired) but **the real gap was wider — none of the 5 C14 sandbox gates were wired to any CI workflow at all.** Fix: added 5 steps to `.github/workflows/ci.yml § grep_invariants`: `verify-sandbox-classification`, `verify-sandbox-minimum-events`, `verify-no-sandbox-cost-update`, `verify-no-inline-sandbox-outside-test`, and `verify-template-version-coherence` with `STRICT_TEMPLATE_TAG_CHECK` set to `1` on `ready-to-merge` and `0` on PR (via `contains(github.event.pull_request.labels.*.name, 'ready-to-merge')` ternary). Also flipped `CURRENT_VERSION.version` + `PUBLISHED_VERSION.version` from `v1.0.0` to `local-dev-v1.0.0` so the strict gate stays green on this PR's `ready-to-merge` label — operator flips back to `v1.0.0` at first-publish time (recorded in SANDBOX-F1 step 0). |
+
+**Scope check (step 4):** ~250 lines across 8 files (2 job files + 1 pure module + 1 pure test + 1 workflow + 2 template version files + 1 todo). Above 500-line threshold? No — under. No scope warning needed.
+
+**G3 verification (step 6):** Lint 0 errors / 906 baseline warnings; typecheck 2 pre-existing `@react-pdf/renderer` errors (confirmed on origin/main); 72/72 sandbox-related vitest pass (27 ceiling-monitor pure + 16 templateVersionParser pure + 29 e2bSandbox pure).
+
+**Gate dry-run:** All 5 sandbox gates execute and PASS in default PR mode AND in STRICT_TEMPLATE_TAG_CHECK=1 mode (with the version-string flip).
+
+**Files changed in Round 2:**
+- `server/jobs/sandboxCeilingMonitorPure.ts` (F1 classifier + types)
+- `server/jobs/sandboxCeilingMonitorJob.ts` (T1 DB-anchored elapsed + F1 applyCeilingTransition split)
+- `server/jobs/sandboxHarvestReconciliationJob.ts` (F1 SELECT + StuckRow + split transition path)
+- `server/jobs/__tests__/sandboxCeilingMonitorPure.test.ts` (F1 +8 classifier tests; 19 → 27 total)
+- `.github/workflows/ci.yml` (T2 wire 5 sandbox gates + STRICT mode on ready-to-merge)
+- `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION` (T2 version → local-dev-v1.0.0)
+- `infra/sandbox-templates/synthetos-sandbox/PUBLISHED_VERSION` (T2 version → local-dev-v1.0.0)
+- `tasks/todo.md` (SANDBOX-F1 step 0 added — operator flips back to v1.0.0 at first-publish)
+- `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md` (this log)
+
 
