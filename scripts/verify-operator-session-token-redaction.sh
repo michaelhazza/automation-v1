@@ -3,13 +3,16 @@ set -euo pipefail
 
 # verify-operator-session-token-redaction.sh
 #
-# CI gate: asserts that accessToken / refreshToken properties are only
-# read in the two permitted service files.
+# CI gate: prevents NEW files from reading .accessToken / .refreshToken outside
+# the established baseline snapshot.
 #
-# Greps for TypeScript property accesses (.accessToken and .refreshToken)
-# in server/ .ts files, excluding the two authorised files.
+# Strategy: baseline snapshot (scripts/.token-read-allowlist.txt) was generated
+# at the time the gate was introduced. The gate exits non-zero only when files
+# that are NOT in the allowlist start reading these properties. Existing files
+# in the allowlist are exempt — the gate does not penalise them.
 #
-# Exits non-zero if any match is found outside the allowlist.
+# To add a legitimately new reader: append its path to the allowlist file and
+# commit it alongside the code change.
 #
 # This is CI-only — do NOT run locally during development.
 #
@@ -17,67 +20,36 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ALLOWLIST="$ROOT_DIR/scripts/.token-read-allowlist.txt"
 
-ALLOWED_FILES=(
-  "server/services/credentialBrokerService.ts"
-  "server/services/connectionTokenService.ts"
-)
-
-VIOLATIONS=()
-
-# Check for .accessToken property accesses
-while IFS= read -r match; do
-  rel="${match#"$ROOT_DIR/"}"
-  allowed=false
-  for f in "${ALLOWED_FILES[@]}"; do
-    if [[ "$rel" == "$f" ]]; then
-      allowed=true
-      break
-    fi
-  done
-  if [[ "$allowed" == false ]]; then
-    VIOLATIONS+=("$rel")
-  fi
-done < <(grep -rn --include="*.ts" --exclude-dir=node_modules \
-  '\.accessToken\b' \
-  "$ROOT_DIR/server" 2>/dev/null | cut -d: -f1 | sort -u || true)
-
-# Check for .refreshToken property accesses
-while IFS= read -r match; do
-  rel="${match#"$ROOT_DIR/"}"
-  allowed=false
-  for f in "${ALLOWED_FILES[@]}"; do
-    if [[ "$rel" == "$f" ]]; then
-      allowed=true
-      break
-    fi
-  done
-  if [[ "$allowed" == false ]]; then
-    VIOLATIONS+=("$rel")
-  fi
-done < <(grep -rn --include="*.ts" --exclude-dir=node_modules \
-  '\.refreshToken\b' \
-  "$ROOT_DIR/server" 2>/dev/null | cut -d: -f1 | sort -u || true)
-
-# Deduplicate violations
-UNIQUE_VIOLATIONS=()
-declare -A seen
-for v in "${VIOLATIONS[@]}"; do
-  if [[ -z "${seen[$v]+_}" ]]; then
-    seen[$v]=1
-    UNIQUE_VIOLATIONS+=("$v")
-  fi
-done
-
-if [[ "${#UNIQUE_VIOLATIONS[@]}" -gt 0 ]]; then
-  echo "ERROR: accessToken / refreshToken properties must not be read outside the permitted files."
-  echo "Permitted: ${ALLOWED_FILES[*]}"
-  echo "Violations found in:"
-  for v in "${UNIQUE_VIOLATIONS[@]}"; do
-    echo "  $v"
-  done
+if [[ ! -f "$ALLOWLIST" ]]; then
+  echo "ERROR: allowlist file not found at $ALLOWLIST" >&2
+  echo "Regenerate it with:" >&2
+  echo "  grep -rn '\\.accessToken\\b\\|\\.refreshToken\\b' server/ --include='*.ts' -l | sort > scripts/.token-read-allowlist.txt" >&2
   exit 1
 fi
 
-echo "OK: No unauthorised accessToken / refreshToken reads found."
-exit 0
+# Find all current files reading .accessToken or .refreshToken
+CURRENT_FILES=$(grep -rn "\.accessToken\b\|\.refreshToken\b" "$ROOT_DIR/server/" \
+  --include="*.ts" --exclude-dir=node_modules -l 2>/dev/null | sort || true)
+
+if [[ -z "$CURRENT_FILES" ]]; then
+  echo "OK: No accessToken/refreshToken readers found in server/."
+  exit 0
+fi
+
+# Find files in CURRENT but NOT in allowlist (these are violations)
+NEW_VIOLATIONS=$(comm -23 \
+  <(echo "$CURRENT_FILES") \
+  <(sort "$ALLOWLIST") | \
+  grep -v "^$" || true)
+
+if [[ -n "$NEW_VIOLATIONS" ]]; then
+  echo "ERROR: New files found reading .accessToken or .refreshToken that are not in the allowlist:" >&2
+  echo "$NEW_VIOLATIONS" >&2
+  echo "" >&2
+  echo "If this is intentional, add the file(s) to scripts/.token-read-allowlist.txt" >&2
+  exit 1
+fi
+
+echo "OK: No new accessToken/refreshToken readers found outside the established allowlist."

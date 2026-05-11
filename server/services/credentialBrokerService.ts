@@ -7,7 +7,8 @@ import { connectionTokenService } from './connectionTokenService.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { logger } from '../lib/logger.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
-import { assertCredentialUsableOrThrow, CredentialNotUsableError } from './credentialBrokerServicePure.js';
+import { assertCredentialUsableOrThrow, CredentialNotUsableError, orderResolvedCredentials } from './credentialBrokerServicePure.js';
+import type { OrderableRow } from './credentialBrokerServicePure.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -334,10 +335,20 @@ export const credentialBrokerService = {
    * Resolve the available credentials for a run context.
    * Lists active connections in scope; does NOT decrypt.
    * Used by Policy Envelope to capture credential availability at run start.
+   *
+   * Design note (§812-820): agent-specific filtering for operator_session rows is
+   * applied here via the optional agentId param. When agentId is omitted, only
+   * 'all_agents' operator_session rows are included (safe default for legacy callers).
+   * The specific_agents path is also exercised at the agent-route level via
+   * operatorSessionService.listAllowedSubscriptionsForAgent (Chunk 3).
+   * orderResolvedCredentials (pure helper) is the single source of truth for §9.7
+   * ordering: default operator_session first, then non-default sorted by label, then
+   * all other authTypes in their original SQL order.
    */
   async resolveAvailableCredentials(params: {
     organisationId: string;
     subaccountId: string;
+    agentId?: string;  // Optional: if provided, also includes specific_agents rows for this agent
   }): Promise<ResolvedCredential[]> {
     // Exclude operator_session rows here — they are handled by the second query below
     // with the additional usabilityState filter.
@@ -353,10 +364,16 @@ export const credentialBrokerService = {
         ),
       );
 
-    // Also include operator_session connections that are usable and allowed for this agent.
-    // Note: resolveAvailableCredentials does not have agentId context (legacy signature).
-    // The operator_session read path is agentId-filtered at the listAllowedSubscriptionsForAgent
-    // level. Here we include all usable operator_session rows for the subaccount.
+    // Include operator_session connections that are usable and allowed for the calling context.
+    // SQL pre-filter: availabilityScope = 'all_agents' always; when agentId is provided,
+    // also include specific_agents rows where allowedAgentIds contains the agentId.
+    const agentIdFilter = params.agentId
+      ? sqlOp`(
+          ${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'
+          OR ${integrationConnections.configJson} -> 'operator_session' -> 'allowedAgentIds' ? ${params.agentId}::text
+        )`
+      : sqlOp`${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'`;
+
     const operatorSessionRows = await db
       .select()
       .from(integrationConnections)
@@ -367,12 +384,39 @@ export const credentialBrokerService = {
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
           eq(integrationConnections.usabilityState, 'connected_usable'),
+          agentIdFilter,
         ),
       );
 
     const allRows = [...rows, ...operatorSessionRows];
 
-    return allRows.map((conn) => ({
+    // Build OrderableRow shape for the pure ordering helper.
+    // Non-operator_session rows use sentinel values that pass all filters so they
+    // preserve their original SQL order at the tail of the result (§9.7).
+    type ConfigJson = { operator_session?: { availabilityScope?: 'all_agents' | 'specific_agents'; allowedAgentIds?: string[] | null } };
+    const orderableRows: (typeof allRows[number] & OrderableRow)[] = allRows.map((conn) => {
+      if (conn.authType !== 'operator_session') {
+        return Object.assign(conn, {
+          label: conn.label ?? null,
+          isDefault: conn.isDefault,
+          usabilityState: 'connected_usable' as UsabilityState,
+          allowedAgentIds: null as string[] | null,
+          availabilityScope: 'all_agents' as const,
+        });
+      }
+      const cfg = (conn.configJson as ConfigJson | null)?.operator_session;
+      return Object.assign(conn, {
+        label: conn.label ?? null,
+        isDefault: conn.isDefault,
+        usabilityState: (conn.usabilityState as UsabilityState) ?? 'connected_unverified',
+        allowedAgentIds: cfg?.allowedAgentIds ?? null,
+        availabilityScope: cfg?.availabilityScope ?? 'all_agents',
+      });
+    });
+
+    const ordered = orderResolvedCredentials(orderableRows, params.agentId ?? '');
+
+    return ordered.map((conn) => ({
       credentialId: conn.id,
       connectionId: conn.id,
       authType: conn.authType === 'operator_session' ? 'operator_session' : mapAuthType(conn.authType),
