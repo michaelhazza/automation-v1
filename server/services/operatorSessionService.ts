@@ -24,39 +24,14 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections } from '../db/schema/index.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import type { OperatorSessionConsent } from '../db/schema/index.js';
+import type { AiSubscriptionConnection } from '../../shared/types/govern.js';
 import { auditService } from './auditService.js';
 import { operatorSessionConsentService } from './operatorSessionConsentService.js';
 import { operatorSessionLifecycleService } from './operatorSessionLifecycleService.js';
 import { OPERATOR_SESSION_PROVIDERS } from '../config/operatorSessionProviders.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
-// ---------------------------------------------------------------------------
-// AiSubscriptionConnection — local type until shared/types/govern.ts is
-// extended in Chunk 5. Shape per spec §9.2 and plan §4.1.
-// ---------------------------------------------------------------------------
-
-export interface AiSubscriptionConnection {
-  id: string;
-  authMethod: 'ai_subscription';
-  provider: string;
-  planTier: 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown';
-  planVerificationStatus: 'verified' | 'self_declared' | 'failed';
-  planVerifiedAt: string | null;
-  usabilityState: UsabilityState;
-  disabledReason: 'owner_inactive' | 'admin_disabled' | 'permission_revoked' | null;
-  pendingReason: 'needs_new_consent' | 'needs_reauth' | 'plan_unverified' | null;
-  isDefault: boolean;
-  availabilityScope: 'all_agents' | 'specific_agents';
-  allowedAgentIds: string[] | null;
-  label: string | null;
-  user: {
-    userId: string | null;
-    userIdNullified: boolean;
-    displayName: string | null;
-  };
-  lastRefreshedAt: string | null;
-  createdAt: string;
-}
+export type { AiSubscriptionConnection };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -420,11 +395,21 @@ export const operatorSessionService = {
       supersededByConsentId: newConsent.id,
     });
 
-    // Update integration_connections.consentRecordId pointer
+    // Update integration_connections.consentRecordId pointer.
+    // Defence-in-depth: explicit organisationId + subaccountId + authType
+    // filter mirrors the SELECT above, satisfying DEVELOPMENT_GUIDELINES §1
+    // ("filter by organisationId in application code, even with RLS").
     await db
       .update(integrationConnections)
       .set({ consentRecordId: newConsent.id, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, input.connectionId));
+      .where(
+        and(
+          eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.organisationId, input.organisationId),
+          eq(integrationConnections.subaccountId, input.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+        ),
+      );
 
     // Transition state to connected_usable (skip if already in target state to
     // avoid InvalidStateTransitionError on connected_usable → connected_usable)
@@ -594,14 +579,21 @@ export const operatorSessionService = {
   }): Promise<{ transitioned: boolean }> {
     const db = getOrgScopedDb('operatorSessionService.detectAndTransitionStaleDisclosure');
 
-    // Load connection to get consentRecordId and current state
+    // Load connection to get consentRecordId and current state.
+    // Defence-in-depth: pin organisationId + authType per DEVELOPMENT_GUIDELINES §1.
     const [connection] = await db
       .select({
         consentRecordId: integrationConnections.consentRecordId,
         usabilityState: integrationConnections.usabilityState,
       })
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, input.connectionId))
+      .where(
+        and(
+          eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.organisationId, input.organisationId),
+          eq(integrationConnections.authType, 'operator_session'),
+        ),
+      )
       .limit(1);
 
     if (!connection || !connection.consentRecordId || connection.usabilityState !== 'connected_usable') {

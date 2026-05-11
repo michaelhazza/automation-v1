@@ -4184,3 +4184,71 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Gap: `client/src/api/governApi.ts:125-131` declares `getAgentAllowedSubscriptions(subaccountId: string, agentId: string)` — `(subaccountId, agentId)` — reversed from the plan's `(agentId, subaccountId)`. The single call site (`ModelAccessSection.tsx:109`) matches the implementation, so the helper is functionally correct; the divergence is the public signature contract.
   - Note: every other AI-subscription helper in the same file (`getAiSubscription`, `connectAiSubscription`, `updateAiSubscriptionLabel`, `makeAiSubscriptionDefault`, `editAiSubscriptionAvailability`, `disconnectAiSubscription`, `reacceptConsent`, `triggerReauth`) takes `(subaccountId, ...)` first, so the current order is consistent with the file's convention. The plan diverges from that convention.
   - Suggested approach: decide whether to (a) flip the helper's parameters to `(agentId, subaccountId)` per the plan (one-line signature change + update the single call site in `ModelAccessSection.tsx`) and accept the inconsistency with sibling helpers, or (b) accept the current `(subaccountId, agentId)` order as the V1 contract and amend the plan to match. Option (b) keeps file-level consistency; option (a) follows the plan literally. Non-blocking — the function works either way.
+
+---
+
+## Deferred from branch-level review — operator-session-identity (2026-05-12)
+
+**Status:** Deferred (V1 ship-as-is; revisit before Phase 3 successor work)
+**Source logs:**
+- `tasks/review-logs/adversarial-review-log-operator-session-identity-2026-05-11T12-18-00Z.md`
+- `tasks/review-logs/pr-review-log-operator-session-identity-branch-2026-05-11T12-18-00Z.md`
+
+**Branch-level fix-loop applied (committed in this build):** S2/L1/L2/N3 org-filter defence-in-depth on `reaccept` UPDATE, refresh-job UPDATE, route re-read, and `detectAndTransitionStaleDisclosure` SELECT; C2 make-default race closed by target-row `FOR UPDATE` + idempotent fast-path + CAS-style `is_default = false` predicate on the promote; L3 sweep capped at `LIMIT 500` (`SWEEP_BATCH_LIMIT`) with batch-saturated logging; S3 duplicate `AiSubscriptionConnection` type collapsed to a single source of truth in `shared/types/govern.ts`.
+
+**Deferred items remaining:**
+
+- **OSI-DEF-1 — credentialBrokerService bare-db conversion to getOrgScopedDb** (adversarial-reviewer C1, confirmed-hole)
+  - File: `server/services/credentialBrokerService.ts` lines 4, 96, 177, 242, 307, 355, 377 (6 call sites)
+  - Reason for deferral: Larger refactor than the rest of the fix-loop; current path is gated by the request-time `withOrgTx` for V1 callers. The hole only opens if a future caller acquires the service from a non-tx context (background job, admin path) without setting up org tx — same risk shape that the 2026-04-25 audit closed across other services.
+  - When to revisit: Before adding any new caller of `credentialBrokerService` (e.g. the OpenClaw adapter activation, or a new background job that resolves credentials). The fix mirrors the prior service-by-service remediation in that audit.
+
+- **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
+  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
+  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
+  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+
+- **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
+  - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
+  - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
+  - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
+
+- **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
+  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
+  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
+  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+
+- **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
+  - Files: `migrations/0322_operator_session_columns.down.sql:3`, `migrations/0321_operator_session_consents.down.sql:7`
+  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0322.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
+  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+
+- **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
+  - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
+  - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
+  - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
+
+- **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
+  - File: `server/routes/operatorSessionConnections.ts` line 442
+  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
+  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+
+- **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
+  - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
+  - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
+  - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
+
+- **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
+  - File: `migrations/0322_operator_session_columns.sql` (`usability_state text` column)
+  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
+  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0322 stays append-only.
+
+- **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
+  - File: `server/services/operatorSessionConsentService.ts` lines 197-209
+  - Reason for deferral: Spec §16 names the method but defers the implementation to the user-deletion privacy sweep (out of scope for Spec C).
+  - When to revisit: When the user-deletion flow is implemented. Confirm any caller handles the 501 gracefully rather than failing the deletion.
+
+- **OSI-DEF-11 — `OPERATOR_SESSION_DISCLOSURE_VERSION` is deploy-coupled** (adversarial-reviewer additional observation)
+  - File: `server/config/operatorSessionProviders.ts` (`OPERATOR_SESSION_DISCLOSURE_VERSION = 1`)
+  - Reason for deferral: Hard-coded constant. Bumping the version (e.g. for a legal update) requires a code deploy. No DB-config or feature-flag path.
+  - When to revisit: If the disclosure text needs an urgent update without a deploy window, or if legal asks for a feature-flag-style toggle on disclosure version.

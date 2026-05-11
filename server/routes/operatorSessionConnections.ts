@@ -116,11 +116,20 @@ router.get(
       connectionId: conn.id,
     });
 
-    // Re-read to get current state after any transition
+    // Re-read to get current state after any transition.
+    // Defence-in-depth: pin organisationId + subaccountId + authType per
+    // DEVELOPMENT_GUIDELINES §1, mirroring the initial SELECT above.
     const [fresh] = await db
       .select()
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, conn.id))
+      .where(
+        and(
+          eq(integrationConnections.id, conn.id),
+          eq(integrationConnections.subaccountId, subaccount.id),
+          eq(integrationConnections.organisationId, req.orgId!),
+          eq(integrationConnections.authType, 'operator_session'),
+        ),
+      )
       .limit(1);
 
     if (!fresh) {
@@ -246,7 +255,32 @@ router.post(
     const db = getOrgScopedDb('operatorSessionConnections.makeDefault');
 
     try {
-      // Lock current default row to prevent concurrent make-default races
+      // Lock the target row first. This serialises concurrent promotes on the
+      // same connId and closes the race window where two requests pass the
+      // current-default FOR UPDATE (no current default → lock locks nothing),
+      // both clear (no-op), and both attempt to promote.
+      const targetRows = await db.execute(sql`
+        SELECT id, is_default FROM integration_connections
+        WHERE id = ${req.params.connId}::uuid
+          AND subaccount_id = ${subaccount.id}::uuid
+          AND organisation_id = ${req.orgId!}::uuid
+          AND auth_type = 'operator_session'
+        FOR UPDATE
+      `);
+      const target = (targetRows as unknown as Array<{ id: string; is_default: boolean }>)[0];
+
+      if (!target) {
+        throw { statusCode: 404, message: 'Connection not found' };
+      }
+
+      // Idempotent: target is already the default, return without rewriting rows.
+      if (target.is_default) {
+        res.json({ id: target.id, isDefault: true });
+        return;
+      }
+
+      // Lock current default row (if any) to serialise against concurrent
+      // promotes on a different target within the same subaccount.
       await db.execute(sql`
         SELECT id FROM integration_connections
         WHERE subaccount_id = ${subaccount.id}::uuid
@@ -269,7 +303,9 @@ router.post(
           ),
         );
 
-      // Promote target connection
+      // Promote target connection. CAS-style predicate (is_default = false)
+      // turns the UPDATE into a no-op if a concurrent transaction has already
+      // promoted this row, complementing the target-row FOR UPDATE above.
       const [promoted] = await db
         .update(integrationConnections)
         .set({ isDefault: true, updatedAt: new Date() })
@@ -279,12 +315,31 @@ router.post(
             eq(integrationConnections.subaccountId, subaccount.id),
             eq(integrationConnections.organisationId, req.orgId!),
             eq(integrationConnections.authType, 'operator_session'),
+            eq(integrationConnections.isDefault, false),
           ),
         )
         .returning();
 
       if (!promoted) {
-        throw { statusCode: 404, message: 'Connection not found' };
+        // CAS missed — a concurrent transaction won the race. Re-read and
+        // return the current state (will be is_default = true).
+        const [current] = await db
+          .select()
+          .from(integrationConnections)
+          .where(
+            and(
+              eq(integrationConnections.id, req.params.connId),
+              eq(integrationConnections.subaccountId, subaccount.id),
+              eq(integrationConnections.organisationId, req.orgId!),
+              eq(integrationConnections.authType, 'operator_session'),
+            ),
+          )
+          .limit(1);
+        if (!current) {
+          throw { statusCode: 404, message: 'Connection not found' };
+        }
+        res.json({ id: current.id, isDefault: current.isDefault });
+        return;
       }
 
       res.json({ id: promoted.id, isDefault: promoted.isDefault });

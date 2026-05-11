@@ -19,13 +19,12 @@
  * Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §9
  */
 
-import { sql } from 'drizzle-orm';
+import { sql, eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
 import { operatorSessionLifecycleService } from '../services/operatorSessionLifecycleService.js';
 import { classifyRefreshFailure, type UsabilityState } from '../services/operatorSessionLifecycleServicePure.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
@@ -34,6 +33,9 @@ import { logger } from '../lib/logger.js';
 import { getJobConfig } from '../config/jobConfig.js';
 
 const REFRESH_WINDOW_MINUTES = 30;
+// Cap the sweep to avoid unbounded enqueue storms when many connections expire in the same window.
+// A subsequent sweep tick picks up the remainder; the singletonKey bucket dedupes overlaps.
+const SWEEP_BATCH_LIMIT = 500;
 
 // ---------------------------------------------------------------------------
 // Handler
@@ -131,6 +133,9 @@ export async function processOperatorSessionRefresh(
             expiresAt: new Date(Date.now() + 3600 * 1000),
           };
 
+          // Defence-in-depth: pin organisationId + authType so a future bug in
+          // the admin lookup cannot let this UPDATE overwrite tokens in the
+          // wrong tenant. Mirrors DEVELOPMENT_GUIDELINES §1.
           await scopedDb
             .update(integrationConnections)
             .set({
@@ -139,7 +144,13 @@ export async function processOperatorSessionRefresh(
               tokenExpiresAt: newToken.expiresAt,
               updatedAt: new Date(),
             })
-            .where(eq(integrationConnections.id, connectionId));
+            .where(
+              and(
+                eq(integrationConnections.id, connectionId),
+                eq(integrationConnections.organisationId, orgId),
+                eq(integrationConnections.authType, 'operator_session'),
+              ),
+            );
 
           await auditService.log({
             organisationId: orgId,
@@ -257,6 +268,8 @@ export async function runOperatorSessionRefreshSweep(): Promise<void> {
           AND connection_status = 'active'
           AND usability_state = 'connected_usable'
           AND token_expires_at <= ${expiryThreshold}
+        ORDER BY token_expires_at ASC
+        LIMIT ${SWEEP_BATCH_LIMIT}
       `);
 
       const connections = rows as unknown as Array<{
@@ -277,6 +290,8 @@ export async function runOperatorSessionRefreshSweep(): Promise<void> {
 
       logger.info('operator_session_refresh_sweep.complete', {
         connectionsFound: connections.length,
+        batchLimit: SWEEP_BATCH_LIMIT,
+        batchSaturated: connections.length >= SWEEP_BATCH_LIMIT,
         refreshBucket,
       });
     },
