@@ -49,5 +49,5 @@ All findings were mechanical (contradictions, stale language, inventory drift, m
 
 Files modified: `tasks/builds/sandbox-isolation/spec.md` only.
 
-Spec commit after iteration: (will be filled in after auto-commit Step 8b).
+Spec commit after iteration: `dd80dc56`.
 

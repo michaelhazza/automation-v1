@@ -4023,3 +4023,25 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Current: `e.eventType.startsWith('phase1.')` includes all future phase1 events in `filteredSystemEvents`, which fall through to `SystemEventRow` returning `null` (silently unrendered).
   - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
   - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.
+
+
+## Deferred spec decisions — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11
+**Source log:** `tasks/review-logs/spec-review-log-sandbox-isolation-2-20260511T000426Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Iteration:** 2
+
+These items were classified ambiguous/directional during spec review. Spec mechanics tightened to acknowledge the build-time choice; the choice itself is deferred to Phase 2.
+
+- [ ] **SANDBOX-DEF-EGRESS-MECH — Choose egress interception mechanism**
+  - Spec section: §9.1 (egress audit logging is mandatory when `network` is non-`none`).
+  - Schema is locked in §20.6 — the choice is which component actually intercepts allow/deny decisions and writes the audit rows.
+  - Candidates: (a) e2b SDK network-policy hooks if they expose per-decision callbacks, (b) application-layer egress proxy outside the sandbox with mandatory routing from the template entrypoint, (c) CNI / eBPF-side hooks if e2b exposes them.
+  - Decision lands during C12 template-build chunk after verifying which hooks e2b actually exposes.
+
+- [ ] **SANDBOX-DEF-LOG-SCHEMA — Choose sandbox log sink schema**
+  - Spec section: §8.4 step 9 (log persistence), §17.1 (retention).
+  - Whichever path is chosen MUST honour the `(sandbox_execution_id, log_stream, sequence)` idempotency key and per-tenant RLS / scoping (§14.4 / §21).
+  - Candidates: (a) new `sandbox_logs` table in `server/db/schema/sandboxLogs.ts` with the matching unique-index + RLS policy + manifest entry (adds one file + one migration to §19 inventory), (b) extension of an existing structured-log layer that already enforces the key shape.
+  - Decision lands during C7 harvest pipeline chunk; whichever path is chosen, §19 is updated in the same PR to keep the inventory authoritative.
