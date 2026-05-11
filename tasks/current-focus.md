@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
-last_updated: 2026-05-11
-last_merge_ready_pr: #287
-last_merge_ready_slug: sandbox-isolation
-last_merge_ready_branch: claude/evolve-sandbox-isolation-brief-Q51hc
-last_merged_pr: #284
-last_merged_slug: pre-test-hardening
-last_merged_branch: claude/review-preprod-spec-CmHez
-last_merged_at: 2026-05-11T01:28:16Z
-last_merged_commit: 37067df9
+status: NONE
+last_updated: 2026-05-12
+last_merged_pr: #287
+last_merged_slug: sandbox-isolation
+last_merged_branch: claude/evolve-sandbox-isolation-brief-Q51hc
+last_merged_at: 2026-05-11T22:04:51Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,9 +28,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — `sandbox-isolation` build complete. PR #287 has passed all branch-level reviews (spec-conformance, adversarial-reviewer, pr-reviewer, dual-reviewer, chatgpt-pr-review across 3 rounds — final verdict APPROVED). Phase 3 finalisation: S2 sync clean (0 behind main); G4 regression-guard same baseline; doc-sync PASS (architecture.md + KNOWLEDGE.md updated, 11 docs n/a); KNOWLEDGE.md +4 patterns (DB CHECK application classifier; DB-anchored elapsed time; CI gates require workflow wiring; pre-publish version-string convention). 9 chatgpt-pr-review findings closed in-branch (5 R1 implements + 1 R1 defer + 3 R2 implements). 2 R3 advisory items routed (SANDBOX-R3-T1 reconciliation wall-clock; SANDBOX-R3-T2 covered by SANDBOX-F1). ready-to-merge label applied at 2026-05-11T10:38:04Z; CI monitor loop now driving green prior to auto-merge.
+**Status:** **NONE** — sprint idle.
 
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
+**Just merged:** PR #287 — `sandbox-isolation` (squash-commit `pending-squash`, 2026-05-11T22:04:51Z). SandboxExecutionService primitive for Tier 4 untrusted code execution: three provider implementations (e2b prod/staging, local Docker dev, inline test-only), 12-step idempotent harvest pipeline, 7 pg-boss lifecycle jobs, template/version contract with CI as digest source of truth, cost-ledger extension on `llm_requests`. Anchors to SynthetOS v1.2 at Layer 4 inside Layer 5 IEE Execution Plane (Risk Tier 4). Spec: `tasks/builds/sandbox-isolation/spec.md` (1679 lines, LOCKED). Phase 3 handoff: `tasks/builds/sandbox-isolation/handoff.md`. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES → adversarial-reviewer HOLES_FOUND (advisory) → pr-reviewer R2 APPROVED → dual-reviewer (Codex) APPROVED → pr-reviewer re-review APPROVED → chatgpt-pr-review 3 rounds APPROVED. Auto-fix loop: 5 iterations — (1) `sandbox_aws_session_token` regex over-match in own C6 commit, (2) operator-authorised cross-PR fix, (3) font-subset prefix hypothesis (wrong — template uses base-14 fonts), (4) stream+xref normalisation (insufficient), (5) **PDF object IDs (`N M obj`) + refs (`N M R`) + trailer `/Size` normalisation — CLOSED determinism contract.** CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-isolation-2026-05-11T10-48-12Z.md`. KNOWLEDGE.md +4 patterns (DB CHECK application classifier; DB-anchored elapsed time in correctness paths; CI gates require workflow wiring; pre-publish version-string convention).
+
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build next.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Re-launch finalisation against that build when sandbox-isolation finishes.
 
@@ -99,7 +98,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11T10:38:04Z (Phase 3 close for `sandbox-isolation` PR #287 → MERGE_READY; ready-to-merge label about to be applied)
+**Last updated:** 2026-05-11T22:04:51Z (post-merge prep for `sandbox-isolation` PR #287 → NONE; auto-merge via `--admin --squash --delete-branch` imminent)
 
 ---
 

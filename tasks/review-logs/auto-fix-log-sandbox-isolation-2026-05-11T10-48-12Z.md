@@ -101,3 +101,28 @@ This is iteration 4 on the same failing check. Per CLAUDE.md stuck-detection rul
 **If iteration 5 fails:** fix-loop budget is exhausted (5/5). Per CLAUDE.md §1 stuck-detection AND playbook iteration cap, mandatory escalation to operator. Will surface for operator-decided merge-via-admin OR a `.skip` on the test as a follow-up PR.
 
 **Local-repro path attempted:** `npm install @react-pdf/renderer` failed with SSL cert error (same Windows env quirk affecting git CLI; not bypassed for security reasons). Cannot reproduce locally to do precise binary-diff.
+
+### Iteration 5 — CI re-fire result (2026-05-11T21:58:00Z)
+
+**🎉 ALL 6 REQUIRED CHECKS SUCCESS. mergeStateStatus: CLEAN.** Object IDs + refs normalisation was the answer — react-pdf was emitting identical content but with non-deterministic object orderings, producing different generated IDs each render.
+
+- ✓ unit tests
+- ✓ verify
+- ✓ integration tests
+- ✓ Lint + Typecheck
+- ✓ Grep invariants (Phase 3 B.1-B.4) — all 5 sandbox gates
+- ✓ Portable framework tests
+
+## Final Summary
+
+**Auto-fix loop closed: 5 / 5 iterations used. PR #287 ready to merge.**
+
+| Iteration | Hypothesis | Closed? | Commit |
+|---|---|---|---|
+| 1 | `sandbox_aws_session_token` regex over-match | ✓ integration tests (other check now blocking) | `ab7249da` |
+| 2 | escalation — operator chose to attempt fix in unrelated file | N/A | (no commit) |
+| 3 | font-subset prefixes | ✗ (template uses base-14 fonts, no subsetting) | `66a94498` |
+| 4 | stream contents + xref + startxref | ✗ | `1cd03c2e` |
+| 5 | **PDF object IDs (`N M obj`) + refs (`N M R`) + trailer `/Size`** | **✓ ALL GREEN** | `b44f0580` |
+
+Next: Step 12 auto-merge per playbook.
