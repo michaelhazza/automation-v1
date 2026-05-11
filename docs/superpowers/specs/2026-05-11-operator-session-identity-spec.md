@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-11
-**Last updated:** 2026-05-11 (spec-reviewer iteration 2 mechanical pass applied)
+**Last updated:** 2026-05-11 (spec-reviewer iteration 3 mechanical pass applied)
 **Author:** claude-opus-4-7
 **Build slug:** operator-session-identity
 **Source branch:** claude/evolve-session-identity-brief-17LO4
@@ -273,8 +273,15 @@ CREATE TABLE operator_session_consents (
   accepted_at             timestamptz NOT NULL DEFAULT now(),
   disclosure_text_snapshot text NOT NULL,          -- full text of disclosure at time of consent
   consent_text_snapshot   text NOT NULL,           -- full text of consent language at time of consent
-  CONSTRAINT operator_session_consents_user_disclosure_unique
-    UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)
+  -- Uniqueness is scoped to a single connection. Two different connections owned by the same
+  -- user in the same subaccount at the same disclosure version are distinct consents
+  -- (one per credential), so connection_id is part of the unique key. NULL connection_id
+  -- values are treated as distinct by Postgres, which permits concurrent connect inserts
+  -- before the one-time back-fill UPDATE assigns each consent row its own connection_id.
+  -- The re-acceptance route uses a different idempotency guard: it checks for an existing
+  -- consent on the SAME connection at the SAME disclosure version before INSERTing.
+  CONSTRAINT operator_session_consents_connection_disclosure_unique
+    UNIQUE (connection_id, disclosure_version)
 );
 
 ALTER TABLE operator_session_consents ENABLE ROW LEVEL SECURITY;
@@ -413,7 +420,7 @@ State transitions are written only by `operatorSessionLifecycleService` (new, §
 
 **Distinct semantics:**
 - `revoked` = provider-side fact. OpenAI invalidated the session. Audit event type: `operator_session.revoked`.
-- `disabled` = platform-side fact. Admin action, offboarding, disclosure version supersession, or permission loss. Audit event type: `operator_session.disabled`. These are orthogonal: a credential can be `disabled` while still provider-valid, or `revoked` while platform policy would have allowed it.
+- `disabled` = platform-side fact. Admin action, offboarding, or permission loss. Audit event type: `operator_session.disabled`. (Disclosure-version supersession is NOT a `disabled` cause — it transitions to `connected_needs_consent` per §11.4. Disclosure supersession is a recoverable state cleared by re-acceptance; `disabled` is a terminal admin-action state.) `revoked` and `disabled` are orthogonal: a credential can be `disabled` while still provider-valid, or `revoked` while platform policy would have allowed it.
 
 ---
 
@@ -425,7 +432,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | Migration | Purpose |
 |---|---|
-| `migrations/0318_operator_session_consents.sql` | Create `operator_session_consents` (with `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)`) + `operator_session_consent_events`, both with RLS. Ships FIRST so the FK target exists before migration 0319. |
+| `migrations/0318_operator_session_consents.sql` | Create `operator_session_consents` (with `UNIQUE (connection_id, disclosure_version)`) + `operator_session_consent_events`, both with RLS. Ships FIRST so the FK target exists before migration 0319. |
 | `migrations/0319_operator_session_columns.sql` | Add 6 columns to `integration_connections` (usability_state, plan_tier, plan_verification_status, plan_verified_at, consent_record_id, is_default) + partial unique index `ic_subaccount_operator_session_default_unique`; add `'operator_session'` to auth_type. Depends on 0318. |
 
 ### 8.2 New schema files
@@ -439,7 +446,7 @@ Every file this spec touches. If any file listed here is not created/modified, t
 
 | File | Change |
 |---|---|
-| `server/db/schema/integrationConnections.ts` | Add 5 new columns; add `'operator_session'` to authType union |
+| `server/db/schema/integrationConnections.ts` | Add 6 new columns (`usabilityState`, `planTier`, `planVerificationStatus`, `planVerifiedAt`, `consentRecordId`, `isDefault`); add `'operator_session'` to authType union |
 | `server/db/schema/index.ts` | Export new schema files |
 
 ### 8.4 New config files
@@ -457,12 +464,14 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | `server/services/operatorSessionConsentService.ts` | Append-only consent row writer (with the one-time `connection_id` back-fill exception per §7.2 / §11.1), consent-event recording, disclosure-version-bump detection (on-read per §11.4), retention enforcement. No UPDATE or DELETE primitives beyond the back-fill — historical changes are recorded as new event rows. |
 | `server/services/operatorSessionLifecycleService.ts` | State machine transitions (the only code allowed to write `usability_state`) |
 | `server/services/operatorSessionLifecycleServicePure.ts` | Pure functions for failure classification, state-transition logic (testable) |
+| `server/services/operatorSessionConsentServicePure.ts` | Pure functions for disclosure-version comparison and consent-state derivation (testable) |
+| `server/services/credentialBrokerServicePure.ts` | Pure helpers extracted from the broker: `assertCredentialUsableOrThrow(state, decryptHook)` (broker retrieval invariant) + `orderResolvedCredentials(rows)` (§9.7 failover ordering). Single source of truth for those two invariants. |
 
 ### 8.6 Modified services
 
 | File | Change |
 |---|---|
-| `server/services/credentialBrokerService.ts` | Add `'operator_session'` branch to `issueCredential`, `injectIntoEnvironment`, `resolveAvailableCredentials`; implement broker retrieval invariant + redacted envelope |
+| `server/services/credentialBrokerService.ts` | Add `'operator_session'` branch to `issueCredential`, `injectIntoEnvironment`, `resolveAvailableCredentials`; delegate the state-check-before-decrypt to `credentialBrokerServicePure.assertCredentialUsableOrThrow`; delegate the failover ordering to `credentialBrokerServicePure.orderResolvedCredentials`; build the redacted envelope (`OperatorSessionEnvelope`). |
 
 ### 8.7 New jobs
 
@@ -477,14 +486,14 @@ Every file this spec touches. If any file listed here is not created/modified, t
 | File | Purpose |
 |---|---|
 | `server/routes/operatorSessionConnections.ts` | Full CRUD: connect, list, get, update (label/display-name), make-default, edit availability (allow-agent-use), disconnect, consent, re-auth trigger. Permission gates per §10.4. |
-| `server/routes/webLoginConnectionsGovern.ts` | Govern-surface Add/Edit/Test Web Login routes migrated from the legacy `IntegrationsAndCredentialsPage` API. Mounts under `/api/subaccounts/:subaccountId/web-login-connections/...`. Reuses existing `webLoginConnections.ts` service layer; only the HTTP surface is new. Permission guards match the legacy routes (`subaccount.connections.manage`). |
+| `server/routes/webLoginConnectionsGovern.ts` | Govern-surface Add/Edit/Test Web Login routes migrated from the legacy `IntegrationsAndCredentialsPage` API. Mounts under `/api/subaccounts/:subaccountId/web-login-connections/...`. Reuses the existing `server/services/webLoginConnectionService.ts` service layer; only the HTTP surface is new. Permission guards match the legacy routes (`subaccount.connections.manage`). |
 
 ### 8.9 Modified routes
 
 | File | Change |
 |---|---|
 | `server/services/connectionsService.ts` | Extend `listConnections` to include `auth_type = 'operator_session'` rows in the Govern surface response |
-| `server/routes/index.ts` | Register `operatorSessionConnections` + `webLoginConnectionsGovern` routers |
+| `server/index.ts` | Mount `operatorSessionConnections` + `webLoginConnectionsGovern` routers (this repo mounts all routers in `server/index.ts`; there is no `server/routes/index.ts` aggregator) |
 
 ### 8.10 Shared types
 
@@ -591,7 +600,13 @@ interface OperatorSessionEnvelope {
 Extended `Connection` type for `operator_session` rows returned by `listConnections`:
 
 ```typescript
-// Producer: server/routes/operatorSessionConnections.ts
+// Producer (canonical list): server/services/connectionsService.ts — the existing Govern-surface
+//   listConnections returns this shape as a discriminated union member for rows with
+//   `auth_type = 'operator_session'`. The list endpoint is `GET /api/subaccounts/:id/connections`
+//   per §10.5, NOT the operator-session-specific route file.
+// Producer (detail / mutations): server/routes/operatorSessionConnections.ts — get-by-id,
+//   connect, make-default, edit availability, disconnect, consent, re-auth all live in the
+//   dedicated operator-session router. These return the same shape for individual rows.
 // Consumer: client/src/pages/govern/components/AiSubscriptionsTab.tsx
 interface AiSubscriptionConnection {
   id: string;
@@ -607,7 +622,7 @@ interface AiSubscriptionConnection {
    * `connected_needs_consent`/`connected_needs_reauth`/`connected_unverified` emit a `pendingReason`,
    * `revoked` carries no sub-label (the source is always the provider, surfaced via the audit event type).
    */
-  disabledReason: 'owner_inactive' | 'admin_disabled' | 'disclosure_superseded' | null;  // populated only when usabilityState === 'disabled'
+  disabledReason: 'owner_inactive' | 'admin_disabled' | 'permission_revoked' | null;  // populated only when usabilityState === 'disabled' (disclosure supersession is NOT a disabled cause — see §7.5)
   pendingReason:  'needs_new_consent' | 'needs_reauth' | 'plan_unverified' | null;       // populated only when usabilityState ∈ {connected_needs_consent, connected_needs_reauth, connected_unverified}
   isDefault: boolean;
   availabilityScope: 'all_agents' | 'specific_agents';
@@ -784,6 +799,7 @@ Specific mappings:
 | `POST /api/subaccounts/:id/operator-session-connections/:connId/make-default` | `operator_session.connect` |
 | `POST /api/subaccounts/:id/operator-session-connections/:connId/reauth` | `operator_session.reauth` |
 | `PATCH /api/subaccounts/:id/operator-session-connections/:connId/allow-agent-use` | `operator_session.allow_agent_use` |
+| `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` | `operator_session.view` (read-only summary used by the agent edit page's Model Access section; returns the ordered list of operator_session connections the agent is allowed to consume per §9.7 ordering rules; no token material) |
 
 ---
 
@@ -801,23 +817,36 @@ New Add/Edit/Test routes exposed via the Govern surface MUST use the same guards
 
 The provider connection handshake is inline / synchronous from the client's perspective. All DB writes for a single connect attempt happen inside ONE transaction so partial-success is impossible.
 
-1. Client POST to `connect` route. For Plus tier, the client UI has already gathered the typed-confirmation disclosure acceptance; the `connect` POST body includes a `disclosureAcceptance: { disclosureVersion, consentText }` block. Pre-flight validation rejects a Plus connect without this block (422 `plus_consent_required`) before any provider call.
+**Disclosure-requirement gate.** The provider capability registry (§7.4) controls whether a `disclosureAcceptance` block is required and what `plan_verification_status` / initial `usability_state` the connection lands in:
+
+- Provider has `planDetectionMechanism = 'introspection_api'` AND the verified tier is one of `sanctionedTiers`: no disclosure required; connection lands in `usability_state = 'connected_usable'` with `plan_verification_status = 'verified'`.
+- Verified tier is in `optInTiers` (Plus): disclosure required; connection lands in `connected_usable` after the disclosure write, with `plan_verification_status = 'verified'`.
+- Tier cannot be verified or detection mechanism is `probe` / `self_declaration`: disclosure required; connection lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'` or `'failed'` per the §7.4 table.
+
+**V1 reality.** The V1 OpenAI registry entry uses `planDetectionMechanism: 'self_declaration'`. By the rule above, EVERY V1 connect:
+- Requires a `disclosureAcceptance` block in the POST body. Pre-flight rejects missing/invalid blocks with 422 `disclosure_required` (the error code does NOT presume Plus — it covers all self-declared connects).
+- Lands in `usability_state = 'connected_unverified'` with `plan_verification_status = 'self_declared'`.
+- Stays not-usable by adapters until either the OpenAI registry entry flips to `'introspection_api'` (mechanism verified) and the connection is re-verified, or the user explicitly accepts a Plus-equivalent disclosure that opts the credential into use.
+
+When the OpenAI registry entry is later updated to `'introspection_api'`, the connect flow can produce `connected_usable` directly for verified sanctioned tiers — no code change beyond the registry update.
+
+**Connect sequence (the canonical one transaction):**
+
+1. Client POST to `connect` route with a `disclosureAcceptance: { disclosureVersion, consentText, acceptanceTier }` block. `acceptanceTier` records what the user believes their plan is, used for the consent snapshot.
 2. Server calls provider OAuth endpoint (or equivalent verified mechanism).
-3. Server receives token, validates plan tier.
+3. Server receives token; attempts plan verification per the §7.4 detection mechanism.
 4. BEGIN transaction:
-   - For Plus tier: INSERT the `operator_session_consents` row using the `disclosureAcceptance` block from the request. Also INSERT a `granted` event into `operator_session_consent_events`. Capture the new `consent_id`.
-   - INSERT the `integration_connections` row with `usability_state = 'connected_usable'` (or `connected_unverified` if plan verification could not classify the plan as sanctioned), `consent_record_id = <consent_id or NULL for sanctioned tiers without disclosure>`, and the encrypted token material.
-   - For Plus tier: UPDATE the consent row to set `connection_id = <new connection id>` (the only mutation ever permitted on a consent row, because the FK target did not exist when the row was first inserted). This is the documented exception to the "append-only" rule and is enforced at the service layer (no other code path may UPDATE a consent row).
+   - INSERT `operator_session_consents` row using the `disclosureAcceptance` block. INSERT a `granted` event into `operator_session_consent_events`. Capture the new `consent_id`.
+   - INSERT `integration_connections` row with the correct initial `usability_state` per the disclosure-requirement gate above, `consent_record_id = <consent_id>`, and the encrypted token material.
+   - UPDATE the consent row to set `connection_id = <new connection id>` — the single permitted UPDATE on `operator_session_consents`, scoped to a one-time NULL → non-NULL transition inside this transaction. Enforced at the service layer.
    - COMMIT.
-5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material).
+5. Server responds 201 with the `AiSubscriptionConnection` shape (no token material). For `connected_unverified` connections, the response makes the gating explicit so the UI can display the Plan-not-verified state immediately.
 
 **Why the back-pointer is mutable exactly once:** `operator_session_consents.connection_id` is a historical reverse pointer captured at the moment of consent. The connect transaction is the only point where the connection's UUID is generated *after* the consent row exists (because the consent must be persisted first to satisfy the FK from `integration_connections.consent_record_id`). The service layer enforces a strict invariant: the only UPDATE permitted on `operator_session_consents` is a one-time write that fills `connection_id` from NULL to a non-NULL UUID within the same connect transaction. After commit, the row is fully immutable. The `consent_record_id` forward pointer on the connection (§9.6) remains the canonical link.
 
-**Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump. That route writes a NEW consent row (linked to the existing `connId` from the start, so no UPDATE-of-connection_id is needed), writes a `superseded` event linking the prior consent, updates `integration_connections.consent_record_id` to the new consent, and transitions `usability_state` back to `connected_usable`. The route returns 422 if no prior consent record exists for the connection — that case must go through the initial `connect` flow instead.
+**Re-acceptance flow (distinct from initial connect):** The separate `POST /api/subaccounts/:id/operator-session-connections/:connId/consent` route (§10.4) is used ONLY when an EXISTING connection's `usability_state` is `connected_needs_consent` after a disclosure-version bump, or when the user re-confirms a `connected_unverified` connection by accepting Plus-equivalent disclosure. That route writes a NEW consent row (linked to the existing `connId` from the start, so no UPDATE-of-connection_id is needed), writes a `superseded` event linking the prior consent, updates `integration_connections.consent_record_id` to the new consent, and transitions `usability_state` back to `connected_usable`. The route returns 422 if no prior consent record exists for the connection — that case must go through the initial `connect` flow instead.
 
-**Unverified plan-tier branch:** When `plan_verification_status` cannot resolve the plan to a sanctioned tier (provider self-declaration unverified or returns ambiguous data), the connection lands in `usability_state = 'connected_unverified'`. The spec treats this as Plus-equivalent: the connect request MUST include a `disclosureAcceptance` block, and the consent row is recorded the same way as for explicit Plus tier (the disclosure_text_snapshot reflects the unverified-tier wording). The credential is NOT usable by adapters until verification succeeds or the user explicitly re-confirms it as Plus-tier via the detail page.
-
-**If provider mechanism is unverified at build time:** Step 2 and 3 are gated. The `connect` route returns `501 provider_mechanism_not_verified` with a body explaining the gate. Schema and consent model are deployed; connection wiring activates when the mechanism is confirmed.
+**If provider mechanism is unverified at build time:** Steps 2 and 3 are gated. The `connect` route returns `501 provider_mechanism_not_verified` with a body explaining the gate. Schema and consent model are deployed; connection wiring activates when the mechanism is confirmed.
 
 ### 11.2 Token lifecycle refresh (queued, pg-boss)
 
@@ -861,7 +890,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 ### Chunk 1 — Schema foundations (migrations + Drizzle)
 
 **Deliverables (ship in migration order — 0318 first, 0319 depends on it):**
-- Migration 0318 (`0318_operator_session_consents.sql`): `operator_session_consents` + `operator_session_consent_events` tables with RLS, FORCE RLS, org-isolation policy, and the `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` constraint
+- Migration 0318 (`0318_operator_session_consents.sql`): `operator_session_consents` + `operator_session_consent_events` tables with RLS, FORCE RLS, org-isolation policy, and the `UNIQUE (connection_id, disclosure_version)` constraint on the consents table
 - Migration 0319 (`0319_operator_session_columns.sql`): 6 new columns on `integration_connections` (`usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, `consent_record_id`, `is_default`); partial unique index `ic_subaccount_operator_session_default_unique`; add `'operator_session'` to the `auth_type` CHECK constraint
 - Drizzle schema files for both new tables
 - Update `server/db/schema/index.ts`
@@ -891,13 +920,13 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 ### Chunk 4 — Credential broker extension
 
 **Deliverables:**
+- New `server/services/credentialBrokerServicePure.ts` (sibling of the existing facade): exports `assertCredentialUsableOrThrow(state, decryptHook)` (the broker retrieval invariant in pure form) and `orderResolvedCredentials(rows)` (the §9.7 failover ordering in pure form).
 - Extend `credentialBrokerService.ts`:
-  - `issueCredential` branch for `operator_session`
-  - State-check-before-decrypt enforcement (broker retrieval invariant)
+  - `issueCredential` branch for `operator_session` — delegates the state check to `assertCredentialUsableOrThrow`; only invokes the decrypt hook on `connected_usable`.
   - Redacted envelope return shape (`OperatorSessionEnvelope`)
   - `injectIntoEnvironment` branch (no-op for V1; structure for Phase 3+)
-  - `resolveAvailableCredentials` includes operator_session rows
-- Unit test: `issueCredential` for non-`connected_usable` states never calls `decryptToken`
+  - `resolveAvailableCredentials` SQL extended to include operator_session rows; the returned array is passed through `orderResolvedCredentials` so the §9.7 ordering is single-source.
+- Unit tests target the pure helpers — see §15 / §17.2 / §17.5b.
 
 **Depends on:** Chunks 1, 3.
 
@@ -906,7 +935,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 **Deliverables:**
 - Add 5 permission keys to `server/lib/permissions.ts` + `ALL_PERMISSIONS`
 - `server/routes/operatorSessionConnections.ts`: full CRUD routes (list, get, connect, update, disconnect, consent, make-default, reauth, allow-agent-use)
-- Mount new router in `server/routes/index.ts`
+- Mount new router in `server/index.ts` (the canonical router-mount surface in this repo)
 - Extend `listConnections` to include `operator_session` rows in the Govern API response
 - Extend `shared/types/govern.ts` with `AiSubscriptionConnection` type
 
@@ -952,7 +981,7 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 - `EditWebLoginModal.tsx`: leave-blank-password treatment; migrate from `CredentialsTab`
 - `TestWebLoginModal.tsx`: agent attribution + running state; migrate from `CredentialsTab`
 - `DisconnectConfirmDialog.tsx`: shared type-to-confirm modal
-- New server route file `server/routes/webLoginConnectionsGovern.ts` exposes Web Login Add/Edit/Test under `/api/subaccounts/:subaccountId/web-login-connections/...` for the Govern surface (was previously only reachable from the legacy `IntegrationsAndCredentialsPage`); reuses the existing service layer in `webLoginConnections.ts`
+- New server route file `server/routes/webLoginConnectionsGovern.ts` exposes Web Login Add/Edit/Test under `/api/subaccounts/:subaccountId/web-login-connections/...` for the Govern surface (was previously only reachable from the legacy `IntegrationsAndCredentialsPage`); reuses the existing service layer in `server/services/webLoginConnectionService.ts`
 - Remove `CredentialsTab.tsx` and `IntegrationsAndCredentialsPage.tsx` (or convert the latter to a redirect)
 
 **Depends on:** Chunk 5. Must run after Chunk 8 (both modify `ConnectionsPage`; parallel edit risk).
@@ -962,9 +991,10 @@ Dependencies must be strictly respected. No chunk may reference a schema, servic
 **Deliverables:**
 - `ConnectionsPage.tsx`: add 3-tab strip, mount all three tab components, tab subtitles, tab count chips
 - Agent edit pages (`AgentEditPage.tsx`, `SubaccountAgentEditPage.tsx`): read-only Model Access section (Standard runs / Autonomous runs split, links to Connections)
-- `governApi.ts`: `getAgentAllowedSubscriptions(agentId, subaccountId)` for the agent-side Model Access summary
+- Server route: `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions` in `server/routes/operatorSessionConnections.ts`. Returns the ordered list of `AiSubscriptionConnection` shapes the agent is allowed to consume per §9.7 (Default first, then alphabetical-by-label, then platform-managed). Calls a new service method on `operatorSessionService.ts`: `listAllowedSubscriptionsForAgent(agentId, subaccountId)` which is a thin wrapper around `credentialBrokerService.resolveAvailableCredentials` filtered to operator_session rows. Permission guard: `operator_session.view`. No token material in the response.
+- `governApi.ts`: `getAgentAllowedSubscriptions(agentId, subaccountId)` for the agent-side Model Access summary — calls the new route above.
 
-**Depends on:** Chunks 7, 8, 9 (all three tabs must exist before wiring).
+**Depends on:** Chunks 4 (broker resolveAvailableCredentials extension), 7, 8, 9.
 
 ### Chunk 11 — Architecture doc sync
 
@@ -1023,21 +1053,23 @@ Per `docs/spec-context.md`:
 - `frontend_tests: none_for_now`
 - `api_contract_tests: none_for_now`
 
-**Allowed tests in this spec (pure functions only):**
+**Allowed runtime tests in this spec.** All runtime tests target pure functions or pure-function-extractable invariants. Service tests are permitted only when they are written against pure functions extracted into `*ServicePure.ts` modules per repo convention, or when they verify a pure invariant on a service by injecting mocked dependencies. No test in this spec touches a real DB connection.
 
-| Test target | File | What it tests |
-|---|---|---|
-| Failure classification | `operatorSessionLifecycleServicePure.test.ts` | All 6 failure buckets; `marksUnusable` and `nextState` for each |
-| State transition logic | same | Valid transitions; forbidden transitions throw; terminal states reject all transitions |
-| Broker retrieval invariant | `credentialBrokerService.test.ts` | `issueCredential` for each non-`connected_usable` state never calls `decryptToken` |
-| Consent version check | `operatorSessionConsentService.test.ts` | `disclosureVersion < current` → returns `needs_reaccept`; `==` → returns `valid` |
-| Provider capability registry | `operatorSessionProviders.test.ts` | All required fields present on each entry; `sanctionedTiers` and `optInTiers` are disjoint |
+| Test target | File | What it tests | Pure-function justification |
+|---|---|---|---|
+| Failure classification | `operatorSessionLifecycleServicePure.test.ts` | All 6 failure buckets; `marksUnusable` and `nextState` for each | Pure function — input is an error object shape, output is a discriminated union with no I/O. |
+| State transition logic | same | Valid transitions; forbidden transitions throw; terminal states reject all transitions | Pure function — input is a `(from, to)` pair, output is `valid | InvalidStateTransitionError`. |
+| Broker retrieval invariant | `credentialBrokerServicePure.test.ts` (new pure helper extracted from `credentialBrokerService.ts`) | The pure helper `assertCredentialUsableOrThrow(state)` rejects any state ≠ `connected_usable` BEFORE any decryption mock is invoked. The non-pure `credentialBrokerService.issueCredential` is verified at integration-test time only (Phase 2+); for V1 the static gate is the order-of-calls test against the pure helper. | Extracted into a pure function that takes the state and a mockable `decryptHook` and verifies the hook is never called when state ≠ `connected_usable`. |
+| Consent version check | `operatorSessionConsentServicePure.test.ts` (new pure helper) | `disclosureVersion < current` → returns `needs_reaccept`; `==` → returns `valid`; `>` (registry rollback case) → returns `valid` | Pure function — input is two numbers, output is a discriminated union. |
+| Provider capability registry | `operatorSessionProviders.test.ts` | All required fields present on each entry; `sanctionedTiers` and `optInTiers` are disjoint; every entry's `connectionMechanism` ∈ enum | Static-data validation; no I/O. |
+| Failover ordering | `credentialBrokerServicePure.test.ts` | Pure helper that takes the unordered list of `(connection, isDefault, label, id, usabilityState, allowedAgentIds)` rows and returns the §9.7 ordering. | Pure function — input is an array, output is the ordered array. The non-pure broker method composes the SQL and feeds the pure helper its rows. |
 
 **Forbidden in this spec:**
 - No supertest / API contract tests
 - No E2E tests
 - No React Testing Library / frontend unit tests
 - No integration tests against live DB (wait for Phase 2 trigger)
+- No service-level tests that boot the DB or pg-boss — every service test must target a pure helper or mock its dependencies completely
 
 ---
 
@@ -1048,7 +1080,7 @@ Per `docs/spec-context.md`:
 | Operation | Idempotency type | Key / predicate |
 |---|---|---|
 | Connect (initial consent write + connection insert) | `state-based` | Multi-row by design: one operator_session connection per `(subaccount_id, provider_type, label)` per the existing `ic_subaccount_provider_label_unique` index. Before insert, check for an existing `connected_usable` row matching `(organisation_id, subaccount_id, provider_type, label)`; if found, return existing. If a row exists at the same label but is NOT usable (`revoked`, `disabled`, etc.), the new connect MUST use a distinct label (UI-enforced) — the unique index will reject a duplicate. Goal §2 line 64 failover (Default first, then alphabetical) requires multiple simultaneously usable rows per subaccount — this predicate preserves that contract. |
-| Record consent | `key-based` | `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` on `operator_session_consents`. A duplicate consent by the same user at the same version is idempotent — DB unique constraint catches it, route returns 200 with existing record. |
+| Record consent | `key-based` | Initial connect: `operator_session_consents` is keyed `UNIQUE (connection_id, disclosure_version)`. New connects always insert a fresh consent row (different connection_id), so collisions never happen at this constraint inside `connect`. Re-acceptance via the dedicated `/consent` route: the service does a pre-INSERT existence check on `(connection_id, disclosure_version)`; if a row exists, return 200 with the existing row. If two re-acceptance requests race on the same connection + version, the constraint rejects the second; route returns 200 with the row written by the winner. |
 | Token refresh (pg-boss job) | `key-based` | pg-boss `singletonKey = ${connection_id}:${refresh_bucket}` where `refresh_bucket` is a 5-minute floor of `now()`. Duplicate enqueue within the same bucket is collapsed by pg-boss to a single queued job, not a second execution. No DB-level unique constraint. |
 | Make default | `state-based` | `UPDATE integration_connections SET is_default = true WHERE id = ? AND organisation_id = ?` plus `UPDATE ... SET is_default = false WHERE organisation_id = ? AND subaccount_id = ? AND id != ?`. Two-step; idempotent by predicate. |
 | Disconnect (state transition to disabled) | `state-based` | `UPDATE ... WHERE id = ? AND usability_state NOT IN ('revoked', 'disabled')`. If 0 rows updated: already terminal, return 200. |
@@ -1094,7 +1126,9 @@ Failure modes for the losing caller:
 
 **Token refresh race:** Multiple refresh job instances for the same connection could write conflicting `usability_state` values. Guard: refresh job uses `UPDATE ... WHERE usability_state = 'connected_usable' AND id = $connId`. If 0 rows: another instance already transitioned — discard this result, do not retry.
 
-**Plus disclosure connect race:** Two concurrent connect requests for the same user + disclosure version could write duplicate consent rows. Guard: unique constraint on `(organisation_id, subaccount_id, user_id, disclosure_version)`. The losing request receives a DB 23505 unique violation — mapped to 200 (idempotent hit) since the consent exists and is valid.
+**Initial-connect consent race:** Two concurrent `connect` requests by the same user produce two distinct consent rows because each request generates its own connection UUID and the `UNIQUE (connection_id, disclosure_version)` index treats the two NULL→UUID transitions as distinct (each connection gets its own consent). This is the desired multi-connection behaviour, not a race that needs resolving.
+
+**Re-acceptance race:** Two concurrent re-acceptance requests against the same connection at the same disclosure version: the `UNIQUE (connection_id, disclosure_version)` constraint catches the second; the losing request receives a DB 23505 unique violation — mapped to 200 (idempotent hit) since the consent now exists and is valid for that connection. The service does a pre-INSERT existence check to keep the happy path 200 rather than relying solely on catching 23505.
 
 ### 16.4 Terminal event guarantee
 
@@ -1122,7 +1156,7 @@ Post-terminal prohibition: once `usability_state` is `revoked` or `disabled`, no
 
 | Constraint | Table | HTTP response on violation |
 |---|---|---|
-| `UNIQUE (organisation_id, subaccount_id, user_id, disclosure_version)` (named `operator_session_consents_user_disclosure_unique`) | `operator_session_consents` | 200 — idempotent consent already exists; return existing record |
+| `UNIQUE (connection_id, disclosure_version)` (named `operator_session_consents_connection_disclosure_unique`) | `operator_session_consents` | 200 — idempotent re-acceptance hit; return existing consent record (only reachable on the `/consent` re-acceptance route; initial connect always inserts a unique `(connection_id = new uuid, disclosure_version)` pair) |
 | `ic_subaccount_operator_session_default_unique` partial unique index on `(subaccount_id) WHERE auth_type = 'operator_session' AND is_default = true` | `integration_connections` | 409 with `{ error: 'concurrent_default_change' }` — a competing Make Default already promoted a different row; the caller should refetch and retry |
 | `ic_subaccount_provider_label_unique` (existing index, reused for operator_session multi-row support) on `(subaccount_id, provider_type, label)` | `integration_connections` | 409 with `{ error: 'duplicate_subscription_label' }` — the user must choose a different label or reuse the existing label's connection |
 | pg-boss `singletonKey = ${connection_id}:${refresh_bucket}` | (not a DB constraint) — pg-boss queue table | Not user-facing; pg-boss collapses the duplicate enqueue internally |
@@ -1151,17 +1185,17 @@ All criteria must pass before the build is marked complete.
 
 ### 17.1 Schema
 
-- [ ] Migration 0318 applies cleanly on a fresh DB and idempotently with `IF NOT EXISTS` / `IF EXISTS` guards on down-scripts.
-- [ ] Migration 0319 applies cleanly; both new tables exist with ENABLE ROW LEVEL SECURITY + FORCE ROW LEVEL SECURITY.
-- [ ] Both new tables are present in `server/config/rlsProtectedTables.ts`.
-- [ ] The `operator_session_consents` table has a UNIQUE constraint on `(organisation_id, subaccount_id, user_id, disclosure_version)`.
+- [ ] Migration 0318 (`0318_operator_session_consents.sql`) applies cleanly on a fresh DB. Both `operator_session_consents` and `operator_session_consent_events` exist with `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` + the org-isolation policy. The `operator_session_consents` table has the `UNIQUE (connection_id, disclosure_version)` constraint.
+- [ ] Migration 0319 (`0319_operator_session_columns.sql`) applies cleanly after 0318. The 6 new columns are present on `integration_connections`; the partial unique index `ic_subaccount_operator_session_default_unique` is in place; `'operator_session'` is in the `auth_type` CHECK constraint.
+- [ ] Both new consent tables are present in `server/config/rlsProtectedTables.ts`.
 - [ ] `verify-rls-coverage.sh` CI gate: green (both new tables covered).
 - [ ] `verify-rls-contract-compliance.sh` CI gate: green (no direct DB access outside service layer for new tables).
 
 ### 17.2 Credential Broker — broker retrieval invariant
 
-- [ ] Unit test (vitest): calling `credentialBrokerService.issueCredential` with a connection in any state other than `connected_usable` (`connected_needs_consent`, `connected_needs_reauth`, `connected_unverified`, `revoked`, `disabled`) NEVER calls `connectionTokenService.decryptToken` and throws `CredentialNotUsableError` with the specific state in the error payload.
-- [ ] Unit test: calling `issueCredential` with `connected_usable` state returns an `OperatorSessionEnvelope` without any `auth_token` or `refresh_token` field.
+- [ ] Pure-function unit test (vitest) in `credentialBrokerServicePure.test.ts`: the extracted `assertCredentialUsableOrThrow(state, decryptHook)` helper, when called with a state other than `connected_usable` (`connected_needs_consent`, `connected_needs_reauth`, `connected_unverified`, `revoked`, `disabled`), throws `CredentialNotUsableError` with the specific state in the error payload AND never invokes the `decryptHook` mock.
+- [ ] Pure-function unit test: the helper with `connected_usable` state invokes the `decryptHook` exactly once and returns an `OperatorSessionEnvelope` shape without any `auth_token` or `refresh_token` field.
+- [ ] Static gate (verify script or grep): no code path other than `credentialBrokerService.issueCredential` reads the raw token columns directly; all decryption goes through the broker.
 
 ### 17.3 No-consumer V1
 
@@ -1176,11 +1210,12 @@ All criteria must pass before the build is marked complete.
 
 ### 17.5 Consent lifecycle
 
-- [ ] A Plus-tier connect attempt without a `disclosureAcceptance` block in the POST body: route returns 422 `plus_consent_required` — no consent row, no credential row written.
-- [ ] A Plus-tier connect attempt WITH a valid `disclosureAcceptance` block: single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_usable'`.
-- [ ] Duplicate consent write at same user + disclosure version (concurrent connect race): DB UNIQUE constraint rejects the second; route returns 200 with the existing consent record, no new row.
-- [ ] Disclosure version bump: existing Plus-tier credential transitions to `connected_needs_consent` on first read after the version bump (§11.4). Agent-use blocked. `/consent` route handles re-acceptance: writes a new consent row (with `connection_id` set at INSERT time, no UPDATE needed), writes a `superseded` event linking the prior consent, updates the connection's `consent_record_id` forward pointer, transitions usability back to `connected_usable`.
-- [ ] Static check: `operatorSessionConsentService` is the ONLY code path that performs the one-time UPDATE on `operator_session_consents.connection_id`. A repo-grep test verifies no other file UPDATEs this table.
+- [ ] V1 connect attempt (self_declaration registry) without a `disclosureAcceptance` block in the POST body: route returns 422 `disclosure_required` — no consent row, no credential row written.
+- [ ] V1 connect attempt WITH a valid `disclosureAcceptance` block: single transaction writes the consent row, the credential row (with `consent_record_id` set), and the one-time UPDATE that fills `consent.connection_id`. Final state: `usability_state = 'connected_unverified'` + `plan_verification_status = 'self_declared'`.
+- [ ] Post-registry-flip connect attempt (introspection_api with a sanctioned tier verified): single transaction writes the credential row with `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`; no consent row required (disclosure flow only triggers for Plus tier or unverified outcomes).
+- [ ] Post-registry-flip connect attempt with verified Plus tier: single transaction writes consent row + credential row + one-time back-fill; final state `usability_state = 'connected_usable'` + `plan_verification_status = 'verified'`.
+- [ ] Disclosure version bump: existing credential transitions to `connected_needs_consent` on first read after the version bump (§11.4). Agent-use blocked. `/consent` route handles re-acceptance: writes a new consent row (with `connection_id` set at INSERT time, no UPDATE needed), writes a `superseded` event linking the prior consent, updates the connection's `consent_record_id` forward pointer, transitions usability back to `connected_usable`.
+- [ ] Static check: `operatorSessionConsentService` is the ONLY code path that performs the one-time UPDATE on `operator_session_consents.connection_id`. A repo-grep verification test confirms no other file issues an UPDATE against this table.
 
 ### 17.5b Failover ordering contract
 
