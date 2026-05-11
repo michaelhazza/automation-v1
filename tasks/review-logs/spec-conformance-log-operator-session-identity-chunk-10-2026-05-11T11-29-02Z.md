@@ -8,6 +8,7 @@
 **Scope:** Plan Chunk 10 only — ConnectionsPage 3-tab wiring + Model Access section
 **Changed-code set:** 5 files
 **Run at:** 2026-05-11T11:29:02Z
+**Commit at finish:** `7fd9b0c5`
 
 ---
 
