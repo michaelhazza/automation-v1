@@ -9,7 +9,7 @@ last_merged_pr: #286
 last_merged_slug: operator-session-identity
 last_merged_branch: claude/evolve-session-identity-brief-17LO4
 last_merged_at: 2026-05-11T23:05:49Z
-last_merged_commit: pending-squash
+last_merged_commit: 62497257
 -->
 
 # Current Focus
@@ -30,7 +30,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Branch:** none
 **Status:** **NONE** — no active build.
 
-**Just merged:** PR #286 — `operator-session-identity` (squash-commit `pending-squash`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
+**Just merged:** PR #286 — `operator-session-identity` (squash-commit `62497257`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
