@@ -12,8 +12,7 @@
  * walks them in order and stops on the first failure. Every step is idempotent
  * on its own write. No single transaction spans all 12 steps (spec §8.4).
  *
- * Provider file API calls (steps 2, 5, 6) are wrapped via providerCallStub.
- * TODO(C8): replace providerCallStub with withSandboxProvider once C8 lands.
+ * Provider file API calls (steps 2, 5, 6) are wrapped via withSandboxProvider.
  */
 
 import { eq, sql, and } from 'drizzle-orm';
@@ -36,21 +35,7 @@ import {
   type HarvestStepResult,
 } from './sandboxHarvestServicePure.js';
 import type { RedactionPattern } from '../lib/redaction.js';
-
-// ---------------------------------------------------------------------------
-// Provider call stub (replaces withSandboxProvider until C8 lands).
-// TODO(C8): replace providerCallStub with withSandboxProvider.
-// ---------------------------------------------------------------------------
-
-interface ProviderCallOpts<T> {
-  phase: 'start' | 'mid_execution' | 'terminal' | 'harvest';
-  sandboxExecutionId: string;
-  call: () => Promise<T>;
-}
-
-async function providerCallStub<T>(opts: ProviderCallOpts<T>): Promise<T> {
-  return opts.call();
-}
+import { withSandboxProvider } from '../lib/withSandboxProvider.js';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -218,7 +203,7 @@ const MAX_OUTPUT_BYTES = 1_048_576; // 1 MB default cap
 
 async function step2OutputRead(ctx: HarvestContext): Promise<OutputReadResult> {
   try {
-    const rawContent = await providerCallStub({
+    const rawContent = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
       call: async () => {
@@ -328,7 +313,7 @@ const MAX_LOG_STREAM_BYTES = 10_485_760; // 10 MB per stream
 async function step5LogRead(ctx: HarvestContext): Promise<LogReadResult> {
   const readStream = async (stream: 'stdout' | 'stderr'): Promise<{ lines: LogEntry[]; bytes: number }> => {
     try {
-      const content = await providerCallStub({
+      const content = await withSandboxProvider({
         phase: 'harvest',
         sandboxExecutionId: ctx.sandboxExecutionId,
         call: async () => {
@@ -407,7 +392,7 @@ async function step6ArtefactEnumeration(
   let artefactList: Array<{ filename: string; bytes: number; mime: string }>;
 
   try {
-    artefactList = await providerCallStub({
+    artefactList = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
       call: async () => {
@@ -467,7 +452,7 @@ async function step6ArtefactEnumeration(
   // Read each artefact's content via the provider file API.
   const artefacts: ArtefactEntry[] = [];
   for (const entry of artefactList) {
-    const content = await providerCallStub({
+    const content = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
       call: async () => Buffer.alloc(0), // stub — actual read in C9/C10
