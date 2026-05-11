@@ -1228,6 +1228,37 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0325_operator_session_consents.sql',
     rationale: 'Consent event ledger — records granted/revoked/superseded events; cross-tenant leak would allow one org to see another org\'s consent history.',
   },
+  // 0321–0323 — Sandbox Isolation: five RLS-protected tables for untrusted Tier 4 code execution (Spec B)
+  {
+    tableName: 'sandbox_executions',
+    schemaFile: 'sandboxExecutions.ts',
+    policyMigration: '0321_create_sandbox_executions.sql',
+    rationale: 'Per-task sandbox execution records including policy snapshot, output, and cost. Cross-tenant leak exposes customer-derived code execution details, policy configuration, and billing data.',
+  },
+  {
+    tableName: 'sandbox_artefacts',
+    schemaFile: 'sandboxArtefacts.ts',
+    policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
+    rationale: 'Pointer rows for harvested artefacts in object storage. Cross-tenant leak exposes customer-uploaded file processing outputs and object storage keys.',
+  },
+  {
+    tableName: 'sandbox_telemetry_events',
+    schemaFile: 'sandboxTelemetryEvents.ts',
+    policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
+    rationale: 'Structured lifecycle events per sandbox execution. Cross-tenant leak exposes execution timing, failure modes, and credential-injection audit events.',
+  },
+  {
+    tableName: 'sandbox_egress_audit',
+    schemaFile: 'sandboxEgressAudit.ts',
+    policyMigration: '0323_create_sandbox_egress_audit.sql',
+    rationale: 'Per-egress-decision rows when network policy is non-none. Cross-tenant leak exposes which external hosts a customer\'s sandbox contacted and credential alias context.',
+  },
+  {
+    tableName: 'sandbox_logs',
+    schemaFile: 'sandboxLogs.ts',
+    policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
+    rationale: 'Redacted per-line stdout/stderr log rows from harvested sandbox executions. Cross-tenant leak exposes customer-derived script output and potentially PII or secrets that survived redaction.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

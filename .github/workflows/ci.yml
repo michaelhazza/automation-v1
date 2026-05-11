@@ -156,6 +156,32 @@ jobs:
       - name: "E.6 Skill error envelope (return paths must include ok: field)"
         run: bash scripts/verify-skill-error-envelope.sh
 
+      # Spec B (sandbox-isolation) — five structural gates added in C14.
+      # All run unconditionally on every PR. The template-version-coherence
+      # gate runs in STRICT mode (hard-fails on missing publish tags for
+      # non-local-dev-* versions) only on ready-to-merge so PR iteration
+      # remains unblocked until the operator pushes a publish tag.
+      - name: "Spec B: sandbox classification routes through SandboxExecutionService.runTask"
+        run: bash scripts/gates/verify-sandbox-classification.sh
+
+      - name: "Spec B: sandbox minimum-events emitted by service layer"
+        run: bash scripts/gates/verify-sandbox-minimum-events.sh
+
+      - name: "Spec B: no UPDATE against sandbox cost-ledger rows (§12.4 insert-only)"
+        run: bash scripts/gates/verify-no-sandbox-cost-update.sh
+
+      - name: "Spec B: no inlineSandbox import outside test files"
+        run: bash scripts/gates/verify-no-inline-sandbox-outside-test.sh
+
+      - name: "Spec B: sandbox template version coherence (strict on ready-to-merge)"
+        env:
+          # Strict mode = hard-fail when CURRENT_VERSION.version is not
+          # local-dev-* and no matching `sandbox-template/{name}/v{version}`
+          # tag exists. Only enforced on ready-to-merge so WIP branches can
+          # iterate on CURRENT_VERSION before tag push.
+          STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}
+        run: bash scripts/gates/verify-template-version-coherence.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/

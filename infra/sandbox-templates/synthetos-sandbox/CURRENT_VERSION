@@ -1,0 +1,5 @@
+version=local-dev-v1.0.0
+template_resource_class=cpu-small
+max_cost_cents_per_second=0.00042
+base_image_digest=sha256:a7e2d85b97e4a0dbc9c1e4fc2d0b5d7f8e9a1b3c5d7e9f1a3b5c7d9e1f3a5b7
+deps_lockfile_hash=sha256:0000000000000000000000000000000000000000000000000000000000000000

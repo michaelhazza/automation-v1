@@ -67,6 +67,17 @@ export const FailureReason = z.enum([
   // Returned by POST /workspace/configure when a different backend is already
   // configured and non-archived identities exist — use /migrate instead.
   'workspace_configure_requires_migration',
+  // Sandbox isolation additions (Spec B — sandbox-isolation §6 / §20.9).
+  // Each value maps to a terminal state in the sandbox execution lifecycle.
+  // See tasks/builds/sandbox-isolation/spec.md §13.1, §13.2, §20.9.
+  'sandbox_timeout',               // wall-clock ceiling tripped during sandbox execution
+  'sandbox_cost_ceiling',          // cost ceiling tripped during sandbox execution
+  'sandbox_output_invalid',        // output.json missing / malformed / schema-failed / over-size
+  'sandbox_harvest_failed',        // harvest pipeline could not write results after sandbox terminal
+  'sandbox_artefact_upload_failed',// artefact upload to object storage failed post-harvest
+  'sandbox_provider_unavailable',  // provider unreachable / ambiguous-terminal after backoff cap
+  'sandbox_credential_denied',     // credential broker refused issuance for this sandbox execution
+  'sandbox_input_rejected',        // preflight input validation failed — pre-row, no sandbox started
   'unknown',
 ]);
 

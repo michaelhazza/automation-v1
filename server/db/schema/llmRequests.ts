@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, numeric, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, numeric, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
@@ -41,7 +41,7 @@ export const llmRequests = pgTable(
     // explicitly so the attribution CHECK constraint in migration 0185 can't
     // be satisfied by accident.
     sourceType:     text('source_type').notNull(),
-    // 'agent_run' | 'process_execution' | 'system' | 'iee' | 'analyzer'
+    // 'agent_run' | 'process_execution' | 'system' | 'iee' | 'analyzer' | 'sandbox_compute' | 'sandbox_compute_correction'
     runId:          uuid('run_id').references(() => agentRuns.id),
     executionId:    uuid('execution_id').references(() => executions.id),
     // IEE attribution — added in rev 6/§13.1. When sourceType='iee', this MUST be set.
@@ -140,6 +140,22 @@ export const llmRequests = pgTable(
     billingDay:   text('billing_day').notNull(),    // 'YYYY-MM-DD'
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // Sandbox compute attribution — spec §12.2–§12.3. All nullable; CHECK constraint
+    // (migration 0324) enforces required fields per source_type.
+    // sandbox_execution_id: no hard FK to avoid coupling sandbox lifecycle to billing writes.
+    sandboxExecutionId:     uuid('sandbox_execution_id'),
+    // Vendor-reported vCPU-seconds (spec §12.3)
+    sandboxVcpuSeconds:     numeric('sandbox_vcpu_seconds', { precision: 12, scale: 4 }),
+    // Vendor-reported wall-clock duration in milliseconds
+    sandboxWallClockMs:     integer('sandbox_wall_clock_ms'),
+    // One of 'e2b' | 'local_docker' | 'inline' (spec §12.3)
+    sandboxProvider:        text('sandbox_provider'),
+    // Immutable digest / version of the sandbox template (spec §15)
+    sandboxTemplateVersion: text('sandbox_template_version'),
+    // Monotonically increasing per sandbox_execution_id for 'sandbox_compute_correction' rows.
+    // Always NULL for 'sandbox_compute' and all non-sandbox rows.
+    correctionSequence:     integer('correction_sequence'),
   },
   (table) => ({
     orgMonthIdx:          index('llm_requests_org_month_idx').on(table.organisationId, table.billingMonth),
@@ -167,6 +183,15 @@ export const llmRequests = pgTable(
     prefixHashIdx:        index('llm_requests_prefix_hash_idx')
       .on(table.prefixHash)
       .where(sql`${table.prefixHash} IS NOT NULL`),
+    // Sandbox cost-row idempotency — spec §12.3, §24.1.
+    // One row per sandbox execution (primary harvest write).
+    sandboxExecutionIdUniqueIdx: uniqueIndex('llm_requests_sandbox_execution_id_unique_idx')
+      .on(table.sandboxExecutionId)
+      .where(sql`${table.sourceType} = 'sandbox_compute'`),
+    // One row per (execution, correction_sequence) for correction rows — spec §24.1.
+    sandboxCorrectionSequenceUniqueIdx: uniqueIndex('llm_requests_sandbox_correction_sequence_unique_idx')
+      .on(table.sandboxExecutionId, table.correctionSequence)
+      .where(sql`${table.sourceType} = 'sandbox_compute_correction'`),
   }),
 );
 
@@ -199,10 +224,15 @@ export const TASK_TYPES = [
 export type TaskType = typeof TASK_TYPES[number];
 
 // Valid source types:
-//   'iee'      — added rev 6 §13.1. When sourceType='iee', ieeRunId MUST be set.
-//   'analyzer' — added rev §6. Non-agent consumer (skill analyzer); sourceId MUST be set.
-//   'system'   — generic non-attributed catch-all for platform work.
-export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee', 'analyzer'] as const;
+//   'iee'                        — added rev 6 §13.1. When sourceType='iee', ieeRunId MUST be set.
+//   'analyzer'                   — added rev §6. Non-agent consumer (skill analyzer); sourceId MUST be set.
+//   'system'                     — generic non-attributed catch-all for platform work.
+//   'sandbox_compute'            — spec §12.2. Sandbox execution cost row; sandboxExecutionId,
+//                                  sandboxVcpuSeconds, sandboxWallClockMs, sandboxProvider,
+//                                  sandboxTemplateVersion MUST be set (CHECK constraint, migration 0324).
+//   'sandbox_compute_correction' — spec §12.2. Cost-correction append row (never update original);
+//                                  sandboxExecutionId and correctionSequence MUST be set.
+export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee', 'analyzer', 'sandbox_compute', 'sandbox_compute_correction'] as const;
 export type SourceType = typeof SOURCE_TYPES[number];
 
 // Call sites — distinguishes LLM calls made on the main-app side from those

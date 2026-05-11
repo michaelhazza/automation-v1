@@ -695,6 +695,88 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const,
     // singletonKey: ${connectionId}:${refreshBucketEpochSec}
   },
+
+  // ── Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a) ─────
+  // sandbox-harvest-reconciliation: 5-minute cron sweep that finds sandbox_executions
+  // rows stuck in non-terminal states past their wall-clock-ceiling-plus-buffer
+  // and re-enqueues the harvest pipeline. fifo: reads current DB state each tick.
+  'sandbox-harvest-reconciliation': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 270,
+    deadLetter: 'sandbox-harvest-reconciliation__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  // sandbox-ceiling-monitor: per-execution tick job that checks wall-clock and
+  // estimated cost ceilings every monitorIntervalMs (default 5 s). Re-enqueues
+  // itself with singletonKey = sandboxExecutionId; exits cleanly on terminal.
+  // singleton-key: one in-flight monitor per execution; duplicates collapse.
+  'sandbox-ceiling-monitor': {
+    retryLimit: 1,
+    retryDelay: 5,
+    retryBackoff: false,
+    expireInSeconds: 30,
+    deadLetter: 'sandbox-ceiling-monitor__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+  // sandbox-wall-clock-kill: one-shot belt-and-braces. Scheduled at sandbox
+  // start with startAfter = wallClockMs + buffer. No-op if already terminal.
+  'sandbox-wall-clock-kill': {
+    retryLimit: 0,
+    retryDelay: 0,
+    retryBackoff: false,
+    expireInSeconds: 60,
+    deadLetter: 'sandbox-wall-clock-kill__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // sandbox-artefact-purge: triggered by run soft-delete event. Physically
+  // deletes artefacts from object storage; marks pointer rows purged.
+  // one-shot: one per run soft-delete; handler is idempotent on objectStorageState.
+  'sandbox-artefact-purge': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'sandbox-artefact-purge__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+
+  // ── Spec B — Sandbox Isolation: retention-scoped pg-boss jobs (C11b) ─────
+  // All three are daily cron jobs scheduled at distinct UTC times to avoid
+  // contention. Each sweeps across all orgs; per-org failure is logged and
+  // iteration continues (maintenance-job pattern). Idempotency: cutoff-scoped —
+  // re-running with the same cutoff date is a no-op (matching rows already deleted).
+  // fifo: sweep re-reads current DB state each tick; duplicate delivery is safe.
+  //
+  // Cron schedule (set in queueService.ts):
+  //   sandbox-telemetry-prune  02:00 UTC — 90-day prune of sandbox_telemetry_events
+  //   sandbox-logs-prune       02:30 UTC — 90-day prune of sandbox_logs (incl. soft-deleted)
+  //   sandbox-egress-audit-prune 03:00 UTC — 180-day prune of sandbox_egress_audit
+  'sandbox-telemetry-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-telemetry-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  'sandbox-logs-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-logs-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  'sandbox-egress-audit-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-egress-audit-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
