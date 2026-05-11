@@ -6,10 +6,13 @@
 - Build slug: `operator-session-identity`
 - Mode: manual
 - Started: 2026-05-11T22:01:13Z
+- Finalised: 2026-05-11T22:14:54Z
 - Branch HEAD at start: `f36f231c`
+- Branch HEAD at finalisation: `25db99bb`
 - Spec: `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`
 - Plan: `tasks/builds/operator-session-identity/plan.md`
 - Phase 2 handoff: `tasks/builds/operator-session-identity/handoff.md`
+- **Verdict:** APPROVED (2 rounds, 4 auto-implement / 0 reject / 1 defer)
 
 ### Phase 2 prior-pass verdicts (context for ChatGPT)
 - G2 (build / tsc): PASS
@@ -108,4 +111,78 @@ Top themes (finding_type vocabulary): `security` (F1, F2), `error_handling` (F4)
 - `bash scripts/verify-operator-session-token-redaction.sh` (local): PASS (gate now exits 0 against current `server/`).
 
 ---
+
+## Round 2 — 2026-05-11T22-14-54Z
+
+### Diff inventory
+- Round 2 code-only diff: `.chatgpt-diffs/pr286-round2-code-diff.diff` — 804K, 90 files
+
+### ChatGPT Feedback (raw)
+
+> Yes, I think you can finalise after one explicit deferral, assuming CI is green.
+>
+> **Final review verdict**
+>
+> No new blockers found. The previous blockers appear resolved in the latest round:
+>
+> | Previous item | Status | Notes |
+> |---------------|--------|-------|
+> | F1 token-redaction gate path mismatch | Resolved | The script now normalises grep output to repo-relative paths before comparing against the allowlist. |
+> | F2 wrong permission helper | Resolved | Latest diff uses `hasSubaccountPermission` for `OPERATOR_SESSION_VIEW`, not `hasOrgPermission`. |
+> | F3 OAuth return path losing workspace context | Resolved | `ConnectAppModal` now preserves `?workspace=${subaccountId}` in the OAuth return path. |
+> | F4 app-clock regression in refresh sweep | Resolved | Refresh bucket and expiry threshold are now DB-time anchored through `transaction_timestamp()`, with no app-clock fallback. |
+>
+> **One remaining item — T1 remains, but can be deferred**
+>
+> The allow-agent-use endpoint still accepts arbitrary UUIDs in `allowedAgentIds` and writes them into `configJson` without validating that each ID belongs to the subaccount's agents. The schema validates UUID shape and non-empty array only, while the route persists the IDs directly.
+>
+> I would not block finalisation on this if V1 does not yet have a proper agent picker, but I would record it clearly as a deferred item:
+>
+> **OPERATOR-SESSION-T1:** Replace raw `allowedAgentIds` entry with a real subaccount-agent picker and server-side membership validation before specific-agent AI subscription scoping becomes user-facing / production-critical.
+>
+> **Recommendation:** Finalise / merge if CI is green, with T1 added to `tasks/todo.md` or the build gaps file. The core security and correctness concerns from the last round are closed.
+
+**Verdict:** APPROVED.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 (Round 1) — token-redaction gate path mismatch | — | — | confirmed resolved | — | Round 2 reviewer marks Resolved — `sed "s#^$ROOT_DIR/##"` normalisation in place. No further action. |
+| F2 (Round 1) — `/api/connections` permission helper mismatch | — | — | confirmed resolved | — | Round 2 reviewer marks Resolved — `hasSubaccountPermission` now used for `OPERATOR_SESSION_VIEW`. No further action. |
+| F3 (Round 1) — OAuth `returnPath` drops `workspace=` | — | — | confirmed resolved | — | Round 2 reviewer marks Resolved — `ConnectAppModal` preserves `&workspace=${subaccountId}`. No further action. |
+| F4 (Round 1) — refresh-sweep `Date.now()` regression | — | — | confirmed resolved | — | Round 2 reviewer marks Resolved — bucket query fails closed; expiry threshold computed via `transaction_timestamp()`. No further action. |
+| T1 (Round 1) — `EditAvailabilityModal` raw agent-ID entry | user-facing | defer | defer (carried) | medium | Already routed to `tasks/todo.md` as OSI-DEF-13 in Round 1. Operator instruction at Round 2: "I think you can finalise after one explicit deferral, assuming CI is green." T1 deferral stands; no agent picker scoped for V1. |
+
+Top themes (finding_type vocabulary): zero new findings; all Round 1 items confirmed resolved or explicitly deferred.
+
+### Round 2 changes
+
+No code changes this round — ChatGPT verdict is APPROVED with one explicit operator-acknowledged deferral (T1 → OSI-DEF-13). Per agent contract step 8: skip the per-round auto-commit (no files changed this round). Operator signalled "done" → proceeding to Finalisation.
+
+### Verification
+
+- No code edits this round → no fresh lint/typecheck run required. Round 1 verification (G3 PASS, token-redaction gate PASS) remains the last green state on this branch.
+
+---
+
+## Final Summary
+
+- **Final Verdict:** APPROVED — operator finalised after Round 2.
+- Rounds: 2
+- Auto-accepted (technical): 4 implemented (F1, F2, F3, F4) | 0 rejected | 0 deferred
+- User-decided: 0 implemented | 0 rejected | 1 deferred (T1 → OSI-DEF-13, operator-approved at Round 2)
+- Index write failures: 0
+- Deferred to `tasks/todo.md` § PR Review deferred items / PR #286:
+  - [user] OSI-DEF-13 — `EditAvailabilityModal` raw agent-ID entry — V1 ships with limitation noted; revisit when agent-list endpoint exists or beta customer hits the path.
+- Architectural items surfaced to screen (user decisions): none (all 4 Round 1 findings auto-applied as technical fixes; T1 surfaced and deferred).
+- KNOWLEDGE.md updated: yes (2 entries — F2 permission-tier-helper-mismatch pattern; F4 DB-bucket-fallback regression as gotcha)
+- architecture.md updated: no — checked grep terms `operator-session`, `OperatorSession`, `hasSubaccountPermission`, `OPERATOR_SESSION_VIEW`, `runOperatorSessionRefreshSweep`, `verify-operator-session-token-redaction`, `ConnectAppModal`; the doc's existing operator-session sections describe service boundaries and stay accurate after these Round 1 fixes (no service-boundary, RLS-invariant, or three-tier-agent-model change was made by F1-F4).
+- capabilities.md updated: n/a — no product capability / agency capability / skill / integration was added, removed, or renamed in this PR's Round 1 fixes (F1-F4 are internal hardening; T1 is deferred). The operator-session capability was already documented in the Phase 2 doc-sync sweep recorded in `f36f231c`.
+- integration-reference.md updated: n/a — no integration behaviour change in Round 1 fixes (F2 corrects a permission helper internal to the consolidated `/api/connections` route; F3 fixes an OAuth `returnPath` query-param continuity issue that does not change connector behaviour or scope).
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked grep terms `operator-session`, `token-redaction`, `permission helper`, `transaction_timestamp`, `Date.now`; existing rules cover these patterns (Date.now caution at KNOWLEDGE 1630/2108; gate-script regex rule at KNOWLEDGE 1702). The two new KNOWLEDGE entries appended this finalisation are observations, not new locked rules.
+- frontend-design-principles.md updated: n/a — no new UI pattern, hard rule, or worked example. F3 fixes an existing OAuth return-path query-param continuity; T1 (deferred) would introduce a picker pattern if implemented, but is held back.
+- KNOWLEDGE.md updated: yes (2 entries — see above)
+- main merged into branch: pending step 10 (to run after finalisation commit)
+- PR: #286 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/286
 

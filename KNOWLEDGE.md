@@ -3713,3 +3713,34 @@ Three corrections from `chatgpt-pr-review` Round 3 on PR #284 pre-test-hardening
 **Rule.** `usability_state` is written ONLY by `operatorSessionLifecycleService.transition` (after initial INSERT). `plan_verification_status` is written by `operatorSessionService.verifyPlan` and by `operatorSessionService.connect` (initial value). Read paths: the broker checks `usability_state === 'connected_usable'` exclusively; the UI pill checks both (state for color, status for "verified" badge). The pure helper `orderResolvedCredentials` in `credentialBrokerServicePure.ts` is the single sort site for failover ordering (default-first, then alphabetical by label).
 
 **Detection heuristic.** If a state machine has two responsibilities (gate + audit), confirm each column has exactly one writer and that read sites consult only the relevant column — never both. Conflating them at read time recreates the original drift. When adding a new writer to either column, verify no existing caller already writes it outside the designated write path.
+
+### [2026-05-11] Gotcha — Permission-helper-tier mismatch: `hasOrgPermission` does NOT accept a `SUBACCOUNT_PERMISSIONS.*` constant
+
+`server/routes/integrationConnections.ts` consolidated route added `hasOrgPermission(req, SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW)` to gate which connection rows the caller could see. The permission constant lives under `SUBACCOUNT_PERMISSIONS` — a workspace-scoped permission set — but the helper was `hasOrgPermission`, an organisation-scoped permission check. The two helpers operate on different permission tiers and look up different membership tables; passing a workspace permission constant into the org helper silently returns the wrong answer (in this case: either hides workspace-scoped operator-session rows for legitimate users, or applies the wrong permission model for org-scope callers). TypeScript does not catch the mismatch because both helpers accept `string`-typed permission codes.
+
+**Pattern:** the permission helper must match the tier of the permission constant exactly:
+- `ORG_PERMISSIONS.*` → `hasOrgPermission(req, code)` — no subaccount required
+- `SUBACCOUNT_PERMISSIONS.*` → `hasSubaccountPermission(req, subaccountId, code)` — subaccount required, parsed from the request scope/query
+
+**Rule for code review:** when grepping for permission gates, treat `has<Tier>Permission(req, <TIER>_PERMISSIONS.*)` as a structural unit. If the helper tier and the constant tier disagree, that line is wrong by construction — not a stylistic preference. The fix is to swap to the matching helper AND parse the scope-appropriate context (e.g. for `scope=workspace` callers, validate `parsed.data.subaccountId` and pass it as the second arg).
+
+**Applied to:** PR #286 chatgpt-pr-review Round 1 F2 — `server/routes/integrationConnections.ts` flipped to `hasSubaccountPermission(req, parsed.data.subaccountId, SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW)` gated on `scope === 'workspace'`; for `scope=org` / undefined scope the flag is forced false (operator_session rows are already skipped downstream for org scope in `connectionsService.ts`). Session log: `tasks/review-logs/chatgpt-pr-review-operator-session-identity-2026-05-11T22-01-13Z.md`.
+
+**Generalises to:** any route handler in `server/routes/*` that gates row visibility or write access via a permission helper. The same trap exists in reverse (passing an `ORG_PERMISSIONS.*` constant into `hasSubaccountPermission`). A future linting rule could enforce: the `<TIER>_` prefix of the constant must match the tier embedded in the helper name, statically. Until that exists, code review catches it via the pattern above.
+
+### [2026-05-11] Gotcha — DB-time bucket queries must fail closed; never fall back to `Date.now()` for ordering / dedupe keys
+
+`server/jobs/operatorSessionRefreshJob.ts:runOperatorSessionRefreshSweep` (PR #286) computed a 5-minute bucket via `SELECT floor(extract(epoch from transaction_timestamp()) / 300)::bigint AS bucket` to dedupe sweep ticks across pods, and computed `expiryThreshold = Date.now() + REFRESH_WINDOW_MINUTES * 60_000` to filter sessions that needed refreshing. Two regressions snuck in during chunk-level implementation:
+
+1. **App-clock fallback on the bucket query** — if the SQL query returned zero rows, the code substituted `Math.floor(Date.now() / 300_000)` as the bucket. That defeats the purpose of using DB time for dedupe: under clock skew between Node processes, two pods could compute different `Date.now()` buckets and both run the sweep tick, doubling work and producing dedupe-key collisions.
+2. **App-clock for the expiry predicate** — `Date.now()` flows into the `WHERE token_expires_at <= $1` clause. Same skew exposure: a session expiring at `T + 30s` could be picked up by one pod's predicate and skipped by another's, depending on the pod's wall clock.
+
+**Fix pattern (PR #286 Round 1 F4):**
+- Fail closed on the bucket query — if zero rows, log `bucket_query_empty` and SKIP the sweep tick. Better to drop a tick than to corrupt the dedupe key.
+- Compute the expiry threshold inside SQL: `WHERE token_expires_at <= transaction_timestamp() + (${REFRESH_WINDOW_MINUTES} * interval '1 minute')`. The predicate evaluates entirely in the database, so all pods see the same threshold for the same transaction.
+
+**Rule:** when a job uses DB-side time for dedupe or ordering semantics (any `transaction_timestamp()`, `now()`, `clock_timestamp()` derivative used as a bucket key, cursor, or predicate), there is NEVER an app-clock fallback. The fallback is "skip this tick / fail closed", not "compute it from Node". Same principle as `[2026-04-30] Date.now() poisons cursor-based projection delta polling` (KNOWLEDGE 2108) and the rate-limit `Retry-After` correctness rule (KNOWLEDGE 1630) — those are reads from DB-time scalars; this entry covers the predicate / bucket-key flavour of the same family.
+
+**Detection heuristic.** Grep any job file for `Date.now()`. Every hit needs a justification: is it used purely for ephemeral instrumentation (latency timing, telemetry), or does it feed into a dedupe key, ordering cursor, or a predicate compared against a DB-side column? If the latter, the value MUST come from a DB query within the same transaction — no fallback.
+
+**Applied to:** PR #286 chatgpt-pr-review Round 1 F4 — `server/jobs/operatorSessionRefreshJob.ts`. The earlier plan-review pass had already removed this pattern once; this was a regression reintroduced during chunk-level implementation. Confirmed resolved in Round 2 with verdict APPROVED. Session log: `tasks/review-logs/chatgpt-pr-review-operator-session-identity-2026-05-11T22-01-13Z.md`.
