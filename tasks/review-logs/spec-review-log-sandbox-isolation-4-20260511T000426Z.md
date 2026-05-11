@@ -33,4 +33,4 @@
 
 Files modified: `tasks/builds/sandbox-isolation/spec.md`, `tasks/todo.md` (SANDBOX-DEF-LOG-SCHEMA wording tightened to mark it as the chunk-zero gating decision).
 
-Spec commit after iteration: (will be filled in after Step 8b).
+Spec commit after iteration: `733fc650`.
