@@ -1,4 +1,4 @@
-export type ContractAuthMethod = 'oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie';
+export type ContractAuthMethod = 'oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie' | 'ai_subscription';
 export type ContractStatus = 'connected' | 'expired' | 'failed' | 'pending';
 
 export class UnknownEnumValueError extends Error {

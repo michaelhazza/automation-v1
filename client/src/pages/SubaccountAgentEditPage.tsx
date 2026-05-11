@@ -23,6 +23,7 @@ import type { AllowedEnvironment } from '../components/agent-config/ExecutionTab
 import GovernanceTab from '../components/agent-config/GovernanceTab';
 import ModelsIdentityTab from '../components/agent-config/ModelsIdentityTab';
 import IntegrationsTab from '../components/agent-config/IntegrationsTab';
+import { ModelAccessSection } from './govern/components/ModelAccessSection';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -609,10 +610,15 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
 
       {/* ── Models and Identity tab ── */}
       {activeTab === 'models_identity' && (
-        <ModelsIdentityTab
-          modelProvider={link.agent.modelProvider}
-          modelId={link.agent.modelId}
-        />
+        <>
+          {subaccountId && (
+            <ModelAccessSection agentId={link.agentId} subaccountId={subaccountId} />
+          )}
+          <ModelsIdentityTab
+            modelProvider={link.agent.modelProvider}
+            modelId={link.agent.modelId}
+          />
+        </>
       )}
 
       {/* ── Integrations tab ── */}

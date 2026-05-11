@@ -4132,6 +4132,141 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
 
 ---
 
+## Deferred from spec-conformance review — operator-session-identity (2026-05-11)
+
+**Captured:** 2026-05-11T10:31:11Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-8-2026-05-11T10-31-11Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 8
+
+- [ ] REQ #5a — `ManageMultiConnectDrawer` is missing the per-connection "Edit label" action named by the plan.
+  - Spec section: plan §Chunk 8, "Multi-connect Manage drawer (§5.4): ... per-connection Test / Edit label / Disconnect actions"
+  - Gap: the drawer's 3-dot menu currently exposes only Test and Disconnect; there is no "Edit label" option, and `governApi.ts` does not appear to have an `updateConnectionLabel` (or equivalent) endpoint.
+  - Suggested approach: confirm whether label editing is in scope for Chunk 8 or deferred to a later chunk; if in scope, decide whether to add a `PATCH /connections/:id` label-only route (server-side) + the corresponding `governApi` call, then surface the action in the drawer with an inline edit affordance.
+  - **Update 2026-05-11T10:48Z (spec-conformance re-verification):** ACCEPTED AS V1 DEFERRAL. No backend endpoint exists; same posture as the master toggle gap in Chunk 7. In-file marker comment present at `ManageMultiConnectDrawer.tsx:122`. Item stays open as the durable record of the deferred capability; revisit if/when a label-edit endpoint is added.
+- [ ] REQ #5b — `AppCard` "Manage" CTA opens `ManageMultiConnectDrawer` for any connection count (≥1) rather than only for ≥2.
+  - Spec section: plan §Chunk 8, "When a card has ≥2 connections (same app), the 'Manage' CTA opens this drawer instead of jumping to the existing single-connection detail."
+  - Gap: AppIntegrationsTab's `AppCard.onManage` always opens the drawer, even when the app has exactly one connection. The plan calls for a single-connection card to route to "the existing single-connection detail" instead.
+  - Suggested approach: clarify which "existing single-connection detail" the plan references (it likely belongs to Chunk 10's `ConnectionsPage.tsx` wiring) and decide whether Chunk 8 should branch on `connections.length` now or defer the branch to Chunk 10.
+  - **Update 2026-05-11T10:48Z (spec-conformance re-verification):** DEFERRED TO CHUNK 10. Chunk 10 owns the wiring between cards and single-connection detail; the branching decision lives there, not in Chunk 8. Item stays open against Chunk 10's scope.
+- [ ] REQ #9 — Shared `DisconnectConfirmDialog` gates on the literal string `"disconnect"` rather than on the connection label as §17.8 prescribes (cross-chunk concern touching Chunks 7, 8, 9).
+  - Spec section: spec §17.8 ("Disconnect confirmation: type-to-confirm gate; disabled CTA until input matches label.")
+  - Status of drawer-side requirement: **RESOLVED 2026-05-11** in commit `154f550a`. `ManageMultiConnectDrawer.tsx:9, 315-325` now imports and mounts the shared `DisconnectConfirmDialog`; the previously inlined `DisconnectConfirmInline` is deleted. Drawer-side Chunk 8 obligation satisfied.
+  - Residual gap: `DisconnectConfirmDialog.tsx:32` (carried over from `consolidation-govern`) gates on `confirmText === 'disconnect'` rather than on the connection's label. §17.8 requires the gate to match the connection/subscription label. This affects all three call sites of the shared dialog — Chunks 7, 8, and 9.
+  - Suggested approach: decide whether to (a) update `DisconnectConfirmDialog` to gate on the connection label per §17.8 (a one-prop change plus matching test), or (b) accept the existing literal-"disconnect" gate as the V1 contract and amend §17.8 to match. Cross-chunk design decision — surfacing it here so Chunks 7/9 inherit whichever outcome.
+
+## Deferred from spec-conformance review — operator-session-identity chunk 9 (2026-05-11)
+
+**Captured:** 2026-05-11T11:04:24Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-9-2026-05-11T11-04-24Z.md`
+**Spec:** `tasks/builds/operator-session-identity/plan.md` § Chunk 9 + `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md` §5.1, §5.2, §5.5, §5.6, §17.7
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 9
+
+- [ ] REQ #4 — `TestWebLoginModal` does not follow the `progressUrl` field from the 202 response, and the row's test-status dot does not update on run completion.
+  - Spec section: plan §Chunk 9 "Test Web Login (existing IEE pattern)" — "Server responds 202 with `{ agentRunId, ieeRunId, progressUrl }`. Client follows `progressUrl` via existing run-trace pattern; updates the row's test-status dot when the run completes."
+  - Gap: `TestWebLoginModal.tsx:71-73` reads only `data.agentRunId` and navigates to a hardcoded route `/admin/subaccounts/{subaccountId}/runs/{agentRunId}`, ignoring `progressUrl` and `ieeRunId`. No completion listener (no polling, no websocket, no callback into `WebLoginsTab`) so the row's status dot stays stale after a test run finishes.
+  - Suggested approach: confirm with the server-side contract whether the hardcoded route IS the canonical progress URL (in which case the contract gap is cosmetic and §Chunk 9 wording should be relaxed) or whether `progressUrl` points at a different surface (in which case the client should follow it). Separately, decide the row-dot-update mechanism — reuse whatever IEE pattern already exists in the codebase for run-trace completion, or accept "user must refresh" as the V1 posture and amend the plan to match.
+- [ ] REQ #7 — Web Login disconnect uses inline `window.confirm` rather than the shared `DisconnectConfirmDialog`.
+  - Spec section: plan §Chunk 9 "Disconnect flow (shared with Chunk 8's DisconnectConfirmDialog): Type-to-confirm with the subscription/connection label; disabled CTA until input matches." Also spec §17.8.
+  - Gap: `WebLoginsTab.tsx:210-212` carries an explanatory comment ("the shared DisconnectConfirmDialog requires a unified Connection type; web login connections use a different shape") and uses `window.confirm(...)` at line 293 instead of mounting the shared dialog. No type-to-confirm gate; no impact preview.
+  - Distinct from the existing Chunk 8 REQ #9 entry above: that one is about the shared dialog gating on the literal `"disconnect"` rather than on the label. This Chunk 9 gap is that the shared dialog is not used AT ALL on the Web Logins surface.
+  - Suggested approach: decide whether to (a) generalise `DisconnectConfirmDialog`'s `Connection` prop to a discriminated union covering both AI Subscriptions and Web Logins (plus widening `getConnectionUsage` / `disconnectConnection` to dispatch on type), (b) build a thin Web-Login-specific adapter that wraps the shared dialog with a synthetic `Connection` shape, or (c) accept the inline `window.confirm` as the V1 posture (matching the deferred-capability pattern used for Chunk 7's master toggle and Chunk 8's Edit label) and amend the plan §Chunk 9 disconnect-flow contract to match. Cross-chunk design choice — same scope as REQ #9 above.
+
+## Deferred from spec-conformance review — operator-session-identity chunk 10 (2026-05-11)
+
+**Captured:** 2026-05-11T11:29:02Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-10-2026-05-11T11-29-02Z.md`
+**Spec:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10 + `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md` §5.3, §6, §8.13, §8.15, §10.4, §17.7
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10
+
+- [ ] REQ #13 — `getAgentAllowedSubscriptions` argument order does not match the plan's named signature.
+  - Spec section: plan §Chunk 10 "Files to modify" — "Add `getAgentAllowedSubscriptions(agentId, subaccountId)` — calls `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions`."
+  - Gap: `client/src/api/governApi.ts:125-131` declares `getAgentAllowedSubscriptions(subaccountId: string, agentId: string)` — `(subaccountId, agentId)` — reversed from the plan's `(agentId, subaccountId)`. The single call site (`ModelAccessSection.tsx:109`) matches the implementation, so the helper is functionally correct; the divergence is the public signature contract.
+  - Note: every other AI-subscription helper in the same file (`getAiSubscription`, `connectAiSubscription`, `updateAiSubscriptionLabel`, `makeAiSubscriptionDefault`, `editAiSubscriptionAvailability`, `disconnectAiSubscription`, `reacceptConsent`, `triggerReauth`) takes `(subaccountId, ...)` first, so the current order is consistent with the file's convention. The plan diverges from that convention.
+  - Suggested approach: decide whether to (a) flip the helper's parameters to `(agentId, subaccountId)` per the plan (one-line signature change + update the single call site in `ModelAccessSection.tsx`) and accept the inconsistency with sibling helpers, or (b) accept the current `(subaccountId, agentId)` order as the V1 contract and amend the plan to match. Option (b) keeps file-level consistency; option (a) follows the plan literally. Non-blocking — the function works either way.
+
+---
+
+## Deferred from branch-level review — operator-session-identity (2026-05-12)
+
+**Status:** Deferred (V1 ship-as-is; revisit before Phase 3 successor work)
+**Source logs:**
+- `tasks/review-logs/adversarial-review-log-operator-session-identity-2026-05-11T12-18-00Z.md`
+- `tasks/review-logs/pr-review-log-operator-session-identity-branch-2026-05-11T12-18-00Z.md`
+
+**Branch-level fix-loop applied (committed in this build):** S2/L1/L2/N3 org-filter defence-in-depth on `reaccept` UPDATE, refresh-job UPDATE, route re-read, and `detectAndTransitionStaleDisclosure` SELECT; C2 make-default race closed by target-row `FOR UPDATE` + idempotent fast-path + CAS-style `is_default = false` predicate on the promote; L3 sweep capped at `LIMIT 500` (`SWEEP_BATCH_LIMIT`) with batch-saturated logging; S3 duplicate `AiSubscriptionConnection` type collapsed to a single source of truth in `shared/types/govern.ts`.
+
+**Deferred items remaining:**
+
+- **OSI-DEF-1 — credentialBrokerService bare-db conversion to getOrgScopedDb** (adversarial-reviewer C1, confirmed-hole)
+  - File: `server/services/credentialBrokerService.ts` lines 4, 96, 177, 242, 307, 355, 377 (6 call sites)
+  - Reason for deferral: Larger refactor than the rest of the fix-loop; current path is gated by the request-time `withOrgTx` for V1 callers. The hole only opens if a future caller acquires the service from a non-tx context (background job, admin path) without setting up org tx — same risk shape that the 2026-04-25 audit closed across other services.
+  - When to revisit: Before adding any new caller of `credentialBrokerService` (e.g. the OpenClaw adapter activation, or a new background job that resolves credentials). The fix mirrors the prior service-by-service remediation in that audit.
+
+- **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
+  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
+  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
+  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+
+- **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
+  - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
+  - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
+  - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
+
+- **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
+  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
+  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
+  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+
+- **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
+  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
+  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
+  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+
+- **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
+  - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
+  - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
+  - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
+
+- **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
+  - File: `server/routes/operatorSessionConnections.ts` line 442
+  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
+  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+
+- **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
+  - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
+  - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
+  - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
+
+- **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
+  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
+  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
+  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
+
+- **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
+  - File: `server/services/operatorSessionConsentService.ts` lines 197-209
+  - Reason for deferral: Spec §16 names the method but defers the implementation to the user-deletion privacy sweep (out of scope for Spec C).
+  - When to revisit: When the user-deletion flow is implemented. Confirm any caller handles the 501 gracefully rather than failing the deletion.
+
+- **OSI-DEF-11 — `OPERATOR_SESSION_DISCLOSURE_VERSION` is deploy-coupled** (adversarial-reviewer additional observation)
+  - File: `server/config/operatorSessionProviders.ts` (`OPERATOR_SESSION_DISCLOSURE_VERSION = 1`)
+  - Reason for deferral: Hard-coded constant. Bumping the version (e.g. for a legal update) requires a code deploy. No DB-config or feature-flag path.
+  - When to revisit: If the disclosure text needs an urgent update without a deploy window, or if legal asks for a feature-flag-style toggle on disclosure version.
+
+- **OSI-DEF-12 — Legacy `/admin/subaccounts/:id/connections` bookmark lands on empty state when org admin has no active client** (dual-reviewer P2)
+  - File: `client/src/pages/govern/ConnectionsPage.tsx` lines 38-45 + `client/src/App.tsx` line 248 (`SubaccountIntegrationsRoute`)
+  - Reason for deferral: The redirect adds `?workspace=X` but `ConnectionsPage` derives `isWorkspace` from `viewMode`. An org admin with no `activeClientId` lands in `'org'` mode and sees "Select a workspace" instead of subaccount X's connections. Honouring the query param across view modes was attempted in this dual-reviewer pass and reverted — it creates a worse UX problem: the page body shows workspace data while the switcher shows "Org" (mode/data mismatch with no clean way to clear the override without editing the URL). Correct fix is non-trivial (set `activeSubaccountId` + name in localStorage from the redirect, which requires fetching the subaccount name; or replace the redirect target with a workspace-picker prompt) and outside the scope of an in-loop edit.
+  - When to revisit: Bundle with the next pass that touches `SubaccountIntegrationsRoute` or the workspace picker. The clean approach is: in `SubaccountIntegrationsRoute`, fetch the subaccount name via `GET /api/subaccounts/:id`, call `setActiveSubaccount(id, name)`, then `Navigate` to `/connections` without the `workspace` query param. The page then enters workspace mode naturally and the switcher stays consistent.
+  - Current behaviour: legacy bookmark from org mode → "Select a workspace" empty state. Bookmark from workspace mode → works because `viewMode === 'workspace'` and the redirect's `workspace=` param is honoured by the existing line-43 ternary.
+
+- **OSI-DEF-13 — `EditAvailabilityModal` exposes raw agent-ID entry instead of a selectable agent picker** (chatgpt-pr-review PR #286 round 1 T1)
+  - File: `client/src/pages/govern/components/EditAvailabilityModal.tsx`
+  - Reason for deferral: V1 ships with this limitation noted. The backend schema validates UUIDs and non-empty arrays, but the UX is not viable for non-technical operators — they cannot realistically type or paste agent IDs from memory, and there is no in-product way to look an ID up. ChatGPT also flags the membership-validation gap (a user could type an ID belonging to a different subaccount and have the persistence layer accept it).
+  - When to revisit: Either when the agent-list endpoint is being built for an adjacent feature (bundle the picker on the back of it), or earlier if a beta customer hits the "Specific agents only" path and the manual-ID flow blocks them.
+  - Two viable end-states (decision deferred):
+    - (a) Hide the "Specific agents only" option from the modal until the picker exists — narrows V1 surface area to "Any agent in this workspace", which is the default and what most callers will pick anyway.
+    - (b) Add a minimal `GET /api/subaccounts/:id/agents` endpoint that returns `[{id, name}]` for the workspace, render a multi-select, and server-side enforce `allowedAgentIds ⊆ workspace.agents` on persistence.
+  - Recommended end-state at revisit time: (b) — the multi-select is the long-term shape and (a) just kicks the can. Picking (a) at revisit is only justified if the agent-list endpoint is far off and a workspace user is actively asking for the restriction-by-agent path.
 ## Deferred spec decisions — sandbox-isolation (2026-05-11)
 
 **Captured:** 2026-05-11

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<!--
+  Screen 01b: Connections — App Integrations tab (Round 10)
+  Location: /connections — Organisation group, sidebar "Connections" active
+  Tab strip: App Integrations [3] (active) | Web Logins [3] | AI Subscriptions [3]
+  Primary action: "Connect" on each app card in Browse section.
+  Layout: category filter chips + card grid. NO mention of OAuth / API Key / MCP / Cookie.
+  Round 10 fix: Browse section shows ONLY apps with zero connections.
+  Connected apps (Gmail, HubSpot, GoHighLevel) removed from Browse section.
+  "Add another" CTA removed entirely from this tab. Only path for adding another connection
+  to an already-connected app is via the Manage drawer (screen 16).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connections — App Integrations | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 12px; gap: 12px;
+}
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+
+/* Header actions */
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.viewmode-switcher {
+  display: inline-flex; align-items: center;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 2px;
+}
+.vm-btn {
+  padding: 5px 14px; border-radius: 6px;
+  font-size: 12px; font-weight: 500; color: #64748b;
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+}
+.vm-btn.active { background: white; color: #0f172a; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+/* Scope badge */
+.scope-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: #475569;
+  background: #f1f5f9; border: 1px solid #e2e8f0;
+  padding: 3px 10px; border-radius: 20px;
+  margin-bottom: 16px;
+}
+.scope-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #4f46e5; flex-shrink: 0; }
+
+/* Tab strip */
+.tab-strip {
+  display: flex; align-items: flex-end;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 20px; gap: 0;
+}
+.tab-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 18px 10px;
+  font-size: 13px; font-weight: 500; color: #64748b;
+  background: transparent; border: none; cursor: pointer;
+  font-family: inherit; position: relative; text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color 0.12s;
+}
+.tab-btn:hover { color: #334155; }
+.tab-btn.active { color: #4338ca; font-weight: 700; border-bottom-color: #4338ca; }
+.tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 600;
+  padding: 1px 6px; border-radius: 10px;
+  background: #f1f5f9; color: #64748b; min-width: 20px;
+}
+.tab-btn.active .tab-count { background: #e0e7ff; color: #4338ca; }
+
+/* Search + category filter bar */
+.filter-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 24px;
+}
+.search-box {
+  display: flex; align-items: center; gap: 8px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 7px 12px;
+}
+.search-box svg { color: #94a3b8; flex-shrink: 0; }
+.search-box input {
+  border: none; outline: none; font-size: 13px; color: #334155;
+  background: transparent; width: 200px; font-family: inherit;
+}
+.search-box input::placeholder { color: #94a3b8; }
+
+/* Category filter chips */
+.cat-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cat-chip {
+  display: inline-flex; align-items: center;
+  font-size: 12px; font-weight: 500; color: #64748b;
+  background: white; border: 1px solid #e2e8f0;
+  padding: 4px 12px; border-radius: 20px; cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.cat-chip:hover { border-color: #a5b4fc; color: #4338ca; }
+.cat-chip.active {
+  background: #eef2ff; border-color: #a5b4fc; color: #4338ca; font-weight: 600;
+}
+
+/* Section heading */
+.section-heading {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: #94a3b8;
+  margin: 0 0 14px;
+}
+
+/* App card grid */
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+/* App card */
+.app-card {
+  background: white;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px 16px 16px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+  position: relative;
+}
+.app-card:hover {
+  border-color: #818cf8;
+  box-shadow: 0 4px 16px rgba(99,102,241,0.13);
+  transform: translateY(-2px);
+}
+
+/* App icon letterform */
+.app-icon {
+  width: 52px; height: 52px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; letter-spacing: -0.03em;
+  margin-bottom: 12px; flex-shrink: 0;
+}
+.icon-gmail   { background: #fce8e6; color: #c5221f; }
+.icon-hubspot { background: #fff3e0; color: #e8460a; }
+.icon-ghl     { background: #e8f5e9; color: #2e7d32; }
+.icon-slack   { background: #f3e5f5; color: #6a1b9a; }
+.icon-teamwork { background: #e3f2fd; color: #1565c0; }
+.icon-gdrive  { background: #e8f5e9; color: #188038; }
+.icon-outlook { background: #e3f2fd; color: #0078d4; }
+.icon-gcal    { background: #fce8e6; color: #1a73e8; }
+.icon-mscal   { background: #e3f2fd; color: #0078d4; }
+.icon-notion  { background: #f8f8f7; color: #191919; border: 1px solid #e2e8f0; }
+
+.app-name { font-size: 13.5px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+.app-category { font-size: 11px; color: #94a3b8; font-weight: 500; margin-bottom: 10px; }
+
+/* Connection status badge on card */
+.card-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 10px;
+  margin-bottom: 12px;
+}
+.card-status-connected { background: #dcfce7; color: #15803d; }
+.card-status-none { background: #f1f5f9; color: #64748b; }
+
+/* Card CTA */
+.card-cta {
+  width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 0; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; transition: background 0.12s;
+}
+.card-cta-primary {
+  background: #4f46e5; color: white;
+}
+.card-cta-primary:hover { background: #4338ca; }
+.card-cta-manage {
+  background: #f1f5f9; color: #334155;
+  border: 1px solid #e2e8f0;
+}
+.card-cta-manage:hover { background: #e2e8f0; color: #0f172a; }
+.card-cta-secondary {
+  background: white; color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+.card-cta-secondary:hover { background: #eef2ff; }
+
+/* Section divider */
+.section-divider {
+  border: none; border-top: 1px solid #e2e8f0; margin: 4px 0 24px;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Home
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Inbox
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01b-app-integrations-tab.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Connections</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <!-- Page header -->
+      <div class="page-header">
+        <div class="page-title">Connections</div>
+        <div class="header-actions">
+          <div class="viewmode-switcher">
+            <button class="vm-btn active">Workspace</button>
+            <button class="vm-btn">Org</button>
+          </div>
+          <input type="text" placeholder="Search apps..." id="appSearch" oninput="filterApps()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:13px;color:#334155;outline:none;font-family:inherit;width:200px;">
+        </div>
+      </div>
+
+      <!-- Scope badge -->
+      <div class="scope-badge">
+        <span class="dot"></span>
+        Workspace: Marketing subaccount
+      </div>
+
+      <!-- Tab strip — App Integrations active -->
+      <div class="tab-strip">
+        <button class="tab-btn active">
+          App Integrations
+          <span class="tab-count">3</span>
+        </button>
+        <a class="tab-btn" href="01c-web-logins-tab.html">
+          Web Logins
+          <span class="tab-count">3</span>
+        </a>
+        <a class="tab-btn" href="01-connections-list.html">
+          AI Subscriptions
+          <span class="tab-count">3</span>
+        </a>
+      </div>
+
+      <!-- Tab subtitle (L) -->
+      <div style="font-size:12px;color:#94a3b8;font-weight:400;margin-bottom:14px;margin-top:6px;padding:0 2px;">Apps your agents use to do work, like Gmail or HubSpot</div>
+
+      <!-- Category filter chips -->
+      <div class="filter-bar">
+        <div class="cat-chips" id="catChips">
+          <button class="cat-chip active" onclick="filterCat('all', this)">All categories</button>
+          <button class="cat-chip" onclick="filterCat('Communication', this)">Communication</button>
+          <button class="cat-chip" onclick="filterCat('CRM', this)">CRM</button>
+          <button class="cat-chip" onclick="filterCat('Marketing', this)">Marketing</button>
+          <button class="cat-chip" onclick="filterCat('File Storage', this)">File Storage</button>
+          <button class="cat-chip" onclick="filterCat('Project Management', this)">Project Management</button>
+          <button class="cat-chip" onclick="filterCat('Calendar', this)">Calendar</button>
+        </div>
+      </div>
+
+      <!-- Section 1: Your connected apps -->
+      <div id="connectedSection">
+        <div class="section-heading">Your connected apps</div>
+        <div class="app-grid" id="connectedGrid">
+
+          <!-- Gmail — 2 connected -->
+          <div class="app-card" data-cat="Communication" data-name="gmail">
+            <div class="app-icon icon-gmail">GM</div>
+            <div class="app-name">Gmail</div>
+            <div class="app-category">Communication</div>
+            <div class="card-status card-status-connected">
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="4" fill="#15803d"/></svg>
+              2 connected
+            </div>
+            <button class="card-cta card-cta-manage" onclick="window.location='16-manage-multi-connect.html'">Manage</button>
+          </div>
+
+          <!-- HubSpot — 1 connected -->
+          <div class="app-card" data-cat="CRM" data-name="hubspot">
+            <div class="app-icon icon-hubspot">HS</div>
+            <div class="app-name">HubSpot</div>
+            <div class="app-category">CRM</div>
+            <div class="card-status card-status-connected">
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="4" fill="#15803d"/></svg>
+              1 connected
+            </div>
+            <button class="card-cta card-cta-manage" onclick="window.location='#'">Manage</button>
+          </div>
+
+          <!-- GoHighLevel — 1 connected -->
+          <div class="app-card" data-cat="CRM" data-name="gohighlevel">
+            <div class="app-icon icon-ghl">GHL</div>
+            <div class="app-name">GoHighLevel</div>
+            <div class="app-category">CRM</div>
+            <div class="card-status card-status-connected">
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><circle cx="4" cy="4" r="4" fill="#15803d"/></svg>
+              1 connected
+            </div>
+            <button class="card-cta card-cta-manage" onclick="window.location='#'">Manage</button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Section 2: Apps you can connect (unconnected apps only) -->
+      <div id="browseSection">
+        <div class="section-heading" style="margin-top:8px;" id="browseSectionHeading">Apps you can connect</div>
+        <div class="app-grid" id="browseGrid">
+
+          <!-- Slack — not connected -->
+          <div class="app-card" data-cat="Communication" data-name="slack">
+            <div class="app-icon icon-slack">SL</div>
+            <div class="app-name">Slack</div>
+            <div class="app-category">Communication</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+          <!-- Teamwork — not connected -->
+          <div class="app-card" data-cat="Project Management" data-name="teamwork">
+            <div class="app-icon icon-teamwork">TW</div>
+            <div class="app-name">Teamwork</div>
+            <div class="app-category">Project Management</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+          <!-- Google Drive — not connected -->
+          <div class="app-card" data-cat="File Storage" data-name="google drive">
+            <div class="app-icon icon-gdrive">GD</div>
+            <div class="app-name">Google Drive</div>
+            <div class="app-category">File Storage</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+          <!-- Outlook — not connected -->
+          <div class="app-card" data-cat="Communication" data-name="outlook">
+            <div class="app-icon icon-outlook">OL</div>
+            <div class="app-name">Outlook</div>
+            <div class="app-category">Communication</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+          <!-- Google Calendar — not connected -->
+          <div class="app-card" data-cat="Calendar" data-name="google calendar">
+            <div class="app-icon icon-gcal">GC</div>
+            <div class="app-name">Google Calendar</div>
+            <div class="app-category">Calendar</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+          <!-- Microsoft Calendar — not connected -->
+          <div class="app-card" data-cat="Calendar" data-name="microsoft calendar">
+            <div class="app-icon icon-mscal">MC</div>
+            <div class="app-name">Microsoft Calendar</div>
+            <div class="app-category">Calendar</div>
+            <div class="card-status card-status-none">Not connected</div>
+            <button class="card-cta card-cta-primary" onclick="window.location='#'">Connect</button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Nav hints -->
+      <div style="margin-top:8px;font-size:11.5px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;">
+        <span>&larr; <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a></span>
+        <span>Switch to: <a href="01c-web-logins-tab.html" style="color:#6366f1;text-decoration:none;">Web Logins (01c)</a> &nbsp;|&nbsp; <a href="01-connections-list.html" style="color:#6366f1;text-decoration:none;">AI Subscriptions (01)</a></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+let currentCat = 'all';
+
+function filterCat(cat, btn) {
+  currentCat = cat;
+  document.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function filterApps() {
+  applyFilters();
+}
+
+function applyFilters() {
+  const query = (document.getElementById('appSearch').value || '').toLowerCase();
+  document.querySelectorAll('.app-card').forEach(card => {
+    const catMatch = currentCat === 'all' || card.dataset.cat === currentCat;
+    const nameMatch = !query || card.dataset.name.includes(query) || card.querySelector('.app-name').textContent.toLowerCase().includes(query);
+    card.style.display = (catMatch && nameMatch) ? '' : 'none';
+  });
+
+  // Hide "Your connected apps" section if all connected cards are hidden
+  const connCards = document.querySelectorAll('#connectedGrid .app-card');
+  const anyConnVisible = Array.from(connCards).some(c => c.style.display !== 'none');
+  document.getElementById('connectedSection').style.display = anyConnVisible ? '' : 'none';
+
+  // Hide "Apps you can connect" section if all browse cards are hidden
+  const browseCards = document.querySelectorAll('#browseGrid .app-card');
+  const anyBrowseVisible = Array.from(browseCards).some(c => c.style.display !== 'none');
+  document.getElementById('browseSection').style.display = anyBrowseVisible ? '' : 'none';
+}
+</script>
+</body>
+</html>

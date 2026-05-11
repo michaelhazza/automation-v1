@@ -28,9 +28,9 @@ import AgentOverviewTab from '../../components/agent-workspace/AgentOverviewTab'
 import DeleteAgentDialog from './components/DeleteAgentDialog';
 import { TestRunnerCard } from './components/TestRunnerCard';
 
-type TabKey = 'overview' | 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs';
+type TabKey = 'overview' | 'configure' | 'behaviour' | 'personality' | 'skills' | 'data-sources' | 'schedule' | 'budget' | 'runs' | 'model-access';
 
-const TAB_ORDER: TabKey[] = ['overview', 'configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs'];
+const TAB_ORDER: TabKey[] = ['overview', 'configure', 'behaviour', 'personality', 'skills', 'data-sources', 'schedule', 'budget', 'runs', 'model-access'];
 
 // Permission gates per spec §4.1 / plan Chunk 6 — Overview tab visibility is
 // gated on `org.agents.view`. Other tabs were already gated by the page's
@@ -68,6 +68,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   schedule: 'Schedule',
   budget: 'Budget',
   runs: 'Runs',
+  'model-access': 'Model Access',
 };
 
 type TabPatchMap = {
@@ -421,6 +422,21 @@ export default function AgentEditPage() {
         )}
         {activeTab === 'runs' && (
           <RunsTab agentId={id!} runs={data.runs} />
+        )}
+        {activeTab === 'model-access' && (
+          // Model Access at org level is workspace-scoped; see workspace agent edit pages for per-agent Model Access.
+          <div className="bg-slate-50 border border-slate-200 rounded-[10px] p-5">
+            <h3 className="text-[15px] font-semibold text-slate-900 m-0 mb-2">Model Access</h3>
+            <p className="text-[13px] text-slate-600 m-0 mb-4">
+              Model Access is configured per workspace. Open this agent in a specific workspace to view which AI Subscriptions it can use.
+            </p>
+            <a
+              href="/admin/subaccounts"
+              className="inline-flex items-center text-[13px] text-indigo-600 hover:text-indigo-800 no-underline hover:underline"
+            >
+              Go to workspace list
+            </a>
+          </div>
         )}
       </div>
 

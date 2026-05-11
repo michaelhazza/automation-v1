@@ -1,8 +1,9 @@
-import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, unique, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, boolean, unique, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
+import { operatorSessionConsents } from './operatorSessionConsents';
 
 // ---------------------------------------------------------------------------
 // Integration Connections — stored external service credentials per org or subaccount
@@ -22,7 +23,7 @@ export const integrationConnections = pgTable(
     providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'stripe_agent' | 'teamwork' | 'web_login' | 'custom' | 'google_drive'>(),
     // Note: 'web_login' uses authType 'service_account' (username + password
     // stored in configJson + secretsRef respectively). Spec v3.4 §6 / Code Change D.
-    authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app' | 'web_login'>(),
+    authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app' | 'web_login' | 'operator_session'>(),
     connectionStatus: text('connection_status').notNull().default('active').$type<'active' | 'revoked' | 'error'>(),
     // Label to distinguish multiple connections of the same provider (e.g. "Support Gmail", "Personal Gmail")
     label: text('label'),
@@ -60,6 +61,18 @@ export const integrationConnections = pgTable(
     syncPhase: text('sync_phase').notNull().default('backfill').$type<'backfill' | 'transition' | 'live'>(),
     syncLockToken: uuid('sync_lock_token'),
 
+    // Operator Session Identity — usability + plan state (migration 0322)
+    usabilityState: text('usability_state')
+      .$type<'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled'>(),
+    planTier: text('plan_tier')
+      .$type<'pro' | 'team' | 'enterprise' | 'plus' | 'unknown'>(),
+    planVerificationStatus: text('plan_verification_status')
+      .$type<'verified' | 'self_declared' | 'failed'>(),
+    planVerifiedAt: timestamp('plan_verified_at', { withTimezone: true }),
+    consentRecordId: uuid('consent_record_id')
+      .references(() => operatorSessionConsents.id, { onDelete: 'set null' }),
+    isDefault: boolean('is_default').notNull().default(false),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -74,6 +87,10 @@ export const integrationConnections = pgTable(
       .where(sql`${table.subaccountId} IS NULL`),
     subaccountIdx: index('integration_connections_subaccount_idx').on(table.subaccountId),
     orgIdx: index('integration_connections_org_idx').on(table.organisationId),
+    // Operator Session Identity: at most one default per subaccount (migration 0322)
+    subaccountOperatorSessionDefaultUnique: uniqueIndex('ic_subaccount_operator_session_default_unique')
+      .on(table.subaccountId)
+      .where(sql`${table.authType} = 'operator_session' AND ${table.isDefault} = true`),
   })
 );
 

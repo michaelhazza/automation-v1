@@ -3648,6 +3648,30 @@ server/config/actionRegistry/
 
 **Detection heuristic.** When writing any code that encodes a duration, limit, or threshold as a numeric literal, grep the codebase for a pure helper that returns the same kind of value. If a helper exists — use it. Common offenders: signed URL TTL (use `deriveSignedUrlExpiry`), eval thresholds (use the DB-stored values), score clamps (use `Math.min(MAX_SCALE, ...)`).
 
+## Pattern: Separate `usability_state` (broker gate) from `plan_verification_status` (audit signal) — two concerns, two columns
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 1 F1). Initial spec made self-declaration connects land in `connected_unverified` — meaning the broker would never issue credentials until plan was independently verified. This made the feature dead-on-arrival for all early users, since V1 has no independent verification mechanism.
+
+**Rule.** When a credential has two separate concerns — "can the broker decrypt and use this?" and "is this credential's metadata confirmed by a third party?" — model them as distinct columns with distinct semantics. `usability_state` is the broker gate: only `connected_usable` allows decryption and injection. `plan_verification_status` is the audit trail: `self_declared` signals unconfirmed tier without blocking access. Mixing the two into a single "unverified = unusable" state creates an unrecoverable hold state that has no exit until infrastructure that may never exist is built.
+
+**Detection heuristic.** When a spec has a state that means both "not yet confirmed by a third party" AND "blocked from use," ask: does the user's action (accepting a disclosure, self-declaring a tier) provide enough confidence to unblock? If yes, split into two fields. The "unconfirmed" signal belongs in a `*_status` or `*_verification_status` column; the "usable" gate belongs in a dedicated `usability_state` or similar state machine column.
+
+## Pattern: Type union members need defined write paths — orphaned values become implementation traps
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 1 IC-3). The `planVerificationStatus` TypeScript union included `'unverified'` as a valid value, but no code path in the spec ever set it. The `'failed'` value already covered "couldn't determine tier."
+
+**Rule.** Every value in a discriminated-union or string-literal type MUST have at least one explicitly named write path in the spec (a service method, migration default, or code branch that produces it). Values with no write path will either never appear in production data, or will be set by ad-hoc code that bypasses the intended semantics — both outcomes are bugs. Before locking a spec, grep the type definition and confirm each member is reachable from the execution model.
+
+**Detection heuristic.** For each string-literal type or discriminated union in the data model section, list its values. For each value, search the execution model and chunk plan for the phrase that sets it (e.g., "`plan_verification_status = 'self_declared'`"). A value with no grep hit is orphaned — remove it or add the write path.
+
+## Pattern: Close open questions explicitly in §18 when the answer lands in §18b — stale open questions create builder contradictions
+
+**Context.** Operator-session-identity chatgpt-spec-review (2026-05-11, Round 2 T1). Open Question §18.3 ("subaccount vs org scope for Plus consent — confirm before implementation") was resolved in §18b during spec-reviewer iteration 5, but §18 still showed the original question verbatim. ChatGPT's Round 2 found the contradiction.
+
+**Rule.** When a resolution lands in §18b, update §18 immediately — replace the open question prose with "(Resolved — see §18b: [title])". Do not leave §18 and §18b as parallel documents. Builders reading §18 will see an unresolved question; builders reading §18b will see a resolution. Both reading paths must be consistent.
+
+**Detection heuristic.** Before locking a spec, grep §18 for any question that also appears (by subject) in §18b. Any §18 item whose topic matches a §18b entry should be replaced with a pointer. Conversely, any §18b entry with no corresponding §18 pointer is an invitation to add one (so the §18 reader is not confused by an apparently-unresolved question).
+
 ## Pattern: Stale regression tests survive when the test mocks the consequence rather than the implementation
 
 **Context.** Pre-test-hardening pr-reviewer re-review (2026-05-11, commit `3423a0d5` blocker B1.x) — `taskService.createTask.regression.test.ts` asserted that the legacy 4-arg overload "throws synchronously and writes zero rows" via `expect(...).rejects.toThrow('legacy 4-arg shape')` plus `expect(tx.insert).not.toHaveBeenCalled()`. The implementation later pivoted from "throws" to "opens its own db.transaction + sets the GUC + delegates to the canonical path" (needed for sister-branch callers in `workflowEngineService.ts:2716` + `:2962`). The test's mocks did NOT cover `db.transaction` because the original throw fired before any db call — when the implementation pivoted, only the `rejects.toThrow` assertion failed; the unmocked `db.transaction` call hit production code and produced a misleading connection error, not an assertion failure.
@@ -3682,6 +3706,44 @@ Three corrections from `chatgpt-pr-review` Round 3 on PR #284 pre-test-hardening
 
 3. **ChatGPT scope-of-view false positive (already-imported claim).** Three rounds in a row, ChatGPT claimed `connectorConfigService.ts` was missing `withAdminConnection` import based on a diff hunk that didn't show line 7's existing import. The import has been in the file since well before this PR. **Rule:** when ChatGPT (or any review agent) flags a missing import based on what's "visible in the diff", verify the full file with `grep -n "^import" <file>` before fixing. Diff-hunk visibility is not file-state. Auto-reject duplicate false positives across rounds — they are noise, not signal.
 
+## Pattern: usability_state vs plan_verification_status implementation — two columns, two writers, two read paths
+
+**Context.** Operator-session-identity Phase 2 implementation (2026-05-11). Spec-review identified the conceptual split (see earlier entry: "Pattern: Separate `usability_state` (broker gate) from `plan_verification_status` (audit signal) — two concerns, two columns"). Implementation surfaced that the split needs two independent writers, two independent read sites, and two independent invariants.
+
+**Rule.** `usability_state` is written ONLY by `operatorSessionLifecycleService.transition` (after initial INSERT). `plan_verification_status` is written by `operatorSessionService.verifyPlan` and by `operatorSessionService.connect` (initial value). Read paths: the broker checks `usability_state === 'connected_usable'` exclusively; the UI pill checks both (state for color, status for "verified" badge). The pure helper `orderResolvedCredentials` in `credentialBrokerServicePure.ts` is the single sort site for failover ordering (default-first, then alphabetical by label).
+
+**Detection heuristic.** If a state machine has two responsibilities (gate + audit), confirm each column has exactly one writer and that read sites consult only the relevant column — never both. Conflating them at read time recreates the original drift. When adding a new writer to either column, verify no existing caller already writes it outside the designated write path.
+
+### [2026-05-11] Gotcha — Permission-helper-tier mismatch: `hasOrgPermission` does NOT accept a `SUBACCOUNT_PERMISSIONS.*` constant
+
+`server/routes/integrationConnections.ts` consolidated route added `hasOrgPermission(req, SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW)` to gate which connection rows the caller could see. The permission constant lives under `SUBACCOUNT_PERMISSIONS` — a workspace-scoped permission set — but the helper was `hasOrgPermission`, an organisation-scoped permission check. The two helpers operate on different permission tiers and look up different membership tables; passing a workspace permission constant into the org helper silently returns the wrong answer (in this case: either hides workspace-scoped operator-session rows for legitimate users, or applies the wrong permission model for org-scope callers). TypeScript does not catch the mismatch because both helpers accept `string`-typed permission codes.
+
+**Pattern:** the permission helper must match the tier of the permission constant exactly:
+- `ORG_PERMISSIONS.*` → `hasOrgPermission(req, code)` — no subaccount required
+- `SUBACCOUNT_PERMISSIONS.*` → `hasSubaccountPermission(req, subaccountId, code)` — subaccount required, parsed from the request scope/query
+
+**Rule for code review:** when grepping for permission gates, treat `has<Tier>Permission(req, <TIER>_PERMISSIONS.*)` as a structural unit. If the helper tier and the constant tier disagree, that line is wrong by construction — not a stylistic preference. The fix is to swap to the matching helper AND parse the scope-appropriate context (e.g. for `scope=workspace` callers, validate `parsed.data.subaccountId` and pass it as the second arg).
+
+**Applied to:** PR #286 chatgpt-pr-review Round 1 F2 — `server/routes/integrationConnections.ts` flipped to `hasSubaccountPermission(req, parsed.data.subaccountId, SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW)` gated on `scope === 'workspace'`; for `scope=org` / undefined scope the flag is forced false (operator_session rows are already skipped downstream for org scope in `connectionsService.ts`). Session log: `tasks/review-logs/chatgpt-pr-review-operator-session-identity-2026-05-11T22-01-13Z.md`.
+
+**Generalises to:** any route handler in `server/routes/*` that gates row visibility or write access via a permission helper. The same trap exists in reverse (passing an `ORG_PERMISSIONS.*` constant into `hasSubaccountPermission`). A future linting rule could enforce: the `<TIER>_` prefix of the constant must match the tier embedded in the helper name, statically. Until that exists, code review catches it via the pattern above.
+
+### [2026-05-11] Gotcha — DB-time bucket queries must fail closed; never fall back to `Date.now()` for ordering / dedupe keys
+
+`server/jobs/operatorSessionRefreshJob.ts:runOperatorSessionRefreshSweep` (PR #286) computed a 5-minute bucket via `SELECT floor(extract(epoch from transaction_timestamp()) / 300)::bigint AS bucket` to dedupe sweep ticks across pods, and computed `expiryThreshold = Date.now() + REFRESH_WINDOW_MINUTES * 60_000` to filter sessions that needed refreshing. Two regressions snuck in during chunk-level implementation:
+
+1. **App-clock fallback on the bucket query** — if the SQL query returned zero rows, the code substituted `Math.floor(Date.now() / 300_000)` as the bucket. That defeats the purpose of using DB time for dedupe: under clock skew between Node processes, two pods could compute different `Date.now()` buckets and both run the sweep tick, doubling work and producing dedupe-key collisions.
+2. **App-clock for the expiry predicate** — `Date.now()` flows into the `WHERE token_expires_at <= $1` clause. Same skew exposure: a session expiring at `T + 30s` could be picked up by one pod's predicate and skipped by another's, depending on the pod's wall clock.
+
+**Fix pattern (PR #286 Round 1 F4):**
+- Fail closed on the bucket query — if zero rows, log `bucket_query_empty` and SKIP the sweep tick. Better to drop a tick than to corrupt the dedupe key.
+- Compute the expiry threshold inside SQL: `WHERE token_expires_at <= transaction_timestamp() + (${REFRESH_WINDOW_MINUTES} * interval '1 minute')`. The predicate evaluates entirely in the database, so all pods see the same threshold for the same transaction.
+
+**Rule:** when a job uses DB-side time for dedupe or ordering semantics (any `transaction_timestamp()`, `now()`, `clock_timestamp()` derivative used as a bucket key, cursor, or predicate), there is NEVER an app-clock fallback. The fallback is "skip this tick / fail closed", not "compute it from Node". Same principle as `[2026-04-30] Date.now() poisons cursor-based projection delta polling` (KNOWLEDGE 2108) and the rate-limit `Retry-After` correctness rule (KNOWLEDGE 1630) — those are reads from DB-time scalars; this entry covers the predicate / bucket-key flavour of the same family.
+
+**Detection heuristic.** Grep any job file for `Date.now()`. Every hit needs a justification: is it used purely for ephemeral instrumentation (latency timing, telemetry), or does it feed into a dedupe key, ordering cursor, or a predicate compared against a DB-side column? If the latter, the value MUST come from a DB query within the same transaction — no fallback.
+
+**Applied to:** PR #286 chatgpt-pr-review Round 1 F4 — `server/jobs/operatorSessionRefreshJob.ts`. The earlier plan-review pass had already removed this pattern once; this was a regression reintroduced during chunk-level implementation. Confirmed resolved in Round 2 with verdict APPROVED. Session log: `tasks/review-logs/chatgpt-pr-review-operator-session-identity-2026-05-11T22-01-13Z.md`.
 ### [2026-05-11] Pattern — Registration-seam lets provider resolver compile before concrete providers exist
 
 When introducing a new provider-resolved service (e.g. `SandboxExecutionService`) that depends on three concrete implementations not yet built, the order-of-delivery problem is solved by a "registration seam": the resolver module exports a `registerSandboxProvider(name, ctor)` function, and each concrete provider calls it at module-init time. The resolver compiles and type-checks independently; C4 (resolver) can ship before C9 (e2bSandbox) and C10 (localDockerSandbox) because the concrete modules are never statically imported by the resolver. The resolver only fails at runtime when `SANDBOX_PROVIDER` names a provider that hasn't been registered — a fail-fast boot error, not a compile error. This avoids both a circular-dependency and a "everything must land in one giant chunk" build constraint. Applied in Spec B: `server/services/sandbox/sandboxProviderResolver.ts` + concrete providers C9/C10.

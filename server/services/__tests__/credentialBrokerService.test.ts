@@ -57,6 +57,15 @@ vi.mock('../../db/schema/index.js', () => ({
     authType: {},
     providerType: {},
     tokenExpiresAt: {},
+    usabilityState: {},
+    configJson: {},
+    isDefault: {},
+    label: {},
+    planTier: {},
+    secretsRef: {},
+    accessToken: {},
+    refreshToken: {},
+    updatedAt: {},
   },
 }));
 
@@ -87,8 +96,10 @@ vi.mock('drizzle-orm', () => ({
   desc: vi.fn((col) => ({ _desc: col })),
   eq: vi.fn((col, val) => ({ _eq: { col, val } })),
   gte: vi.fn((col, val) => ({ _gte: { col, val } })),
+  ne: vi.fn((col, val) => ({ _ne: { col, val } })),
   // sql is the tagged-template function used for the metadata->>'subaccountId'
-  // predicate in audit(). Capture the parts so tests can assert if needed.
+  // predicate in audit() and the JSONB allowlist filter in resolveAvailableCredentials().
+  // Capture the parts so tests can assert if needed.
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ _sql: { strings, values } })),
 }));
 
@@ -465,10 +476,29 @@ describe('audit', () => {
 
 // ── resolveAvailableCredentials ───────────────────────────────────────────────
 
+// resolveAvailableCredentials now makes two db.select calls:
+//   1st: regular (non-operator_session) active connections
+//   2nd: operator_session connections with usabilityState = 'connected_usable'
+// Tests use mockReturnValueOnce for each call in sequence.
+
+const MOCK_OP_CONN = {
+  id: '00000000-0000-0000-0000-000000000004',
+  organisationId: ORG_ID,
+  subaccountId: SUBACCOUNT_ID,
+  authType: 'operator_session',
+  providerType: 'salesforce',
+  connectionStatus: 'active',
+  usabilityState: 'connected_usable',
+  tokenExpiresAt: null,
+};
+
 describe('resolveAvailableCredentials', () => {
   test('queries integrationConnections for active connections in scope', async () => {
-    const chain = makeSelectChainNoLimit([MOCK_CONN]);
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(chain);
+    const chain1 = makeSelectChainNoLimit([MOCK_CONN]);
+    const chain2 = makeSelectChainNoLimit([]);
+    (db.select as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(chain1)
+      .mockReturnValueOnce(chain2);
 
     await credentialBrokerService.resolveAvailableCredentials({
       organisationId: ORG_ID,
@@ -476,13 +506,16 @@ describe('resolveAvailableCredentials', () => {
     });
 
     expect(db.select).toHaveBeenCalled();
-    expect(chain.from).toHaveBeenCalled();
-    expect(chain.where).toHaveBeenCalled();
+    expect(chain1.from).toHaveBeenCalled();
+    expect(chain1.where).toHaveBeenCalled();
   });
 
   test('returns ResolvedCredential array with correct shape', async () => {
-    const chain = makeSelectChainNoLimit([MOCK_CONN]);
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(chain);
+    const chain1 = makeSelectChainNoLimit([MOCK_CONN]);
+    const chain2 = makeSelectChainNoLimit([]);
+    (db.select as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(chain1)
+      .mockReturnValueOnce(chain2);
 
     const result = await credentialBrokerService.resolveAvailableCredentials({
       organisationId: ORG_ID,
@@ -498,8 +531,11 @@ describe('resolveAvailableCredentials', () => {
   });
 
   test('returns empty array when no active connections', async () => {
-    const chain = makeSelectChainNoLimit([]);
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(chain);
+    const chain1 = makeSelectChainNoLimit([]);
+    const chain2 = makeSelectChainNoLimit([]);
+    (db.select as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(chain1)
+      .mockReturnValueOnce(chain2);
 
     const result = await credentialBrokerService.resolveAvailableCredentials({
       organisationId: ORG_ID,
@@ -510,8 +546,11 @@ describe('resolveAvailableCredentials', () => {
   });
 
   test('does not call connectionTokenService (no decryption)', async () => {
-    const chain = makeSelectChainNoLimit([MOCK_CONN]);
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(chain);
+    const chain1 = makeSelectChainNoLimit([MOCK_CONN]);
+    const chain2 = makeSelectChainNoLimit([]);
+    (db.select as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(chain1)
+      .mockReturnValueOnce(chain2);
 
     await credentialBrokerService.resolveAvailableCredentials({
       organisationId: ORG_ID,
@@ -519,5 +558,23 @@ describe('resolveAvailableCredentials', () => {
     });
 
     expect(connectionTokenService.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  test('includes operator_session rows when second query returns usable rows', async () => {
+    const chain1 = makeSelectChainNoLimit([]);
+    const chain2 = makeSelectChainNoLimit([MOCK_OP_CONN]);
+    (db.select as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(chain1)
+      .mockReturnValueOnce(chain2);
+
+    const result = await credentialBrokerService.resolveAvailableCredentials({
+      organisationId: ORG_ID,
+      subaccountId: SUBACCOUNT_ID,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].authType).toBe('operator_session');
+    expect(result[0].credentialId).toBe(MOCK_OP_CONN.id);
+    expect(result[0].providerType).toBe('salesforce');
   });
 });

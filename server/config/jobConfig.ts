@@ -682,6 +682,21 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
   },
 
+  // ── operator-session-identity chunk 6 — token refresh ───────────────────
+  // Per-connection refresh job. singletonKey = ${connectionId}:${refreshBucketEpochSec}
+  // deduplicates rapid re-enqueues within the same 5-minute bucket.
+  // retryLimit 5 with exponential backoff handles transient provider errors;
+  // expireInSeconds 7200 (2h) gives ample headroom above the retry series.
+  'operator-session-refresh': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 7200,
+    deadLetter: 'operator-session-refresh__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+    // singletonKey: ${connectionId}:${refreshBucketEpochSec}
+  },
+
   // ── Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a) ─────
   // sandbox-harvest-reconciliation: 5-minute cron sweep that finds sandbox_executions
   // rows stuck in non-terminal states past their wall-clock-ceiling-plus-buffer

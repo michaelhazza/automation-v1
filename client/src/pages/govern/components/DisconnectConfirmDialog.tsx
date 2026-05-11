@@ -4,15 +4,15 @@
 import { useEffect, useState } from 'react';
 import Modal from '../../../components/Modal';
 import { getConnectionUsage, disconnectConnection } from '../../../api/governApi';
-import type { Connection, ConnectionUsage } from '../../../../../shared/types/govern.js';
+import type { ConnectionUsage } from '../../../../../shared/types/govern.js';
 
 interface Props {
-  connection: Connection;
+  connectionId: string;
   onClose: () => void;
   onDisconnected: () => void;
 }
 
-export function DisconnectConfirmDialog({ connection, onClose, onDisconnected }: Props) {
+export function DisconnectConfirmDialog({ connectionId, onClose, onDisconnected }: Props) {
   const [usage, setUsage] = useState<ConnectionUsage | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState('');
@@ -20,10 +20,10 @@ export function DisconnectConfirmDialog({ connection, onClose, onDisconnected }:
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
   useEffect(() => {
-    getConnectionUsage(connection.id)
+    getConnectionUsage(connectionId)
       .then(setUsage)
       .catch(() => setLoadError('Failed to load usage information.'));
-  }, [connection.id]);
+  }, [connectionId]);
 
   const impactCount = usage
     ? usage.agents.length + usage.recurringTasks.length + usage.workflows.length
@@ -36,7 +36,7 @@ export function DisconnectConfirmDialog({ connection, onClose, onDisconnected }:
     setBusy(true);
     setDisconnectError(null);
     try {
-      await disconnectConnection(connection.id);
+      await disconnectConnection(connectionId);
       onDisconnected();
     } catch (e: unknown) {
       const msg = (() => {
