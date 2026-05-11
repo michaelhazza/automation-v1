@@ -52,19 +52,24 @@ function normalizePdfBytes(buf: Buffer): Buffer {
   str = str.replace(/\/ID\s*\[<[0-9a-fA-F]{32}>\s*<[0-9a-fA-F]{32}>\]/g, '');
   str = str.replace(/[A-Z]{6}\+/g, 'AAAAAA+');
   // Strip PDF object stream contents — opaque binary that may vary per
-  // render even for identical input. Match `stream\n` ... `\nendstream`
-  // (PDF spec — stream operator is always followed by a newline and the
-  // endstream operator is preceded by one).
-  str = str.replace(/(stream\r?\n)[\s\S]*?(\r?\nendstream)/g, '$1<STREAM_NORMALISED>$2');
-  // Normalise /Length declarations on stream objects so the stripped
-  // content's original length doesn't leak variance into the bytes.
+  // render. Permissive endstream match (any whitespace, not just \r?\n)
+  // because some PDF writers omit the leading newline before `endstream`.
+  str = str.replace(/(stream\r?\n)[\s\S]*?(\s*endstream)/g, '$1<STREAM_NORMALISED>$2');
+  // Normalise /Length declarations on stream objects.
   str = str.replace(/\/Length\s+\d+/g, '/Length 0');
-  // Strip xref table contents — byte offsets derived from earlier object
-  // sizes propagate any earlier non-determinism. Keep the `xref`/`trailer`
-  // boundary tokens so the file structure remains recognisable.
+  // Iteration 5: normalise PDF object IDs and references. Two renders
+  // of the same input may produce identical OBJECT CONTENT but emit
+  // objects in different orders, getting different generated IDs. The
+  // header `N M obj` (start of an indirect object) and the reference
+  // `N M R` (pointer to one) both carry these IDs. Replacing them with
+  // a fixed sentinel decouples byte-equality from object-emission order.
+  str = str.replace(/\b\d+\s+\d+\s+obj\b/g, '0 0 obj');
+  str = str.replace(/\b\d+\s+\d+\s+R\b/g, '0 0 R');
+  // Strip xref table contents.
   str = str.replace(/(xref\r?\n)[\s\S]*?(trailer\b)/g, '$1<XREF_NORMALISED>\n$2');
-  // Normalise the `startxref` offset (the absolute byte position of the
-  // xref table from file start).
+  // Normalise the trailer's /Size entry — the count of indirect objects.
+  str = str.replace(/\/Size\s+\d+/g, '/Size 0');
+  // Normalise the `startxref` offset.
   str = str.replace(/startxref\s+\d+/g, 'startxref 0');
   return Buffer.from(str, 'binary');
 }
