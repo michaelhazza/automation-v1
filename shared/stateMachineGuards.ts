@@ -29,7 +29,7 @@
 
 import { TERMINAL_RUN_STATUSES, AGENT_RUN_STATUS } from './runStatus.js';
 
-export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run' | 'workflow_step_gate';
+export type StateMachineKind = 'agent_run' | 'workflow_run' | 'workflow_step_run' | 'workflow_step_gate' | 'sandbox_execution';
 
 const AGENT_RUN_TERMINAL: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
 const AGENT_RUN_KNOWN: ReadonlySet<string> = new Set(Object.values(AGENT_RUN_STATUS));
@@ -77,6 +77,32 @@ const WORKFLOW_STEP_KNOWN: ReadonlySet<string> = new Set([
 const WORKFLOW_STEP_GATE_TERMINAL: ReadonlySet<string> = new Set(['resolved']);
 const WORKFLOW_STEP_GATE_KNOWN: ReadonlySet<string> = new Set(['open', 'resolved']);
 
+// Sandbox execution state machine — 8 terminal states + 3 non-terminal states.
+// The closed taxonomy is locked at spec §13.1; additions require a spec amendment.
+const SANDBOX_EXECUTION_TERMINAL: ReadonlySet<string> = new Set([
+  'completed',
+  'timed_out',
+  'cost_ceiling_hit',
+  'crashed',
+  'output_validation_failed',
+  'harvest_failed',
+  'artefact_upload_failed',
+  'provider_unavailable',
+]);
+const SANDBOX_EXECUTION_KNOWN: ReadonlySet<string> = new Set([
+  'pending',
+  'running',
+  'harvesting',
+  'completed',
+  'timed_out',
+  'cost_ceiling_hit',
+  'crashed',
+  'output_validation_failed',
+  'harvest_failed',
+  'artefact_upload_failed',
+  'provider_unavailable',
+]);
+
 interface KindSets {
   terminal: ReadonlySet<string>;
   known: ReadonlySet<string>;
@@ -92,6 +118,8 @@ function setsForKind(kind: StateMachineKind): KindSets {
       return { terminal: WORKFLOW_STEP_TERMINAL, known: WORKFLOW_STEP_KNOWN };
     case 'workflow_step_gate':
       return { terminal: WORKFLOW_STEP_GATE_TERMINAL, known: WORKFLOW_STEP_GATE_KNOWN };
+    case 'sandbox_execution':
+      return { terminal: SANDBOX_EXECUTION_TERMINAL, known: SANDBOX_EXECUTION_KNOWN };
   }
 }
 

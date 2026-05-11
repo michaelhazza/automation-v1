@@ -70,7 +70,7 @@
 | 4 | C3 — llm_requests extension | done | 1 | (next) | Migration 0324. Two CHECK constraints extended (`llm_requests_attribution_ck` + `llm_requests_execution_phase_ck` — second one was a consequential fix because sandbox rows need execution_phase=NULL). Approved scope expansion: `shared/types/systemPnl.ts` 1-line `InFlightSourceType` superset extension to keep router's `ctx.sourceType: SourceType` assignment typecheck-clean. |
 | 5 | C4 — Provider resolver + inlineSandbox | done | 1 | (next) | Registration-seam pattern (no static import of e2bSandbox/localDocker). 22 test cases cover NODE_ENV × SANDBOX_PROVIDER × SANDBOX_ALLOW_INLINE matrix. Cleaned up 6 stale gitignored `.js` artifacts in `shared/iee/` (pre-April-30, no longer in sync with current `.ts` sources) — unblocks `failure('sandbox_*', ...)` in subsequent chunks' tests. |
 | 6 | C12 — Template + CI publish + version parser | done | 1 | (next) | 16 files. synthetos-sandbox template + openclaw-session placeholders + parser + docker-compose + GH workflow + 16 pure tests. CURRENT_VERSION.deps_lockfile_hash = sha256:000... (operator computes real hash before first tag push, per spec §15.2). PUBLISHED_VERSION all-zeros placeholder (CI attestation PR writes real values on first publish). e2b publish CLI invocation is TODO pending e2b account provisioning — workflow structurally complete otherwise. docker-compose uses `sandbox-build` profile (no auto-start). |
-| 7 | C5 — SandboxExecutionService skeleton + pure helpers | pending | — | — | — |
+| 7 | C5 — SandboxExecutionService skeleton + pure helpers | done | 1 | (next) | 36 pure tests; 7-case start-claim lease state machine; harvest seam stubbed for C7; ceiling-monitor enqueue stubbed for C11a. Approved scope expansion: `shared/stateMachineGuards.ts` added `sandbox_execution` kind + paired sets/case for `assertValidTransition` per DEVELOPMENT_GUIDELINES §8.18. |
 | 8 | C6 — Output validation + redaction wiring | pending | — | — | — |
 | 9 | C7 — Harvest pipeline | pending | — | — | — |
 | 10 | C8 — withSandboxProvider + sandboxJobNames | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C12 (commit pending)
-- head: 5651ff45 (C4)
+- last_chunk_committed: C5 (commit pending)
+- head: 773150ea (C12)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T05:30:00Z
+- captured_at: 2026-05-11T05:50:00Z
 
 ---
 
