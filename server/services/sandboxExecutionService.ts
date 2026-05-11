@@ -443,7 +443,12 @@ async function _attemptProviderStart(
   });
   await db
     .update(sandboxExecutions)
-    .set({ status: 'harvesting' })
+    .set({
+      status: 'harvesting',
+      outputJson: providerOutput.output,
+      metricsJson: providerOutput.metrics,
+      costCents: providerOutput.costCents,
+    })
     .where(
       and(
         eq(sandboxExecutions.id, row.id),

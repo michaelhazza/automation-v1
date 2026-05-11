@@ -17,7 +17,9 @@
 
 import type PgBoss from 'pg-boss';
 import { sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { withOrgTx } from '../instrumentation.js';
 import { logger } from '../lib/logger.js';
 import { SANDBOX_HARVEST_RECONCILIATION_JOB } from '../lib/sandboxJobNames.js';
 import {
@@ -118,7 +120,15 @@ export async function sandboxHarvestReconciliationHandler(): Promise<void> {
         }
 
         try {
-          await reconcileExecution(tx, row);
+          await db.transaction(async (orgTx) => {
+            await orgTx.execute(sql`SELECT set_config('app.organisation_id', ${row.organisation_id}, true)`);
+            return withOrgTx(
+              { tx: orgTx, organisationId: row.organisation_id, source: 'jobs.sandboxHarvestReconciliation:per-row' },
+              async () => {
+                await reconcileExecution(orgTx, row);
+              },
+            );
+          });
           reconciled += 1;
         } catch (err) {
           logger.warn('sandbox.harvest_reconciliation.execution_failed', {
@@ -147,9 +157,12 @@ export async function sandboxHarvestReconciliationHandler(): Promise<void> {
  *
  * For pre-terminal stuck states (pending, running, harvesting):
  *   invoke the harvest service directly (it will re-check state and classify).
+ *
+ * Must be called inside a db.transaction with withOrgTx set so that
+ * getOrgScopedDb() in the harvest pipeline resolves correctly.
  */
 async function reconcileExecution(
-  tx: Parameters<Parameters<typeof withAdminConnection>[1]>[0],
+  tx: import('../db/index.js').OrgScopedTx,
   row: StuckRow,
 ): Promise<void> {
   const sandboxExecutionId = row.id;
@@ -163,6 +176,7 @@ async function reconcileExecution(
         status = 'harvesting',
         attempt_number = attempt_number + 1
       WHERE id = ${sandboxExecutionId}::uuid
+        AND organisation_id = ${row.organisation_id}::uuid
         AND status = ANY(ARRAY['harvest_failed','artefact_upload_failed'])
     `);
   }

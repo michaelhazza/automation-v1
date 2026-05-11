@@ -408,8 +408,14 @@ async function step6ArtefactEnumeration(
   }
 
   // Credential-leak defense-in-depth (spec §11.4).
+  // Normalize before matching to prevent case/separator bypass (SANDBOX-ADV-4.1).
   for (const entry of artefactList) {
-    if (entry.filename.includes('/workspace/secrets/') || entry.filename.startsWith('secrets/')) {
+    const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');
+    if (
+      norm.includes('/workspace/secrets/') ||
+      norm.startsWith('secrets/') ||
+      norm.includes('..')
+    ) {
       await writeTelemetryEvent(ctx, 'credential_leak_attempted', 'error', {
         filename: entry.filename,
       });

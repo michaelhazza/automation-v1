@@ -96,7 +96,7 @@ export async function runSandboxTelemetryPrune(): Promise<SandboxTelemetryPruneR
             const deleted = (await orgTx.execute(
               sql`DELETE FROM sandbox_telemetry_events
                   WHERE organisation_id = ${org.id}::uuid
-                    AND emitted_at < ${cutoff}
+                    AND event_at < ${cutoff}
                   RETURNING id`,
             )) as unknown as Array<{ id: string }>;
             return deleted.length;
