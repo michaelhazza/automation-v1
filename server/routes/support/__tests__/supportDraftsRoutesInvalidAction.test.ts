@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Test uses dynamic await import('../supportDraftsRoutes.js') in beforeEach — the env preamble / module-mock-hoisting interaction makes a static import incorrect (mocks must be registered first). The static-analysis gate doesn't see dynamic imports; the test does import a sibling at runtime."
 /**
  * supportDraftsRoutesInvalidAction.test.ts
  *

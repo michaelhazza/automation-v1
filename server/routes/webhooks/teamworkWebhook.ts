@@ -2,7 +2,7 @@ import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
-import { recordIfNew } from '../../lib/webhookReplayNonceStore.js';
+import { recordIfNew } from '../../services/webhookReplayNonceStore.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { recordIncident } from '../../services/incidentIngestor.js';
 import { logger } from '../../lib/logger.js';

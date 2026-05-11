@@ -41,7 +41,8 @@ vi.mock('../../../services/connectorConfigService.js', () => ({
 }));
 
 const mockRecordIfNew = vi.fn();
-vi.mock('../../../lib/webhookReplayNonceStore.js', () => ({
+// PTH-CGT-CI: path updated when webhookReplayNonceStore moved server/lib/ → server/services/.
+vi.mock('../../../services/webhookReplayNonceStore.js', () => ({
   recordIfNew: mockRecordIfNew,
 }));
 

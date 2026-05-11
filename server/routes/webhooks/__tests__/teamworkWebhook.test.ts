@@ -66,7 +66,9 @@ vi.mock('../../../lib/webhookDedupe.js', () => ({
 }));
 
 // Replay nonce store — new delivery (inserted: true) so processing proceeds
-vi.mock('../../../lib/webhookReplayNonceStore.js', () => ({
+// PTH-CGT-CI: path updated when webhookReplayNonceStore moved server/lib/ → server/services/
+// to satisfy verify-rls-contract-compliance.sh (bare db.transaction must live in services/).
+vi.mock('../../../services/webhookReplayNonceStore.js', () => ({
   recordIfNew: vi.fn().mockResolvedValue({ inserted: true }),
 }));
 
