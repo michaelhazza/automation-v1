@@ -19,6 +19,19 @@ export const APP_ERROR_CODES = [
   'INVALID_LINKED_AGENT',
   'INVALID_BUDGET',
   'INVALID_NAME',
+  // Integration connection codes
+  'connection.status_invalid',
+  // Webhook codes
+  'webhook.signature_required',
+  // Reference document codes
+  'referenceDocument.scope_cross_org',
+  // Support draft codes
+  'support.draft.override_collision_human_only',
+  'support.draft.scope_mismatch',
+  'support.draft.preflight.ticket_status_ineligible',
+  'support.draft.preflight.human_collision_blocked',
+  'support.draft.preflight.customer_match_required',
+  'support.draft.preflight.superseded_by_newer_draft',
   // Generic legacy adapter code emitted by asyncHandler when normalising duck-shape errors
   'LEGACY_ERROR',
 ] as const;

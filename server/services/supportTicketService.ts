@@ -39,6 +39,10 @@ function notFoundError(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 404, message });
 }
 
+function forbiddenError(errorCode: string, message?: string): Error {
+  return Object.assign(new Error(message ?? errorCode), { statusCode: 403, errorCode });
+}
+
 function invalidTransitionError(message: string): Error {
   return Object.assign(new Error(message), { statusCode: 422, message });
 }
@@ -267,6 +271,13 @@ export async function readThreadForHumanUi(
     throw notFoundError('support.ticket.not_found');
   }
 
+  if (
+    principalCtx.subaccountId !== null &&
+    ticket.subaccountId !== principalCtx.subaccountId
+  ) {
+    throw forbiddenError('support.ticket.scope_mismatch');
+  }
+
   const rawRows = await fetchMessageRowsWithAuthors(ticketId, principalCtx.organisationId);
   const messages = rawRows.map(shapeThreadMessage);
 
@@ -356,6 +367,9 @@ export async function listOpenTickets(
   const conditions = [
     eq(canonicalTickets.organisationId, principalCtx.organisationId),
     inArray(canonicalTickets.status, statusValues),
+    ...(principalCtx.subaccountId !== null
+      ? [eq(canonicalTickets.subaccountId, principalCtx.subaccountId)]
+      : []),
   ];
 
   // For non-quarantined groups, exclude provider_deleted rows.

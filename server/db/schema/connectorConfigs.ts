@@ -35,6 +35,12 @@ export const connectorConfigs = pgTable(
     // Both columns updated by connectorPollingService on every successful sync.
     successfulPollCountTotal: integer('successful_poll_count_total').notNull().default(0),
     firstQualifyingPollAt: timestamp('first_qualifying_poll_at', { withTimezone: true }),
+    // Pre-Test Hardening W3 — per-connector webhook URL token (migration 0319 — renumbered from 0314 post-S2 to clear collision with PR #283).
+    // Used to route incoming webhooks to exactly one connector without scanning all active configs.
+    // The partial UNIQUE index `connector_configs_webhook_token_unique (webhook_token) WHERE webhook_token IS NOT NULL`
+    // is declared in migration 0319 only — matches the SQL-only partial-index convention used by the
+    // two CRM/workspace-scoped uniques (see comment in the index block below).
+    webhookToken: uuid('webhook_token'),
   },
   (table) => ({
     // connector_configs_org_type_unique dropped in migration 0254 and replaced with

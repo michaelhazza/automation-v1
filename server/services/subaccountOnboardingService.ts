@@ -227,11 +227,15 @@ class SubaccountOnboardingService {
         ),
       );
 
-    const onboardingTask = await taskService.createTask(params.organisationId, params.subaccountId, {
-      title: `Workflow run`,
-      status: 'inbox',
-      brief: JSON.stringify(params.initialInput ?? {}),
-    }, params.startedByUserId ?? undefined);
+    const onboardingTask = await taskService.createTask(
+      {
+        organisationId: params.organisationId,
+        subaccountId: params.subaccountId,
+        data: { title: `Workflow run`, status: 'inbox', brief: JSON.stringify(params.initialInput ?? {}) },
+        userId: params.startedByUserId ?? undefined,
+      },
+      tx,
+    );
 
     let startInput: Parameters<typeof WorkflowRunService.startRun>[0];
     if (orgTemplate) {

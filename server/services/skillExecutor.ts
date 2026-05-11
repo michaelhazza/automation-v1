@@ -3397,21 +3397,25 @@ async function executeCreateTask(
   }
 
   try {
+    const tx = getOrgScopedDb('service:skillExecutor.executeCreateTask');
     const item = await taskService.createTask(
-      context.organisationId,
-      context.subaccountId!,
       {
-        title,
-        description,
-        brief: input.brief ? String(input.brief) : undefined,
-        priority,
-        status: input.status ? String(input.status) : 'inbox',
-        assignedAgentIds: assignedAgentIds.length ? assignedAgentIds : undefined,
-        createdByAgentId: context.agentId,
-        handoffSourceRunId: context.runId,
-        handoffContext: handoffContext ? { message: handoffContext } : undefined,
-        handoffDepth: assignedAgentIds.length ? currentDepth + 1 : 0,
-      }
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        data: {
+          title,
+          description,
+          brief: input.brief ? String(input.brief) : undefined,
+          priority,
+          status: input.status ? String(input.status) : 'inbox',
+          assignedAgentIds: assignedAgentIds.length ? assignedAgentIds : undefined,
+          createdByAgentId: context.agentId,
+          handoffSourceRunId: context.runId,
+          handoffContext: handoffContext ? { message: handoffContext } : undefined,
+          handoffDepth: assignedAgentIds.length ? currentDepth + 1 : 0,
+        },
+      },
+      tx,
     );
 
     // Trigger a handoff for every assigned agent
@@ -3638,16 +3642,20 @@ async function executeTriageIntake(
     const title = rawInput.split(/\n/, 1)[0]!.slice(0, MAX_TASK_TITLE_LENGTH).trim() || `${inputType} from ${source}`;
 
     try {
+      const tx = getOrgScopedDb('service:skillExecutor.executeTriageIntake');
       const item = await taskService.createTask(
-        context.organisationId,
-        context.subaccountId!,
         {
-          title,
-          description: description.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
-          priority,
-          status: 'inbox',
-          createdByAgentId: context.agentId,
-        }
+          organisationId: context.organisationId,
+          subaccountId: context.subaccountId!,
+          data: {
+            title,
+            description: description.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
+            priority,
+            status: 'inbox',
+            createdByAgentId: context.agentId,
+          },
+        },
+        tx,
       );
 
       return {
@@ -4407,18 +4415,22 @@ async function executeSpawnSubAgents(
     }> = [];
 
     for (const t of resolvedTargets) {
+      const tx = getOrgScopedDb('service:skillExecutor.executeSpawnSubAgents');
       const task = await taskService.createTask(
-        context.organisationId,
-        context.subaccountId!,
         {
-          title: t.st.title.slice(0, MAX_TASK_TITLE_LENGTH),
-          brief: t.st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
-          status: 'in_progress',
-          assignedAgentId: t.st.assigned_agent_id,
-          createdByAgentId: context.agentId,
-          isSubTask: true,
-          parentTaskId: context.runId,
-        }
+          organisationId: context.organisationId,
+          subaccountId: context.subaccountId!,
+          data: {
+            title: t.st.title.slice(0, MAX_TASK_TITLE_LENGTH),
+            brief: t.st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
+            status: 'in_progress',
+            assignedAgentId: t.st.assigned_agent_id,
+            createdByAgentId: context.agentId,
+            isSubTask: true,
+            parentTaskId: context.runId,
+          },
+        },
+        tx,
       );
       childJobs.push({ task, saLink: t.saLink });
     }
@@ -5447,17 +5459,21 @@ async function executeReportBug(
   const priority = (priorityMap[severity] ?? 'normal') as 'urgent' | 'high' | 'normal' | 'low';
 
   try {
+    const tx = getOrgScopedDb('service:skillExecutor.executeReportBug');
     const task = await taskService.createTask(
-      context.organisationId,
-      context.subaccountId!,
       {
-        title: `[BUG] ${title}`,
-        description,
-        brief,
-        status: 'inbox',
-        priority,
-        createdByAgentId: context.agentId,
-      }
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId!,
+        data: {
+          title: `[BUG] ${title}`,
+          description,
+          brief,
+          status: 'inbox',
+          priority,
+          createdByAgentId: context.agentId,
+        },
+      },
+      tx,
     );
 
     await taskService.addActivity(task.id, context.organisationId, {

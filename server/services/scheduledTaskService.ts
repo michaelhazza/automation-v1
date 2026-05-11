@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   scheduledTasks,
@@ -9,6 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
 import { taskService } from './taskService.js';
 import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
 import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
 
 // ---------------------------------------------------------------------------
 // Scheduled Task Service — CRUD + occurrence firing + retry logic
@@ -644,18 +645,43 @@ export const scheduledTaskService = {
       : `${st.title} #${occurrence}`;
 
     try {
-      const task = await taskService.createTask(
-        st.organisationId,
-        st.subaccountId!,
-        {
+      // PTH-CGT-F2 defence-in-depth: if a non-HTTP caller (cron / setImmediate)
+      // invokes fireOccurrence outside withOrgTx, getOrgScopedDb() would throw
+      // missing_org_context. Detect ALS absence and open our own tx + GUC so the
+      // service is safe for all callers. When already inside withOrgTx (the
+      // common HTTP path), reuse the existing tx so we don't create a redundant
+      // savepoint.
+      const taskInput = {
+        organisationId: st.organisationId,
+        subaccountId: st.subaccountId!,
+        data: {
           title: taskTitle,
           description: st.description ?? undefined,
           brief: st.brief ?? undefined,
           priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
-          status: 'inbox',
+          status: 'inbox' as const,
           assignedAgentId: st.assignedAgentId,
-        }
-      );
+        },
+      };
+      // PTH-CGT-R5-F1: split DB write (createTaskCore) from side effects so
+      // observers never see task-created events for rolled-back rows.
+      // ALS-present branch: caller owns the tx; side effects fire INLINE
+      // (same as prior behaviour — caller is responsible for commit timing).
+      // Fallback branch: we own the tx; side effects defer until after our commit.
+      let task: import('../db/schema/tasks.js').Task;
+      if (peekOrgTxContext()) {
+        task = await taskService.createTaskCore(
+          taskInput,
+          getOrgScopedDb('service:scheduledTaskService.runDue'),
+        );
+        taskService.emitCreateTaskSideEffects(task, taskInput);
+      } else {
+        task = await db.transaction(async (innerTx) => {
+          await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+          return taskService.createTaskCore(taskInput, innerTx);
+        });
+        taskService.emitCreateTaskSideEffects(task, taskInput);
+      }
 
       // Update the run with the task reference
       await db.update(scheduledTaskRuns).set({

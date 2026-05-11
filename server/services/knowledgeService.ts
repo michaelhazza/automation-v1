@@ -19,6 +19,8 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 import { db } from '../db/index.js';
 import { agentRuns, agents, memoryBlocks, memoryBlockVersions, workspaceMemoryEntries } from '../db/schema/index.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import {
   canonicaliseBody,
@@ -780,80 +782,121 @@ export async function overrideEntry(opts: {
   const canonical = canonicaliseBody(opts.body);
   const bodyHash = hashBody(canonical);
 
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .select({
-        id: memoryBlocks.id,
-        status: memoryBlocks.status,
-        updatedAt: memoryBlocks.updatedAt,
-      })
-      .from(memoryBlocks)
-      .where(and(
-        eq(memoryBlocks.id, opts.blockId),
-        eq(memoryBlocks.organisationId, opts.organisationId),
-        isNull(memoryBlocks.deletedAt),
-      ));
-    if (rows.length === 0) return { ok: false, reason: 'not_found' as const };
+  // PTH-CGT-F1 defence-in-depth: ensure overrideEntry's advisory lock + version
+  // read + version insert + memory-block update all execute on the same real
+  // transaction handle. The advisory lock is acquired with pg_advisory_xact_lock
+  // (transaction-scoped, auto-released on commit/rollback) — but that semantic
+  // ONLY holds when the lock is acquired inside a real transaction. If a
+  // future caller invokes overrideEntry outside withOrgTx, getOrgScopedDb()
+  // would throw missing_org_context (safe failure mode), but the conditional
+  // here is an extra safety net: if ALS is established (the HTTP path),
+  // reuse the existing tx so we don't create a redundant savepoint; if ALS
+  // is absent (any non-HTTP caller), open our own db.transaction + set the
+  // GUC + run the override flow inside it. Either path satisfies the spec
+  // §V2 same-transaction requirement.
+  // PTH-CGT-R3-F2: use truthy check (matches deliveryService + scheduledTaskService).
+  // peekOrgTxContext() returns OrgTxContext | undefined in production but tests
+  // sometimes mock it as () => null. `!== undefined` would treat null as "ctx present"
+  // and incorrectly route to getOrgScopedDb (which throws missing_org_context). A
+  // truthy check treats both undefined and null as "no ctx".
+  const existingCtx = peekOrgTxContext();
+  return existingCtx
+    ? runOverrideInTx(getOrgScopedDb('knowledgeService.overrideEntry'), opts, canonical, bodyHash)
+    : db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${opts.organisationId}, true)`);
+        return runOverrideInTx(innerTx, opts, canonical, bodyHash);
+      });
+}
 
-    const row = rows[0];
+async function runOverrideInTx(
+  tx: OrgScopedTx,
+  opts: { organisationId: string; blockId: string; expectedEtag: string; actorUserId: string | null },
+  canonical: string,
+  bodyHash: string,
+): Promise<
+  | { ok: true; status: 'in_use'; etag: string; created: boolean }
+  | { ok: false; reason: 'state'; currentStatus: ContractStatus }
+  | { ok: false; reason: 'etag_mismatch'; currentEtag: string }
+  | { ok: false; reason: 'not_found' }
+> {
+  // Serialise concurrent overrides on the same block via a per-block
+  // transaction-scoped advisory lock. hashtextextended maps blockId → int8
+  // deterministically; locks on distinct blockIds do NOT serialise each other.
+  // pg_advisory_xact_lock (NOT pg_advisory_lock) — released automatically on
+  // transaction commit/rollback, never leaks to the connection pool.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${opts.blockId}::text, 0))`);
 
-    if (!isOverrideAllowed(row.status as DbStatus)) {
-      return {
-        ok: false, reason: 'state' as const,
-        currentStatus: dbStatusToContract(row.status as DbStatus),
-      };
-    }
+  const rows = await tx
+    .select({
+      id: memoryBlocks.id,
+      status: memoryBlocks.status,
+      updatedAt: memoryBlocks.updatedAt,
+    })
+    .from(memoryBlocks)
+    .where(and(
+      eq(memoryBlocks.id, opts.blockId),
+      eq(memoryBlocks.organisationId, opts.organisationId),
+      isNull(memoryBlocks.deletedAt),
+    ));
+  if (rows.length === 0) return { ok: false, reason: 'not_found' as const };
 
-    // INVARIANT I3: ETag mismatch → 412, not 409
-    const currentEtag = row.updatedAt.toISOString();
-    if (currentEtag !== opts.expectedEtag) {
-      return { ok: false, reason: 'etag_mismatch' as const, currentEtag };
-    }
+  const row = rows[0];
 
-    // Insert version row; idempotent via partial unique index on (memory_block_id, body_hash).
-    // Target the body-hash conflict explicitly so an unrelated (memory_block_id, version)
-    // unique violation under concurrent overrides is NOT silently swallowed — let it bubble
-    // and be retried by the caller.
-    const inserted = await tx
-      .insert(memoryBlockVersions)
-      .values({
-        memoryBlockId: opts.blockId,
-        content: canonical,
-        version: sql`(COALESCE((SELECT MAX(version) FROM memory_block_versions WHERE memory_block_id = ${opts.blockId}::uuid), 0) + 1)`,
-        createdByUserId: opts.actorUserId,
-        changeSource: 'manual_edit',
-        bodyHash,
-      })
-      .onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
-      .returning({ id: memoryBlockVersions.id });
-
-    const created = inserted.length > 0;
-
-    // Defence-in-depth: filter UPDATE on (id, organisationId) even though the SELECT above
-    // already verified the org. Belt-and-braces per DEVELOPMENT_GUIDELINES §1.
-    const [updated] = created
-      ? await tx
-          .update(memoryBlocks)
-          .set({ content: canonical, autoUpdateDisabled: true, updatedAt: new Date() })
-          .where(and(
-            eq(memoryBlocks.id, opts.blockId),
-            eq(memoryBlocks.organisationId, opts.organisationId),
-          ))
-          .returning({ updatedAt: memoryBlocks.updatedAt })
-      : await tx
-          .update(memoryBlocks)
-          .set({ autoUpdateDisabled: true, updatedAt: new Date() })
-          .where(and(
-            eq(memoryBlocks.id, opts.blockId),
-            eq(memoryBlocks.organisationId, opts.organisationId),
-          ))
-          .returning({ updatedAt: memoryBlocks.updatedAt });
-
+  if (!isOverrideAllowed(row.status as DbStatus)) {
     return {
-      ok: true as const,
-      status: 'in_use' as const,
-      etag: updated.updatedAt.toISOString(),
-      created,
+      ok: false, reason: 'state' as const,
+      currentStatus: dbStatusToContract(row.status as DbStatus),
     };
-  });
+  }
+
+  // INVARIANT I3: ETag mismatch → 412, not 409
+  const currentEtag = row.updatedAt.toISOString();
+  if (currentEtag !== opts.expectedEtag) {
+    return { ok: false, reason: 'etag_mismatch' as const, currentEtag };
+  }
+
+  // Insert version row; idempotent via partial unique index on (memory_block_id, body_hash).
+  // With the advisory lock held, concurrent overrides on the same block are serialised so the
+  // (memory_block_id, version) unique constraint is never violated by racing MAX(version) reads.
+  const inserted = await tx
+    .insert(memoryBlockVersions)
+    .values({
+      memoryBlockId: opts.blockId,
+      content: canonical,
+      version: sql`(COALESCE((SELECT MAX(version) FROM memory_block_versions WHERE memory_block_id = ${opts.blockId}::uuid), 0) + 1)`,
+      createdByUserId: opts.actorUserId,
+      changeSource: 'manual_edit',
+      bodyHash,
+    })
+    .onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
+    .returning({ id: memoryBlockVersions.id });
+
+  const created = inserted.length > 0;
+
+  // Defence-in-depth: filter UPDATE on (id, organisationId) even though the SELECT above
+  // already verified the org. Belt-and-braces per DEVELOPMENT_GUIDELINES §1.
+  const [updated] = created
+    ? await tx
+        .update(memoryBlocks)
+        .set({ content: canonical, autoUpdateDisabled: true, updatedAt: new Date() })
+        .where(and(
+          eq(memoryBlocks.id, opts.blockId),
+          eq(memoryBlocks.organisationId, opts.organisationId),
+        ))
+        .returning({ updatedAt: memoryBlocks.updatedAt })
+    : await tx
+        .update(memoryBlocks)
+        .set({ autoUpdateDisabled: true, updatedAt: new Date() })
+        .where(and(
+          eq(memoryBlocks.id, opts.blockId),
+          eq(memoryBlocks.organisationId, opts.organisationId),
+        ))
+        .returning({ updatedAt: memoryBlocks.updatedAt });
+
+  return {
+    ok: true as const,
+    status: 'in_use' as const,
+    etag: updated.updatedAt.toISOString(),
+    created,
+  };
 }

@@ -313,3 +313,6 @@ export * from './runArtifacts.js';
 
 // Support Agent eval harness (migration 0315)
 export * from './supportEvalRuns.js';
+
+// Pre-Test Hardening W3 — persistent webhook replay nonces (migration 0318 — renumbered from 0313 post-S2)
+export * from './webhookReplayNonces.js';

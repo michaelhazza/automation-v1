@@ -6,7 +6,7 @@ import supportAgentInstallRoute from './supportAgentInstallRoute.js';
 import supportAgentRoutes from './supportAgentRoutes.js';
 import supportEvalsRoutes from './supportEvalsRoutes.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
 router.use('/', supportTicketsRoutes);
 router.use('/', supportDraftsRoutes);

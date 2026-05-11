@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { getActiveClientId } from '../../lib/auth';
 import SyncHealthPill from '../../components/support/SyncHealthPill';
 
 interface InboxHealth {
@@ -19,7 +20,9 @@ export default function SupportDeskSetupPage() {
 
   useEffect(() => {
     if (step !== 'confirm') return;
-    api.get<{ inboxes: InboxHealth[] }>('/api/support/inboxes')
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) return;
+    api.get<{ inboxes: InboxHealth[] }>(`/api/subaccounts/${subaccountId}/support/inboxes`)
       .then(({ data }) => setInboxes(data.inboxes ?? []))
       .catch(() => { /* non-fatal */ });
   }, [step]);

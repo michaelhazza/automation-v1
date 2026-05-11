@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../lib/api';
+import { getActiveClientId } from '../../lib/auth';
 import SyncHealthPill from '../../components/support/SyncHealthPill';
 import { InboxAgentConfigTab } from '../../components/support/InboxAgentConfigTab';
 import type { SupportInboxAgentConfig as PhaseOneInboxAgentConfig } from '../../../../shared/types/supportInboxAgentConfig';
@@ -112,7 +113,9 @@ function InboxForm({ inbox, onSaved }: { inbox: Inbox; onSaved: () => void }) {
         promptOverride: base.promptOverride,
         escalationCategories: base.escalationCategories,
       };
-      await api.patch(`/api/support/inboxes/${inbox.id}`, { agentConfig });
+      const subaccountId = getActiveClientId();
+      if (!subaccountId) throw new Error('No active client selected');
+      await api.patch(`/api/subaccounts/${subaccountId}/support/inboxes/${inbox.id}`, { agentConfig });
       setSaved(true);
       setIsDirty(false);
       setTimeout(() => setSaved(false), 2000);
@@ -303,7 +306,13 @@ export default function InboxConfigPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
-    api.get<{ inboxes: Inbox[] }>('/api/support/inboxes')
+    const subaccountId = getActiveClientId();
+    if (!subaccountId) {
+      setError('No active client selected.');
+      setLoading(false);
+      return;
+    }
+    api.get<{ inboxes: Inbox[] }>(`/api/subaccounts/${subaccountId}/support/inboxes`)
       .then(({ data }) => setInboxes(data.inboxes ?? []))
       .catch(() => setError('Failed to load inboxes.'))
       .finally(() => setLoading(false));

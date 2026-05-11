@@ -284,25 +284,35 @@ export const systemIncidentService = {
     const previousTaskIds = (incident.previousTaskIds ?? []) as string[];
 
     // Create task + update incident inside a single transaction to prevent orphan tasks on rollback.
-    // taskService.createTask runs its own internal db calls — this wraps them atomically.
+    // taskService.createTask receives the savepoint tx directly so all writes are atomic.
+    // The org GUC must be set explicitly here because this path does not go through the
+    // orgScoping HTTP middleware — without it, the FORCE-RLS policy on `tasks` rejects the INSERT.
+    // PTH-CGT-R5-F1: split task creation across the transaction boundary.
+    // createTaskCore performs DB writes only inside the tx; if the incident
+    // update or event insert below fails, the task row is rolled back. Side
+    // effects (websocket, triggers, orchestrator enqueue) defer until after
+    // the outer transaction commits so observers never see task-created
+    // events for rows that no longer exist.
+    const taskInput = {
+      organisationId: sysOps.organisationId,
+      subaccountId: sysOps.subaccountId,
+      data: {
+        title: `[Incident] ${incident.summary.slice(0, 120)}`,
+        description: [
+          `**Source:** ${incident.source}`,
+          `**Severity:** ${incident.severity}`,
+          `**Error code:** ${incident.errorCode ?? '—'}`,
+          `**Occurrences:** ${incident.occurrenceCount}`,
+          `**First seen:** ${incident.firstSeenAt.toISOString()}`,
+          `**Fingerprint:** \`${incident.fingerprint}\``,
+        ].join('\n'),
+        priority: (incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal') as 'low' | 'normal' | 'high' | 'urgent',
+      },
+      userId,
+    };
     const updated = await db.transaction(async (tx) => {
-      const task = await taskService.createTask(
-        sysOps.organisationId,
-        sysOps.subaccountId,
-        {
-          title: `[Incident] ${incident.summary.slice(0, 120)}`,
-          description: [
-            `**Source:** ${incident.source}`,
-            `**Severity:** ${incident.severity}`,
-            `**Error code:** ${incident.errorCode ?? '—'}`,
-            `**Occurrences:** ${incident.occurrenceCount}`,
-            `**First seen:** ${incident.firstSeenAt.toISOString()}`,
-            `**Fingerprint:** \`${incident.fingerprint}\``,
-          ].join('\n'),
-          priority: incident.severity === 'critical' ? 'urgent' : incident.severity === 'high' ? 'high' : 'normal',
-        },
-        userId,
-      );
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${sysOps.organisationId}, true)`);
+      const task = await taskService.createTaskCore(taskInput, tx);
 
       const [row] = await tx.update(systemIncidents).set({
         status: 'escalated',
@@ -327,10 +337,13 @@ export const systemIncidentService = {
         occurredAt: now,
       });
 
-      return { row, taskId: task.id };
+      return { row, task };
     });
 
-    return { incident: updated.row, taskId: updated.taskId };
+    // PTH-CGT-R5-F1: fire side effects AFTER the transaction commits.
+    taskService.emitCreateTaskSideEffects(updated.task, taskInput);
+
+    return { incident: updated.row, taskId: updated.task.id };
   },
 
   // @rls-allowlist-bypass: system_incident_suppressions listSuppressions [ref: spec §3.3.1]

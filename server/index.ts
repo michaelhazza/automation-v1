@@ -476,8 +476,8 @@ app.use(agentPresenceStreamRouter);
 app.use(runArtifactsRouter);
 // Phase 1 Showcase — internal worker-to-S3 finalize route (Chunk 1, spec §6.1.4)
 app.use(runArtifactsFinalizeRouter);
-// Support Desk canonical substrate (C13)
-app.use('/api/support', supportRouter);
+// Support Desk canonical substrate (C13) — subaccount-scoped per DEC-1 (pre-test-hardening T1)
+app.use('/api/subaccounts/:subaccountId/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

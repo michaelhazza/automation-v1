@@ -1,0 +1,3514 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e13e3-1cbd-7211-8845-a9a84fabe71d
+--------
+user
+current changes
+  → Inspect git status and diffs
+  • Review changed code for bugs
+  • Produce prioritized findings JSON
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --stat; git diff --cached --stat' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 752ms:
+ M server/services/connectorConfigService.ts
+ M server/services/scheduledTaskService.ts
+?? tasks/review-logs/.codex-prompt-iter1-2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter1_pre-test-hardening_2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter2_pre-test-hardening_2026-05-10T21-55-09Z.txt
+ server/services/connectorConfigService.ts | 11 +++++++
+ server/services/scheduledTaskService.ts   | 49 ++++++++++++++++++++-----------
+ 2 files changed, 43 insertions(+), 17 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/services/connectorConfigService.ts server/services/scheduledTaskService.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 509ms:
+diff --git a/server/services/connectorConfigService.ts b/server/services/connectorConfigService.ts
+index 0357c097..264a43ed 100644
+--- a/server/services/connectorConfigService.ts
++++ b/server/services/connectorConfigService.ts
+@@ -1,3 +1,4 @@
++import { randomUUID } from 'crypto';
+ import { eq, and, ne, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+@@ -137,6 +138,12 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 — Teamwork connectors require a per-connector
++    // webhook URL token at creation time. The tokenised webhook route
++    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
++    // token; a null token means deliveries are silently dropped with 401.
++    // Migration 0314 backfills existing rows; this auto-generates for new ones.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -146,6 +153,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+ 
+@@ -165,6 +173,8 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 — see `create` above for rationale.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -175,6 +185,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+     return config;
+diff --git a/server/services/scheduledTaskService.ts b/server/services/scheduledTaskService.ts
+index 8bdc0aa6..c37349bb 100644
+--- a/server/services/scheduledTaskService.ts
++++ b/server/services/scheduledTaskService.ts
+@@ -1,4 +1,4 @@
+-import { eq, and, desc, isNull } from 'drizzle-orm';
++import { eq, and, desc, isNull, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import {
+   scheduledTasks,
+@@ -9,7 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
+ import { taskService } from './taskService.js';
+ import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
+ import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
+-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
++import { withOrgTx } from '../instrumentation.js';
+ 
+ // ---------------------------------------------------------------------------
+ // Scheduled Task Service — CRUD + occurrence firing + retry logic
+@@ -645,22 +645,37 @@ export const scheduledTaskService = {
+       : `${st.title} #${occurrence}`;
+ 
+     try {
+-      const tx = getOrgScopedDb('service:scheduledTaskService.runDue');
+-      const task = await taskService.createTask(
+-        {
+-          organisationId: st.organisationId,
+-          subaccountId: st.subaccountId!,
+-          data: {
+-            title: taskTitle,
+-            description: st.description ?? undefined,
+-            brief: st.brief ?? undefined,
+-            priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+-            status: 'inbox',
+-            assignedAgentId: st.assignedAgentId,
++      // Open a self-contained org-scoped tx so this path works both when called
++      // from an authenticated HTTP request (which already has an ALS tx open) and
++      // from the unauthenticated `setImmediate` path inside `enqueueRunNow`,
++      // where the request tx has already finished by the time we run.
++      // Mirrors the auth middleware pattern: db.transaction + set_config + withOrgTx.
++      const task = await db.transaction(async (innerTx) => {
++        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
++        return withOrgTx(
++          {
++            tx: innerTx,
++            organisationId: st.organisationId,
++            subaccountId: st.subaccountId,
++            source: 'service:scheduledTaskService.fireOccurrence',
+           },
+-        },
+-        tx,
+-      );
++          () => taskService.createTask(
++            {
++              organisationId: st.organisationId,
++              subaccountId: st.subaccountId!,
++              data: {
++                title: taskTitle,
++                description: st.description ?? undefined,
++                brief: st.brief ?? undefined,
++                priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
++                status: 'inbox',
++                assignedAgentId: st.assignedAgentId,
++              },
++            },
++            innerTx,
++          ),
++        );
++      });
+ 
+       // Update the run with the task reference
+       await db.update(scheduledTaskRuns).set({
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path server/services/connectorConfigService.ts -TotalCount 240; Write-Output '---'; Get-Content -Path server/services/scheduledTaskService.ts | Select-Object -Skip 600 -First 110" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 669ms:
+import { randomUUID } from 'crypto';
+import { eq, and, ne, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
+import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
+
+export function buildWorkspaceTenantConfig(
+  subaccountName: string,
+  connectorConfig: { id: string; connectorType: string; configJson: unknown } | null,
+): WorkspaceTenantConfig {
+  const cfg = (connectorConfig?.configJson as Record<string, unknown> | null) ?? {};
+  const configDomain = typeof cfg.domain === 'string' && cfg.domain.length > 0 ? cfg.domain : null;
+
+  // Workspace `domain` resolution mirrors the GET /workspace summary route:
+  // per-subaccount override (configJson.domain) ƒÅ' NATIVE_EMAIL_DOMAIN ƒÅ' null.
+  // Returning `null` (rather than 'workspace.local') lets callers distinguish
+  // "no workspace configured" from "configured with the dev fallback".
+  // Read from process.env directly rather than the validated env module so that
+  // pure unit tests of this builder don't have to bootstrap the entire env Zod
+  // schema (which requires DATABASE_URL, EMAIL_FROM, ...).
+  const envDomain = typeof process.env.NATIVE_EMAIL_DOMAIN === 'string' && process.env.NATIVE_EMAIL_DOMAIN.length > 0
+    ? process.env.NATIVE_EMAIL_DOMAIN
+    : null;
+  const resolvedDomain = configDomain ?? envDomain;
+
+  const backend = connectorConfig?.connectorType === 'synthetos_native' || connectorConfig?.connectorType === 'google_workspace'
+    ? connectorConfig.connectorType
+    : null;
+
+  return {
+    backend,
+    connectorConfigId: connectorConfig?.id ?? null,
+    domain: resolvedDomain,
+    subaccountName,
+    defaultSignatureTemplate: typeof cfg.defaultSignatureTemplate === 'string' ? cfg.defaultSignatureTemplate : '',
+    discloseAsAgent: cfg.discloseAsAgent === true,
+    vanityDomain: typeof cfg.vanityDomain === 'string' ? cfg.vanityDomain : null,
+  };
+}
+
+type ConnectorInsert = typeof connectorConfigs.$inferInsert;
+type ConnectorType = ConnectorInsert['connectorType'];
+type ConnectorStatus = ConnectorInsert['status'];
+type SyncPhase = ConnectorInsert['syncPhase'];
+
+export const connectorConfigService = {
+  async listByOrg(organisationId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(eq(connectorConfigs.organisationId, organisationId));
+  },
+
+  async listBySubaccount(organisationId: string, subaccountId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(
+        and(
+          eq(connectorConfigs.organisationId, organisationId),
+          eq(connectorConfigs.subaccountId, subaccountId),
+        )
+      );
+  },
+
+  async get(id: string, organisationId: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (!config) throw { statusCode: 404, message: 'Connector config not found' };
+    return config;
+  },
+
+  async getByType(organisationId: string, connectorType: string) {
+    // Workspace connector types (synthetos_native, google_workspace) are
+    // subaccount-scoped after migration 0254 ƒ?" the unique index is
+    // (org_id, connector_type) WHERE connector_type IN ('crm', ...) only.
+    // Callers that need a workspace connector must use getBySubaccountAndType.
+    if (connectorType === 'synthetos_native' || connectorType === 'google_workspace') {
+      throw new Error(
+        `getByType does not support workspace connector type '${connectorType}'. ` +
+        'Use getBySubaccountAndType(organisationId, subaccountId, connectorType) instead.',
+      );
+    }
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType as ConnectorType)));
+    return config ?? null;
+  },
+
+  async getBySubaccountAndType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ));
+    return config ?? null;
+  },
+
+  /**
+   * Returns the first connector config for this subaccount whose connectorType
+   * differs from the given `connectorType`. Used by the /configure guard to
+   * detect a backend-swap attempt before any identities have been migrated.
+   */
+  async getBySubaccountAndDifferentType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        ne(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ))
+      .limit(1);
+    return config ?? null;
+  },
+
+  async getActiveByOrg(organisationId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.status, 'active')));
+  },
+
+  async create(organisationId: string, data: {
+    connectorType: string;
+    connectionId?: string;
+    configJson?: Record<string, unknown>;
+    pollIntervalMinutes?: number;
+    webhookSecret?: string;
+  }) {
+    // Pre-Test Hardening W3 ƒ?" Teamwork connectors require a per-connector
+    // webhook URL token at creation time. The tokenised webhook route
+    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
+    // token; a null token means deliveries are silently dropped with 401.
+    // Migration 0314 backfills existing rows; this auto-generates for new ones.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+    const [config] = await db
+      .insert(connectorConfigs)
+      .values({
+        organisationId,
+        connectorType: data.connectorType as ConnectorType,
+        connectionId: data.connectionId ?? null,
+        configJson: data.configJson ?? null,
+        pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+        webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
+      })
+      .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'connector_config', entityId: config.id, organisationId,
+      snapshot: config as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
+
+    return config;
+  },
+
+  async createForSubaccount(organisationId: string, subaccountId: string, data: {
+    connectorType: string;
+    connectionId?: string;
+    configJson?: Record<string, unknown>;
+    pollIntervalMinutes?: number;
+    webhookSecret?: string;
+  }) {
+    // Pre-Test Hardening W3 ƒ?" see `create` above for rationale.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+    const [config] = await db
+      .insert(connectorConfigs)
+      .values({
+        organisationId,
+        subaccountId,
+        connectorType: data.connectorType as ConnectorType,
+        connectionId: data.connectionId ?? null,
+        configJson: data.configJson ?? null,
+        pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+        webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
+      })
+      .returning();
+    return config;
+  },
+
+  async update(id: string, organisationId: string, data: Partial<{
+    connectionId: string | null;
+    configJson: Record<string, unknown>;
+    status: ConnectorStatus;
+    pollIntervalMinutes: number;
+    webhookSecret: string | null;
+    syncPhase: SyncPhase;
+    lastSyncAt: Date;
+    lastSyncStatus: string;
+    lastSyncError: string | null;
+    configVersion: string;
+  }>) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
+    const [updated] = await db
+      .update(connectorConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))
+      .returning();
+    if (!updated) throw { statusCode: 404, message: 'Connector config not found' };
+    return updated;
+  },
+
+  async delete(id: string, organisationId: string) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api', changeSummary: 'Entity deleted',
+      });
+    }
+
+    const [deleted] = await db
+      .delete(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))
+      .returning();
+    if (!deleted) throw { statusCode: 404, message: 'Connector config not found' };
+---
+  // ƒ"?ƒ"?ƒ"? Fire Occurrence ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+  //
+  // Spec ¶õ5.4 ƒ?" scheduledƒÅ'workflow dispatch: when a scheduled task fires a
+  // workflow run (Chunk 15 scope), read `st.pinnedTemplateVersionId` from the
+  // scheduled task row and pass it as `pinnedTemplateVersionId` to
+  // WorkflowRunService.startRun. startRun honours the pin via
+  // WorkflowScheduleDispatchService.pickVersionForSchedule and throws
+  // `pinned_version_unavailable` (422) when the pinned version no longer exists.
+
+  async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
+    const [st] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(and(eq(scheduledTasks.id, scheduledTaskId), eq(scheduledTasks.organisationId, organisationId)));
+
+    if (!st || !st.isActive) return;
+
+    // Check end conditions
+    if (st.endsAfterRuns && st.totalRuns >= st.endsAfterRuns) {
+      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      return;
+    }
+    if (st.endsAt && new Date() > st.endsAt) {
+      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      return;
+    }
+
+    const occurrence = st.totalRuns + 1;
+
+    // Create the run record
+    const [run] = await db
+      .insert(scheduledTaskRuns)
+      .values({
+        scheduledTaskId: st.id,
+        occurrence,
+        status: 'pending',
+        scheduledFor: st.nextRunAt ?? new Date(),
+        createdAt: new Date(),
+      })
+      .returning();
+
+    // Create a task card on the board
+    const taskTitle = st.title.includes('#{n}')
+      ? st.title.replace('#{n}', String(occurrence))
+      : `${st.title} #${occurrence}`;
+
+    try {
+      // Open a self-contained org-scoped tx so this path works both when called
+      // from an authenticated HTTP request (which already has an ALS tx open) and
+      // from the unauthenticated `setImmediate` path inside `enqueueRunNow`,
+      // where the request tx has already finished by the time we run.
+      // Mirrors the auth middleware pattern: db.transaction + set_config + withOrgTx.
+      const task = await db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+        return withOrgTx(
+          {
+            tx: innerTx,
+            organisationId: st.organisationId,
+            subaccountId: st.subaccountId,
+            source: 'service:scheduledTaskService.fireOccurrence',
+          },
+          () => taskService.createTask(
+            {
+              organisationId: st.organisationId,
+              subaccountId: st.subaccountId!,
+              data: {
+                title: taskTitle,
+                description: st.description ?? undefined,
+                brief: st.brief ?? undefined,
+                priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+                status: 'inbox',
+                assignedAgentId: st.assignedAgentId,
+              },
+            },
+            innerTx,
+          ),
+        );
+      });
+
+      // Update the run with the task reference
+      await db.update(scheduledTaskRuns).set({
+        taskId: task.id,
+        status: 'running',
+        startedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Find the subaccount agent link
+      const { subaccountAgents } = await import('../db/schema/index.js');
+      const [saLink] = await db
+        .select()
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, st.subaccountId!),
+            eq(subaccountAgents.agentId, st.assignedAgentId),
+            eq(subaccountAgents.isActive, true)
+          )
+        );
+
+      if (!saLink) {
+        await this.handleRunCompletion(run.id, 'failed', 'Agent not linked to subaccount or inactive');
+        return;
+      }
+
+      // Execute the agent run
+      const result = await agentExecutionService.executeRun({
+        agentId: st.assignedAgentId,
+        subaccountId: st.subaccountId,
+        subaccountAgentId: saLink.id,
+        organisationId: st.organisationId,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-10T21:55:31.509178Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/db/schema/*.ts -Pattern "webhookToken|connectorConfigs" -Context 2,3; Get-ChildItem -Recurse -Filter "*0314*" | Select-Object FullName'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/db/schema/*.ts -Pattern "webhookToken|connectorConfigs" -Context 2,3; Get-ChildItem -Recurse -Filter "*0314*" | Select-Object FullName' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/db/schema/*.ts -Pattern "webhookToken|connectorConfigs" -Context 2,3; Get-ChildItem -Recurse -Filter "*0314*" | Select-Object FullName'` rejected: blocked by policy
+2026-05-10T21:55:34.567858Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server/db/schema | Select-String -Pattern 'webhookToken' -Context 2,3"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server/db/schema | Select-String -Pattern 'webhookToken' -Context 2,3" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server/db/schema | Select-String -Pattern 'webhookToken' -Context 2,3"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "webhookToken|connectorConfigs" server/db server -g "*.ts"' in C:\Files\Projects\automation-v1-2nd
+2026-05-10T21:55:40.280494Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.8 seconds
+Output:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n "webhookToken|connectorConfigs" server/db server -g "*.ts"
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+ exited 1 in 2761ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n "webhookToken|connectorConfigs" server/db server -g "*.ts"
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+2026-05-10T21:55:45.245951Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root,dirs,files in os.walk('server'):
+  for f in files:
+    if f.endswith(('.ts','.sql')):
+      p=os.path.join(root,f)
+      try:
+        s=open(p,encoding='utf-8').read().splitlines()
+      except Exception: continue
+      for i,l in enumerate(s,1):
+        if 'webhookToken' in l or 'webhook_token' in l or 'connectorConfigs' in l:
+          print(f'{p}:{i}:{l}')
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root,dirs,files in os.walk('server'):
+  for f in files:
+    if f.endswith(('.ts','.sql')):
+      p=os.path.join(root,f)
+      try:
+        s=open(p,encoding='utf-8').read().splitlines()
+      except Exception: continue
+      for i,l in enumerate(s,1):
+        if 'webhookToken' in l or 'webhook_token' in l or 'connectorConfigs' in l:
+          print(f'{p}:{i}:{l}')
+'@ | python -" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root,dirs,files in os.walk('server'):
+  for f in files:
+    if f.endswith(('.ts','.sql')):
+      p=os.path.join(root,f)
+      try:
+        s=open(p,encoding='utf-8').read().splitlines()
+      except Exception: continue
+      for i,l in enumerate(s,1):
+        if 'webhookToken' in l or 'webhook_token' in l or 'connectorConfigs' in l:
+          print(f'{p}:{i}:{l}')
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server\\db\\schema -Name" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 636ms:
+__tests__
+accountOverrides.ts
+actionAttempts.ts
+actionEvents.ts
+actionResumeEvents.ts
+actions.ts
+agentBeliefs.ts
+agentBriefings.ts
+agentCharges.ts
+agentConversations.ts
+agentDataSources.ts
+agentEmbeddings.ts
+agentExecutionEvents.ts
+agentMessages.ts
+agentObservations.ts
+agentPresenceProjections.ts
+agentPromptRevisions.ts
+agentRecommendations.ts
+agentRunLlmPayloads.ts
+agentRunMessages.ts
+agentRunPrompts.ts
+agentRuns.ts
+agentRunSnapshots.ts
+agents.ts
+agentScorecardAttachments.ts
+agentTemplates.ts
+agentTestFixtures.ts
+agentTriggers.ts
+agentWorkingTimeEventLedger.ts
+agentWorkingTimeRollups.ts
+auditEvents.ts
+automationCategories.ts
+automationConnectionMappings.ts
+automationEngines.ts
+automations.ts
+benchRuns.ts
+boardConfigs.ts
+boardTemplates.ts
+bundleResolutionSnapshots.ts
+bundleSuggestionDismissals.ts
+canonicalAccounts.ts
+canonicalEntities.ts
+canonicalInboxes.ts
+canonicalMetrics.ts
+canonicalRowSubaccountScopes.ts
+canonicalSupportAgents.ts
+canonicalTicketDrafts.ts
+canonicalTicketMessages.ts
+canonicalTickets.ts
+clientPulseCanonicalTables.ts
+computeReservations.ts
+configBackups.ts
+configHistory.ts
+connectorConfigs.ts
+connectorLocationTokens.ts
+conversations.ts
+conversationThreadContext.ts
+conversionEvents.ts
+costAggregates.ts
+delegationGrants.ts
+delegationOutcomes.ts
+documentBundleAttachments.ts
+documentBundleMembers.ts
+documentBundles.ts
+documentCache.ts
+documentFetchEvents.ts
+documentPromotionAudit.ts
+dropZoneProcessingLog.ts
+dropZoneUploadAudit.ts
+executionFiles.ts
+executionPayloads.ts
+executions.ts
+fastPathDecisions.ts
+featureRequests.ts
+feedbackVotes.ts
+flowRuns.ts
+formSubmissions.ts
+geoAudits.ts
+goals.ts
+hierarchyTemplates.ts
+hierarchyTemplateSlots.ts
+ieeArtifacts.ts
+ieeRuns.ts
+ieeSessions.ts
+ieeSteps.ts
+inboxReadStates.ts
+index.ts
+integrationConnections.ts
+integrationIngestionStats.ts
+interventionOutcomes.ts
+llmInflightHistory.ts
+llmPricing.ts
+llmRequests.ts
+llmRequestsArchive.ts
+mcpServerAgentLinks.ts
+mcpServerConfigs.ts
+mcpToolInvocations.ts
+memoryBlockAttachments.ts
+memoryBlocks.ts
+memoryBlockVersions.ts
+memoryCitationScores.ts
+memoryReviewQueue.ts
+metricDefinitions.ts
+migrationStates.ts
+modelTierBudgetPolicies.ts
+modules.ts
+oauthStateNonces.ts
+onboardingBundleConfigs.ts
+optimiserSkillPeerMedians.ts
+orgAgentConfigs.ts
+organisations.ts
+organisationSecrets.ts
+orgApprovalChannels.ts
+orgComputeBudgets.ts
+orgMarginConfigs.ts
+orgMemories.ts
+orgSubaccountChannelGrants.ts
+orgSubscriptions.ts
+orgUserRoles.ts
+pageProjects.ts
+pages.ts
+pageVersions.ts
+pageViews.ts
+permissions.ts
+permissionSetItems.ts
+permissionSets.ts
+policyRules.ts
+portalBriefs.ts
+priorityFeedClaims.ts
+processedResources.ts
+projectIntegrations.ts
+projects.ts
+rateLimitBuckets.ts
+referenceDocumentChunks.ts
+referenceDocumentDataSources.ts
+referenceDocuments.ts
+referenceDocumentVersions.ts
+regressionCases.ts
+reports.ts
+reviewAuditRecords.ts
+reviewItems.ts
+routingOutcomes.ts
+runtimeCheckResults.ts
+scheduledTasks.ts
+scorecardJudgements.ts
+scorecards.ts
+scrapingCache.ts
+scrapingSelectors.ts
+securityAuditEvents.ts
+servicePrincipals.ts
+skillAnalyzerConfig.ts
+skillAnalyzerJobs.ts
+skillAnalyzerResults.ts
+skillEmbeddings.ts
+skillIdempotencyKeys.ts
+skills.ts
+skillVersions.ts
+slackConversations.ts
+spendingBudgetApprovers.ts
+spendingBudgets.ts
+spendingPolicies.ts
+subaccountAgents.ts
+subaccountApprovalChannels.ts
+subaccountAutomationLinks.ts
+subaccountBaselineMetrics.ts
+subaccountBaselines.ts
+subaccountCategories.ts
+subaccountOnboardingState.ts
+subaccounts.ts
+subaccountStateSummaries.ts
+subaccountTags.ts
+subaccountUserAssignments.ts
+subscriptions.ts
+systemAgents.ts
+systemHierarchyTemplates.ts
+systemHierarchyTemplateSlots.ts
+systemIncidentEvents.ts
+systemIncidents.ts
+systemIncidentSuppressions.ts
+systemMonitorBaselines.ts
+systemMonitorHeuristicFires.ts
+systemSettings.ts
+systemSkills.ts
+taskActivities.ts
+taskAttachments.ts
+taskDeliverables.ts
+taskEvents.ts
+tasks.ts
+teamMembers.ts
+teams.ts
+toolCallSecurityEvents.ts
+trustCalibrationState.ts
+users.ts
+userSettings.ts
+webhookAdapterConfigs.ts
+webhookReplayNonces.ts
+workflowDrafts.ts
+workflowRuns.ts
+workflowStepGates.ts
+workflowTemplates.ts
+workspaceActors.ts
+workspaceCalendarEvents.ts
+workspaceEntities.ts
+workspaceHealthFindings.ts
+workspaceIdentities.ts
+workspaceLimits.ts
+workspaceMemories.ts
+workspaceMessages.ts
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\db\\schema\\connectorConfigs.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 631ms:
+import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { organisations } from './organisations.js';
+import { subaccounts } from './subaccounts.js';
+import { integrationConnections } from './integrationConnections.js';
+
+export const connectorConfigs = pgTable(
+  'connector_configs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
+    connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom' | 'synthetos_native' | 'google_workspace'>(),
+    connectionId: uuid('connection_id').references(() => integrationConnections.id),
+    configJson: jsonb('config_json').$type<Record<string, unknown>>(),
+    status: text('status').notNull().default('active').$type<'active' | 'error' | 'disconnected'>(),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    lastSyncStatus: text('last_sync_status'),
+    lastSyncError: text('last_sync_error'),
+    pollIntervalMinutes: integer('poll_interval_minutes').notNull().default(60),
+    webhookSecret: text('webhook_secret'),
+    syncPhase: text('sync_phase').notNull().default('backfill').$type<'backfill' | 'transition' | 'live'>(),
+    configVersion: text('config_version'),
+    tokenScope: text('token_scope').notNull().default('agency').$type<'agency' | 'location'>(),
+    companyId: text('company_id'),
+    installedAt: timestamp('installed_at', { withTimezone: true }),
+    disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+    // Agency token columns ƒ?" dedicated columns, not configJson (required for expiry queries)
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    scope: text('scope').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    // F3 ¶õ4 ƒ?" readiness condition support (migration 0280).
+    // Both columns updated by connectorPollingService on every successful sync.
+    successfulPollCountTotal: integer('successful_poll_count_total').notNull().default(0),
+    firstQualifyingPollAt: timestamp('first_qualifying_poll_at', { withTimezone: true }),
+    // Pre-Test Hardening W3 ƒ?" per-connector webhook URL token (migration 0314).
+    // Used to route incoming webhooks to exactly one connector without scanning all active configs.
+    webhookToken: uuid('webhook_token'),
+  },
+  (table) => ({
+    // connector_configs_org_type_unique dropped in migration 0254 and replaced with
+    // two partial unique indexes (CRM-scoped + workspace-scoped) expressed in SQL only.
+    orgIdx: index('connector_configs_org_idx').on(table.organisationId),
+    subaccountIdx: index('connector_configs_subaccount_idx').on(table.subaccountId),
+    statusIdx: index('connector_configs_status_idx').on(table.status),
+  })
+);
+
+export type ConnectorConfig = typeof connectorConfigs.$inferSelect;
+export type NewConnectorConfig = typeof connectorConfigs.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-10T21:55:55.072530Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Where-Object { $_.Name -like '"'*0314*' } | ForEach-Object { "'$_.FullName }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Where-Object { $_.Name -like '"'*0314*' } | ForEach-Object { "'$_.FullName }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Where-Object { $_.Name -like '"'*0314*' } | ForEach-Object { "'$_.FullName }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem migrations -Name | findstr 0314' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 699ms:
+0314_connector_configs_webhook_token.down.sql
+0314_connector_configs_webhook_token.sql
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content migrations\\0314_connector_configs_webhook_token.sql" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 644ms:
+ALTER TABLE connector_configs ADD COLUMN webhook_token uuid NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS connector_configs_webhook_token_unique
+  ON connector_configs (webhook_token)
+  WHERE webhook_token IS NOT NULL;
+
+UPDATE connector_configs SET webhook_token = gen_random_uuid()
+  WHERE connector_type = 'teamwork' AND webhook_token IS NULL;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\instrumentation.ts -TotalCount 220; Get-Content server\\lib\\orgScopedDb.ts -TotalCount 220" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 652ms:
+/**
+ * Langfuse instrumentation ƒ?" singleton client + AsyncLocalStorage context propagation.
+ *
+ * Usage:
+ *   import { langfuse, withTrace, getActiveTrace, getTraceContext } from './instrumentation.js';
+ *
+ *   // Start a trace around a unit of work (pass run context for automatic metadata injection):
+ *   await withTrace(trace, { runId, orgId, subaccountId, agentId }, async () => {
+ *     // Use tracing helpers from server/lib/tracing.ts ƒ?" they pull context automatically.
+ *     const span = createSpan('agent.loop.iteration', { iteration: 0, phase: 'planning' });
+ *     // ... do work ...
+ *     span.end({ output: result });
+ *   });
+ *
+ * The AsyncLocalStorage makes getActiveTrace() / getTraceContext() work anywhere
+ * in the call stack without threading the trace object through every function signature.
+ */
+
+import { AsyncLocalStorage } from 'async_hooks';
+import { Langfuse } from 'langfuse';
+import type { LangfuseTraceClient } from 'langfuse';
+import { env } from './lib/env.js';
+import { MAX_SPANS_PER_RUN, MAX_EVENTS_PER_RUN } from './config/limits.js';
+
+// ---------------------------------------------------------------------------
+// Langfuse singleton ƒ?" no-ops automatically if keys are not configured
+// ---------------------------------------------------------------------------
+
+export const langfuse = new Langfuse({
+  publicKey:  env.LANGFUSE_PUBLIC_KEY  ?? '',
+  secretKey:  env.LANGFUSE_SECRET_KEY  ?? '',
+  baseUrl:    env.LANGFUSE_BASE_URL    ?? 'https://cloud.langfuse.com',
+  // Disable if keys not set ƒ?" SDK will no-op all calls
+  enabled: Boolean(env.LANGFUSE_PUBLIC_KEY && env.LANGFUSE_SECRET_KEY),
+  flushAt: 10,
+  flushInterval: 5000,
+});
+
+// ---------------------------------------------------------------------------
+// Trace context ƒ?" carries run metadata alongside the Langfuse trace
+// ---------------------------------------------------------------------------
+
+export interface TraceContext {
+  trace: LangfuseTraceClient;
+  runId: string;
+  orgId: string;
+  subaccountId?: string;
+  agentId?: string;
+  executionMode?: string;
+  /** Running count of spans emitted ƒ?" used for performance budget enforcement */
+  spanCount: number;
+  /** Running count of events emitted ƒ?" used for performance budget enforcement */
+  eventCount: number;
+  maxSpans: number;
+  maxEvents: number;
+  /** Whether an agent.loop.terminated event has been emitted (Section 15.4) */
+  loopTerminated: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// AsyncLocalStorage ƒ?" propagates trace context through async call stacks
+// ---------------------------------------------------------------------------
+
+const traceStorage = new AsyncLocalStorage<TraceContext>();
+
+/**
+ * Run `fn` inside an async context where tracing helpers can access the
+ * active trace and run metadata. The `runContext` fields are injected as
+ * default metadata on every span/event created within `fn`.
+ */
+export async function withTrace<T>(
+  trace: LangfuseTraceClient,
+  runContext: {
+    runId: string;
+    orgId: string;
+    subaccountId?: string;
+    agentId?: string;
+    executionMode?: string;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ctx: TraceContext = {
+    trace,
+    ...runContext,
+    spanCount: 0,
+    eventCount: 0,
+    maxSpans: MAX_SPANS_PER_RUN,
+    maxEvents: MAX_EVENTS_PER_RUN,
+    loopTerminated: false,
+  };
+  return traceStorage.run(ctx, fn);
+}
+
+/**
+ * Returns the active Langfuse trace for the current async context,
+ * or undefined if we're outside a `withTrace` block.
+ */
+export function getActiveTrace(): LangfuseTraceClient | undefined {
+  return traceStorage.getStore()?.trace;
+}
+
+/**
+ * Returns the full trace context (trace + run metadata + counters),
+ * or undefined if outside a `withTrace` block.
+ */
+export function getTraceContext(): TraceContext | undefined {
+  return traceStorage.getStore();
+}
+
+/**
+ * Run `fn` inside an existing trace context snapshot. Use this to preserve
+ * trace context across async boundaries (Promise.all, pg-boss handlers,
+ * event emitters) where AsyncLocalStorage context would otherwise be lost.
+ */
+export async function withTraceContext<T>(
+  ctx: TraceContext,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return traceStorage.run(ctx, fn);
+}
+
+/**
+ * Bind a function so it always runs in the current trace context, even when
+ * called later from a different async scope (e.g., event emitter callbacks).
+ * If no context is active, returns the function unchanged.
+ */
+export function bindTraceContext<T extends (...args: never[]) => unknown>(fn: T): T {
+  const ctx = traceStorage.getStore();
+  if (!ctx) return fn;
+  return ((...args: never[]) => traceStorage.run(ctx, () => fn(...args))) as unknown as T;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 P1.1 Layer 1 ƒ?" org-scoped transaction slot
+//
+// Every request and every pg-boss job runs inside an explicit Drizzle
+// transaction that has issued `SELECT set_config('app.organisation_id', $1)`
+// for the current tenant. The transaction handle lives here so every
+// service-layer DB access can read it without threading it through every
+// function signature.
+//
+// If a service-layer DB helper finds no active OrgTxContext, that is a
+// Layer A contract violation and MUST throw `failure('missing_org_context')`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal shape a drizzle transaction handle satisfies ƒ?" same as the
+ * top-level `db` object. We use `unknown` to avoid an import cycle with
+ * server/db/index.ts; consumers cast back to the Drizzle DB type via the
+ * `getCurrentOrgTx()` helper in server/lib/orgScopedDb.ts.
+ */
+export interface OrgTxContext {
+  /** The tenant-scoped Drizzle transaction handle. */
+  tx: unknown;
+  /** Organisation ID that `set_config('app.organisation_id', ƒ?İ)` was set to. */
+  organisationId: string;
+  /** Optional subaccount context, when the request/job is subaccount-scoped. */
+  subaccountId?: string | null;
+  /** Principal that initiated the work, when known (HTTP requests only). */
+  userId?: string;
+  /** Human-readable origin for debugging (e.g. "http:GET /api/tasks"). */
+  source: string;
+}
+
+const orgTxStorage = new AsyncLocalStorage<OrgTxContext>();
+
+/**
+ * Run `fn` inside an org-scoped transaction context. Typically called by
+ * `server/middleware/orgScoping.ts` for HTTP requests and by
+ * `server/lib/createWorker.ts` for pg-boss jobs.
+ */
+export async function withOrgTx<T>(ctx: OrgTxContext, fn: () => Promise<T>): Promise<T> {
+  return orgTxStorage.run(ctx, fn);
+}
+
+/**
+ * Returns the active org-scoped transaction context, or undefined when the
+ * caller is outside a `withOrgTx` block. Services that require a tx call
+ * `requireOrgTx()` instead so the missing-context failure is structured.
+ */
+export function getOrgTxContext(): OrgTxContext | undefined {
+  return orgTxStorage.getStore();
+}
+/**
+ * orgScopedDb ƒ?" Sprint 2 P1.1 Layer 1 service-layer DB helper.
+ *
+ * Every service-layer DB access MUST go through `getOrgScopedDb()` so that:
+ *
+ *   1. The query runs inside the org-scoped transaction opened by the
+ *      `orgScoping` HTTP middleware or the `createWorker` pg-boss wrapper,
+ *      which has already issued `SELECT set_config('app.organisation_id', ƒ?İ)`.
+ *   2. A service called outside any `withOrgTx(...)` block fails loudly with
+ *      `failure('missing_org_context')` (Layer A of the three-layer fail-closed
+ *      data isolation contract). This is the first line of defence; RLS policies
+ *      are the silent backup defence-in-depth if a code path bypasses the
+ *      service layer entirely.
+ *
+ * Non-org-scoped access paths (migrations, cron, admin tooling, boot-time
+ * system reads) MUST use `server/lib/adminDbConnection.ts::withAdminConnection`
+ * instead. That helper acquires a connection bound to the `admin_role`
+ * Postgres role which has BYPASSRLS and explicitly logs every invocation to
+ * `audit_events`.
+ *
+ * See `docs/improvements-roadmap-spec.md` ¶õP1.1 Layer 1 for the full contract.
+ */
+
+import { getOrgTxContext } from '../instrumentation.js';
+import type { OrgScopedTx } from '../db/index.js';
+import { throwFailure } from '../../shared/iee/failure.js';
+
+/**
+ * Return the drizzle transaction handle bound to the current org context.
+ * Throws `failure('missing_org_context')` when the caller is outside any
+ * `withOrgTx(...)` block.
+ *
+ * Use this inside services whenever you need to run a query. The returned
+ * handle has the same API as the top-level `db` object, so existing
+ * `db.select(...)`-style calls drop in by swapping the reference.
+ */
+export function getOrgScopedDb(source: string): OrgScopedTx {
+  const ctx = getOrgTxContext();
+  if (!ctx) {
+    throwFailure(
+      'missing_org_context',
+      `${source}: service-layer DB access reached without an active org-scoped transaction`,
+      { source },
+    );
+  }
+  return ctx.tx as OrgScopedTx;
+}
+
+/**
+ * Return the current organisation id the ALS tx is bound to, or throw
+ * `failure('missing_org_context')` if none is set. Use this when a service
+ * needs to read the tenant id for audit logging or cross-checks without
+ * trusting the input arguments.
+ */
+export function getOrgScopedOrgId(source: string): string {
+  const ctx = getOrgTxContext();
+  if (!ctx) {
+    throwFailure(
+      'missing_org_context',
+      `${source}: organisationId requested outside an org-scoped transaction`,
+      { source },
+    );
+  }
+  return ctx.organisationId;
+}
+
+/**
+ * Non-throwing peek at the active org context. Used by telemetry / tracing
+ * callers that want to enrich spans without affecting control flow when the
+ * context is absent (e.g. startup-time reads, test harnesses).
+ */
+export function peekOrgTxContext(): ReturnType<typeof getOrgTxContext> {
+  return getOrgTxContext();
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\taskService.ts -TotalCount 220" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 773ms:
+import { eq, and, isNull, desc, asc, ilike, inArray, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import type { OrgScopedTx } from '../db/index.js';
+import {
+  tasks,
+  taskActivities,
+  taskDeliverables,
+  boardConfigs,
+  agents,
+} from '../db/schema/index.js';
+import { assertActive } from '../lib/queryHelpers.js';
+import type { Task } from '../db/schema/tasks.js';
+
+type TaskStatus = Task['status'];
+import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { triggerService } from './triggerService.js';
+import { subtaskWakeupService } from './subtaskWakeupService.js';
+import { logger } from '../lib/logger.js';
+
+// ƒ"?ƒ"?ƒ"? Types ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+export type CreateTaskData = {
+  title: string;
+  description?: string;
+  brief?: string;
+  status?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  assignedAgentId?: string;
+  assignedAgentIds?: string[];
+  createdByAgentId?: string;
+  processId?: string;
+  dueDate?: Date;
+  handoffSourceRunId?: string;
+  handoffContext?: Record<string, unknown>;
+  handoffDepth?: number;
+  isSubTask?: boolean;
+  parentTaskId?: string;
+};
+
+export type CreateTaskInput = {
+  organisationId: string;
+  subaccountId: string;
+  data: CreateTaskData;
+  userId?: string;
+};
+
+const POSITION_GAP = 1000;
+
+// Resolve an array of agent IDs to full agent objects in one query
+async function resolveAgents(ids: string[]): Promise<Array<{ id: string; name: string | null; slug: string | null }>> {
+  if (!ids.length) return [];
+  return db
+    .select({ id: agents.id, name: agents.name, slug: agents.slug })
+    .from(agents)
+    .where(inArray(agents.id, ids));
+}
+
+// Build the assignedAgents array and keep assignedAgentId in sync (first element = primary)
+function mergeAgentIds(
+  assignedAgentId: string | undefined | null,
+  assignedAgentIds: string[] | undefined | null
+): { agentId: string | null; agentIds: string[] } {
+  const ids = assignedAgentIds ?? (assignedAgentId ? [assignedAgentId] : []);
+  const deduped = [...new Set(ids.filter(Boolean))];
+  const primary = deduped[0] ?? null;
+  return { agentId: primary, agentIds: deduped };
+}
+
+// ƒ"?ƒ"?ƒ"? createTask ƒ?" overloaded standalone (DEC-4 / spec ¶õ3.3) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+//
+// TypeScript does not support overloads on object literal methods, so
+// `createTask` is declared as a module-level function and then assigned to
+// `taskService.createTask`. Callers import via `taskService` as before.
+
+/**
+ * Canonical ƒ?" required for all in-scope callers.
+ * Must be called with a caller-supplied `OrgScopedTx` obtained from
+ * `getOrgScopedDb()` inside an active `withOrgTx(...)` block.
+ */
+function _createTask(input: CreateTaskInput, tx: OrgScopedTx): Promise<Task>;
+/**
+ * @deprecated transitional shim for sister-branch reconciliation ƒ?" do NOT call from new code.
+ * Throws at runtime. Sister branch removes this overload when it lands its own
+ * withOrgTx wrappers.
+ */
+function _createTask(
+  organisationId: string,
+  subaccountId: string,
+  data: CreateTaskData,
+  userId?: string,
+): Promise<Task>;
+async function _createTask(
+  arg1: CreateTaskInput | string,
+  arg2: OrgScopedTx | string,
+  arg3?: CreateTaskData,
+  arg4?: string,
+): Promise<Task> {
+  if (typeof arg1 === 'string') {
+    // Transitional shim for sister-branch callers (workflowEngineService) that have not yet
+    // migrated to (input, tx). Opens its own transaction and sets the org GUC so RLS passes.
+    // DEC-4 / spec ¶õ3.3 ƒ?" remove once sister branch lands its withOrgTx wrappers.
+    const organisationId = arg1;
+    const subaccountId = arg2 as string;
+    const data = arg3!;
+    const userId = arg4;
+    logger.warn('taskService.createTask_legacy_4arg', {
+      event: 'legacy_4arg_createTask',
+      organisationId,
+      note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
+    });
+    return db.transaction(async (innerTx) => {
+      await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+      return _createTask({ organisationId, subaccountId, data, userId }, innerTx);
+    });
+  }
+
+  // Canonical implementation ƒ?" arg1 is CreateTaskInput, arg2 is OrgScopedTx
+  const { organisationId, subaccountId, data, userId } = arg1;
+  const tx = arg2 as OrgScopedTx;
+
+  const status = (data.status ?? 'inbox') as TaskStatus;
+
+  await _validateStatus(organisationId, subaccountId, status, tx);
+  const position = await _nextPosition(subaccountId, status, tx);
+
+  const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
+
+  if (agentId) {
+    const [assignedAgent] = await tx
+      .select({ id: agents.id, deletedAt: agents.deletedAt })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)))
+      .limit(1);
+    assertActive(assignedAgent, 'Agent');
+  }
+
+  const [item] = await tx
+    .insert(tasks)
+    .values({
+      organisationId,
+      subaccountId,
+      title: data.title,
+      description: data.description ?? null,
+      brief: data.brief ?? null,
+      status,
+      priority: data.priority ?? 'normal',
+      assignedAgentId: agentId,
+      assignedAgentIds: agentIds,
+      createdByAgentId: data.createdByAgentId ?? null,
+      createdByUserId: userId ?? null,
+      processId: data.processId ?? null,
+      position,
+      dueDate: data.dueDate ?? null,
+      handoffSourceRunId: data.handoffSourceRunId ?? null,
+      handoffContext: data.handoffContext ?? null,
+      handoffDepth: data.handoffDepth ?? 0,
+      isSubTask: data.isSubTask ?? false,
+      parentTaskId: data.parentTaskId ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  await tx.insert(taskActivities).values({
+    organisationId,
+    taskId: item.id,
+    userId: userId ?? null,
+    agentId: data.createdByAgentId ?? null,
+    activityType: 'created',
+    message: `Task "${data.title}" created`,
+    createdAt: new Date(),
+  });
+
+  emitSubaccountUpdate(subaccountId, 'task:created', {
+    taskId: item.id, title: data.title, status,
+  });
+
+  // Fire task_created triggers (non-blocking)
+  triggerService.checkAndFire(subaccountId, organisationId, 'task_created', {
+    taskId: item.id,
+    title: data.title,
+    status,
+    priority: item.priority,
+    agentId: data.createdByAgentId ?? null,
+  }).catch((err: unknown) => {
+    logger.error('task.trigger_failed', {
+      subaccountId,
+      eventType: 'task_created',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md ¶õ7).
+  // Enqueue the Orchestrator-from-task job when the task meets the eligibility
+  // predicate. Non-blocking; the handler performs its own guards and silently
+  // no-ops when the Orchestrator agent is not linked in this org.
+  import('../jobs/orchestratorFromTaskJob.js').then(({ enqueueOrchestratorRoutingIfEligible }) =>
+    enqueueOrchestratorRoutingIfEligible({
+      id: item.id,
+      organisationId,
+      status: item.status,
+      assignedAgentId: item.assignedAgentId ?? null,
+      isSubTask: item.isSubTask,
+      createdByAgentId: item.createdByAgentId ?? null,
+      description: item.description ?? null,
+    }),
+  ).catch((err: unknown) => {
+    logger.error('task.orchestrator_enqueue_failed', {
+      taskId: item.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  return item;
+}
+
+// ƒ"?ƒ"?ƒ"? Standalone helpers (also used internally by createTask) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+async function _validateStatus(organisationId: string, subaccountId: string, status: string, tx?: OrgScopedTx): Promise<void> {
+  // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\triggerService.ts -TotalCount 160; Get-Content server\\jobs\\orchestratorFromTaskJob.ts -TotalCount 120" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 696ms:
+import { eq, and, isNull, gte, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { agentTriggers, agentRuns, subaccountAgents } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
+import { MAX_TRIGGERED_RUNS_PER_MINUTE } from '../config/limits.js';
+
+// ---------------------------------------------------------------------------
+// Trigger Service ƒ?" checks and fires event-based agent triggers
+// ---------------------------------------------------------------------------
+
+type JobSender = (name: string, data: object) => Promise<string | null>;
+
+let triggerJobSender: JobSender | null = null;
+
+export function setTriggerJobSender(sender: JobSender): void {
+  triggerJobSender = sender;
+}
+
+const TRIGGER_RUN_QUEUE = 'agent-triggered-run';
+
+// ---------------------------------------------------------------------------
+// Rate cap helpers
+// ---------------------------------------------------------------------------
+
+async function countTriggeredRunsInLastMinute(subaccountId: string): Promise<number> {
+  const since = new Date(Date.now() - 60_000);
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.subaccountId, subaccountId),
+        eq(agentRuns.runType, 'triggered'),
+        gte(agentRuns.createdAt, since)
+      )
+    );
+  return total ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Filter matching
+// ---------------------------------------------------------------------------
+
+function matchesFilter(
+  filter: Record<string, unknown>,
+  eventData: Record<string, unknown>
+): boolean {
+  for (const [key, value] of Object.entries(filter)) {
+    if (eventData[key] !== value) return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export const triggerService = {
+  /**
+   * Check active triggers for a given event and fire matching ones.
+   * Non-blocking: call with .catch() at hook points.
+   */
+  async checkAndFire(
+    subaccountId: string,
+    organisationId: string,
+    eventType: 'task_created' | 'task_moved' | 'agent_completed',
+    eventData: Record<string, unknown>
+  ): Promise<void> {
+    // Rate cap check
+    const recentCount = await countTriggeredRunsInLastMinute(subaccountId);
+
+    if (recentCount >= MAX_TRIGGERED_RUNS_PER_MINUTE) {
+      console.warn(`[TriggerService] Rate cap reached (${recentCount}/${MAX_TRIGGERED_RUNS_PER_MINUTE}) for ${eventType} in subaccount ${subaccountId} ƒ?" suppressing`);
+      return;
+    }
+
+    // Soft warning at 70%
+    if (recentCount >= Math.floor(MAX_TRIGGERED_RUNS_PER_MINUTE * 0.7)) {
+      console.warn(`[TriggerService] Approaching rate cap (${recentCount}/${MAX_TRIGGERED_RUNS_PER_MINUTE}) for subaccount ${subaccountId}`);
+    }
+
+    // Load active triggers for this event
+    const triggers = await db
+      .select()
+      .from(agentTriggers)
+      .where(
+        and(
+          eq(agentTriggers.subaccountId, subaccountId),
+          eq(agentTriggers.eventType, eventType),
+          eq(agentTriggers.isActive, true),
+          isNull(agentTriggers.deletedAt)
+        )
+      );
+
+    if (triggers.length === 0) return;
+
+    let fired = 0;
+
+    for (const trigger of triggers) {
+      // In-loop rate cap: re-check so a single batch cannot overshoot
+      if (recentCount + fired >= MAX_TRIGGERED_RUNS_PER_MINUTE) {
+        console.warn(`[TriggerService] Rate cap hit mid-batch (${recentCount + fired}/${MAX_TRIGGERED_RUNS_PER_MINUTE}) for subaccount ${subaccountId} ƒ?" stopping`);
+        break;
+      }
+
+      // Cooldown check
+      if (trigger.lastTriggeredAt) {
+        const cooldownMs = trigger.cooldownSeconds * 1000;
+        const elapsed = Date.now() - trigger.lastTriggeredAt.getTime();
+        if (elapsed < cooldownMs) continue;
+      }
+
+      // Filter match
+      const filter = (trigger.eventFilter ?? {}) as Record<string, unknown>;
+      if (!matchesFilter(filter, eventData)) continue;
+
+      // Self-trigger guard ƒ?" skip if the triggering agent is the target agent
+      const triggeringAgentId = eventData.agentId as string | undefined;
+      if (triggeringAgentId) {
+        const [saLink] = await db
+          .select({ agentId: subaccountAgents.agentId })
+          .from(subaccountAgents)
+          .where(eq(subaccountAgents.id, trigger.subaccountAgentId!))
+          .limit(1);
+
+        if (saLink?.agentId === triggeringAgentId) continue;
+      }
+
+      // Enqueue via pg-boss
+      if (triggerJobSender) {
+        await triggerJobSender(TRIGGER_RUN_QUEUE, {
+          subaccountAgentId: trigger.subaccountAgentId,
+          subaccountId,
+          organisationId,
+          triggerContext: { source: 'trigger', eventType, eventData, triggerId: trigger.id },
+        });
+      }
+
+      // Update trigger stats
+      await db
+        .update(agentTriggers)
+        .set({
+          lastTriggeredAt: new Date(),
+          triggerCount: trigger.triggerCount + 1,
+          updatedAt: new Date(),
+        })
+        // guard-ignore-next-line: org-scoped-writes reason="trigger was loaded from prior org-scoped query filtered by organisationId and subaccountId"
+        .where(eq(agentTriggers.id, trigger.id));
+
+      fired++;
+    }
+
+    console.info(`[TriggerService] Fired ${fired} of ${triggers.length} triggers for ${eventType} in subaccount ${subaccountId}`);
+  },
+
+  /**
+   * Dry run ƒ?" returns what would fire without executing.
+   */
+  async dryRun(
+    subaccountId: string,
+// Capability-Aware Orchestrator (also called 'Router and Execution Planner' in the v1.2 product brief). See docs/synthetos-nomenclature.md
+
+import { and, eq, isNull } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { tasks, conversations } from '../db/schema/index.js';
+import { agentExecutionService } from '../services/agentExecutionService.js';
+import { taskService } from '../services/taskService.js';
+import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
+import { writeConversationMessage } from '../services/briefConversationWriter.js';
+import { logger } from '../lib/logger.js';
+import { detectCadenceSignals } from '../services/orchestratorCadenceDetectionPure.js';
+import { classifyAsMilestone } from '../services/orchestratorMilestoneEmitterPure.js';
+import { detectWorkflowDraftIntent } from '../services/chatTriageClassifierPure.js';
+import { appendAndEmitTaskEvent } from '../services/taskEventService.js';
+import { workflowDraftService } from '../services/workflowDraftService.js';
+
+// ---------------------------------------------------------------------------
+// orchestratorFromTaskJob
+//
+// Handler for the org-level task-created event targeting the Orchestrator
+// agent. Consumes a pg-boss job payload containing the task id + org id,
+// performs handler-side guards that a simple eventFilter cannot express,
+// resolves the Orchestrator's subaccount-agent link for the org, and
+// dispatches an agent run with the task as context.
+//
+// See docs/orchestrator-capability-routing-spec.md ¶õ7.
+// ---------------------------------------------------------------------------
+
+export const ORCHESTRATOR_FROM_TASK_QUEUE = 'orchestrator-from-task';
+const MIN_DESCRIPTION_CHARS = 10;
+
+export interface OrchestratorFromTaskPayload {
+  taskId: string;
+  organisationId: string;
+  triggerId?: string;
+  scope?: 'subaccount' | 'org' | 'system';
+}
+
+// ---------------------------------------------------------------------------
+// Enqueue: called by taskService.createTask after the row is written. Job
+// handler runs the real work asynchronously. Non-blocking from the caller's
+// perspective. See spec ¶õ7.3 for the eligibility predicate.
+// ---------------------------------------------------------------------------
+
+type JobSender = (name: string, data: object) => Promise<string | null>;
+
+let orchestratorJobSender: JobSender | null = null;
+
+export function setOrchestratorJobSender(sender: JobSender): void {
+  orchestratorJobSender = sender;
+}
+
+export interface TaskLike {
+  id: string;
+  organisationId: string;
+  status: string;
+  assignedAgentId: string | null;
+  isSubTask: boolean;
+  createdByAgentId: string | null;
+  description: string | null;
+}
+
+/**
+ * Eligibility predicate ƒ?" mirrors the eventFilter from spec ¶õ7.3 plus the
+ * handler-side guards for non-equality-checkable fields (createdByAgentId,
+ * description length).
+ */
+export function isEligibleForOrchestratorRouting(task: TaskLike): boolean {
+  if (task.status !== 'inbox') return false;
+  if (task.assignedAgentId !== null) return false;
+  if (task.isSubTask) return false;
+  if (task.createdByAgentId !== null) return false;
+  if (!task.description || task.description.trim().length < MIN_DESCRIPTION_CHARS) return false;
+  return true;
+}
+
+/**
+ * Enqueue the Orchestrator routing job for a newly-created task, if the
+ * task meets the eligibility criteria. Non-throwing ƒ?" caller fires and
+ * forgets. Safe to call on every task creation.
+ */
+export async function enqueueOrchestratorRoutingIfEligible(
+  task: TaskLike,
+  opts?: { scope?: 'subaccount' | 'org' | 'system' },
+): Promise<void> {
+  if (!isEligibleForOrchestratorRouting(task)) return;
+  if (!orchestratorJobSender) {
+    logger.warn('orchestratorFromTask.no_sender', { taskId: task.id });
+    return;
+  }
+  try {
+    const payload: OrchestratorFromTaskPayload = {
+      taskId: task.id,
+      organisationId: task.organisationId,
+    };
+    if (opts?.scope !== undefined) {
+      payload.scope = opts.scope;
+    }
+    await orchestratorJobSender(ORCHESTRATOR_FROM_TASK_QUEUE, payload);
+  } catch (err) {
+    logger.error('orchestratorFromTask.enqueue_failed', {
+      taskId: task.id,
+      organisationId: task.organisationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+export async function processOrchestratorFromTask(payload: OrchestratorFromTaskPayload): Promise<void> {
+  const { taskId, organisationId } = payload;
+
+  // 1. Load the task.
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+
+  if (!task) {
+    logger.warn('orchestratorFromTask.task_not_found', { taskId, organisationId });
+    return;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n /c:\"getOrgScopedDb\" server\\services\\scheduledTaskService.ts; findstr /n /c:\"withOrgTx\" server\\services\\scheduledTaskService.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 504ms:
+12:import { withOrgTx } from '../instrumentation.js';
+652:      // Mirrors the auth middleware pattern: db.transaction + set_config + withOrgTx.
+655:        return withOrgTx(
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /c:\"fireOccurrence(\" server\\*.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 666ms:
+server\routes\scheduledTasks.ts:142:    await scheduledTaskService.fireOccurrence(req.params.stId, req.orgId!);
+server\services\scheduledTaskService.ts:248:      this.fireOccurrence(scheduledTaskId, organisationId).catch((err) => {
+server\services\scheduledTaskService.ts:610:  async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\scheduledTaskService.ts | Select-Object -Skip 210 -First 60; Get-Content server\\routes\\scheduledTasks.ts | Select-Object -Skip 120 -First 35" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 673ms:
+    const rows = await db
+      .select()
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.createdByWorkflowSlug, workflowSlug),
+          eq(scheduledTasks.isActive, true),
+        ),
+      );
+    for (const r of rows) {
+      await db
+        .update(scheduledTasks)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(scheduledTasks.id, r.id));
+      await configHistoryService.recordHistory({
+        entityType: 'scheduled_task',
+        entityId: r.id,
+        organisationId: r.organisationId,
+        snapshot: { ...(r as unknown as Record<string, unknown>), isActive: false },
+        changedBy: null,
+        changeSource: 'api',
+        changeSummary: `Deactivated as part of playbook '${workflowSlug}' retirement`,
+      });
+    }
+  },
+
+  /**
+   * Enqueue an immediate run of an existing scheduled task. Idempotent via
+   * the agent-run `scheduled_task:${id}:${occurrence}` key. We use
+   * `setImmediate` rather than `pgBoss.send` because the current scheduler is
+   * in-process RRULE-based; migrating to a pg-boss cron queue is out of
+   * scope for this phase (spec ¶õ5.8 ƒ?" failure isolation is preserved because
+   * the catch around `enqueueRunNow` emits to the server log).
+   */
+  async enqueueRunNow(scheduledTaskId: string, organisationId: string): Promise<void> {
+    setImmediate(() => {
+      this.fireOccurrence(scheduledTaskId, organisationId).catch((err) => {
+        console.error('[ScheduledTask] runNow fireOccurrence failed:', err);
+      });
+    });
+  },
+
+  async update(
+    id: string,
+    organisationId: string,
+    data: {
+      title?: string;
+      description?: string;
+      brief?: string;
+      priority?: string;
+      assignedAgentId?: string;
+      rrule?: string;
+      timezone?: string;
+      scheduleTime?: string;
+      retryPolicy?: { maxRetries: number; backoffMinutes: number; pauseAfterConsecutiveFailures: number };
+      tokenBudgetPerRun?: number;
+      endsAt?: Date | null;
+      endsAfterRuns?: number | null;
+    }
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') {
+      res.status(400).json({ error: 'isActive (boolean) is required' });
+      return;
+    }
+    const updated = await scheduledTaskService.toggleActive(req.params.stId, req.orgId!, isActive);
+    res.json(updated);
+  })
+);
+
+// ƒ"?ƒ"?ƒ"? Run now (manual trigger) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+router.post(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/run-now',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // Fire the occurrence immediately (doesn't affect the regular schedule)
+    await scheduledTaskService.fireOccurrence(req.params.stId, req.orgId!);
+    res.json({ success: true, message: 'Scheduled task triggered' });
+  })
+);
+
+// ƒ"?ƒ"?ƒ"? Scheduled task data sources (spec ¶õ9) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+//
+// NOTE: The cascade preview endpoint and the in-UI agent reassignment flow
+// (spec ¶õ7.6) are deferred to a follow-up. The backend cascade itself in
+// scheduledTaskService.update IS implemented and transactional ƒ?" agent
+// reassignment via API or seed script will still cascade safely. What's
+// deferred is exposing it through the detail page edit form with a UI
+// confirmation dialog. Tracked for a follow-up that adds an agent picker
+// to the edit form. (pr-reviewer Blocker 5.)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\middleware\\orgScoping.ts -TotalCount 180; Get-Content server\\lib\\createWorker.ts -TotalCount 180" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 735ms:
+// ---------------------------------------------------------------------------
+// createWorker ƒ?" declarative pg-boss worker registration (Phase A3)
+//
+// Reads retry, timeout, and error classification from jobConfig.ts.
+// Reduces per-queue worker boilerplate from ~30 lines to ~5 lines.
+//
+// Sprint 2 P1.1 Layer 1 Path 2: every handler runs inside an org-scoped
+// Drizzle transaction that has issued `SELECT set_config('app.organisation_id',
+// $1)` for the tenant the job belongs to. The job payload MUST carry
+// `organisationId` explicitly ƒ?" pg-boss handlers without it throw a
+// structured `missing_org_context` failure before the handler ever runs.
+// See docs/improvements-roadmap-spec.md ¶õP1.1 Layer 1.
+// ---------------------------------------------------------------------------
+
+import type PgBoss from 'pg-boss';
+import { sql } from 'drizzle-orm';
+import { JOB_CONFIG, type JobName } from '../config/jobConfig.js';
+import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from './jobErrors.js';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
+import { throwFailure } from '../../shared/iee/failure.js';
+
+interface WorkerOptions<T> {
+  /** Queue name ƒ?" must match a key in JOB_CONFIG */
+  queue: JobName;
+  /** pg-boss instance */
+  boss: PgBoss;
+  /** Handler function ƒ?" receives the pg-boss job */
+  handler: (job: PgBoss.Job<T>) => Promise<void>;
+  /** Override concurrency (defaults to env QUEUE_CONCURRENCY or 2) */
+  concurrency?: number;
+  /** Override timeout in ms (defaults to jobConfig expireInSeconds * 900ms) */
+  timeoutMs?: number;
+  /**
+   * Sprint 2 P1.1 Layer 1 Path 2 ƒ?" org context resolver.
+   *
+   * Most handlers read `organisationId` (and optionally `subaccountId`)
+   * straight from the job payload. The default resolver does that. A
+   * handler whose job payload stores the tenant context under a different
+   * field name, or whose payload intentionally has no org context (cross-
+   * org maintenance sweeps, admin jobs), can override this.
+   *
+   * - Return `null` to explicitly opt out of the tx-opening prelude. The
+   *   handler is then responsible for using `withAdminConnection` for any
+   *   DB access.
+   * - Return `{ organisationId, subaccountId? }` to open an org-scoped tx
+   *   for the handler. This is the default behaviour.
+   */
+  resolveOrgContext?: (
+    job: PgBoss.Job<T>,
+  ) => { organisationId: string; subaccountId?: string | null } | null;
+}
+
+/**
+ * Default org-context resolver: reads `organisationId` / `subaccountId`
+ * from the job payload. Throws a structured failure when `organisationId`
+ * is missing ƒ?" job payload schemas validated at the `boss.send(...)` site
+ * must include this field (see docs/pgboss-zod-hardening-spec.md).
+ */
+function defaultResolveOrgContext<T>(
+  job: PgBoss.Job<T>,
+): { organisationId: string; subaccountId?: string | null } | null {
+  const data = (job.data ?? {}) as Record<string, unknown>;
+  const organisationId = data.organisationId ?? data.orgId;
+  if (typeof organisationId !== 'string' || organisationId.length === 0) {
+    throwFailure(
+      'missing_org_context',
+      `pg-boss job ${job.id} payload missing organisationId`,
+      { jobId: job.id, payloadKeys: Object.keys(data) },
+    );
+  }
+  const subaccountId = data.subaccountId;
+  return {
+    organisationId,
+    subaccountId:
+      typeof subaccountId === 'string' && subaccountId.length > 0
+        ? subaccountId
+        : null,
+  };
+}
+
+/**
+ * Register a pg-boss worker with automatic retry, timeout, and error classification
+ * based on the centralised job configuration.
+ */
+export function createWorker<T>(options: WorkerOptions<T>) {
+  const config = JOB_CONFIG[options.queue];
+  const teamSize = options.concurrency ?? parseInt(process.env.QUEUE_CONCURRENCY ?? '2', 10);
+
+  // Derive timeout: explicit override > config expireInSeconds * 0.9 > 60s default
+  const timeoutMs = options.timeoutMs
+    ?? ((config as Record<string, unknown>).expireInSeconds
+      ? ((config as Record<string, unknown>).expireInSeconds as number) * 900
+      : 60_000);
+
+  const resolveOrgContext = options.resolveOrgContext ?? defaultResolveOrgContext;
+
+  return options.boss.work<T>(
+    options.queue,
+    { teamSize, teamConcurrency: 1 },
+    async (job) => {
+      const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
+      if (retryCount > 0) {
+        console.warn(`[Worker:${options.queue}] Retry #${retryCount} for job ${job.id}`);
+      }
+
+      // Sprint 2 P1.1 Layer 1 Path 2 ƒ?" open an org-scoped transaction for
+      // the handler. Every query the handler issues then runs with
+      // `current_setting('app.organisation_id')` set to the tenant id
+      // extracted from the job payload, matching the RLS policies.
+      //
+      // A resolver that returns `null` opts out ƒ?" used by admin maintenance
+      // jobs that must touch multiple tenants via `withAdminConnection`.
+      const runHandler = async (): Promise<void> => {
+        const orgContext = resolveOrgContext(job);
+        if (orgContext === null) {
+          // Explicit opt-out: the handler is responsible for its own
+          // tx / admin-bypass wiring.
+          await options.handler(job);
+          return;
+        }
+
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT set_config('app.organisation_id', ${orgContext.organisationId}, true)`,
+          );
+
+          await withOrgTx(
+            {
+              tx,
+              organisationId: orgContext.organisationId,
+              subaccountId: orgContext.subaccountId ?? null,
+              source: `pgboss:${options.queue}:${job.id}`,
+            },
+            () => options.handler(job),
+          );
+        });
+      };
+
+      try {
+        await withTimeout(runHandler(), timeoutMs);
+      } catch (err: unknown) {
+        if (isNonRetryable(err)) {
+          console.error(`[Worker:${options.queue}] Non-retryable failure for job ${job.id}:`,
+            err instanceof Error ? err.message : err);
+          await options.boss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          console.error(`[Worker:${options.queue}] Timeout after ${timeoutMs}ms for job ${job.id}`);
+        }
+        throw err; // pg-boss handles retry/DLQ
+      }
+    }
+  );
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+Get-Content : Cannot find path 'C:\Files\Projects\automation-v1-2nd\server\middleware\orgScoping.ts' because it does 
+not exist.
+At line:2 char:1
++ Get-Content server\middleware\orgScoping.ts -TotalCount 180; Get-Cont ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (C:\Files\Projec...e\orgScoping.ts:String) [Get-Content], ItemNotFoundEx 
+   ception
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem server -Recurse -Filter *orgScop* -Name' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 713ms:
+lib\orgScopedDb.ts
+lib\orgScoping.ts
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\lib\\orgScoping.ts -TotalCount 160" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 669ms:
+import { sql } from 'drizzle-orm';
+import type { OrgScopedTx } from '../db/index.js';
+
+/**
+ * Sets the per-statement organisation_id GUC on the current transaction.
+ *
+ * MUST be called as the first statement inside any db.transaction(async tx => { ... })
+ * block that touches RLS-protected tables outside the request middleware path.
+ *
+ * The `true` third argument to set_config scopes the setting to the current
+ * transaction (is_local = true) so it is cleared automatically on commit/rollback
+ * and cannot leak back into the connection pool.
+ *
+ * This is the canonical replacement for the `withOrgTx({ tx: db })` anti-pattern
+ * (passing the module-level db connection as `tx`). See KNOWLEDGE.md ƒ?"
+ * "2026-05-05 Gotcha ƒ?" withOrgTx({ tx: db }) in unauthenticated callbacks".
+ */
+export async function setOrgGUC(tx: OrgScopedTx, orgId: string): Promise<void> {
+  if (!orgId) throw new Error('orgId required for setOrgGUC');
+  await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content tasks\\review-logs\\_codex_dual_iter2_pre-test-hardening_2026-05-10T21-55-09Z.txt -TotalCount 200" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 703ms:
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e13e3-1cbd-7211-8845-a9a84fabe71d
+--------
+user
+current changes
+  ƒÅ' Inspect git status and diffs
+  ƒ?½ Review changed code for bugs
+  ƒ?½ Produce prioritized findings JSON
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --stat; git diff --cached --stat' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 752ms:
+ M server/services/connectorConfigService.ts
+ M server/services/scheduledTaskService.ts
+?? tasks/review-logs/.codex-prompt-iter1-2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter1_pre-test-hardening_2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter2_pre-test-hardening_2026-05-10T21-55-09Z.txt
+ server/services/connectorConfigService.ts | 11 +++++++
+ server/services/scheduledTaskService.ts   | 49 ++++++++++++++++++++-----------
+ 2 files changed, 43 insertions(+), 17 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/services/connectorConfigService.ts server/services/scheduledTaskService.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 509ms:
+diff --git a/server/services/connectorConfigService.ts b/server/services/connectorConfigService.ts
+index 0357c097..264a43ed 100644
+--- a/server/services/connectorConfigService.ts
++++ b/server/services/connectorConfigService.ts
+@@ -1,3 +1,4 @@
++import { randomUUID } from 'crypto';
+ import { eq, and, ne, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+@@ -137,6 +138,12 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 ƒ?" Teamwork connectors require a per-connector
++    // webhook URL token at creation time. The tokenised webhook route
++    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
++    // token; a null token means deliveries are silently dropped with 401.
++    // Migration 0314 backfills existing rows; this auto-generates for new ones.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -146,6 +153,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+ 
+@@ -165,6 +173,8 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 ƒ?" see `create` above for rationale.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -175,6 +185,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+     return config;
+diff --git a/server/services/scheduledTaskService.ts b/server/services/scheduledTaskService.ts
+index 8bdc0aa6..c37349bb 100644
+--- a/server/services/scheduledTaskService.ts
++++ b/server/services/scheduledTaskService.ts
+@@ -1,4 +1,4 @@
+-import { eq, and, desc, isNull } from 'drizzle-orm';
++import { eq, and, desc, isNull, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import {
+   scheduledTasks,
+@@ -9,7 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
+ import { taskService } from './taskService.js';
+ import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
+ import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
+-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
++import { withOrgTx } from '../instrumentation.js';
+ 
+ // ---------------------------------------------------------------------------
+ // Scheduled Task Service ƒ?" CRUD + occurrence firing + retry logic
+@@ -645,22 +645,37 @@ export const scheduledTaskService = {
+       : `${st.title} #${occurrence}`;
+ 
+     try {
+-      const tx = getOrgScopedDb('service:scheduledTaskService.runDue');
+-      const task = await taskService.createTask(
+-        {
+-          organisationId: st.organisationId,
+-          subaccountId: st.subaccountId!,
+-          data: {
+-            title: taskTitle,
+-            description: st.description ?? undefined,
+-            brief: st.brief ?? undefined,
+-            priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+-            status: 'inbox',
+-            assignedAgentId: st.assignedAgentId,
++      // Open a self-contained org-scoped tx so this path works both when called
++      // from an authenticated HTTP request (which already has an ALS tx open) and
++      // from the unauthenticated `setImmediate` path inside `enqueueRunNow`,
++      // where the request tx has already finished by the time we run.
++      // Mirrors the auth middleware pattern: db.transaction + set_config + withOrgTx.
++      const task = await db.transaction(async (innerTx) => {
++        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
++        return withOrgTx(
++          {
++            tx: innerTx,
++            organisationId: st.organisationId,
++            subaccountId: st.subaccountId,
++            source: 'service:scheduledTaskService.fireOccurrence',
+           },
+-        },
+-        tx,
+-      );
++          () => taskService.createTask(
++            {
++              organisationId: st.organisationId,
++              subaccountId: st.subaccountId!,
++              data: {
++                title: taskTitle,
++                description: st.description ?? undefined,
++                brief: st.brief ?? undefined,
++                priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
++                status: 'inbox',
++                assignedAgentId: st.assignedAgentId,
++              },
++            },
++            innerTx,
++          ),
++        );
++      });
+ 
+       // Update the run with the task reference
+       await db.update(scheduledTaskRuns).set({
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path server/services/connectorConfigService.ts -TotalCount 240; Write-Output '---'; Get-Content -Path server/services/scheduledTaskService.ts | Select-Object -Skip 600 -First 110" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 669ms:
+import { randomUUID } from 'crypto';
+import { eq, and, ne, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
+import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
+
+export function buildWorkspaceTenantConfig(
+  subaccountName: string,
+  connectorConfig: { id: string; connectorType: string; configJson: unknown } | null,
+): WorkspaceTenantConfig {
+  const cfg = (connectorConfig?.configJson as Record<string, unknown> | null) ?? {};
+  const configDomain = typeof cfg.domain === 'string' && cfg.domain.length > 0 ? cfg.domain : null;
+
+  // Workspace `domain` resolution mirrors the GET /workspace summary route:
+  // per-subaccount override (configJson.domain) ’'Ç.' NATIVE_EMAIL_DOMAIN ’'Ç.' null.
+  // Returning `null` (rather than 'workspace.local') lets callers distinguish
+  // "no workspace configured" from "configured with the dev fallback".
+  // Read from process.env directly rather than the validated env module so that
+  // pure unit tests of this builder don't have to bootstrap the entire env Zod
+  // schema (which requires DATABASE_URL, EMAIL_FROM, ...).
+  const envDomain = typeof process.env.NATIVE_EMAIL_DOMAIN === 'string' && process.env.NATIVE_EMAIL_DOMAIN.length > 0
+    ? process.env.NATIVE_EMAIL_DOMAIN
+    : null;
+  const resolvedDomain = configDomain ?? envDomain;
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-10T21:56:58.285998Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server'"\\services\\scheduledTaskService.ts | ForEach-Object { if("'$i -ge 650 -and $i -le 683){ '"'{0}:{1}' -f "'$i, $_}; $i++ }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server'"\\services\\scheduledTaskService.ts | ForEach-Object { if("'$i -ge 650 -and $i -le 683){ '"'{0}:{1}' -f "'$i, $_}; $i++ }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server'"\\services\\scheduledTaskService.ts | ForEach-Object { if("'$i -ge 650 -and $i -le 683){ '"'{0}:{1}' -f "'$i, $_}; $i++ }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n /c:\"const task = await db.transaction\" /c:\"SELECT set_config\" /c:\"subaccountId: st.subaccountId,\" /c:\"taskService.createTask\" server\\services\\scheduledTaskService.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 542ms:
+653:      const task = await db.transaction(async (innerTx) => {
+654:        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+659:            subaccountId: st.subaccountId,
+662:          () => taskService.createTask(
+708:        subaccountId: st.subaccountId,
+877:        subaccountId: st.subaccountId,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\db\\schema\\scheduledTasks.ts -TotalCount 120" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 809ms:
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { organisations } from './organisations';
+import { subaccounts } from './subaccounts';
+import { agents } from './agents';
+import { users } from './users';
+import { workflowTemplateVersions } from './workflowTemplates';
+
+// ---------------------------------------------------------------------------
+// Scheduled Tasks - user-configured recurring tasks
+// ---------------------------------------------------------------------------
+
+export const scheduledTasks = pgTable(
+  'scheduled_tasks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id')
+      .notNull()
+      .references(() => organisations.id),
+    subaccountId: uuid('subaccount_id')
+      .references(() => subaccounts.id),
+
+    // Task template
+    title: text('title').notNull(),
+    description: text('description'),
+    brief: text('brief'),
+    priority: text('priority').notNull().default('normal').$type<'low' | 'normal' | 'high' | 'urgent'>(),
+    assignedAgentId: uuid('assigned_agent_id')
+      .notNull()
+      .references(() => agents.id),
+    createdByUserId: uuid('created_by_user_id')
+      .references(() => users.id),
+
+    // Schedule (RRULE-based)
+    rrule: text('rrule').notNull(),
+    timezone: text('timezone').notNull().default('UTC'),
+    scheduleTime: text('schedule_time').notNull(), // HH:MM 24hr
+
+    // Phase B2 - logical identity + lifecycle metadata (spec õ5.4.1, õ5.4.2)
+    taskSlug: text('task_slug'),
+    createdByWorkflowSlug: text('created_by_workflow_slug'),
+    firstRunAt: timestamp('first_run_at', { withTimezone: true }),
+    firstRunAtTz: text('first_run_at_tz'),
+
+    // Lifecycle
+    isActive: boolean('is_active').notNull().default(true),
+
+    // Execution config
+    retryPolicy: jsonb('retry_policy').$type<{
+      maxRetries: number;
+      backoffMinutes: number;
+      pauseAfterConsecutiveFailures: number;
+    }>(),
+    tokenBudgetPerRun: integer('token_budget_per_run').notNull().default(30000),
+
+    // Scheduling state
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    totalRuns: integer('total_runs').notNull().default(0),
+    totalFailures: integer('total_failures').notNull().default(0),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+
+    // End conditions
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    endsAfterRuns: integer('ends_after_runs'),
+
+    // Memory & Briefings spec Phase 1 (migration 0143, õ10.4 S22)
+    // Per-task delivery channel override. Null = use the Workflow default.
+    // Shape is a subset of DeliveryConfig from deliveryService (Phase 1).
+    deliveryChannels: jsonb('delivery_channels').$type<{
+      email?: boolean;
+      portal?: boolean;
+      slack?: boolean;
+    } | null>(),
+
+    // Workflows V1 (migration 0270) - pin a specific template version for scheduled runs
+    pinnedTemplateVersionId: uuid('pinned_template_version_id').references(
+      () => workflowTemplateVersions.id
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    orgIdx: index('scheduled_tasks_org_idx').on(table.organisationId),
+    subaccountActiveIdx: index('scheduled_tasks_subaccount_active_idx').on(
+      table.subaccountId,
+      table.isActive
+    ),
+    nextRunIdx: index('scheduled_tasks_next_run_idx').on(
+      table.nextRunAt,
+      table.isActive
+    ),
+    // Phase B2 - partial unique index so legacy rows (slug NULL) and
+    // deactivated rows do not block re-creation. See migration 0118.
+    subaccountSlugActiveUniq: uniqueIndex('scheduled_tasks_subaccount_slug_active_uniq')
+      .on(table.subaccountId, table.taskSlug)
+      .where(sql`${table.taskSlug} IS NOT NULL AND ${table.isActive} = true`),
+    workflowSlugIdx: index('scheduled_tasks_workflow_slug_idx')
+      .on(table.createdByWorkflowSlug)
+      .where(sql`${table.createdByWorkflowSlug} IS NOT NULL`),
+    pinnedTemplateVersionIdx: index('scheduled_tasks_pinned_template_version_idx')
+      .on(table.pinnedTemplateVersionId)
+      .where(sql`${table.pinnedTemplateVersionId} IS NOT NULL`),
+  })
+);
+
+export type ScheduledTask = typeof scheduledTasks.$inferSelect;
+export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Scheduled Task Runs - individual occurrences of a scheduled task
+// ---------------------------------------------------------------------------
+
+export const scheduledTaskRuns = pgTable(
+  'scheduled_task_runs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    scheduledTaskId: uuid('scheduled_task_id')
+      .notNull()
+      .references(() => scheduledTasks.id, { onDelete: 'cascade' }),
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\taskService.ts | Select-Object -Skip 210 -First 80" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 687ms:
+    });
+  });
+
+  return item;
+}
+
+// ƒ"?ƒ"?ƒ"? Standalone helpers (also used internally by createTask) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+async function _validateStatus(organisationId: string, subaccountId: string, status: string, tx?: OrgScopedTx): Promise<void> {
+  // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
+  // fall back to db ƒ?" those callers are not yet inside withOrgTx; tracked as a future migration.
+  const queryHandle = tx ?? db;
+  const [config] = await queryHandle
+    .select()
+    .from(boardConfigs)
+    .where(and(eq(boardConfigs.organisationId, organisationId), eq(boardConfigs.subaccountId, subaccountId)));
+
+  if (!config) return;
+
+  const columns = config.columns as Array<{ key: string }>;
+  if (!columns.some(c => c.key === status)) {
+    const validKeys = columns.map(c => c.key).join(', ');
+    throw { statusCode: 400, message: `Invalid status "${status}". Valid statuses: ${validKeys}` };
+  }
+}
+
+async function _nextPosition(subaccountId: string, status: TaskStatus, tx?: OrgScopedTx): Promise<number> {
+  // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
+  // fall back to db ƒ?" those callers are not yet inside withOrgTx; tracked as a future migration.
+  const queryHandle = tx ?? db;
+  const [last] = await queryHandle
+    .select({ position: tasks.position })
+    .from(tasks)
+    .where(and(eq(tasks.subaccountId, subaccountId), eq(tasks.status, status), isNull(tasks.deletedAt)))
+    .orderBy(desc(tasks.position))
+    .limit(1);
+
+  return (last?.position ?? 0) + POSITION_GAP;
+}
+
+export const taskService = {
+  // ƒ"?ƒ"?ƒ"? Tasks (Kanban Cards) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+  /**
+   * Returns true iff a task with the given id exists in the org. Soft-deleted
+   * tasks are still considered owned (for audit / replay paths). Routes use
+   * this to scope task-id paths without leaking existence across orgs.
+   *
+   * Per DEVELOPMENT_GUIDELINES ¶õ2 routes never import `db` directly ƒ?" call
+   * this from the route layer instead of inlining a select.
+   */
+  async assertOrgOwnsTask(taskId: string, organisationId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId)))
+      .limit(1);
+    return row != null;
+  },
+
+  async listTasks(
+    organisationId: string,
+    subaccountId: string,
+    filters?: { status?: string; priority?: string; assignedAgentId?: string; search?: string; projectId?: string }
+  ) {
+    const conditions = [
+      eq(tasks.organisationId, organisationId),
+      eq(tasks.subaccountId, subaccountId),
+      isNull(tasks.deletedAt),
+    ];
+
+    if (filters?.status) conditions.push(eq(tasks.status, filters.status as TaskStatus));
+    if (filters?.priority) conditions.push(eq(tasks.priority, filters.priority as 'low' | 'normal' | 'high' | 'urgent'));
+    if (filters?.assignedAgentId) conditions.push(eq(tasks.assignedAgentId, filters.assignedAgentId));
+    if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
+    if (filters?.projectId) conditions.push(eq(tasks.projectId, filters.projectId));
+
+    const rows = await db
+      .select({ item: tasks })
+      .from(tasks)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /c:\"insert(connectorConfigs\" server\\*.ts scripts\\*.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 875ms:
+server\services\connectorConfigService.ts:148:      .insert(connectorConfigs)
+server\services\connectorConfigService.ts:179:      .insert(connectorConfigs)
+server\services\connectorConfigService.ts:367:            .insert(connectorConfigs)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\connectorConfigService.ts | Select-Object -Skip 330 -First 65" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 784ms:
+        id: connectorConfigs.id,
+        connectorType: connectorConfigs.connectorType,
+        configJson: connectorConfigs.configJson,
+      })
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, orgId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+      ))
+      .limit(1);
+
+    return buildWorkspaceTenantConfig(sub?.name ?? '', config ?? null);
+  },
+
+  async upsertAgencyConnection(params: {
+    orgId: string;
+    companyId: string;
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: Date;
+    scope: string;
+  }): Promise<typeof connectorConfigs.$inferSelect> {
+    // connector_configs has FORCE ROW LEVEL SECURITY. The OAuth callback that
+    // calls this is intentionally unauthenticated (browser redirect with no
+    // JWT), so app.organisation_id is never set. Use withAdminConnection +
+    // SET LOCAL ROLE admin_role to bypass RLS ƒ?" orgId is already validated
+    // by the state-nonce consume step at the route layer, so org isolation
+    // is upheld at the application boundary.
+    const encryptedAccess = connectionTokenService.encryptToken(params.accessToken);
+    const encryptedRefresh = connectionTokenService.encryptToken(params.refreshToken);
+    try {
+      return await withAdminConnection(
+        { source: 'ghl_oauth_callback_upsert', skipAudit: true },
+        async (adminDb) => {
+          await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+          const [row] = await adminDb
+            .insert(connectorConfigs)
+            .values({
+              organisationId: params.orgId,
+              connectorType: 'ghl' as ConnectorType,
+              tokenScope: 'agency',
+              companyId: params.companyId,
+              accessToken: encryptedAccess,
+              refreshToken: encryptedRefresh,
+              expiresAt: params.expiresAt,
+              scope: params.scope,
+              status: 'active' as ConnectorStatus,
+              installedAt: new Date(),
+              disconnectedAt: null,
+            })
+            .onConflictDoUpdate({
+              target: [connectorConfigs.organisationId, connectorConfigs.connectorType, connectorConfigs.companyId],
+              targetWhere: sql`token_scope = 'agency' AND status <> 'disconnected'`,
+              set: {
+                accessToken: encryptedAccess,
+                refreshToken: encryptedRefresh,
+                expiresAt: params.expiresAt,
+                scope: params.scope,
+                status: 'active' as ConnectorStatus,
+                disconnectedAt: null,
+                updatedAt: new Date(),
+              },
+            })
+            .returning();
+          return row;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /i /c:\"webhook_token\" /c:\"webhookToken\" /c:\"webhooks/teamwork\" server\\*.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 847ms:
+server\db\schema\connectorConfigs.ts:40:    webhookToken: uuid('webhook_token'),
+server\index.ts:100:import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
+server\routes\webhooks\teamworkWebhook.ts:16: *   - URL carries a per-connector token: POST /api/webhooks/teamwork/:orgWebhookToken
+server\routes\webhooks\teamworkWebhook.ts:19: *   - The old un-tokened route ( POST /api/webhooks/teamwork ) is REMOVED entirely.
+server\routes\webhooks\teamworkWebhook.ts:26:router.post('/api/webhooks/teamwork/:orgWebhookToken', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+server\routes\webhooks\teamworkWebhook.ts:27:  const { orgWebhookToken } = req.params;
+server\routes\webhooks\teamworkWebhook.ts:31:  let config: Awaited<ReturnType<typeof connectorConfigService.findByWebhookToken>>;
+server\routes\webhooks\teamworkWebhook.ts:33:    config = await connectorConfigService.findByWebhookToken(orgWebhookToken, 'teamwork');
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:8: * Updated for W3 (pre-test-hardening C2): route now uses :orgWebhookToken param,
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:9: * connector lookup is by token (findByWebhookToken), and deliveryId header is required.
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:36:    findByWebhookToken: vi.fn().mockResolvedValue({
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:40:      webhookToken: 'aaaaaaaa-0000-0000-0000-000000000001',
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:93: * Updated for W3: includes :orgWebhookToken param and x-desk-delivery header.
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:102:    url: `/api/webhooks/teamwork/${VALID_TOKEN}`,
+server\routes\webhooks\__tests__\teamworkWebhook.test.ts:103:    params: { orgWebhookToken: VALID_TOKEN },
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:11: *  - Old un-tokened route (POST /api/webhooks/teamwork with no param) → 404
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:34:const mockFindByWebhookToken = vi.fn();
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:37:    findByWebhookToken: mockFindByWebhookToken,
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:90:  webhookToken: VALID_TOKEN,
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:99:  webhookToken: OTHER_TOKEN,
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:137:    url: `/api/webhooks/teamwork/${token}`,
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:138:    params: { orgWebhookToken: token },
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:191:  test('POST /api/webhooks/teamwork (no :orgWebhookToken) returns 404 AND performs zero side effects', async () => {
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:197:    // All registered paths must contain the :orgWebhookToken parameter.
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:199:      expect(path).toContain(':orgWebhookToken');
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:202:    expect(mockFindByWebhookToken).not.toHaveBeenCalled();
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:220:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:233:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:245:    mockFindByWebhookToken.mockResolvedValue(null); // no match
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:259:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:272:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:290:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:307:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:331:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts:344:    mockFindByWebhookToken.mockResolvedValue(ORG_A_CONFIG);
+server\services\connectorConfigService.ts:143:    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
+server\services\connectorConfigService.ts:146:    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+server\services\connectorConfigService.ts:156:        webhookToken,
+server\services\connectorConfigService.ts:177:    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+server\services\connectorConfigService.ts:188:        webhookToken,
+server\services\connectorConfigService.ts:263:  async findByWebhookToken(
+server\services\connectorConfigService.ts:268:    // cast errors. The unique index requires webhook_token IS NOT NULL, and NULL
+server\services\connectorConfigService.ts:275:      { source: 'teamwork_webhook_token_lookup', skipAudit: true },
+server\services\connectorConfigService.ts:285:              sql`${connectorConfigs.webhookToken} = ${token}::uuid`,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\connectorConfigService.ts | Select-Object -Skip 250 -First 50" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 844ms:
+    return config ?? null;
+  },
+
+  /**
+   * Find an active connector config by its per-connector webhook URL token.
+   * Used by webhook routes to route incoming webhooks to exactly one connector config
+   * without scanning all active configs.
+   *
+   * IMPORTANT: WHERE clause intentionally matches only `status = 'active'` ƒ?" do NOT add
+   * disconnectedAt IS NULL or any other predicate; `status = 'active'` is the sole active guard.
+   * Returns null when the token is unknown or belongs to a non-active / non-teamwork config.
+   */
+  async findByWebhookToken(
+    token: string,
+    connectorType: 'teamwork',
+  ): Promise<typeof connectorConfigs.$inferSelect | null> {
+    // Guard: reject non-UUID-shaped tokens before the DB call to avoid Postgres
+    // cast errors. The unique index requires webhook_token IS NOT NULL, and NULL
+    // rows never match the equality predicate ƒ?" so this guard is purely for
+    // invalid-format protection.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(token)) return null;
+
+    return await withAdminConnection(
+      { source: 'teamwork_webhook_token_lookup', skipAudit: true },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await adminDb
+          .select()
+          .from(connectorConfigs)
+          .where(
+            and(
+              eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+              eq(connectorConfigs.status, 'active'),
+              sql`${connectorConfigs.webhookToken} = ${token}::uuid`,
+            ),
+          )
+          .limit(1);
+        return row ?? null;
+      },
+    );
+  },
+
+  /** Find all active connector configs for a given type (across all orgs). Used by webhook routes that match by signature. */
+  async findAllActiveByType(connectorType: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')));
+  },
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /i /c:\"scheduled_task_runs\" migrations\\*.sql | findstr /i \"POLICY ENABLE FORCE app.organisation_id\"" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 822ms:
+migrations\0013_phase_two_scheduled_workforce.sql:46:CREATE TABLE IF NOT EXISTS "scheduled_task_runs" (
+migrations\0013_phase_two_scheduled_workforce.sql:61:CREATE INDEX IF NOT EXISTS "scheduled_task_runs_st_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:62:  ON "scheduled_task_runs" ("scheduled_task_id");
+migrations\0013_phase_two_scheduled_workforce.sql:63:CREATE INDEX IF NOT EXISTS "scheduled_task_runs_status_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:64:  ON "scheduled_task_runs" ("status");
+migrations\0013_phase_two_scheduled_workforce.sql:65:CREATE INDEX IF NOT EXISTS "scheduled_task_runs_scheduled_for_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:66:  ON "scheduled_task_runs" ("scheduled_for");
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /i /c:\"scheduled_tasks\" migrations\\*.sql | findstr /i \"POLICY ENABLE FORCE\"" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 806ms:
+migrations\0013_phase_two_scheduled_workforce.sql:8:CREATE TABLE IF NOT EXISTS "scheduled_tasks" (
+migrations\0013_phase_two_scheduled_workforce.sql:35:CREATE INDEX IF NOT EXISTS "scheduled_tasks_org_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:36:  ON "scheduled_tasks" ("organisation_id");
+migrations\0013_phase_two_scheduled_workforce.sql:37:CREATE INDEX IF NOT EXISTS "scheduled_tasks_subaccount_active_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:38:  ON "scheduled_tasks" ("subaccount_id", "is_active");
+migrations\0013_phase_two_scheduled_workforce.sql:39:CREATE INDEX IF NOT EXISTS "scheduled_tasks_next_run_idx"
+migrations\0013_phase_two_scheduled_workforce.sql:40:  ON "scheduled_tasks" ("next_run_at", "is_active");
+migrations\0013_phase_two_scheduled_workforce.sql:48:  "scheduled_task_id" uuid NOT NULL REFERENCES "scheduled_tasks"("id") ON DELETE CASCADE,
+migrations\0245_all_tenant_tables_rls.sql:704:ALTER TABLE scheduled_tasks ENABLE ROW LEVEL SECURITY;
+migrations\0245_all_tenant_tables_rls.sql:705:ALTER TABLE scheduled_tasks FORCE ROW LEVEL SECURITY;
+migrations\0245_all_tenant_tables_rls.sql:707:-- rollback: DROP POLICY scheduled_tasks_org_isolation ON scheduled_tasks; ALTER TABLE scheduled_tasks NO FORCE ROW LEVEL SECURITY; ALTER TABLE scheduled_tasks DISABLE ROW LEVEL SECURITY;
+migrations\0245_all_tenant_tables_rls.sql:708:DROP POLICY IF EXISTS scheduled_tasks_org_isolation ON scheduled_tasks;
+migrations\0245_all_tenant_tables_rls.sql:709:CREATE POLICY scheduled_tasks_org_isolation ON scheduled_tasks
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /c:\"withOrgTx\" server\\*.ts | findstr /v instrumentation.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 800ms:
+server\db\withPrincipalContext.ts:8: * transaction opened by `withOrgTx`. The org variable
+server\db\withPrincipalContext.ts:9: * (`app.organisation_id`) is already set by the `withOrgTx` caller;
+server\db\withPrincipalContext.ts:18: * Must be called inside an active `withOrgTx(...)` block. Throws if
+server\db\withPrincipalContext.ts:39:      'withPrincipalContext: must be called inside an active withOrgTx() block',
+server\index.ts:315:// so enqueues inside withOrgTx flush after tx commits, not before).
+server\jobs\agentObservationsPruneJob.ts:22:import { withOrgTx } from '../instrumentation.js';
+server\jobs\agentObservationsPruneJob.ts:93:          return withOrgTx(
+server\jobs\benchExecuteJob.ts:14:import { withOrgTx } from '../instrumentation.js';
+server\jobs\benchExecuteJob.ts:204:    await withOrgTx(
+server\jobs\captureBaselineJob.ts:4:import { withOrgTx } from '../instrumentation.js';
+server\jobs\captureBaselineJob.ts:22:    await withOrgTx(
+server\jobs\correctionPatternDetectorJob.ts:8:import { withOrgTx } from '../instrumentation.js';
+server\jobs\correctionPatternDetectorJob.ts:194:    await withOrgTx(
+server\jobs\documentChunkEmbedJob.ts:17:import { withOrgTx } from '../instrumentation.js';
+server\jobs\documentChunkEmbedJob.ts:94:        await withOrgTx(
+server\jobs\documentReembedJob.ts:17:import { withOrgTx } from '../instrumentation.js';
+server\jobs\documentReembedJob.ts:204:    await withOrgTx(
+server\jobs\evaluateAllPendingBaselines.ts:5:import { withOrgTx } from '../instrumentation.js';
+server\jobs\evaluateAllPendingBaselines.ts:58:        await withOrgTx(
+server\jobs\fastPathDecisionsPruneJob.ts:9: *   - Per-org DELETE runs in a fresh db.transaction + withOrgTx so that
+server\jobs\fastPathDecisionsPruneJob.ts:22:import { withOrgTx } from '../instrumentation.js';
+server\jobs\fastPathDecisionsPruneJob.ts:89:        return withOrgTx(
+server\jobs\fastPathRecalibrateJob.ts:11: *   - Per-org SELECT runs in a fresh db.transaction + withOrgTx so that
+server\jobs\fastPathRecalibrateJob.ts:24:import { withOrgTx } from '../instrumentation.js';
+server\jobs\fastPathRecalibrateJob.ts:92:        return withOrgTx(
+server\jobs\ghlAutoStartOnboardingJob.ts:60:  // TODO(post-T3, spec ??10): wrap in withOrgTx ??? explicitly deferred per spec ??0.4 + ??10. Depends on the GHL unauthenticated path landing first.
+server\jobs\ieeSessionOrphanCleanup.ts:19:import { withOrgTx } from '../instrumentation.js';
+server\jobs\ieeSessionOrphanCleanup.ts:97:        return withOrgTx(
+server\jobs\ieeSessionsCompactJob.ts:14:import { withOrgTx } from '../instrumentation.js';
+server\jobs\ieeSessionsCompactJob.ts:80:        return withOrgTx(
+server\jobs\runOptimiserScanJob.ts:5: * single subaccount. Org context (ALS + db.transaction + withOrgTx) is provided
+server\jobs\scorecardJudgeJob.ts:7:import { withOrgTx } from '../instrumentation.js';
+server\jobs\scorecardJudgeJob.ts:40:    await withOrgTx(
+server\jobs\workingTimeRollupCompactJob.ts:19:import { withOrgTx } from '../instrumentation.js';
+server\jobs\workingTimeRollupCompactJob.ts:78:        return withOrgTx(
+server\jobs\__tests__\workingTimeRollupCompactJob.test.ts:138:  withOrgTx: vi.fn(async (_ctx: unknown, fn: () => Promise<unknown>) => fn()),
+server\lib\createWorker.ts:20:import { withOrgTx } from '../instrumentation.js';
+server\lib\createWorker.ts:128:          await withOrgTx(
+server\lib\orgScopedDb.ts:9: *   2. A service called outside any `withOrgTx(...)` block fails loudly with
+server\lib\orgScopedDb.ts:31: * `withOrgTx(...)` block.
+server\lib\orgScoping.ts:14: * This is the canonical replacement for the `withOrgTx({ tx: db })` anti-pattern
+server\lib\orgScoping.ts:16: * "2026-05-05 Gotcha ??? withOrgTx({ tx: db }) in unauthenticated callbacks".
+server\lib\rlsBoundaryGuard.ts:298:    // Org-scoped handles already operate within `withOrgTx`'s
+server\lib\webhookReplayNonceStore.ts:21:import { withOrgTx } from '../instrumentation.js';
+server\lib\webhookReplayNonceStore.ts:40:    return withOrgTx(
+server\lib\__tests__\webhookReplayNonceStore.test.ts:36:// withOrgTx just calls the fn ??? no ALS side-effects needed in unit tests.
+server\lib\__tests__\webhookReplayNonceStore.test.ts:38:  withOrgTx: vi.fn().mockImplementation((_ctx: unknown, fn: () => Promise<unknown>) => fn()),
+server\middleware\auth.ts:8:import { withOrgTx } from '../instrumentation.js';
+server\middleware\auth.ts:154:      await withOrgTx(
+server\routes\githubWebhook.ts:24:import { withOrgTx } from '../instrumentation.js';
+server\routes\githubWebhook.ts:171:    // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
+server\routes\githubWebhook.ts:176:      await withOrgTx(
+server\routes\githubWebhook.ts:229:  // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
+server\routes\githubWebhook.ts:234:    await withOrgTx(
+server\routes\oauthIntegrations.ts:23:import { withOrgTx } from '../instrumentation.js';
+server\routes\oauthIntegrations.ts:436:        await withOrgTx(
+server\routes\workspaceInboundWebhook.ts:26:import { withOrgTx } from '../instrumentation.js';
+server\routes\workspaceInboundWebhook.ts:205:        return withOrgTx(
+server\routes\__tests__\sessionMessage.test.ts:117:  const { withOrgTx } = await import('../../instrumentation.js');
+server\routes\__tests__\sessionMessage.test.ts:176:      const result = await withOrgTx(
+server\routes\__tests__\sessionMessage.test.ts:224:      const result = await withOrgTx(
+server\services\agentExecutionService.ts:2387:// MUST be called inside an active `withOrgTx` block ??? it uses the
+server\services\agentExecutionService.ts:2426:  // MUST run inside an active withOrgTx block ??? we use getOrgScopedDb
+server\services\agentRunMessageService.ts:13: * `appendMessage()` MUST be called inside an active `withOrgTx(...)`
+server\services\agentRunMessageService.ts:29: * The lock is released automatically when the surrounding `withOrgTx`
+server\services\agentRunMessageService.ts:96:  // running worker. The lock is released when withOrgTx commits.
+server\services\agentScheduleService.ts:66:    // `createWorker`, which opens a `db.transaction` + `withOrgTx` for the
+server\services\agentScheduleService.ts:169:        // Look up agentId from the subaccountAgentId ??? inside withOrgTx.
+server\services\agentScheduleService.ts:207:    // createWorker opens db.transaction + withOrgTx, satisfying the ALS
+server\services\canonicalDataService.ts:27:// every caller is verified to run inside an active `withOrgTx` block.
+server\services\captureBaselineService.ts:28:   * call in db.transaction + set_config + withOrgTx so that getOrgScopedDb() works and
+server\services\captureBaselineService.ts:229:   * withOrgTx), so getOrgScopedDb() resolves correctly.
+server\services\connectionTokenService.ts:47: *   - undefined: no ALS context active (suspicious ??? outside any withOrgTx)
+server\services\connectorPollingService.ts:4:import { withOrgTx } from '../instrumentation.js';
+server\services\connectorPollingService.ts:420:  await withOrgTx(
+server\services\connectorPollingService.ts:472:  await withOrgTx(
+server\services\connectorPollingService.ts:532:  await withOrgTx(
+server\services\connectorPollingService.ts:578:      await withOrgTx(
+server\services\connectorPollingService.ts:709:  await withOrgTx(
+server\services\connectorPollingService.ts:753:    await withOrgTx(
+server\services\connectorPollingService.ts:995:  await withOrgTx(
+server\services\connectorPollingService.ts:1018:  await withOrgTx(
+server\services\correctionCaptureService.ts:7:import { withOrgTx } from '../instrumentation.js';
+server\services\correctionCaptureService.ts:38:  // Phase 1: UPSERT inside withOrgTx so RLS GUC is set for the insert.
+server\services\correctionCaptureService.ts:42:    memoryBlockId = await withOrgTx(
+server\services\correctionCaptureService.ts:90:      await withOrgTx(
+server\services\crmQueryPlanner\crmQueryPlannerService.ts:183:  // variables RLS policies consume. If no outer withOrgTx() is active (test
+server\services\crmQueryPlanner\__tests__\integration.test.ts:25:  let withOrgTx: Awaited<typeof import('../../../instrumentation.js')>['withOrgTx'];
+server\services\crmQueryPlanner\__tests__\integration.test.ts:38:    ({ withOrgTx } = await import('../../../instrumentation.js'));
+server\services\crmQueryPlanner\__tests__\integration.test.ts:158:      await withOrgTx(
+server\services\crmQueryPlanner\__tests__\integration.test.ts:183:      await withOrgTx(
+server\services\documentEmbeddingService.ts:12:// Invariant ??1.5 #9: embedding provider calls MUST run outside withOrgTx.
+server\services\documentEmbeddingService.ts:101: * MUST be called outside any withOrgTx transaction (spec ??1.5 #9).
+server\services\ieeSessionService.ts:5:import { withOrgTx } from '../instrumentation.js';
+server\services\ieeSessionService.ts:129:    await withOrgTx(
+server\services\ieeSessionService.ts:172: * Uses `getOrgScopedDb` (not withOrgTx) because this method is intended to
+server\services\ieeSessionService.ts:211: * Uses `getOrgScopedDb` ??? callers must have an active `withOrgTx` context.
+server\services\onboardingStateService.ts:51:  // outside an active withOrgTx block. Per the file header contract, onboarding
+server\services\optimiser\runOptimiserScan.ts:14:// call inside db.transaction + withOrgTx to set up the ALS context that
+server\services\optimiser\__tests__\runOptimiserScanPure.test.ts:63:  withOrgTx: vi.fn(),
+server\services\optimiser\__tests__\verificationMatrix.test.ts:44:  withOrgTx: vi.fn(),
+server\services\referenceDocumentService.ts:365:// Called from within the job handler's withOrgTx context.
+server\services\runtimeCheckService.ts:18:import { withOrgTx } from '../instrumentation.js';
+server\services\runtimeCheckService.ts:289:  // Wraps in its own withOrgTx so the org GUC is set for the FORCE-RLS-checked
+server\services\runtimeCheckService.ts:302:          await withOrgTx(
+server\services\scheduledTaskService.ts:12:import { withOrgTx } from '../instrumentation.js';
+server\services\scheduledTaskService.ts:652:      // Mirrors the auth middleware pattern: db.transaction + set_config + withOrgTx.
+server\services\scheduledTaskService.ts:655:        return withOrgTx(
+server\services\scorecardJudgeRunner.ts:19: * Precondition: caller MUST be inside an active withOrgTx block (HTTP handler or
+server\services\scorecardJudgeRunner.ts:94: * Precondition: caller MUST be inside an active withOrgTx block ??? see scheduleForRun.
+server\services\scorecardService.ts:4:// All methods MUST be called inside an active withOrgTx block.
+server\services\supportInboxService.ts:7: * active withOrgTx block.
+server\services\supportTicketService.ts:7: * active withOrgTx block (org-scoped transaction with RLS set_config applied).
+server\services\taskService.ts:78: * `getOrgScopedDb()` inside an active `withOrgTx(...)` block.
+server\services\taskService.ts:84: * withOrgTx wrappers.
+server\services\taskService.ts:101:    // DEC-4 / spec ??3.3 ??? remove once sister branch lands its withOrgTx wrappers.
+server\services\taskService.ts:109:      note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
+server\services\taskService.ts:221:  // fall back to db ??? those callers are not yet inside withOrgTx; tracked as a future migration.
+server\services\taskService.ts:239:  // fall back to db ??? those callers are not yet inside withOrgTx; tracked as a future migration.
+server\services\toolCallsLogProjectionService.ts:25: * `toolCallsLog` array. Must be called inside an active `withOrgTx`
+server\services\webhookAdapterService.ts:18:import { withOrgTx } from '../instrumentation.js';
+server\services\webhookAdapterService.ts:568:    await withOrgTx(
+server\services\webhookAdapterService.ts:703:    await withOrgTx(
+server\services\webhookAdapterService.ts:739:    await withOrgTx(
+server\services\webhookAdapterService.ts:775:    await withOrgTx(
+server\services\webhookAdapterService.ts:862:    await withOrgTx(
+server\services\workflowGateStallNotifyService.ts:140:    // withOrgTx context (e.g. a maintenance script using withAdminConnection).
+server\services\workflowRunService.ts:675:   * set by the auth middleware's `withOrgTx` block that wraps the entire
+server\services\workspace\workspaceEmailPipeline.ts:3:import { withOrgTx } from '../../instrumentation.js';
+server\services\workspace\workspaceEmailPipeline.ts:74:    const [inserted] = await withOrgTx(
+server\services\workspace\workspaceEmailPipeline.ts:130:      const [inserted] = await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:10: * wraps each onboard() call in withOrgTx() so getOrgScopedDb() receives the mock tx.
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:31:let withOrgTx: any;
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:40:  ({ withOrgTx } = await import('../../../instrumentation.js'));
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:202:      const result = await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:240:      const result = await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:272:      const result = await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:306:    await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:332:      const result = await withOrgTx(
+server\services\workspace\__tests__\workspaceOnboardingService.test.ts:353:    const result = await withOrgTx(
+server\services\workspaceHealth\workspaceHealthService.ts:76:  // The spec calls for withOrgTx here, but the audit runs as an admin
+server\services\__tests__\baselineInvariants.test.ts:197:  // sends res.json which fires res.finish, resolving withOrgTx, committing
+server\services\__tests__\briefVisibilityServicePure.test.ts:6: * use the org-scoped tx injected by withOrgTx rather than a module-top db handle.
+server\services\__tests__\briefVisibilityServicePure.test.ts:8: * Strategy: inject a fake tx via withOrgTx (the same ALS mechanism used in
+server\services\__tests__\briefVisibilityServicePure.test.ts:28:const { withOrgTx } = await import('../../instrumentation.js');
+server\services\__tests__\briefVisibilityServicePure.test.ts:100:// withOrgTx helper ??? wraps service call in a fake ALS context
+server\services\__tests__\briefVisibilityServicePure.test.ts:104:  return withOrgTx(
+server\services\__tests__\briefVisibilityServicePure.test.ts:149:test('resolveBriefVisibility throws missing_org_context when called without withOrgTx', async () => {
+server\services\__tests__\briefVisibilityServicePure.test.ts:194:test('resolveConversationVisibility throws missing_org_context when called without withOrgTx', async () => {
+server\services\__tests__\llmRouterLaelIntegration.test.ts:68:let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'];
+server\services\__tests__\llmRouterLaelIntegration.test.ts:86:  ({ withOrgTx } = await import('../../instrumentation.js'));
+server\services\__tests__\llmRouterLaelIntegration.test.ts:307:    // withOrgTx block. In production this is set by HTTP middleware /
+server\services\__tests__\llmRouterLaelIntegration.test.ts:311:      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-1' }, async () => {
+server\services\__tests__\llmRouterLaelIntegration.test.ts:478:        await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-2' }, async () => {
+server\services\__tests__\llmRouterLaelIntegration.test.ts:594:      await withOrgTx({ tx, organisationId: orgId, source: 'lael-int-test:test-3' }, async () => {
+server\services\__tests__\onboardingStateServicePure.test.ts:6: * injected by withOrgTx rather than a module-top db handle.
+server\services\__tests__\onboardingStateServicePure.test.ts:8: * Strategy: inject a fake tx via withOrgTx (the same ALS mechanism used in
+server\services\__tests__\onboardingStateServicePure.test.ts:28:const { withOrgTx } = await import('../../instrumentation.js');
+server\services\__tests__\onboardingStateServicePure.test.ts:89:// withOrgTx helper
+server\services\__tests__\onboardingStateServicePure.test.ts:93:  return withOrgTx(
+server\services\__tests__\onboardingStateServicePure.test.ts:205:test('resolves without throwing when called outside withOrgTx (bookkeeping must not block)', async () => {
+server\services\__tests__\onboardingStateServicePure.test.ts:218:  expect(!threw, `expected upsertSubaccountOnboardingState to resolve without throwing when called outside withOrgTx, but it threw: ${
+server\services\__tests__\rls.context-propagation.test.ts:7: *   Layer A (ALS + set_config): withOrgTx opens a transaction, issues
+server\services\__tests__\rls.context-propagation.test.ts:41:  let withOrgTx: Awaited<typeof import('../../instrumentation.js')>['withOrgTx'];
+server\services\__tests__\rls.context-propagation.test.ts:55:    ({ withOrgTx } = await import('../../instrumentation.js'));
+server\services\__tests__\rls.context-propagation.test.ts:105:    await withOrgTx(
+server\services\__tests__\spendSkillHandlers.test.ts:27:// these unit tests don't run inside a `withOrgTx(...)` block.
+server\services\__tests__\taskService.createTask.regression.test.ts:169:  it('createTask invoked inside withOrgTx writes successfully and emits the expected task_created row', async () => {
+server\services\__tests__\taskService.createTask.regression.test.ts:191:  it('createTask invoked inside withOrgTx with a different organisationId than the GUC fails ??? cross-tenant write rejected', async () => {
+server\services\__tests__\workflowEngineApprovalResumeDispatch.integration.test.ts:140:    // guard-ignore-next-line: org-scoped-writes reason="integration-test cleanup ??? taskIdToClean was inserted by this test's own setup, and the bare-id delete is intentional because the test runs as the admin role outside any withOrgTx context"
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\middleware\\auth.ts | Select-Object -Skip 120 -First 55" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 869ms:
+        metadata: {
+          targetOrganisationId: headerOrgId,
+          originalOrganisationId: payload.organisationId,
+          method: req.method,
+          path: req.path,
+        },
+        ipAddress: req.ip,
+      });
+      void recordSecurityEvent({
+        event:          auditEvent.auth.crossOrgAccess,
+        organisationId: payload.organisationId,
+        actorUserId:    payload.id,
+        actorRole:      payload.role,
+        targetType:     'organisation',
+        targetId:       headerOrgId,
+        ip:             req.ip ?? null,
+        userAgent:      req.get('user-agent') ?? null,
+        meta:           { route: req.path, method: req.method, targetOrganisationId: headerOrgId },
+      });
+    }
+  } else {
+    req.orgId = payload.organisationId;
+  }
+
+  const orgId = req.orgId!;
+
+  try {
+    await db.transaction(async (tx) => {
+      // Bind app.organisation_id to the tx. `true` (is_local) scopes the
+      // setting to this transaction so it's cleared on commit/rollback and
+      // cannot leak across pool connections.
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+
+      await withOrgTx(
+        {
+          tx,
+          organisationId: orgId,
+          subaccountId: (req.params?.subaccountId as string | undefined) ?? null,
+          userId: payload.id,
+          source: `http:${req.method} ${req.path}`,
+        },
+        () =>
+          new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const settle = (err?: unknown) => {
+              if (settled) return;
+              settled = true;
+              if (err) reject(err);
+              else resolve();
+            };
+
+            // Most success paths complete via res.json(...) inside
+            // asyncHandler, so we resolve on `finish`. `close` handles
+            // the client-disconnect case. `next(err)` handles errors
+            // that bypass asyncHandler (middleware-raised errors).
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\middleware\\auth.ts | Select-Object -Skip 175 -First 45" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 715ms:
+            res.once('finish', () => settle());
+            res.once('close', () => settle());
+
+            next();
+          }),
+      );
+    });
+  } catch (err) {
+    // Errors here come from set_config, the transaction itself, or from
+    // next(err) bubbling up via the bridge above.
+    next(err);
+  }
+};
+
+// ƒ"?ƒ"?ƒ"? requireSystemAdmin ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+/** Allows only users with role = 'system_admin'. */
+export const requireSystemAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (req.user.role !== 'system_admin') {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  next();
+};
+
+// ƒ"?ƒ"?ƒ"? Internal helpers ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+async function loadOrgPermissions(userId: string, organisationId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ permissionKey: permissionSetItems.permissionKey })
+    .from(orgUserRoles)
+    .innerJoin(
+      permissionSetItems,
+      eq(permissionSetItems.permissionSetId, orgUserRoles.permissionSetId)
+    )
+    .where(
+      and(
+        eq(orgUserRoles.userId, userId),
+        eq(orgUserRoles.organisationId, organisationId)
+      )
+    );
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\db\\index.ts -TotalCount 160; Get-Content server\\lib\\rlsBoundaryGuard.ts | Select-Object -Skip 260 -First 70" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 710ms:
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import * as schema from './schema/index.js';
+
+const connectionString = process.env.DATABASE_URL!;
+
+export const client = postgres(connectionString, {
+  max: 10,
+  idle_timeout: 30,
+  connect_timeout: 10,
+});
+
+export const db = drizzle(client, { schema });
+
+export type DB = typeof db;
+
+/**
+ * The transaction handle type that drizzle passes into `db.transaction()`
+ * callbacks. Used by `server/lib/orgScopedDb.ts` to type the tx slot on the
+ * AsyncLocalStorage context. Kept here (not inline in orgScopedDb.ts) to
+ * avoid an import cycle with `server/instrumentation.ts`.
+ */
+export type OrgScopedTx = Parameters<Parameters<DB['transaction']>[0]>[0];
+          checkWrite(tableName, options);
+        } else {
+          // Defence-in-depth (Y5): if extractTableName returns null on a write,
+          // we cannot run the boundary check. Production short-circuits above
+          // (wrapWithBoundary returns the handle unchanged), so this branch
+          // only runs in dev/test ƒ?" failing closed surfaces the gap loudly
+          // before it ships, instead of silently letting the write through.
+          throw new RlsBoundaryUnresolvableTable(
+            prop as 'insert' | 'update' | 'delete',
+            options.source,
+          );
+        }
+        // Forward to the original method with its original receiver. Using
+        // .apply preserves the chained-builder return value.
+        return (original as (...args: unknown[]) => unknown).apply(target, [table, ...rest]);
+      };
+    },
+  }) as T;
+}
+
+// ƒ"?ƒ"? Org-scoped wrapping ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+/**
+ * Wrap an org-scoped tx handle in the boundary Proxy. Use this if you have a
+ * raw `OrgScopedTx` from `getOrgScopedDb` and want the dev-time guard. Most
+ * service code does not need this directly ƒ?" the recommendation is to call
+ * `getOrgScopedDb('<service>')` and pass the returned handle to this helper
+ * at function entry.
+ *
+ * No-op in production.
+ */
+export function withOrgScopedBoundary(
+  handle: OrgScopedTx,
+  source: string,
+): OrgScopedTx {
+  return wrapWithBoundary(handle, {
+    source,
+    // Org-scoped handles already operate within `withOrgTx`'s
+    // `app.organisation_id` binding; protected-table writes are expected.
+    allowRlsBypass: false,
+    mode: 'org-scoped',
+  });
+}
+
+// ƒ"?ƒ"? Admin wrapping ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+export interface AdminConnectionGuardedOptions {
+  /** Short machine-readable tag identifying the caller. */
+  source: string;
+  /** Optional free-form reason logged to audit_events. */
+  reason?: string;
+  /** Skip the audit log write ƒ?" forwarded to `withAdminConnection`. */
+  skipAudit?: boolean;
+  /**
+   * Affirmative declaration that this admin transaction will write across
+   * organisations (migration backfill, retention pruner, audit-replay tooling).
+   * Default: `false` ƒ?" writes to RLS-protected tables throw
+   * `RlsBoundaryAdminWriteToProtectedTable`.
+   *
+   * Every call site that passes `true` MUST carry an inline `// allowRlsBypass: <justification>`
+   * comment within +/-1 line. CI enforces the comment via
+   * `scripts/verify-rls-protected-tables.sh`.
+   *
+   * The flag is the intent declaration ONLY. The caller is still responsible
+   * for the actual `await tx.execute(sql\`SET LOCAL ROLE admin_role\`)` inside
+   * the callback ƒ?" see `withAdminConnection`'s contract.
+   */
+  allowRlsBypass: boolean;
+}
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content migrations\\0245_all_tenant_tables_rls.sql | Select-Object -Skip 700 -First 18" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 695ms:
+  );
+
+-- ƒ"?ƒ"? scheduled_tasks ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+ALTER TABLE scheduled_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scheduled_tasks FORCE ROW LEVEL SECURITY;
+-- prior RLS state: disabled (no policy)
+-- rollback: DROP POLICY scheduled_tasks_org_isolation ON scheduled_tasks; ALTER TABLE scheduled_tasks NO FORCE ROW LEVEL SECURITY; ALTER TABLE scheduled_tasks DISABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scheduled_tasks_org_isolation ON scheduled_tasks;
+CREATE POLICY scheduled_tasks_org_isolation ON scheduled_tasks
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\scheduledTaskService.ts | Select-Object -Skip 680 -First 150" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 713ms:
+      await db.update(scheduledTaskRuns).set({
+        taskId: task.id,
+        status: 'running',
+        startedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Find the subaccount agent link
+      const { subaccountAgents } = await import('../db/schema/index.js');
+      const [saLink] = await db
+        .select()
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, st.subaccountId!),
+            eq(subaccountAgents.agentId, st.assignedAgentId),
+            eq(subaccountAgents.isActive, true)
+          )
+        );
+
+      if (!saLink) {
+        await this.handleRunCompletion(run.id, 'failed', 'Agent not linked to subaccount or inactive');
+        return;
+      }
+
+      // Execute the agent run
+      const result = await agentExecutionService.executeRun({
+        agentId: st.assignedAgentId,
+        subaccountId: st.subaccountId,
+        subaccountAgentId: saLink.id,
+        organisationId: st.organisationId,
+        executionScope: 'subaccount',
+        runType: 'scheduled',
+        runSource: 'scheduler',
+        executionMode: 'api',
+        taskId: task.id,
+        // Dedupe concurrent triggers for the same occurrence (e.g. manual
+        // run-now while the scheduler also fires). The key is stable per
+        // (scheduledTask, occurrence) so a duplicate fireOccurrence is a no-op
+        // at the agent run layer.
+        idempotencyKey: `scheduled_task:${st.id}:${occurrence}`,
+        triggerContext: {
+          source: 'scheduled_task',
+          scheduledTaskId: st.id,
+          scheduledTaskRunId: run.id,
+          occurrence,
+        },
+      });
+
+      await db.update(scheduledTaskRuns).set({
+        agentRunId: result.runId,
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      if (result.status === 'completed') {
+        await this.handleRunCompletion(run.id, 'completed');
+      } else {
+        await this.handleRunCompletion(run.id, 'failed', result.summary ?? `Run ended with status: ${result.status}`);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await this.handleRunCompletion(run.id, 'failed', errMsg);
+    }
+
+    // Compute and store next occurrence
+    const nextRunAt = await this.computeNextOccurrence(st.rrule, st.timezone, st.scheduleTime);
+    await db.update(scheduledTasks).set({
+      lastRunAt: new Date(),
+      totalRuns: occurrence,
+      nextRunAt,
+      updatedAt: new Date(),
+    }).where(eq(scheduledTasks.id, st.id));
+  },
+
+  // ƒ"?ƒ"?ƒ"? Run Completion + Retry Logic ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+  async handleRunCompletion(
+    scheduledTaskRunId: string,
+    status: 'completed' | 'failed',
+    errorMessage?: string
+  ): Promise<void> {
+    const [run] = await db
+      .select()
+      .from(scheduledTaskRuns)
+      .where(eq(scheduledTaskRuns.id, scheduledTaskRunId));
+
+    if (!run) return;
+
+    if (status === 'completed') {
+      await db.update(scheduledTaskRuns).set({
+        status: 'completed',
+        completedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Reset consecutive failures
+      await db.update(scheduledTasks).set({
+        consecutiveFailures: 0,
+        updatedAt: new Date(),
+      }).where(eq(scheduledTasks.id, run.scheduledTaskId));
+
+      return;
+    }
+
+    // Failed ƒ?" check retry policy
+    const [st] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(eq(scheduledTasks.id, run.scheduledTaskId));
+
+    if (!st) return;
+
+    const policy = (st.retryPolicy as typeof DEFAULT_RETRY_POLICY) ?? DEFAULT_RETRY_POLICY;
+    const currentAttempt = run.attempt;
+
+    if (currentAttempt <= policy.maxRetries) {
+      // Retry: update status and will be picked up by retry handler
+      await db.update(scheduledTaskRuns).set({
+        status: 'retrying',
+        attempt: currentAttempt + 1,
+        errorMessage,
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Schedule retry with exponential backoff. `currentAttempt` is the
+      // attempt that just failed (>= 1), so `Math.pow(2, currentAttempt - 1)`
+      // yields 1, 2, 4, ƒ?İ on attempts 1, 2, 3 ƒ?" the first retry waits
+      // exactly `backoffMinutes`, the second waits 2x, etc.
+      const backoffMs = policy.backoffMinutes * 60 * 1000 * Math.pow(2, currentAttempt - 1);
+
+      // The in-process timer is the happy path. If the process restarts
+      // before the timer fires, reconcileRetryingRuns() (called from
+      // server bootstrap) will sweep `retrying` runs whose backoff has
+      // elapsed and re-queue them. Without that sweep, a restart between
+      // mark-retrying and timer-fire would strand the run permanently.
+      setTimeout(() => {
+        this.retryOccurrence(run.id).catch(err =>
+          console.error(`[ScheduledTask] Retry failed:`, err)
+        );
+      }, backoffMs);
+    } else {
+      // All retries exhausted
+      await db.update(scheduledTaskRuns).set({
+        status: 'failed',
+        errorMessage,
+        completedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Increment consecutive failures
+      const newConsecutive = st.consecutiveFailures + 1;
+      const updates: Record<string, unknown> = {
+        totalFailures: st.totalFailures + 1,
+        consecutiveFailures: newConsecutive,
+        updatedAt: new Date(),
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /s /n /c:\"enqueueRunNow\" server\\*.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 859ms:
+server\services\scheduledTaskService.ts:97:          this.enqueueRunNow(existing.id, organisationId).catch((err) => {
+server\services\scheduledTaskService.ts:146:      this.enqueueRunNow(created.id, organisationId).catch((err) => {
+server\services\scheduledTaskService.ts:244:   * the catch around `enqueueRunNow` emits to the server log).
+server\services\scheduledTaskService.ts:246:  async enqueueRunNow(scheduledTaskId: string, organisationId: string): Promise<void> {
+server\services\scheduledTaskService.ts:650:      // from the unauthenticated `setImmediate` path inside `enqueueRunNow`,
+server\tools\config\configSkillHandlers.ts:333:        await scheduledTaskService.enqueueRunNow(existing.id, context.organisationId);
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\scheduledTaskService.ts | Select-Object -Skip 70 -First 85" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 797ms:
+      retryPolicy?: { maxRetries: number; backoffMinutes: number; pauseAfterConsecutiveFailures: number };
+      tokenBudgetPerRun?: number;
+      endsAt?: Date;
+      endsAfterRuns?: number;
+      // Phase B2 ƒ?" onboarding-playbooks spec ¶õ5.4.1, ¶õ5.4.2.
+      taskSlug?: string;
+      createdByWorkflowSlug?: string;
+      firstRunAt?: Date;
+      firstRunAtTz?: string;
+      /**
+       * When true, fire an immediate run in addition to the recurring cron.
+       * Idempotent ƒ?" resubmitting the same (task, occurrence) is a no-op at
+       * the agent run layer via the existing idempotencyKey invariant.
+       */
+      runNow?: boolean;
+    },
+    userId?: string
+  ) {
+    // Uniqueness invariant (spec ¶õ5.4.1): if an active task already exists
+    // for (subaccountId, taskSlug) return it rather than creating a duplicate.
+    // Every call path ƒ?" UI form, Configuration Assistant chat, playbook
+    // action_call, direct API ƒ?" gets dedup for free.
+    if (data.taskSlug) {
+      const existing = await this.findActiveBySlug(subaccountId, data.taskSlug);
+      if (existing) {
+        if (data.runNow) {
+          this.enqueueRunNow(existing.id, organisationId).catch((err) => {
+            console.error('[ScheduledTask] runNow on existing slug failed:', err);
+          });
+        }
+        return existing;
+      }
+    }
+
+    // Validate agent exists and is linked to subaccount
+    const nextRunAt = await this.computeNextOccurrence(data.rrule, data.timezone ?? 'UTC', data.scheduleTime);
+
+    const [created] = await db
+      .insert(scheduledTasks)
+      .values({
+        organisationId,
+        subaccountId,
+        title: data.title,
+        description: data.description ?? null,
+        brief: data.brief ?? null,
+        priority: (data.priority ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent',
+        assignedAgentId: data.assignedAgentId,
+        createdByUserId: userId ?? null,
+        rrule: data.rrule,
+        timezone: data.timezone ?? 'UTC',
+        scheduleTime: data.scheduleTime,
+        taskSlug: data.taskSlug ?? null,
+        createdByWorkflowSlug: data.createdByWorkflowSlug ?? null,
+        firstRunAt: data.firstRunAt ?? null,
+        firstRunAtTz: data.firstRunAtTz ?? null,
+        retryPolicy: data.retryPolicy ?? DEFAULT_RETRY_POLICY,
+        tokenBudgetPerRun: data.tokenBudgetPerRun ?? 30000,
+        nextRunAt,
+        endsAt: data.endsAt ?? null,
+        endsAfterRuns: data.endsAfterRuns ?? null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'scheduled_task',
+      entityId: created.id,
+      organisationId,
+      snapshot: created as unknown as Record<string, unknown>,
+      changedBy: userId ?? null,
+      changeSource: 'api',
+    });
+
+    if (data.runNow) {
+      this.enqueueRunNow(created.id, organisationId).catch((err) => {
+        console.error('[ScheduledTask] runNow enqueue failed:', err);
+      });
+    }
+
+    return created;
+  },
+
+  // ƒ"?ƒ"?ƒ"? Slug-based lookups (Phase B2) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+  ✓ Inspect git status and diffs
+  ✓ Review changed code for bugs
+  → Produce prioritized findings JSON
+codex
+The scheduled task change does not actually make the unauthenticated immediate-run path org-scoped because the transaction is introduced only around task creation, after earlier RLS-protected accesses and before later ones.
+
+Review comment:
+
+- [P2] Wrap the whole occurrence in the org-scoped transaction — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:653-654
+  When `fireOccurrence` runs from the `setImmediate` path with no active request transaction, this new transaction is reached too late: the function has already read `scheduledTasks` using the module-level `db`, and later reads/updates other tenant tables the same way. Since `scheduled_tasks` has FORCE RLS and depends on `app.organisation_id`, the unauthenticated run-now path can return no row or fail before this `set_config` block ever helps, so the immediate occurrence is still silently skipped unless the whole occurrence DB sequence is executed under the org-scoped transaction.
+2026-05-10T21:59:01.759917Z ERROR codex_core::session: failed to record rollout items: thread 019e13e3-1d03-7310-938e-3f98cd718d0b not found
+2026-05-10T21:59:01.845725Z ERROR codex_core::session: failed to record rollout items: thread 019e13e3-1cbd-7211-8845-a9a84fabe71d not found
+The scheduled task change does not actually make the unauthenticated immediate-run path org-scoped because the transaction is introduced only around task creation, after earlier RLS-protected accesses and before later ones.
+
+Review comment:
+
+- [P2] Wrap the whole occurrence in the org-scoped transaction — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:653-654
+  When `fireOccurrence` runs from the `setImmediate` path with no active request transaction, this new transaction is reached too late: the function has already read `scheduledTasks` using the module-level `db`, and later reads/updates other tenant tables the same way. Since `scheduled_tasks` has FORCE RLS and depends on `app.organisation_id`, the unauthenticated run-now path can return no row or fail before this `set_config` block ever helps, so the immediate occurrence is still silently skipped unless the whole occurrence DB sequence is executed under the org-scoped transaction.

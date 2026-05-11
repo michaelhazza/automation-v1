@@ -15,6 +15,7 @@ import { hashContent, hashSerialized, serializeDocument, DOC_DELIMITER_END } fro
 import { countTokens, SUPPORTED_MODEL_FAMILIES } from './llmRouter.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import type { ReferenceDocumentVersion } from '../db/schema/referenceDocumentVersions.js';
+import { verifyScopeIdsBelongToOrg } from './documentDataSourceService.js';
 
 // ---------------------------------------------------------------------------
 // Document Promotion Service — promotes an execution_files row to a permanent
@@ -49,6 +50,21 @@ export async function promoteFile(input: {
     organisationId, subaccountId, agentId, scheduledTaskId, taskInstanceId,
     principalId, boss,
   } = input;
+
+  // Step 0: verify all supplied scope IDs belong to this org BEFORE any DB write (C4)
+  const scopeVerification = await verifyScopeIdsBelongToOrg(organisationId, {
+    agentId,
+    subaccountId,
+    scheduledTaskId,
+    taskInstanceId,
+  });
+  if (!scopeVerification.ok) {
+    throw {
+      statusCode: 403,
+      message: 'Cross-org scope ID rejected',
+      errorCode: 'referenceDocument.scope_cross_org',
+    };
+  }
 
   const orgTx = getOrgScopedDb('documentPromotionService.promoteFile');
 
