@@ -663,15 +663,25 @@ export const scheduledTaskService = {
           assignedAgentId: st.assignedAgentId,
         },
       };
-      const task = peekOrgTxContext()
-        ? await taskService.createTask(
-            taskInput,
-            getOrgScopedDb('service:scheduledTaskService.runDue'),
-          )
-        : await db.transaction(async (innerTx) => {
-            await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
-            return taskService.createTask(taskInput, innerTx);
-          });
+      // PTH-CGT-R5-F1: split DB write (createTaskCore) from side effects so
+      // observers never see task-created events for rolled-back rows.
+      // ALS-present branch: caller owns the tx; side effects fire INLINE
+      // (same as prior behaviour — caller is responsible for commit timing).
+      // Fallback branch: we own the tx; side effects defer until after our commit.
+      let task: import('../db/schema/tasks.js').Task;
+      if (peekOrgTxContext()) {
+        task = await taskService.createTaskCore(
+          taskInput,
+          getOrgScopedDb('service:scheduledTaskService.runDue'),
+        );
+        taskService.emitCreateTaskSideEffects(task, taskInput);
+      } else {
+        task = await db.transaction(async (innerTx) => {
+          await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+          return taskService.createTaskCore(taskInput, innerTx);
+        });
+        taskService.emitCreateTaskSideEffects(task, taskInput);
+      }
 
       // Update the run with the task reference
       await db.update(scheduledTaskRuns).set({

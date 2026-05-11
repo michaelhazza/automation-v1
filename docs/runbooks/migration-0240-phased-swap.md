@@ -117,7 +117,7 @@ SELECT conname FROM pg_constraint
 WHERE conrelid = 'conversations'::regclass AND contype = 'u';
 ```
 
-Both constraints should still be present (old constraint in place, new one not yet promoted). Once confirmed, retry Step 3. There is no manual cleanup required from a dropped-connection scenario — the transaction boundary guarantees atomicity.
+The old constraint should still be present, and the new constraint should NOT be promoted (the transaction rolled back before COMMIT). The concurrently built index from Step 2 may still exist and can be reused or dropped before retrying Step 3. There is no manual cleanup required from a dropped-connection scenario — the transaction boundary guarantees atomicity for the constraint promotion.
 
 ### If Step 3 succeeds but the new constraint causes unexpected behaviour
 

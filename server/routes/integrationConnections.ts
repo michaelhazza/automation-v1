@@ -101,7 +101,12 @@ router.get(
   })
 );
 
-const patchConnectionBodySchema = z.object({
+/**
+ * PTH-CGT-R5-F3 — exported so the contract-pin test can import this exact
+ * schema rather than maintaining a mirror that drifts silently when the route
+ * changes. See server/routes/__tests__/integrationConnectionsValidation.test.ts.
+ */
+export const patchConnectionBodySchema = z.object({
   connectionStatus: z.enum(['active', 'revoked', 'error']).optional(),
 }).passthrough();
 

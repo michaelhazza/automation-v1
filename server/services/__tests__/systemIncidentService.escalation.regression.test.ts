@@ -3,7 +3,7 @@
  *
  * Regression safety net for the B2 fix in commit 3423a0d5 — verifies
  * that escalateIncidentToAgent sets the `app.organisation_id` GUC at
- * the top of its transaction BEFORE invoking taskService.createTask.
+ * the top of its transaction BEFORE invoking taskService.createTaskCore.
  *
  * Without this, FORCE-RLS on `tasks` rejects the insert when the
  * caller does NOT go through the orgScoping HTTP middleware (e.g.
@@ -73,12 +73,19 @@ vi.mock('../../db/index.js', () => ({
 }));
 
 // Mock taskService so the escalation does not pull in the full task-creation graph.
+// PTH-CGT-R5-F1: post-refactor, escalateIncidentToAgent uses createTaskCore +
+// emitCreateTaskSideEffects (split for after-commit semantics). Mock both.
 vi.mock('../taskService.js', () => ({
   taskService: {
     createTask: vi.fn(async (input: { organisationId: string }) => {
       txInstrumentation.taskServiceCreateCalls.push({ organisationId: input.organisationId });
       return { id: 'task-2222', organisationId: input.organisationId };
     }),
+    createTaskCore: vi.fn(async (input: { organisationId: string }) => {
+      txInstrumentation.taskServiceCreateCalls.push({ organisationId: input.organisationId });
+      return { id: 'task-2222', organisationId: input.organisationId };
+    }),
+    emitCreateTaskSideEffects: vi.fn(),
   },
 }));
 
@@ -102,7 +109,7 @@ vi.mock('../systemIncidentServicePure.js', () => ({
 import { systemIncidentService } from '../systemIncidentService.js';
 
 describe('systemIncidentService.escalateIncidentToAgent — B2 regression', () => {
-  it('sets the app.organisation_id GUC as the first execute() call inside its transaction (before taskService.createTask runs)', async () => {
+  it('sets the app.organisation_id GUC as the first execute() call inside its transaction (before taskService.createTaskCore runs)', async () => {
     // Reset instrumentation for this test.
     txInstrumentation.executeCalls.length = 0;
     txInstrumentation.insertCalls.length = 0;

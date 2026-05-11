@@ -18,15 +18,14 @@
 export {};
 
 import { describe, test, expect } from 'vitest';
-import { z } from 'zod';
 
 // ─── Section 1: Pure schema assertions ───────────────────────────────────────
 
-// Mirror of the schema in integrationConnections.ts.
-// If the enum values change there, this will catch the drift at test time.
-const patchConnectionBodySchema = z.object({
-  connectionStatus: z.enum(['active', 'revoked', 'error']).optional(),
-}).passthrough();
+// PTH-CGT-R5-F3: import the REAL schema from the route module (exported there)
+// rather than maintaining a mirror that would drift silently when the route
+// changes. The previous version of this test re-declared the schema inline —
+// chatgpt-pr-review Round 5 flagged that as weak regression coverage.
+import { patchConnectionBodySchema } from '../integrationConnections.js';
 
 describe('patchConnectionBodySchema (pure)', () => {
   test('connectionStatus="foo" → fails validation', () => {

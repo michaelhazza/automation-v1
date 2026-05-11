@@ -171,23 +171,25 @@ async function handleIssueEvent(payload: Record<string, any>) {
     // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
     // same pattern used by agentObservationsPruneJob and correctionPatternDetectorJob
     // for non-HTTP write paths where auth middleware is not available.
-    await db.transaction(async (innerTx) => {
+    // PTH-CGT-R5-F1: defer task-created side effects until after the tx commits
+    // so observers never see events for rolled-back rows.
+    const taskInput = {
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId,
+      data: { title, description, status: 'inbox' as const, priority },
+    };
+    const task = await db.transaction(async (innerTx) => {
       await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${context.organisationId}, true)`);
-      await withOrgTx(
+      return withOrgTx(
         { tx: innerTx, organisationId: context.organisationId, source: 'route:githubWebhook.issue-opened' },
         async () => {
           const tx = getOrgScopedDb('route:githubWebhook.issue-opened');
-          await taskService.createTask(
-            {
-              organisationId: context.organisationId,
-              subaccountId: context.subaccountId,
-              data: { title, description, status: 'inbox', priority },
-            },
-            tx,
-          );
+          return taskService.createTaskCore(taskInput, tx);
         },
       );
     });
+
+    taskService.emitCreateTaskSideEffects(task, taskInput);
 
     logger.info('github_webhook.task_created', { issueNumber: issue.number, repo });
   }
@@ -229,28 +231,29 @@ async function handleIssueCommentEvent(payload: Record<string, any>) {
   // then enter withOrgTx so getOrgScopedDb resolves correctly. This is the
   // same pattern used by agentObservationsPruneJob and correctionPatternDetectorJob
   // for non-HTTP write paths where auth middleware is not available.
-  await db.transaction(async (innerTx) => {
+  // PTH-CGT-R5-F1: defer task-created side effects until after the tx commits.
+  const taskInput = {
+    organisationId: context.organisationId,
+    subaccountId: context.subaccountId,
+    data: {
+      title: `[GitHub] ${taskTitle}`,
+      description: `Created from comment on issue #${issue.number} in ${repo}\n\n${body}\n\n[View comment](${comment.html_url})`,
+      status: 'inbox' as const,
+      priority: 'normal' as const,
+    },
+  };
+  const task = await db.transaction(async (innerTx) => {
     await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${context.organisationId}, true)`);
-    await withOrgTx(
+    return withOrgTx(
       { tx: innerTx, organisationId: context.organisationId, source: 'route:githubWebhook.issue-comment' },
       async () => {
         const tx = getOrgScopedDb('route:githubWebhook.issue-comment');
-        await taskService.createTask(
-          {
-            organisationId: context.organisationId,
-            subaccountId: context.subaccountId,
-            data: {
-              title: `[GitHub] ${taskTitle}`,
-              description: `Created from comment on issue #${issue.number} in ${repo}\n\n${body}\n\n[View comment](${comment.html_url})`,
-              status: 'inbox',
-              priority: 'normal',
-            },
-          },
-          tx,
-        );
+        return taskService.createTaskCore(taskInput, tx);
       },
     );
   });
+
+  taskService.emitCreateTaskSideEffects(task, taskInput);
 
   logger.info('github_webhook.task_from_comment', { issueNumber: issue.number, repo });
 }

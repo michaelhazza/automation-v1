@@ -4021,7 +4021,9 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
   - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.
 
-### PTH-CGT-R2 — taskService.createTask side effects fire before outer transaction commits
+### PTH-CGT-R2 — taskService.createTask side effects fire before outer transaction commits — **CLOSED 2026-05-11 in Round 5**
+
+**Closed 2026-05-11 in PR #284 Round 5 F1.** Refactor split: `_createTaskCore(input, tx)` (DB-only writes) + `emitCreateTaskSideEffects(item, input)`. Public `createTask` wraps both for backwards compat. Updated 5 cited call sites: systemIncidentService.escalateIncidentToAgent, deliveryService.deliver, scheduledTaskService.fireOccurrence, githubWebhook (2 sites). Original entry retained below for audit history.
 
 **Origin:** chatgpt-pr-review Round 2 (PR #284 pre-test-hardening, 2026-05-10).
 **Surface:** `server/services/taskService.ts:174-212` — websocket emit (`emitSubaccountUpdate`), trigger fire (`triggerService.checkAndFire`), and orchestrator routing enqueue (`enqueueOrchestratorRoutingIfEligible`) all run INSIDE the canonical `createTask(input, tx)` body, before the supplied `tx` commits.

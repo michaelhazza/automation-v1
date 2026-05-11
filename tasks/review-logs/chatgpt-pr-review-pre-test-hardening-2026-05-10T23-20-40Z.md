@@ -111,5 +111,23 @@
 
 **Round 4 verdict:** CHANGES_REQUESTED → APPROVED.
 
-**Round 5 diff:** pending generation after commit.
+### Round 5 — 2026-05-11T00:15:00Z (post Round 4 commit `d108fd42`)
+
+**ChatGPT verdict:** CHANGES_REQUESTED
+
+| # | Finding | Severity | Category | finding_type | Triage | Recommendation | Decision |
+|---|---|---|---|---|---|---|---|
+| F1 | `taskService.createTask(input, tx)` performs side effects (websocket emit, trigger fire, orchestrator enqueue) inline; if outer caller's tx rolls back, observers see phantom task-created events | high (claimed blocker) | observability / transaction-correctness | architecture | technical (scope_signal: architectural) | **defer** | **ESCALATED to operator — operator chose APPLY NOW.** Same concern as Round 2 R2 (deferred to PTH-CGT-R2). Refactor split: extracted `_createTaskCore(input, tx)` (DB writes only) + `emitCreateTaskSideEffects(item, input)` (websocket + triggers + orchestrator). Public `createTask` wraps both for backwards compat. Updated 5 cited call sites: systemIncidentService.escalateIncidentToAgent (after-commit emit), deliveryService.deliver (dual-branch: ALS inline, fallback after-commit), scheduledTaskService.fireOccurrence (same dual-branch), githubWebhook issue-opened (after-commit), githubWebhook issue-comment (after-commit). Updated systemIncidentService regression test to mock createTaskCore + emitCreateTaskSideEffects alongside createTask. Closes PTH-CGT-R2 from the backlog. |
+| F2 | `connector_configs.webhook_token` Drizzle schema doesn't declare the partial unique index that migration 0319 creates | low | schema | naming | technical | **comment** | auto (comment) — verified the existing convention: lines 43-44 of `connectorConfigs.ts` explicitly document "two partial unique indexes (CRM-scoped + workspace-scoped) expressed in SQL only." The new webhook_token partial UNIQUE follows the same pattern. Added an explanatory comment at the column declaration citing this. No declaration change — would deviate from the local convention. |
+| F3 | `integrationConnectionsValidation.test.ts` mirrors the route's Zod schema instead of importing it | medium | test-quality | test_coverage | technical | **implement** | auto (implement) — exported `patchConnectionBodySchema` from `server/routes/integrationConnections.ts`; updated the test to import it. Removed the unused `import { z } from 'zod'` from the test. All 13 tests (10 pure + 3 skipped integration) still pass. |
+| F4 | `docs/runbooks/migration-0240-phased-swap.md:120` rollback wording contradicts itself ("Both constraints should still be present" — but on rollback the new constraint shouldn't be promoted) | low | doc | other | technical | **implement** | auto (implement) — rewrote the paragraph: "The old constraint should still be present, and the new constraint should NOT be promoted (the transaction rolled back before COMMIT). The concurrently built index from Step 2 may still exist and can be reused or dropped before retrying Step 3." |
+
+**Auto-applied:** F2 (comment only), F3, F4 (3 findings).
+**Operator-approved + applied:** F1 (1 finding — architectural refactor across 5 call sites + 2 test files).
+
+**Verification after Round 5 fixes (commit pending):** server typecheck CLEAN (0 errors); all 30 regression tests pass + 3 skipped (DB-dependent integration tests).
+
+**Round 5 verdict:** CHANGES_REQUESTED → APPROVED.
+
+**Round 6 diff:** pending generation after commit.
 

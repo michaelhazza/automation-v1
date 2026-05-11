@@ -114,9 +114,25 @@ async function _createTask(
     });
   }
 
-  // Canonical implementation — arg1 is CreateTaskInput, arg2 is OrgScopedTx
-  const { organisationId, subaccountId, data, userId } = arg1;
-  const tx = arg2 as OrgScopedTx;
+  // Canonical implementation — arg1 is CreateTaskInput, arg2 is OrgScopedTx.
+  // PTH-CGT-R5-F1: split into createTaskCore (DB-only writes) + emitCreateTaskSideEffects
+  // (websocket + triggers + orchestrator enqueue). The public createTask wrapper keeps the
+  // old behaviour (DB writes + immediate side effects) for backwards compatibility, but
+  // callers that need post-commit semantics now use createTaskCore + explicitly run
+  // emitCreateTaskSideEffects after their outer transaction commits.
+  const item = await _createTaskCore(arg1, arg2 as OrgScopedTx);
+  emitCreateTaskSideEffects(item, arg1);
+  return item;
+}
+
+/**
+ * PTH-CGT-R5-F1 — DB writes only. No websocket, no trigger fire, no orchestrator
+ * enqueue. Callers that wrap createTaskCore in a transaction that can roll back
+ * downstream MUST defer side effects until after their outer commit by calling
+ * `emitCreateTaskSideEffects(item, input)`.
+ */
+async function _createTaskCore(input: CreateTaskInput, tx: OrgScopedTx): Promise<Task> {
+  const { organisationId, subaccountId, data, userId } = input;
 
   const status = (data.status ?? 'inbox') as TaskStatus;
 
@@ -171,6 +187,20 @@ async function _createTask(
     createdAt: new Date(),
   });
 
+  return item;
+}
+
+/**
+ * PTH-CGT-R5-F1 — non-blocking side effects fired after a successful createTaskCore
+ * write. Callers that pass the returned `item` from `createTaskCore` directly to this
+ * function get the same behaviour as the legacy inline-side-effects path. Callers
+ * inside a transaction that can fail downstream MUST defer this call until AFTER
+ * their outer commit so observers don't see events for rolled-back rows.
+ */
+function emitCreateTaskSideEffects(item: Task, input: CreateTaskInput): void {
+  const { organisationId, subaccountId, data } = input;
+  const status = (data.status ?? 'inbox') as TaskStatus;
+
   emitSubaccountUpdate(subaccountId, 'task:created', {
     taskId: item.id, title: data.title, status,
   });
@@ -210,8 +240,6 @@ async function _createTask(
       error: err instanceof Error ? err.message : String(err),
     });
   });
-
-  return item;
 }
 
 // ─── Standalone helpers (also used internally by createTask) ─────────────────
@@ -338,6 +366,9 @@ export const taskService = {
   },
 
   createTask: _createTask,
+  // PTH-CGT-R5-F1 — DB-only writes; caller responsible for emitCreateTaskSideEffects after commit.
+  createTaskCore: _createTaskCore,
+  emitCreateTaskSideEffects,
 
   async updateTask(
     id: string,

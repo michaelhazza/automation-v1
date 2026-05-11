@@ -249,12 +249,23 @@ export const deliveryService = {
       subaccountId,
       data: { title: artefact.title, description: artefact.content, status: 'inbox' as const, createdByAgentId: artefact.createdByAgentId },
     };
-    const task = peekOrgTxContext()
-      ? await taskService.createTask(taskInput, getOrgScopedDb('service:deliveryService.deliver'))
-      : await db.transaction(async (innerTx) => {
-          await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
-          return taskService.createTask(taskInput, innerTx);
-        });
+    // PTH-CGT-R5-F1: split DB write (createTaskCore) from side effects so
+    // observers never see task-created events for rolled-back rows. In the
+    // ALS-present branch, the caller's outer tx is in control of commit
+    // timing — side effects fire INLINE (current behaviour, the caller is
+    // responsible). In the fallback branch, we own the tx; side effects
+    // defer until after this function's own commit.
+    let task: import('../db/schema/tasks.js').Task;
+    if (peekOrgTxContext()) {
+      task = await taskService.createTaskCore(taskInput, getOrgScopedDb('service:deliveryService.deliver'));
+      taskService.emitCreateTaskSideEffects(task, taskInput);
+    } else {
+      task = await db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+        return taskService.createTaskCore(taskInput, innerTx);
+      });
+      taskService.emitCreateTaskSideEffects(task, taskInput);
+    }
 
     const channels: ChannelDispatchResult[] = [];
 
