@@ -1,27 +1,16 @@
 // client/src/pages/govern/components/ManageMultiConnectDrawer.tsx
 // Spec: tasks/builds/operator-session-identity/spec.md §Chunk 8
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { disconnectConnection, testConnection } from '../../../api/governApi';
+import { testConnection, listConnections } from '../../../api/governApi';
 import type { Connection } from '../../../../../shared/types/govern.js';
 import type { AppDefinition } from './AppIntegrationsTab';
+import { DisconnectConfirmDialog } from './DisconnectConfirmDialog';
+import { formatRelative } from './_utils';
+import { acquireScrollLock, releaseScrollLock } from '../../../components/overlayScrollLock';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatRelative(iso: string | null): string {
-  if (!iso) return 'Never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 2) return 'Just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs === 1 ? '1 hour' : `${hrs} hours`} ago`;
-  const days = Math.floor(hrs / 24);
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 function initials(name: string): string {
   return name
@@ -31,86 +20,35 @@ function initials(name: string): string {
     .join('');
 }
 
-// ── Disconnect confirm inline modal ───────────────────────────────────────────
-
-interface DisconnectConfirmProps {
-  connection: Connection;
-  onCancel: () => void;
-  onDisconnected: () => void;
-}
-
-function DisconnectConfirmInline({ connection, onCancel, onDisconnected }: DisconnectConfirmProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleDisconnect() {
-    setBusy(true);
-    setError(null);
-    try {
-      await disconnectConnection(connection.id);
-      onDisconnected();
-    } catch (e: unknown) {
-      const msg = (() => {
-        if (e instanceof Error) return e.message;
-        const ax = e as { response?: { data?: { message?: string } } };
-        return ax.response?.data?.message ?? 'Disconnect failed.';
-      })();
-      setError(msg);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mx-6 my-3 p-4 bg-red-50 border border-red-200 rounded-xl">
-      <p className="text-[13px] font-semibold text-slate-900 mb-1">
-        Disconnect &quot;{connection.name}&quot;?
-      </p>
-      <p className="text-[12.5px] text-slate-500 mb-3 leading-relaxed">
-        This stops agents from using this connection. It cannot be undone.
-      </p>
-      {error && (
-        <p className="text-[12px] text-red-600 mb-2">{error}</p>
-      )}
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-3 py-1.5 text-[12.5px] font-medium text-slate-600 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 cursor-pointer font-[inherit]"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleDisconnect()}
-          disabled={busy}
-          className="px-3 py-1.5 text-[12.5px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg border-0 cursor-pointer font-[inherit] transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {busy ? 'Disconnecting...' : 'Disconnect'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Connection row ────────────────────────────────────────────────────────────
 
 interface ConnRowProps {
   connection: Connection;
-  onDisconnected: () => void;
-  onAddAnother: () => void;
+  subaccountId: string;
+  onDisconnectRequest: (connection: Connection) => void;
 }
 
-type RowAction = 'menu' | 'disconnecting' | null;
-
-function ConnRow({ connection, onDisconnected }: ConnRowProps) {
-  const [action, setAction] = useState<RowAction>(null);
+function ConnRow({ connection, onDisconnectRequest }: ConnRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [testResult, setTestResult] = useState<'ok' | 'failed' | null>(null);
   const [testing, setTesting] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const status = connection.status;
   const isOk = status === 'connected';
   const isExpired = status === 'expired' || status === 'failed';
+
+  // S2: 3-dot menu outside-click close
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [menuOpen]);
 
   async function handleTest() {
     setMenuOpen(false);
@@ -128,82 +66,72 @@ function ConnRow({ connection, onDisconnected }: ConnRowProps) {
   const abbr = initials(connection.name);
 
   return (
-    <>
-      <div className="flex items-center gap-3 px-6 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-        {/* Avatar */}
-        <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-[12px] font-bold text-indigo-700 flex-shrink-0">
-          {abbr}
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="text-[13.5px] font-semibold text-slate-900 truncate">{connection.name}</div>
-          <div className="text-[11px] text-slate-400 truncate">{connection.provider}</div>
-        </div>
-
-        {/* Status dot */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span
-            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-              isOk ? 'bg-emerald-500' : isExpired ? 'bg-amber-400' : 'bg-slate-300'
-            }`}
-          />
-          <span className="text-[11.5px] font-medium text-slate-500">
-            {isOk ? 'Connected' : isExpired ? 'Needs sign in' : 'Pending'}
-          </span>
-          {testResult === 'ok' && <span className="text-[10.5px] text-emerald-600 font-semibold">Test passed</span>}
-          {testResult === 'failed' && <span className="text-[10.5px] text-red-600 font-semibold">Test failed</span>}
-          {testing && <span className="text-[10.5px] text-slate-400">Testing...</span>}
-        </div>
-
-        {/* Last sync */}
-        <div className="text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap hidden sm:block">
-          {formatRelative(connection.lastSyncAt)}
-        </div>
-
-        {/* 3-dot menu */}
-        <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 border-0 bg-transparent cursor-pointer font-[inherit] text-base leading-none"
-            aria-label="Connection actions"
-          >
-            &#8942;
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-xl shadow-lg min-w-[180px] py-1">
-              <button
-                type="button"
-                onClick={() => { void handleTest(); setMenuOpen(false); }}
-                className="w-full text-left px-3 py-2 text-[12.5px] text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer bg-transparent border-0 font-[inherit]"
-              >
-                <span className="w-3.5 opacity-60 text-center text-[11px]">&#9654;</span>
-                Test
-              </button>
-              <div className="border-t border-slate-100 my-1" />
-              <button
-                type="button"
-                onClick={() => { setAction('disconnecting'); setMenuOpen(false); }}
-                className="w-full text-left px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 flex items-center gap-2.5 cursor-pointer bg-transparent border-0 font-[inherit]"
-              >
-                <span className="w-3.5 opacity-75 text-center text-[11px]">&#8856;</span>
-                Disconnect
-              </button>
-            </div>
-          )}
-        </div>
+    <div className="flex items-center gap-3 px-6 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+      {/* Avatar */}
+      <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-[12px] font-bold text-indigo-700 flex-shrink-0">
+        {abbr}
       </div>
 
-      {/* Inline disconnect confirm */}
-      {action === 'disconnecting' && (
-        <DisconnectConfirmInline
-          connection={connection}
-          onCancel={() => setAction(null)}
-          onDisconnected={onDisconnected}
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="text-[13.5px] font-semibold text-slate-900 truncate">{connection.name}</div>
+        <div className="text-[11px] text-slate-400 truncate">{connection.provider}</div>
+      </div>
+
+      {/* Status dot */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <span
+          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            isOk ? 'bg-emerald-500' : isExpired ? 'bg-amber-400' : 'bg-slate-300'
+          }`}
         />
-      )}
-    </>
+        <span className="text-[11.5px] font-medium text-slate-500">
+          {isOk ? 'Connected' : isExpired ? 'Needs sign in' : 'Pending'}
+        </span>
+        {testResult === 'ok' && <span className="text-[10.5px] text-emerald-600 font-semibold">Test passed</span>}
+        {testResult === 'failed' && <span className="text-[10.5px] text-red-600 font-semibold">Test failed</span>}
+        {testing && <span className="text-[10.5px] text-slate-400">Testing...</span>}
+      </div>
+
+      {/* Last sync */}
+      <div className="text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap hidden sm:block">
+        {formatRelative(connection.lastSyncAt)}
+      </div>
+
+      {/* 3-dot menu */}
+      <div ref={menuRef} className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 border-0 bg-transparent cursor-pointer font-[inherit] text-base leading-none"
+          aria-label="Connection actions"
+        >
+          &#8942;
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-xl shadow-lg min-w-[180px] py-1">
+            <button
+              type="button"
+              onClick={() => { void handleTest(); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-[12.5px] text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 cursor-pointer bg-transparent border-0 font-[inherit]"
+            >
+              <span className="w-3.5 opacity-60 text-center text-[11px]">&#9654;</span>
+              Test
+            </button>
+            <div className="border-t border-slate-100 my-1" />
+            {/* V1: label edit deferred (no backend endpoint) */}
+            <button
+              type="button"
+              onClick={() => { onDisconnectRequest(connection); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 flex items-center gap-2.5 cursor-pointer bg-transparent border-0 font-[inherit]"
+            >
+              <span className="w-3.5 opacity-75 text-center text-[11px]">&#8856;</span>
+              Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -211,20 +139,63 @@ function ConnRow({ connection, onDisconnected }: ConnRowProps) {
 
 interface Props {
   app: AppDefinition;
-  connections: Connection[];
+  subaccountId: string;
   onClose: () => void;
   onAddAnother: () => void;
   onDisconnected: () => void;
 }
 
-export function ManageMultiConnectDrawer({ app, connections, onClose, onAddAnother, onDisconnected }: Props) {
+export function ManageMultiConnectDrawer({ app, subaccountId, onClose, onAddAnother, onDisconnected }: Props) {
+  const [connections, setConnections] = useState<Connection[] | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [disconnectTarget, setDisconnectTarget] = useState<Connection | null>(null);
+
+  // B4: self-fetching live list, filtered by provider
+  const fetchConnections = useCallback(() => {
+    setFetchError(null);
+    listConnections({ scope: 'workspace', subaccountId })
+      .then((res) => {
+        const filtered = res.rows.filter(
+          (c) => c.provider === app.provider && c.authMethod !== 'ai_subscription',
+        );
+        setConnections(filtered);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : 'Failed to load connections.';
+        setFetchError(msg);
+      });
+  }, [subaccountId, app.provider]);
+
+  useEffect(() => {
+    fetchConnections();
+  }, [fetchConnections, refreshKey]);
+
+  // S2: Escape-to-close
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  // S2: Body scroll lock
+  useEffect(() => {
+    acquireScrollLock();
+    return () => releaseScrollLock();
+  }, []);
+
   function handleDisconnected() {
     onDisconnected();
-    // If no connections left after disconnect, close the drawer
-    if (connections.length <= 1) {
+    const newCount = (connections?.length ?? 1) - 1;
+    setRefreshKey((k) => k + 1);
+    if (newCount <= 0) {
       onClose();
     }
   }
+
+  const liveCount = connections?.length ?? 0;
 
   return createPortal(
     <>
@@ -257,7 +228,7 @@ export function ManageMultiConnectDrawer({ app, connections, onClose, onAddAnoth
                 {app.name} connections
               </div>
               <div className="text-[12px] text-slate-400 mt-0.5">
-                {connections.length} connection{connections.length !== 1 ? 's' : ''}
+                {liveCount} connection{liveCount !== 1 ? 's' : ''}
               </div>
             </div>
           </div>
@@ -287,17 +258,33 @@ export function ManageMultiConnectDrawer({ app, connections, onClose, onAddAnoth
 
         {/* Connection list */}
         <div className="flex-1 overflow-y-auto">
-          {connections.length === 0 ? (
+          {fetchError && (
+            <div className="mx-6 my-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[12.5px] text-red-700">
+              {fetchError}
+              <button
+                type="button"
+                onClick={() => setRefreshKey((k) => k + 1)}
+                className="ml-2 underline cursor-pointer bg-transparent border-0 font-[inherit] text-red-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!fetchError && connections === null ? (
+            <div className="text-center py-10 px-6">
+              <p className="text-[13px] text-slate-400">Loading...</p>
+            </div>
+          ) : !fetchError && liveCount === 0 ? (
             <div className="text-center py-10 px-6">
               <p className="text-[13px] text-slate-400">No connections found.</p>
             </div>
           ) : (
-            connections.map((conn) => (
+            connections?.map((conn) => (
               <ConnRow
                 key={conn.id}
                 connection={conn}
-                onDisconnected={handleDisconnected}
-                onAddAnother={onAddAnother}
+                subaccountId={subaccountId}
+                onDisconnectRequest={setDisconnectTarget}
               />
             ))
           )}
@@ -324,6 +311,18 @@ export function ManageMultiConnectDrawer({ app, connections, onClose, onAddAnoth
           to { transform: translateX(0); }
         }
       `}</style>
+
+      {/* B3: Shared disconnect dialog */}
+      {disconnectTarget && (
+        <DisconnectConfirmDialog
+          connection={disconnectTarget}
+          onClose={() => setDisconnectTarget(null)}
+          onDisconnected={() => {
+            setDisconnectTarget(null);
+            handleDisconnected();
+          }}
+        />
+      )}
     </>,
     document.body,
   );

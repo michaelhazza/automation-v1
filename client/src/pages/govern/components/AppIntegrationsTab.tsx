@@ -126,7 +126,7 @@ function groupByProvider(rows: Connection[]): Record<string, Connection[]> {
 function AppAvatar({ app }: { app: AppDefinition }) {
   return (
     <div
-      className={`w-12 h-12 rounded-xl ${app.avatarBg} flex items-center justify-content-center items-center justify-center flex-shrink-0 mb-3`}
+      className={`w-12 h-12 rounded-xl ${app.avatarBg} flex items-center justify-center flex-shrink-0 mb-3`}
     >
       <span className={`text-[12px] font-extrabold leading-none ${app.avatarText}`}>{app.abbr}</span>
     </div>
@@ -378,6 +378,7 @@ export function AppIntegrationsTab({ subaccountId }: Props) {
       {connectingApp && (
         <ConnectAppModal
           app={connectingApp}
+          subaccountId={subaccountId}
           onClose={() => setConnectingApp(null)}
           onConnected={() => { setConnectingApp(null); reload(); }}
         />
@@ -387,7 +388,7 @@ export function AppIntegrationsTab({ subaccountId }: Props) {
       {managingApp && (
         <ManageMultiConnectDrawer
           app={managingApp.app}
-          connections={managingApp.connections}
+          subaccountId={subaccountId}
           onClose={() => setManagingApp(null)}
           onAddAnother={() => { setManagingApp(null); setConnectingApp(managingApp.app); }}
           onDisconnected={reload}

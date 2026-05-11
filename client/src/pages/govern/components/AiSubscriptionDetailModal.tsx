@@ -8,6 +8,7 @@ import { disconnectAiSubscription } from '../../../api/governApi';
 import { MakeDefaultConfirmModal } from './MakeDefaultConfirmModal';
 import { SignInAgainModal } from './SignInAgainModal';
 import { EditAvailabilityModal } from './EditAvailabilityModal';
+import { formatRelative } from './_utils';
 
 interface Props {
   subaccountId: string;
@@ -56,19 +57,6 @@ function StatusPill({ state }: { state: AiSubscriptionConnection['usabilityState
 function formatDate(iso: string | null): string {
   if (!iso) return 'Never';
   return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function formatRelative(iso: string | null): string {
-  if (!iso) return 'Never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 2) return 'Just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
-  const days = Math.floor(hrs / 24);
-  if (days === 1) return 'Yesterday';
-  return `${days} days ago`;
 }
 
 type SubModal = 'make_default' | 'sign_in_again' | 'edit_availability' | null;

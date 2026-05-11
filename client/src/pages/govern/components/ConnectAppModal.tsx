@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import Modal from '../../../components/Modal';
+import api from '../../../lib/api';
 import type { AppDefinition } from './AppIntegrationsTab';
 
 // ── Per-app connection variant config ─────────────────────────────────────────
@@ -18,8 +19,8 @@ interface FieldDef {
 interface AppConnectVariant {
   /** CTA button label */
   ctaLabel: string;
-  /** For OAuth apps: redirect URL. For API-key apps: empty string. */
-  oauthRedirect?: string;
+  /** For OAuth apps: provider string used to build the auth-url request. For API-key apps: undefined. */
+  oauthProvider?: string;
   /** For API-key apps: form fields to render */
   fields: FieldDef[];
   /** Short description shown as modal subtitle */
@@ -29,7 +30,7 @@ interface AppConnectVariant {
 const APP_CONNECT_VARIANTS: Record<string, AppConnectVariant> = {
   gmail: {
     ctaLabel: 'Continue to Google',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=gmail',
+    oauthProvider: 'gmail',
     fields: [],
     subtitle: 'Google Workspace / personal Gmail',
   },
@@ -48,43 +49,43 @@ const APP_CONNECT_VARIANTS: Record<string, AppConnectVariant> = {
   },
   slack: {
     ctaLabel: 'Continue to Slack',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=slack',
+    oauthProvider: 'slack',
     fields: [],
     subtitle: 'Team messaging and notifications',
   },
   ghl: {
     ctaLabel: 'Continue to GoHighLevel',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=ghl',
+    oauthProvider: 'ghl',
     fields: [],
     subtitle: 'CRM, automations and pipeline',
   },
   teamwork: {
     ctaLabel: 'Continue to Teamwork',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=teamwork',
+    oauthProvider: 'teamwork',
     fields: [],
     subtitle: 'Project management and tasks',
   },
   google_drive: {
     ctaLabel: 'Continue to Google',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=google_drive',
+    oauthProvider: 'google_drive',
     fields: [],
     subtitle: 'Files and document storage',
   },
   outlook: {
     ctaLabel: 'Continue to Microsoft',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=outlook',
+    oauthProvider: 'outlook',
     fields: [],
     subtitle: 'Email via Microsoft 365',
   },
   microsoft_calendar: {
     ctaLabel: 'Continue to Microsoft',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=microsoft_calendar',
+    oauthProvider: 'microsoft_calendar',
     fields: [],
     subtitle: 'Calendar via Microsoft 365',
   },
   google_calendar: {
     ctaLabel: 'Continue to Google',
-    oauthRedirect: '/api/integrations/oauth2/start?provider=google_calendar',
+    oauthProvider: 'google_calendar',
     fields: [],
     subtitle: 'Calendar via Google Workspace',
   },
@@ -94,18 +95,19 @@ const APP_CONNECT_VARIANTS: Record<string, AppConnectVariant> = {
 
 interface Props {
   app: AppDefinition;
+  subaccountId: string;
   onClose: () => void;
   onConnected: () => void;
 }
 
-export function ConnectAppModal({ app, onClose, onConnected }: Props) {
+export function ConnectAppModal({ app, subaccountId, onClose, onConnected }: Props) {
   const variant = APP_CONNECT_VARIANTS[app.id] ?? {
     ctaLabel: 'Connect',
-    oauthRedirect: undefined,
+    oauthProvider: undefined,
     fields: [],
   };
 
-  const isOAuth = Boolean(variant.oauthRedirect);
+  const isOAuth = Boolean(variant.oauthProvider);
 
   // Field values keyed by field.key
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -113,7 +115,6 @@ export function ConnectAppModal({ app, onClose, onConnected }: Props) {
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingOAuth, setPendingOAuth] = useState(false);
 
   function setField(key: string, value: string) {
     setFieldValues((prev) => ({ ...prev, [key]: value }));
@@ -126,10 +127,26 @@ export function ConnectAppModal({ app, onClose, onConnected }: Props) {
 
   async function handleSubmit() {
     if (isOAuth) {
-      setPendingOAuth(true);
-      // Navigate to OAuth redirect. In a real implementation this opens a popup
-      // or navigates to the OAuth start URL. We use window.location for now.
-      window.location.href = variant.oauthRedirect!;
+      setBusy(true);
+      setError(null);
+      try {
+        const params: Record<string, string> = {
+          provider: variant.oauthProvider!,
+          scope: subaccountId ? 'subaccount' : 'org',
+          returnPath: '/connections?tab=app-integrations',
+        };
+        if (subaccountId) params.subaccountId = subaccountId;
+        const { data } = await api.get('/api/integrations/oauth2/auth-url', { params });
+        window.location.href = (data as { url: string }).url;
+      } catch (e: unknown) {
+        const msg = (() => {
+          if (e instanceof Error) return e.message;
+          const ax = e as { response?: { data?: { message?: string } } };
+          return ax.response?.data?.message ?? 'Failed to initiate connection. Please try again.';
+        })();
+        setError(msg);
+        setBusy(false);
+      }
       return;
     }
 
@@ -143,61 +160,33 @@ export function ConnectAppModal({ app, onClose, onConnected }: Props) {
     setError(null);
     setBusy(true);
     try {
-      // POST to the API. The endpoint is provider-specific.
-      const body: Record<string, string> = { provider: app.provider };
-      if (label.trim()) body.label = label.trim();
-      for (const field of variant.fields) {
-        body[field.key] = fieldValues[field.key] ?? '';
+      // HubSpot (and future API-key providers): POST to subaccount connections endpoint
+      const body: Record<string, string> = {
+        providerType: app.provider,
+        authType: 'api_key',
+        label: label.trim() || `${app.name} connection`,
+        secretsRef: fieldValues['apiKey'] ?? fieldValues[variant.fields[0]?.key ?? ''] ?? '',
+      };
+      const response = await api.post(
+        `/api/subaccounts/${encodeURIComponent(subaccountId)}/connections`,
+        body,
+        { validateStatus: (s) => s === 201 },
+      );
+      if (response.status === 201) {
+        onConnected();
       }
-      const response = await fetch('/api/integrations/api-key/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(data.message ?? `Request failed (${response.status})`);
-      }
-      onConnected();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Connection failed. Please try again.');
+      const msg = (() => {
+        if (e instanceof Error) return e.message;
+        const ax = e as { response?: { data?: { message?: string } } };
+        return ax.response?.data?.message ?? 'Connection failed. Please try again.';
+      })();
+      setError(msg);
       setBusy(false);
     }
   }
 
-  // ── Pending OAuth state ────────────────────────────────────────────────────
-  if (pendingOAuth) {
-    return (
-      <Modal title={`Connect ${app.name}`} onClose={onClose} maxWidth={460}>
-        <div className="text-center py-6">
-          <div className="text-3xl mb-3">&#128279;</div>
-          <div className="text-[16px] font-bold text-slate-900 mb-2">Waiting for authorisation</div>
-          <div className="text-[13px] text-slate-500 mb-6 leading-relaxed">
-            Complete sign-in in the tab that opened. This window will update when done.
-          </div>
-          <div className="flex items-center justify-center gap-2 text-slate-400 text-[12.5px]">
-            <svg
-              width="14" height="14"
-              fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
-              className="animate-spin"
-            >
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-            </svg>
-            Waiting for authorisation...
-          </div>
-          <button
-            type="button"
-            onClick={() => setPendingOAuth(false)}
-            className="mt-5 text-[12px] text-slate-400 bg-transparent border-0 cursor-pointer font-[inherit] hover:text-slate-700"
-          >
-            Cancel and go back
-          </button>
-        </div>
-      </Modal>
-    );
-  }
-
-  // ── Normal form ────────────────────────────────────────────────────────────
+  // ── Form ───────────────────────────────────────────────────────────────────
   return (
     <Modal title={`Connect ${app.name}`} onClose={onClose} maxWidth={460}>
       {/* App header */}
