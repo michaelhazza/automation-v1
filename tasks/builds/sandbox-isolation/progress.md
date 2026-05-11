@@ -74,7 +74,7 @@
 | 8 | C6 — Output validation + redaction wiring | done | 1 | `31cec382` | 3 helpers (composeRedactionPatternSet, classifyHarvestOutcome with 12-step first-failed semantics, validateOutputAgainstSchema). 34 pure tests. redaction.ts +3 sandbox patterns. |
 | 9 | C7 — Harvest pipeline (12 ordered steps) | done | 1 | (next) | runHarvest + runHarvestReconciliation. Provider file API calls guarded by providerCallStub with TODO(C8) — replaced when C8 lands. Step 6 has credential-leak defense per spec §11.4. Step 12 wraps assertValidTransition. C6 Pure file extended with 2 new helpers (extractTerminalReasonFromProviderSignal, pickHarvestStepFromError); test file now 61 tests. credentialBrokerService.issueCredential gained optional redactionPattern?: RegExp. resolveOutputSchema is TODO(C7-schema-registry) — returns null falling back to z.unknown(). |
 | 10 | C8 — withSandboxProvider + sandboxJobNames | done | 1 | (next) | sandboxJobNames.ts (all 7 queue constants for C11a/C11b consumption). withSandboxProvider with 3-attempt backoff + retry-after + slow-start diagnostics + ambiguous-terminal reconciliation enqueue (string-constant seam, no handler import). withSandboxProviderPure.ts with classifyProviderSignal + extractRetryAfterMs. 17 pure tests. Approved scope: replaced C7's providerCallStub with withSandboxProvider at 4 call sites. Diagnostics emitted as structured log events (not DB rows) — lib wrapper doesn't hold the full HarvestContext that telemetry rows require. |
-| 11 | C9 — e2bSandbox provider | pending | — | — | — |
+| 11 | C9 — e2bSandbox provider | done | 1 | (next) | e2bSandbox + e2bSandboxPure (4 helpers: terminal-signal mapper, latest-version guard, metadata-tag builder, credentialAliasPath). 29 pure tests. Module-init registerSandboxProvider('e2b', ...) per F1 fix. e2b SDK is interface-stubbed (real install post-merge once account provisioned); credential value-threading stubbed for C13. SANDBOX-DEF-EGRESS-MECH decision: DEFERRED to actual SDK install (audit-row schema unaffected) — recorded in tasks/todo.md. |
 | 12 | C10 — localDockerSandbox provider | pending | — | — | — |
 | 13 | C11a — Execution-scoped pg-boss jobs | pending | — | — | — |
 | 14 | C11b — Retention-scoped pg-boss jobs | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C8 (commit pending)
-- head: b2934f3e (C7)
+- last_chunk_committed: C9 (commit pending)
+- head: 08629201 (C8)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T06:55:00Z
+- captured_at: 2026-05-11T07:15:00Z
 
 ---
 

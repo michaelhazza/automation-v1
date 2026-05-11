@@ -4145,7 +4145,7 @@ These items were classified ambiguous/directional during spec review. Spec mecha
   - Spec section: §9.1 (egress audit logging is mandatory when `network` is non-`none`).
   - Schema is locked in §20.6 — the choice is which component actually intercepts allow/deny decisions and writes the audit rows.
   - Candidates: (a) e2b SDK network-policy hooks if they expose per-decision callbacks, (b) application-layer egress proxy outside the sandbox with mandatory routing from the template entrypoint, (c) CNI / eBPF-side hooks if e2b exposes them.
-  - Decision lands during C12 template-build chunk after verifying which hooks e2b actually exposes.
+  - **STATUS (C9 chunk, 2026-05-11): DEFERRED to actual SDK installation.** The e2b SDK (@e2b/sdk or 'e2b') is not yet installed in node_modules. The e2bSandbox provider is implemented with a thin E2bSdkClient interface stub that throws on first call; real SDK wiring lands when the e2b account is provisioned and the SDK's exposed surface (especially network-policy hooks) is verified. The audit-row schema (C1b §20.6) is unaffected by the mechanism choice. Decision options remain (a), (b), (c) above — pick based on the actual SDK API surface at installation time.
 
 - [x] **SANDBOX-DEF-LOG-SCHEMA — CLOSED 2026-05-11 at chatgpt-spec-review Round 1 F1.** Locked to **option (a) — new `sandbox_logs` table**.
   - Spec section: §8.4 step 9 (log persistence), §17.1 + §17.3 (retention), §20.8 (contract), §21.1 (RLS), §19.1 (schema file + prune job), §19.4 (migration).
