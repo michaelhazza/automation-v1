@@ -440,11 +440,13 @@ Spec C's `credentialBrokerService` extensions and Spec B's sandbox credential-in
 
 **Why the column name `llm_requests` is acceptable for non-LLM compute.** The table's role is "metered usage events tied to a run." LLM requests, agent process executions, IEE adapter runs, analyzer runs, and now sandbox computes all share that shape. The brief acknowledges this — "If `llm_requests` is reused, Spec B must justify why non-LLM compute belongs there and define the exact row shape." The justification is the shared shape, not a naming claim. (A future rename to `metered_runs` or similar would be a separate spec; out of scope here.)
 
-### 12.2 New `source_type` enum value: `sandbox_compute`
+### 12.2 New `source_type` enum values: `sandbox_compute` + `sandbox_compute_correction`
 
-Spec B extends the `sourceType` enum in `server/db/schema/llmRequests.ts` to include `sandbox_compute`. Current enum values: `['agent_run', 'process_execution', 'system', 'iee', 'analyzer']`. After Spec B: `[..., 'sandbox_compute']`. Spec C separately adds `'subscription_mediated'` (§26 coordination).
+Spec B extends the `sourceType` enum in `server/db/schema/llmRequests.ts` to include both `sandbox_compute` (primary harvest write) and `sandbox_compute_correction` (correction rows per §12.4). Current enum values: `['agent_run', 'process_execution', 'system', 'iee', 'analyzer']`. After Spec B: `[..., 'sandbox_compute', 'sandbox_compute_correction']`. Spec C separately adds `'subscription_mediated'` (§26 coordination).
 
-**CHECK constraint extension.** The existing migration `0185_llm_observability.sql` introduced CHECK constraints pairing `sourceType` with required columns (e.g., `sourceType = 'iee' AND iee_run_id IS NOT NULL`). Spec B's migration extends the constraint to require, when `sourceType = 'sandbox_compute'`, that `sandbox_execution_id IS NOT NULL` and `sandbox_vcpu_seconds IS NOT NULL` and `sandbox_wall_clock_ms IS NOT NULL` and `sandbox_provider IS NOT NULL` and `sandbox_template_version IS NOT NULL`.
+**CHECK constraint extension.** The existing migration `0185_llm_observability.sql` introduced CHECK constraints pairing `sourceType` with required columns (e.g., `sourceType = 'iee' AND iee_run_id IS NOT NULL`). Spec B's migration extends the constraint to require:
+- when `sourceType = 'sandbox_compute'`: `sandbox_execution_id IS NOT NULL` AND `sandbox_vcpu_seconds IS NOT NULL` AND `sandbox_wall_clock_ms IS NOT NULL` AND `sandbox_provider IS NOT NULL` AND `sandbox_template_version IS NOT NULL`;
+- when `sourceType = 'sandbox_compute_correction'`: `sandbox_execution_id IS NOT NULL` (the correction row references the original by `sandbox_execution_id`; the other sandbox columns may be null or carry delta values).
 
 ### 12.3 New columns on `llm_requests` (nullable except for sandbox rows via CHECK)
 
@@ -539,7 +541,7 @@ This is encoded in the harvest cost-row writer (§12.4) — it always writes a r
 
 ### 13.4 Visibility posture per state
 
-Customer-facing run trace surfaces only user-visible states. Internal-only states (`harvest_failed`, `artefact_upload_failed`) surface as a generic "execution pending / reconciling" to the customer while the internal reconciliation runs — once reconciliation succeeds, the customer sees the harvested output retroactively (terminal becomes `completed`). If reconciliation also fails after retries, the run surfaces a typed failure (`sandbox_harvest_failed_permanent`, a derived state, not a `sandbox_executions.status` value) and an operator audit event fires.
+Customer-facing run trace surfaces only user-visible states. Internal-only states (`harvest_failed`, `artefact_upload_failed`) surface as a generic "execution pending / reconciling" to the customer while the internal reconciliation runs — once reconciliation succeeds, the customer sees the harvested output retroactively (terminal becomes `completed`). If reconciliation also fails after retries, the run surfaces a typed failure using the existing `FailureReason.sandbox_harvest_failed` value with `permanent: true` in the structured detail (no new `FailureReason` enum value is added; `sandbox_harvest_failed_permanent` is purely a display-label / log-tag, not a status or `FailureReason`). An operator audit event fires.
 
 ### 13.5 Audit posture per state
 
@@ -568,7 +570,7 @@ A unique-by-sequence index `(sandbox_execution_id, sequence)` provides ordered i
 | `sandbox_input_rejected` | Preflight rejected (over-size, MIME mismatch, etc.). Fired on the calling run's failure trace; **NOT** in `sandbox_telemetry_events` because no execution row exists (see §9.6). Listed here for completeness. | error | n/a (no sandbox row) |
 | `sandbox_start` | Sandbox successfully started, `pending → running` transition. | info | `{ ceilings, network_policy, alias_count }` |
 | `sandbox_start_failed` | Start API call failed; `pending → provider_unavailable`. | error | `{ reason, providerErrorCode? }` |
-| `sandbox_terminal` | Sandbox terminated (any reason). | info | `{ terminalState, wallClockMs, vcpuSeconds, providerReportedCostCents, harvestStepReached: 0..12 }` — `harvestStepReached` lets the minimum-events gate decide which phase applies (§14.5) |
+| `sandbox_terminal` | Sandbox terminated (any reason). The first `sandbox_terminal` per execution is the canonical terminal (`isCanonical: true`); subsequent ones written by the reconciliation recovery path (§13.1) are flagged `isCanonical: false` with `reconciliationAttempt: N`. | info | `{ terminalState, wallClockMs, vcpuSeconds, providerReportedCostCents, harvestStepReached: 0..12, isCanonical: boolean, reconciliationAttempt?: number }` — `harvestStepReached` lets the minimum-events gate decide which phase applies (§14.5) |
 | `sandbox_timeout` | Wall-clock ceiling tripped. | warn | `{ ceilingMs, observedMs, enforcedBy: 'provider' | 'worker' }` |
 | `sandbox_cost_ceiling_hit` | Cost ceiling tripped. | warn | `{ ceilingCents, observedCents, enforcedBy }` |
 | `sandbox_crashed` | Sandbox process exited non-zero or died. | warn | `{ exitCode?, diagnosticHash }` |
@@ -582,7 +584,7 @@ A unique-by-sequence index `(sandbox_execution_id, sequence)` provides ordered i
 | `credential_leak_attempted` | Defense-in-depth: harvest enumerator saw `/workspace/secrets/` content. | error | `{ filename }` (filename only — value never logged) |
 | `egress_audited` | Egress decision recorded. **Only fires when `network` policy is non-`none`.** | info | `{ destinationClass, destinationHost, destinationPort, credentialContext, outcome }` (also denormalised to `sandbox_egress_audit` for query-friendly access) |
 | `provider_diagnostic` | Transient provider-call event — retry, slow-start, rate-limit, ambiguous-terminal. May fire multiple times per execution. Always pre-terminal. | warn | `{ phase: 'start' | 'mid_execution' | 'terminal' | 'harvest', subKind: 'retry' | 'slow_start' | 'rate_limit' | 'ambiguous_terminal', backoffAttempt }` |
-| `provider_unavailable` | Terminal provider state — emitted exactly once per execution when the row reaches a `provider_unavailable` terminal status. Pairs with `sandbox_terminal`. | error | `{ phase: 'start' | 'mid_execution' | 'terminal' | 'harvest' }` |
+| `provider_unavailable` | Terminal provider state — emitted exactly once per execution when the row reaches a `provider_unavailable` terminal status. Pairs with `sandbox_start_failed` when the failure was pre-start (`phase: 'start'`); pairs with `sandbox_terminal` when the failure was post-start (any other `phase`). | error | `{ phase: 'start' | 'mid_execution' | 'terminal' | 'harvest' }` |
 | `runtime_install_requested` | Reserved for future runtime-install path (§9.5). V1 events never fire — `allowRuntimeInstall` is forced `false`. | info | `{ packageList, taskClass }` |
 | `runtime_install_denied` | Reserved. V1 events never fire (because no install is requested). | warn | `{ reason }` |
 | `runtime_install_completed` | Reserved. V1 events never fire. | info | `{ packageList, durationMs }` |
@@ -613,7 +615,7 @@ Per brief §2.12, every sandbox execution MUST emit minimum-events scoped to the
 - **Post-start without output-read** (mid-execution `provider_unavailable` where the wrapper declared the sandbox terminated before harvest read `output.json`, OR `harvest_failed` at harvest step 2 (output read) — see §8.4): MUST emit `sandbox_start` and `sandbox_terminal`. Output-validation events are NOT required because the output was never read.
 - **Post-start with output-read** (all other post-start terminals — `completed`, `timed_out`, `cost_ceiling_hit`, `crashed`, `output_validation_failed`, `harvest_failed` past step 2, `artefact_upload_failed`): MUST emit `sandbox_start`, `sandbox_terminal`, AND one of (`output_validated` | `output_validation_failed`). The harvest pipeline (§8.4) is the only producer of the output-validation pair; the row state machine in §13.1 cannot reach these terminals without harvest having reached at least step 3.
 
-Spec B's harvest pipeline + start path are structured so that an execution that ends without the events required for its phase is impossible. The `verify-sandbox-minimum-events` CI grep gate (§25) enforces this by checking each terminal-status writer against the matching event-writer set for its phase (the gate uses the `sandbox_executions.status` value plus the `sandbox_terminal` event payload's `harvest_step_reached` field to decide which phase applies).
+Spec B's harvest pipeline + start path are structured so that an execution that ends without the events required for its phase is impossible. The `verify-sandbox-minimum-events` CI grep gate (§25) enforces this by checking each terminal-status writer against the matching event-writer set for its phase (the gate uses the `sandbox_executions.status` value plus the `sandbox_terminal` event payload's `harvestStepReached` field to decide which phase applies).
 
 ---
 
@@ -690,7 +692,7 @@ A new wrapper module `server/lib/withSandboxProvider.ts` mirrors `withBackoff`'s
 
 ### 16.4 Slow-start posture
 
-If provider start exceeds a soft threshold (default 30 s — pinned in `policy.providerThresholds.startTimeoutMs`), the wrapper does NOT terminate. It logs `sandbox.start.slow` and continues to wait until the hard wall-clock-ceiling + buffer. After the hard limit, `provider_unavailable` fires.
+If provider start exceeds a soft threshold (default 30 s — pinned in `policy.providerThresholds.startTimeoutMs`), the wrapper does NOT terminate. It emits a `provider_diagnostic` event with `phase: 'start'` and `subKind: 'slow_start'` (DB-side per §14.2 + log-side `sandbox.provider_diagnostic`) and continues to wait until the hard wall-clock-ceiling + buffer. After the hard limit, `provider_unavailable` (terminal) fires.
 
 This avoids the failure mode where transient provider warm-up cycles cancel sandboxes that would have started successfully a few seconds later.
 
@@ -1134,19 +1136,24 @@ Spec B's chunking pre-plan (for the architect's reference, not a final plan):
 
 ```
 C1 ──┬──> C2 ──> C5 ──> C6 ──> C7 ──> C11 ──┐
-     │                  │                   │
-     │                  └──> C8 ──> C9 ─────┤
-     │                               │     │
-     ├──> C3 ──> C7                  └─> C13 ─> C14
+     │                  │           ^       │
+     │                  └──> C8 ────┤───────┤
+     │                       │      │       │
+     │                       └──> C9 ───────┤
+     │                               │      │
+     ├──> C3 ──> C7                  └─> C13 ──> C14
      │                                    ^
      ├──> C4 ──> C5                       │
      │           │                        │
-     │           └──> C10 ──> C13          │
+     │           └──> C10 ──┬──> C13      │
+     │                      └──> C11      │
      │                                    │
      └──> C12 ─────────────────────────────┘
 ```
 
-Note the `C12 → C13` edge: the `iee_dev` adapter rewiring cannot land in CI before the template Dockerfile + CI publish pipeline exists, because the new dispatch path resolves `template_version` against `CURRENT_VERSION` (§15.2) and refuses `latest` (§15.3). C12 itself depends only on C1 (the schema must be in place), so C12 can run in parallel with most of the C2–C11 fanout — but the gating edge into C13 is mandatory.
+Notes:
+- `C12 → C13`: the `iee_dev` adapter rewiring cannot land in CI before the template Dockerfile + CI publish pipeline exists, because the new dispatch path resolves `template_version` against `CURRENT_VERSION` (§15.2) and refuses `latest` (§15.3). C12 itself depends only on C1 (the schema must be in place), so C12 can run in parallel with most of the C2–C11 fanout — but the gating edge into C13 is mandatory.
+- `C8/C9/C10 → C11`: the `sandboxCeilingMonitorJob` inside C11 calls the provider's terminate API through the `withSandboxProvider` wrapper (C8) and the provider implementations (C9 + C10). C11's other jobs only need C7's harvest API, but the monitor's provider-terminate call path means C11 as a whole cannot land before C8/C9/C10 are in.
 
 No backward dependencies. C14 (CI gates + doc-sync) closes the build. C12 (templates + CI publish) is parallelisable with most chunks but must complete before C13's adapter rewiring goes live in CI.
 
@@ -1211,10 +1218,10 @@ Unique-constraint violations map to HTTP / failure surfaces:
 
 ### 24.4 Terminal event guarantee
 
-Per the harvest pipeline (§8.4), every `sandbox_executions` row in a terminal state has exactly one matching `sandbox_terminal` telemetry event (or `sandbox_start_failed` for the pre-start failure path). Post-terminal prohibition: no further events with the same `sandbox_execution_id` after the terminal event EXCEPT:
+Per the harvest pipeline (§8.4), every `sandbox_executions` row in a terminal state has exactly one CANONICAL terminal telemetry event: a `sandbox_terminal` event for post-start executions, or a `sandbox_start_failed` event for the pre-start failure path. The canonical terminal event is the first one written for a given `sandbox_execution_id`. Post-canonical-terminal prohibition: no further events with the same `sandbox_execution_id` after the canonical terminal EXCEPT:
 
 - Cost-correction events from §12.4 (these are explicitly post-terminal corrections; allowed because they're additive to the audit trail, not contradictory).
-- Reconciliation events from the harvest_failed / artefact_upload_failed recovery path (§13.1 reconciliation-recoverable exception). When the row re-enters `harvesting`, the recovery attempt emits its own `harvest_started` + `harvest_failed|artefact_uploaded|sandbox_terminal` events with `reconciliation_attempt: N` in the payload. The first `sandbox_terminal` event remains the canonical terminal; subsequent ones are recovery events flagged accordingly.
+- Reconciliation events from the harvest_failed / artefact_upload_failed recovery path (§13.1 reconciliation-recoverable exception). When the row re-enters `harvesting`, the recovery attempt emits its own `harvest_started` + `harvest_failed|artefact_uploaded|sandbox_terminal` events with `reconciliationAttempt: N` and `isCanonical: false` in the payload. The first `sandbox_terminal` event with `isCanonical: true` remains the only canonical terminal; subsequent ones are explicitly non-canonical recovery events that the "exactly one canonical terminal" rule does NOT cover.
 - Late-arriving provider terminate events (e.g., e2b webhook fires after our wrapper already declared `provider_unavailable`): the late event is recorded with a `late_arriving: true` flag in `payload_json` and the canonical state is not changed.
 - `provider_diagnostic` events are pre-terminal by definition (§14.2) and do not violate this rule; they cannot fire after the terminal event for the same `sandbox_execution_id`.
 
@@ -1451,7 +1458,7 @@ Each invariant from `tasks/builds/sandbox-isolation/brief.md § 6` cross-referen
 - Template CI defines vulnerability scanning posture → §15.4. ✅
 - `localDockerSandbox` template parity contract → §8.2.2. ✅
 - No broad `artefact` / `artifact` naming migration → §8.3, §19.5 (existing `run_artifacts` table unchanged). ✅
-- Sandbox telemetry / logs / artefacts / cost RLS-enforced → §14.4, §21. ✅
+- Sandbox telemetry / artefacts / cost / egress audit RLS-enforced → §14.4, §21. ✅ (Logs: the per-tenant RLS / scoping requirement is **contractually mandated** — see §8.4 step 9 — but the concrete log-sink schema is a build-time decision tracked in §27 / `SANDBOX-DEF-LOG-SCHEMA`. Whichever sink is chosen MUST honour §14.4 / §21 scoping rules; the build PR updates the inventory and manifest in the same change.)
 - Egress audit logging when network is allowed → §9.1, §14.2, §20.6. ✅
 - Ledger rows retained / anonymised / correction-reversed on run deletion → §17.4. ✅
 
@@ -1493,10 +1500,10 @@ No load-bearing claim is unbacked.
 |---|---|
 | Section 0 — verify deferred items | n/a (greenfield) ✅ |
 | Section 1 — new primitives have "why not reuse" justifications | ✅ (§6 + §8.1 + §14.1) |
-| Section 2 — file inventory has every new file / column / migration | ✅ (§19) |
+| Section 2 — file inventory has every new file / column / migration | ✅ (§19) — provisional for the log sink (build-time choice tracked in §27 / `SANDBOX-DEF-LOG-SCHEMA`; whichever option lands, the build PR updates §19/§21 in the same commit) |
 | Section 3 — every contract has an example | ✅ (§20) |
 | Section 3 — source-of-truth precedence declared | ✅ (§7.3, §20.1, §20.2, §20.7) |
-| Section 4 — RLS / manifest / guard / principal-scope for each new tenant table | ✅ (§21) |
+| Section 4 — RLS / manifest / guard / principal-scope for each new tenant table | ✅ (§21) — log sink: the RLS / scoping requirement is contractually mandated in §8.4 step 9 / §29.2 but the concrete table or layer is a build-time decision (`SANDBOX-DEF-LOG-SCHEMA`); the build PR adds the entry to §21 in the same commit |
 | Section 5 — execution model picked explicitly per behaviour | ✅ (§22) |
 | Section 6 — phase dependency graph clean | ✅ (§23.1) |
 | Section 7 — Deferred Items section exists | ✅ (§27) |

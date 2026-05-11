@@ -49,4 +49,4 @@
 
 Files modified: `tasks/builds/sandbox-isolation/spec.md`, `tasks/todo.md`.
 
-Spec commit after iteration: (will be filled in after Step 8b).
+Spec commit after iteration: `b25d80e2`.
