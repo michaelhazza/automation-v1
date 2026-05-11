@@ -5,6 +5,7 @@ import type {
   CapsResponse, SpendInsights, SpendTrends,
   ConnectionsQuery, ConnectionsResponse,
   ConnectionUsage, ConnectionTestResponse,
+  AiSubscriptionConnection,
 } from '../../../shared/types/govern.js';
 
 function qs(params: Record<string, unknown>): string {
@@ -66,3 +67,57 @@ export const disconnectConnection = (
   id: string,
 ): Promise<{ success: true; alreadyDisconnected: boolean; kind: 'integration' | 'mcp' }> =>
   api.post(`/api/connections/${encodeURIComponent(id)}/disconnect`).then(r => r.data);
+
+// ── AI Subscription Connections (operator_session) ─────────────────────────
+// Spec: tasks/builds/operator-session-identity/spec.md §Chunk 7
+
+export const listAiSubscriptions = (subaccountId: string): Promise<AiSubscriptionConnection[]> =>
+  api.get(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections`)
+    .then(r => r.data as AiSubscriptionConnection[]);
+
+export const getAiSubscription = (subaccountId: string, id: string): Promise<AiSubscriptionConnection> =>
+  api.get(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}`)
+    .then(r => r.data as AiSubscriptionConnection);
+
+export const connectAiSubscription = (
+  subaccountId: string,
+  payload: {
+    provider: string;
+    label: string;
+    disclosureAcceptance?: { disclosureVersion: number; consentText: string; acceptanceTier: string };
+  },
+): Promise<AiSubscriptionConnection> =>
+  api.post(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections`, payload)
+    .then(r => r.data as AiSubscriptionConnection);
+
+export const updateAiSubscriptionLabel = (subaccountId: string, id: string, label: string): Promise<AiSubscriptionConnection> =>
+  api.patch(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}`, { label })
+    .then(r => r.data as AiSubscriptionConnection);
+
+export const makeAiSubscriptionDefault = (subaccountId: string, id: string): Promise<unknown> =>
+  api.post(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}/make-default`)
+    .then(r => r.data);
+
+export const editAiSubscriptionAvailability = (
+  subaccountId: string,
+  id: string,
+  payload: { availabilityScope: 'all_agents' | 'specific_agents'; allowedAgentIds: string[] | null },
+): Promise<unknown> =>
+  api.patch(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}/allow-agent-use`, payload)
+    .then(r => r.data);
+
+export const disconnectAiSubscription = (subaccountId: string, id: string): Promise<unknown> =>
+  api.delete(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}`)
+    .then(r => r.data);
+
+export const reacceptConsent = (
+  subaccountId: string,
+  id: string,
+  payload: { disclosureAcceptance: { disclosureVersion: number; consentText: string; acceptanceTier: string } },
+): Promise<unknown> =>
+  api.post(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}/consent`, payload)
+    .then(r => r.data);
+
+export const triggerReauth = (subaccountId: string, id: string): Promise<unknown> =>
+  api.post(`/api/subaccounts/${encodeURIComponent(subaccountId)}/operator-session-connections/${encodeURIComponent(id)}/reauth`)
+    .then(r => r.data);
