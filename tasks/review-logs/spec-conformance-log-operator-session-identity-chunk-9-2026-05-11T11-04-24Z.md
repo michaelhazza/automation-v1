@@ -168,4 +168,4 @@ NON_CONFORMANT — 2 directional gaps must be addressed by the main session befo
 
 Operator may also reasonably elect to ACCEPT both gaps as V1 deferrals (matching the disposition used for Chunk 8's REQ #5a master toggle / Edit label), in which case Chunk 9 is logically complete and `pr-reviewer` can proceed against the existing branch state. The deferrals stay open as the durable record of the deferred capabilities.
 
-**Commit at finish:** filled by auto-commit step below.
+**Commit at finish:** `4134db29`
