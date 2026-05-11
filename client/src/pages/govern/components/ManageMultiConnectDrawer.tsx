@@ -306,7 +306,7 @@ export function ManageMultiConnectDrawer({ app, connections, onClose, onAddAnoth
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100">
           <p className="text-[11.5px] text-slate-400 leading-relaxed mb-3">
-            To rotate credentials, disconnect and reconnect. OAuth connections use the provider sign-in; there is no credential to paste inline.
+            To rotate credentials, disconnect and reconnect.
           </p>
           <button
             type="button"

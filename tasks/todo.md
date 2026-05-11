@@ -4129,3 +4129,25 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
 **Recommendation:** before wiring downstream agent dispatch, extend the prune window to match the provider's maximum retry horizon (e.g. 96 hours, matching the Stripe webhook TTL used elsewhere in this codebase per `architecture.md`).
 
 **Suggested classification:** P2 (correctness gap once downstream handlers ship).
+
+---
+
+## Deferred from spec-conformance review — operator-session-identity (2026-05-11)
+
+**Captured:** 2026-05-11T10:31:11Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-8-2026-05-11T10-31-11Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 8
+
+- [ ] REQ #5a — `ManageMultiConnectDrawer` is missing the per-connection "Edit label" action named by the plan.
+  - Spec section: plan §Chunk 8, "Multi-connect Manage drawer (§5.4): ... per-connection Test / Edit label / Disconnect actions"
+  - Gap: the drawer's 3-dot menu currently exposes only Test and Disconnect; there is no "Edit label" option, and `governApi.ts` does not appear to have an `updateConnectionLabel` (or equivalent) endpoint.
+  - Suggested approach: confirm whether label editing is in scope for Chunk 8 or deferred to a later chunk; if in scope, decide whether to add a `PATCH /connections/:id` label-only route (server-side) + the corresponding `governApi` call, then surface the action in the drawer with an inline edit affordance.
+- [ ] REQ #5b — `AppCard` "Manage" CTA opens `ManageMultiConnectDrawer` for any connection count (≥1) rather than only for ≥2.
+  - Spec section: plan §Chunk 8, "When a card has ≥2 connections (same app), the 'Manage' CTA opens this drawer instead of jumping to the existing single-connection detail."
+  - Gap: AppIntegrationsTab's `AppCard.onManage` always opens the drawer, even when the app has exactly one connection. The plan calls for a single-connection card to route to "the existing single-connection detail" instead.
+  - Suggested approach: clarify which "existing single-connection detail" the plan references (it likely belongs to Chunk 10's `ConnectionsPage.tsx` wiring) and decide whether Chunk 8 should branch on `connections.length` now or defer the branch to Chunk 10.
+- [ ] REQ #9 — `ManageMultiConnectDrawer` does not use the shared `DisconnectConfirmDialog`; it inlines its own confirm without the type-to-confirm gate.
+  - Spec section: plan §Chunk 8 ("Files to create" lists `DisconnectConfirmDialog.tsx` as shared and used by Chunks 7/8/9); spec §17.8 ("Disconnect confirmation: type-to-confirm gate; disabled CTA until input matches label").
+  - Gap: the drawer ships its own `DisconnectConfirmInline` (no type-to-confirm, no usage impact summary) instead of the shared dialog. Additionally, the pre-existing `DisconnectConfirmDialog.tsx` (from consolidation-govern) gates on the literal string `"disconnect"` rather than on the connection label as §17.8 specifies — a separate gap that affects all three call sites (Chunks 7, 8, 9).
+  - Suggested approach: (a) switch the drawer to call the shared `DisconnectConfirmDialog`; (b) decide whether to update `DisconnectConfirmDialog` to gate on the connection label (per §17.8) or to accept the existing literal-"disconnect" gate as the V1 contract and amend the spec — this is a cross-chunk design decision touching Chunks 7, 8, 9.
