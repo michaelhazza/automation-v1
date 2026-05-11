@@ -68,7 +68,7 @@
 | 2 | C1b — 5 Drizzle schemas + 3 SQL migrations + RLS manifest | done | 1 | `951e62cb` | Migrations 0321/0322/0323; sandbox_logs MAX_LOG_LINE_BYTES intentionally deferred from DB CHECK to service-layer truncation (write-amplification avoidance); flag for spec-conformance |
 | 3 | C2 — FailureReason enum extension | done | 1 | (next) | Plan said `shared/iee/failure.ts`; actual enum lives in `shared/iee/failureReason.ts`. Builder routed to correct file. Plan-doc inaccuracy only — not a plan gap. |
 | 4 | C3 — llm_requests extension | done | 1 | (next) | Migration 0324. Two CHECK constraints extended (`llm_requests_attribution_ck` + `llm_requests_execution_phase_ck` — second one was a consequential fix because sandbox rows need execution_phase=NULL). Approved scope expansion: `shared/types/systemPnl.ts` 1-line `InFlightSourceType` superset extension to keep router's `ctx.sourceType: SourceType` assignment typecheck-clean. |
-| 5 | C4 — Provider resolver + inlineSandbox | pending | — | — | — |
+| 5 | C4 — Provider resolver + inlineSandbox | done | 1 | (next) | Registration-seam pattern (no static import of e2bSandbox/localDocker). 22 test cases cover NODE_ENV × SANDBOX_PROVIDER × SANDBOX_ALLOW_INLINE matrix. Cleaned up 6 stale gitignored `.js` artifacts in `shared/iee/` (pre-April-30, no longer in sync with current `.ts` sources) — unblocks `failure('sandbox_*', ...)` in subsequent chunks' tests. |
 | 6 | C12 — Template + CI publish + version parser | pending | — | — | — |
 | 7 | C5 — SandboxExecutionService skeleton + pure helpers | pending | — | — | — |
 | 8 | C6 — Output validation + redaction wiring | pending | — | — | — |
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C3 (commit pending)
-- head: 4056f455 (C2)
+- last_chunk_committed: C4 (commit pending)
+- head: 58860bcb (C3)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T04:55:00Z
+- captured_at: 2026-05-11T05:10:00Z
 
 ---
 
