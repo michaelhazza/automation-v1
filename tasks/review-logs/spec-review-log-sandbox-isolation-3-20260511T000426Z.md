@@ -40,4 +40,4 @@
 
 Files modified: `tasks/builds/sandbox-isolation/spec.md` only.
 
-Spec commit after iteration: (will be filled in after Step 8b).
+Spec commit after iteration: `8a627775`.
