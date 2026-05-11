@@ -77,7 +77,7 @@
 | 11 | C9 — e2bSandbox provider | done | 1 | (next) | e2bSandbox + e2bSandboxPure (4 helpers: terminal-signal mapper, latest-version guard, metadata-tag builder, credentialAliasPath). 29 pure tests. Module-init registerSandboxProvider('e2b', ...) per F1 fix. e2b SDK is interface-stubbed (real install post-merge once account provisioned); credential value-threading stubbed for C13. SANDBOX-DEF-EGRESS-MECH decision: DEFERRED to actual SDK install (audit-row schema unaffected) — recorded in tasks/todo.md. |
 | 12 | C10 — localDockerSandbox provider | done | 1 | (next) | localDockerSandbox + localDockerSandboxPure (dockerExitCodeToTerminal mapper + assertNotLatestLocalTemplateVersion guard). 24 pure tests. docker run --rm --network=none --read-only --stop-timeout via child_process.spawn with SIGTERM forwarding. Zero-cost rows per spec §12.5. Module-init registerSandboxProvider('local_docker', ...). |
 | 13 | C11a — Execution-scoped pg-boss jobs | done | 1 | (next) | 4 jobs (harvestReconciliation, ceilingMonitor, wallClockKill, artefactPurge) + 2 pure modules + 2 tests (44 pure-test cases) + queueService.ts and jobConfig.ts wiring. Approved scope: jobConfig.ts inclusion (pg-boss job config registry). Reconciliation cron 5min; ceiling monitor singletonKey = sandbox_execution_id. |
-| 14 | C11b — Retention-scoped pg-boss jobs | pending | — | — | — |
+| 14 | C11b — Retention-scoped pg-boss jobs | done | 1 | (next) | 3 prune jobs (telemetry 90d, logs 90d-AND-soft-deleted, egress 180d) + sandboxRetentionPure (UTC-deterministic cutoff helper, 11 pure tests). Daily cron at distinct times (02:00/02:30/03:00 UTC). withAdminConnection + per-org withOrgTx pattern (mirrors fastPathDecisionsPruneJob). Logs prune deletes both age-expired AND `is_active=false` per spec §17.3. |
 | 15 | C13 — iee_dev adapter rewiring | pending | — | — | — |
 | 16 | C14 — CI gates + doc-sync | pending | — | — | — |
 
@@ -90,11 +90,11 @@ Builder C1a noted two pre-existing typecheck errors unrelated to sandbox-isolati
 Confirmed pre-existing on this branch via stash round-trip. Tracked here for reviewer context (not introduced by this build).
 
 ## Environment snapshot
-- last_chunk_committed: C11a (commit pending)
-- head: 26a87f7a (C10)
+- last_chunk_committed: C11b (commit pending)
+- head: 3139de24 (C11a)
 - package_lock_md5: 237aa0e95b01b79c265c819bb3ba6170
 - migration_count: 381
-- captured_at: 2026-05-11T08:00:00Z
+- captured_at: 2026-05-11T08:25:00Z
 
 ---
 

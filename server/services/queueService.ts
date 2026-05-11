@@ -12,7 +12,12 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 import { setSystemWorkerContext } from './connectionTokenService.js';
-import { SANDBOX_HARVEST_RECONCILIATION_JOB } from '../lib/sandboxJobNames.js';
+import {
+  SANDBOX_HARVEST_RECONCILIATION_JOB,
+  SANDBOX_TELEMETRY_PRUNE_JOB,
+  SANDBOX_LOGS_PRUNE_JOB,
+  SANDBOX_EGRESS_AUDIT_PRUNE_JOB,
+} from '../lib/sandboxJobNames.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -1575,6 +1580,24 @@ export const queueService = {
         const { registerSandboxArtefactPurgeJob } = await import('../jobs/sandboxArtefactPurgeJob.js');
         await registerSandboxArtefactPurgeJob(boss as any);
         // No schedule — event-driven, enqueued on run soft-delete.
+      }
+
+      // Spec B — Sandbox Isolation: retention-scoped pg-boss jobs (C11b)
+      // Distinct cron times to avoid contention (telemetry 02:00, logs 02:30, egress 03:00 UTC).
+      {
+        const { registerSandboxTelemetryPruneJob } = await import('../jobs/sandboxTelemetryPruneJob.js');
+        await registerSandboxTelemetryPruneJob(boss as any);
+        await boss.schedule(SANDBOX_TELEMETRY_PRUNE_JOB, '0 2 * * *', {}); // daily 02:00 UTC
+      }
+      {
+        const { registerSandboxLogsPruneJob } = await import('../jobs/sandboxLogsPruneJob.js');
+        await registerSandboxLogsPruneJob(boss as any);
+        await boss.schedule(SANDBOX_LOGS_PRUNE_JOB, '30 2 * * *', {}); // daily 02:30 UTC
+      }
+      {
+        const { registerSandboxEgressAuditPruneJob } = await import('../jobs/sandboxEgressAuditPruneJob.js');
+        await registerSandboxEgressAuditPruneJob(boss as any);
+        await boss.schedule(SANDBOX_EGRESS_AUDIT_PRUNE_JOB, '0 3 * * *', {}); // daily 03:00 UTC
       }
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
