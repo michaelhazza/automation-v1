@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/phase-1-showcase-mvps/spec.md
-active_plan: tasks/builds/phase-1-showcase-mvps/plan.md
-build_slug: phase-1-showcase-mvps
-branch: feat/phase-1-showcase-mvps
-status: MERGE_READY
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: NONE
 last_updated: 2026-05-11
-last_merged_pr: #279
-last_merged_slug: synthetos-foundation-refactor
-last_merged_branch: claude/openclaw-worker-mode-VnjQT
-last_merged_at: 2026-05-09T23:39:33Z
-last_merged_commit: 53dabb69
+last_merged_pr: #286
+last_merged_slug: operator-session-identity
+last_merged_branch: claude/evolve-session-identity-brief-17LO4
+last_merged_at: 2026-05-11T23:05:49Z
+last_merged_commit: 62497257
 -->
 
 # Current Focus
@@ -24,13 +24,23 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/phase-1-showcase-mvps/spec.md`
-**Active plan:** `tasks/builds/phase-1-showcase-mvps/plan.md`
-**Active build slug:** phase-1-showcase-mvps
-**Branch:** feat/phase-1-showcase-mvps
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED — Round 1 triaged 6 findings (F1/F2 false positives auto-rejected; F3 missing ORG_PERMISSIONS keys + ALL_PERMISSIONS entries added to `server/lib/permissions.ts`; F4 hardcoded 7d signed-URL expiry replaced with `deriveSignedUrlExpiry()` call in `server/routes/runArtifacts.ts`; R1 judge score display fixed in `SupportEvalsPage.tsx` — was calling `pct()` on 0-5 scale producing 400%+ values; R2 dead UI wiring closed — `RunTraceArtifactsPanel`, `SupportEventRenderers`, `MacroFailureRenderers` all imported and registered in `RunTracePage.tsx` / `RunTraceEventRenderer.tsx`); Round 2 APPROVED WITH 1 SMALL FOLLOW-UP (N1 phase1.* filter posture deferred to `tasks/todo.md` as PHASE1-N1 — non-blocking). Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). PR #283. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`. **Next:** CI auto-fix loop if needed, then auto-merge. 9 spec-conformance medium/low items + 4 pr-reviewer Strongs + 7 Non-Blockings + 1 architectural gap (support-agent-run job producer) + 1 PHASE1-N1 deferred to post-merge backlog in `tasks/todo.md`.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **NONE** — no active build.
 
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Pointer was overwritten by the active `phase-1-showcase-mvps` work; recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+**Just merged:** PR #286 — `operator-session-identity` (squash-commit `62497257`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
+
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) was previously recorded complete with handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+
+---
+
+**Just merged:** PR #287 — `sandbox-isolation` (squash-commit `9b151741`, 2026-05-11). Spec B sibling: SandboxExecutionService primitive (V1) for untrusted Tier 4 code execution. Five RLS-protected tables (sandbox_executions, sandbox_artefacts, sandbox_telemetry_events, sandbox_egress_audit, sandbox_logs) across migrations 0321-0324, plus 12 pg-boss jobs (harvest-reconciliation, ceiling-monitor, wall-clock-kill, artefact-purge, telemetry/logs/egress-audit prune), 3 sandbox providers (e2b, localDocker, inline), template-version coherence gate, and ADR-0010. Merged onto main during operator-session-identity Phase 3 review pass — drove migration renumber from 0321/0322 → 0325/0326 on operator-session-identity branch.
+
+**Just merged:** PR #284 — `pre-test-hardening` (squash-commit `37067df9`, 2026-05-11T01:28:16Z). 14-item launch-blocker security hardening sprint shipped: W1-W3 webhook auth + per-org Teamwork URL token + DB-backed replay nonces; T1-T3 support read subaccount scoping + cross-org scope-ID rejection + taskService caller-supplied tx contract (17 caller sites); S1-S2 four missing support-draft preflight checks + agent-principal overrideCollision guard; V1-V2 connection-status enum + CHECK constraint + advisory-lock knowledge override race fix; O1-O5 working-time-rollup compact + migration 0240 phased-swap runbook + reseed prod-DB guards (allowlist NODE_ENV=development) + branch-protection requirement. 3 migrations 0318/0319/0320 (renumbered post-S2 from 0313-0315 to clear PR #281/283 collision). Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer 2 rounds APPROVED → dual-reviewer Codex APPROVED (4 iterations) → adversarial-reviewer HOLES_FOUND (PTH-ADV-1 closed) → S2 merge → chatgpt-pr-review 8 rounds APPROVED (13 fixes + 2 operator-approved spec deviations: createTask side-effect split + reseed allowlist) → CI auto-fix 3 iterations. CI ALL GREEN at merge time.
+
+**Just merged:** PR #283 — `phase-1-showcase-mvps` (squash-commit `f3dac9f3`, 2026-05-10T21:54:20Z). Phase 1 showcase MVPs build. Phase 3 (FINALISATION) complete. S2 branch-sync: clean (no conflicts). G4 regression guard: PASSED. chatgpt-pr-review: 2 rounds APPROVED. Doc-sync sweep: 3 docs updated (`architecture.md` permissions table + key files; `docs/capabilities.md` + `docs/integration-reference.md` support.classify_ticket skill added). KNOWLEDGE.md +3 patterns (pct() wrong-scale, dead UI wiring, pure-helper encapsulates policy). chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-feat-phase-1-showcase-mvps-2026-05-10T21-07-36Z.md`.
 
 **Just merged:** PR #279 — `synthetos-foundation-refactor` (squash-commit `53dabb69`, 2026-05-09T23:39:33Z). SynthetOS Phase 1 foundation refactor — 6 primitives across 11 chunks: `controllerStyle` field on `agent_runs` (migration 0308), 138-row Risk Tier classification with `verify-risk-tier-assigned` CI gate, CredentialBrokerService facade with subaccount-scoped revoke + org-scoped injectIntoEnvironment (closes ADV-B), PolicyEnvelopeResolver with v1 JSONB snapshot on `agent_runs` (migration 0309), 14-member Run Trace virtual view across 7 ledger tables (`routing_path_chosen` deferred to Phase 3, documented in spec §11.0 as Accepted Implementation Deviation), `allowedEnvironments` Zod validator now `.min(1)`, naming glossary + awareness comments. Pipeline: spec-conformance → pr-reviewer (4 rounds APPROVED) → dual-reviewer (3 iterations, 10 Codex findings closed) → adversarial-reviewer → chatgpt-pr-review (3 rounds APPROVED — Round 1 closed F1 enum drift + F2 source vocab + F3 require_approval_at_tier reverted to 0..6 + F4 422-not-403 + F5 routing_path_chosen deferred + F6 Risk Tier rubric realigned + N1 nomenclature fix + N3 payload-shape pin; Round 2 closed all 8 in commit `1c58cc3c`; Round 3 closed S1+S2+N1 follow-ups in `7eb39776`). Phase 3: S2 branch-sync merged main commit `4e01e16f` cleanly; G4 regression guard PASSED; doc-sync sweep recorded; current-focus.md → MERGE_READY (`f4e18b61`); ready-to-merge label applied. CI auto-fix loop: 2 iterations (commit `a10d2f93` — `IF EXISTS` on 0307/0308/0309 down migrations for idempotency; commit `1633178e` — added `organisationId` to `IssuedCredential` and `and(eq(id), eq(organisationId))` filter on `injectIntoEnvironment`). All 6 CI checks GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-synthetos-foundation-refactor-2026-05-09T20-24-44Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-synthetos-foundation-refactor-2026-05-09T21-30-00Z.md`. Phase 3 handoff: `tasks/builds/synthetos-foundation-refactor/handoff.md`.
 
@@ -88,7 +98,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11 (PR #283 `phase-1-showcase-mvps` → MERGE_READY; Phase 3 finalisation complete)
+**Last updated:** 2026-05-11T23:05:49Z (PR #286 `operator-session-identity` MERGED to main; squash sha pending; finalisation-coordinator Step 12 in flight)
 
 ---
 

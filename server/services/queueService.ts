@@ -12,6 +12,12 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 import { setSystemWorkerContext } from './connectionTokenService.js';
+import {
+  SANDBOX_HARVEST_RECONCILIATION_JOB,
+  SANDBOX_TELEMETRY_PRUNE_JOB,
+  SANDBOX_LOGS_PRUNE_JOB,
+  SANDBOX_EGRESS_AUDIT_PRUNE_JOB,
+} from '../lib/sandboxJobNames.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -979,6 +985,19 @@ export const queueService = {
         }
       });
 
+      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly)
+      await (boss as any).work('maintenance:webhook-replay-nonce-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runWebhookReplayNoncePrune } = await import('../jobs/webhookReplayNoncePruneJob.js');
+          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:webhook-replay-nonce-prune', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1196,6 +1215,7 @@ export const queueService = {
       await boss.schedule('maintenance:iee-sessions-compact',       '0 5 * * *',   {});  // 5am daily
       await boss.schedule('maintenance:agent-observations-prune',   '30 5 * * *',  {});  // 5:30am daily
       await boss.schedule('maintenance:working-time-rollup-compact','0 6 1 * *',   {});  // 6am 1st of month
+      await boss.schedule('maintenance:webhook-replay-nonce-prune', '0 * * * *',   {});  // hourly
 
       // System Monitor — self-check (every 5 minutes)
       await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
@@ -1539,6 +1559,46 @@ export const queueService = {
         }
       });
       await boss.schedule('correction:pattern-detect', '0 5 * * *', {}); // 5am daily
+
+      // Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a)
+      {
+        const { registerSandboxHarvestReconciliationJob } = await import('../jobs/sandboxHarvestReconciliationJob.js');
+        await registerSandboxHarvestReconciliationJob(boss as any);
+        await boss.schedule(SANDBOX_HARVEST_RECONCILIATION_JOB, '*/5 * * * *', {}); // every 5 minutes
+      }
+      {
+        const { registerSandboxCeilingMonitorJob } = await import('../jobs/sandboxCeilingMonitorJob.js');
+        await registerSandboxCeilingMonitorJob(boss as any);
+        // No schedule — enqueued ad-hoc at sandbox start via boss.send with singletonKey.
+      }
+      {
+        const { registerSandboxWallClockKillJob } = await import('../jobs/sandboxWallClockKillJob.js');
+        await registerSandboxWallClockKillJob(boss as any);
+        // No schedule — one-shot, scheduled at sandbox start with startAfter = wallClockMs + buffer.
+      }
+      {
+        const { registerSandboxArtefactPurgeJob } = await import('../jobs/sandboxArtefactPurgeJob.js');
+        await registerSandboxArtefactPurgeJob(boss as any);
+        // No schedule — event-driven, enqueued on run soft-delete.
+      }
+
+      // Spec B — Sandbox Isolation: retention-scoped pg-boss jobs (C11b)
+      // Distinct cron times to avoid contention (telemetry 02:00, logs 02:30, egress 03:00 UTC).
+      {
+        const { registerSandboxTelemetryPruneJob } = await import('../jobs/sandboxTelemetryPruneJob.js');
+        await registerSandboxTelemetryPruneJob(boss as any);
+        await boss.schedule(SANDBOX_TELEMETRY_PRUNE_JOB, '0 2 * * *', {}); // daily 02:00 UTC
+      }
+      {
+        const { registerSandboxLogsPruneJob } = await import('../jobs/sandboxLogsPruneJob.js');
+        await registerSandboxLogsPruneJob(boss as any);
+        await boss.schedule(SANDBOX_LOGS_PRUNE_JOB, '30 2 * * *', {}); // daily 02:30 UTC
+      }
+      {
+        const { registerSandboxEgressAuditPruneJob } = await import('../jobs/sandboxEgressAuditPruneJob.js');
+        await registerSandboxEgressAuditPruneJob(boss as any);
+        await boss.schedule(SANDBOX_EGRESS_AUDIT_PRUNE_JOB, '0 3 * * *', {}); // daily 03:00 UTC
+      }
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {

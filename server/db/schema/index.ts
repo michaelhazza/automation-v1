@@ -313,3 +313,17 @@ export * from './runArtifacts.js';
 
 // Support Agent eval harness (migration 0315)
 export * from './supportEvalRuns.js';
+
+// Pre-Test Hardening W3 — persistent webhook replay nonces (migration 0318 — renumbered from 0313 post-S2)
+export * from './webhookReplayNonces.js';
+
+// Operator Session — consent ledger and events (migrations 0325-0326)
+export * from './operatorSessionConsents.js';
+export * from './operatorSessionConsentEvents.js';
+
+// Sandbox Isolation — five RLS-protected tables for untrusted Tier 4 code execution (migrations 0321–0323)
+export * from './sandboxExecutions.js';
+export * from './sandboxArtefacts.js';
+export * from './sandboxTelemetryEvents.js';
+export * from './sandboxEgressAudit.js';
+export * from './sandboxLogs.js';

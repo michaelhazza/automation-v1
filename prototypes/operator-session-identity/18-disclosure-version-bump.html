@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<!--
+  Screen 18: Disclosure version bump — Plus terms updated (Round 13)
+  Triggered when disclosure_version increments on an existing Plus-tier subscription.
+  The subscription is flagged unusable until the user re-accepts the updated terms.
+  Confirmation pattern: checkbox (consent already on file, this is a re-confirmation).
+  Primary action: "Accept and continue" (disabled until checkbox).
+  Escape path: "Disconnect this subscription".
+  Brief Section 4 mandate.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plus terms updated | ChatGPT Plus (Marketing) | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.wizard-wrap { max-width: 560px; margin: 0 auto; }
+
+/* Modal card */
+.modal-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+}
+
+/* Header */
+.modal-head {
+  padding: 20px 24px 18px;
+  border-bottom: 1px solid #fcd34d;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.modal-head-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: #fde68a;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.modal-head-text h2 {
+  font-size: 16px; font-weight: 700; color: #78350f; margin-bottom: 3px;
+}
+.modal-head-text p {
+  font-size: 13px; color: #92400e; line-height: 1.4; margin-top: 2px;
+}
+
+/* Sub-identity line */
+.sub-identity-line {
+  display: flex; align-items: center; gap: 8px;
+  margin: 18px 0 14px;
+  font-size: 13px; color: #475569;
+}
+
+/* Disclosure block (amber) */
+.disclosure-block {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  font-size: 13px; line-height: 1.6; color: #78350f;
+}
+.disclosure-block h4 {
+  font-size: 13px; font-weight: 700; color: #92400e;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.disclosure-block p { margin-bottom: 8px; }
+.disclosure-block p:last-child { margin-bottom: 0; }
+.disclosure-block ul { padding-left: 18px; margin: 8px 0; }
+.disclosure-block ul li { margin-bottom: 5px; }
+.disclosure-version-footer {
+  font-size: 10.5px; color: #a16207;
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid #fde68a;
+}
+
+/* Checkbox re-acknowledgement */
+.reack-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 14px 16px;
+  background: #fefce8; border: 1.5px solid #fef08a; border-radius: 8px;
+  margin-bottom: 16px; cursor: pointer;
+}
+.reack-row input[type="checkbox"] {
+  width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; cursor: pointer;
+}
+.reack-label {
+  font-size: 13px; color: #78350f; font-weight: 500; line-height: 1.5;
+  cursor: pointer;
+}
+
+/* Success banner */
+.success-banner {
+  display: none; align-items: flex-start; gap: 12px;
+  padding: 14px 16px;
+  background: #ecfdf5; border: 1.5px solid #a7f3d0; border-radius: 10px;
+  margin-top: 14px; font-size: 13px; color: #14532d; line-height: 1.5;
+}
+.success-banner.show { display: flex; }
+
+/* Card body + footer */
+.modal-body { padding: 22px 24px; }
+.modal-foot {
+  padding: 16px 24px;
+  border-top: 1px solid #fcd34d;
+  background: #fffbeb;
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Buttons */
+.btn-accept {
+  padding: 9px 22px; border-radius: 8px; border: none;
+  background: #d97706; color: white;
+  font-size: 13.5px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  transition: background 0.12s;
+}
+.btn-accept:not(:disabled):hover { background: #b45309; }
+.btn-accept:disabled {
+  background: #e2e8f0; color: #94a3b8; cursor: not-allowed;
+}
+.btn-disconnect-escape {
+  padding: 9px 18px; border-radius: 8px;
+  border: 1px solid #fca5a5; background: white;
+  font-size: 13px; font-weight: 500; color: #dc2626;
+  cursor: pointer; font-family: inherit;
+  transition: background 0.12s;
+  margin-right: auto;
+}
+.btn-disconnect-escape:hover { background: #fef2f2; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="01-connections-list.html" style="color:#64748b;text-decoration:none;">Connections</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Plus terms updated</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:11px;color:#64748b;background:#e0e7ff;padding:2px 8px;border-radius:12px;font-weight:600;">Org admin</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:6px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <div class="wizard-wrap">
+
+        <div class="modal-card" id="main-modal">
+          <!-- Header -->
+          <div class="modal-head">
+            <div class="modal-head-icon">&#9888;</div>
+            <div class="modal-head-text">
+              <h2>Plus terms have been updated</h2>
+              <p>We've updated the terms for Plus plans. Please review and re-accept to keep using this subscription.</p>
+            </div>
+          </div>
+
+          <div class="modal-body">
+            <!-- Subscription identity line -->
+            <div class="sub-identity-line">
+              <span style="font-size:22px;">&#129302;</span>
+              <div>
+                <div style="font-size:14px;font-weight:700;color:#0f172a;">ChatGPT Plus (Marketing)</div>
+                <div style="font-size:12px;color:#64748b;margin-top:2px;display:flex;align-items:center;gap:6px;">
+                  <span class="tier-badge tier-plus" style="font-size:10px;padding:1px 6px;">Plus</span>
+                  <span>OpenAI</span>
+                  <span>&#183;</span>
+                  <span>Owner: Marketing team</span>
+                </div>
+              </div>
+              <div style="margin-left:auto;">
+                <span class="usability-pill disabled-pill" style="font-size:11px;"><span class="dot"></span>Disabled</span>
+                <div style="font-size:10.5px;color:#94a3b8;margin-top:4px;text-align:right;">Needs new consent</div>
+              </div>
+            </div>
+
+            <!-- Updated disclosure text -->
+            <div class="disclosure-block">
+              <h4>
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                Updated risk disclosure (placeholder copy, pending Legal review)
+              </h4>
+              <p>
+                ChatGPT Plus is a personal consumer subscription not designed or approved by OpenAI for business automation use. Connecting a Plus AI Subscription to this platform may violate OpenAI's Terms of Service <span style="font-size:11px;color:#a16207;font-style:italic;">[Legal will add link]</span>.
+              </p>
+              <p>By continuing to use this subscription, you acknowledge the following risks:</p>
+              <ul>
+                <li>Your subscription may be rate-limited or suspended by OpenAI if automated usage is detected.</li>
+                <li>OpenAI may modify or revoke access to Plus accounts used for business automation at any time, with or without notice.</li>
+                <li>This platform accepts no liability for suspension, data loss, or service interruption resulting from use of a Plus AI Subscription for business automation.</li>
+                <li>Your organisation is solely responsible for compliance with OpenAI's usage policies.</li>
+              </ul>
+              <div class="disclosure-version-footer">Updated: 14 May 2026</div>
+            </div>
+
+            <!-- Checkbox re-acknowledgement -->
+            <label class="reack-row" for="ack-bump">
+              <input type="checkbox" id="ack-bump" onchange="onAckChange(this)">
+              <span class="reack-label">I accept the updated terms for using a personal plan with business automation.</span>
+            </label>
+
+            <!-- Success banner -->
+            <div class="success-banner" id="success-banner">
+              <span style="font-size:20px;flex-shrink:0;">&#10003;</span>
+              <div>
+                <strong style="display:block;margin-bottom:2px;">Acceptance recorded. ChatGPT Plus (Marketing) is active again.</strong>
+                Your updated consent has been saved. Agents can use this subscription on their next run.
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-foot">
+            <button class="btn-disconnect-escape" onclick="window.location='15-disconnect-confirm.html'">
+              Disconnect this subscription
+            </button>
+            <button class="btn-accept" id="btn-accept" disabled onclick="doAccept()">
+              Accept and continue
+            </button>
+          </div>
+        </div>
+
+        <!-- Footer audit line -->
+        <div style="margin-top:10px;text-align:center;font-size:10.5px;color:#94a3b8;">
+          Disclosure version: 2 (was 1) &nbsp;&#183;&nbsp; Updated 14 May 2026
+        </div>
+
+        <!-- Nav hint -->
+        <div style="margin-top:10px;text-align:right;font-size:11.5px;color:#94a3b8;">
+          &larr; <a href="01-connections-list.html" style="color:#6366f1;text-decoration:none;">Back to Connections</a>
+          &nbsp;&nbsp;
+          <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function onAckChange(checkbox) {
+  const btn = document.getElementById('btn-accept');
+  btn.disabled = !checkbox.checked;
+}
+
+function doAccept() {
+  document.getElementById('success-banner').classList.add('show');
+  document.getElementById('btn-accept').textContent = 'Done';
+  document.getElementById('btn-accept').onclick = function() { window.location.href = '01-connections-list.html'; };
+  document.querySelector('.btn-disconnect-escape').style.display = 'none';
+  document.querySelector('.reack-row').style.opacity = '0.5';
+  document.querySelector('.reack-row').style.pointerEvents = 'none';
+}
+</script>
+</body>
+</html>

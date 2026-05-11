@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<!--
+  Screen 01c: Connections — Web Logins tab (Round 9, NEW)
+  Location: /connections — Organisation group, sidebar "Connections" active
+  Tab strip: App Integrations [3] | Web Logins [3] (active) | AI Subscriptions [3]
+  Primary action: "+ Add Web Login"
+  Sortable columns: Label, Site, Username, Status, Last tested.
+  Filterable columns: Site, Status, Owner.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connections — Web Logins | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 12px; gap: 12px;
+}
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.viewmode-switcher {
+  display: inline-flex; align-items: center;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 2px;
+}
+.vm-btn {
+  padding: 5px 14px; border-radius: 6px;
+  font-size: 12px; font-weight: 500; color: #64748b;
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+}
+.vm-btn.active { background: white; color: #0f172a; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+/* Scope badge */
+.scope-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: #475569;
+  background: #f1f5f9; border: 1px solid #e2e8f0;
+  padding: 3px 10px; border-radius: 20px;
+  margin-bottom: 16px;
+}
+.scope-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #4f46e5; flex-shrink: 0; }
+
+/* Tab strip */
+.tab-strip {
+  display: flex; align-items: flex-end;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 20px; gap: 0;
+}
+.tab-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 18px 10px;
+  font-size: 13px; font-weight: 500; color: #64748b;
+  background: transparent; border: none; cursor: pointer;
+  font-family: inherit; position: relative; text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color 0.12s;
+}
+.tab-btn:hover { color: #334155; }
+.tab-btn.active { color: #4338ca; font-weight: 700; border-bottom-color: #4338ca; }
+.tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 600;
+  padding: 1px 6px; border-radius: 10px;
+  background: #f1f5f9; color: #64748b; min-width: 20px;
+}
+.tab-btn.active .tab-count { background: #e0e7ff; color: #4338ca; }
+
+/* Tab toolbar */
+.tab-toolbar {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px;
+}
+.tab-toolbar-left { flex: 1; }
+.tab-toolbar-desc {
+  font-size: 13px; color: #475569; line-height: 1.5;
+  max-width: 620px;
+}
+.btn-add-web-login {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 16px; border-radius: 8px;
+  background: #0f172a; color: white;
+  font-size: 13px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; text-decoration: none;
+  transition: background 0.12s; white-space: nowrap;
+}
+.btn-add-web-login:hover { background: #1e293b; }
+
+/* Table card */
+.connections-card {
+  background: white; border: 1px solid #e2e8f0;
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.conn-table { width: 100%; border-collapse: collapse; }
+.conn-table thead tr {
+  background: #f8fafc; border-bottom: 2px solid #e2e8f0;
+}
+.conn-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: #64748b; white-space: nowrap;
+}
+/* Sort + filter affordances */
+.conn-table th.sortable { cursor: pointer; user-select: none; }
+.conn-table th.sortable:hover { background: #f1f5f9; }
+.conn-table th.sort-active { color: #4338ca; }
+.sort-icon { display: inline-block; vertical-align: middle; margin-left: 4px; }
+.filter-icon {
+  display: inline-block; vertical-align: middle; margin-left: 3px;
+  color: #94a3b8; opacity: 0.7; cursor: pointer;
+}
+.conn-table th.filterable .filter-icon:hover { opacity: 1; color: #4338ca; }
+
+.conn-table tbody tr {
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.1s;
+}
+.conn-table tbody tr:last-child { border-bottom: none; }
+.conn-table tbody tr:hover { background: #f8fafc; }
+.conn-table td {
+  padding: 12px 14px;
+  font-size: 13px; color: #334155;
+  vertical-align: middle;
+}
+
+/* Name / site cells */
+.conn-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+.conn-sub  { font-size: 11.5px; color: #64748b; margin-top: 1px; }
+
+/* Status dots */
+.status-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; }
+.dot-green  { width: 7px; height: 7px; border-radius: 50%; background: #10b981; flex-shrink: 0; }
+.dot-red    { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
+.dot-grey   { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; flex-shrink: 0; }
+
+/* Tooltip on failed dot */
+.tooltip-wrap { position: relative; display: inline-flex; align-items: center; }
+.tooltip-wrap .tooltip-box {
+  display: none; position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%);
+  background: #1e293b; color: white;
+  font-size: 11px; line-height: 1.4; padding: 5px 9px; border-radius: 6px;
+  white-space: normal; max-width: 230px; z-index: 100; pointer-events: none;
+  font-weight: 400;
+}
+.tooltip-wrap .tooltip-box::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #1e293b;
+}
+.tooltip-wrap:hover .tooltip-box { display: block; }
+
+/* Owner badge */
+.owner-badge {
+  display: inline-flex; align-items: center;
+  font-size: 10.5px; font-weight: 500; color: #475569;
+  background: #f1f5f9; padding: 2px 7px; border-radius: 4px;
+}
+
+/* Overflow menu */
+.overflow-wrap { position: relative; }
+.overflow-btn {
+  width: 28px; height: 28px;
+  background: transparent; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.overflow-btn:hover { background: #f1f5f9; color: #334155; }
+.ctx-menu {
+  position: absolute; right: 0; top: 32px;
+  background: white; border: 1px solid #e2e8f0;
+  border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  min-width: 180px; padding: 4px; z-index: 50;
+  display: none;
+}
+.ctx-menu.open { display: block; }
+.ctx-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 6px;
+  font-size: 12.5px; color: #334155;
+  cursor: pointer; width: 100%; border: none; background: transparent; text-align: left;
+  font-family: inherit;
+}
+.ctx-item:hover { background: #f8fafc; }
+.ctx-item.danger { color: #dc2626; }
+.ctx-item.danger:hover { background: #fef2f2; }
+.ctx-sep { border: none; border-top: 1px solid #f1f5f9; margin: 3px 4px; }
+.ctx-item-icon { width: 15px; text-align: center; font-size: 12px; opacity: 0.75; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        Home
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Inbox
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Automations
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01c-web-logins-tab.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Acme Corp</span>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Connections</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <!-- Page header -->
+      <div class="page-header">
+        <div class="page-title">Connections</div>
+        <div class="header-actions">
+          <div class="viewmode-switcher">
+            <button class="vm-btn active">Workspace</button>
+            <button class="vm-btn">Org</button>
+          </div>
+          <input type="text" placeholder="Search connections..." style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:13px;color:#334155;outline:none;font-family:inherit;width:200px;">
+        </div>
+      </div>
+
+      <!-- Scope badge -->
+      <div class="scope-badge">
+        <span class="dot"></span>
+        Workspace: Marketing subaccount
+      </div>
+
+      <!-- Tab strip — Web Logins active -->
+      <div class="tab-strip">
+        <a class="tab-btn" href="01b-app-integrations-tab.html">
+          App Integrations
+          <span class="tab-count">3</span>
+        </a>
+        <button class="tab-btn active">
+          Web Logins
+          <span class="tab-count">3</span>
+        </button>
+        <a class="tab-btn" href="01-connections-list.html">
+          AI Subscriptions
+          <span class="tab-count">3</span>
+        </a>
+      </div>
+
+      <!-- Tab subtitle (L) -->
+      <div style="font-size:12px;color:#94a3b8;font-weight:400;margin-bottom:14px;margin-top:6px;padding:0 2px;">Logins to websites that don't have an integration</div>
+
+      <!-- Tab toolbar: description + Add button -->
+      <div class="tab-toolbar">
+        <div class="tab-toolbar-left">
+          <div class="tab-toolbar-desc">
+            Username and password credentials for sites that don't have an integration. Used by browser automation for paywalled portal logins.
+          </div>
+        </div>
+        <a class="btn-add-web-login" href="12-add-web-login.html">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Add Web Login
+        </a>
+      </div>
+
+      <!-- Web Logins table -->
+      <div class="connections-card">
+        <table class="conn-table">
+          <thead>
+            <tr>
+              <!-- Label: sortable, active asc -->
+              <th style="width:22%;" class="sortable sort-active sort-asc" onclick="cycleSort(this)">
+                Label
+                <svg class="sort-icon" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M5 2L8 5H2L5 2Z" fill="#4338ca"/>
+                  <path d="M5 8L2 5H8L5 8Z" fill="#c7d2fe"/>
+                </svg>
+              </th>
+              <!-- Site: sortable + filterable -->
+              <th style="width:17%;" class="sortable filterable" onclick="cycleSort(this)">
+                Site
+                <svg class="sort-icon" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M5 2L8 5H2L5 2Z" fill="#cbd5e1"/>
+                  <path d="M5 8L2 5H8L5 8Z" fill="#cbd5e1"/>
+                </svg>
+                <svg class="filter-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Filter by site"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+              </th>
+              <!-- Username: sortable -->
+              <th style="width:18%;" class="sortable" onclick="cycleSort(this)">
+                Username
+                <svg class="sort-icon" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M5 2L8 5H2L5 2Z" fill="#cbd5e1"/>
+                  <path d="M5 8L2 5H8L5 8Z" fill="#cbd5e1"/>
+                </svg>
+              </th>
+              <!-- Status: sortable + filterable -->
+              <th style="width:16%;" class="sortable filterable" onclick="cycleSort(this)">
+                Status
+                <svg class="sort-icon" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M5 2L8 5H2L5 2Z" fill="#cbd5e1"/>
+                  <path d="M5 8L2 5H8L5 8Z" fill="#cbd5e1"/>
+                </svg>
+                <svg class="filter-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Filter by status"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+              </th>
+              <!-- Last tested: sortable -->
+              <th style="width:12%;" class="sortable" onclick="cycleSort(this)">
+                Last tested
+                <svg class="sort-icon" width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M5 2L8 5H2L5 2Z" fill="#cbd5e1"/>
+                  <path d="M5 8L2 5H8L5 8Z" fill="#cbd5e1"/>
+                </svg>
+              </th>
+              <!-- Owner: filterable only -->
+              <th style="width:10%;" class="filterable">
+                Owner
+                <svg class="filter-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Filter by owner"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+              </th>
+              <!-- Actions -->
+              <th style="width:5%;"></th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <!-- Row 1: 42 Macro paywall — Tested OK -->
+            <tr onclick="window.location='#'">
+              <td>
+                <div class="conn-name">42 Macro paywall</div>
+              </td>
+              <td style="color:#64748b;font-size:12.5px;">42macro.com</td>
+              <td style="font-size:12.5px;color:#334155;">operator@firm.com</td>
+              <td>
+                <span class="status-cell">
+                  <span class="dot-green"></span>
+                  Tested OK
+                </span>
+              </td>
+              <td style="color:#94a3b8;font-size:12px;">2 days ago</td>
+              <td><span class="owner-badge">Marketing</span></td>
+              <td>
+                <div class="overflow-wrap" onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleMenu('m1')">&#8942;</button>
+                  <div class="ctx-menu" id="m1">
+                    <button class="ctx-item" onclick="window.location='14-test-web-login.html'"><span class="ctx-item-icon">&#9654;</span> Test</button>
+                    <button class="ctx-item" onclick="window.location='13-edit-web-login.html'"><span class="ctx-item-icon">&#9998;</span> Edit</button>
+                    <div class="ctx-sep"></div>
+                    <button class="ctx-item danger" onclick="window.location='15-disconnect-confirm.html'"><span class="ctx-item-icon">&#8856;</span> Disconnect</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 2: Bloomberg portal — Test failed -->
+            <tr onclick="window.location='#'" style="background:#fffaf9;">
+              <td>
+                <div class="conn-name">Bloomberg portal</div>
+              </td>
+              <td style="color:#64748b;font-size:12.5px;">bloomberg.com</td>
+              <td style="font-size:12.5px;color:#334155;">research@firm.com</td>
+              <td>
+                <span class="status-cell">
+                  <span class="tooltip-wrap">
+                    <span class="dot-red"></span>
+                    <span class="tooltip-box">Login form not found at the configured selector. The page may have changed its layout.</span>
+                  </span>
+                  Test failed
+                </span>
+              </td>
+              <td style="color:#ef4444;font-size:12px;">3 days ago</td>
+              <td><span class="owner-badge">Marketing</span></td>
+              <td>
+                <div class="overflow-wrap" onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleMenu('m2')">&#8942;</button>
+                  <div class="ctx-menu" id="m2">
+                    <button class="ctx-item" onclick="window.location='14-test-web-login.html'"><span class="ctx-item-icon">&#9654;</span> Test</button>
+                    <button class="ctx-item" onclick="window.location='13-edit-web-login.html'"><span class="ctx-item-icon">&#9998;</span> Edit</button>
+                    <div class="ctx-sep"></div>
+                    <button class="ctx-item danger" onclick="window.location='15-disconnect-confirm.html'"><span class="ctx-item-icon">&#8856;</span> Disconnect</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 3: Internal admin portal — Untested -->
+            <tr onclick="window.location='#'">
+              <td>
+                <div class="conn-name">Internal admin portal</div>
+              </td>
+              <td style="color:#64748b;font-size:12.5px;">internal.acme.com</td>
+              <td style="font-size:12.5px;color:#334155;">admin@firm.com</td>
+              <td>
+                <span class="status-cell">
+                  <span class="dot-grey"></span>
+                  Untested
+                </span>
+              </td>
+              <td style="color:#94a3b8;font-size:12px;">Never</td>
+              <td><span class="owner-badge">Marketing</span></td>
+              <td>
+                <div class="overflow-wrap" onclick="event.stopPropagation()">
+                  <button class="overflow-btn" onclick="toggleMenu('m3')">&#8942;</button>
+                  <div class="ctx-menu" id="m3">
+                    <button class="ctx-item" onclick="window.location='14-test-web-login.html'"><span class="ctx-item-icon">&#9654;</span> Test</button>
+                    <button class="ctx-item" onclick="window.location='13-edit-web-login.html'"><span class="ctx-item-icon">&#9998;</span> Edit</button>
+                    <div class="ctx-sep"></div>
+                    <button class="ctx-item danger" onclick="window.location='15-disconnect-confirm.html'"><span class="ctx-item-icon">&#8856;</span> Disconnect</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Nav hints -->
+      <div style="margin-top:14px;font-size:11.5px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;">
+        <span>&larr; <a href="01b-app-integrations-tab.html" style="color:#6366f1;text-decoration:none;">App Integrations (01b)</a></span>
+        <span><a href="01-connections-list.html" style="color:#6366f1;text-decoration:none;">AI Subscriptions (01) &rarr;</a></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toggleMenu(id) {
+  document.querySelectorAll('.ctx-menu').forEach(m => {
+    if (m.id !== id) m.classList.remove('open');
+  });
+  document.getElementById(id).classList.toggle('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.ctx-menu').forEach(m => m.classList.remove('open'));
+});
+
+// Sort affordance (visual only): cycles asc / desc / none
+function cycleSort(th) {
+  const ths = th.closest('thead').querySelectorAll('th.sortable');
+  ths.forEach(h => {
+    if (h !== th) { h.classList.remove('sort-active','sort-asc','sort-desc'); updateIcon(h, 'none'); }
+  });
+  if (th.classList.contains('sort-asc')) {
+    th.classList.remove('sort-asc'); th.classList.add('sort-desc'); updateIcon(th, 'desc');
+  } else if (th.classList.contains('sort-desc')) {
+    th.classList.remove('sort-active','sort-desc'); updateIcon(th, 'none');
+  } else {
+    th.classList.add('sort-active','sort-asc'); updateIcon(th, 'asc');
+  }
+}
+function updateIcon(th, dir) {
+  const svg = th.querySelector('.sort-icon');
+  if (!svg) return;
+  const p = svg.querySelectorAll('path');
+  if (dir === 'asc')  { p[0].setAttribute('fill','#4338ca'); p[1].setAttribute('fill','#c7d2fe'); }
+  else if (dir === 'desc') { p[0].setAttribute('fill','#c7d2fe'); p[1].setAttribute('fill','#4338ca'); }
+  else { p[0].setAttribute('fill','#cbd5e1'); p[1].setAttribute('fill','#cbd5e1'); }
+}
+</script>
+</body>
+</html>

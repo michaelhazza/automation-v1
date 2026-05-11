@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<!--
+  Screen 02: Connect AI Subscription — Provider handshake
+  Location: /connections > Connect AI Subscription
+  Breadcrumb: Connections / Connect AI Subscription
+  Two states rendered sequentially on page:
+    State A: "Connect with OpenAI" button (before handshake)
+    State B: "Plan detected: Pro" confirmation (post-handshake)
+  The page shows State A by default. Clicking "Connect with OpenAI" transitions to State B.
+  From State B, clicking "Save subscription" navigates to the subscription detail page.
+  If plan_tier = Plus it would navigate to disclosure screen instead (shown via note).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect AI Subscription | Connections | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.page-subtitle { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+/* Centered wizard container */
+.wizard-wrap {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* Card shell */
+.wizard-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.wizard-card-head {
+  padding: 20px 24px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.wizard-card-head h2 { font-size: 16px; font-weight: 700; color: #0f172a; }
+.wizard-card-head p { font-size: 13px; color: #64748b; margin-top: 4px; }
+.wizard-card-body { padding: 28px 24px; }
+.wizard-card-foot {
+  padding: 16px 24px;
+  border-top: 1px solid #f1f5f9;
+  background: #f8fafc;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+}
+
+/* Provider button */
+.provider-connect-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 13px 20px;
+  background: white; border: 1.5px solid #e2e8f0;
+  border-radius: 10px; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: #0f172a;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  font-family: inherit;
+}
+.provider-connect-btn:hover {
+  border-color: #818cf8;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.12);
+}
+.provider-connect-btn .openai-logo {
+  width: 22px; height: 22px;
+  background: #0f172a; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Detection result card */
+.detection-card {
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.detection-check {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: #dcfce7; color: #166534;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0; margin-top: 2px;
+}
+.detection-title { font-size: 14px; font-weight: 700; color: #14532d; margin-bottom: 4px; }
+.detection-detail { font-size: 13px; color: #166534; line-height: 1.5; }
+.detection-badges { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* Divider with "or" */
+.or-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 16px 0; color: #94a3b8; font-size: 12px;
+}
+.or-divider::before, .or-divider::after {
+  content: ''; flex: 1; height: 1px; background: #e2e8f0;
+}
+
+/* Step states */
+#state-before { display: block; }
+#state-after  { display: none; }
+
+/* Plus divergence note */
+.plus-note {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 12px; color: #78350f; line-height: 1.5;
+  margin-top: 14px;
+}
+.plus-note strong { font-weight: 600; }
+
+/* Connecting spinner overlay */
+.connecting-overlay {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+  display: none; align-items: center; justify-content: center; z-index: 100;
+}
+.connecting-overlay.open { display: flex; }
+.connecting-box {
+  background: white; border-radius: 14px;
+  padding: 36px 44px; text-align: center;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+}
+.connecting-spinner {
+  width: 40px; height: 40px;
+  border: 3px solid #e0e7ff;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.connecting-label { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
+.connecting-sub { font-size: 12px; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="01-connections-list.html" style="color:#64748b;text-decoration:none;">Connections</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Connect AI Subscription</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Connect AI Subscription</div>
+          <div class="page-subtitle">Connect a ChatGPT plan so your autonomous agents can use it when they run.</div>
+        </div>
+      </div>
+
+      <div class="wizard-wrap">
+        <!-- Step bar — 4 steps always (R) -->
+        <div class="wizard-step-bar" style="margin-bottom:24px;">
+          <div class="wstep done">
+            <div class="num">1</div>
+            Connect account
+          </div>
+          <div class="wstep-divider"></div>
+          <div class="wstep current" id="step2-label">
+            <div class="num">2</div>
+            Plan detected
+          </div>
+          <div class="wstep-divider"></div>
+          <div class="wstep" id="step3-label" style="opacity:0.45;">
+            <div class="num">3</div>
+            <span>Accept terms <span style="font-size:10px;color:#94a3b8;font-weight:400;display:block;margin-top:1px;">personal plans only</span></span>
+          </div>
+          <div class="wstep-divider"></div>
+          <div class="wstep">
+            <div class="num">4</div>
+            Done
+          </div>
+        </div>
+
+        <!-- Wizard card -->
+        <div class="wizard-card">
+          <div class="wizard-card-head">
+            <h2 id="card-title">Connect your OpenAI account</h2>
+            <p id="card-sub">Sign in with OpenAI to link your ChatGPT subscription.</p>
+          </div>
+
+          <div class="wizard-card-body">
+
+            <!-- STATE A: before handshake -->
+            <div id="state-before">
+              <p style="font-size:13px;color:#475569;margin-bottom:18px;line-height:1.6;">
+                Click "Connect with OpenAI" to open a secure OpenAI authentication page. Your login credentials are handled directly by OpenAI and are never stored on this platform.
+              </p>
+
+              <button class="provider-connect-btn" onclick="startConnect()">
+                <div class="openai-logo">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M22.2819 9.8211a5.9847 5.9847 0 00-.5157-4.9108 6.0462 6.0462 0 00-6.5098-2.9A6.0651 6.0651 0 004.9807 4.1818a5.9847 5.9847 0 00-3.9977 2.9 6.0462 6.0462 0 00.7427 7.0966 5.98 5.98 0 00.511 4.9107 6.051 6.051 0 006.5146 2.9001A5.9847 5.9847 0 0013.2599 24a6.0557 6.0557 0 005.7718-4.2058 5.9894 5.9894 0 003.9977-2.9001 6.0557 6.0557 0 00-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 01-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 00.3927-.6813v-6.7369l2.02 1.1686a.071.071 0 01.038.052v5.5826a4.504 4.504 0 01-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 01-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 00.7806 0l5.8428-3.3685v2.3324a.0804.0804 0 01-.0332.0615L9.74 19.9502a4.4992 4.4992 0 01-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 012.3655-1.9728V11.6a.7664.7664 0 00.3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 01-.071 0l-4.8303-2.7865A4.504 4.504 0 012.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 01.071 0l4.8303 2.7913a4.4944 4.4944 0 01-.6765 8.1042v-5.6772a.79.79 0 00-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 00-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 01.0284-.0615l4.8303-2.7866a4.4992 4.4992 0 016.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 01-.038-.0567V6.0742a4.4992 4.4992 0 017.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 00-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+                </div>
+                Connect with OpenAI
+              </button>
+
+              <div class="or-divider">or</div>
+
+              <p style="font-size:12px;color:#64748b;text-align:center;">
+                Don't have a ChatGPT Pro, Team, or Enterprise plan?
+                <a href="#" style="color:#4f46e5;text-decoration:none;">Learn about supported plans</a>
+              </p>
+            </div>
+
+            <!-- STATE B: after handshake — plan detected -->
+            <div id="state-after">
+              <div class="detection-card">
+                <div class="detection-check">&#10003;</div>
+                <div>
+                  <div class="detection-title">Plan detected: Pro</div>
+                  <div class="detection-detail">
+                    OpenAI confirmed your account is on the <strong>ChatGPT Pro</strong> plan. This is a business plan and works with automation.
+                  </div>
+                  <div class="detection-badges">
+                    <span class="tier-badge tier-pro">Pro</span>
+                    <span class="usability-pill usable" style="font-size:11px;"><span class="dot"></span>Ready to use</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top:18px;font-size:12px;color:#64748b;line-height:1.6;">
+                <strong style="color:#475569;">Account:</strong> sarah@acmecorp.com<br>
+                <strong style="color:#475569;">Provider:</strong> OpenAI<br>
+                <strong style="color:#475569;">Plan verified:</strong> <span style="color:#059669;font-weight:500;">Yes</span> <span style="color:#94a3b8;">OpenAI confirmed this plan <span title="We verified your plan tier directly with OpenAI when you connected." style="cursor:help;border-bottom:1px dotted #94a3b8;">&#9432;</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="wizard-card-foot">
+            <a href="01-connections-list.html" class="btn btn-secondary btn-sm" style="text-decoration:none;">Cancel</a>
+            <div id="foot-before">
+              <!-- Primary action is the "Connect with OpenAI" button above; footer Cancel only -->
+            </div>
+            <div id="foot-after" style="display:none;">
+              <a href="04-subscription-detail.html" class="btn btn-primary btn-sm" style="text-decoration:none;">Connect AI Subscription</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nav hint -->
+        <div style="margin-top:12px;text-align:right;font-size:11.5px;color:#94a3b8;">
+          &larr; <a href="01-connections-list.html" style="color:#6366f1;text-decoration:none;">Back to Connections</a>
+          &nbsp;&nbsp;
+          See also: <a href="03-disclosure-plus.html" style="color:#6366f1;text-decoration:none;">Plus disclosure screen &rarr;</a>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Connecting overlay -->
+<div class="connecting-overlay" id="connecting-overlay">
+  <div class="connecting-box">
+    <div class="connecting-spinner"></div>
+    <div class="connecting-label">Connecting to OpenAI</div>
+    <div class="connecting-sub">Verifying plan and detecting tier...</div>
+  </div>
+</div>
+
+<script>
+function startConnect() {
+  const overlay = document.getElementById('connecting-overlay');
+  overlay.classList.add('open');
+  setTimeout(() => {
+    overlay.classList.remove('open');
+    document.getElementById('state-before').style.display = 'none';
+    document.getElementById('state-after').style.display = 'block';
+    document.getElementById('foot-before').style.display = 'none';
+    document.getElementById('foot-after').style.display = 'block';
+    document.getElementById('card-title').textContent = 'Plan detected';
+    document.getElementById('card-sub').textContent = 'OpenAI confirmed your subscription. Review the details below.';
+    const step2 = document.getElementById('step2-label');
+    step2.classList.remove('current');
+    step2.classList.add('done');
+    step2.querySelector('.num').style.background = '#4f46e5';
+    step2.querySelector('.num').style.color = 'white';
+    step2.querySelector('.num').style.boxShadow = 'none';
+  }, 1800);
+}
+</script>
+</body>
+</html>

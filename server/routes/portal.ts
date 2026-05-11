@@ -31,6 +31,7 @@ import { WorkflowRunService } from '../services/workflowRunService.js';
 import { taskService } from '../services/taskService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 const router = Router();
 
@@ -651,11 +652,16 @@ router.post(
 
     let startResult: { runId: string; status: string };
     if (orgVer) {
-      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
-        title: `Workflow run`,
-        status: 'inbox',
-        brief: JSON.stringify({}),
-      }, req.user!.id);
+      const tx = getOrgScopedDb('route:portal.replay-org');
+      const task = await taskService.createTask(
+        {
+          organisationId: sourceRun.organisationId,
+          subaccountId,
+          data: { title: `Workflow run`, status: 'inbox', brief: JSON.stringify({}) },
+          userId: req.user!.id,
+        },
+        tx,
+      );
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,
@@ -671,11 +677,16 @@ router.post(
         res.status(422).json({ error: 'Cannot replay: workflowSlug not set on source run' });
         return;
       }
-      const task = await taskService.createTask(sourceRun.organisationId, subaccountId, {
-        title: `System workflow run`,
-        status: 'inbox',
-        brief: JSON.stringify({}),
-      }, req.user!.id);
+      const tx = getOrgScopedDb('route:portal.replay-system');
+      const task = await taskService.createTask(
+        {
+          organisationId: sourceRun.organisationId,
+          subaccountId,
+          data: { title: `System workflow run`, status: 'inbox', brief: JSON.stringify({}) },
+          userId: req.user!.id,
+        },
+        tx,
+      );
       startResult = await WorkflowRunService.startRun({
         organisationId: sourceRun.organisationId,
         subaccountId,

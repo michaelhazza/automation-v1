@@ -73,6 +73,7 @@ import integrationConnectionsRouter from './routes/integrationConnections.js';
 import credentialsRouter from './routes/credentials.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
+import operatorSessionConnectionsRouter from './routes/operatorSessionConnections.js';
 import workflowTemplatesRouter from './routes/workflowTemplates.js';
 import workflowRunsRouter from './routes/workflowRuns.js';
 import workflowStudioRouter from './routes/workflowStudio.js';
@@ -372,6 +373,8 @@ app.use(integrationConnectionsRouter);
 app.use(credentialsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
+// operator-session-identity chunk 5 — AI Subscription management routes
+app.use(operatorSessionConnectionsRouter);
 app.use(workflowTemplatesRouter);
 app.use(workflowRunsRouter);
 app.use(workflowStudioRouter);
@@ -476,8 +479,8 @@ app.use(agentPresenceStreamRouter);
 app.use(runArtifactsRouter);
 // Phase 1 Showcase — internal worker-to-S3 finalize route (Chunk 1, spec §6.1.4)
 app.use(runArtifactsFinalizeRouter);
-// Support Desk canonical substrate (C13)
-app.use('/api/support', supportRouter);
+// Support Desk canonical substrate (C13) — subaccount-scoped per DEC-1 (pre-test-hardening T1)
+app.use('/api/subaccounts/:subaccountId/support', supportRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -800,6 +803,26 @@ async function start() {
       registerSupportEvalDailyJob(boss);
     } catch (err) {
       console.error('[boot] failed to register support-eval-daily worker', err);
+    }
+  }
+  // operator-session-identity chunk 6 — token refresh worker
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { createWorker } = await import('./lib/createWorker.js');
+      const { processOperatorSessionRefresh } = await import('./jobs/operatorSessionRefreshJob.js');
+      await createWorker({
+        queue: 'operator-session-refresh',
+        boss,
+        // Cross-org: payload carries only connectionId (no organisationId).
+        // The handler resolves org context via withAdminConnection then opens
+        // its own org-scoped tx. Opt out of createWorker's auto-transaction.
+        resolveOrgContext: () => null,
+        handler: processOperatorSessionRefresh,
+      });
+      logger.info('[boot] operator-session-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-refresh worker', err);
     }
   }
   // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)

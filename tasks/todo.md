@@ -44,7 +44,7 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 | 19 | **Security** | **[CLOSED 2026-04-29]** Helmet CSP enabled in production with non-trivial directives (`server/index.ts:188-213`); dev intentionally `false`. Originally: "Helmet CSP disabled" | `server/index.ts:188-213` | HIGH |
 | 20 | **Security** | **[CLOSED 2026-04-29]** CORS allowlist read from `env.CORS_ORIGINS`; prod fails fast on `*`. Originally: "CORS allows wildcard origins with credentials enabled" | `server/index.ts:215-228` | HIGH |
 | 21 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 2]** In-memory rate limiting lost on restart; bypassed in multi-process | `server/routes/auth.ts:14-30` | HIGH |
-| 22 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 3]** Webhook auth optional — no HMAC validation if WEBHOOK_SECRET unset | `server/services/webhookService.ts:74-77` | HIGH |
+| 22 | **Security** | **[CLOSED 2026-05-11 — pre-test-hardening W1 PR #284]** Webhook HMAC validation fails closed in production when WEBHOOK_SECRET is unset (401 webhook.signature_required). Dev preserves the existing skip with a one-time `logger.warn('webhook_secret_missing')` per process boot. | `server/services/webhookService.ts:74-77` | HIGH |
 | 23 | **Security** | **[CLOSED 2026-04-29]** Cross-org access logged via `auditService.log({ action: 'cross_org_access', … })` (persisted, queryable — stricter than the `logger.info` originally requested) | `server/middleware/auth.ts:82-96` | HIGH |
 | 24 | **Security** | **[OPEN — pre-prod-boundary-and-brief-api Phase 1]** Multer memory storage accepts 500MB — OOM DoS risk | `server/middleware/validate.ts:17-20` | MEDIUM |
 | 25 | **Security** | **[CLOSED 2026-04-29 — route wiring; primitive swap remaining in pre-prod-boundary-and-brief-api Phase 2]** Forgot/reset-password rate-limited via `express-rate-limit` 5/15min at `server/routes/auth.ts:11-12,108,120`. Swap to DB-backed primitive folded into Phase 2. | `server/routes/auth.ts:11-12,108,120` | MEDIUM |
@@ -453,7 +453,7 @@ All four items are technical and recommended for the TI-005 follow-up branch. Th
 **Branch**: `claude/implement-universal-brief-qJzP8`
 **Source log**: [tasks/review-logs/pr-review-log-universal-brief-2026-04-22T07-35-39Z.md](./review-logs/pr-review-log-universal-brief-2026-04-22T07-35-39Z.md)
 
-- [ ] **B10 — maintenance jobs defense-in-depth: per-org `withOrgTx` (architectural, partial).** `server/jobs/ruleAutoDeprecateJob.ts`, `fastPathDecisionsPruneJob.ts`, and `fastPathRecalibrateJob.ts` already use `withAdminConnection({ source: ... })` + `SET LOCAL ROLE admin_role` for the org enumeration and per-org savepoints (`tx.transaction(async (subTx) => …)`). They are **no longer silent no-ops** — decay / prune / recalibrate run successfully against every org. Remaining gap: the per-org work runs under `admin_role` (which bypasses RLS) rather than dropping back into a per-org `withOrgTx({ organisationId, source })` connection that re-engages tenant-scoped policies. Upgrade is defense-in-depth, not correctness — and the canonical reference job `server/jobs/memoryDedupJob.ts` cited in the original brief also runs work directly under `admin_role` without per-subaccount `withOrgTx`, so this is a stronger pattern than the existing house style. Routed to the pre-prod-tenancy spec (Phase 3, optional) — see `docs/superpowers/specs/2026-04-29-pre-prod-tenancy-spec.md`.
+- [x] **B10 — maintenance jobs defense-in-depth: per-org `withOrgTx`.** **CLOSED 2026-05-10** — shipped via pre-prod-tenancy spec Phase 3 (commits on main as of `b41e82c`). `fastPathDecisionsPruneJob.ts` and `fastPathRecalibrateJob.ts` now use `db.transaction + withOrgTx` for per-org work (Pattern A — verified at lines 89/92). `ruleAutoDeprecateJob.ts` correctly uses Pattern B (lock-spans-sweep + `SAVEPOINT` per org under `admin_role`) because the decay write `currentScore - BLOCK_DECAY_RATE` is non-idempotent across overlapping runners — switching to per-org `withOrgTx` would lose the cross-runner mutual-exclusion. Audit captured in `tasks/builds/pre-prod-tenancy/progress.md` § Phase 3 acceptance.
 - [ ] **S2 — add skill definition .md files for `ask_clarifying_questions` and `challenge_assumptions`.** Handlers are wired in `SKILL_HANDLERS` so runtime dispatch works, but the file-based definitions pattern (`server/skills/*.md` with frontmatter) expects them. Without the .md these capabilities won't surface in the config assistant or skill studio UIs. Reference: `architecture.md` §Skill System.
 - [ ] **S3 — strengthen rule-conflict parser tests.** `ruleConflictDetectorServicePure.parseConflictReportPure` drops malformed items silently via `continue`; production could let users save conflicting rules if the LLM returns malformed conflict objects. Add tests for: (a) existingRuleId not in candidatePool → dropped; (b) invalid `kind` → dropped; (c) confidence out of [0,1] → dropped.
 - [ ] **S4 — remove or re-label `cheap_answer` canned replies.** `briefSimpleReplyGeneratorPure` emits `source: 'canonical'` artefacts with hardcoded placeholder rows ("See revenue data"). Users see properly-sourced-looking results that are actually stubs. Either (a) add `'canned' | 'stub'` to `BriefResultSource` and re-label, or (b) remove the cheap_answer route from the tier-1 classifier until real data resolvers land. Option (b) is simpler.
@@ -1058,10 +1058,7 @@ Findings are grouped by remediation phase per the 2026-04-25 remediation plan.
 **Source log:** `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md`
 **Spec:** `docs/superpowers/specs/2026-04-26-audit-remediation-followups-spec.md`
 
-- [ ] **SC-2026-04-26-1** — A2 schema-vs-registry gate fails on current main (`exit 1`, 64 violations: 60 unregistered tenant tables + 4 stale registry entries).
-  - Spec section: §A2 Acceptance criteria — *"`bash scripts/verify-rls-protected-tables.sh` exits 0 on the current main"*.
-  - Gap: `server/config/rlsProtectedTables.ts` covers 74 tables but `migrations/*.sql` declares ~134 tables with `organisation_id`. The 60-table delta is mostly real tenant-scoped tables that should either be registered (with a matching `CREATE POLICY` in their migration) or added to `scripts/rls-not-applicable-allowlist.txt` with a one-line rationale. The 4 stale entries (`document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`) scope via parent FK and have no direct `organisation_id` column — registry should drop these or the diff logic should be taught to recognise FK-scoping.
-  - Suggested approach: the cheapest path is a triage pass — for each of the 60 unregistered tables, `grep -l "<table>" migrations/*.sql` to find the migration, check whether it carries a `CREATE POLICY` block. If yes → add to `rlsProtectedTables.ts`. If no but the table is genuinely tenant-private → write the policy migration AND add the entry. If no and the table is a system/audit/cross-tenant ledger → add to `rls-not-applicable-allowlist.txt` with rationale. The 4 stale entries can be removed mechanically once you confirm their FK-scoping vs `organisation_id` from their schema files.
+- [x] **SC-2026-04-26-1** — A2 schema-vs-registry gate. **CLOSED 2026-05-10** — shipped via pre-prod-tenancy spec Phase 4 (commits on main as of `b41e82c`). `migrations/0245_all_tenant_tables_rls.sql` registers 55 canonical tenant tables in one shot; 3 tables allowlisted in `scripts/rls-not-applicable-allowlist.txt` (`llm_inflight_history`, `system_incidents`, `system_incident_suppressions` — all sysadmin-gated cross-tenant ledgers); 4 stale entries (`document_bundle_members`, `reference_document_versions`, `task_activities`, `task_deliverables`) dropped from registry; 2 sister-branch-owned tables (`workflow_engines`, `workflow_runs`) added registry-only. `bash scripts/verify-rls-protected-tables.sh` re-run 2026-05-10 → `violations=0`. Triage detail in `tasks/builds/pre-prod-tenancy/progress.md` § Phase 1.
   - Back-link: `tasks/review-logs/spec-conformance-log-audit-remediation-followups-2026-04-26T05-34-10Z.md` REQ #15.
 
 - [x] **SC-2026-04-26-2** — H1 helper `server/lib/derivedDataMissingLog.ts` has no unit tests. **CLOSED 2026-04-26** — added `server/lib/__tests__/derivedDataMissingLog.test.ts` with 6 cases (first-call WARN, repeat-DEBUG, multi-orgId / multi-field / multi-service distinct keys, `_resetWarnedKeysForTesting` boundary). Spies `logger.warn` / `logger.debug` directly via `node:test` `mock.method` so the test does not depend on `LOG_LEVEL` (which the logger captures at module-import time and would silently filter the DEBUG path).
@@ -1373,15 +1370,9 @@ Source: ChatGPT review (round 1) on branch `code-cache-upgrade`. Reviewer verdic
     2. The watcher polls `references/.watcher.pid` every flush and exits if the PID file no longer matches its own pid. Cuts the failure window to the poll interval; requires care to avoid races on the `--rebuild` unlink step.
   - Not blocking merge per reviewer; add to Phase 1 hardening if telemetry shows shard corruption complaints.
 
-- [ ] Reseed restore script: wrap user-restore in a transaction (ChatGPT R1)
-  - File: `scripts/_reseed_restore_users.ts`
-  - Gap: restore inserts users (and any joined rows) outside of an explicit transaction. If interrupted mid-restore (Ctrl-C, machine sleep, DB blip), partial state is left in the DB and a re-run may collide on unique constraints or leave orphan FKs.
-  - Suggested approach: wrap the entire restore body in `db.transaction(async (tx) => { ... })`. Verify all DML inside uses `tx`, not the global `db`. No behavior change on the success path; on failure the DB is unchanged so re-run is idempotent.
+- [x] Reseed restore script: wrap user-restore in a transaction (ChatGPT R1) — **CLOSED 2026-05-11 by pre-test-hardening O4 PR #284.** Entire restore body wrapped in `db.transaction(async (tx) => { ... })`; all DML uses tx. Mid-restore throw leaves DB unchanged.
 
-- [ ] Reseed drop-create script: env guard against running outside development (ChatGPT R1)
-  - File: `scripts/_reseed_drop_create.ts`
-  - Gap: script drops and recreates the DB unconditionally. Production safety relies entirely on operator vigilance.
-  - Suggested approach: at the top of `main()`, fail-fast if `process.env.NODE_ENV !== 'development'` (or `process.env.DATABASE_URL` matches a known production host). Throw with a clear message explaining the guard.
+- [x] Reseed drop-create script: env guard against running outside development (ChatGPT R1) — **CLOSED 2026-05-11 by pre-test-hardening O3 + O4 PR #284.** `scripts/lib/prod-db-guard.ts::assertDevTargetOrThrow` shared by both reseed scripts. Round 8 F1 operator-approved tightening: primary guard is now an allowlist (only `NODE_ENV=development` passes); explicit fail when `DATABASE_URL` is unset; secondary host denylist (supabase/neon/render/rds.amazonaws/pooler.) as defence-in-depth. 14 tests cover the contract.
 
 - [ ] Refactor: split `scripts/build-code-graph.ts` into extractor / cache layer / watcher lifecycle (ChatGPT R1)
   - File is 1,113 lines (post-Phase-0). Reviewer flagged as a maintainability risk, not blocking. Split candidates: `scripts/code-graph/extractor.ts` (single-file extraction, ts-morph projects), `scripts/code-graph/cache.ts` (load/save, sha256, shard IO), `scripts/code-graph/watcher.ts` (lock, PID, chokidar, debounce, processEvents). Top-level `build-code-graph.ts` becomes the entry-point orchestrator.
@@ -1500,16 +1491,13 @@ Reviewer's framing on PR #227: "Approve with minor fixes." Two must-fix items we
 
 ## Deferred findings — system-monitoring-coverage build (2026-04-28)
 
-### Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts
+### ~~Webhook 5xx coverage gap — slackWebhook.ts + teamworkWebhook.ts~~ — CLOSED 2026-05-11 by pre-test-hardening W2 PR #284
 
 `server/routes/webhooks/slackWebhook.ts` and `server/routes/webhooks/teamworkWebhook.ts`
-have inline `res.status(500)` paths that do not call `recordIncident`.
-These were out-of-scope for the system-monitoring-coverage build (spec §6.1.3 locked
-scope to GHL + GitHub only).
-
-Follow-up: apply the same `recordIncident` pattern to each inline 500 path in
-these files. Use `fingerprintOverride: 'webhook:slack:handler_failed'` and
-`fingerprintOverride: 'webhook:teamwork:handler_failed'` respectively.
+inline `res.status(500)` paths now route through `recordIncident` with stable
+fingerprints `webhook:slack:handler_failed` and `webhook:teamwork:handler_failed`.
+Targeted tests per webhook simulate a downstream throw and assert `recordIncident`
+is called with the correct fingerprint before the 500 response.
 
 ### workflow-bulk-parent-check JOB_CONFIG entry has no worker registration
 
@@ -3357,12 +3345,12 @@ Three findings — two in pre-existing code, one in new code — surfaced during
   - Gap: Soft-delete UPDATE filters only on `blockId`; prior SELECT verifies org, RLS protects in practice, but DEVELOPMENT_GUIDELINES §1 mandates explicit org filter on every by-id mutation.
   - Suggested approach: Add `eq(memoryBlocks.organisationId, organisationId)` to the UPDATE WHERE, matching the pattern in `overrideEntry`.
 
-- [ ] **CONSOL-GOV-DEF-18 — `overrideEntry` version-counter race can throw raw 500 under concurrency.**
+- [x] **CONSOL-GOV-DEF-18 — `overrideEntry` version-counter race can throw raw 500 under concurrency.** — **CLOSED 2026-05-11 by pre-test-hardening V2 PR #284.** `pg_advisory_xact_lock(hashtextextended(blockId::text, 0))` acquired inside the same outer `withOrgTx` that reads MAX(version) and inserts. Concurrency test asserts N concurrent overrides serialise without 23505 leakage. Round 3 F2 + Round 4 F2 + Round 5 F2 hardened the conditional `peekOrgTxContext()` wrapper for defence-in-depth.
   - File: `server/services/knowledgeService.ts:766-811` (NEW in this branch)
   - Gap: Version increment uses `MAX(version) + 1` in a sub-select. Two concurrent overrides with different bodies and identical ETag both pass the ETag check, both compute the same `MAX(version)`, both attempt INSERT with `version = N+1`. `onConflictDoNothing` is correctly targeted at `(memoryBlockId, bodyHash)` only, so the `(memoryBlockId, version)` collision bubbles as a raw 23505 (constraint name leaked in 500).
   - Suggested approach: Acquire `pg_advisory_xact_lock(hashtextextended(blockId, 0))` at the start of the transaction so concurrent overrides serialise. Alternative: catch 23505 specifically and retry once.
 
-- [ ] **CONSOL-GOV-DEF-19 — `PATCH /api/subaccounts/:subaccountId/connections/:id` accepts arbitrary `connectionStatus` strings.**
+- [x] **CONSOL-GOV-DEF-19 — `PATCH /api/subaccounts/:subaccountId/connections/:id` accepts arbitrary `connectionStatus` strings.** — **CLOSED 2026-05-11 by pre-test-hardening V1 PR #284.** Zod enum validation at the route layer (400 `connection.status_invalid`) plus CHECK constraint at the DB layer (migration 0320 with preflight RAISE that aborts on dirty data). Test coverage: pure Zod assertions + DB-level constraint test that bypasses Zod via raw drizzle insert.
   - File: `server/routes/integrationConnections.ts:123` (PRE-EXISTING route, not new in this branch)
   - Gap: `req.body.connectionStatus` flows straight into the column with no enum validation; a malformed value crashes every subsequent `GET /api/connections` response (UnknownEnumValueError throws). Self-inflicted DoS by an authorised CONNECTIONS_MANAGE user.
   - Suggested approach: Add Zod enum validation to the PATCH body (`connectionStatus: z.enum(['active','revoked','error']).optional()`); follow up with a Postgres CHECK constraint migration.
@@ -3495,7 +3483,7 @@ Three findings — two in pre-existing code, one in new code — surfaced during
 
 - [x] **AKR-ADV-2 — `server/routes/files.ts` imports `db` directly; `/api/files` GET runs outside the ALS org-scoped transaction.** ~~Tenant boundary relies solely on the explicit `eq(*, req.orgId!)` predicates and (if applicable) RLS.~~ CLOSED — fix shipped in PR #274 squash `b1c4d14d` via pre-merge commit `fa78a601`: `fileService.listFiles()` extracted using `getOrgScopedDb()`; route delegates to the service. Required to unblock `verify-rls-contract-compliance` blocking gate.
 
-- [ ] **AKR-ADV-3 — Promote endpoint accepts `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` from request body without org-membership verification.** `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` both pass scope IDs through to `referenceDocumentDataSources` insertion without verifying each ID belongs to `req.orgId!`. Direct cross-tenant data exposure is low (FK-walked retrieval queries scope by `organisationId` AND `agentId`), but writes corrupt the scope-link table with FK-valid references to other orgs' entities. Fix: verify each non-null scope ID against `WHERE id = :id AND organisationId = :orgId` before insert.
+- [x] **AKR-ADV-3 — Promote endpoint accepts `agentId`, `subaccountId`, `scheduledTaskId`, `taskInstanceId` from request body without org-membership verification.** — **CLOSED 2026-05-11 by pre-test-hardening T2 PR #284.** `documentDataSourceService.verifyScopeIdsBelongToOrg` runs explicit `WHERE id = :id AND organisation_id = :orgId` checks for every supplied scope ID; mismatch → 403 `referenceDocument.scope_cross_org` with audit row (PTH-CGT-R7-F3 routes through canonical `auditService.log`). Atomicity: all verifications complete before any insert. `POST /api/reference-documents/promote` and `POST /api/reference-documents/:id/links` both pass scope IDs through to `referenceDocumentDataSources` insertion without verifying each ID belongs to `req.orgId!`. Direct cross-tenant data exposure is low (FK-walked retrieval queries scope by `organisationId` AND `agentId`), but writes corrupt the scope-link table with FK-valid references to other orgs' entities. Fix: verify each non-null scope ID against `WHERE id = :id AND organisationId = :orgId` before insert.
 
 - [ ] **AKR-ADV-5 — No per-org chunk-count cap or embedding cost quota in `documentChunkEmbedJob`.** A user with `REFERENCE_DOCUMENTS_WRITE` can promote large documents rapidly, each producing hundreds of OpenAI embedding API batches. The job's `expireInSeconds: 300` timeout fires after API calls are already billed. Fix: add `MAX_CHUNKS_PER_DOCUMENT = 500` constant in `documentChunkingServicePure.ts` (truncate + warn-log if exceeded); add per-org `document:chunk-embed` queue rate-limit or daily embedding-token counter.
 
@@ -3592,7 +3580,7 @@ External reviewer (ChatGPT) verdict was APPROVE-with-follow-up. ~95% of findings
   - Gap: heartbeat payload field missing.
   - Suggested approach: emit `data: { eventTimestamp, serverNow, lastEventId }` in the heartbeat (where `lastEventId` is the most-recently-emitted real event for the scope); confirm whether the canonical `lastEventId` should be drawn from the ring buffer's last entry per scope or from a separate per-connection tracker.
 
-- [ ] **AGW-DEF-6 — `workingTimeRollupCompactJob` uses `RETURNING id` against composite-PK table.** `server/jobs/workingTimeRollupCompactJob.ts:99` does `DELETE FROM agent_working_time_rollups ... RETURNING id`, but `agent_working_time_rollups` has no `id` column (composite PK on `organisation_id, agent_id, bucket_date`). The job will fail at runtime on the first execution against any non-empty data set. This is a code-quality bug rather than a spec deviation (spec doesn't pin SQL details), but it nullifies the §6.7 retention/compaction policy in production.
+- [x] **AGW-DEF-6 — `workingTimeRollupCompactJob` uses `RETURNING id` against composite-PK table.** — **CLOSED 2026-05-11 by pre-test-hardening O1 PR #284.** Dropped `RETURNING id` from the DELETE; job runs to completion against seeded retention data. `server/jobs/workingTimeRollupCompactJob.ts:99` does `DELETE FROM agent_working_time_rollups ... RETURNING id`, but `agent_working_time_rollups` has no `id` column (composite PK on `organisation_id, agent_id, bucket_date`). The job will fail at runtime on the first execution against any non-empty data set. This is a code-quality bug rather than a spec deviation (spec doesn't pin SQL details), but it nullifies the §6.7 retention/compaction policy in production.
   - Spec section: §6.7 retention policy row "Working Time aggregates".
   - Gap: SQL bug, runtime failure.
   - Suggested approach: change `RETURNING id` to `RETURNING agent_id` (or remove `RETURNING` entirely — the CTE only needs the row count, which it doesn't actually use). Add a vitest pure test that exercises the compaction SQL against a fixture DB to catch this class of bug.
@@ -3614,7 +3602,7 @@ Phase 2 (`feature-coordinator`) entered the build pipeline with one of the two P
 
 Branch-level Phase 2 review pass against the integrated `claude/support-ticket-structure-xMcy8` branch (head `d96fb728`). All 15 chunks (C1–C15) of the build are present and most of the spec surface area is implemented faithfully. Seven gaps require human design judgement before the build is merge-ready. The most urgent (REQ #45) silently breaks the brief's collision-avoidance invariant.
 
-- [ ] **REQ #45 — §8.1 preflight checks 4, 5, 6, 7 missing in `supportDraftDispatchService.approveDraft`.** Spec §8.1 enumerates seven preflight checks; the implementation performs only checks 1, 2, 3 (in part). Missing: (4) ticket status eligibility per §5.1.A column 3 (e.g. `support.propose_reply` not allowed on `pending_internal`), (5) collision-window check (`now - last_human_activity_at >= agent_config.collisionWindow.minMinutesSinceHumanActivity` AND respect-human-assignee), (6) customer-match policy gate, (7) supersession check (no newer draft exists). Without these the dispatch service can issue a public reply on top of fresh human activity — direct violation of brief §5.4 (collision avoidance) and brief §6.5 (assisted/autonomous mode separation). The `overrideCollision` parameter on `approveDraft` is plumbed but the underlying check it bypasses does not exist; the parameter is therefore inert today.
+- [x] **REQ #45 — §8.1 preflight checks 4, 5, 6, 7 missing in `supportDraftDispatchService.approveDraft`.** — **CLOSED 2026-05-11 by pre-test-hardening S1 PR #284.** All four checks (status eligibility, collision window with `respect-human-assignee`, customer-match policy, supersession with `(created_at, id)` tuple ordering) implemented as pure helpers in `supportDraftDispatchPreflightPure.ts`. Source-rule snapshot pinned via unit tests so any later edit to the source spec that contradicts the snapshot is caught. Spec §8.1 enumerates seven preflight checks; the implementation performs only checks 1, 2, 3 (in part). Missing: (4) ticket status eligibility per §5.1.A column 3 (e.g. `support.propose_reply` not allowed on `pending_internal`), (5) collision-window check (`now - last_human_activity_at >= agent_config.collisionWindow.minMinutesSinceHumanActivity` AND respect-human-assignee), (6) customer-match policy gate, (7) supersession check (no newer draft exists). Without these the dispatch service can issue a public reply on top of fresh human activity — direct violation of brief §5.4 (collision avoidance) and brief §6.5 (assisted/autonomous mode separation). The `overrideCollision` parameter on `approveDraft` is plumbed but the underlying check it bypasses does not exist; the parameter is therefore inert today.
   - Spec section: §8.1 (preflight checks) + §5.4 (brief invariant) + §15 (`support.ticket.human_collision_blocked` log code)
   - Suggested approach: Read `canonical_inboxes.agent_config` once during preflight (already loaded for the inbox-disabled check). For check 5, compare `ticket.lastHumanActivityAt` against `now - minMinutesSinceHumanActivity` and inspect `ticket.assigneeAgentId` joined to `canonical_support_agents.agentKind` when `respectHumanAssignee=true`. For check 7, query for newer drafts on the same ticket in `awaiting_review`+ states. Each failure returns `{ statusCode: 422, errorCode: <reason> }`. Emit `SUPPORT_LOG_CODES.TICKET_HUMAN_COLLISION_BLOCKED` on collision fail. Pure helpers belong in `supportDraftDispatchServicePure.ts` for fixture testing.
 
@@ -3622,7 +3610,7 @@ Branch-level Phase 2 review pass against the integrated `claude/support-ticket-s
   - Spec section: §8.6 #2
   - Suggested approach: Once REQ #45 lands the collision-window check, gate the `overrideCollision=true` path on `assertScope(principal, 'support.draft.override_collision')` (already gated at the route layer; the service should re-assert defensively), then before re-running preflight without the collision check, insert an `auditEvents` row capturing the snapshot. Use the existing `auditEvents` schema. The route already enforces the permission key (`server/routes/support/supportDraftsRoutes.ts:39`), so the service-level guard is defence-in-depth.
 
-- [ ] **REQ #50 — §8.6 autonomous-agent guard for `overrideCollision: true` missing.** Spec §8.6 paragraph 5 explicitly requires that `overrideCollision: true` from an agent-run principal (no human user id) be rejected with `{ statusCode: 403, errorCode: 'support.draft.override_collision_human_only' }`. The current implementation silently records `reviewerUserId = null` for non-user principals and proceeds.
+- [x] **REQ #50 — §8.6 autonomous-agent guard for `overrideCollision: true` missing.** — **CLOSED 2026-05-11 by pre-test-hardening S2 PR #284.** `approveDraft` rejects agent-principal `overrideCollision=true` with 403 `support.draft.override_collision_human_only`; ZERO DB writes on the reject path. Integration test asserts both reject (agent + override) and success (human + override). Spec §8.6 paragraph 5 explicitly requires that `overrideCollision: true` from an agent-run principal (no human user id) be rejected with `{ statusCode: 403, errorCode: 'support.draft.override_collision_human_only' }`. The current implementation silently records `reviewerUserId = null` for non-user principals and proceeds.
   - Spec section: §8.6 paragraph 5
   - Suggested approach: At the top of `approveDraft`, when `options?.overrideCollision === true`, throw the spec-named typed error if `principalCtx.type !== 'user'`. Single-line guard.
 
@@ -3661,14 +3649,14 @@ Round-2 verification against the integrated `claude/support-ticket-structure-xMc
 **Branch HEAD at review:** `62f9a28e`
 **Verdict:** HOLES_FOUND (2 confirmed-holes / 2 likely-holes / 3 worth-confirming) — non-blocking advisory per playbook §8.2
 
-- [ ] **SDC-ADV-1 (confirmed-hole, partial spec-contradiction) — Read-pathway sub-account scoping not enforced.** `GET /api/support/{tickets,tickets/:id,drafts,drafts/:id,inboxes}` are gated only by `authenticate`. Any authenticated org user can read all support drafts (full `proposedBodyText` + `reviewNotes`), all ticket message threads (customer email bodies), all inbox `agent_config` (mode, collision-window, opt-ins). Spec chatgpt-spec-review R2 explicitly removed read permission keys ("read access is implicit in org membership + sub-account scoping") — but the route handlers pass `subaccountId: null` hardcoded (`supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21`), and the service-layer queries do not filter by subaccountId. Net: implementation enforces "read = org membership" only; spec-mandated subaccount scoping is missing.
+- [x] **SDC-ADV-1 (confirmed-hole, partial spec-contradiction) — Read-pathway sub-account scoping not enforced.** — **CLOSED 2026-05-11 by pre-test-hardening T1 PR #284.** All 5 read endpoints moved under `/api/subaccounts/:subaccountId/support/...`; route handlers call `resolveSubaccount(req.params.subaccountId, req.orgId!)` first; service-layer queries filter by `eq(table.subaccountId, subaccountId)`. Legacy unscoped mount removed (no compatibility shim per spec DEC-1). 11 client call-sites rewritten. `GET /api/support/{tickets,tickets/:id,drafts,drafts/:id,inboxes}` are gated only by `authenticate`. Any authenticated org user can read all support drafts (full `proposedBodyText` + `reviewNotes`), all ticket message threads (customer email bodies), all inbox `agent_config` (mode, collision-window, opt-ins). Spec chatgpt-spec-review R2 explicitly removed read permission keys ("read access is implicit in org membership + sub-account scoping") — but the route handlers pass `subaccountId: null` hardcoded (`supportTicketsRoutes.ts:14`, `supportInboxesRoutes.ts:15`, `supportDraftsRoutes.ts:21`), and the service-layer queries do not filter by subaccountId. Net: implementation enforces "read = org membership" only; spec-mandated subaccount scoping is missing.
   - **Operator triage:** (a) implement subaccount scoping by extracting `req.subaccountId` from the auth middleware and passing through to the service layer's RLS-aware queries (preferred — matches spec); or (b) override the spec decision and add `support.{ticket,draft,inbox}.view` read permission keys to gate these routes (spec amendment required).
 
 - [ ] **SDC-ADV-2 (likely-hole) — `action_attempts` TOCTOU on crash-recovery path.** `supportDraftDispatchService.ts:367-402` — Phase 2 CAS and `action_attempts` INSERT are not in the same transaction. If process A wins Phase 2 (sets `dispatching`), calls the adapter, but crashes before inserting the `in_flight` ledger row, boot-recovery transitions to `needs_reconciliation` and re-enqueues. The retry finds no `action_attempts` row, calls the adapter again. Result: duplicate provider send if the Teamwork Desk adapter's `idempotencyKey` is not provider-side honored.
   - **Confirmation needed:** does Teamwork Desk's `addReply` honor the `idempotencyKey` parameter as provider-side dedup? If yes → not exploitable. If no → confirmed duplicate-send hole.
   - **Suggested:** add a Teamwork Desk API smoke test in C7 follow-up that submits two `addReply` calls with the same key and verifies provider behavior. Document in spec §14.1 next to OQ-3.
 
-- [ ] **SDC-ADV-3 (likely-hole) — Teamwork webhook cross-tenant attribution + in-memory dedup.** `teamworkWebhook.ts:37-67` enumerates all active Teamwork connector configs across all orgs and breaks at first HMAC match. If two orgs configure the same `webhookSecret` (no platform-side uniqueness enforcement), webhook events from org A can be attributed to org B. Currently the post-processing is a no-op (`Future: publish to event bus`) — when canonical mutations land, this becomes a cross-tenant data injection path. Replay protection is in-memory (`webhookDedupeStore`, 10-min TTL) — multi-instance deployments have independent stores; manual replay against a different instance bypasses dedup.
+- [x] **SDC-ADV-3 (likely-hole) — Teamwork webhook cross-tenant attribution + in-memory dedup.** — **CLOSED 2026-05-11 by pre-test-hardening W3 PR #284.** Per-org URL token route `/api/webhooks/teamwork/:orgWebhookToken`; `connectorConfigService.findByWebhookToken` lookup filters by `connector_type='teamwork' AND status='active' AND webhook_token=$1::uuid` with UUID-regex pre-validation. DB-backed replay nonces (migration 0318) with `UNIQUE (organisation_id, webhook_source, nonce)` enforce dedup correctness; row existence (not wall-clock TTL) is the dedup invariant. Auto-generate `webhook_token` on Teamwork connector create (dual-reviewer Codex iter4 fix). Token-rotation runbook at `docs/runbooks/teamwork-webhook-token-rotation.md`. `teamworkWebhook.ts:37-67` enumerates all active Teamwork connector configs across all orgs and breaks at first HMAC match. If two orgs configure the same `webhookSecret` (no platform-side uniqueness enforcement), webhook events from org A can be attributed to org B. Currently the post-processing is a no-op (`Future: publish to event bus`) — when canonical mutations land, this becomes a cross-tenant data injection path. Replay protection is in-memory (`webhookDedupeStore`, 10-min TTL) — multi-instance deployments have independent stores; manual replay against a different instance bypasses dedup.
   - **Suggested:** (a) add a unique constraint or platform-side check that `connector_configs.config->>'webhookSecret'` cannot collide across orgs for the same connector type; (b) persist webhook dedup in a shared store (Postgres `webhook_dedup_keys` table with TTL cleanup, or Redis with TTL).
 
 - [ ] **SDC-ADV-4 (worth-confirming) — Multiple UPDATEs in `approveDraft` omit `organisationId` predicate.** `supportDraftDispatchService.ts` lines 295-312, 339-341, 346-350, 381-384, 443-446, 455-458, 470-473, 478-481. RLS provides the backstop, but `DEVELOPMENT_GUIDELINES.md §1` requires explicit application-layer org filtering for defence-in-depth. Pattern violation — not exploitable in isolation.
@@ -4023,3 +4011,398 @@ The 4 Strong + 7 Non-Blocking items below remain open for post-merge follow-up.
   - Current: `e.eventType.startsWith('phase1.')` includes all future phase1 events in `filteredSystemEvents`, which fall through to `SystemEventRow` returning `null` (silently unrendered).
   - Suggested: replace with `hasPhase1Renderer(eventType)` helper that checks both `SUPPORT_EVENT_RENDERERS` and the two macro failure types, OR add an explicit fallback row (e.g. "Unknown phase1 event: {type}") so unrendered events are visible during QA rather than silently dropped.
   - Non-blocker: only Support Agent and 42 Macro failure phase1 events exist today.
+
+### PTH-CGT-R2 — taskService.createTask side effects fire before outer transaction commits — **CLOSED 2026-05-11 in Round 5**
+
+**Closed 2026-05-11 in PR #284 Round 5 F1.** Refactor split: `_createTaskCore(input, tx)` (DB-only writes) + `emitCreateTaskSideEffects(item, input)`. Public `createTask` wraps both for backwards compat. Updated 5 cited call sites: systemIncidentService.escalateIncidentToAgent, deliveryService.deliver, scheduledTaskService.fireOccurrence, githubWebhook (2 sites). Original entry retained below for audit history.
+
+**Origin:** chatgpt-pr-review Round 2 (PR #284 pre-test-hardening, 2026-05-10).
+**Surface:** `server/services/taskService.ts:174-212` — websocket emit (`emitSubaccountUpdate`), trigger fire (`triggerService.checkAndFire`), and orchestrator routing enqueue (`enqueueOrchestratorRoutingIfEligible`) all run INSIDE the canonical `createTask(input, tx)` body, before the supplied `tx` commits.
+
+**Risk:** if the caller's outer transaction rolls back, the task row rolls back too — but observers may have already received the websocket update or the trigger handler may have already fired downstream effects. This contradicts the "single transaction prevents orphan tasks" comment in `systemIncidentService.ts:286-287` and is a contract mismatch for any caller relying on createTask's atomicity.
+
+**Why deferred (not blocking):**
+- Pre-existing: these side effects were inline before pre-test-hardening; this PR did not introduce the race.
+- No `afterCommit` primitive: the codebase has no generic transaction-callback hook. Adding one is architectural scope-out for a hardening sprint.
+- Scope cost: a clean fix touches every caller of `createTask` and changes contract for systemIncidentService, scheduledTaskService, deliveryService, githubWebhook, route handlers, agent skill executors. Out of scope for this PR.
+
+**Fix options for the next sprint:**
+1. Add a `sideEffects?: 'inline' | 'defer' | 'none'` option to `createTask` so callers inside a transaction can opt out and emit side effects themselves after commit.
+2. Build a generic `afterCommit(fn)` primitive that queues callbacks on the current tx and fires them on commit. Drizzle doesn't expose this natively; would require a wrapper.
+3. Move side effects entirely to a pg-boss `task-created` queue that the worker fires AFTER the transaction commits (most consistent with the existing pattern but adds latency for synchronous observers).
+
+**Suggested classification:** P2 (correctness, not security; pre-existing).
+
+### PTH-CGT-R3-R2 — supportRouteScoping.test.ts 404 section is weak
+
+**Origin:** chatgpt-pr-review Round 3 (PR #284 pre-test-hardening, 2026-05-10).
+**Surface:** `server/routes/support/__tests__/supportRouteScoping.test.ts:60-110`
+
+**Concern:** the "GET /api/support/* returns 404" section creates a minimal Express app with NO support routes mounted and asserts the catch-all returns 404. This proves Express's default 404 behaviour, not that production removed the legacy `/api/support` mount. The structural source-grep assertions in the same test (lines 36-54) already prove the production state.
+
+**Why deferred (not blocking):** the structural assertions do the real work; the 404 section is redundant rather than misleading. The 404 envelope shape `{ message: 'Not found' }` it pins is also intentional contract surface for the operator, so the section has minor non-zero signal.
+
+**Fix options:**
+1. Drop lines 60-110 entirely; rely on the structural section.
+2. Replace the minimal Express with a controlled harness that mounts the production `server/index.ts` router config (without lifecycle / DB) and exercises the unmounted legacy paths through real routing.
+3. Keep the section but rename to "404 envelope shape contract pin" and add an explanatory comment.
+
+**Suggested classification:** P3 (test quality, not correctness).
+
+### PTH-CGT-R6-F3 — remaining createTask(input, tx) callers still emit side effects pre-commit
+
+**Origin:** chatgpt-pr-review Round 6 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** the public `taskService.createTask(input, tx)` API calls `createTaskCore` + `emitCreateTaskSideEffects` inline. Round 5 F1 migrated 5 critical callers to call `createTaskCore` + `emitCreateTaskSideEffects` after their outer commit. The following callers still use the public `createTask(input, tx)` and would fire side effects pre-commit if their wrapping tx rolls back:
+
+- `server/services/skillExecutor.ts` (4 call sites — agent skill execution path)
+- `server/services/workflowRunStartSkillService.ts`
+- `server/services/subaccountOnboardingService.ts`
+- `server/routes/workflowRuns.ts`
+- `server/routes/portal.ts` (2 call sites — replay paths)
+- `server/routes/tasks.ts`
+
+**Risk:** narrower than the 5 callers Round 5 fixed (HTTP routes have little logic between createTask and `res.json`; skillExecutor's failure window depends on the skill graph). Pre-existing pattern. Severity: low — observability concern, not correctness.
+
+**Why deferred:** spec §0.1 explicitly forbids refactors beyond what each fix requires. The PR has materially improved the state (5 critical callers + legacy shim now correct). A blanket migration is architectural scope-out for a hardening sprint.
+
+**Fix options for the next sprint:**
+1. Migrate all 6 remaining callers to `createTaskCore` + post-commit `emitCreateTaskSideEffects`. ~40-80 LOC across 10 call sites.
+2. Add `afterCommit(fn)` primitive to `OrgTxContext` (`server/instrumentation.ts`); auth middleware fires registered callbacks after tx commit. Have `createTask(input, tx)` auto-register `emitCreateTaskSideEffects` via afterCommit. Mechanically safe; all callers benefit. ~50-100 LOC including tests.
+3. Deprecate `createTask(input, tx)` with a runtime warning when called inside a tx; force migration over time.
+
+**Suggested classification:** P2 (correctness/observability, not security).
+
+---
+
+### PTH-CGT-R6-F6 — resolveSubaccount discriminates 403 (cross-org) from 404 (not found) via status code
+
+**Origin:** chatgpt-pr-review Round 6 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/lib/resolveSubaccount.ts:14-17` — queries without org filter, returns 404 if no subaccount with that id exists, 403 if it exists but belongs to a different org.
+
+**Risk:** minor enumeration leak. An attacker can probe subaccount IDs and discriminate "exists in another org" (403) from "does not exist" (404) via the HTTP status code. The body message is identical ("Subaccount not found") which provides some defence.
+
+**Why deferred:** the spec §3.1 acceptance test for T1 explicitly chose 403 for cross-org subaccount IDs ("Negative test: GET with another org's subaccountId in the path → 403"). This is a spec-level design choice, not a code bug. Changing it requires amending the spec.
+
+**Fix options for the next sprint (if spec is amended):**
+1. Strict: keep query org-filtered (revert to pre-PR behaviour); return 404 for both cases.
+2. Hybrid: keep current behaviour for known-trusted admin paths; return 404 elsewhere.
+
+**Suggested classification:** P3 (defence-in-depth; not actively exploitable without further chained vulns).
+
+### PTH-ADV-2 — Teamwork webhook admin-bypass with skipAudit:true (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/services/connectorConfigService.ts::findByWebhookToken` uses `withAdminConnection(..., skipAudit: true)` to bypass RLS for the unauthenticated webhook routing path. Returns a full `connector_configs` row including `accessToken`, `refreshToken`, `webhookSecret`, `configJson` keyed by UUID token.
+
+**Concern:** the admin bypass fires on every inbound Teamwork webhook with no audit-log footprint. If the webhook endpoint is ever exposed to a scanning attack (automated UUID enumeration), the admin bypass would fire silently at high frequency with no alerting. The UUID uniqueness makes token collisions cryptographically improbable but doesn't address the audit-trail gap.
+
+**Recommendation:** either (a) remove `skipAudit: true` and accept the audit log overhead, or (b) emit a counter metric (not a per-request log line) so anomalous enumeration rates are visible. Document why audit suppression is the right choice if (a) and (b) are both rejected.
+
+**Suggested classification:** P3 (defence-in-depth).
+
+---
+
+### PTH-ADV-3 — pg_advisory_xact_lock requires real db.transaction in middleware (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/services/knowledgeService.ts::overrideEntry` acquires `pg_advisory_xact_lock` against the handle returned by `getOrgScopedDb()`. The lock is transaction-scoped — only safe if the caller opened a real `db.transaction()`.
+
+**Verified safe for HTTP path:** auth middleware at `server/middleware/auth.ts:148` opens `db.transaction(...)` per request. The advisory lock is bound to that outer transaction; releases on commit/rollback.
+
+**Worth-confirming:** any background-job caller of `overrideEntry` must also pre-establish a real transaction (typical job pattern is `withOrgTx({ tx, organisationId, source }, fn)` after opening `db.transaction`). Today there are no non-HTTP callers. If a future job adds a caller, the conditional `peekOrgTxContext()` wrapper in `overrideEntry` opens its own tx via the no-ALS branch — also safe. The PTH-CGT-R3-F2 fix made this robust.
+
+**Recommended action:** add a sentinel test that asserts `overrideEntry` from outside withOrgTx opens its own tx (the no-ALS branch). Already partially covered by the existing concurrency test.
+
+**Suggested classification:** P3 (defence-in-depth; current state is safe).
+
+---
+
+### PTH-ADV-4 — Webhook replay-nonce 10-min TTL vs Teamwork retry window (worth-confirming)
+
+**Origin:** adversarial-reviewer Phase 2 (PR #284 pre-test-hardening, 2026-05-11).
+**Surface:** `server/jobs/webhookReplayNoncePruneJob.ts` runs hourly, deletes nonces older than 10 minutes.
+
+**Concern:** Teamwork Desk's documented webhook retry window is up to 72 hours (varies by provider). After the 10-minute prune, a delivery ID that was already processed can be re-ingested because the nonce row no longer exists. For the current handler (which only logs and emits to a future event bus), this is low-risk. Once downstream agent processing wires up, the 10-minute window becomes a correctness gap.
+
+**Trigger:** downstream agent dispatch on Teamwork webhook events.
+
+**Recommendation:** before wiring downstream agent dispatch, extend the prune window to match the provider's maximum retry horizon (e.g. 96 hours, matching the Stripe webhook TTL used elsewhere in this codebase per `architecture.md`).
+
+**Suggested classification:** P2 (correctness gap once downstream handlers ship).
+
+---
+
+## Deferred from spec-conformance review — operator-session-identity (2026-05-11)
+
+**Captured:** 2026-05-11T10:31:11Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-8-2026-05-11T10-31-11Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 8
+
+- [ ] REQ #5a — `ManageMultiConnectDrawer` is missing the per-connection "Edit label" action named by the plan.
+  - Spec section: plan §Chunk 8, "Multi-connect Manage drawer (§5.4): ... per-connection Test / Edit label / Disconnect actions"
+  - Gap: the drawer's 3-dot menu currently exposes only Test and Disconnect; there is no "Edit label" option, and `governApi.ts` does not appear to have an `updateConnectionLabel` (or equivalent) endpoint.
+  - Suggested approach: confirm whether label editing is in scope for Chunk 8 or deferred to a later chunk; if in scope, decide whether to add a `PATCH /connections/:id` label-only route (server-side) + the corresponding `governApi` call, then surface the action in the drawer with an inline edit affordance.
+  - **Update 2026-05-11T10:48Z (spec-conformance re-verification):** ACCEPTED AS V1 DEFERRAL. No backend endpoint exists; same posture as the master toggle gap in Chunk 7. In-file marker comment present at `ManageMultiConnectDrawer.tsx:122`. Item stays open as the durable record of the deferred capability; revisit if/when a label-edit endpoint is added.
+- [ ] REQ #5b — `AppCard` "Manage" CTA opens `ManageMultiConnectDrawer` for any connection count (≥1) rather than only for ≥2.
+  - Spec section: plan §Chunk 8, "When a card has ≥2 connections (same app), the 'Manage' CTA opens this drawer instead of jumping to the existing single-connection detail."
+  - Gap: AppIntegrationsTab's `AppCard.onManage` always opens the drawer, even when the app has exactly one connection. The plan calls for a single-connection card to route to "the existing single-connection detail" instead.
+  - Suggested approach: clarify which "existing single-connection detail" the plan references (it likely belongs to Chunk 10's `ConnectionsPage.tsx` wiring) and decide whether Chunk 8 should branch on `connections.length` now or defer the branch to Chunk 10.
+  - **Update 2026-05-11T10:48Z (spec-conformance re-verification):** DEFERRED TO CHUNK 10. Chunk 10 owns the wiring between cards and single-connection detail; the branching decision lives there, not in Chunk 8. Item stays open against Chunk 10's scope.
+- [ ] REQ #9 — Shared `DisconnectConfirmDialog` gates on the literal string `"disconnect"` rather than on the connection label as §17.8 prescribes (cross-chunk concern touching Chunks 7, 8, 9).
+  - Spec section: spec §17.8 ("Disconnect confirmation: type-to-confirm gate; disabled CTA until input matches label.")
+  - Status of drawer-side requirement: **RESOLVED 2026-05-11** in commit `154f550a`. `ManageMultiConnectDrawer.tsx:9, 315-325` now imports and mounts the shared `DisconnectConfirmDialog`; the previously inlined `DisconnectConfirmInline` is deleted. Drawer-side Chunk 8 obligation satisfied.
+  - Residual gap: `DisconnectConfirmDialog.tsx:32` (carried over from `consolidation-govern`) gates on `confirmText === 'disconnect'` rather than on the connection's label. §17.8 requires the gate to match the connection/subscription label. This affects all three call sites of the shared dialog — Chunks 7, 8, and 9.
+  - Suggested approach: decide whether to (a) update `DisconnectConfirmDialog` to gate on the connection label per §17.8 (a one-prop change plus matching test), or (b) accept the existing literal-"disconnect" gate as the V1 contract and amend §17.8 to match. Cross-chunk design decision — surfacing it here so Chunks 7/9 inherit whichever outcome.
+
+## Deferred from spec-conformance review — operator-session-identity chunk 9 (2026-05-11)
+
+**Captured:** 2026-05-11T11:04:24Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-9-2026-05-11T11-04-24Z.md`
+**Spec:** `tasks/builds/operator-session-identity/plan.md` § Chunk 9 + `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md` §5.1, §5.2, §5.5, §5.6, §17.7
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 9
+
+- [ ] REQ #4 — `TestWebLoginModal` does not follow the `progressUrl` field from the 202 response, and the row's test-status dot does not update on run completion.
+  - Spec section: plan §Chunk 9 "Test Web Login (existing IEE pattern)" — "Server responds 202 with `{ agentRunId, ieeRunId, progressUrl }`. Client follows `progressUrl` via existing run-trace pattern; updates the row's test-status dot when the run completes."
+  - Gap: `TestWebLoginModal.tsx:71-73` reads only `data.agentRunId` and navigates to a hardcoded route `/admin/subaccounts/{subaccountId}/runs/{agentRunId}`, ignoring `progressUrl` and `ieeRunId`. No completion listener (no polling, no websocket, no callback into `WebLoginsTab`) so the row's status dot stays stale after a test run finishes.
+  - Suggested approach: confirm with the server-side contract whether the hardcoded route IS the canonical progress URL (in which case the contract gap is cosmetic and §Chunk 9 wording should be relaxed) or whether `progressUrl` points at a different surface (in which case the client should follow it). Separately, decide the row-dot-update mechanism — reuse whatever IEE pattern already exists in the codebase for run-trace completion, or accept "user must refresh" as the V1 posture and amend the plan to match.
+- [ ] REQ #7 — Web Login disconnect uses inline `window.confirm` rather than the shared `DisconnectConfirmDialog`.
+  - Spec section: plan §Chunk 9 "Disconnect flow (shared with Chunk 8's DisconnectConfirmDialog): Type-to-confirm with the subscription/connection label; disabled CTA until input matches." Also spec §17.8.
+  - Gap: `WebLoginsTab.tsx:210-212` carries an explanatory comment ("the shared DisconnectConfirmDialog requires a unified Connection type; web login connections use a different shape") and uses `window.confirm(...)` at line 293 instead of mounting the shared dialog. No type-to-confirm gate; no impact preview.
+  - Distinct from the existing Chunk 8 REQ #9 entry above: that one is about the shared dialog gating on the literal `"disconnect"` rather than on the label. This Chunk 9 gap is that the shared dialog is not used AT ALL on the Web Logins surface.
+  - Suggested approach: decide whether to (a) generalise `DisconnectConfirmDialog`'s `Connection` prop to a discriminated union covering both AI Subscriptions and Web Logins (plus widening `getConnectionUsage` / `disconnectConnection` to dispatch on type), (b) build a thin Web-Login-specific adapter that wraps the shared dialog with a synthetic `Connection` shape, or (c) accept the inline `window.confirm` as the V1 posture (matching the deferred-capability pattern used for Chunk 7's master toggle and Chunk 8's Edit label) and amend the plan §Chunk 9 disconnect-flow contract to match. Cross-chunk design choice — same scope as REQ #9 above.
+
+## Deferred from spec-conformance review — operator-session-identity chunk 10 (2026-05-11)
+
+**Captured:** 2026-05-11T11:29:02Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-session-identity-chunk-10-2026-05-11T11-29-02Z.md`
+**Spec:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10 + `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md` §5.3, §6, §8.13, §8.15, §10.4, §17.7
+**Plan:** `tasks/builds/operator-session-identity/plan.md` § Chunk 10
+
+- [ ] REQ #13 — `getAgentAllowedSubscriptions` argument order does not match the plan's named signature.
+  - Spec section: plan §Chunk 10 "Files to modify" — "Add `getAgentAllowedSubscriptions(agentId, subaccountId)` — calls `GET /api/subaccounts/:id/agents/:agentId/allowed-subscriptions`."
+  - Gap: `client/src/api/governApi.ts:125-131` declares `getAgentAllowedSubscriptions(subaccountId: string, agentId: string)` — `(subaccountId, agentId)` — reversed from the plan's `(agentId, subaccountId)`. The single call site (`ModelAccessSection.tsx:109`) matches the implementation, so the helper is functionally correct; the divergence is the public signature contract.
+  - Note: every other AI-subscription helper in the same file (`getAiSubscription`, `connectAiSubscription`, `updateAiSubscriptionLabel`, `makeAiSubscriptionDefault`, `editAiSubscriptionAvailability`, `disconnectAiSubscription`, `reacceptConsent`, `triggerReauth`) takes `(subaccountId, ...)` first, so the current order is consistent with the file's convention. The plan diverges from that convention.
+  - Suggested approach: decide whether to (a) flip the helper's parameters to `(agentId, subaccountId)` per the plan (one-line signature change + update the single call site in `ModelAccessSection.tsx`) and accept the inconsistency with sibling helpers, or (b) accept the current `(subaccountId, agentId)` order as the V1 contract and amend the plan to match. Option (b) keeps file-level consistency; option (a) follows the plan literally. Non-blocking — the function works either way.
+
+---
+
+## Deferred from branch-level review — operator-session-identity (2026-05-12)
+
+**Status:** Deferred (V1 ship-as-is; revisit before Phase 3 successor work)
+**Source logs:**
+- `tasks/review-logs/adversarial-review-log-operator-session-identity-2026-05-11T12-18-00Z.md`
+- `tasks/review-logs/pr-review-log-operator-session-identity-branch-2026-05-11T12-18-00Z.md`
+
+**Branch-level fix-loop applied (committed in this build):** S2/L1/L2/N3 org-filter defence-in-depth on `reaccept` UPDATE, refresh-job UPDATE, route re-read, and `detectAndTransitionStaleDisclosure` SELECT; C2 make-default race closed by target-row `FOR UPDATE` + idempotent fast-path + CAS-style `is_default = false` predicate on the promote; L3 sweep capped at `LIMIT 500` (`SWEEP_BATCH_LIMIT`) with batch-saturated logging; S3 duplicate `AiSubscriptionConnection` type collapsed to a single source of truth in `shared/types/govern.ts`.
+
+**Deferred items remaining:**
+
+- **OSI-DEF-1 — credentialBrokerService bare-db conversion to getOrgScopedDb** (adversarial-reviewer C1, confirmed-hole)
+  - File: `server/services/credentialBrokerService.ts` lines 4, 96, 177, 242, 307, 355, 377 (6 call sites)
+  - Reason for deferral: Larger refactor than the rest of the fix-loop; current path is gated by the request-time `withOrgTx` for V1 callers. The hole only opens if a future caller acquires the service from a non-tx context (background job, admin path) without setting up org tx — same risk shape that the 2026-04-25 audit closed across other services.
+  - When to revisit: Before adding any new caller of `credentialBrokerService` (e.g. the OpenClaw adapter activation, or a new background job that resolves credentials). The fix mirrors the prior service-by-service remediation in that audit.
+
+- **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
+  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
+  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
+  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+
+- **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
+  - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
+  - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
+  - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
+
+- **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
+  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
+  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
+  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+
+- **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
+  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
+  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
+  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+
+- **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
+  - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
+  - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
+  - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
+
+- **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
+  - File: `server/routes/operatorSessionConnections.ts` line 442
+  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
+  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+
+- **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
+  - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
+  - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
+  - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
+
+- **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
+  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
+  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
+  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
+
+- **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
+  - File: `server/services/operatorSessionConsentService.ts` lines 197-209
+  - Reason for deferral: Spec §16 names the method but defers the implementation to the user-deletion privacy sweep (out of scope for Spec C).
+  - When to revisit: When the user-deletion flow is implemented. Confirm any caller handles the 501 gracefully rather than failing the deletion.
+
+- **OSI-DEF-11 — `OPERATOR_SESSION_DISCLOSURE_VERSION` is deploy-coupled** (adversarial-reviewer additional observation)
+  - File: `server/config/operatorSessionProviders.ts` (`OPERATOR_SESSION_DISCLOSURE_VERSION = 1`)
+  - Reason for deferral: Hard-coded constant. Bumping the version (e.g. for a legal update) requires a code deploy. No DB-config or feature-flag path.
+  - When to revisit: If the disclosure text needs an urgent update without a deploy window, or if legal asks for a feature-flag-style toggle on disclosure version.
+
+- **OSI-DEF-12 — Legacy `/admin/subaccounts/:id/connections` bookmark lands on empty state when org admin has no active client** (dual-reviewer P2)
+  - File: `client/src/pages/govern/ConnectionsPage.tsx` lines 38-45 + `client/src/App.tsx` line 248 (`SubaccountIntegrationsRoute`)
+  - Reason for deferral: The redirect adds `?workspace=X` but `ConnectionsPage` derives `isWorkspace` from `viewMode`. An org admin with no `activeClientId` lands in `'org'` mode and sees "Select a workspace" instead of subaccount X's connections. Honouring the query param across view modes was attempted in this dual-reviewer pass and reverted — it creates a worse UX problem: the page body shows workspace data while the switcher shows "Org" (mode/data mismatch with no clean way to clear the override without editing the URL). Correct fix is non-trivial (set `activeSubaccountId` + name in localStorage from the redirect, which requires fetching the subaccount name; or replace the redirect target with a workspace-picker prompt) and outside the scope of an in-loop edit.
+  - When to revisit: Bundle with the next pass that touches `SubaccountIntegrationsRoute` or the workspace picker. The clean approach is: in `SubaccountIntegrationsRoute`, fetch the subaccount name via `GET /api/subaccounts/:id`, call `setActiveSubaccount(id, name)`, then `Navigate` to `/connections` without the `workspace` query param. The page then enters workspace mode naturally and the switcher stays consistent.
+  - Current behaviour: legacy bookmark from org mode → "Select a workspace" empty state. Bookmark from workspace mode → works because `viewMode === 'workspace'` and the redirect's `workspace=` param is honoured by the existing line-43 ternary.
+
+- **OSI-DEF-13 — `EditAvailabilityModal` exposes raw agent-ID entry instead of a selectable agent picker** (chatgpt-pr-review PR #286 round 1 T1)
+  - File: `client/src/pages/govern/components/EditAvailabilityModal.tsx`
+  - Reason for deferral: V1 ships with this limitation noted. The backend schema validates UUIDs and non-empty arrays, but the UX is not viable for non-technical operators — they cannot realistically type or paste agent IDs from memory, and there is no in-product way to look an ID up. ChatGPT also flags the membership-validation gap (a user could type an ID belonging to a different subaccount and have the persistence layer accept it).
+  - When to revisit: Either when the agent-list endpoint is being built for an adjacent feature (bundle the picker on the back of it), or earlier if a beta customer hits the "Specific agents only" path and the manual-ID flow blocks them.
+  - Two viable end-states (decision deferred):
+    - (a) Hide the "Specific agents only" option from the modal until the picker exists — narrows V1 surface area to "Any agent in this workspace", which is the default and what most callers will pick anyway.
+    - (b) Add a minimal `GET /api/subaccounts/:id/agents` endpoint that returns `[{id, name}]` for the workspace, render a multi-select, and server-side enforce `allowedAgentIds ⊆ workspace.agents` on persistence.
+  - Recommended end-state at revisit time: (b) — the multi-select is the long-term shape and (a) just kicks the can. Picking (a) at revisit is only justified if the agent-list endpoint is far off and a workspace user is actively asking for the restriction-by-agent path.
+## Deferred spec decisions — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11
+**Source log:** `tasks/review-logs/spec-review-log-sandbox-isolation-2-20260511T000426Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Iteration:** 2
+
+These items were classified ambiguous/directional during spec review. Spec mechanics tightened to acknowledge the build-time choice; the choice itself is deferred to Phase 2.
+
+- [ ] **SANDBOX-DEF-EGRESS-MECH — Choose egress interception mechanism**
+  - Spec section: §9.1 (egress audit logging is mandatory when `network` is non-`none`).
+  - Schema is locked in §20.6 — the choice is which component actually intercepts allow/deny decisions and writes the audit rows.
+  - Candidates: (a) e2b SDK network-policy hooks if they expose per-decision callbacks, (b) application-layer egress proxy outside the sandbox with mandatory routing from the template entrypoint, (c) CNI / eBPF-side hooks if e2b exposes them.
+  - **STATUS (C9 chunk, 2026-05-11): DEFERRED to actual SDK installation.** The e2b SDK (@e2b/sdk or 'e2b') is not yet installed in node_modules. The e2bSandbox provider is implemented with a thin E2bSdkClient interface stub that throws on first call; real SDK wiring lands when the e2b account is provisioned and the SDK's exposed surface (especially network-policy hooks) is verified. The audit-row schema (C1b §20.6) is unaffected by the mechanism choice. Decision options remain (a), (b), (c) above — pick based on the actual SDK API surface at installation time.
+
+- [x] **SANDBOX-DEF-LOG-SCHEMA — CLOSED 2026-05-11 at chatgpt-spec-review Round 1 F1.** Locked to **option (a) — new `sandbox_logs` table**.
+  - Spec section: §8.4 step 9 (log persistence), §17.1 + §17.3 (retention), §20.8 (contract), §21.1 (RLS), §19.1 (schema file + prune job), §19.4 (migration).
+  - Rationale: cleaner RLS surface (symmetric with the other four sandbox tables); line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` enforceable at the DB layer (a JSONB column couldn't); 90d retention lifecycle decoupled from the general application log layer.
+  - Build impact: schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). No longer a chunk-zero gating decision.
+
+- [ ] **SANDBOX-F1 — Compute real digests + hashes for synthetos-sandbox template (deferred Phase 3 chatgpt-pr-review R1)**
+  - Captured 2026-05-11 via Phase 3 `chatgpt-pr-review` Round 1 finding F1 (recommended `defer`).
+  - Spec section: §15.2 (CURRENT_VERSION is human-committed pre-build), §15.3 (PUBLISHED_VERSION is CI-attested post-publish).
+  - Current state per `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION`: `deps_lockfile_hash = sha256:000...` placeholder; Dockerfile base image digest also placeholder; pip package hashes in requirements.txt similarly placeholder.
+  - **Why deferred for V1 ship:** all of these are intentionally placeholder until the e2b account is provisioned (see SANDBOX-DEF-EGRESS-MECH above). The CURRENT_VERSION / PUBLISHED_VERSION contract is structurally complete; values are operator-computed pre-first-publish per spec §15.2.
+  - **Operator action when e2b account is provisioned:** (0) flip `CURRENT_VERSION.version` AND `PUBLISHED_VERSION.version` from `local-dev-v1.0.0` to `v1.0.0` — the `local-dev-` prefix is intentional pre-first-publish to keep the `verify-template-version-coherence.sh` strict gate (Phase 3 T1 fix) green on `ready-to-merge` while no tag exists; (1) `docker pull` the real base image and capture the digest; (2) update `infra/sandbox-templates/synthetos-sandbox/Dockerfile` `FROM` line + CURRENT_VERSION `base_image_digest`; (3) regenerate `requirements.txt` with `pip-compile --generate-hashes` and capture real package hashes; (4) recompute `deps_lockfile_hash = sha256(requirements.txt || package-lock.json)`; (5) update CURRENT_VERSION; (6) flip repo variable `E2B_PUBLISH_ENABLED=true` AFTER wiring the real `e2b template publish` + `e2b template inspect` commands in `.github/workflows/publish-sandbox-templates.yml` (per Phase 3 F2 fix — the workflow now hard-fails until both wiring + variable flip are done); (7) push the `sandbox-template/synthetos-sandbox/v1.0.0` tag to trigger the publish workflow; (8) merge the auto-generated attestation PR within the 24h grace window so PUBLISHED_VERSION lands with real digests.
+
+---
+
+## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11T08:06:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-sandbox-isolation-2026-05-11T08-06-30Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Verdict:** NON_CONFORMANT — 14 directional / ambiguous gaps. The 3 critical items (REQ #11, #28, #29) together prevent the feature from working end-to-end on the happy path; address them as a single focused builder pass before invoking `pr-reviewer`.
+
+- [ ] **REQ #11 (Critical) — `runTask` does not call `runHarvest` on the happy path**
+  - Spec section: §8.4, §22 (harvest happens inline within `runTask` for the happy path).
+  - Gap: `server/services/sandboxExecutionService.ts:367-376` throws `sandbox_harvest_failed` with comment `TODO(C7): wire to runHarvest()`. The harvest pipeline IS implemented in `sandboxHarvestService.ts` but `runTask` never invokes it after the provider returns terminal. Result: every successful sandbox call fails with a synthetic harvest error.
+  - Suggested approach: in `_attemptProviderStart` after the provider returns `providerOutput`, replace the throw with a call to `runHarvest(input.sandboxExecutionId, { ...tenancy from input, outputSchemaRef: input.outputSchemaRef, credentialAliases: input.credentialIssuanceContext.aliases.map(a => ({ alias: a.alias, connectionId: a.connectionId })), policyArtefactLimits: input.policy.artefactLimits })` and return its result. Before the call, transition the row from `running` (or current pre-terminal state) to `harvesting` via an atomic UPDATE WHERE status predicate so the harvest pipeline's own §24.3 race semantics engage. The harvest pipeline will own the terminal write in step 12.
+
+- [ ] **REQ #28 (Critical) — `sandbox_start_failed` telemetry event never emitted**
+  - Spec section: §14.5 (pre-start failure path MUST emit `sandbox_start_failed`).
+  - Gap: grep finds the string only in the schema enum and in `verify-sandbox-minimum-events.sh`. No production code writes this event row. CI gate already FAILS for this reason.
+  - Suggested approach: add a telemetry event writer in C5's `_handleExistingRow` (Case 7 — MAX_START_ATTEMPTS reached) and in `_attemptProviderStart` (catch branch, before the `provider_unavailable` UPDATE). Use `sandboxHarvestService`'s `writeTelemetryEvent` shape extracted into a smaller helper, or call into it directly. Payload per spec §14.2 row `sandbox_start_failed`: `{ reason, providerErrorCode? }`.
+
+- [ ] **REQ #29 (Critical) — `sandbox_start` telemetry event never emitted**
+  - Spec section: §14.5 (post-start path MUST emit `sandbox_start`).
+  - Gap: same shape as #28 — only present in schema enum + gate script. No production writer.
+  - Suggested approach: emit `sandbox_start` from `_attemptProviderStart` immediately after `provider.runTask(input)` returns successfully and BEFORE the harvest invocation (added in REQ #11). Payload per spec §14.2 row `sandbox_start`: `{ ceilings, network_policy, alias_count }` — derive from the resolved ceilings, `input.policy.network`, and `input.credentialIssuanceContext.aliases.length`.
+
+- [ ] **REQ #6 (High) — `sandbox_logs.line` length CHECK constraint**
+  - Spec section: §20.8 (`CHECK (length(line) <= MAX_LOG_LINE_BYTES)` — V1 default 64 KB per line).
+  - Gap: schema and migration `0322` carry no length CHECK. Service-layer truncation at `sandboxHarvestService.ts:333-337` partially substitutes but spec pins this as a DB constraint (defence-in-depth against bypass).
+  - Suggested approach: write a corrective migration `0325_add_sandbox_logs_line_length_check.sql` with `ALTER TABLE sandbox_logs ADD CONSTRAINT sandbox_logs_line_length_check CHECK (length(line) <= 65536)`. Paired down. Update the Drizzle schema to declare the constraint so generated migrations align. Verify the service-layer truncation at line 333 already keeps lines under the limit (it does — `MAX_LOG_LINE_BYTES = 65536`).
+
+- [ ] **REQ #20 (High) — `sandboxMeteringQueryPure.ts` missing**
+  - Spec section: §12.6, §19.1, §25.1.
+  - Gap: spec names the file path, the function names (`getOrgSandboxMinutes(orgId, monthRange)`, `getSubaccountSandboxMinutes(orgId, subaccountId, monthRange)`), and the test file. None exist.
+  - Suggested approach: create `server/services/sandboxMeteringQueryPure.ts` exposing the two functions as pure SQL composers (return `SQL` fragments, callers wrap with `withOrgTx`). The rollup is over `llm_requests` filtered by `source_type = 'sandbox_compute'`, summing `sandbox_wall_clock_ms / 60_000` for "minutes". Decide month-range semantics (closed-open interval on `billing_month`) and pure-test the SQL string output against fixtures. Add `server/services/__tests__/sandboxMeteringQueryPure.test.ts`.
+
+- [ ] **REQ #31 (Medium) — `withSandboxProvider` emits diagnostics only as logs, not DB rows**
+  - Spec section: §14.2 (DB telemetry events) + §14.3 (structured log events) — both required.
+  - Gap: `server/lib/withSandboxProvider.ts` emits `provider_diagnostic` and `provider_unavailable` to the logger only. Progress.md acknowledges the lib wrapper doesn't carry the HarvestContext required for DB rows.
+  - Suggested approach: extend the `withSandboxProvider` options type with optional tenancy fields (`organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `provider`); when present, write a `sandbox_telemetry_events` row alongside the log line. Audit every call site and pass the context. For call sites without context (rare — mostly the harvest-step provider reads), keep the log-only path as a documented fallback with a `// no-tenancy-context: defaults to log-only` comment.
+
+- [ ] **REQ #35 (Medium, AMBIGUOUS) — `sandboxArtefactPurgeJob` trigger from run-soft-delete**
+  - Spec section: §17.4 (artefacts physically deleted from object storage by `sandbox-artefact-purge` job triggered by the soft-delete event).
+  - Gap: job exists and is registered, but the trigger from the run-soft-delete cascade was not surveyed end-to-end during this conformance run.
+  - Suggested approach: confirm whether the existing run-deletion path (the soft-delete handler used elsewhere in the codebase) calls `boss.send(SANDBOX_ARTEFACT_PURGE_JOB, { agentRunId })` for the affected runs. If yes, mark this PASS; if no, wire the call from the soft-delete service.
+
+- [ ] **REQ #36 (Medium) — Ceiling-monitor + wall-clock-kill jobs do not call provider terminate**
+  - Spec section: §10.2 ("calls the provider terminate API and writes `timed_out`" / "calls the provider terminate API directly").
+  - Gap: both jobs in `server/jobs/sandboxCeilingMonitorJob.ts` and `server/jobs/sandboxWallClockKillJob.ts` only update the DB row to `harvesting` with an `errorReason`. Neither calls `provider.terminate(provider_sandbox_id)` via `withSandboxProvider`. The conservative choice (let harvest pipeline handle teardown via its own close path) is defensible but diverges from the spec's named mechanism.
+  - Suggested approach (operator-decision): either (a) wire `withSandboxProvider({ phase: 'terminal', sandboxExecutionId, call: () => provider.terminate(providerSandboxId) })` into both jobs before the DB UPDATE, importing the provider via the resolver registry; or (b) write a one-paragraph spec amendment clarifying that "calls the provider terminate API" is satisfied by transitioning to `harvesting` + harvest pipeline's existing teardown call (which IS via withSandboxProvider). Option (b) is lower-risk but rewrites spec wording.
+
+- [ ] **REQ #55 (Medium) — Sandbox teardown verification missing entirely**
+  - Spec section: §17.5 (`sandbox.teardown.verified` / `sandbox.teardown.unverified` log events; operator-paging on unverified after 60s + backoff).
+  - Gap: zero matches for either event name in `server/`. e2bSandbox calls `terminateSandbox` but does not verify-then-emit. localDockerSandbox similar.
+  - Suggested approach: add a `verifyTeardown(providerSandboxId, sandboxExecutionId)` method on each provider that polls (with `withBackoff`) until the sandbox is no longer enumerable in the provider's sandbox list, with a 60s grace + retry. On success, emit `sandbox.teardown.verified` log. On failure, emit `sandbox.teardown.unverified` log + write a structured op-paging event (path TBD per existing operator-paging convention in the codebase). Call from the harvest pipeline's terminal step (after `assertValidTransition`).
+
+- [ ] **REQ #57 (High, AMBIGUOUS) — Credential value-threading into `/workspace/secrets/` is acknowledged-incomplete**
+  - Spec section: §11.1 (sandbox receives task-scoped, sub-account-scoped credentials mounted as files).
+  - Gap: `server/services/sandbox/e2bSandbox.ts:258-265` declares the file-mount intent but the loop body is a no-op with `void alias.alias + targetPath` and a comment "credential value is not available in the input descriptor in V1. C13 (adapter rewiring) threads the issued credential value through". The C13 adapter passes `credentialIssuanceContext: { aliases: [] }` — no value-threading happens. Sandbox cannot receive credentials in V1.
+  - Suggested approach: extend `SandboxRunTaskInput.credentialIssuanceContext` to carry pre-issued credential values (or a callable to issue at sandbox start). Plumb the calling adapter (`ieeDevBackend.dispatch`) to call `credentialBrokerService.issueCredential` for each requested alias before invoking `runTask`, attach the materialised credential value, and let `e2bSandbox` write each via `sdkClient.writeFile(sandboxId, '/workspace/secrets/{alias}.token', Buffer.from(value), { mode: 0o400 })`. Verify the `redactionPattern: RegExp` returned by the broker (REQ #13 PASS) is registered in the harvest pipeline's per-execution pattern set so the value is redacted from harvested outputs.
+
+---
+
+## Deferred from adversarial-reviewer review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/adversarial-review-log-sandbox-isolation-2026-05-11T08-47-38Z.md` — verdict HOLES_FOUND (2 confirmed + 4 likely + 5 worth-confirming). Per `feature-coordinator §8.2`, advisory non-blocking. Operator may prioritise selected items pre-merge during Phase 3 chatgpt-pr-review.
+
+### High-priority pre-merge candidates
+
+- [ ] **SANDBOX-ADV-1.1 (confirmed-hole) — Reconciliation job missing `withOrgTx` wrap**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:120-195`
+  - Issue: `runHarvestReconciliation` calls `getOrgScopedDb()` but the reconciliation job never wraps in `withOrgTx({ tx, organisationId })`. Every reconciliation will throw `missing_org_context` (silently caught by per-row try/catch). Stuck executions cannot recover. Separately, the `UPDATE sandbox_executions WHERE id = ANY(...)` runs on admin connection without `organisation_id` predicate.
+  - Fix: Wrap reconcile call in `db.transaction(async (orgTx) => { withOrgTx({ tx: orgTx, organisationId: row.organisation_id }, async () => { await reconcileExecution(orgTx, row); }); })`. Add `AND organisation_id = ${row.organisation_id}::uuid` to UPDATE WHERE. Pattern: `sandboxTelemetryPruneJob.ts:91-105`.
+
+- [ ] **SANDBOX-ADV-5.1 (likely-hole) — Ceiling-monitor + wall-clock-kill jobs never enqueued**
+  - File: `server/services/sandboxExecutionService.ts:380-383` (TODO unimplemented)
+  - Issue: Both jobs registered as workers but never enqueued. Wall-clock enforcement is provider-side only (best-effort). Tenant code can run beyond spec §10.1 30-min hard cap with cost charged but unenforced.
+  - Fix: After `pending → running` UPDATE in `_attemptProviderStart`, enqueue both via `boss.send` with `singletonKey: sandboxExecutionId` and appropriate `startAfter`.
+
+- [ ] **SANDBOX-ADV-4.1 (confirmed-hole) — Credential-leak defense is case-sensitive**
+  - File: `server/services/sandboxHarvestService.ts:411-421`
+  - Issue: Step 6 of harvest blocks `/workspace/secrets/` (case-sensitive). Bypass: `/workspace/Secrets/foo.token`, `../secrets/foo`. e2b `listFiles` response not normalised.
+  - Fix: Normalise: `const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');` then check on `norm`. Reject `..` paths.
+  - Severity: Latent until C13 wires credentials. Fix BEFORE C13 lands.
+
+### Medium-priority post-merge backlog
+
+- [ ] **SANDBOX-ADV-2.1 (likely-hole) — `templateVersion` from env var unvalidated** (`server/services/executionBackends/ieeDevBackend.ts:131`). env-var value flows verbatim to audit rows. e2b sandbox image is safe (uses pinned digest) but audit rows can carry forged version strings, breaking spec G12 audit guarantee. Fix: read pinned digest from `E2bSandbox.templateDigest`.
+- [ ] **SANDBOX-ADV-3.1 (likely-hole) — Telemetry sequence allocator race silently drops events** (`sandboxExecutionService.ts:63-73` + `sandboxHarvestService.ts:81-91`). `criticality='error'` events may be lost. Fix: `INSERT ... ON CONFLICT DO UPDATE SET sequence = ... RETURNING sequence` with retry, OR Postgres advisory lock. At minimum: log dropped events at warn/error level.
+- [ ] **SANDBOX-ADV-6.1 (likely-hole) — Reconciliation hardcodes `credentialAliases: []`** (`sandboxHarvestReconciliationJob.ts:183-187`). Latent until C13. Fix: add `credential_aliases` JSONB column to `sandbox_executions`.
+
+### Low-priority / observations (worth-confirming)
+
+- [ ] **SANDBOX-ADV-1.2 — Subaccount FK missing on all 5 new sandbox tables.** No DB-level cross-org subaccount validation; relies on service layer.
+- [ ] **SANDBOX-ADV-2.2 — Inline-sandbox env-injection bypass possible** if non-test caller passes forged `env` object to `resolveSandboxProvider`. CI gate catches static imports only.
+- [ ] **SANDBOX-ADV-3.2 — Race between provider success and ceiling-monitor `markForHarvest`** can cause completed execution to be billed as timed-out with no cost row.
+- [ ] **SANDBOX-ADV-4.2 — S3 path-traversal via filename.** `${ctx.subaccountId}/${ctx.sandboxExecutionId}/${artefact.filename}` — `..` could overwrite another execution's artefact. Sanitise filename.
+- [ ] **SANDBOX-ADV-5.2 — No per-tenant log-storage quota.** Per-execution caps (10MB stdout + 10MB stderr) but tenant could fill DB before 90d prune.
+
+---
+
+## Deferred from chatgpt-pr-review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`. 3 rounds; Round 3 verdict APPROVED. 2 advisory non-blockers carried forward (recorded for future work; ChatGPT explicitly flagged both as not-blocking).
+
+- [ ] **SANDBOX-R3-T1 (advisory, low priority) — Reconciliation eligibility still uses Node wall-clock `now = new Date()`**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:72` (`const now = new Date();`)
+  - ChatGPT call (Round 3): *"less critical than the ceiling monitor because it is recovery timing, not billing enforcement, but for consistency I'd eventually move that to DB time too. Not a blocker."*
+  - Why deferred: recovery timing has no billing or correctness invariant; clock skew of seconds-to-minutes shifts when stuck-row sweep fires but does not change which rows are eligible (the per-row `isExecutionEligibleForReconciliation` check still validates the deadline). Round 2 R2-T1 fix migrated the ceiling monitor (correctness-sensitive) to DB-anchored time; this completes the migration to consistency.
+  - Suggested approach: replace `const now = new Date();` with a `SELECT NOW()` in the same admin transaction; thread the DB time through to `isExecutionEligibleForReconciliation`. Pure helper signature unchanged. Single-file change, ~10 lines.
+
+- [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
+  - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
+  - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.

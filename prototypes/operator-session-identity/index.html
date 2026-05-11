@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Subscriptions + /connections CRUD (Spec C) — Prototype Index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+body { padding: 40px 48px; max-width: 960px; margin: 0 auto; }
+.proto-index-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.02em; }
+.proto-index-sub { font-size: 14px; color: #64748b; margin-bottom: 32px; line-height: 1.6; }
+.screen-list { display: flex; flex-direction: column; gap: 10px; }
+.screen-item {
+  display: flex; align-items: center; gap: 16px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 16px 20px; text-decoration: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.screen-item:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+.screen-num {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: #eef2ff; color: #4338ca;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.screen-info { flex: 1; }
+.screen-title { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 2px; }
+.screen-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+.screen-arrow { color: #94a3b8; font-size: 18px; }
+.section-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #94a3b8; margin: 24px 0 8px;
+}
+.section-header {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #4338ca;
+  margin: 32px 0 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-header::before { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.section-header::after  { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.round-badge {
+  font-size: 10px; font-weight: 700; color: #7c3aed;
+  background: #f5f3ff; border: 1px solid #ddd6fe;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+.new-badge {
+  font-size: 10px; font-weight: 700; color: #047857;
+  background: #ecfdf5; border: 1px solid #a7f3d0;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+.crud-badge {
+  font-size: 10px; font-weight: 700; color: #b45309;
+  background: #fffbeb; border: 1px solid #fcd34d;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+.r9-badge {
+  font-size: 10px; font-weight: 700; color: #0369a1;
+  background: #e0f2fe; border: 1px solid #7dd3fc;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+.r11-badge {
+  font-size: 10px; font-weight: 700; color: #b45309;
+  background: #fffbeb; border: 1px solid #fcd34d;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+.r13-badge {
+  font-size: 10px; font-weight: 700; color: #7c3aed;
+  background: #f5f3ff; border: 1px solid #ddd6fe;
+  padding: 1px 7px; border-radius: 4px; margin-left: 8px;
+}
+</style>
+</head>
+<body>
+
+<div class="proto-index-title">AI Subscriptions + /connections CRUD (Spec C)</div>
+<div class="proto-index-sub">
+  Spec C: Credential Broker + consolidated /connections surface. Twenty screens.
+  Round 9 restructure: three-tab strip (App Integrations, Web Logins, AI Subscriptions).
+  Round 11: Make Default confirmation modal (screen 17) with two states: business plan and personal plan (checkbox re-acknowledgement).
+  Round 12: Vocabulary palette applied across all screens. "Operator Controller", "Phase 3+", "sanctioned" removed from user-facing copy. Copy trimmed 30-50%.
+  Round 13: Vocabulary lock (Connect / Sign in again / Disconnect / Turn off agent use / Make default / Edit availability), status pill lock (6 states), AI Subscription capitalisation, confirmation pattern parity, tab subtitles, permission pills (Org admin only), date format, "OpenAI confirmed this plan". New screens: 18 (disclosure version bump), 19 (Revoked by OpenAI state), 20 (Sign in again light flow). New state variants: connected_unverified on 01 and 04, gated connect and empty state on 01.
+</div>
+
+<!-- ========== Connections entry point ========== -->
+<div class="section-label">Connections page (entry point)</div>
+<div class="screen-list">
+
+  <a class="screen-item" href="01-connections-list.html">
+    <div class="screen-num">01</div>
+    <div class="screen-info">
+      <div class="screen-title">Connections: AI Subscriptions tab <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">3-tab strip with subtitles. AI Subscriptions tab active: 4 rows (Connected, Needs consent, Needs sign in, Plan not verified). Vocabulary locked: "Connected" / "Needs consent" / "Needs sign in" / "Plan not verified". Org admin only pills on Make default / Edit availability / Disconnect / Sign in again. State variant: gated connect button (provider verification in progress) with info banner. State variant: empty state with primary CTA.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="01b-app-integrations-tab.html">
+    <div class="screen-num" style="font-size:11px;">01b</div>
+    <div class="screen-info">
+      <div class="screen-title">Connections: App Integrations tab <span class="r9-badge">Round 9 NEW</span></div>
+      <div class="screen-desc">App Integrations tab active. Card grid layout (not table). Section 1: connected apps (Gmail 2, HubSpot 1, GoHighLevel 1) with "Manage" CTA. Section 2: browse all apps (9 cards). Category filter chips above grid (All / Communication / CRM / Marketing / File Storage / Project Management / Calendar). Search by app name. No auth-method labels. "Manage" opens drawer (16); "Connect" / "Add another" opens per-app modal.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="01c-web-logins-tab.html">
+    <div class="screen-num" style="font-size:11px;">01c</div>
+    <div class="screen-info">
+      <div class="screen-title">Connections: Web Logins tab <span class="r9-badge">Round 9 NEW</span></div>
+      <div class="screen-desc">Web Logins tab active. Table with sort + filter affordances. Sortable: Label (active, asc), Site, Username, Status, Last tested. Filterable: Site, Status, Owner. Three sample rows: 42 Macro paywall (Tested OK, green dot), Bloomberg portal (Test failed, red dot + hover tooltip), Internal admin portal (Untested, grey dot). "+ Add Web Login" CTA. Explainer: "Username and password credentials for sites that don't have an integration."</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+</div>
+
+<!-- ========== App connect flows ========== -->
+<div class="section-header">App connect flows</div>
+<div class="screen-list">
+
+  <a class="screen-item" href="10-connect-app-gmail.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">10</div>
+    <div class="screen-info">
+      <div class="screen-title">Connect Gmail <span class="r9-badge">Round 9 UPDATED</span></div>
+      <div class="screen-desc">Per-app modal. Title: "Connect Gmail". Body explains agents can read, draft, send. Optional Label field ("Show as"). Primary action: "Continue to Google". Note below button: "Google will ask you to sign in and confirm permissions." "What we'll access" disclosure section collapsed by default — 4 plain-English bullets (read, send, labels, settings). State B: pending authorization overlay. No mention of "OAuth".</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="11-connect-app-hubspot.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">11</div>
+    <div class="screen-info">
+      <div class="screen-title">Connect HubSpot <span class="r9-badge">Round 9 UPDATED</span></div>
+      <div class="screen-desc">Per-app modal. Title: "Connect HubSpot". Uses HubSpot's own term "Private App Token" — not "API Key". Token field: masked, show/hide toggle. Optional Label field. Primary action: "Connect and test" (renamed from "Save and test" for verb parity). No mention of "API Key".</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="16-manage-multi-connect.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">16</div>
+    <div class="screen-info">
+      <div class="screen-title">Manage Gmail connections <span class="r9-badge">Round 9 NEW</span></div>
+      <div class="screen-desc">Right-side drawer opened from "Manage" on the Gmail app card (2 connected). Header: Gmail icon + "Gmail connections" title + "2 connections in this subaccount" subtitle. "+ Add another Gmail" CTA. Two connection rows: "Marketing Gmail" (Connected, 2 min ago), "Research Gmail" (Needs re-auth, 5 days ago). 3-dot menus: Test / Edit label / Disconnect for connected; Test / Re-authorise / Edit label / Disconnect for expired. Footer note: credential rotation requires disconnect + reconnect. Backdrop click closes drawer.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+</div>
+
+<!-- ========== Web Login flows ========== -->
+<div class="section-header">Web Login flows</div>
+<div class="screen-list">
+
+  <a class="screen-item" href="12-add-web-login.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">12</div>
+    <div class="screen-info">
+      <div class="screen-title">Add Web Login <span class="crud-badge">Round 8</span></div>
+      <div class="screen-desc">4 primary fields: Label (optional), Login URL, Username, Password (masked + show/hide). Collapsed Advanced section: Content URL, Username selector, Password selector, Submit selector, Success selector, Timeout. Primary action: "Save Web Login". Entry from "+ Add Web Login" on the Web Logins tab.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="13-edit-web-login.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">13</div>
+    <div class="screen-info">
+      <div class="screen-title">Edit Web Login <span class="crud-badge">Round 8</span></div>
+      <div class="screen-desc">Pre-filled Bloomberg portal (last test failed). Test-status strip at top. Password field: dashed-border "leave blank to keep current password" treatment. Advanced section collapsed by default. Primary action: "Save changes".</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="14-test-web-login.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">14</div>
+    <div class="screen-info">
+      <div class="screen-title">Test Web Login <span class="crud-badge">Round 8</span></div>
+      <div class="screen-desc">Two states. State A: agent picker, "Run test" primary action. State B: spinner + "Browser is logging in as [Agent]. Usually 10-30 seconds." + "View run details" link.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+</div>
+
+<!-- ========== AI Subscription flows ========== -->
+<div class="section-header">AI Subscription flows</div>
+<div class="screen-list">
+
+  <a class="screen-item" href="02-connect-wizard.html">
+    <div class="screen-num">02</div>
+    <div class="screen-info">
+      <div class="screen-title">Connect AI Subscription: Provider handshake <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">4-step bar (Connect account / Plan detected / Accept terms [muted, personal plans only] / Done). "Connect with OpenAI" button, post-connect plan detected state. "OpenAI confirmed this plan" replaces technical label. No inline prototype note for Plus branch.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="03-disclosure-plus.html">
+    <div class="screen-num">03</div>
+    <div class="screen-info">
+      <div class="screen-title">Disclosure: Plus tier <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">4-step bar (step 3 active for Plus). Type-to-accept consent gate: typed phrase "I accept the risk". ToS placeholder "[Legal will add link]". Explainer sub-line: "First-time connection requires you to type the phrase below. Future Plus-related confirmations will be a checkbox."</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="04-subscription-detail.html">
+    <div class="screen-num">04</div>
+    <div class="screen-info">
+      <div class="screen-title">AI Subscription detail: Connected state <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">Status pill: "Connected". Action buttons: "Sign in again" / "Transfer ownership" / "Disconnect" (all with Org admin only pill). "Edit availability" with Org admin only pill. "OpenAI confirmed this plan" with info tooltip. State variant stacked below: Plan not verified (connected_unverified) with amber-grey banner, disabled toggle, disabled Make Default.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="05-reauth-state.html">
+    <div class="screen-num">05</div>
+    <div class="screen-info">
+      <div class="screen-title">AI Subscription detail: Needs sign in <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">Status pill: "Needs sign in". Banner CTA: "Sign in again" (links to screen 20). Sidebar actions: Sign in again (Org admin only) / Transfer ownership / Disconnect (Org admin only). Relative date format.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="06-offboarding-state.html">
+    <div class="screen-num">06</div>
+    <div class="screen-info">
+      <div class="screen-title">AI Subscription detail: Owner inactive <span class="round-badge">Round 4</span></div>
+      <div class="screen-desc">Disabled subscription. Banner: "The original owner of this AI Subscription is no longer active." Breadcrumb: Connections / ChatGPT Pro (David K.).</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="07-availability-edit.html">
+    <div class="screen-num">07</div>
+    <div class="screen-info">
+      <div class="screen-title">Edit availability: Agent allowlist <span class="round-badge">Round 4</span></div>
+      <div class="screen-desc">Title: "Edit availability: ChatGPT Pro (Marketing)". Radios: All agents / Specific agents only. Checkbox list of 10 agents.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="08-agent-edit-model-access.html">
+    <div class="screen-num">08</div>
+    <div class="screen-info">
+      <div class="screen-title">Agent edit: Model Access <span class="round-badge">Round 7</span></div>
+      <div class="screen-desc">Read-only policy summary split by run type. Standard runs: locked to platform model providers. Autonomous runs (available soon): read-only list of allowed AI Subscriptions with Default highlighted. Configuration via Connections page.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+</div>
+
+<!-- ========== Shared ========== -->
+<div class="section-header">Shared</div>
+<div class="screen-list">
+
+  <a class="screen-item" href="15-disconnect-confirm.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">15</div>
+    <div class="screen-info">
+      <div class="screen-title">Disconnect Confirm <span class="crud-badge">Round 8</span></div>
+      <div class="screen-desc">Shared shape across all auth methods. Danger icon. Impact copy. Type-to-confirm field: must match connection label exactly to enable the red Disconnect button.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="17-make-default-confirm.html">
+    <div class="screen-num" style="background:#fffbeb;color:#b45309;">17</div>
+    <div class="screen-info">
+      <div class="screen-title">Make Default: confirmation modal <span class="r13-badge">Round 13</span></div>
+      <div class="screen-desc">
+        Both states. State A (business plan): "Org admin only" pill on modal title. Standard confirm. State B (personal plan): amber header, warning callout, impact stats, disclosure, checkbox re-acknowledgement.
+        Entry points: "Make default" in 3-dot menu (screen 01) with Org admin only pill.
+      </div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="18-disclosure-version-bump.html">
+    <div class="screen-num" style="background:#fef3c7;color:#92400e;">18</div>
+    <div class="screen-info">
+      <div class="screen-title">Disclosure version bump <span class="r13-badge">Round 13 NEW</span></div>
+      <div class="screen-desc">Shown when disclosure_version increments on an existing Plus subscription. Amber header: "Plus terms have been updated." Subscription identity line with Disabled status pill. Updated disclosure text with ToS placeholder. Checkbox re-acknowledgement: "I accept the updated terms for using a personal plan with business automation." Accept and continue (disabled until checkbox) / Disconnect this subscription (escape path). Footer: "Disclosure version: 2 (was 1)."</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="19-revoked-by-openai-state.html">
+    <div class="screen-num" style="background:#fef2f2;color:#b91c1c;">19</div>
+    <div class="screen-info">
+      <div class="screen-title">AI Subscription detail: Revoked by OpenAI <span class="r13-badge">Round 13 NEW</span></div>
+      <div class="screen-desc">Provider-side revocation (distinct from platform-side disable on screen 06). Red "Revoked by OpenAI" status pill. Prominent red banner: "OpenAI ended this session." Actions: Sign in again (primary, Org admin only) / Transfer ownership / Disconnect (Org admin only). No "Allow agent use" toggle shown. Audit footer: operator_session.revoked event. Compare link to screen 06.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+  <a class="screen-item" href="20-sign-in-again-light.html">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">20</div>
+    <div class="screen-info">
+      <div class="screen-title">Sign in again: lightweight re-auth <span class="r13-badge">Round 13 NEW</span></div>
+      <div class="screen-desc">Reached from screen 05, 19, 04 "Sign in again" action. No plan detection, no consent capture, no step bar. Title: "Sign in again to ChatGPT Team (Sandbox)." Subscription identity card. Single CTA: "Continue to OpenAI" (opens spinner, then resolves to connected detail). Footer note about identity mismatch / Transfer ownership prompt. Cancel returns to subscription detail.</div>
+    </div>
+    <div class="screen-arrow">&#8250;</div>
+  </a>
+
+</div>
+
+</body>
+</html>

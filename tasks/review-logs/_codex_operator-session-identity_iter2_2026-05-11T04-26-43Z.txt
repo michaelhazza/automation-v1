@@ -1,0 +1,30 @@
+Findings below all refer to `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`.
+
+- **critical** §7.1 / §7.2 introduce an impossible migration order. `0318_operator_session_columns.sql` adds `consent_record_id uuid REFERENCES operator_session_consents(id)` (lines 213-219), but `operator_session_consents` is only created in `0319_operator_session_consents.sql` (lines 253-277). As written, migration `0318` cannot apply on a fresh DB.
+
+- **critical** The Plus-consent flow contradicts itself across four sections. §11.1 says connect writes the connection row, then for `plan_tier = plus` writes consent before storing token (lines 771-773). §11.3 says consent is written inside the connect transaction before the credential is stored (line 789). But §17.5 says a Plus connect attempt without a prior consent record returns `422` (lines 1116-1118), and §10.4 defines a separate `POST /operator-session-connections/:connId/consent` route that requires an existing `connId` (lines 742-749). The spec currently describes both “consent is created during connect” and “connect requires pre-existing consent”.
+
+- **important** §7.2 / §9.6 / §11.3 leave `operator_session_consents.connection_id` without a viable write mechanism. The consent row has a `connection_id` FK (line 265) and §9.6 says it is an immutable historical reverse pointer that “stays at the original value forever” (line 675). But §11.3 says the consent row is written before the credential is stored (line 789). Since consent rows are append-only and “NEVER updated” (§7.2, line 257), the spec needs a concrete mechanism such as pre-generated connection IDs; otherwise this pointer cannot be populated consistently.
+
+- **important** §16.3’s Make Default lock SQL is mechanically invalid for Postgres. The spec shows:
+  `UPDATE integration_connections ... FOR UPDATE;` (lines 1025-1027). `FOR UPDATE` is a `SELECT` locking clause, not valid on `UPDATE`. The concurrency guard is therefore not executable as written.
+
+- **important** §2, §7.1, §8.1, and Chunk 1 disagree on how many new `integration_connections` columns ship. Goals say “five new columns” and list only `usability_state`, `plan_tier`, `plan_verification_status`, `plan_verified_at`, `consent_record_id` (line 52). §7.1 and §8.1 add a sixth column, `is_default` (lines 218-219, 412), and Chunk 1 also depends on that sixth column (line 817). This is a direct internal contradiction.
+
+- **important** §7.1 also contradicts itself on nullability. It says “All are nullable” for the new `integration_connections` columns (line 210), but the same block defines `is_default boolean NOT NULL DEFAULT false` (line 219) and the Drizzle field as `.notNull().default(false)` (line 237).
+
+- **important** §16.6 is missing the required unique-constraint-to-HTTP mapping for the new partial unique index introduced in §7.1. The spec creates `ic_subaccount_operator_session_default_unique` on `(subaccount_id) WHERE auth_type = 'operator_session' AND is_default = true` (lines 221-223), but §16.6 only maps the consent unique constraint and UUID PKs (lines 1062-1066). The checklist requires every new DB uniqueness constraint to have an explicit HTTP mapping.
+
+- **important** `disabledReason` is internally inconsistent with the state machine and has no declared source of truth. The API contract adds `disabledReason: 'owner_inactive' | 'admin_disabled' | 'needs_new_consent' | null` (line 588), but §7.5 says disclosure-version bump transitions to `connected_needs_consent`, not `disabled` (lines 372, 377, 400), and §9.6 does not name any column/event field that stores `disabledReason`. Right now `needs_new_consent` is a disabled reason for a state the spec says is not disabled.
+
+- **important** The provider-capability section makes load-bearing claims without a usable enforcement path. §7.4 hardcodes `sanctionedTiers: ['pro','team','enterprise']` while the same `openai` entry uses `connectionMechanism: 'none_verified'` and `planDetectionMechanism: 'self_declaration'` (lines 347-353). §11.1 then says the server “validates plan tier” and may write `connected_usable` (lines 769-771). The spec never states whether self-declared `pro/team/enterprise` land in `verified`, `self_declared`, or `connected_unverified`, even though that branch controls usability and disclosure requirements.
+
+- **important** Goal 14’s “locked failover policy” is not backed by any concrete mechanism. §2 says failover order is “Default first; other allowed subscriptions in alphabetical order on failure; platform-managed providers as final fallback” (line 64), and the UI inventory mentions failover copy (lines 160, 489, 880), but no contract, service method, or ordering rule is specified in §9, §11, §12, or `server/services/credentialBrokerService.ts` beyond “resolveAvailableCredentials includes operator_session rows” (lines 449, 852). For a “locked” policy, the read path and ordering source of truth are currently missing.
+
+- **important** §16.6 contradicts itself about whether constraint violations can return `500`. The table explicitly says a UUID PK collision returns `500 + alert` (line 1066), then the next sentence says “No constraint violations should surface as 500” (line 1068).
+
+- **minor** §8.5 uses stale language against the append-only consent model. `server/services/operatorSessionConsentService.ts` is described as “Consent record CRUD” (line 441), but §7.2 says consent rows are append-only and “NEVER updated or deleted” (line 257). “CRUD” is no longer accurate framing here.
+
+- **minor** §18 contains a resolved item inside “Open questions”. “Default subscription storage pattern — RESOLVED” remains listed under `## 18. Open questions` (lines 1156-1159). That is stale sectioning and makes the open-questions list non-literal.
+
+- **minor** There is a naming typo in the consent service API. The spec uses `supersedConsent` in §9.4 and Chunk 3 (lines 626, 838). If this is meant to be a concrete exported function name, it should be corrected consistently before implementation.

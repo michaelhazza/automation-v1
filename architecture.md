@@ -1325,6 +1325,37 @@ UNINSTALL webhook flips agency status to `disconnected` AND mass-soft-deletes ch
 
 ---
 
+<a id="credential-broker-operator-session-mode"></a>
+## Credential Broker — operator_session mode
+
+Spec: `docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md`. Plan: `tasks/builds/operator-session-identity/plan.md`. Tables: `operator_session_consents` (migration 0321) + four columns on `integration_connections` (0322).
+
+### Key decisions
+- **Two-column credential state** — `usability_state` (broker gate, only `connected_usable` returns token material) vs `plan_verification_status` (audit signal). See KNOWLEDGE.md entry on the same pattern.
+- **Append-only consent ledger** — `operator_session_consents` rows immutable except for a one-shot post-INSERT UPDATE that fills `connection_id` from NULL inside the connect transaction. Scoped to `operatorSessionConsentService.backfillConnectionId`; throws if no `withOrgTx` ALS context.
+- **Pure-helper extraction** — `credentialBrokerServicePure.ts` owns `assertCredentialUsableOrThrow` and `orderResolvedCredentials`. The non-pure broker delegates. Acceptance criteria deterministically testable without DB boot.
+- **Lifecycle through one method** — `operatorSessionLifecycleService.transition(connectionId, from, to)` is the sole owner of every `usability_state` write after the row exists. Initial state on INSERT owned by `operatorSessionService.connect`.
+- **On-read disclosure-version-bump** — when `OPERATOR_SESSION_DISCLOSURE_VERSION` (in `operatorSessionProviders.ts`) increments, the read path triggers `connected_usable → connected_needs_consent` lazily. No background sweep.
+
+### State machine (usability_state)
+- `connected_unverified` — initial state if registry says provider not yet verified
+- `connected_usable` — broker gate open; tokens issued
+- `connected_needs_consent` — disclosure version drifted; re-accept required
+- `connected_needs_reauth` — token expired/revoked; reconnect required
+- `revoked` — explicit user disconnect or admin revoke
+- `disabled` — owner inactive / admin disabled / permission revoked
+
+### Broker retrieval invariant
+Only `usability_state === 'connected_usable'` returns token material from `issueCredential`. Every other state returns a sentinel (`{ requiresReauth }`, `{ requiresConsent }`, `{ unavailable }`). Failover ordering: default-first then alphabetical by label. The pure helper `orderResolvedCredentials` is the single sort site.
+
+### `/connections` CRUD consolidation
+The `/connections` Govern page is the single CRUD surface for all credential types — 3 tabs (App Integrations / Web Logins / AI Subscriptions). Replaces the legacy `CredentialsTab` + `IntegrationsAndCredentialsPage` (latter is now a redirect).
+
+### Token refresh job
+`runOperatorSessionRefreshSweep()` (worker registered as `operator-session-refresh`). NOT yet wired as a scheduled job — GAP-1 in `tasks/builds/operator-session-identity/gaps.md`. Blocker: provider registry flip from `none_verified` to a live mechanism (Phase 3+, OpenClaw adapter).
+
+---
+
 <a id="board-config-hierarchy"></a>
 ## Board Config Hierarchy
 
@@ -3096,7 +3127,7 @@ Each adapter owns its own dispatch body in `server/services/executionBackends/`:
 
 - `apiBackend.ts` / `headlessBackend.ts` — in-process agentic loop (wraps `runAgenticLoop` via `_apiHeadlessShared.ts`).
 - `claudeCodeBackend.ts` — subprocess invocation of the Claude Code CLI runner.
-- `ieeBrowserBackend.ts` / `ieeDevBackend.ts` — delegated-task dispatch to the IEE worker (parks parent in `'delegated'`; terminal write arrives later via the pg-boss event handler — see §IEE delegation lifecycle).
+- `ieeBrowserBackend.ts` / `ieeDevBackend.ts` — delegated-task dispatch to the IEE worker (parks parent in `'delegated'`; terminal write arrives later via the pg-boss event handler — see §IEE delegation lifecycle). `ieeDevBackend.ts` routes sandbox-class tasks through `SandboxExecutionService` — see [Sandbox Isolation primitive](#sandbox-isolation-primitive).
 
 The IEE adapters return `lifecycle: 'delegated'`; api/headless return `lifecycle: 'in_process'`; claude-code returns `lifecycle: 'subprocess'`. The post-completion finalisation block in `agentExecutionService.ts` consumes `result.loopResult` for the in-process / subprocess paths, and short-circuits to the delegated-run response shape when `lifecycle === 'delegated'`.
 
@@ -3473,6 +3504,82 @@ Zod schemas + typed errors imported by both server and worker:
 
 ---
 
+<a id="sandbox-isolation-primitive"></a>
+## Sandbox Isolation primitive — `SandboxExecutionService`
+
+**Spec B — introduced 2026-05-11.** See `tasks/builds/sandbox-isolation/spec.md` for the full specification.
+
+`SandboxExecutionService` is the only approved boundary for **Tier 4 untrusted code execution** — customer-uploaded data parsing, LLM-emitted scripts over customer data, and customer-derived transformation logic. It sits below the `ExecutionBackend` adapter contract (Layer 4 of the SynthetOS architecture) and above the concrete provider implementations.
+
+Adapters that need sandbox execution (today `iee_dev`, future OpenClaw) call `SandboxExecutionService.runTask`. They do NOT invoke provider SDKs, `child_process`, or any in-process execution primitive directly. The `verify-sandbox-classification` CI gate enforces this at PR-merge time.
+
+### Execution classification table (dispatch rule)
+
+| Execution class | Examples | Runs where |
+|---|---|---|
+| Customer-uploaded data parsing | CSV, Excel, PDF, doc parsing | **Sandbox** |
+| LLM-emitted scripts over customer data | Python / JS transforms generated by an agent | **Sandbox** |
+| Customer-derived transformation logic | Anything whose source is a customer input or LLM output | **Sandbox** |
+| Deterministic internal orchestration | Adapter routing, run metadata, harvest plumbing | Worker |
+| Trusted repo / dev operations | Controlled, non-customer repo commands | Worker (V1) |
+
+**No "small script" exception.** If in doubt, the sandbox is the answer. The classification is by what code runs, not by which controller calls — both Native Controller and Operator Controller dispatch through `SandboxExecutionService` for sandbox-class work.
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `server/services/sandboxExecutionService.ts` | `SandboxExecutionService` interface + `runTask` + `getExecution`. Resolves provider from env, runs the start-claim lease state machine, delegates to the harvest pipeline. |
+| `server/services/sandboxExecutionServicePure.ts` | Pure helpers: `classifyTerminal`, `resolveSandboxCeilings`, policy-to-provider-flags mapping, cost-attribution math. |
+| `server/services/sandbox/sandboxProviderResolver.ts` | `SANDBOX_PROVIDER` env-var resolver. Fail-fast at construction time. |
+| `server/services/sandbox/e2bSandbox.ts` | Production provider — wraps the external compute SDK. |
+| `server/services/sandbox/localDockerSandbox.ts` | Local-dev provider — `docker run` against the same template image. |
+| `server/services/sandbox/inlineSandbox.ts` | **Test-only.** Hard-guards throw outside `NODE_ENV=test` + `SANDBOX_ALLOW_INLINE=1`. Never import in production code. |
+| `server/services/sandboxHarvestService.ts` | 12-step post-terminal pipeline: validate → redact → store artefacts → emit logs → write cost row. |
+| `server/lib/withSandboxProvider.ts` | Provider-call wrapper: backoff, ambiguous-terminal reconciliation, structured retry events. |
+| `shared/types/sandbox.ts` | `SandboxRunTaskInput`, `SandboxRunTaskOutput`, terminal-state enum, policy schema. |
+| `infra/sandbox-templates/synthetos-sandbox/` | Template image consumed by both `e2bSandbox` (published) and `localDockerSandbox` (local build). |
+| `scripts/gates/verify-sandbox-classification.sh` | CI gate — fails if sandbox-required adapters bypass `SandboxExecutionService.runTask`. |
+| `scripts/gates/verify-sandbox-minimum-events.sh` | CI gate — fails if required telemetry events are missing for each lifecycle phase. |
+| `scripts/gates/verify-template-version-coherence.sh` | CI gate — verifies `CURRENT_VERSION` + `PUBLISHED_VERSION` two-file contract. |
+| `scripts/gates/verify-no-sandbox-cost-update.sh` | CI gate — fails if any code issues UPDATE against sandbox cost rows (insert-only invariant). |
+| `scripts/gates/verify-no-inline-sandbox-outside-test.sh` | CI gate — fails if `inlineSandbox` appears outside test paths. |
+
+### Provider selection
+
+`SANDBOX_PROVIDER` env var selects the provider at service construction:
+- `e2b` — production-grade; **the registered factory fails fast at construction** when `NODE_ENV=production` (the SDK is not yet installed) or in non-production without `E2B_SDK_STUBBED=true`. A boot with `SANDBOX_PROVIDER=e2b` and a missing SDK never proceeds — the alternative ("valid provider, throws on first sandbox call") creates an ambiguous runtime mode that this guard rules out.
+- `local_docker` — rejected in `NODE_ENV=production`.
+- `inline` — rejected outside `NODE_ENV=test` + `SANDBOX_ALLOW_INLINE=1`.
+
+Any misconfiguration throws at boot (fail-fast), not at first call.
+
+### Application-level invariant for DB CHECK constraints
+
+`sandbox_executions` carries a CHECK constraint requiring `provider_sandbox_id IS NOT NULL` when `status` is `running` or `harvesting` (paired with `provider_sandbox_id IS NULL` when `status='pending'`). The application enforces the matching invariant before any write: a pending row whose worker died pre-start MUST transition to `provider_unavailable` directly, never to `harvesting` (which would violate the CHECK). The pure helper `classifyCeilingTransition(status, providerSandboxId, ceilingType)` in `server/jobs/sandboxCeilingMonitorPure.ts` is the single point of truth — both the ceiling monitor and the harvest reconciliation job consult it before issuing any transition. Pure-test matrix encodes the legal grid; defence-in-depth race-safe `status=` WHERE predicates back it up.
+
+### CI integration
+
+All five sandbox gates (`verify-sandbox-classification`, `verify-sandbox-minimum-events`, `verify-no-sandbox-cost-update`, `verify-no-inline-sandbox-outside-test`, `verify-template-version-coherence`) run in `.github/workflows/ci.yml § grep_invariants` on every PR. The template-version gate switches to STRICT mode (hard-fails on missing publish tags for non-`local-dev-*` versions) when the PR carries the `ready-to-merge` label — set via `STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}`. Pre-first-publish, `CURRENT_VERSION.version` is `local-dev-v1.0.0`; the operator flips it to `v1.0.0` post-account-provisioning per `tasks/todo.md § SANDBOX-F1`.
+
+### Time-source for correctness-sensitive paths
+
+The ceiling monitor computes elapsed time DB-side via `(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint` returned in the same row-load `SELECT`. This anchors both endpoints to DB time and avoids the cross-instance clock-skew failure mode that wall-clock `Date.now()` would introduce in correctness-sensitive paths (mirrors the patterns established in `inboundRateLimiter.ts` and `agentWorkingTimeService.ts`). Reconciliation eligibility still uses Node wall-clock for the sweep-start instant — that path is recovery timing, not billing enforcement; future migration tracked as `SANDBOX-R3-T1`.
+
+### Cost ledger
+
+Sandbox compute is attributed via `llm_requests` rows with `source_type='sandbox_compute'`. Corrections append new rows with `source_type='sandbox_compute_correction'`. Both are **insert-only** — no UPDATE is ever issued against these rows. The `verify-no-sandbox-cost-update` CI gate enforces this.
+
+### RLS posture
+
+Five new RLS-protected tables: `sandbox_executions`, `sandbox_artefacts`, `sandbox_telemetry_events`, `sandbox_egress_audit`, `sandbox_logs`. RLS enforces the organisation boundary; subaccount isolation is enforced at the service layer (per the existing `llm_requests` / `agent_runs` convention).
+
+### Cross-reference
+
+`iee_dev` adapter (`server/services/executionBackends/ieeDevBackend.ts`) routes sandbox-class tasks through `SandboxExecutionService.runTask` (see §18 of the spec). The adapter's `sandboxRequirement: 'code_execution'` declaration is enforced by the `verify-sandbox-classification` CI gate.
+
+---
+
 <a id="local-development-setup"></a>
 ## Local Development Setup
 
@@ -3581,7 +3688,10 @@ This three-phase pattern prevents duplicate customer-visible replies regardless 
 
 **OQ-1 deferral (operator-acknowledged):** Foundry-trained model wiring into the dispatch path is deferred. Future wiring is gated on operator-driven OQ-1 close per `tasks/todo.md § Deferred`. See ADR-0009 Consequences.
 
-### Routes (mounted at `/api/support`)
+### Routes (mounted at `/api/subaccounts/:subaccountId/support` — pre-test-hardening DEC-1/T1)
+
+Support reads are subaccount-scoped: every endpoint resolves `req.params.subaccountId` via `resolveSubaccount(req.params.subaccountId, req.orgId!)` before any DB query. The legacy unscoped `/api/support` mount was removed (no compatibility shim per pre-test-hardening spec §3.1 / DEC-1 — pre-launch posture). Service-layer queries additionally carry `eq(table.subaccountId, subaccountId)` so cross-subaccount reads return zero rows.
+
 
 | Route | File | Purpose |
 |-------|------|---------|
@@ -3707,6 +3817,10 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Modify operator_session connections (CRUD) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
+| Modify the credential broker | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + provider registry at `server/config/operatorSessionProviders.ts` |
+| Add a new operator_session provider | `server/config/operatorSessionProviders.ts` — extend the registry; bump `OPERATOR_SESSION_DISCLOSURE_VERSION` if disclosure copy changed |
+| Modify the AI Subscriptions / App Integrations / Web Logins UI | `client/src/pages/govern/ConnectionsPage.tsx` (3-tab strip) + `client/src/pages/govern/components/{AiSubscriptionsTab,AppIntegrationsTab,WebLoginsTab,ModelAccessSection,_aiSubscriptionPills,_utils,_webLoginFormFields}.tsx` + `client/src/api/governApi.ts` (AI Subscription helpers; `getAgentAllowedSubscriptions`) |
 | Modify canonical Support Desk ingestion (Teamwork) | `server/services/connectorPollingService.ts` (poll adapter wiring) + `server/services/webhookAdapterService.ts` (webhook ingestion block) + `server/adapters/teamwork/teamworkSupportStatusMap.ts` (fail-closed status map, inbound + outbound) + `server/adapters/teamworkAdapter.ts` (ticketing adapter contract) |
 | Modify support ticket read path | `server/services/supportTicketService.ts` (`readThreadForAgent` / `readThreadForHumanUi`) + `server/services/supportInboxService.ts` (`listInboxes` / `getInbox` / `classifyHealth`) |
 | Modify support draft lifecycle or dispatch | `server/services/supportDraftDispatchService.ts` (three-phase dispatch: approveDraft / listDraftsForReview / getDraftById / editDraft / rejectDraft / manualResolveDraft) + `server/services/supportDraftDispatchServicePure.ts` (pure helpers: `isValidDraftStatusTransition`, `deriveActionIdempotencyKey`, `planSameRunSupersession`) |
@@ -3783,6 +3897,12 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Spend insights / trends | `server/services/spendInsightsService.ts`, `server/services/spendInsightsServicePure.ts`, `server/services/spendTrendsService.ts`, `server/services/spendTrendsServicePure.ts`, `client/src/pages/govern/components/SpendInsightsRow.tsx`, `client/src/pages/govern/components/SpendBarChart.tsx`, `client/src/pages/govern/components/SpendTrendChart.tsx`, `client/src/pages/govern/components/CapUtilisationChart.tsx` |
 | Caps + pace | `server/services/computeBudgetService.ts` (extended), `server/services/computeBudgetServicePure.ts` (pace projector), `client/src/pages/govern/SpendingPage.tsx` (CapsTab) |
 | Connections list / usage / test / disconnect | `server/routes/integrationConnections.ts` (`GET /api/connections`, `GET /:id/usage`, `POST /:id/test`, `POST /:id/disconnect`), `server/services/connectionsService.ts` (incl. `disconnectConnection`), `server/services/connectionsListPure.ts`, `server/services/connectionTokenService.ts` (testConnection dispatcher with closed-enum error.code mapping), `client/src/pages/govern/ConnectionsPage.tsx`, `client/src/pages/govern/components/ConnectionTestButton.tsx`, `client/src/pages/govern/components/DisconnectConfirmDialog.tsx` |
+| Operator session connections (AI Subscriptions / App Integrations / Web Logins tabs) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
+| Credential broker (operator_session mode) | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + `server/config/operatorSessionProviders.ts` (provider registry + `OPERATOR_SESSION_DISCLOSURE_VERSION`) |
+| AI Subscriptions tab UI | `client/src/pages/govern/components/AiSubscriptionsTab.tsx` + `client/src/pages/govern/components/_aiSubscriptionPills.tsx` + `client/src/pages/govern/components/ConnectAiSubscriptionModal.tsx` + `client/src/pages/govern/components/AiSubscriptionDetailModal.tsx` + `client/src/pages/govern/components/DisclosureVersionBumpModal.tsx` + `client/src/pages/govern/components/EditAvailabilityModal.tsx` + `client/src/pages/govern/components/_utils.ts` + `client/src/api/governApi.ts` |
+| App Integrations tab UI | `client/src/pages/govern/components/AppIntegrationsTab.tsx` + `client/src/pages/govern/components/ConnectAppModal.tsx` + `client/src/pages/govern/components/ManageMultiConnectDrawer.tsx` + `client/src/pages/govern/components/MakeDefaultConfirmModal.tsx` |
+| Web Logins tab UI | `client/src/pages/govern/components/WebLoginsTab.tsx` + `client/src/pages/govern/components/AddWebLoginModal.tsx` + `client/src/pages/govern/components/EditWebLoginModal.tsx` + `client/src/pages/govern/components/TestWebLoginModal.tsx` + `client/src/pages/govern/components/SignInAgainModal.tsx` + `client/src/pages/govern/components/_webLoginFormFields.tsx` |
+| Model access (per-agent AI subscription scoping) | `client/src/pages/govern/components/ModelAccessSection.tsx` |
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
 | Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
 
@@ -4026,8 +4146,9 @@ Clients join via `socket.emit('join:sysadmin')` (system_admin role only).
 `escalateIncidentToAgent` in `systemIncidentService.ts`:
 1. `computeEscalationVerdict` — hard cap 3, 60s rate limit per incident
 2. `resolveSystemOpsContext()` — resolves System Operations org (is_system_org=true) + its sentinel subaccount
-3. Creates task via `taskService.createTask` in System Operations org
-4. Updates incident to `escalated`, increments `escalationCount`, writes escalation event
+3. Opens `db.transaction`, sets `app.organisation_id` GUC, calls `taskService.createTaskCore` (DB writes only) inside the tx in System Operations org
+4. Updates incident to `escalated`, increments `escalationCount`, writes escalation event — all inside the same tx
+5. After the tx commits, calls `taskService.emitCreateTaskSideEffects` so observers never see task-created events for rolled-back rows (pre-test-hardening PTH-CGT-R5-F1 — split createTask side effects across the transaction boundary)
 
 Guardrail failures write `escalation_blocked` event and throw 429.
 

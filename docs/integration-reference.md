@@ -932,7 +932,7 @@ webhook_events:
   - ticket.note.created
   - ticket.assigned
   - ticket.status_changed
-setup_steps_summary: Generate a Teamwork Desk API key, configure the webhook URL in Teamwork settings, and connect via the Synthetos integrations setup page.
+setup_steps_summary: Generate a Teamwork Desk API key, configure the per-org webhook URL (issued on connector create — shape `/api/webhooks/teamwork/{orgWebhookToken}` per pre-test-hardening DEC-2/W3) in Teamwork settings, and connect via the Synthetos integrations setup page. Token rotation runbook at `docs/runbooks/teamwork-webhook-token-rotation.md`.
 setup_doc_link: null
 typical_use_cases:
   - AI-drafted reply queue with human approval gate
@@ -946,13 +946,11 @@ broadly_useful_patterns:
 known_gaps:
   - Foundry parity (OQ-1) deferred per operator override (SDC-OVERRIDE-1)
   - Provider-side idempotency on addReply pending verification (SDC-ADV-2)
-  - Subaccount scoping on read endpoints not yet enforced (SDC-ADV-1)
-  - Webhook cross-tenant attribution risk if webhookSecret collides across orgs (SDC-ADV-3)
 client_specific_patterns:
   - Inbox-level agent_config (mode autonomous/assisted/disabled, collision window thresholds)
   - Per-inbox AI mode opt-ins (autonomous reply on waiting_on_customer)
 implemented_since: "2026-05-09"
-last_verified: "2026-05-09"
+last_verified: "2026-05-11"
 owner: platform-team
 ```
 

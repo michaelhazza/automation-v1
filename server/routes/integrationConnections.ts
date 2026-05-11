@@ -9,7 +9,7 @@ import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -101,12 +101,26 @@ router.get(
   })
 );
 
+/**
+ * PTH-CGT-R5-F3 — exported so the contract-pin test can import this exact
+ * schema rather than maintaining a mirror that drifts silently when the route
+ * changes. See server/routes/__tests__/integrationConnectionsValidation.test.ts.
+ */
+export const patchConnectionBodySchema = z.object({
+  connectionStatus: z.enum(['active', 'revoked', 'error']).optional(),
+}).passthrough();
+
 // Update connection (label, status, tokens)
 router.patch(
   '/api/subaccounts/:subaccountId/connections/:id',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
+    const parsed = patchConnectionBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw { statusCode: 400, message: 'Invalid connectionStatus value', errorCode: 'connection.status_invalid' };
+    }
+
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const [existing] = await db.select()
       .from(integrationConnections)
@@ -121,7 +135,7 @@ router.patch(
 
     if (req.body.label !== undefined) updates.label = req.body.label;
     if (req.body.displayName !== undefined) updates.displayName = req.body.displayName;
-    if (req.body.connectionStatus !== undefined) updates.connectionStatus = req.body.connectionStatus;
+    if (parsed.data.connectionStatus !== undefined) updates.connectionStatus = parsed.data.connectionStatus;
     if (req.body.configJson !== undefined) updates.configJson = req.body.configJson;
 
     // Re-encrypt if new tokens provided
@@ -236,7 +250,7 @@ router.get(
     const querySchema = z.object({
       scope: z.enum(['workspace', 'org']).optional(),
       subaccountId: z.string().uuid().optional(),
-      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie']).optional(),
+      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie', 'ai_subscription']).optional(),
       status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
       q: z.string().trim().min(1).max(200).optional(),
     }).refine(
@@ -256,6 +270,25 @@ router.get(
     }
 
     const limit = Math.min(Number(req.query.limit) || 50, 50);
+    // Gate AI Subscription rows on OPERATOR_SESSION_VIEW. The permission is
+    // subaccount-scoped because AI Subscription rows are workspace-bound in V1
+    // (see connectionsService.ts: operator_session rows are skipped for
+    // scope=org and only appended when scope=workspace).
+    //
+    // - scope=workspace: check the per-subaccount permission against the
+    //   parsed subaccountId. Without the permission, AI Subscription rows are
+    //   omitted from the workspace view.
+    // - scope=org / undefined: operator_session rows are skipped downstream
+    //   regardless, so the flag is forced false here (no permission check
+    //   needed and no org-level proxy permission exists for this view).
+    const hasOperatorSessionView =
+      parsed.data.scope === 'workspace' && parsed.data.subaccountId
+        ? await hasSubaccountPermission(
+            req,
+            parsed.data.subaccountId,
+            SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,
+          )
+        : false;
     const result = await listConnections({
       organisationId: req.orgId!,
       scope: parsed.data.scope,
@@ -267,6 +300,7 @@ router.get(
       cursor: (req.query.cursor as string) || null,
       limit,
       sortDir: req.query.sortDir === 'asc' ? 'asc' : 'desc',
+      hasOperatorSessionView,
     });
     res.json(result);
   })
