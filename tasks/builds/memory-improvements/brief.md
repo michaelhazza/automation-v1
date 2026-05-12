@@ -1,7 +1,7 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** **LOCKED** for spec handoff (Rev 6.2 — final reviewer sync pass applied; no further open issues from review)
-**Revision:** 6.2 (final reviewer F1-F3 + P1-P2 applied: index.html stale D wording fixed; B1 substrate trimmed to raw counts + 30d aggregate only; A lineage schema gains run-provenance columns; rationale doc surface counts updated; reverse-lineage UI marked as optional chrome)
+**Status:** **LOCKED** for spec handoff (Rev 6.3 — reviewer confirmed lock-ready; final-pass wording cleanups applied)
+**Revision:** 6.3 (final final-pass: §5 surface-count corrected from three to two; A-Run-provenance invariant added to §4 next to A-Deletion so spec author cannot miss the run-linkage columns)
 **Date:** 2026-05-12
 **Spec-handoff non-negotiables** (Rev 6.2): B1 must add `injected_entry_ids` before entry utility is reported. B1 substrate exposes raw per-run counts plus the 30-day aggregate that B2 consumes (no other rolling windows materialised). B1 aggregate queries must distinguish "not measured" from "0% utility" for pre-migration runs. D ships behind a single env on/off flag (no user-facing UI, no four-mode rollout). **D-Recall invariant:** semantic filtering must never silently empty a previously non-empty candidate category. **D-Embedding-failure invariant:** OpenAI failures fail open to legacy retrieval and emit a degraded reason on the run trace; they must not block agent execution. A must use the join table unless the spec explicitly rejects bidirectional lineage; lineage row retains deletion-safe snapshot metadata AND run-provenance columns (`source_run_id`, `source_run_id_hash`, `source_run_label_at_capture`) even when `source_entry_id` or `source_run_id` becomes NULL.
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
@@ -237,6 +237,8 @@ These invariants emerged from the first round of external review and apply acros
 
 **A-Deletion invariant (reviewer F3).** If `source_entry_id` can become NULL (it can: source entries are soft-deletable today and may be hard-deleted via privacy flows), the lineage row must retain enough non-sensitive snapshot metadata to remain audit-useful even after source loss. **Required at minimum:** `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `content_hash` alone is insufficient — it proves content integrity only if the content is still recoverable. `snapshot_excerpt` is **out of scope for v1** unless privacy review explicitly approves it; v1 lineage relies on the required metadata only. This keeps v1 clean and avoids accidental sensitive-content retention.
 
+**A-Run-provenance invariant (reviewer final-pass F2).** When the originating run is available at synthesis time, lineage rows must capture deletion-safe run provenance: `source_run_id` (nullable FK, `ON DELETE SET NULL`), `source_run_id_hash`, and `source_run_label_at_capture` (denormalised text). If the source run is later deleted or purged, the admin route falls back to the captured label so the Sources tab can still surface "produced by run X on date Y" without joining a missing row.
+
 **B-D dependency.** Proposal D depends on Proposal **B1** (measurement substrate), not on B2's polished dashboard UX. B1 gives engineering the post-enablement quality signal needed to verify the ranker is helping rather than hurting; dashboard polish may follow.
 
 **B1 denominator invariant (reviewer F2).** B1 must verify that every injected workspace-memory entry ID and memory-block version ID is persisted per run before declaring the substrate complete. Codebase audit confirms blocks are persisted (`appliedMemoryBlockIds`) but entry injection IDs are **not**. B1 therefore must add a bounded injected-entry manifest at prompt-assembly time; without it, citation utility has a numerator but no trustworthy denominator and the dashboard looks scientific while being wrong.
@@ -251,7 +253,7 @@ These invariants emerged from the first round of external review and apply acros
 
 ## 5. UI surfaces affected (mockups)
 
-Three operator-facing UI surfaces are touched by this brief. Mockups produced by the `mockup-designer` agent live under `prototypes/memory-improvements/` and are grounded in existing pages and components; new components are introduced only where the existing pattern is genuinely absent.
+Two operator-facing UI surfaces are touched by this brief. Proposal D is backend-only and represented only by a retired mockup tombstone for historical context. Mockups produced by the `mockup-designer` agent live under `prototypes/memory-improvements/` and are grounded in existing pages and components; new components are introduced only where the existing pattern is genuinely absent.
 
 | Proposal | Surface | Mockup file | Existing page / component extended |
 |---|---|---|---|
