@@ -241,7 +241,7 @@ When adding a no-circular-import assertion (e.g. a test that reads file source a
 
 ## 9. Multi-tenant safety checklist (every new feature)
 
-Before any PR that touches tenant data merges, answer YES to all eight:
+Before any PR that touches tenant data merges, answer YES to all nine:
 
 - [ ] **Org-scoped at the table level.** New table has `organisation_id NOT NULL`, `RLS_PROTECTED_TABLES` entry, and canonical org-isolation policy in the same migration.
 - [ ] **Org-scoped at the query level.** Every read/write by ID also filters by `organisationId` explicitly.
@@ -251,6 +251,7 @@ Before any PR that touches tenant data merges, answer YES to all eight:
 - [ ] **Background jobs follow the admin/org tx pattern.** Any new maintenance job that writes tenant rows mirrors `memoryDedupJob.ts` (admin connection for iteration, `withOrgTx` per tenant write).
 - [ ] **Log-and-swallow services keep `getOrgScopedDb` inside `try`.** No resolution above the catch boundary.
 - [ ] **Cross-entity ID verified.** Server-side handlers that take a parent ID in the URL and a client-supplied child ID in the body verify the child belongs to the parent before any write.
+- [ ] **Dual-GUC tables use `setOrgAndSubaccountGUC`.** Any new table whose RLS policy checks both `app.organisation_id` and `app.subaccount_id` (dual-GUC) calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` — never bare `db.select()`/`db.update()` and never plain `setOrgGUC` — as the first statement inside every `db.transaction(...)` that touches it. See architecture.md "Dual-GUC pattern".
 
 ---
 

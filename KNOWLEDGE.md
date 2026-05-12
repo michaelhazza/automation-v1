@@ -3816,3 +3816,25 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **The fix:** before referencing an open-PR action ("push commit to PR #N", "add comment to PR #N", "amend PR #N's description"), run `mcp__github__pull_request_read` with method `get` and check `merged` + `state`. If merged, the action is fresh-branch + fresh-PR, not amend.
 
 **Detection signal:** any phrase like "PR #N" that's older than 30 minutes of conversation state is unsafe to act on without re-reading. PR state changes off-session (operator merges, CI auto-closes, conflicts arise) and assumed-open PRs are a common stale-state failure mode.
+
+---
+
+### 2026-05-13 Gotcha — bare db.select/db.update on dual-GUC tables silently returns 0 rows (seen in operator-backend B2/B3)
+**Date:** 2026-05-13
+**Source:** pr-reviewer fix-loop on operator-backend branch (slugs B2, B3)
+
+`operator_runs`, `operator_task_profiles`, and `subaccount_operator_settings` have FORCE ROW LEVEL SECURITY policies keyed on BOTH `app.organisation_id` AND `app.subaccount_id`. Any `db.select()` or `db.update()` that does NOT run inside a `db.transaction(async tx => { await setOrgAndSubaccountGUC(tx, orgId, subaccountId); ... })` block acquires a fresh pool connection with neither GUC set. RLS fails closed — the query returns 0 rows or affects 0 rows, silently. No error is thrown.
+
+**Concrete failure:** the operator-backend dispatcher read `operator_runs` without a transaction. `currentAttemptNumber` always defaulted to 1 and `chainSeqNext` always defaulted to 1, so every chain link wrote `chain_seq=1`. The `(agent_run_id, attempt_number, chain_seq)` UNIQUE index failed on the second link. The entire chain mechanism was non-functional.
+
+**Rule:** for ANY table with a dual-GUC RLS policy, call `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` as the first statement inside the transaction before reading or writing the table. Never make bare pool calls against these tables. Use `setOrgGUC` only for org-scoped-only tables (agent_runs, iee_runs, etc.). See architecture.md "Dual-GUC pattern" for the canonical list.
+
+---
+
+### 2026-05-13 Gotcha — extend-budget routes must accumulate per-task, not write subaccount-wide settings (seen in operator-backend B1)
+**Date:** 2026-05-13
+**Source:** pr-reviewer finding B1 on operator-backend branch
+
+When a route provides a per-task budget extension (POST /api/operator-tasks/:id/extend-budget), the correct write target is a per-task accumulator column (e.g. `agent_runs.per_task_budget_extension_minutes`), NOT the subaccount-wide settings row (`subaccount_operator_settings.per_task_budget_cap_minutes`). Writing to the subaccount-wide row makes every task in the subaccount — including future tasks — inherit the elevated cap permanently. The cap drifts upward with every extension and can only be corrected via a manual settings PATCH.
+
+**Rule:** budget caps that are spec-stated as per-task additives must be stored on the task row, not the settings table. The dispatcher composes the effective cap at dispatch time: `effectiveSettings.per_task_budget_cap_minutes + run.perTaskBudgetExtensionMinutes`. The settings table remains the baseline; the task row holds the delta.

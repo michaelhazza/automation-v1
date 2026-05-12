@@ -1728,6 +1728,19 @@ CREATE POLICY <table>_org_isolation ON <table>
 
 Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR. `policyMigration` in that manifest must point at the migration that physically runs `CREATE POLICY ... ON <table>` — when a corrective migration's header NOTE explicitly excludes a table, the manifest still references the original. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm.
 
+#### Dual-GUC pattern (subaccount-scoped tables)
+
+Some tables are scoped to a specific subaccount, not just an org. Their RLS policy checks BOTH `app.organisation_id` AND `app.subaccount_id`. Setting only `app.organisation_id` (the org-scoped helper `setOrgGUC`) leaves `app.subaccount_id` unset; FORCE RLS then returns 0 rows silently.
+
+Use `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` from `server/lib/orgScoping.ts` for ALL reads and writes against these tables:
+- `operator_runs`
+- `operator_task_profiles`
+- `subaccount_operator_settings`
+
+Call it as the **first statement** inside `db.transaction(async (tx) => { ... })`. Never make bare `db.select()`/`db.update()` calls against dual-GUC tables outside a transaction — the pool picks a fresh connection with no GUC set and the query silently returns nothing.
+
+`setOrgGUC` (single GUC) remains correct for org-scoped-only tables such as `agent_runs`, `iee_runs`, and existing org-tenant tables.
+
 #### Corrective migrations (when RLS is broken or missing)
 
 Migrations are append-only. To repair: write a new migration with the next number, `DROP POLICY IF EXISTS` for **every** historical policy name on the table (enumerate `*_tenant_isolation`, `*_org_isolation`, `*_subaccount_isolation`, etc.), then `CREATE POLICY <table>_org_isolation` with the canonical shape. Reference: `migrations/0213_fix_cached_context_rls.sql` (precedent), `migrations/0200_fix_universal_brief_rls.sql` (canonical policy shape source).
@@ -3979,7 +3992,7 @@ New `operator_managed` execution adapter. Drives long-form autonomous tasks acro
 | Task-view operator UI | `client/src/components/openTask/OperatorChainLinkIndicator.tsx`, `client/src/components/openTask/OperatorAutoExtendBanner.tsx` |
 | Operator modals + badge + filter | `client/src/components/operator/OperatorBadge.tsx`, `OperatorFilterToggle.tsx`, `OperatorConcurrencyLimitModal.tsx`, `OperatorUnavailableModal.tsx`, `OperatorBudgetExceededModal.tsx` |
 | Client API helpers | `client/src/lib/api/operatorTasks.ts` |
-| Migrations | `migrations/0327–0331` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions, llm_requests extensions) |
+| Migrations | `migrations/0327–0331` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions: `operator_chain_failure_count`, llm_requests extensions), `0332` (sandbox_executions: `sandbox_start_key`), `0333` (agent_runs: `per_task_budget_extension_minutes` — per-task accumulator for extend-budget route) |
 | CS runbook | `docs/runbooks/operator-session-account-suspension.md` + comms templates in `docs/runbooks/templates/` |
 
 **Sandbox primitive extension (additive, Spec B unchanged for non-operator callers):**
@@ -4001,6 +4014,22 @@ One agent run = 1..N chain links. Each chain link is an `operator_runs` row. Whe
 | `operator-task-profile-gc` | Deferred browser-profile garbage collection |
 
 **Vendor codename discipline:** the vendor operator runtime codename appears only in `infra/sandbox-templates/operator-session/Dockerfile` and env-manifest entries. It does not appear in code, schema, UI, telemetry, customer copy, or this document.
+
+**Permissions:**
+
+| Permission slug | Guard location | Grants |
+|----------------|---------------|--------|
+| `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` | `server/routes/subaccountOperatorSettings.ts` PATCH route | Allows PATCH to `subaccount_operator_settings` for the requesting subaccount |
+
+The PATCH route also requires `AGENTS_EDIT` (general). `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` is the fine-grained gate layered on top — org_admin-only in practice per the route actor-rule.
+
+**ExecutionCapability literals (operator-backend additions):**
+
+`'long_running'` — signals that the adapter can handle tasks whose total wall-clock duration exceeds a single session cap by checkpointing and continuing across chain links. Dispatcher must honour `settings_snapshot.max_wall_clock_per_task_days`.
+
+`'session_identity'` — signals that the adapter maintains a persistent browser profile (`operator_task_profiles`) between chain links within a task attempt. Retry path must preserve the profile row; fresh-profile-restart bumps `attempt_number` and supersedes prior chain links.
+
+Both literals are defined at `server/services/executionBackends/types.ts` (single source of truth). The CI gate `scripts/gates/verify-execution-capability-references.sh` enforces that `'long_running'` and `'session_identity'` strings appear only in the canonical types file, adapter declarations, test fixtures, and documentation.
 
 ---
 
