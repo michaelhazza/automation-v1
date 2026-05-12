@@ -158,9 +158,12 @@ Nothing on the foundation is in flux. V1 is a pure composer of existing primitiv
 ### 3.1 Google Calendar OAuth integration
 
 - New provider entry in `server/config/oauthProviders.ts` keyed `google_calendar`. Same shape as `gmail` and `google_drive`: `authUrl`, `tokenUrl`, scopes, `extra: { access_type: 'offline', prompt: 'consent' }` for refresh-token issuance.
-- Default scopes — V1 spec picks final list, recommendation:
-  - Read-only first decision (see §4 question 1): `https://www.googleapis.com/auth/calendar.readonly`, `https://www.googleapis.com/auth/calendar.events.readonly`
-  - Read + write second decision: add `https://www.googleapis.com/auth/calendar.events` (write to user's primary + accepted calendars)
+- Default scopes — V1 requires (locked per §4 q1):
+  - `https://www.googleapis.com/auth/calendar.readonly`
+  - `https://www.googleapis.com/auth/calendar.events.readonly`
+  - `https://www.googleapis.com/auth/calendar.events`
+
+  The write-capable `calendar.events` scope is required because V1 ships `create_event`, `update_event`, and `respond_to_invite` behind mandatory review gates (§3.2). `delete_event` remains deferred and MUST NOT be registered in V1.
 - Slug registered in `REQUIRED_INTEGRATION_SLUGS` and the `RequiredIntegrationSlug` type union in `server/config/actionRegistry.ts`.
 - Appears in the existing Connections page (`client/src/pages/govern/ConnectionsPage.tsx`) with no new visual surface — same row pattern as Gmail / Drive / Slack.
 - OAuth callback handler reuses `server/routes/oauthIntegrations.ts`. No new route surface required.
@@ -330,8 +333,11 @@ New resource:
 voice_profiles: {
   id: uuid,
   organisation_id: uuid,
-  scope_type: 'user' | 'subaccount' | 'org',     // parallel to principal model
-  scope_id: uuid,
+  // Exactly one of owner_user_id / subaccount_id is set per row.
+  // CHECK constraint: (owner_user_id IS NOT NULL)::int + (subaccount_id IS NOT NULL)::int + (org_scope)::int = 1
+  owner_user_id: uuid | null,                    // user-owned profile (e.g. Michael's personal email voice)
+  subaccount_id: uuid | null,                    // subaccount-scoped brand/client profile (e.g. Acme Co outreach voice)
+  org_scope: boolean,                            // org-wide profile (rare; reserved for future)
   name: text,                                     // display, e.g. "Michael — personal email voice"
   source: 'gmail_sent_sampler' | 'drive_doc_sampler' | 'manual',
   source_config: jsonb,                           // sampler-specific: { last_n: 50, since_days: 90, gmailLabelFilter?: ... }
@@ -345,13 +351,15 @@ voice_profiles: {
 }
 ```
 
+**Note on shape:** VoiceProfile uses explicit `owner_user_id` / `subaccount_id` / `org_scope` columns rather than a generic `scope_type` + `scope_id` pair. It does not revive the rejected `principal_type` / `principal_id` abstraction from `user-owned-agents` §0. Naming aligns with the foundation (`owner_user_id`) so a user-owned EA's voice profile and the EA agent share the same key.
+
 New service: `VoiceProfileService` with pluggable samplers:
 
 - `gmail_sent_sampler` — pulls last N sent messages from `read_inbox` adapter, runs feature distillation, writes profile.
 - `drive_doc_sampler` — reads specified Drive doc(s) as the source material (for brand-voice cases where the brand has a style guide doc).
 - `manual` — operator pastes example content, profile derives from it.
 
-Agent configs declare which voice profile to use via a `voice_profile_id` field. The EA defaults to a user-scoped Gmail-sampled profile for its principal user. Riley defaults to a subaccount-scoped profile (existing brand-voice configuration in his system prompt becomes data, not prose). Future agents pick their profile at config time.
+Agent configs declare which voice profile to use via a `voice_profile_id` field. The EA defaults to a user-scoped Gmail-sampled profile for its owning user (the same user whose `owner_user_id` is on the agent row). Riley defaults to a subaccount-scoped profile (existing brand-voice configuration in his system prompt becomes data, not prose). Future agents pick their profile at config time.
 
 Prompt integration: every generated draft conditions on the profile JSON. Existing prompt builder gains a `<voice>` block injected before the task prompt when the agent has a configured profile.
 
@@ -376,7 +384,7 @@ First-run wizard collects (5–10 fields max, one screen):
 - Recurring people-or-projects to always flag in briefings (free-text, optional)
 - Anything else worth knowing on day one (free-text, optional)
 
-Each field writes to a `memory_blocks` row with `scope_type: 'user'`, `scope_id: current_user.id`, a structured `key` (e.g., `'ea.working_hours'`, `'ea.timezone'`), and the value. The EA reads these at every run via the principal-aware `runContextLoader`.
+Each field writes to a `memory_blocks` row keyed by the user's EA `agent_id` (which itself carries `owner_user_id` per the `user-owned-agents` foundation). The block has a structured `key` (e.g., `'ea.working_hours'`, `'ea.timezone'`) and a value. The EA reads these at every run via the existing per-agent memory pattern — no `scope_type` / `scope_id` abstraction (per `user-owned-agents` §3.4).
 
 Users can edit / delete blocks later via the EA settings page (§3.17 mockup #3). No new admin UI for memory management.
 
