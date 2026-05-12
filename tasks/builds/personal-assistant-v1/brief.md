@@ -27,12 +27,15 @@
   - [3.10 Multi-user consumption (consumes `principal-scoped-agents`)](#310-multi-user-consumption-consumes-principal-scoped-agents)
   - [3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)](#311-voice-profile-primitive-introduced-by-ea-v1-designed-for-reuse)
   - [3.12 First-run setup context attachment](#312-first-run-setup-context-attachment)
-  - [3.13 Personal nav group in sidebar (data-driven)](#313-personal-nav-group-in-sidebar-data-driven)
+  - [3.13 Personal nav group in sidebar + home Personal zone (both data-driven)](#313-personal-nav-group-in-sidebar--home-personal-zone-both-data-driven)
   - [3.14 EA provisioning (explicit consent, not automatic)](#314-ea-provisioning-explicit-consent-not-automatic)
   - [3.15 Spending budgets (pooled to subaccount)](#315-spending-budgets-pooled-to-subaccount)
   - [3.16 Connection card "Personal" chip labelling](#316-connection-card-personal-chip-labelling)
   - [3.17 Display name customisation](#317-display-name-customisation)
-  - [3.18 Failure modes for triggered runs](#318-failure-modes-for-triggered-runs)
+  - [3.18 Capability grouping for the connection UI](#318-capability-grouping-for-the-connection-ui)
+  - [3.19 Live-fetch vs canonical data decision](#319-live-fetch-vs-canonical-data-decision)
+  - [3.20 Home-widget contribution contract (introduced by EA V1, designed for reuse)](#320-home-widget-contribution-contract-introduced-by-ea-v1-designed-for-reuse)
+  - [3.21 Failure modes for triggered runs](#321-failure-modes-for-triggered-runs)
 - [4. Open architectural questions (for operator ratification)](#4-open-architectural-questions-for-operator-ratification)
 - [5. Out of scope (explicit non-goals)](#5-out-of-scope-explicit-non-goals)
 - [6. What unblocks when this ships](#6-what-unblocks-when-this-ships)
@@ -306,7 +309,7 @@ Users can edit / delete blocks later via the EA settings page (§3.17 mockup #3)
 
 Mockup: `prototypes/personal-assistant-v1/01-first-run-setup.html` — single-screen wizard with the OAuth connection step, the context questionnaire, and the voice-profile derivation confirmation.
 
-### 3.13 Personal nav group in sidebar (data-driven)
+### 3.13 Personal nav group in sidebar + home Personal zone (both data-driven)
 
 User-principal agents need to be discoverable in the sidebar without hardcoding any specific agent name or mode-switch. Approach:
 
@@ -321,7 +324,13 @@ User-principal agents need to be discoverable in the sidebar without hardcoding 
 
 **Phase 3 forward-compat:** when Dev Agent ships as a second user-principal agent, it appears in the same Personal nav group automatically. Zero hardcoding, no nav refactor.
 
-Mockup: `prototypes/personal-assistant-v1/02-my-ea-home.html` shows the sidebar with the Personal group at the top and the EA's home view as main content.
+**Pair: home page Personal zone.** Discoverability and "what does my assistant want me to look at this morning?" cannot rely on the sidebar alone — users need a glanceable summary when they land. The existing user home page gains a new **Personal zone** at the top that renders one card per user-principal agent the user owns. Cards are contributed by each agent via the home-widget contract in §3.20.
+
+EA's home card shows: today's briefing one-liner + count of drafts awaiting review + next meeting prep + "Open" link. Click → goes to the per-agent detail page (Workspace / Activity / Settings tabs per §3.17 mockup).
+
+No dedicated "EA home page" exists — that would be page proliferation. The sidebar entry navigates to a per-agent detail page (deeper work surfaces); the home zone surfaces glanceable summaries. Both data-driven from `agents WHERE principal_type = 'user' AND principal_id = current_user.id`.
+
+Mockup: `prototypes/personal-assistant-v1/02-my-ea-home.html` shows the existing home layout with the new Personal zone at top.
 
 ### 3.14 EA provisioning (explicit consent, not automatic)
 
@@ -369,7 +378,87 @@ The EA's display name is per-instance, defaulting to `Personal Assistant`. Users
 
 Stored in `agents.name` (existing column). No new schema. Mockup #3 shows the rename field.
 
-### 3.18 Failure modes for triggered runs
+### 3.18 Capability grouping for the connection UI
+
+Aligns with existing infrastructure — does NOT introduce a new abstraction layer:
+
+- **Existing capability taxonomy** lives in `docs/integration-reference.md` (read/write capability slugs with aliases) and is CI-enforced by `scripts/verify-integration-reference.ts`.
+- **Existing per-agent capability map** lives in `subaccount_agents.capability_map` JSONB, computed by `capabilityMapService.ts` from skill links crossed with the integration reference.
+- **Existing backend-agnostic adapter** for email + calendar: `WorkspaceAdapter` (`shared/types/workspaceAdapterContract.ts`) with two backends today — `'synthetos_native'` and `'google_workspace'`. Outlook / M365 slots in as a future backend.
+
+What this build adds: **a small UI grouping layer over existing capability slugs.** One new file `server/config/capabilityGroups.ts` defining four user-facing groups → existing capability slugs:
+
+```ts
+export const CAPABILITY_GROUPS = {
+  email:     { label: 'Email',     slugs: ['inbox_read', 'email_body_read', 'send_email', 'modify_labels', 'classify_email'] },
+  calendar:  { label: 'Calendar',  slugs: ['calendar_read', 'calendar_event_create'] },
+  files:     { label: 'Files',     slugs: ['page_read', 'spreadsheet_read'] },
+  team_chat: { label: 'Team chat', slugs: ['channel_messages_read', /* + post-message slug to be added to taxonomy */] },
+} as const;
+```
+
+CI gate validates every referenced slug exists in the integration-reference taxonomy. The wizard renders four capability cards; clicking "Email" surfaces providers that declare any of the email slugs (today: `gmail` + Google Workspace identity backend). Future Outlook lands by adding an `outlook` block to `integration-reference.md` declaring `inbox_read` + `send_email` etc. — the wizard auto-discovers via the same grouping.
+
+User never sees raw slugs in the wizard. Operators / system admins see them on the Connections page (existing) and in agent capability-map debug surfaces (existing).
+
+### 3.19 Live-fetch vs canonical data decision
+
+The codebase already supports both paths via `readPath: 'liveFetch' | 'canonical'` on each action. EA V1 makes the decision explicit:
+
+| Data | Storage | Why |
+|---|---|---|
+| Email content (bodies, threads, headers) | **Live-fetch** | Storage cost (GB per user); privacy escalation; no V1 use case requires cross-source SQL. Existing `read_inbox` action is already live-fetch. |
+| Calendar event content | **Live-fetch** | Same reasoning. |
+| Drive file content | **Live-fetch** | Existing read-only resolver pattern. |
+| Slack message content | **Live-fetch** | Same reasoning. |
+| Voice profile (derived features) | **Canonical** | Feature-level summary, small, valuable persistence, opt-out enforced. |
+| User context memory blocks | **Canonical** | Already how memory works. |
+| Run trace + run history | **Canonical** | Already canonical (foundation primitive). |
+| Drafts the EA generated awaiting your review | **Canonical** | Needs to survive across sessions; "show me pending drafts" is a primary UX. New `ea_drafts` table — small, ~5–10 cols, indexed by `(organisation_id, user_id, status)`. |
+
+What we DO NOT build in V1:
+- Inbox ingestion / sync jobs
+- Calendar event mirror table
+- File content cache
+- Cross-source unified search index
+
+Defer to Phase 1.5 IF a real use case requires cross-source SQL (Revenue Ops Assistant uses canonical for invoices because invoice reconciliation needs it; EA V1 has no equivalent need).
+
+### 3.20 Home-widget contribution contract (introduced by EA V1, designed for reuse)
+
+Generic primitive that any user-principal agent template uses to contribute a card to the user's home Personal zone (§3.13). Designed for reuse by Dev Agent (Phase 3), future personal-research agents, etc.
+
+Contract on the system-agent template:
+
+```ts
+home_widget: {
+  type: 'summary_card' | 'queue_card' | 'metric_card',  // extensible
+  title_template: string,
+  body_provider_skill: string,  // slug of a skill that, when invoked, returns WidgetData
+  refresh_policy: 'on_login' | 'every_5m' | 'on_demand',
+} | null  // null = agent does not surface to home
+```
+
+The home page reads `agents WHERE principal_type = 'user' AND principal_id = current_user.id`, looks up each agent's `home_widget` declaration on its system-agent template, invokes the `body_provider_skill`, renders the resulting `WidgetData` inside a consistent visual frame.
+
+EA's contribution (V1):
+
+```ts
+home_widget: {
+  type: 'summary_card',
+  title_template: '${agent.display_name}',
+  body_provider_skill: 'ea.home_widget.summary',  // new skill, returns: { briefingOneLiner, draftCount, nextMeetingPrep, runRecency }
+  refresh_policy: 'on_login',
+}
+```
+
+Visual frame is a single component on the home page; agents only return data, not markup. This prevents agents from rendering arbitrary HTML and keeps the home page consistent.
+
+`WidgetData` shape per type is defined in `shared/types/homeWidget.ts`. New types can be added as future agents need them; the frame component handles each type's rendering.
+
+Foundation cost: ~1 dev-day. Pays off the day a second user-principal agent ships.
+
+### 3.21 Failure modes for triggered runs
 
 The spec defines behaviour for the four failure classes:
 

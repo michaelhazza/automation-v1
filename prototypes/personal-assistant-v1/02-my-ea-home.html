@@ -3,99 +3,98 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Personal Assistant — My Home</title>
+<title>Home — with new Personal zone</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
 <style>
 body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; }
-
-/* --- App shell already provided by _shared.css; nav layout below --- */
-
 .proto-banner { background: #eef2ff; border-bottom: 1px solid #c7d2fe; padding: 8px 16px; font-size: 11.5px; color: #3730a3; text-align: center; }
 
-.sidebar-personal-group { padding: 12px 0 4px; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); margin-top: 0; background: linear-gradient(180deg, rgba(99,102,241,0.07), rgba(99,102,241,0)); }
+/* Sidebar Personal group (same pattern as round 1) */
+.sidebar-personal-group { padding: 12px 0 4px; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); background: linear-gradient(180deg, rgba(99,102,241,0.07), rgba(99,102,241,0)); }
 .sidebar-personal-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: rgba(255,255,255,0.5); padding: 0 16px 8px; }
 .sidebar-personal-label .new-dot { width: 6px; height: 6px; background: #818cf8; border-radius: 50%; }
 .sidebar-personal-item { display: flex; align-items: center; gap: 9px; padding: 6px 12px; margin: 0 6px 2px; border-radius: 7px; color: #fff; font-size: 12.5px; font-weight: 500; cursor: pointer; text-decoration: none; }
-.sidebar-personal-item.active { background: rgba(99,102,241,0.18); color: #c7d2fe; }
-.sidebar-personal-item:not(.active):hover { background: rgba(255,255,255,0.04); }
+.sidebar-personal-item:hover { background: rgba(255,255,255,0.04); }
 .sidebar-personal-icon { width: 18px; height: 18px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: 700; flex-shrink: 0; }
 
-/* main area */
-.page-shell { padding: 32px 40px; max-width: 1100px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
-.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 4px; }
-.page-sub { font-size: 13.5px; color: #64748b; line-height: 1.6; }
+.section-label { padding: 8px 16px 4px; color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; }
+.nav-item { padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px; }
+.nav-item.active { background: rgba(255,255,255,0.07); color: white; border-radius: 7px; }
 
-.greeting-bar { display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: linear-gradient(135deg, #eef2ff, #f5f3ff); border: 1px solid #c7d2fe; border-radius: 12px; margin-bottom: 24px; }
-.greeting-avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #8b5cf6); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 16px; flex-shrink: 0; }
-.greeting-body { flex: 1; }
-.greeting-text { font-size: 15px; font-weight: 600; color: #0f172a; }
-.greeting-meta { font-size: 12.5px; color: #64748b; margin-top: 2px; }
+/* MAIN */
+.page-shell { padding: 32px 40px; max-width: 1140px; }
+.greeting { font-size: 23px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 4px; }
+.greeting-sub { font-size: 13.5px; color: #64748b; line-height: 1.6; margin-bottom: 28px; }
 
-/* Card grid */
-.card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-.full-card { grid-column: 1 / -1; }
+/* ── PERSONAL ZONE (new) ────────────────────────────────────────── */
+.personal-zone { margin-bottom: 32px; }
+.zone-label { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 0 4px; }
+.zone-label-title { font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.08em; }
+.zone-label-dot { width: 6px; height: 6px; background: #818cf8; border-radius: 50%; }
+.zone-label-meta { font-size: 11.5px; color: #94a3b8; margin-left: auto; }
 
-.ea-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
-.ea-card-header { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #f1f5f9; }
-.ea-card-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-.icon-briefing { background: #eef2ff; color: #4338ca; }
-.icon-drafts { background: #fef3c7; color: #92400e; }
-.icon-prep { background: #ecfdf5; color: #047857; }
-.icon-runs { background: #f1f5f9; color: #475569; }
-.ea-card-title { font-size: 14.5px; font-weight: 700; color: #0f172a; flex: 1; }
-.ea-card-meta { font-size: 11.5px; color: #64748b; font-weight: 500; }
+.personal-card { background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%); border: 1px solid #c7d2fe; border-radius: 12px; padding: 20px 22px; box-shadow: 0 2px 8px rgba(99,102,241,0.06); }
+.personal-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #eef2ff; }
+.personal-card-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: white; flex-shrink: 0; }
+.personal-card-title { font-size: 14.5px; font-weight: 700; color: #0f172a; }
+.personal-card-meta { font-size: 11.5px; color: #64748b; }
+.personal-card-open { margin-left: auto; padding: 6px 13px; background: white; border: 1px solid #c7d2fe; border-radius: 7px; font-size: 11.5px; font-weight: 600; color: #4338ca; text-decoration: none; }
+.personal-card-open:hover { background: #eef2ff; }
 
-/* briefing content */
-.briefing-section { font-size: 13px; color: #334155; line-height: 1.65; }
-.briefing-section-h { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 8px; margin-bottom: 4px; }
-.briefing-item { display: flex; gap: 8px; padding: 4px 0; }
-.briefing-item-time { color: #64748b; font-weight: 500; min-width: 56px; flex-shrink: 0; }
-.briefing-item-text { color: #0f172a; }
-.briefing-flag-urgent { color: #b91c1c; font-weight: 700; font-size: 10px; padding: 1px 6px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 3px; margin-left: 6px; vertical-align: 1px; }
+.personal-card-body { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; }
+.personal-summary { font-size: 13px; color: #334155; line-height: 1.6; padding-right: 16px; border-right: 1px solid #eef2ff; }
+.personal-summary strong { color: #0f172a; font-weight: 600; }
 
-/* drafts */
-.draft-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid #f1f5f9; }
-.draft-row:first-of-type { border-top: none; padding-top: 0; }
-.draft-dot { width: 8px; height: 8px; background: #f59e0b; border-radius: 50%; flex-shrink: 0; margin-top: 6px; }
-.draft-body { flex: 1; }
-.draft-to { font-size: 12.5px; font-weight: 600; color: #0f172a; }
-.draft-subj { font-size: 12.5px; color: #475569; margin: 2px 0; }
-.draft-preview { font-size: 12px; color: #64748b; line-height: 1.55; }
-.draft-actions { display: flex; gap: 8px; margin-top: 6px; }
-.draft-btn { padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; cursor: pointer; border: 1px solid #cbd5e1; background: white; color: #334155; }
-.draft-btn.approve { background: #4338ca; color: white; border-color: #4338ca; }
+.personal-mini { display: flex; flex-direction: column; gap: 6px; }
+.personal-mini-label { font-size: 10.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+.personal-mini-value { font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1; }
+.personal-mini-meta { font-size: 11px; color: #64748b; }
 
-/* meeting prep */
-.prep-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid #f1f5f9; }
-.prep-row:first-of-type { border-top: none; padding-top: 0; }
-.prep-time { display: flex; flex-direction: column; align-items: center; min-width: 56px; padding: 6px; background: #f8fafc; border-radius: 7px; flex-shrink: 0; }
-.prep-time-h { font-size: 14px; font-weight: 700; color: #0f172a; }
-.prep-time-m { font-size: 10.5px; color: #64748b; }
-.prep-body { flex: 1; }
-.prep-title { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
-.prep-attendees { font-size: 11.5px; color: #64748b; margin-bottom: 5px; }
-.prep-summary { font-size: 12px; color: #475569; line-height: 1.55; padding: 7px 9px; background: #fafbfd; border-left: 2.5px solid #6366f1; border-radius: 4px; }
+/* Demo: how a second user-principal agent (Dev Agent, Phase 3) would look in the same zone */
+.future-card { background: white; border: 1.5px dashed #cbd5e1; border-radius: 12px; padding: 16px 20px; margin-top: 10px; display: flex; align-items: center; gap: 14px; opacity: 0.62; }
+.future-icon { width: 30px; height: 30px; background: #e2e8f0; color: #64748b; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.future-body { flex: 1; }
+.future-title { font-size: 13px; font-weight: 600; color: #334155; }
+.future-sub { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+.future-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; background: #f1f5f9; color: #64748b; border-radius: 4px; }
 
-/* recent runs */
-.run-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; font-size: 12.5px; }
-.run-row:first-of-type { border-top: none; padding-top: 0; }
-.run-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.run-dot-ok { background: #10b981; }
-.run-dot-warn { background: #f59e0b; }
-.run-name { color: #0f172a; font-weight: 500; flex: 1; }
-.run-time { color: #64748b; font-size: 11.5px; }
+/* ── EXISTING HOME SECTIONS (kept) ──────────────────────────────── */
+.existing-zone-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding: 0 4px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.kpi-card { background: white; border: 1px solid #e2e8f0; border-radius: 11px; padding: 16px 18px; }
+.kpi-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+.kpi-value { font-size: 24px; font-weight: 700; color: #0f172a; line-height: 1; margin-bottom: 4px; }
+.kpi-delta { font-size: 11.5px; color: #64748b; }
+.kpi-delta.pos { color: #059669; }
+.kpi-delta.neg { color: #b91c1c; }
 
-.privacy-strip { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 12.5px; color: #475569; }
-.privacy-lock { width: 24px; height: 24px; background: #ecfdf5; color: #047857; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.attention-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; }
+.attention-h { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.attention-h .count-pill { font-size: 11px; padding: 2px 8px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 10px; font-weight: 700; }
+.attention-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; font-size: 12.5px; }
+.attention-row:first-of-type { border-top: none; padding-top: 4px; }
+.attention-name { color: #0f172a; font-weight: 500; flex: 1; }
+.attention-meta { color: #64748b; font-size: 11.5px; }
+
+.activity-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 22px; }
+.activity-h { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
+.activity-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #334155; }
+.activity-row:first-of-type { border-top: none; padding-top: 4px; }
+.activity-dot { width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; flex-shrink: 0; }
+.activity-dot.ok { background: #10b981; }
+.activity-text { flex: 1; }
+.activity-time { color: #94a3b8; font-size: 11.5px; }
+
+.privacy-strip { display: flex; align-items: center; gap: 10px; padding: 11px 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 12px; color: #475569; margin-top: 14px; }
+.privacy-lock { width: 22px; height: 22px; background: #ecfdf5; color: #047857; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; flex-shrink: 0; }
 </style>
 </head>
 <body>
 
 <div class="proto-banner">
-  Personal Assistant V1 — Mockup 2 of 3: User's home view with the new Personal nav group in sidebar.
+  Personal Assistant V1 — Mockup 2 of 3 (round 2): existing home page + new Personal zone at top. No dedicated EA dashboard.
   <a href="index.html" style="color: #4338ca; font-weight: 600; text-decoration: none; margin-left: 8px;">← Back to index</a>
 </div>
 
@@ -116,32 +115,31 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; }
       <div class="sidebar-client-caret">▼</div>
     </div>
 
-    <!-- ─── NEW: Personal nav group ─── -->
+    <!-- Personal nav group (data-driven; same primitive used by home zone) -->
     <div class="sidebar-personal-group">
       <div class="sidebar-personal-label"><span class="new-dot"></span>Personal</div>
-      <a class="sidebar-personal-item active">
+      <a class="sidebar-personal-item" href="03-ea-settings.html">
         <div class="sidebar-personal-icon">PA</div>
         <span>Personal Assistant</span>
       </a>
     </div>
 
-    <!-- Existing groups continue below -->
     <div class="sidebar-section">
-      <div class="sidebar-section-label" style="padding: 8px 16px 4px; color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em;">Operate</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Home</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Inbox</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Activity</div>
+      <div class="section-label">Operate</div>
+      <div class="nav-item active">Home</div>
+      <div class="nav-item">Inbox</div>
+      <div class="nav-item">Activity</div>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-section-label" style="padding: 8px 16px 4px; color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em;">Build</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Agents</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Recurring Tasks</div>
+      <div class="section-label">Build</div>
+      <div class="nav-item">Agents</div>
+      <div class="nav-item">Recurring Tasks</div>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-section-label" style="padding: 8px 16px 4px; color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em;">Govern</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Connections</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Knowledge</div>
-      <div style="padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px;">Spending</div>
+      <div class="section-label">Govern</div>
+      <div class="nav-item">Connections</div>
+      <div class="nav-item">Knowledge</div>
+      <div class="nav-item">Spending</div>
     </div>
   </aside>
 
@@ -149,141 +147,99 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; }
   <main style="flex: 1;">
     <div class="page-shell">
 
-      <div class="page-header">
-        <div>
-          <div class="page-title">Personal Assistant</div>
-          <div class="page-sub">Your private workspace — runs only for you, never visible to other staff.</div>
+      <div class="greeting">Good morning, Michael</div>
+      <div class="greeting-sub">Tuesday, 12 May. 4 meetings · 12 new emails · 2 drafts awaiting your review.</div>
+
+      <!-- ─── PERSONAL ZONE (NEW) ─── -->
+      <div class="personal-zone">
+        <div class="zone-label">
+          <span class="zone-label-dot"></span>
+          <span class="zone-label-title">Personal</span>
+          <span class="zone-label-meta">Your private workspace · only visible to you</span>
         </div>
-        <a href="03-ea-settings.html" style="padding: 7px 14px; background: white; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: #475569; text-decoration: none;">Settings</a>
+
+        <!-- EA's home widget contribution -->
+        <div class="personal-card">
+          <div class="personal-card-head">
+            <div class="personal-card-icon">PA</div>
+            <div>
+              <div class="personal-card-title">Personal Assistant</div>
+              <div class="personal-card-meta">Posted morning briefing to Slack DM · 7:02 AM</div>
+            </div>
+            <a href="03-ea-settings.html" class="personal-card-open">Open →</a>
+          </div>
+
+          <div class="personal-card-body">
+            <div class="personal-summary">
+              <strong>Today is shaping up to be busy.</strong> The 11:30 Atlas Ventures sync needs prep — Jane's expecting your Q1 follow-up. Two urgent emails flagged: Jane Liu re: Q3 contract (drafted reply ready), Stripe failure on Acme account.
+            </div>
+            <div class="personal-mini">
+              <div class="personal-mini-label">Drafts waiting</div>
+              <div class="personal-mini-value">2</div>
+              <div class="personal-mini-meta">Both urgent</div>
+            </div>
+            <div class="personal-mini">
+              <div class="personal-mini-label">Next prep</div>
+              <div class="personal-mini-value">11:30</div>
+              <div class="personal-mini-meta">Atlas Ventures</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Future-state hint: how a second user-principal agent (Dev Agent, Phase 3) would appear here -->
+        <div class="future-card">
+          <div class="future-icon">DA</div>
+          <div class="future-body">
+            <div class="future-title">Dev Agent <span class="future-tag">PHASE 3</span></div>
+            <div class="future-sub">When provisioned, Dev Agent contributes its own card here — PRs in review, CI failures, etc. Same widget contract.</div>
+          </div>
+        </div>
       </div>
 
-      <div class="greeting-bar">
-        <div class="greeting-avatar">M</div>
-        <div class="greeting-body">
-          <div class="greeting-text">Good morning, Michael. Today is shaping up to be busy — 4 meetings, 12 new emails, 2 drafts waiting for your review.</div>
-          <div class="greeting-meta">Last briefing: today at 7:02 AM · Voice profile refreshed 6 days ago</div>
+      <!-- ─── EXISTING HOME SECTIONS (unchanged shape) ─── -->
+      <div class="existing-zone-label">Acme Co workspace</div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Pending approval</div>
+          <div class="kpi-value">3</div>
+          <div class="kpi-delta">2 are Tier 6 sends</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Clients needing attention</div>
+          <div class="kpi-value">5</div>
+          <div class="kpi-delta neg">+2 since yesterday</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Active agents</div>
+          <div class="kpi-value">7</div>
+          <div class="kpi-delta">Riley, Helena, Patel, Sarah +3</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Runs · last 7 days</div>
+          <div class="kpi-value">142</div>
+          <div class="kpi-delta pos">+18% vs prior week</div>
         </div>
       </div>
 
-      <div class="card-grid">
+      <div class="attention-card">
+        <div class="attention-h">Pending your approval <span class="count-pill">3</span></div>
+        <div class="attention-row"><div class="attention-name">Riley — outbound email to 4 leads (re-engagement campaign)</div><div class="attention-meta">2h ago</div></div>
+        <div class="attention-row"><div class="attention-name">Helena — Q1 client report draft for Pinecrest</div><div class="attention-meta">5h ago</div></div>
+        <div class="attention-row"><div class="attention-name">Patel — invoice nudge to Acme · $4,200 overdue</div><div class="attention-meta">Yesterday</div></div>
+      </div>
 
-        <!-- Briefing -->
-        <div class="ea-card full-card">
-          <div class="ea-card-header">
-            <div class="ea-card-icon icon-briefing">📋</div>
-            <div class="ea-card-title">This morning's briefing</div>
-            <div class="ea-card-meta">Posted 7:02 AM to Slack DM</div>
-          </div>
-
-          <div class="briefing-section">
-            <div class="briefing-section-h">Calendar — 4 meetings</div>
-            <div class="briefing-item"><div class="briefing-item-time">9:00 AM</div><div class="briefing-item-text">Engineering standup (recurring)</div></div>
-            <div class="briefing-item"><div class="briefing-item-time">11:30 AM</div><div class="briefing-item-text">Investor sync — Atlas Ventures<span class="briefing-flag-urgent">PREP NEEDED</span></div></div>
-            <div class="briefing-item"><div class="briefing-item-time">2:00 PM</div><div class="briefing-item-text">1:1 with Sarah Chen (CTO)</div></div>
-            <div class="briefing-item"><div class="briefing-item-time">4:30 PM</div><div class="briefing-item-text">Customer demo — Pinecrest Capital</div></div>
-
-            <div class="briefing-section-h">Inbox — 12 new (3 urgent)</div>
-            <div class="briefing-item"><div class="briefing-item-time">Urgent</div><div class="briefing-item-text">Jane Liu replied re: Q3 contract terms — needs answer by EOD</div></div>
-            <div class="briefing-item"><div class="briefing-item-time">Urgent</div><div class="briefing-item-text">Stripe payment failure on Acme account — finance@ flagged</div></div>
-            <div class="briefing-item"><div class="briefing-item-time">FYI</div><div class="briefing-item-text">9 newsletter / promotional emails (auto-archived)</div></div>
-
-            <div class="briefing-section-h">Slack — 1 thread mentions you</div>
-            <div class="briefing-item"><div class="briefing-item-time">#design</div><div class="briefing-item-text">Sarah asked about the brand-voice direction in the new EA mockup</div></div>
-          </div>
-        </div>
-
-        <!-- Drafts -->
-        <div class="ea-card">
-          <div class="ea-card-header">
-            <div class="ea-card-icon icon-drafts">✏️</div>
-            <div class="ea-card-title">Drafts awaiting your review</div>
-            <div class="ea-card-meta">2 pending</div>
-          </div>
-
-          <div class="draft-row">
-            <div class="draft-dot"></div>
-            <div class="draft-body">
-              <div class="draft-to">To: jane@atlasventures.com</div>
-              <div class="draft-subj">Re: Q3 contract terms — let's confirm</div>
-              <div class="draft-preview">"Thanks Jane — Tuesday 2pm AEST works for me. I'll send a calendar invite shortly. To your Q on payment terms, we can offer 30 days net…"</div>
-              <div class="draft-actions">
-                <button class="draft-btn approve">Approve &amp; send</button>
-                <button class="draft-btn">Edit</button>
-                <button class="draft-btn">Skip</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="draft-row">
-            <div class="draft-dot"></div>
-            <div class="draft-body">
-              <div class="draft-to">To: finance@synthetos.example</div>
-              <div class="draft-subj">Re: Stripe payment failure — Acme</div>
-              <div class="draft-preview">"Hi team, can you investigate the failure code on Acme's last invoice and re-run if it's a 3DS issue? Happy to chat 15 min today if needed."</div>
-              <div class="draft-actions">
-                <button class="draft-btn approve">Approve &amp; send</button>
-                <button class="draft-btn">Edit</button>
-                <button class="draft-btn">Skip</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Meeting prep -->
-        <div class="ea-card">
-          <div class="ea-card-header">
-            <div class="ea-card-icon icon-prep">🧭</div>
-            <div class="ea-card-title">Today's meeting prep</div>
-            <div class="ea-card-meta">Posted 15 min before each event</div>
-          </div>
-
-          <div class="prep-row">
-            <div class="prep-time">
-              <div class="prep-time-h">11:30</div>
-              <div class="prep-time-m">AM</div>
-            </div>
-            <div class="prep-body">
-              <div class="prep-title">Investor sync — Atlas Ventures</div>
-              <div class="prep-attendees">With: Jane Liu (Partner)</div>
-              <div class="prep-summary">Last call (3 weeks ago): Jane asked for Q1 revenue + churn breakdown. You promised a follow-up — still outstanding in your drafts folder. Drive: "Atlas Q1 update.docx" updated last Friday.</div>
-            </div>
-          </div>
-
-          <div class="prep-row">
-            <div class="prep-time">
-              <div class="prep-time-h">2:00</div>
-              <div class="prep-time-m">PM</div>
-            </div>
-            <div class="prep-body">
-              <div class="prep-title">1:1 with Sarah Chen (CTO)</div>
-              <div class="prep-attendees">Recurring</div>
-              <div class="prep-summary">Open items from last 1:1: hiring decision on senior dev role (deadline tomorrow), Q3 platform roadmap review (you owed feedback by Friday).</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Recent runs -->
-        <div class="ea-card full-card">
-          <div class="ea-card-header">
-            <div class="ea-card-icon icon-runs">⚙️</div>
-            <div class="ea-card-title">Your assistant's recent activity</div>
-            <div class="ea-card-meta">Last 24 hours</div>
-          </div>
-
-          <div class="run-row"><div class="run-dot run-dot-ok"></div><div class="run-name">Drafted reply to Jane Liu re: Q3 contract</div><div class="run-time">7:14 AM</div></div>
-          <div class="run-row"><div class="run-dot run-dot-ok"></div><div class="run-name">Posted morning briefing to Slack DM</div><div class="run-time">7:02 AM</div></div>
-          <div class="run-row"><div class="run-dot run-dot-ok"></div><div class="run-name">Inbox triage — 12 new, 9 auto-archived, 3 urgent flagged</div><div class="run-time">7:00 AM</div></div>
-          <div class="run-row"><div class="run-dot run-dot-warn"></div><div class="run-name">Meeting prep — Pinecrest demo (Drive doc not found)</div><div class="run-time">Yesterday, 4:15 PM</div></div>
-          <div class="run-row"><div class="run-dot run-dot-ok"></div><div class="run-name">Summarised thread in #design after @mention</div><div class="run-time">Yesterday, 2:31 PM</div></div>
-        </div>
-
+      <div class="activity-card">
+        <div class="activity-h">Recent activity</div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Riley sent 12 outbound emails (approved)</div><div class="activity-time">14m ago</div></div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Helena published Q1 report draft</div><div class="activity-time">1h ago</div></div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Sarah completed insights run for 3 subaccounts</div><div class="activity-time">3h ago</div></div>
+        <div class="activity-row"><div class="activity-dot"></div><div class="activity-text">Patel detected 2 overdue invoices on Acme</div><div class="activity-time">Yesterday</div></div>
       </div>
 
       <div class="privacy-strip">
         <div class="privacy-lock">🔒</div>
-        <div>
-          <strong style="color: #0f172a;">Private to you.</strong> Your inbox content, calendar attendees, and memory blocks are not visible to org admins or subaccount admins. They can see what your assistant did (action, time, status) but not the content it reasoned over.
-        </div>
+        <div>The <strong style="color: #0f172a;">Personal</strong> zone is private to you. Other staff have their own Personal zones; nobody sees each other's. Org admins see what your assistant did (action, time, status) but not the content it reasoned over.</div>
       </div>
 
     </div>
