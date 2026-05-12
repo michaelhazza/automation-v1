@@ -360,7 +360,7 @@ owner: platform-team
 ### Google Calendar
 
 ```yaml integration
-slug: google-calendar
+slug: google_calendar
 name: Google Calendar
 provider_type: oauth
 status: partial
@@ -410,10 +410,10 @@ status: fully_supported
 visibility: public
 read_capabilities:
   - channel_messages_read
-  - channel_search_messages
 write_capabilities:
   - post_message
   - channel_post_message
+  - channel_search_messages
   - dm_send
 skills_enabled: []
 primitives_required:

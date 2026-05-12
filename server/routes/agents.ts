@@ -16,9 +16,6 @@ import { TEST_RUN_RATE_LIMIT_PER_HOUR } from '../config/limits.js';
 import { deriveTestRunIdempotencyCandidates } from '../lib/testRunIdempotency.js';
 import { logger } from '../lib/logger.js';
 import { requireOrgSubaccount } from '../services/orgSubaccountService.js';
-import { db } from '../db/index.js';
-import { agents } from '../db/schema/agents.js';
-import { eq, and, isNull } from 'drizzle-orm';
 
 const router = Router();
 
@@ -38,26 +35,7 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
   if (req.query.ownerScope === 'user') {
-    const rows = await db
-      .select({
-        id: agents.id,
-        name: agents.name,
-        slug: agents.slug,
-        status: agents.status,
-        ownerUserId: agents.ownerUserId,
-        systemAgentId: agents.systemAgentId,
-        isSystemManaged: agents.isSystemManaged,
-        createdAt: agents.createdAt,
-        updatedAt: agents.updatedAt,
-      })
-      .from(agents)
-      .where(
-        and(
-          eq(agents.organisationId, req.orgId!),
-          eq(agents.ownerUserId, req.user!.id),
-          isNull(agents.deletedAt),
-        ),
-      );
+    const rows = await agentService.listOwnedByUser(req.orgId!, req.user!.id);
     res.json({ agents: rows });
     return;
   }

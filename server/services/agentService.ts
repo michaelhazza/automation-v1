@@ -725,6 +725,27 @@ export const agentService = {
     }));
   },
 
+  async listOwnedByUser(organisationId: string, userId: string) {
+    return db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        slug: agents.slug,
+        status: agents.status,
+        ownerUserId: agents.ownerUserId,
+        systemAgentId: agents.systemAgentId,
+        isSystemManaged: agents.isSystemManaged,
+        createdAt: agents.createdAt,
+        updatedAt: agents.updatedAt,
+      })
+      .from(agents)
+      .where(and(
+        eq(agents.organisationId, organisationId),
+        eq(agents.ownerUserId, userId),
+        isNull(agents.deletedAt),
+      ));
+  },
+
   async getAgent(id: string, organisationId: string) {
     const [rawAgent] = await db
       .select()
