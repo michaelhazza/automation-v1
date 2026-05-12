@@ -327,3 +327,8 @@ export * from './sandboxArtefacts.js';
 export * from './sandboxTelemetryEvents.js';
 export * from './sandboxEgressAudit.js';
 export * from './sandboxLogs.js';
+
+// Operator Backend — chain-link rows, task profiles, per-subaccount settings (migrations 0327–0329)
+export * from './operatorRuns.js';
+export * from './operatorTaskProfiles.js';
+export * from './subaccountOperatorSettings.js';

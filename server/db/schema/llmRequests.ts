@@ -6,6 +6,7 @@ import { users } from './users';
 import { agentRuns } from './agentRuns';
 import { executions } from './executions';
 import { ieeRuns } from './ieeRuns';
+import { operatorRuns } from './operatorRuns';
 
 // ---------------------------------------------------------------------------
 // llm_requests — append-only financial ledger
@@ -156,6 +157,14 @@ export const llmRequests = pgTable(
     // Monotonically increasing per sandbox_execution_id for 'sandbox_compute_correction' rows.
     // Always NULL for 'sandbox_compute' and all non-sandbox rows.
     correctionSequence:     integer('correction_sequence'),
+
+    // Operator Backend attribution (migration 0331) — spec §4.10, §3.12.
+    // Populated for subscription_mediated and sandbox_compute rows written by
+    // the operator backend cost-writer.
+    operatorRunId:  uuid('operator_run_id').references(() => operatorRuns.id),
+    // Cost-accounting boundary within a chain link (e.g. 'pre_fallback' /
+    // 'post_fallback'). Part of the idempotency key for operator rows.
+    boundary:       text('boundary'),
   },
   (table) => ({
     orgMonthIdx:          index('llm_requests_org_month_idx').on(table.organisationId, table.billingMonth),
@@ -192,6 +201,14 @@ export const llmRequests = pgTable(
     sandboxCorrectionSequenceUniqueIdx: uniqueIndex('llm_requests_sandbox_correction_sequence_unique_idx')
       .on(table.sandboxExecutionId, table.correctionSequence)
       .where(sql`${table.sourceType} = 'sandbox_compute_correction'`),
+    // Operator Backend — covering index for per-chain-link cost reads (migration 0331)
+    operatorRunIdIdx: index('llm_requests_operator_run_id_idx')
+      .on(table.operatorRunId)
+      .where(sql`${table.operatorRunId} IS NOT NULL`),
+    // Operator Backend — idempotency UNIQUE index (migration 0331)
+    operatorRunSourceBoundaryUniqueIdx: uniqueIndex('llm_requests_operator_run_source_boundary_unique_idx')
+      .on(table.operatorRunId, table.sourceType, table.boundary)
+      .where(sql`${table.operatorRunId} IS NOT NULL AND ${table.boundary} IS NOT NULL`),
   }),
 );
 

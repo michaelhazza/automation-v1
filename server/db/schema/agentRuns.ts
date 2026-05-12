@@ -38,7 +38,7 @@ export const agentRuns = pgTable(
     // 'iee_browser' / 'iee_dev' added rev 6 §9.1 — these route the run through
     // the Integrated Execution Environment (server/services/ieeExecutionService.ts)
     // instead of the standard API/headless tool dispatch.
-    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev'>(),
+    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev' | 'operator_managed'>(),
 
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
@@ -96,7 +96,7 @@ export const agentRuns = pgTable(
     // (iee_runs). Transitions to a terminal value when the backend reaches its
     // own terminal state, via the registry orchestrator
     // (`agentRunFinalizationService.finaliseAgentRunFromBackend`).
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration'>(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration' | 'paused_for_chain_continuation' | 'paused_chain_failure' | 'paused_budget_exceeded' | 'paused_wall_clock_exceeded'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -263,6 +263,11 @@ export const agentRuns = pgTable(
     // ExecutionBackendId) to keep the schema layer independent of contract types.
     backendId: text('backend_id'),
     backendTaskId: text('backend_task_id'),
+
+    // Operator Backend — consecutive chain-link dispatch-start failure counter
+    // (migration 0330). Reset to 0 on every successful dispatch. Sole writer
+    // is the dispatcher. Spec §3.4 / §3.17 item 1.
+    operatorChainFailureCount: integer('operator_chain_failure_count').notNull().default(0),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

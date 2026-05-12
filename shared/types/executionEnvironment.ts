@@ -12,7 +12,7 @@ export type ExecutionEnvironment = (typeof EXECUTION_ENVIRONMENTS)[number];
 
 // ExecutionMode mirrors agent_runs.execution_mode column type.
 // Source of truth: server/db/schema/agentRuns.ts line 39.
-export type ExecutionMode = 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev';
+export type ExecutionMode = 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev' | 'operator_managed';
 
 // Maps each ExecutionMode value to its ExecutionEnvironment (spec §4.2.8).
 // The exhaustiveness guard (const _exhaustive: never = mode) ensures that
@@ -30,6 +30,8 @@ export function executionModeToEnvironment(mode: ExecutionMode): ExecutionEnviro
       return 'browser';
     case 'iee_dev':
       return 'terminal_repo';
+    case 'operator_managed':
+      return 'browser';
     default: {
       const _exhaustive: never = mode;
       throw new Error(`Unhandled ExecutionMode: ${_exhaustive}`);
