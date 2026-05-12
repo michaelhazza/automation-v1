@@ -1,8 +1,9 @@
-**Status:** draft
+**Status:** accepted
 **Spec date:** 2026-05-12
 **Last updated:** 2026-05-12
 **Author:** Claude (spec-coordinator) for michael@breakoutsolutions.com
 **Build slug:** personal-assistant-v1
+**Reviews complete:** spec-reviewer (Codex, 5 iter cap, 52 mechanical fixes) + chatgpt-spec-review (2 rounds, 8 findings closed; final verdict "build-ready" after round 2). Logs: `tasks/review-logs/spec-review-final-personal-assistant-v1-20260512T065942Z.md`, `tasks/review-logs/chatgpt-spec-review-personal-assistant-v1-2026-05-12T07-09-30Z.md`.
 
 # Executive Assistant V1 — Spec
 
@@ -257,7 +258,7 @@ Every file this spec touches. Adding a prose reference in any later section requ
 | `server/db/schema/systemAgents.ts` | Add `homeWidget: jsonb('home_widget').$type<HomeWidgetDeclaration | null>()` column reflecting the migration in §5.1's `NNNN_executive_assistant_seed.sql`. Drizzle-level type matches `shared/types/homeWidget.ts` | §7.6, §13 |
 | `server/services/credentialBrokerService.ts` | No change — predecessor extends `injectIntoEnvironment({ ownerUserId? })` | §3.2 |
 | `server/routes/webhooks/slackWebhook.ts` | Extend existing route to handle `event_callback` with `app_mention` event type. Existing approval-callback handling preserved. Dispatches to `externalSourceTriggers` for `slack_mention` event | §10 |
-| `server/jobs/workflowGateStallNotifyJob.ts` | Extend existing stall-handler to cover `ea_drafts` rows: emit one-time 24h reminder for `state = 'pending'` drafts past their reminder threshold; transition expired drafts (`createdAt + 7d`) to `state = 'expired'` and emit the `draft.expired` Run Trace event per §24.3. Existing workflow-gate stall behaviour preserved | §7.5, §20.4, §22.2 |
+| `server/jobs/workflowGateStallNotifyJob.ts` | Extend existing stall-handler to cover EA-linked proposal rows: emit one-time 24h reminder when the linked proposal row remains in approval state `pending` past its reminder threshold; transition expired proposal rows (`createdAt + 7d`) to approval state `expired`. The `ea_drafts` row's `sendState` stays `idle` after expiry. Approval-side state is owned by the proposal primitive; this job dispatches against proposal rows that carry the `eaDraftId` reference. Existing workflow-gate stall behaviour preserved | §7.5, §20.4, §22.2 |
 | `server/services/agentExecutionService.ts` (and / or its `*Pure.ts` sibling) | Prompt-assembly extension: inject `<voice>` block before the task prompt when the agent has a configured `voice_profile_id` AND the profile's `optOutAt IS NULL`. Single small addition; no other change. Architect in Phase 2 confirms whether the change is in the main service file or in `agentExecutionServicePure.ts` per the existing pure-helper convention | §12.4, §22.3 |
 | `server/routes/oauthIntegrations.ts` | No code change — callback handler is provider-generic and picks up `google_calendar` automatically when registered in `oauthProviders.ts` | §8 |
 | `server/config/rlsProtectedTables.ts` | Add entries for `voice_profiles`, `ea_drafts`, `external_trigger_dedup` | §21 |
@@ -533,7 +534,8 @@ When the same fact is represented in multiple stores, the precedence rule:
 |---|---|---|
 | Voice profile content | `voice_profiles.profileJson` | only one store; opt-out wins over content |
 | Voice profile opt-out | `voice_profiles.optOutAt` + UI toggle | DB column is canonical; UI reads from DB |
-| EA draft state | `ea_drafts.state` | DB column is canonical (the row IS the audit) |
+| EA draft approval state | proposal primitive's row (linked via `ea_drafts.proposalId`) | proposal primitive's row is canonical; `ea_drafts` never holds approval state |
+| EA draft send state | `ea_drafts.sendState` | DB column is canonical (the row IS the post-approval send audit) |
 | User's EA settings (display name, briefing time, delivery target, auto-send scope) | `agents.name` (display name) + memory_blocks (other settings) | DB rows canonical; cached `useAgent()` hook invalidates on change |
 | External-event dedup | `external_trigger_dedup` row | `external_trigger_dedup` UNIQUE row is canonical (LOCKED per §7.1, §24.1) |
 | Run cost rollup | `cost_aggregates` + per-call `llm_requests_all` | existing precedence (no change from EA V1) |
@@ -663,7 +665,7 @@ Risk-tier rationale per Phase 1 foundation §4.2.3:
 
 Scope upgrade on existing connected Slack workspaces: existing connections will lack the new scopes. The Connections page UI surfaces a "Re-authorise" action when an action requires a scope the connection lacks (architect picks the exact UI shape in Phase 2; spec mandates the affordance exists).
 
-### 9.3 Auto-send scope dropdown
+### 9.3 Slack auto-send policy
 
 Per brief §4 q2 (LOCKED). The EA's V1 auto-send behaviour is fixed by the §1 framing assumption: "Every Tier 4+ write to a third-party system is review-gated. Auto-send only to the operator's own surfaces (own Slack DMs, own Gmail Drafts)." Concretely:
 
@@ -683,7 +685,9 @@ This pattern is forward-compat reusable. Future agents that gain Slack post capa
 
 1. Resolve owner-scoped Slack credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'slack', ownerUserId })`.
 2. Validate input.
-3. For write actions: derive `client_msg_id` idempotency key per `slackActionServicePure.deriveIdempotencyKey`; call `slackActionServicePure.decideAutoSendScope`; if `decision === 'review'`, write a proposal row via `actionService.proposeAction({ action, payload, ownerUserId, agentId, runId })` AND a linked `ea_drafts` row with `proposalId` + `sendState: 'idle'` (in the same transaction) and return — the action does not call Slack at this point. The send happens after operator approval via the proposal primitive's commit hook, which re-enters the handler with `eaDraftId` set.
+3. For write actions: derive `client_msg_id` idempotency key per `slackActionServicePure.deriveIdempotencyKey`; call `slackActionServicePure.decideAutoSendScope`; then:
+   - **If `decision === 'auto'`** (DM target = `ownerUserId`): call Slack `chat.postMessage` immediately with the `client_msg_id` and return the resulting `messageTs`.
+   - **If `decision === 'review'`** (any channel post, or DM target ≠ ownerUserId): create a proposal row via `actionService.proposeAction({ action, payload, ownerUserId, agentId, runId })` AND a linked `ea_drafts` row with `proposalId` + `sendState: 'idle'` (both in the same transaction; FK is never dangling). Return — the action does not call Slack at this point. The proposal primitive owns approval state; on approval, its commit hook re-enters the handler with `eaDraftId` set and the original idempotency key (the row is the audit), which proceeds to the post-approval send path (step 4).
 4. For approved drafts: re-enter the handler from the approval path; idempotency key is the same; Slack rejects duplicate `client_msg_id` with `already_in_channel` which we map to a 200-idempotent-hit response.
 5. Map errors per Slack API conventions; emit Run Trace events.
 
@@ -901,7 +905,9 @@ Both deferred workflows can land in V1.5 with NO foundation changes — only the
 
 ### 11.6 Workflow framing — interaction with the approval primitive + EA drafts
 
-Workflow B (inbox triage) is the only V1 workflow that writes `ea_drafts` rows. Approval state lives on the proposal row (`actionService.proposeAction` primitive), NOT on `ea_drafts` (per §7.5 composition lock). Workflow B writes a proposal row + a linked `ea_drafts` row in the same transaction. The operator-driven approval surface is the proposal primitive's existing UI (existing approval-flow components); the per-agent Workspace tab in §14.3 is a JOIN view that surfaces `ea_drafts.body` (the preview) alongside the proposal primitive's approve/reject buttons. On approval, the proposal primitive's commit hook invokes the underlying action handler with `eaDraftId` in the input (per §8.4 reject-if-missing for Calendar actions, same pattern for Gmail/Slack). The action handler records `externalResultId` on the `ea_drafts` row + transitions `sendState`. No parallel approval primitive on `ea_drafts`.
+Workflow B (inbox triage) is the only default V1 scheduled workflow that creates `ea_drafts` rows during normal operation. HOWEVER, any V1 review-gated external write may create a proposal row + linked `ea_drafts` row through the shared draft/proposal helper — this explicitly includes Gmail sends (Workflow B's path), Slack reviewed channel posts and non-self DMs (§9.4 step 3), and Calendar `create_event` / `update_event` / `respond_to_invite` actions (§8.4 reject-if-missing-eaDraftId). The `ea_drafts.kind` enum (§7.5) names the seven supported draft kinds for exactly this reason.
+
+Approval state always lives on the proposal row (`actionService.proposeAction` primitive), NOT on `ea_drafts` (per §7.5 composition lock). Whoever creates a draft (Workflow B, Calendar action handler, Slack action handler) writes both rows in the same transaction. The operator-driven approval surface is the proposal primitive's existing UI; the per-agent Workspace tab in §14.3 is a JOIN view that surfaces `ea_drafts.body` (the preview) alongside the proposal primitive's approve/reject buttons. On approval, the proposal primitive's commit hook invokes the underlying action handler with `eaDraftId` in the input. The action handler records `externalResultId` on the `ea_drafts` row + transitions `sendState: 'idle' → 'sending' → 'sent'`. No parallel approval primitive on `ea_drafts`.
 
 
 ## 12. Voice Profile primitive
