@@ -1,10 +1,10 @@
 <!-- mission-control
 active_spec: none
 active_plan: none
-build_slug: none
-branch: none
-status: NONE
-last_updated: 2026-05-11
+build_slug: operator-backend
+branch: claude/sandbox-execution-provider-DLfjn
+status: PLANNING
+last_updated: 2026-05-12
 last_merged_pr: #286
 last_merged_slug: operator-session-identity
 last_merged_branch: claude/evolve-session-identity-brief-17LO4
