@@ -69,6 +69,7 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Output template requires `[🔴|🟡|💭] <file:line>` prefix and a `Why:` line per finding.
 - Final verdict line summarises counts (`Blocking: N / Should-fix: N / Consider: N`) before the overall verdict.
 - A short **"Files NOT read"** disclosure section is appended when the diff was large enough to skim parts (lifted from agency-agents `codebase-onboarding-engineer`).
+- **Disclosure constraint:** if files are not read, the reviewer must state whether unread files could invalidate the verdict. If yes, the verdict cannot be `APPROVED`. This closes the loophole where a reviewer disclaims its way out of doing the review.
 
 **Non-goals:** changing what `pr-reviewer` *does* — it's still read-only, still independent, still pre-merge gate. Only the *output shape* changes.
 
@@ -91,6 +92,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Lists "Files NOT read" if the diff exceeded its read window.
 
 **Non-goals:** running tests itself, fixing anything, adjudicating subjective UX. It's a verifier, not a builder.
+
+**Caller obligation:** the invoking coordinator must pass the implementer's claimed verification evidence into `reality-checker`. If no evidence is supplied, `reality-checker` returns `NEEDS_WORK` rather than attempting to run commands. This prevents future coordinators from drifting into "the verifier will run the tests for me."
 
 **Position in pipeline:** runs *after* `pr-reviewer`, *before* `dual-reviewer` (when Codex available). Updates the review pipeline section in `CLAUDE.md` and `tasks/review-logs/README.md`.
 
@@ -128,7 +131,7 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Reads `docs/incident-response.md` (new, see §7 doc-sync) for the SEV matrix and on-call expectations.
 - Step 1: classify SEV (SEV-1 critical / SEV-2 high / SEV-3 medium / SEV-4 low) and confirm with operator.
 - Step 2: assign **scribe** role (the agent itself if no other coordinator present) — appends timestamped log entries to `tasks/incidents/<YYYY-MM-DD-slug>/timeline.md`.
-- Step 3: invoke `hotfix` for the actual fix (delegation, not duplication).
+- Step 3: instruct the main session to switch to the `hotfix` playbook for the fix work. `incident-commander` does **not** directly dispatch another coordinator — per CLAUDE.md, coordinators cannot dispatch coordinators. The main session adopts `hotfix` inline.
 - Step 4: post-incident — drives a 48-hour post-mortem template into `tasks/incidents/<YYYY-MM-DD-slug>/postmortem.md`. Template fields: summary, impact, timeline, root cause (5-whys), contributing factors, what went well, what didn't, action items (owners + due dates).
 
 **Inline vs dispatched:** runs inline in the main session (like other coordinators), so the operator sees the timeline build in real time. Per CLAUDE.md, coordinators cannot dispatch coordinators; main session must adopt the playbook.
@@ -164,9 +167,26 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
    - (b) the file list is filtered (e.g. legacy allowlist).
 2. **Fix the gate first**, so it would fail in CI as it stands today.
 3. **Then** triage each violator into one of:
-   - **Move to service** — extract DB access into an existing or new service. Default path.
-   - **Document exception** — only if there is a genuine reason the route legitimately reaches DB directly (mirror `workspaceInboundWebhook.ts` precedent). Each exception requires a `guard-ignore` comment with rationale + ADR reference.
+   - **Move to service** — extract DB access into an existing or new service. Default path. Must satisfy the service-layer migration invariant below.
+   - **Document exception** — only if there is a genuine reason the route legitimately reaches DB directly (mirror `workspaceInboundWebhook.ts` precedent). Each exception requires a `guard-ignore` comment in the exact format below.
 4. Per-route work is independent; can be parallelised across builder chunks.
+
+**Allowed exception format (T1):**
+
+```
+// guard-ignore verify-no-db-in-routes: <ADR-id> <one-line rationale>
+```
+
+The script must **reject** any bare `guard-ignore` without both an ADR reference and a rationale. Inconsistent comment shapes will not parse and break the gate again.
+
+**Service-layer migration invariant (T2):** A migration is only "done" when all four hold:
+
+- Route handler performs auth / input parsing / response shaping only.
+- DB access moves behind a service method.
+- The service method accepts organisation / subaccount scope explicitly, or derives it through the existing scoped-context pattern.
+- The route must not import `db`, schema tables, or Drizzle query helpers.
+
+This prevents a superficial migration where the route re-exports the same query semantics through a thin wrapper. The intent is real separation, not file relocation.
 
 **Out-of-scope inside this spec:** redesigning the gate framework itself, or auditing other `verify-*.sh` scripts for drift (separate audit if requested).
 
@@ -193,6 +213,18 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Output: `tasks/todo.md` reduced to in-flight items only; new `tasks/todo-archive/2026-Q2.md` holding the archived set; ADR references for the ACCEPT pile.
 - Time-box: target ≤500 lines for `tasks/todo.md` post-sprint.
 
+**Inventory-first workflow (mandatory):**
+
+Before any mutation of `tasks/todo.md`, the builder produces `tasks/todo-triage-inventory.md` with one row per deferred item:
+
+- item id / heading
+- domain
+- proposed end-state: SHIP / ARCHIVE / ACCEPT
+- one-line rationale
+- destination file (target spec / archive section / ADR id)
+
+The triage applies **only after operator or spec-coordinator approval of the inventory**. This converts a giant unreviewable diff into a flat list the operator can scan in one pass.
+
 **Not in scope here:** implementing any SHIP item — that becomes its own spec.
 
 ### C2. `KNOWLEDGE.md` sweep
@@ -208,17 +240,31 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Compress redundant entries (keep oldest if equivalent).
 - Target: ≤2,500 lines post-sweep, in line with the file's own stated bound.
 
+**Inventory-first workflow (mandatory):**
+
+Before any mutation of `KNOWLEDGE.md`, the builder produces `docs/knowledge-sweep-inventory.md`:
+
+- grouped entries (by domain)
+- proposed ADR promotions (with target ADR ids)
+- duplicate / compression candidates (with rationale)
+- entries retained unchanged
+
+**Non-deletion rule:** No entry may be deleted outright. Removed or compressed content must either (a) be represented in a new ADR, (b) survive as a canonical compressed entry, or (c) remain recoverable through the sweep inventory. The full pre-sweep file remains in git history regardless.
+
 **Constraint:** CLAUDE.md §3 — "never edit or remove existing entries — only append." This sweep is the explicit exception, called out as a "quarterly grouping pass." Document the sweep in a single dated header so future readers know the trim happened.
 
-### C3. PR #277 (`support-desk-canonical`) — close or finish
+### C3. PR #277 (`support-desk-canonical`) — pre-plan operator decision
 
-**Rationale:** A parked PR is a quiet liability. Every week that passes, `main` evolves and the merge cost grows — eventually crossing the value the PR offers. Holding it open also clutters `tasks/current-focus.md` and tempts future sessions to half-resume it. Forcing the decision now (finish or close) ends the decay either way. The spec doesn't pick — just demands the call be made before plan-authoring.
+**Rationale:** A parked PR is a quiet liability. Every week that passes, `main` evolves and the merge cost grows — eventually crossing the value the PR offers. Holding it open also clutters `tasks/current-focus.md` and tempts future sessions to half-resume it. Forcing the decision now (finish or close) ends the decay either way.
 
 **Problem:** parked indefinitely on `claude/support-ticket-structure-xMcy8`. Open PRs decay via merge conflicts and stale doc references.
 
-**Decision required from operator before chunk runs:** finish (resume via `tasks/builds/support-desk-canonical/handoff.md`) or close.
+**Control model:** This is **not** a chunk of this build. It is a **pre-plan operator decision** that must be resolved before plan-authoring begins. Once the operator chooses:
 
-**This spec does not pick one** — it surfaces the decision as a gate. Spec sign-off requires the operator's choice.
+- **Close** — recorded in `tasks/current-focus.md` paused-build line; no chunk in this spec.
+- **Finish** — handled in a **separate build/branch** sequenced before or after this one; not folded into this spec's chunk list.
+
+This keeps the hygiene build coherent and avoids coupling a stale product PR's review surface into the fleet-and-codebase-health diff.
 
 ### C4. Working-tree bloat — archive `prototypes/` and `attached_assets/`
 
@@ -233,6 +279,12 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 - Add a one-line `_archive/README.md` explaining the convention.
 
 **Constraint:** preserve git history (use `git mv`, not delete+add).
+
+**Chunk acceptance (T7):**
+
+- `rg "prototypes/|attached_assets/"` reviewed after the move. Every remaining reference either intentionally points to `_archive/...` or is documented as historical.
+- `.gitignore` reviewed for obsolete root-path assumptions about `prototypes/` or `attached_assets/`.
+- Doc references (README, mockup-log, build artefacts) updated where the new path matters.
 
 ## 6. WS-D — Process clarification
 
@@ -251,6 +303,16 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
   - **ADVISORY** — only `pr-reviewer` mandatory; others always optional.
 - Update `feature-coordinator` and `finalisation-coordinator` to enforce whichever posture is chosen, and to **fail loudly** (not silently skip) when a required reviewer is unavailable.
 
+**REVIEW_GAP artifact (T5):** When a required reviewer is skipped under any posture, finalisation must write a `REVIEW_GAP` entry to `tasks/current-focus.md` (aligned with the existing pattern). Required fields:
+
+- reviewer name
+- task class (Trivial / Standard / Significant / Major)
+- reason unavailable or skipped
+- operator override, if any (with timestamp)
+- remediation: TODO entry or explicit acceptance
+
+A silent skip with no `REVIEW_GAP` entry is itself a policy violation.
+
 **Recommendation embedded in spec:** GRADED, since it matches current intent. Spec-reviewer / operator can override.
 
 ### D2. Testing-posture flip date
@@ -265,8 +327,12 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
   - Inventory: which suites need to exist before flip-day (integration tests for RLS-protected flows, workflow engine smoke tests, the four obese services' critical paths).
   - Sequencing: which gates flip first, which stay gates-only longest.
   - Estimated effort: rough S/M/L per suite.
-  - Trigger restatement: clearer than "first live client" — e.g. "T-minus-14-days from first live client onboarding."
-- Add a TODO in `tasks/todo.md` for the operator to decide the actual trigger date.
+
+**Default trigger embedded in the plan (T8):**
+
+The transition plan ships with a default trigger: **T-minus-14 calendar days before first live agency client onboarding.** The plan adopts this default unless the operator explicitly overrides it.
+
+This avoids the deferred-debt antipattern (adding a vague "operator to decide trigger" TODO) that the C1 sweep is trying to eliminate. The trigger is decided by default; override is explicit.
 
 ## 7. Doc-sync impact
 
@@ -281,18 +347,18 @@ Following `docs/doc-sync.md`. Every WS item below names the docs it touches.
 | A5 | `.claude/agents/incident-commander.md` (new), `docs/incident-response.md` (new), `CLAUDE.md` § Local Dev Agent Fleet, `.claude/CHANGELOG.md` |
 | B1 | `scripts/verify-no-db-in-routes.sh`, 9 route files (or services they migrate into), possibly one new ADR under `docs/decisions/` if a documented exception is added |
 | B2 | `replit.md` |
-| C1 | `tasks/todo.md`, `tasks/todo-archive/2026-Q2.md` (new), zero-to-N ADRs |
-| C2 | `KNOWLEDGE.md`, zero-to-N ADRs |
-| C3 | `tasks/current-focus.md` (paused-build line removed once decided), possibly PR #277 itself |
-| C4 | `_archive/README.md` (new), any in-code reference paths |
-| D1 | `CLAUDE.md` § Review pipeline, `.claude/agents/feature-coordinator.md`, `.claude/agents/finalisation-coordinator.md` |
-| D2 | `docs/testing-transition-plan.md` (new), `tasks/todo.md` |
+| C1 | `tasks/todo-triage-inventory.md` (new, transient), `tasks/todo.md`, `tasks/todo-archive/2026-Q2.md` (new), zero-to-N ADRs |
+| C2 | `docs/knowledge-sweep-inventory.md` (new, transient), `KNOWLEDGE.md`, zero-to-N ADRs |
+| C3 | `tasks/current-focus.md` only (paused-build line updated to reflect operator decision). No chunk in this spec. |
+| C4 | `_archive/README.md` (new), any in-code reference paths, `.gitignore` if affected |
+| D1 | `CLAUDE.md` § Review pipeline, `.claude/agents/feature-coordinator.md`, `.claude/agents/finalisation-coordinator.md` (REVIEW_GAP artifact emission) |
+| D2 | `docs/testing-transition-plan.md` (new, with default T-minus-14 trigger embedded) |
 
 `docs/capabilities.md` is **not** touched — this spec adds no customer-visible product capabilities.
 
 ## 8. Chunk plan
 
-Ordered. Each chunk is independent at the file-level so a single `builder` invocation can land it cleanly.
+Ordered. Each chunk is independent at the file-level so a single `builder` invocation can land it cleanly. PR #277 is **not** in this list — it is a pre-plan operator decision (see §5.C3 and §11).
 
 | # | Chunk | WS | Effort |
 |---|-------|----|--------|
@@ -305,32 +371,53 @@ Ordered. Each chunk is independent at the file-level so a single `builder` invoc
 | 7 | New `reality-checker` agent + wire into `feature-coordinator` pipeline + update `CLAUDE.md` fleet table + `tasks/review-logs/README.md` | A2 | M |
 | 8 | New `incident-commander` agent + `docs/incident-response.md` SEV matrix + post-mortem template + `CLAUDE.md` fleet table | A5 | M |
 | 9 | Reviewer-coverage policy: audit SKIPPED reasons, document chosen posture in `CLAUDE.md`, update `feature-coordinator`/`finalisation-coordinator` enforcement | D1 | M |
-| 10 | `docs/testing-transition-plan.md` + `tasks/todo.md` decision-needed entry | D2 | M |
+| 10 | `docs/testing-transition-plan.md` (with default T-minus-14 trigger embedded) | D2 | M |
 | 11 | Route violator triage — each violator migrated to service or documented exception (one builder chunk per violator, or grouped 3-3-3) | B1 | M-L (≈9 sub-chunks) |
-| 12 | `KNOWLEDGE.md` sweep — group, promote to ADRs, compress | C2 | M |
-| 13 | `tasks/todo.md` triage sprint — categorise 281 deferred items into SHIP/ARCHIVE/ACCEPT; produce `tasks/todo-archive/2026-Q2.md` | C1 | L |
-| 14 | PR #277 decision and execution — finish or close (gated on operator choice from §5.C3) | C3 | varies |
+| 12 | `KNOWLEDGE.md` sweep — produce inventory, get operator approval, then apply | C2 | M |
+| 13 | `tasks/todo.md` triage sprint — produce inventory, get operator approval, then apply | C1 | L |
+
+**Chunk-1 acceptance (F1):**
+
+Chunk 1 is gate-only and must **not** edit any route file. Its acceptance is the *opposite* of final acceptance:
+
+- `scripts/verify-no-db-in-routes.sh` **fails** on current branch state and reports the 9 known violators.
+- `workspaceInboundWebhook.ts` remains exempted only via the documented `guard-ignore` token (in the T1 format).
+- No route files are edited in Chunk 1.
+
+A green gate at Chunk 1 means the gate was weakened or routes were edited prematurely. Both are failures.
 
 **Sequencing notes:**
 
 - Chunks 1-6 are pure file edits, no architectural decisions left open → can land in one session each.
 - Chunk 11 (route violators) waits on chunk 1 (gate fix) so each migration can be verified by the now-strict gate.
-- Chunks 12 and 13 (`KNOWLEDGE.md` and `todo.md` sweeps) are end-of-build because the WS-A/B work will itself emit follow-ups that should land in the archive sweep, not the live file.
-- Chunk 14 (PR #277) blocks on operator decision; spec-coordinator gates on it before plan finalisation.
+- **Branch state between Chunk 1 and Chunk 11:** the branch is intentionally CI-red until all 9 routes migrate. Plan-authoring should tightly sequence Chunk 1 with the start of Chunk 11 to minimise this window, or gate the strict matcher behind an env var until Chunk 11 completes. Either approach is acceptable; the plan must pick one.
+- Chunks 12 and 13 (`KNOWLEDGE.md` and `todo.md` sweeps) are end-of-build because the WS-A/B work will itself emit follow-ups that should land in the inventory, not the live file.
+- Each of Chunks 12 and 13 is **two steps**: produce inventory → operator approval → apply triage.
+
+**Planning guideline — branch split:**
+
+This spec is broad enough that a single implementation PR may be too large to review well. At plan-authoring time, consider splitting into two branches:
+
+- **Branch 1 — fleet + process:** chunks 2, 4, 5, 6, 7, 8, 9, 10 (mostly agent files + CLAUDE.md edits; low blast radius).
+- **Branch 2 — codebase health:** chunks 1, 3, 11, 12, 13 (gate fix + route migrations + sweeps; higher blast radius, deserves its own review surface).
+
+The spec stays unified; the plan decides the branch split.
 
 ## 9. Acceptance criteria
 
-Spec passes when:
+Acceptance is split into **chunk-level** (per chunk; see §8 chunk-1 acceptance) and **final** (spec-level). Final acceptance:
 
-- **Gate restored:** `npm run lint && scripts/verify-no-db-in-routes.sh` is GREEN on the branch with all 9 violators migrated or documented; `workspaceInboundWebhook.ts` exemption preserved.
+- **Gate restored:** `scripts/verify-no-db-in-routes.sh` is GREEN on the branch tip with all 9 violators migrated or documented; `workspaceInboundWebhook.ts` exemption preserved; every exception carries the T1 `guard-ignore` token shape.
+- **Service-layer invariant satisfied (T2):** for every migrated route, the four-bullet invariant holds (route owns auth/parsing/shaping only; DB access behind a service; explicit scope handling; no `db`/schema/Drizzle imports in the route).
 - **Two new agents live:** `.claude/agents/reality-checker.md` and `.claude/agents/incident-commander.md` exist, are referenced in CLAUDE.md fleet table, and `validate-setup` passes.
 - **Three existing agents upgraded:** `pr-reviewer`, `adversarial-reviewer`, `builder` carry the new contracts; `feature-coordinator` pipeline updated.
-- **CLAUDE.md updates:** §6 carries the three minimal-change rules; § Review pipeline carries the chosen reviewer-coverage posture; fleet table lists the two new agents.
-- **Doc cleanup:** `replit.md` corrected; `_archive/` exists with README; `prototypes/` + `attached_assets/` moved (with git history preserved).
-- **Debt visible:** `tasks/todo.md` ≤500 lines; `tasks/todo-archive/2026-Q2.md` exists; `KNOWLEDGE.md` ≤2,500 lines.
-- **Transition plan written:** `docs/testing-transition-plan.md` exists with the inventory and trigger-date TODO.
-- **PR #277:** decision logged and executed (merged or closed).
-- **CI green:** all 66 `verify-*.sh` gates pass on the branch tip.
+- **CLAUDE.md updates:** §6 carries the three minimal-change rules; § Review pipeline carries the chosen reviewer-coverage posture and the REVIEW_GAP artifact format; fleet table lists the two new agents.
+- **Doc cleanup:** `replit.md` corrected; `_archive/` exists with README; `prototypes/` + `attached_assets/` moved (with git history preserved); T7 path-reference grep clean.
+- **Debt visible:** `tasks/todo.md` ≤500 lines; `tasks/todo-archive/2026-Q2.md` exists; `KNOWLEDGE.md` ≤2,500 lines; both sweeps applied only after operator approval of their inventory.
+- **Transition plan written:** `docs/testing-transition-plan.md` exists with the inventory and the default T-minus-14-days trigger embedded.
+- **CI green (F4):** the canonical gate-suite command documented in `CLAUDE.md` / `scripts/run-all-gates.sh` passes on the branch tip. The plan must not hard-code a gate count — it asserts the suite passes, with `verify-no-db-in-routes.sh` specifically asserted post-Chunk 11.
+
+PR #277 is **not** a final-acceptance item — it is resolved as a pre-plan operator decision (see §11).
 
 ## 10. Risks
 
@@ -346,9 +433,9 @@ Spec passes when:
 
 ## 11. Open questions for operator
 
-1. **Reviewer posture (§6 D1):** STRICT / GRADED / ADVISORY — recommendation is GRADED. Confirm or pick.
-2. **PR #277 fate (§5 C3):** finish or close.
-3. **Archive convention (§5 C4):** `_archive/` at repo root vs. moving the contents out of repo entirely. Recommendation is in-repo for history; confirm.
-4. **Testing-transition trigger (§6 D2):** keep "first live client" or pick a concrete date.
+Resolved as a single pre-plan decision block. Plan-authoring **must not** start until all four are answered.
 
-Spec-coordinator surfaces these as a single decision block before plan-authoring begins.
+1. **PR #277 fate (§5 C3) — pre-plan gate:** finish or close. If **close**: recorded in `tasks/current-focus.md` and PR closed; no further work in this spec. If **finish**: handled in a separate build/branch sequenced before or after this one — not folded into this spec.
+2. **Reviewer posture (§6 D1):** STRICT / GRADED / ADVISORY — recommendation is GRADED. Confirm or pick.
+3. **Archive convention (§5 C4):** `_archive/` at repo root vs. moving the contents out of repo entirely. Recommendation is in-repo for history; confirm.
+4. **Testing-transition trigger (§6 D2):** the default is T-minus-14-days before first live agency client onboarding. Confirm or override with a concrete date.
