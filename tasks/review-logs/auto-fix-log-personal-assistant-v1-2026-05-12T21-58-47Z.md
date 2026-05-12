@@ -17,4 +17,15 @@ Guardrails active: G1 (test files off-limits), G2 (50-line diff cap), G3 (catego
 - **Fix:** make 0331.down + 0332.down idempotent against missing columns/tables; replace 5 raw `console.*` calls with `logger.warn/info/error` in eaDraftDispatchService.ts
 - **Diff:** ~25 lines across 3 files (`migrations/0331_system_agents_home_widget.down.sql`, `migrations/0332_executive_assistant_seed.down.sql`, `server/services/eaDrafts/eaDraftDispatchService.ts`)
 - **Local verify:** lint 0 errors; typecheck clean; `verify-no-raw-console.sh` exit 0
+- **CI re-fire result:** Lint+Typecheck SUCCESS, Grep invariants B.2 SUCCESS, Portable framework tests SUCCESS. unit tests / integration tests / verify all RED with NEW failure: `0332_executive_assistant_seed.sql` "there is no unique or exclusion constraint matching the ON CONFLICT specification". Root cause uncovered by iter 1 (down-script no longer blocks migration progression).
+
+## Iteration 2 — 2026-05-12T22:18:00Z
+
+- **Failed checks:** `unit tests`, `integration tests`, `verify` — all on `0332_executive_assistant_seed.sql` migration step
+- **Root cause:** `ON CONFLICT (slug) DO NOTHING` references the (now partial) unique index on `system_agents.slug`. Migration 0238 replaced `system_agents_slug_idx` (full unique) with `system_agents_slug_active_idx (slug) WHERE deleted_at IS NULL` (partial unique). Postgres requires the ON CONFLICT predicate to be included when the target is a partial unique index.
+- **Category (G3 allowlist match):** SQL / migration syntax
+- **Guardrail status:** G1=PASS; G2=1 line; G3=PASS; G4=logged
+- **Fix:** add `WHERE deleted_at IS NULL` predicate to the ON CONFLICT clause in 0332_executive_assistant_seed.sql
+- **Diff:** 1 line in `migrations/0332_executive_assistant_seed.sql`
+- **Local verify:** N/A (SQL migration not run locally; lint/typecheck don't cover SQL syntax)
 - **CI re-fire result:** pending at next poll

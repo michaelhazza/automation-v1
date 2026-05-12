@@ -58,7 +58,7 @@ You ask before sending to third parties; you act freely on internal-only tasks (
   20,
   NOW(),
   NOW()
-) ON CONFLICT (slug) DO NOTHING;
+) ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING;
 
 -- Partial unique index: at most one EA per user per organisation
 CREATE UNIQUE INDEX IF NOT EXISTS agents_personal_assistant_per_user_idx
