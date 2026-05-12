@@ -471,6 +471,7 @@ export const credentialBrokerService = {
    * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.6
    */
   async requestOperatorSessionCredential(params: {
+    organisationId: string;
     subaccountId: string;
     agentRunId: string;
   }): Promise<OperatorSessionEnvelope | { unavailable: true; reason: string }> {
@@ -479,6 +480,7 @@ export const credentialBrokerService = {
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, params.organisationId),
           eq(integrationConnections.subaccountId, params.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -513,6 +515,7 @@ export const credentialBrokerService = {
    * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.7 item 2
    */
   async resolveFallback(params: {
+    organisationId: string;
     subaccountId: string;
     agentRunId: string;
     originalCredentialId: string;
@@ -523,6 +526,7 @@ export const credentialBrokerService = {
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, params.organisationId),
           eq(integrationConnections.subaccountId, params.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -553,6 +557,7 @@ export const credentialBrokerService = {
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, params.organisationId),
           eq(integrationConnections.subaccountId, params.subaccountId),
           eq(integrationConnections.authType, 'api_key'),
           eq(integrationConnections.connectionStatus, 'active'),

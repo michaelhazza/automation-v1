@@ -25,10 +25,12 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
 import { agentRuns, operatorRuns } from '../db/schema/index.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { auditService } from '../services/auditService.js';
 import { operatorTaskProfileService } from '../services/operatorTaskProfileService.js';
 import { credentialBrokerService } from '../services/credentialBrokerService.js';
+import { subaccountOperatorSettingsService } from '../services/subaccountOperatorSettingsService.js';
 import { OperatorBackendConflictError } from '../services/operatorBackendErrors.js';
 import { OPERATOR_DISPATCH_NEXT_CHAIN_LINK_QUEUE } from '../jobs/operatorSessionDispatchNextChainLinkHandler.js';
 import {
@@ -180,6 +182,23 @@ router.post(
 
     const { extensionMinutes } = parsed.data;
 
+    // Apply the budget extension to the subaccount settings so the dispatcher
+    // picks up the incremented per_task_budget_cap_minutes on the next chain link.
+    // updateSettings validates the new value against the range constraint (max 60000);
+    // if it would exceed the cap, validateOperatorSettingsRange throws a 400-level error.
+    const currentSettings = await subaccountOperatorSettingsService.getEffectiveSettings(
+      orgId,
+      run.subaccountId!,
+    );
+    await subaccountOperatorSettingsService.updateSettings({
+      orgId,
+      subaccountId: run.subaccountId!,
+      patch: {
+        per_task_budget_cap_minutes: currentSettings.per_task_budget_cap_minutes + extensionMinutes,
+      },
+      updatedByUserId: actor.id,
+    });
+
     void auditService.log({
       organisationId: orgId,
       actorId: actor.id,
@@ -190,6 +209,7 @@ router.post(
       metadata: {
         agent_run_id: agentRunId,
         extension_minutes: extensionMinutes,
+        new_per_task_budget_cap_minutes: currentSettings.per_task_budget_cap_minutes + extensionMinutes,
         source: 'ui',
         request_id: req.correlationId,
       },
@@ -238,29 +258,62 @@ router.post(
 
     const run = await readAgentRunOrThrow(agentRunId, orgId);
 
-    // Read latest non-superseded chain-link row for precondition check
-    const [latestChainLink] = await db
-      .select({
-        failureReason: operatorRuns.failureReason,
-        failedMidStep: operatorRuns.failedMidStep,
-        attemptNumber: operatorRuns.attemptNumber,
-        chainSeq: operatorRuns.chainSeq,
-      })
-      .from(operatorRuns)
-      .where(
-        and(
-          eq(operatorRuns.agentRunId, agentRunId),
-          isNull(operatorRuns.supersededByAttempt),
-        ),
-      )
-      .orderBy(operatorRuns.chainSeq)
-      .limit(1);
+    if (!run.subaccountId) {
+      throw { statusCode: 400, message: 'Task has no subaccount context', errorCode: 'NO_SUBACCOUNT' };
+    }
 
-    const predicate = decideFreshProfileRestartAllowed({
-      taskStatus: run.status,
-      latestChainLinkFailureClass: null,
-      latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
-    });
+    // Read and write operator_runs inside a single dual-GUC transaction so
+    // RLS on operator_runs (keyed on both org + subaccount) returns rows.
+    const { priorAttemptNumber, newAttemptNumber, priorChainSeqCount, predicate } =
+      await db.transaction(async (tx) => {
+        await setOrgAndSubaccountGUC(tx, orgId, run.subaccountId!);
+
+        const [latestChainLink] = await tx
+          .select({
+            failureReason: operatorRuns.failureReason,
+            failedMidStep: operatorRuns.failedMidStep,
+            attemptNumber: operatorRuns.attemptNumber,
+            chainSeq: operatorRuns.chainSeq,
+          })
+          .from(operatorRuns)
+          .where(
+            and(
+              eq(operatorRuns.agentRunId, agentRunId),
+              isNull(operatorRuns.supersededByAttempt),
+            ),
+          )
+          .orderBy(operatorRuns.chainSeq)
+          .limit(1);
+
+        const pred = decideFreshProfileRestartAllowed({
+          taskStatus: run.status,
+          latestChainLinkFailureClass: null,
+          latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
+        });
+
+        const priorAttempt = latestChainLink?.attemptNumber ?? 1;
+        const newAttempt = priorAttempt + 1;
+
+        if (pred.allowed) {
+          // Mark prior chain links superseded while we still hold the GUC.
+          await tx
+            .update(operatorRuns)
+            .set({ supersededByAttempt: newAttempt })
+            .where(
+              and(
+                eq(operatorRuns.agentRunId, agentRunId),
+                isNull(operatorRuns.supersededByAttempt),
+              ),
+            );
+        }
+
+        return {
+          priorAttemptNumber: priorAttempt,
+          newAttemptNumber: newAttempt,
+          priorChainSeqCount: latestChainLink?.chainSeq ?? 0,
+          predicate: pred,
+        };
+      });
 
     if (!predicate.allowed) {
       throw new OperatorBackendConflictError({
@@ -271,21 +324,6 @@ router.post(
         },
       });
     }
-
-    const priorAttemptNumber = latestChainLink?.attemptNumber ?? 1;
-    const newAttemptNumber = priorAttemptNumber + 1;
-    const priorChainSeqCount = latestChainLink?.chainSeq ?? 0;
-
-    // Mark prior chain links superseded
-    await db
-      .update(operatorRuns)
-      .set({ supersededByAttempt: newAttemptNumber })
-      .where(
-        and(
-          eq(operatorRuns.agentRunId, agentRunId),
-          isNull(operatorRuns.supersededByAttempt),
-        ),
-      );
 
     void auditService.log({
       organisationId: orgId,

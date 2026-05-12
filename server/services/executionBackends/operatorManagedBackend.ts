@@ -24,12 +24,13 @@
  */
 
 import { z } from 'zod';
-import { eq, and, lt, sql, isNull, desc } from 'drizzle-orm';
+import { eq, and, lt, or, sql, isNull, desc } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { operatorRuns, agentRuns } from '../../db/schema/index.js';
 import type { OperatorRun } from '../../db/schema/operatorRuns.js';
 import { logger } from '../../lib/logger.js';
 import { setOrgAndSubaccountGUC, setOrgGUC } from '../../lib/orgScoping.js';
+import { withAdminConnectionGuarded } from '../../lib/rlsBoundaryGuard.js';
 import { recordIncident } from '../incidentIngestor.js';
 import { emitAgentRunUpdate } from '../../websocket/emitters.js';
 import { adoptOrStart } from '../sandboxExecutionService.js';
@@ -84,6 +85,8 @@ function _buildOperatorSessionPolicy(wallClockMs: number): SandboxPolicy {
 export const operatorSessionCompletedPayloadSchema = z.object({
   operatorRunId: z.string().uuid(),
   agentRunId: z.string().uuid(),
+  organisationId: z.string().uuid(),
+  subaccountId: z.string().uuid(),
 });
 
 export type OperatorSessionCompletedPayload = z.infer<typeof operatorSessionCompletedPayloadSchema>;
@@ -280,6 +283,7 @@ export const operatorManagedBackend: ExecutionBackend = {
 
     // Step 4: Request operator-session credential.
     const credentialResult = await credentialBrokerService.requestOperatorSessionCredential({
+      organisationId,
       subaccountId,
       agentRunId: runId,
     });
@@ -289,6 +293,7 @@ export const operatorManagedBackend: ExecutionBackend = {
     if ('unavailable' in credentialResult) {
       // Fallback: try to resolve an API-key credential.
       const fallback = await credentialBrokerService.resolveFallback({
+        organisationId,
         subaccountId,
         agentRunId: runId,
         originalCredentialId: '',
@@ -375,6 +380,7 @@ export const operatorManagedBackend: ExecutionBackend = {
       credentialStartMode = 'operator_session';
 
       // Defence-in-depth: three-way subaccount match (spec §3.6).
+      // Organisation match is enforced by the broker's WHERE predicate.
       if (credentialResult.subaccountId !== subaccountId) {
         throw new Error(
           `operatorManagedBackend.dispatch: subaccount mismatch: ` +
@@ -811,21 +817,31 @@ export const operatorManagedBackend: ExecutionBackend = {
   async reconcile(): Promise<number> {
     const staleThreshold = new Date(Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000);
 
-    const staleRows = await db
-      .select({
-        id: operatorRuns.id,
-        agentRunId: operatorRuns.agentRunId,
-        organisationId: operatorRuns.organisationId,
-        subaccountId: operatorRuns.subaccountId,
-      })
-      .from(operatorRuns)
-      .where(
-        and(
-          eq(operatorRuns.status, 'running'),
-          lt(operatorRuns.lastProgressAt, staleThreshold),
-        ),
-      )
-      .limit(100);
+    // Cross-tenant scan: bypass RLS to find stale rows across all orgs.
+    // allowRlsBypass: cross-tenant reconcile scan — rows are subsequently
+    // processed per-org via setOrgAndSubaccountGUC inside each row's tx.
+    const staleRows = await withAdminConnectionGuarded(
+      { source: 'operatorManagedBackend.reconcile', allowRlsBypass: true },
+      async (tx) =>
+        tx
+          .select({
+            id: operatorRuns.id,
+            agentRunId: operatorRuns.agentRunId,
+            organisationId: operatorRuns.organisationId,
+            subaccountId: operatorRuns.subaccountId,
+          })
+          .from(operatorRuns)
+          .where(
+            and(
+              eq(operatorRuns.status, 'running'),
+              or(
+                isNull(operatorRuns.lastProgressAt),
+                lt(operatorRuns.lastProgressAt, staleThreshold),
+              ),
+            ),
+          )
+          .limit(100),
+    );
 
     let count = 0;
     for (const row of staleRows) {
@@ -859,6 +875,8 @@ export const operatorManagedBackend: ExecutionBackend = {
         await finaliseAgentRunFromBackend({
           backendId: 'operator_managed',
           backendTaskId: row.id,
+          organisationId: row.organisationId,
+          subaccountId: row.subaccountId,
         });
       } catch (err) {
         logger.error('operator.reconcile.stale_row_failed', {
