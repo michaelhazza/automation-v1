@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
+active_spec: docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md
+active_plan: tasks/builds/personal-assistant-v1/plan.md
+build_slug: personal-assistant-v1
 branch: claude/synthetos-personal-assistant-0kaIM
-status: PLANNING
-last_updated: 2026-05-12T00:00:00Z
+status: BUILDING
+last_updated: 2026-05-12T07:50:00Z
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -24,11 +24,16 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** (drafting — spec-coordinator running)
-**Active plan:** (pending Phase 2)
-**Active build slug:** personal-assistant-v1 (PLANNING — slug to be confirmed in Step 4)
-**Branch:** claude/synthetos-personal-assistant-0kaIM
-**Status:** **PLANNING**
+**Active spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md` (Status: accepted; locked 2026-05-12)
+**Active plan:** `tasks/builds/personal-assistant-v1/plan.md` (pending Phase 2 architect authoring)
+**Active build slug:** `personal-assistant-v1`
+**Branch:** `claude/synthetos-personal-assistant-0kaIM`
+**PR:** [#291](https://github.com/michaelhazza/2026-05-12-personal-assistant-v1-spec)
+**Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-12):** Spec authored for the Executive Assistant V1 build (~2000 lines, 27 sections). spec-reviewer ran 5 iterations (cap; 52 mechanical fixes); 3 directional decisions ratified (Calendar push deferred → 1-min lookahead scan; Slack auto-send dropdown deferred → fixed policy; risk-tier ceiling 5 → 6). chatgpt-spec-review ran 2 rounds (8 findings, all auto-applied — F1/F2/F3/F4/T1 in round 1, F1/F2/T1 in round 2); APPROVED at round 2. Spec status → accepted. Phase 2 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
+
+**BLOCKING gate before Phase 2 BUILD:** Locked predecessor `user-owned-agents` (`tasks/builds/user-owned-agents/brief.md`, status DRAFT) MUST reach MERGED before launching `feature-coordinator` for EA V1. Predecessor delivers `agents.owner_user_id` + RLS + redaction primitives the EA composes against.
 
 **Just merged:** PR #284 — `pre-test-hardening` (squash-commit `37067df9`, 2026-05-11T01:28:16Z). 14-item launch-blocker security hardening sprint shipped: W1-W3 webhook auth + per-org Teamwork URL token + DB-backed replay nonces; T1-T3 support read subaccount scoping + cross-org scope-ID rejection + taskService caller-supplied tx contract (17 caller sites); S1-S2 four missing support-draft preflight checks + agent-principal overrideCollision guard; V1-V2 connection-status enum + CHECK constraint + advisory-lock knowledge override race fix; O1-O5 working-time-rollup compact + migration 0240 phased-swap runbook + reseed prod-DB guards (allowlist NODE_ENV=development) + branch-protection requirement. 3 migrations 0318/0319/0320 (renumbered post-S2 from 0313-0315 to clear PR #281/283 collision). Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer 2 rounds APPROVED → dual-reviewer Codex APPROVED (4 iterations) → adversarial-reviewer HOLES_FOUND (PTH-ADV-1 closed) → S2 merge → chatgpt-pr-review 8 rounds APPROVED (13 fixes + 2 operator-approved spec deviations: createTask side-effect split + reseed allowlist) → CI auto-fix 3 iterations (gate-script exclusions + integration-test setup fixes). 6 duplicate false-positive `withAdminConnection` import claims auto-rejected. PR #284 handoff: `tasks/builds/pre-test-hardening/handoff.md`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-test-hardening-2026-05-10T23-20-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-pre-test-hardening-2026-05-11T00-50-15Z.md`. CI ALL GREEN at merge time.
 
