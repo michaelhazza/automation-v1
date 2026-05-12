@@ -7,6 +7,7 @@
 - Spec: docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md
 - Mode: manual
 - Started: 2026-05-12T21:00:51Z
+- **Verdict:** APPROVED_AFTER_FIXES (2 rounds, 8 implement / 3 reject / 0 defer; operator finalised after R2 fixes landed, pre-CI)
 
 ---
 
@@ -200,4 +201,49 @@ After those fixes, should be close to merge-ready.
 - `npm run typecheck` — clean (both client + server tsconfig).
 - `npx vitest run server/services/eaDrafts/__tests__/eaDraftDispatchService.test.ts` — 3 passed (new).
 - `npx vitest run server/services/eaDrafts/__tests__/eaDraftServicePure.test.ts` — 19 passed (unchanged from R1).
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Total findings: 11 (R1: 8 — F1/F2/F3/F4/F5 blockers + R1/R2/R3 required; R2: 3 — F1/F2/F3 blockers)
+- Auto-accepted (technical): 8 implemented | 2 rejected | 0 deferred
+- User-decided: 0 implemented | 1 rejected | 0 deferred (F1 scope clarification — operator pre-approved combined predecessor + EA scope)
+- Index write failures: 0
+- Deferred to tasks/todo.md: none
+- Architectural items surfaced to screen: F1 in R1 (operator decided: reject — combined scope is intentional and pre-approved)
+
+### Key fixes by round
+
+**Round 1** — security + composition primitives:
+- F2: Approve/reject/retry routes require `draft.ownerUserId === req.user.id` strictly; admin bypass removed (spec §18 line 1573, V1 owner-only).
+- F3: Proposal commit hook wired into `actionService.transitionState(approved)`; HTTP route only transitions; `eaDraftDispatchService.dispatchAfterApproval` owns dispatch via dynamic import.
+- F4: `EADraftViewer` redaction context threaded through `listDrafts` / `getDraft`; non-owner viewers (incl. admins) get `bodyRedacted: true` with empty body; 11 new Vitest cases cover all viewer roles.
+- F5: `GET /api/agent-runs?agentId=` filters + redacts per row (owner / admin-non-owner / non-owner non-admin) for user-owned runs.
+- R2: `0330_external_source_triggers.sql` RLS admin role aligned to `org_admin | system_admin` (was `org_admin | subaccount_admin`).
+- F1/R1/R3 rejected with rationale logged.
+
+**Round 2** — dispatch correctness + data exposure tightening:
+- F1: `externalSourceTriggers.ts` wraps rate-cap SELECT + `external_trigger_dedup` INSERT in `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS); WITH CHECK kept tight (owner-only) per repo convention.
+- F2: `dispatchAfterApproval` claims FIRST via `eaDraftService.claimSend` then routes inside try/catch with `markSendFailed` on error; Slack/calendar handlers honour `_dispatchPreClaimed` ctx flag. Eliminates the approved-but-`send_state=idle` durability window.
+- F3: `GET /api/agent-runs?agentId=` drops `triggerContext` from SELECT and response; each row carries `triggerContextRedacted: true`; full content remains at `/api/agent-runs/:id/trace` (existing Run Trace detail endpoint owns content visibility).
+
+### Doc-sync verdicts
+
+Deferred to `finalisation-coordinator` for the full PR-vs-main sweep per the operator's instruction. The chatgpt-pr-review session touched per-round edits already; the broader cross-doc sweep is not in scope here.
+
+- architecture.md: deferred to finalisation-coordinator
+- docs/capabilities.md: deferred to finalisation-coordinator
+- docs/integration-reference.md: deferred to finalisation-coordinator
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: deferred to finalisation-coordinator
+- docs/frontend-design-principles.md: deferred to finalisation-coordinator
+- KNOWLEDGE.md: yes — 5 new entries appended at finalisation (see commit body)
+
+### Final Verdict
+
+**APPROVED_AFTER_FIXES.** All 3 R2 findings closed cleanly with claim-first dispatch, FORCE-RLS admin-write convention alignment, and tightened list-endpoint privacy. Operator finalised after Round 2 with no Round 3 fired; pre-CI state. PR #291 ready for finalisation-coordinator handoff (doc-sync sweep + S2 + G4 + ready-to-merge label).
+
+- main merged into branch: deferred to finalisation-coordinator
+- PR: #291 — ready for finalisation at https://github.com/michaelhazza/automation-v1/pull/291
 
