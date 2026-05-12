@@ -682,6 +682,47 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
   },
 
+  // ── Operator Backend (Spec D) — four lifecycle queues ────────────────────
+  // operator-session-completed: terminal event from the vendor sandbox.
+  // Singleton key 'operator-session-task-terminal:${agentRunId}' guards duplicate emission.
+  'operator-session-completed': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'operator-session-completed__dlq',
+    idempotencyStrategy: 'one-shot' as const, // event_emitted_at IS NULL guard
+  },
+  // operator-session-dispatch-next-chain-link: enqueued by finaliser after completed checkpoint.
+  // Backoff retry: 1 min → 5 min → 15 min via startAfter.
+  'operator-session-dispatch-next-chain-link': {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+    deadLetter: 'operator-session-dispatch-next-chain-link__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: operator-continuation:${agentRunId}
+  },
+  // operator-session-progressed: step-boundary progress updates.
+  // Sole writer for last_progress_at + step_count on operator_runs.
+  'operator-session-progressed': {
+    retryLimit: 1,
+    retryDelay: 5,
+    retryBackoff: false,
+    expireInSeconds: 30,
+    deadLetter: 'operator-session-progressed__dlq',
+    idempotencyStrategy: 'fifo' as const, // greatest() guards monotonicity
+  },
+  // operator-task-profile-gc: 15-minute cron; reclaims stale gc_in_progress rows.
+  'operator-task-profile-gc': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'operator-task-profile-gc__dlq',
+    idempotencyStrategy: 'fifo' as const, // sweep re-reads current DB state
+  },
+
   // ── operator-session-identity chunk 6 — token refresh ───────────────────
   // Per-connection refresh job. singletonKey = ${connectionId}:${refreshBucketEpochSec}
   // deduplicates rapid re-enqueues within the same 5-minute bucket.

@@ -695,14 +695,54 @@ async function start() {
     const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
     const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
     const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { operatorManagedBackend } = await import('./services/executionBackends/operatorManagedBackend.js');
     executionBackendRegistry.register(apiBackend);
     executionBackendRegistry.register(headlessBackend);
     executionBackendRegistry.register(claudeCodeBackend);
     executionBackendRegistry.register(ieeBrowserBackend);
     executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(operatorManagedBackend);
   } catch (err) {
     console.error('[boot] failed to register execution backends', err);
     throw err;
+  }
+
+  // Operator Backend pg-boss handlers (Spec D — operator_managed adapter)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionCompletedHandler } = await import('./jobs/operatorSessionCompletedHandler.js');
+      await registerOperatorSessionCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-completed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionDispatchNextChainLinkHandler } = await import('./jobs/operatorSessionDispatchNextChainLinkHandler.js');
+      await registerOperatorSessionDispatchNextChainLinkHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-dispatch-next-chain-link handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionProgressedHandler } = await import('./jobs/operatorSessionProgressedHandler.js');
+      await registerOperatorSessionProgressedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-progressed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorTaskProfileGcHandler } = await import('./jobs/operatorTaskProfileGcHandler.js');
+      await registerOperatorTaskProfileGcHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-task-profile-gc handler', err);
+    }
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)

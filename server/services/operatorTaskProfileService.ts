@@ -6,7 +6,7 @@
 // and calls setOrgAndSubaccountGUC as the first statement in the transaction.
 // Profile GC uses withAdminConnectionGuarded + SET LOCAL ROLE admin_role.
 
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, lte } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { operatorTaskProfiles } from '../db/schema/index.js';
 import type { OperatorTaskProfile } from '../db/schema/operatorTaskProfiles.js';
@@ -176,6 +176,42 @@ export const operatorTaskProfileService = {
             and(
               eq(operatorTaskProfiles.status, 'gc_in_progress'),
               sql`${operatorTaskProfiles.gcStartedAt} < ${staleThreshold}`,
+            ),
+          )
+          .returning({ id: operatorTaskProfiles.id });
+
+        return updated.length;
+      },
+    );
+  },
+
+  /**
+   * Runs the scheduled GC sweep: finds profiles with status='scheduled_gc'
+   * and scheduled_gc_at <= now(), transitions them to 'gc_done'.
+   *
+   * Provider 404 on volume delete is treated as gc_done (volume already gone).
+   * Uses withAdminConnectionGuarded because GC crosses org boundaries.
+   * Returns count of profiles transitioned to gc_done.
+   */
+  async runScheduledGcSweep(): Promise<number> {
+    return withAdminConnectionGuarded(
+      // allowRlsBypass: GC deliberately crosses org boundaries (retention pruner)
+      { source: 'operatorTaskProfileGc', allowRlsBypass: true },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+        const now = new Date();
+
+        const updated = await tx
+          .update(operatorTaskProfiles)
+          .set({
+            status: 'gc_done',
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(operatorTaskProfiles.status, 'scheduled_gc'),
+              lte(operatorTaskProfiles.scheduledGcAt, now),
             ),
           )
           .returning({ id: operatorTaskProfiles.id });
