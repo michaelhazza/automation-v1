@@ -99,7 +99,9 @@ Per the challenge-round decision to constrain V1 to "prove the primitive, don't 
 | Send email to third parties | always review-gated (Tier 6 sends require approval) |
 | Slack post to channels / DMs to others | per the auto-send scope dropdown (default: only DMs to me auto, all else review) |
 | Calendar reads | yes |
-| Calendar writes (create / update / delete events) | **deferred — read-only V1**. Trust earned over time before granting write. Updated from earlier brief; reviewer should note this is a tightening from the previous "read+write V1" recommendation. |
+| Calendar writes (create / update events, respond to invites) | yes — **all review-gated** (Tier 3–4, mandatory approval). Aligned with existing workspace-adapter capability surface; risk control via review gates, not capability removal. |
+| Calendar `delete_event` | **deferred** to V1.5 — destructive, not in workspace adapter today either |
+| Google Drive writes (Docs / Sheets editing) | **deferred** — no V1 use case requires it; 3 dev-days real cost (Docs / Sheets batch-update APIs); workspace adapter doesn't have these capabilities today either, so deferral creates no inconsistency. V1.5 add when a real use case emerges. |
 | Voice-profile derivation from sent mail | yes (default on with one-click opt-out) |
 | Memory (user context blocks via `update_memory_block`) | yes (per-agent, not shared across agents) |
 | Briefing schedule + meeting-prep triggers + inbox-poll triggers | yes |
@@ -113,7 +115,8 @@ Recorded in chat transcript on branch `claude/synthetos-personal-assistant-0kaIM
 
 1. **Schema simplification.** Move from `principal_type` / `principal_id` / `scope_type` abstraction to a single `agents.owner_user_id` column. Same strategic outcome, ~40% of the schema work. Detail: `tasks/builds/user-owned-agents/brief.md` §0.
 2. **Strategic framing.** This build is foundation primitive proof, not EA product. Explicit non-goal vs Claude / Codex.
-3. **Tightened V1 scope.** Calendar writes deferred; third-party sends review-gated; auto-send only to self.
+3. **Tightened V1 scope.** Third-party sends review-gated; auto-send only to self.
+4. **Capability-alignment correction (later same day).** Restored Calendar write actions to V1 (`create_event`, `update_event`, `respond_to_invite`) after a capability audit found the existing `WorkspaceAdapter` contract already exposes these for subaccount-owned agents. Deferring on user-owned agents would have created an artificial capability regression. All restored actions are review-gated (Tier 3–4 with mandatory approval); only `delete_event` remains deferred. Drive writes (Docs / Sheets editing) explicitly considered and deferred — no V1 use case, ~3 dev-days real cost, no inconsistency with workspace adapter (which also lacks them).
 
 Reviewer should read `tasks/builds/user-owned-agents/brief.md` §0 first to understand the foundation rationale, then this section, then the rest of this brief.
 
@@ -165,24 +168,26 @@ Nothing on the foundation is in flux. V1 is a pure composer of existing primitiv
 
 ### 3.2 Google Calendar actions
 
-**V1 ships read-only.** Per §0.5.4 (tightened scope decision), Calendar write actions are deferred to a V1.5 follow-on. Read-only is enough for the three locked V1 use cases (briefing assembly, inbox triage, meeting prep). Write capability earned over time.
+**V1 ships read + review-gated write.** Earlier round 2 tightened this to read-only V1; a subsequent capability-alignment check (2026-05-12, after the workspace-adapter capability audit) restored write actions to V1 because the existing `WorkspaceAdapter` contract already exposes `createEvent` and `respondToEvent` for subaccount-owned agents with workspace identities. Deferring writes on user-owned agents would have created an artificial capability regression. The risk control (no autonomous writes to shared resources) is achieved via review-gating at the action tier, not by removing the capability.
 
-Minimum action set for V1 (read-only) in `server/config/actionRegistry.ts` (each with parameter Zod schema, `riskTier`, `defaultGateLevel`, `verify` or null-with-justification, `requiredIntegration: 'google_calendar'`, MCP annotations, retry policy):
+Minimum action set for V1 in `server/config/actionRegistry.ts` (each with parameter Zod schema, `riskTier`, `defaultGateLevel`, `verify` or null-with-justification, `requiredIntegration: 'google_calendar'`, MCP annotations, retry policy):
 
 | Action | Read/Write | Risk tier | Default gate | Verify shape |
 |---|---|---|---|---|
 | `list_events` | read | 2 | auto | `row_exists` (event id returned) |
 | `get_event` | read | 2 | auto | `row_exists` |
 | `find_free_slot` | read (compute over read) | 2 | auto | `api_status_2xx` |
+| `create_event` | write | 4 | **review** | `row_exists` |
+| `update_event` | write | 4 | **review** | `row_exists` |
+| `respond_to_invite` | write | 3 | **review** | `api_status_2xx` |
 
 Deferred to V1.5 follow-on (NOT in this build):
 
-| Action | Read/Write | Risk tier | Default gate | Reason for deferral |
-|---|---|---|---|---|
-| `create_event` | write | 4 | review | Higher stakes: wrongly created event affects other people's calendars. Earn trust first. |
-| `update_event` | write | 4 | review | Same. |
-| `delete_event` | write (destructive) | 5 | review | Irreversible; defer until V1 read-only patterns prove reliable. |
-| `respond_to_invite` | write | 3 | review | Modifies attendee state; defer with the other write actions. |
+| Action | Read/Write | Risk tier | Reason for deferral |
+|---|---|---|---|
+| `delete_event` | write (destructive) | 5 | Irreversible; not currently in workspace adapter either; defer until V1 write patterns prove reliable. |
+
+The deferred-write list is now MUCH shorter than round 2 — just `delete_event`. `create_event`, `update_event`, `respond_to_invite` are V1 with review gates, matching what subaccount-owned agents already do via the workspace adapter.
 
 Risk-tier rationale per Phase 1 foundation refactor §4.2.3:
 - Tier 2 — external API reads (no customer-facing side effect).
@@ -541,7 +546,7 @@ All four failure paths are visible in the EA's Run Trace view (existing surface)
 
 Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = awaiting decision.
 
-1. **Calendar write-scope V1.** **LOCKED — tightened to read-only V1.** Earlier round 1 locked this as "read + write V1"; the 2026-05-12 challenge round tightened to **read-only V1**, write deferred to V1.5 follow-on. Reason: write actions on the operator's calendar affect other people's calendars (higher stakes than internal record changes). Read-only is enough for the three locked V1 use cases (briefing, inbox triage, meeting prep). Earn trust before granting write. Detail in §0.5.4 and §3.2.
+1. **Calendar write-scope V1.** **LOCKED — read + review-gated write.** This question went through three positions: round 1 (read + write V1), round 2 challenge-round tightening (read-only V1), and the capability-alignment correction (back to read + write V1 with mandatory review gates on writes). Final shape: `list_events` / `get_event` / `find_free_slot` auto; `create_event` / `update_event` / `respond_to_invite` review-gated; `delete_event` deferred. Rationale: the existing `WorkspaceAdapter` already exposes write capabilities for subaccount-owned agents — deferring on user-owned agents created an artificial regression. Risk control achieved via review gates, not capability removal. Detail in §0.5.4 and §3.2.
 
 2. **Slack write-scope V1 — user-facing config.** **LOCKED.** Read + write V1. Auto-send scope is a per-instance setting with three options, default `Only me (DMs)`:
    - **Only me (DMs)** — every message to a channel or other person needs operator approval (default).
