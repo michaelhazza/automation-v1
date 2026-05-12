@@ -189,6 +189,13 @@ jobs:
       - name: "Operator Backend: ExecutionCapability literals confined to canonical sites (§ 3.2)"
         run: bash scripts/gates/verify-execution-capability-references.sh
 
+      # Operator Backend (§ 4.7) — event-registry namespace discipline gate.
+      # Enforces that naked 'operator-session.*' string literals only appear in
+      # the registry file (shared/types/operatorBackendEvents.ts), test fixtures,
+      # and documentation. All other call sites must import from the registry.
+      - name: "Operator Backend: operator-session.* literals confined to event registry (§ 4.7)"
+        run: bash scripts/gates/verify-operator-event-registry.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/
