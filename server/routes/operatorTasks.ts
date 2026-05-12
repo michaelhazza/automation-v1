@@ -3,11 +3,20 @@
 // Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §6.5b
 //
 // Routes (all POST):
-//   retry-chain-failure       — assigned user OR manager+ (AGENT_RUN_WRITE → AGENTS_EDIT)
-//   extend-budget             — assigned user OR manager+ (AGENTS_EDIT)
+//   retry-chain-failure       — assigned user OR manager+ (handler-only — no broad
+//                                permission middleware; evaluateRouteActorRule enforces
+//                                the rule against agent_runs.assigned_user_id and role)
+//   extend-budget             — assigned user OR manager+ (same handler-only gate)
 //   fresh-profile-restart     — org_admin only (AGENTS_EDIT + admin check)
 //   refresh-credential        — org_admin only (AGENTS_EDIT + admin check)
 //   extend-debug-retention    — org_admin only (AGENTS_EDIT + admin check)
+//
+// The user-or-manager routes intentionally skip requireOrgPermission(AGENTS_EDIT)
+// because AGENTS_EDIT does not generally include rank-and-file users. The
+// actor-rule check inside the handler is the security gate: a non-assigned
+// non-manager is rejected with 403 REQUIRES_MANAGER_OR_ASSIGNED_USER before any
+// state mutation. (Spec §6.5b; the spec table's AGENT_RUN_WRITE column refers
+// to a permission key that does not exist in V1 — the handler check stands in.)
 //
 // R2-F1 enqueue-only invariant: retry-chain-failure and extend-budget MUST NOT
 // transition agent_runs.status. Only the dispatcher (pg-boss handler) writes
@@ -79,7 +88,10 @@ async function readAgentRunOrThrow(agentRunId: string, orgId: string) {
 router.post(
   '/api/operator-tasks/:agentRunId/retry-chain-failure',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  // No requireOrgPermission middleware — the actor-rule handler check below
+  // is the gate. AGENTS_EDIT would block rank-and-file assigned users before
+  // the handler runs; the V1 permission registry has no AGENT_RUN_WRITE
+  // alternative.
   asyncHandler(async (req, res) => {
     const { agentRunId } = req.params;
     const orgId = req.orgId!;
@@ -166,7 +178,8 @@ const extendBudgetBodySchema = z.object({
 router.post(
   '/api/operator-tasks/:agentRunId/extend-budget',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  // No requireOrgPermission middleware — see retry-chain-failure for the
+  // rationale. The handler-level actor-rule is the security gate.
   asyncHandler(async (req, res) => {
     const { agentRunId } = req.params;
     const orgId = req.orgId!;

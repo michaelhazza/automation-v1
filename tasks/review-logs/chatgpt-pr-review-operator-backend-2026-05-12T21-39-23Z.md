@@ -196,4 +196,74 @@ ChatGPT confirmed Round 2 fixes:
 
 ### Round 3 commit + diff regeneration
 
-Pending — see next session entry.
+Commit `4d557172`. Round 4 diff regenerated at `.chatgpt-diffs/pr288-round4-code-diff.diff`.
+
+## Round 4 — Findings
+
+ChatGPT verdict line: "Not quite final yet... one important route-permission issue remains."
+
+| ID | Severity | Triage | Recommendation | User Decision |
+|----|----------|--------|----------------|---------------|
+| F1 | blocker | technical | implement | auto (implement) |
+
+ChatGPT confirmed Round 3's assigned-user wiring closed the first half of the prior finding; the actor-rule helper tests cover the matrix; this is the second half — the outer middleware can still block ordinary assigned users before the handler runs.
+
+### F1 — outer middleware blocks assigned users before handler-level actor rule runs (BLOCKER)
+
+**Evidence:** `server/routes/operatorTasks.ts:82,169` — `requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT)` mounted before the handler for retry-chain-failure and extend-budget. AGENTS_EDIT is "Edit AI agents" — a manager-level permission that does not typically grant to rank-and-file users. So an assigned user with the spec-intended right to retry their own paused task is rejected at the middleware before `evaluateRouteActorRule` ever runs.
+
+**Root cause:** the build mounted the closest-existing permission key (AGENTS_EDIT) as a coarse gate; the spec referenced `AGENT_RUN_WRITE` which does not exist in V1. The handler-level actor-rule check is the actually-fine-grained gate, and it's already correct after Round 3, but the coarse gate short-circuits before it.
+
+**Fix:** removed `requireOrgPermission(AGENTS_EDIT)` from both user-or-manager routes (retry-chain-failure, extend-budget). The chain is now:
+
+1. `authenticate` middleware — verifies the actor is logged in to a session.
+2. `readAgentRunOrThrow(agentRunId, orgId)` — verifies the run exists, is org-scoped, and resolves `assignedUserId`.
+3. `evaluateRouteActorRule({ actorRole, assignedUserId, routeRequiresAdmin: false })` — rejects any actor that is not (a) the assigned user OR (b) manager+. 403 REQUIRES_MANAGER_OR_ASSIGNED_USER otherwise.
+
+The five admin-only routes (fresh-profile-restart, refresh-credential, extend-debug-retention) keep `requireOrgPermission(AGENTS_EDIT)` because they should bounce non-admin actors at the middleware layer. The actor rule on those routes additionally checks `routeRequiresAdmin: true` so only org_admin / system_admin get through.
+
+Route header comment + the inline middleware comments updated to make the V1 reality explicit (AGENT_RUN_WRITE does not exist; handler check stands in).
+
+**Minor cleanup (operator-noted):** sweep for stale `/api/operator-sessions/:operatorRunId/progress` references — `grep -rn "/api/operator-sessions/:operatorRunId" --include="*.ts" --include="*.md" --include="*.tsx" .` (excluding `.chatgpt-diffs`, review logs, spec, plan) → no hits. The implementation is clean; the stale text ChatGPT may have seen was in archived materials only.
+
+**Files changed:** `server/routes/operatorTasks.ts`.
+
+### G3 (lint + typecheck) post-fix
+
+- `npm run lint` → 0 errors, 904 warnings (all pre-existing).
+- `npm run typecheck` → clean.
+
+### Round 4 commit + finalisation
+
+Commit pending. Operator instructed: "after this round, merge in main, fix any conflicts and then proceed to finalisation." This is the closing chatgpt-pr-review round.
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED — operator finalised after Round 4.
+
+**Rounds:** 4. ChatGPT signalled "almost final" after Round 3 and "comfortable finalising after this patch" after Round 4. Operator instructed to close the loop after Round 4 and proceed to finalisation-coordinator Steps 6+.
+
+**Findings closed:**
+- Round 1: F1 refresh-credential blank connectionId + fire-and-forget audit (blocker, implemented), F2 adoptOrStart unique-index contradiction (blocker, implemented), F3 dispatcher delegated predicate (high, rejected — verified clean), F4 progress route doc drift (medium, implemented), F5 retry-route reset race (medium, implemented).
+- Round 2: F1 extend-budget race (blocker, implemented), F2 fresh-profile-restart wrong-chain-link order (blocker, implemented), F3 stale delegated predicate (medium, rejected — duplicate of R1 F3), F4 fire-and-forget audit writes (medium, implemented).
+- Round 3: F1 assigned-user wiring (high, architectural escalation, operator-approved Option 2 — add column).
+- Round 4: F1 outer middleware blocks assigned users (blocker, implemented — middleware removed from user-or-manager routes, kept on admin-only routes).
+
+**Total commits driven by chatgpt-pr-review:** 4 (`3e482410`, `5c63f181`, `4d557172`, plus the Round 4 commit landing next).
+
+**Schema change introduced by review:** migration 0334 `agent_runs.assigned_user_id` (operator-approved during Round 3 escalation).
+
+**Doc-sync sweep:** runs as finalisation-coordinator Step 6 after S2 sync — see next entry in this log.
+
+### Doc-sync field placeholders (filled by finalisation-coordinator Step 6)
+
+```
+- KNOWLEDGE.md updated: pending Step 6
+- architecture.md updated: yes (Operator Backend Key files row corrected for progress route) — additional sweep pending Step 6
+- capabilities.md updated: pending Step 6
+- integration-reference.md updated: pending Step 6
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: pending Step 6
+- frontend-design-principles.md updated: pending Step 6
+```
