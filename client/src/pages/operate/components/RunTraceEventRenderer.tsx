@@ -158,10 +158,10 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
 
   // ── operator-session.* event renderers (mockup r17 / c2) ────────────────────
 
-  if (event.eventType === 'operator-session.chain_link_started') {
+  if (event.eventType === 'operator-session.dispatched') {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-[12px] text-indigo-700">
-        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} started</span>
+        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} dispatched</span>
         {isLate && <LateChip />}
       </div>
     );
@@ -188,6 +188,15 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
     );
   }
 
+  if (event.eventType === 'operator-session.chain_link_cancelled') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-600">
+        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} cancelled</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
   if (event.eventType === 'operator-session.fallback_engaged') {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12px] text-amber-700">
@@ -208,7 +217,7 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
     );
   }
 
-  if (event.eventType === 'operator-session.task_terminal_completed') {
+  if (event.eventType === 'operator-session.task_completed') {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-[12px] text-green-700">
         <span className="font-medium">Task completed</span>
@@ -217,10 +226,19 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
     );
   }
 
-  if (event.eventType === 'operator-session.task_terminal_failed') {
+  if (event.eventType === 'operator-session.task_failed') {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[12px] text-red-700">
         <span className="font-medium">Task failed</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.task_cancelled') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-600">
+        <span className="font-medium">Task cancelled</span>
         {isLate && <LateChip />}
       </div>
     );

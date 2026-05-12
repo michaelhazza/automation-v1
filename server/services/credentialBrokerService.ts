@@ -11,6 +11,7 @@ import type { IntegrationConnection } from '../db/schema/integrationConnections.
 import { assertCredentialUsableOrThrow, CredentialNotUsableError, orderResolvedCredentials } from './credentialBrokerServicePure.js';
 import type { OrderableRow } from './credentialBrokerServicePure.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
+import { OPERATOR_SESSION_USABILITY_RESTORED } from '../../shared/types/operatorBackendEvents.js';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -576,7 +577,7 @@ export const credentialBrokerService = {
   },
 
   /**
-   * Emits the operator-session.usability_restored lifecycle event.
+   * Emits the OPERATOR_SESSION_USABILITY_RESTORED lifecycle event.
    *
    * Called when the broker detects that a previously unavailable operator-session
    * credential has become usable again. Clears fallback stickiness for any
@@ -589,8 +590,8 @@ export const credentialBrokerService = {
     agentRunId?: string;
   }): Promise<void> {
     if (params.agentRunId) {
-      emitAgentRunUpdate(params.agentRunId, 'operator-session.usability_restored', {
-        event: 'operator-session.usability_restored',
+      emitAgentRunUpdate(params.agentRunId, OPERATOR_SESSION_USABILITY_RESTORED, {
+        event: OPERATOR_SESSION_USABILITY_RESTORED,
         agent_run_id: params.agentRunId,
         credential_id: params.connectionId,
       });

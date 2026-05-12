@@ -29,12 +29,13 @@ FAIL=0
 # Build the grep command and filter hits against the allow-list.
 # Allow-list paths (as ERE patterns for grep -vE on the output lines):
 #   - shared/types/operatorBackendEvents.ts (the registry file itself)
+#   - shared/types/runTraceEvent.ts (consumer-side type registry; string literals are discriminated union members, not emit sites)
 #   - __tests__/ directories (test fixtures)
 #   - .test.ts files
 #   - docs/, tasks/, scripts/__tests__/ (documentation / spec / plans)
 #   - .sh files (gate scripts)
 #   - .md files (documentation / runbooks)
-ALLOWLIST_PATTERN="shared/types/operatorBackendEvents\.ts|__tests__/|\.test\.ts|^docs/|^tasks/|scripts/__tests__/|\.sh:|\.md:"
+ALLOWLIST_PATTERN="shared/types/operatorBackendEvents\.ts|shared/types/runTraceEvent\.ts|__tests__/|\.test\.ts|^docs/|^tasks/|scripts/__tests__/|\.sh:|\.md:"
 
 # Scan all TypeScript files under server/, client/, shared/, scripts/.
 # Paths in the grep output are absolute; convert to relative for the allow-list filter.

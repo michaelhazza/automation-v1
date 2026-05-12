@@ -51,6 +51,13 @@ import type {
   BackendFinalisationResult,
 } from './types.js';
 import type { SandboxPolicy } from '../../../shared/types/sandbox.js';
+import {
+  OPERATOR_SESSION_DISPATCHED,
+  OPERATOR_SESSION_CHAIN_LINK_COMPLETED,
+  OPERATOR_SESSION_CHAIN_LINK_FAILED,
+  OPERATOR_SESSION_CHAIN_LINK_CANCELLED,
+  OPERATOR_SESSION_TASK_CANCELLED,
+} from '../../../shared/types/operatorBackendEvents.js';
 
 // ---------------------------------------------------------------------------
 // Operator-session sandbox policy
@@ -539,7 +546,7 @@ export const operatorManagedBackend: ExecutionBackend = {
     }
 
     // Step 9: Emit WebSocket update for UI feedback.
-    emitAgentRunUpdate(runId, 'operator-session.dispatched', {
+    emitAgentRunUpdate(runId, OPERATOR_SESSION_DISPATCHED, {
       operatorRunId,
       chainSeq: chainSeqNext,
       vendorSessionId,
@@ -750,8 +757,14 @@ export const operatorManagedBackend: ExecutionBackend = {
         });
       }
 
-      // Emit WebSocket update.
-      emitAgentRunUpdate(agentRunId, 'operator-session.completed', {
+      // Emit WebSocket update — chain-link terminal event (name is status-specific).
+      const chainLinkEventName =
+        terminalState.status === 'cancelled'
+          ? OPERATOR_SESSION_CHAIN_LINK_CANCELLED
+          : terminalState.status === 'failed'
+            ? OPERATOR_SESSION_CHAIN_LINK_FAILED
+            : OPERATOR_SESSION_CHAIN_LINK_COMPLETED;
+      emitAgentRunUpdate(agentRunId, chainLinkEventName, {
         operatorRunId,
         chainSeq,
         parentStatus: parentTerminalStatus,
@@ -924,6 +937,6 @@ export const operatorManagedBackend: ExecutionBackend = {
     // when status='cancelled' (cancel-vs-dispatch invariant; handled in the
     // dispatch-next-chain-link handler's predecessor allow-list check).
 
-    emitAgentRunUpdate(runId, 'operator-session.cancelled', { agentRunId: runId });
+    emitAgentRunUpdate(runId, OPERATOR_SESSION_TASK_CANCELLED, { agentRunId: runId });
   },
 };

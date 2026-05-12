@@ -228,3 +228,26 @@ export type OperatorBackendEvent =
 export function enumerateOperatorEventNames(): ReadonlyArray<OperatorSessionEventName> {
   return OPERATOR_SESSION_EVENT_NAMES;
 }
+
+// Per-event name constants — import these at emit sites instead of hardcoding string literals.
+// The CI gate (verify-operator-event-registry.sh) allows this file as the single source of truth.
+export const OPERATOR_SESSION_DISPATCHED = 'operator-session.dispatched' as const;
+export const OPERATOR_SESSION_CREDENTIAL_INJECTED = 'operator-session.credential_injected' as const;
+export const OPERATOR_SESSION_PROGRESSED = 'operator-session.progressed' as const;
+export const OPERATOR_SESSION_FALLBACK_ENGAGED = 'operator-session.fallback_engaged' as const;
+export const OPERATOR_SESSION_REFRESH_FAILED = 'operator-session.refresh_failed' as const;
+export const OPERATOR_SESSION_PREPARING_CHECKPOINT = 'operator-session.preparing_checkpoint' as const;
+export const OPERATOR_SESSION_AUTO_EXTENDING = 'operator-session.auto_extending' as const;
+export const OPERATOR_SESSION_ARTEFACT_HARVESTED = 'operator-session.artefact_harvested' as const;
+export const OPERATOR_SESSION_CHAIN_LINK_COMPLETED = 'operator-session.chain_link_completed' as const;
+export const OPERATOR_SESSION_CHAIN_LINK_FAILED = 'operator-session.chain_link_failed' as const;
+export const OPERATOR_SESSION_CHAIN_LINK_CANCELLED = 'operator-session.chain_link_cancelled' as const;
+export const OPERATOR_SESSION_TASK_COMPLETED = 'operator-session.task_completed' as const;
+export const OPERATOR_SESSION_TASK_FAILED = 'operator-session.task_failed' as const;
+export const OPERATOR_SESSION_TASK_CANCELLED = 'operator-session.task_cancelled' as const;
+export const OPERATOR_SESSION_TASK_PAUSED_FOR_CHAIN_CONTINUATION = 'operator-session.task_paused_for_chain_continuation' as const;
+export const OPERATOR_SESSION_TASK_PAUSED_CHAIN_FAILURE = 'operator-session.task_paused_chain_failure' as const;
+export const OPERATOR_SESSION_TASK_PAUSED_BUDGET_EXCEEDED = 'operator-session.task_paused_budget_exceeded' as const;
+export const OPERATOR_SESSION_TASK_PAUSED_WALL_CLOCK_EXCEEDED = 'operator-session.task_paused_wall_clock_exceeded' as const;
+export const OPERATOR_SESSION_FRESH_PROFILE_RESTART = 'operator-session.fresh_profile_restart' as const;
+export const OPERATOR_SESSION_USABILITY_RESTORED = 'operator-session.usability_restored' as const;

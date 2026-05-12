@@ -13,9 +13,9 @@
  * (logs the drop; no WebSocket emit).
  *
  * Also emits:
- *   - 'operator-session.progressed' WebSocket event on every step.
- *   - 'operator-session.preparing_checkpoint' when is_resumable_now is present.
- *   - 'operator-session.auto_extending' once per chain link (singleton key guard).
+ *   - OPERATOR_SESSION_PROGRESSED WebSocket event on every step.
+ *   - OPERATOR_SESSION_PREPARING_CHECKPOINT when is_resumable_now is present.
+ *   - OPERATOR_SESSION_AUTO_EXTENDING once per chain link (singleton key guard).
  */
 
 import type PgBoss from 'pg-boss';
@@ -27,6 +27,11 @@ import { logger } from '../lib/logger.js';
 import { createWorker } from '../lib/createWorker.js';
 import { emitAgentRunUpdate } from '../websocket/emitters.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import {
+  OPERATOR_SESSION_PROGRESSED,
+  OPERATOR_SESSION_PREPARING_CHECKPOINT,
+  OPERATOR_SESSION_AUTO_EXTENDING,
+} from '../../shared/types/operatorBackendEvents.js';
 
 export const OPERATOR_SESSION_PROGRESSED_QUEUE = 'operator-session-progressed';
 
@@ -108,7 +113,7 @@ export async function registerOperatorSessionProgressedHandler(boss: PgBoss): Pr
       }
 
       // Emit progressed WebSocket event.
-      emitAgentRunUpdate(agentRunId, 'operator-session.progressed', {
+      emitAgentRunUpdate(agentRunId, OPERATOR_SESSION_PROGRESSED, {
         operatorRunId,
         stepIndex,
         progressedAt,
@@ -116,7 +121,7 @@ export async function registerOperatorSessionProgressedHandler(boss: PgBoss): Pr
 
       // Emit preparing_checkpoint when is_resumable_now is true.
       if (isResumableNow === true) {
-        emitAgentRunUpdate(agentRunId, 'operator-session.preparing_checkpoint', {
+        emitAgentRunUpdate(agentRunId, OPERATOR_SESSION_PREPARING_CHECKPOINT, {
           operatorRunId,
           stepIndex,
         });
@@ -142,7 +147,7 @@ export async function registerOperatorSessionProgressedHandler(boss: PgBoss): Pr
               singletonKey: `operator-auto-extending:${operatorRunId}`,
             },
           );
-          emitAgentRunUpdate(agentRunId, 'operator-session.auto_extending', {
+          emitAgentRunUpdate(agentRunId, OPERATOR_SESSION_AUTO_EXTENDING, {
             operatorRunId,
           });
         } catch (err) {

@@ -54,13 +54,15 @@ export type RunTraceEventType =
   | 'phase1.macro.report_rendering_failed'
   | 'phase1.macro.artifact_upload_failed'
   // Operator Backend — operator-session lifecycle events (spec § 4.7)
-  | 'operator-session.chain_link_started'
+  | 'operator-session.dispatched'
   | 'operator-session.chain_link_completed'
   | 'operator-session.chain_link_failed'
+  | 'operator-session.chain_link_cancelled'
   | 'operator-session.fallback_engaged'
   | 'operator-session.auto_extending'
-  | 'operator-session.task_terminal_completed'
-  | 'operator-session.task_terminal_failed'
+  | 'operator-session.task_completed'
+  | 'operator-session.task_failed'
+  | 'operator-session.task_cancelled'
   | 'operator-session.fresh_profile_restart'
   | 'operator-session.progressed'
   | 'operator-session.preparing_checkpoint'
@@ -317,7 +319,7 @@ export type RunTraceEvent =
     })
   // Operator Backend — operator-session lifecycle events (spec § 4.7)
   | (RunTraceEventBase & {
-      eventType: 'operator-session.chain_link_started';
+      eventType: 'operator-session.dispatched';
       payload?: { chainSeq?: number; imageTag?: string; attemptNumber?: number };
     })
   | (RunTraceEventBase & {
@@ -329,6 +331,10 @@ export type RunTraceEvent =
       payload?: { chainSeq?: number; failureReason?: string; attemptNumber?: number };
     })
   | (RunTraceEventBase & {
+      eventType: 'operator-session.chain_link_cancelled';
+      payload?: { chainSeq?: number; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
       eventType: 'operator-session.fallback_engaged';
       payload?: { chainSeq?: number; fromMode?: string; toMode?: string; reason?: string; stepIndex?: number };
     })
@@ -337,12 +343,16 @@ export type RunTraceEvent =
       payload?: { chainSeq?: number; attemptNumber?: number };
     })
   | (RunTraceEventBase & {
-      eventType: 'operator-session.task_terminal_completed';
+      eventType: 'operator-session.task_completed';
       payload?: { totalLinks?: number; totalElapsedMs?: number };
     })
   | (RunTraceEventBase & {
-      eventType: 'operator-session.task_terminal_failed';
+      eventType: 'operator-session.task_failed';
       payload?: { failureReason?: string };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.task_cancelled';
+      payload?: { cancelledByUserId?: string | null };
     })
   | (RunTraceEventBase & {
       eventType: 'operator-session.fresh_profile_restart';
