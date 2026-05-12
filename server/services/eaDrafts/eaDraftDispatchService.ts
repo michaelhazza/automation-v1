@@ -27,6 +27,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
+import { logger } from '../../lib/logger.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
 import { eaDraftService } from './eaDraftService.js';
@@ -80,7 +81,7 @@ export const eaDraftDispatchService = {
     if (!row.ownerUserId) {
       // Defensive — owner_user_id is NOT NULL in the schema, but log + return
       // if somehow encountered (e.g. legacy row).
-      console.warn('[ea-draft-dispatch] draft has no ownerUserId', { draftId: row.id });
+      logger.warn('ea_draft_dispatch.draft_missing_owner', { draftId: row.id });
       return;
     }
 
@@ -99,7 +100,7 @@ export const eaDraftDispatchService = {
     // never gets stuck in approved+idle.
     const claim = await eaDraftService.claimSend(row.id, { organisationId });
     if (!claim.claimed) {
-      console.info('[ea-draft-dispatch] claim_skipped', {
+      logger.info('ea_draft_dispatch.claim_skipped', {
         draftId: row.id,
         reason: claim.reason,
       });
@@ -160,7 +161,7 @@ export const eaDraftDispatchService = {
           // Exhaustiveness guard. Gmail kinds are handled above.
           const _exhaustive: never = row.kind;
           void _exhaustive;
-          console.warn('[ea-draft-dispatch] unknown draft kind', { draftId: row.id, kind: row.kind });
+          logger.warn('ea_draft_dispatch.unknown_kind', { draftId: row.id, kind: row.kind });
           // Unknown kind: nothing to send, but the claim is still held.
           // Mark failed so a stall-reset isn't needed to recover.
           await eaDraftService.markSendFailed(row.id, { organisationId });
@@ -174,7 +175,7 @@ export const eaDraftDispatchService = {
       // failures; calling markSendFailed twice is idempotent (it sets the
       // same state) so the dispatch-level catch is a safety net for
       // failures that happen before the handler's try/catch covers them.
-      console.warn('[ea-draft-dispatch] dispatch failed — marking send_failed', {
+      logger.warn('ea_draft_dispatch.failed_marking_send_failed', {
         draftId: row.id,
         kind: row.kind,
         err: err instanceof Error ? err.message : String(err),
@@ -182,7 +183,7 @@ export const eaDraftDispatchService = {
       try {
         await eaDraftService.markSendFailed(row.id, { organisationId });
       } catch (markErr) {
-        console.error('[ea-draft-dispatch] markSendFailed also threw', {
+        logger.error('ea_draft_dispatch.mark_send_failed_threw', {
           draftId: row.id,
           err: markErr instanceof Error ? markErr.message : String(markErr),
         });
