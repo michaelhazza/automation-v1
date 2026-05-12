@@ -180,10 +180,10 @@ Every file this spec touches. Adding a prose reference in any later section requ
 
 | Path | Purpose | Section |
 |---|---|---|
-| `migrations/NNNN_executive_assistant_seed.sql` (+ down) | Seed system_agents row for `executive-assistant`; seed `agent_triggers` event_type enum extension; seed default skill bundle + risk-tier ceiling for the template | §13, §10 |
+| `migrations/NNNN_executive_assistant_seed.sql` (+ down) | Add `home_widget jsonb` column to `system_agents` table (nullable; null = template does not surface to home zone); seed the `executive-assistant` system_agents row populating slug, name, default skill bundle, risk-tier ceiling, default approval policy, default system prompt, and `home_widget` declaration per §13.1 | §13 |
 | `migrations/NNNN_voice_profiles.sql` (+ down) | Create `voice_profiles` table + indexes + RLS policy + RLS_PROTECTED_TABLES registration | §12, §21 |
 | `migrations/NNNN_ea_drafts.sql` (+ down) | Create `ea_drafts` table + indexes + RLS policy + RLS_PROTECTED_TABLES registration | §18, §21 |
-| `migrations/NNNN_external_source_triggers.sql` (+ down) | Extend `agent_triggers.event_type` enum to add `gmail_message_received`, `calendar_event_imminent`, `slack_mention`; create `webhook_channel_registrations` table for Calendar push channels (channel_id, resource_id, expiration, owner_user_id, organisation_id, integration_connection_id) + RLS policy + RLS_PROTECTED_TABLES registration; create `external_trigger_dedup` table with `UNIQUE(provider, external_event_id, owner_user_id)` for trigger idempotency + RLS policy + RLS_PROTECTED_TABLES registration | §10, §24.1 |
+| `migrations/NNNN_external_source_triggers.sql` (+ down) | Extend `agent_triggers.event_type` enum to add `gmail_message_received`, `calendar_event_imminent`, `slack_mention`; create `external_trigger_dedup` table with `UNIQUE(provider, dedup_key, owner_user_id)` for trigger idempotency (see §7.1 + §10.4 for the per-event-type `dedup_key` shape) + RLS policy + RLS_PROTECTED_TABLES registration | §10, §24.1 |
 | `server/services/calendar/calendarActionService.ts` | Calendar action handlers: `list_events`, `get_event`, `find_free_slot`, `create_event`, `update_event`, `respond_to_invite` | §8 |
 | `server/services/calendar/calendarActionServicePure.ts` | Pure helpers: input validation, idempotency-key derivation, free-slot computation, RFC5545 attendee normalisation | §8, §24, §25 |
 | `server/services/slack/slackActionService.ts` | Slack action handlers: `list_channels`, `read_channel`, `search_messages`, `summarise_thread`, `post_message`, `post_dm` | §9 |
@@ -198,12 +198,11 @@ Every file this spec touches. Adding a prose reference in any later section requ
 | `server/services/eaDrafts/eaDraftServicePure.ts` | Pure helpers: state-transition rules, expiry computation | §11, §24, §25 |
 | `server/services/homeWidget/homeWidgetService.ts` | Read user-owned agents for current user, invoke each agent template's `body_provider_skill`, return ordered `WidgetData[]` | §19 |
 | `server/services/homeWidget/homeWidgetServicePure.ts` | Pure helpers: widget-card ordering, refresh-policy evaluation | §19, §25 |
-| `server/routes/webhooks/googleWebhook.ts` | Google webhook ingestion route — Calendar push channels only (channel-token + resource-state verify). HMAC + replay-nonce per existing webhook pattern. Dispatches to `externalSourceTriggers`. Gmail push via Pub/Sub is deferred to V1.5 per §26 — V1 ships no flag-gated push code path | §10 |
 | `server/routes/voiceProfiles.ts` | API: GET / refresh / opt-out endpoints for owner's voice profiles. RLS-defended | §12, §21 |
 | `server/routes/eaDrafts.ts` | API: list / approve / reject endpoints for owner's EA drafts. RLS-defended | §11, §18 |
 | `server/routes/agentHomeWidgets.ts` | API: GET widget data for current user's user-owned agents. RLS-defended | §19 |
 | `server/jobs/gmailInboxPollJob.ts` | pg-boss job: 5-minute polling fallback per connected Gmail account. Calls Gmail `users.history.list` with single-writer-per-connection guarantee via advisory lock | §10, §24 |
-| `server/jobs/calendarChannelRenewalJob.ts` | pg-boss job: renew Calendar push channels before expiration (Google channels expire ≤24h-7d). Idempotent on `(integration_connection_id, channel_id)` | §10, §24 |
+| `server/jobs/calendarLookaheadJob.ts` | pg-boss recurring job (every 1 min per connected Calendar account): scan the owner's primary calendar for events in `[now, now + lookaheadMinutes]` via `events.list`; fire `calendar_event_imminent` for events not already in the dedup ledger. Replaces the prior Calendar-push-channel design (Google Calendar push notifications fire on event create/update, NOT at reminder time — push cannot produce a 15-minute-before trigger). Single-writer-per-connection via advisory lock on `('calendar_lookahead', integration_connection_id)` | §10, §11.3, §24 |
 | `server/jobs/voiceProfileRefreshJob.ts` | pg-boss job: refresh voice profiles whose refresh-policy threshold has triggered | §12, §24 |
 | `server/skills/ea-home-widget-summary.md` | Skill: returns EA's home widget body (briefing one-liner + drafts count + next meeting prep + run recency) | §19 |
 | `server/skills/ea-daily-briefing.md` | Workflow skill: assemble + post daily briefing | §11 |
@@ -241,7 +240,7 @@ Every file this spec touches. Adding a prose reference in any later section requ
 
 | Path | Reason | Section |
 |---|---|---|
-| `server/config/oauthProviders.ts` | Add `google_calendar` provider entry (authUrl, tokenUrl, scopes, `access_type: 'offline'`, `prompt: 'consent'`); env-var convention `OAUTH_GOOGLE_CALENDAR_CLIENT_ID` / `_CLIENT_SECRET` | §8 |
+| `server/config/oauthProviders.ts` | (a) Add `google_calendar` provider entry (authUrl, tokenUrl, scopes, `access_type: 'offline'`, `prompt: 'consent'`); env-var convention `OAUTH_GOOGLE_CALENDAR_CLIENT_ID` / `_CLIENT_SECRET`. (b) Extend the existing `slack` provider entry: add scopes `channels:history`, `groups:history`, `im:history`, `mpim:history`, `im:write`, `search:read`, `app_mentions:read` per §9.2; document the Slack `Event Subscriptions` config (`app_mention` event subscribed) per §10.6 — the subscription is configured at the Slack-app level (Slack admin UI), the spec-time reference in this file is a comment noting it | §8, §9.2, §10.6 |
 | `server/config/actionRegistry.ts` | Add 6 Calendar actions + 6 Slack actions with risk tiers, default gates, Zod schemas, verify shapes, MCP annotations, retry policies, `requiredIntegration`. Register two new topic slugs `'calendar'` and `'slack'` in topic associations | §8, §9 |
 | `server/config/topicRegistry.ts` | Add two new topics: `calendar` + `slack` | §8, §9 |
 | `server/config/c.ts` | Add `executive-assistant` entry to `SUBACCOUNT_AGENTS` array with `agentRole: 'Specialist'`, `executionScope: 'subaccount'`. Mirror the DB seed row | §13 |
@@ -251,11 +250,13 @@ Every file this spec touches. Adding a prose reference in any later section requ
 | `server/db/schema/integrationConnections.ts` | No change — predecessor adds `owner_user_id` column | §3.2 |
 | `server/db/schema/agents.ts` | No change — predecessor adds `owner_user_id` column | §3.2 |
 | `server/db/schema/agentRuns.ts` | No change — predecessor adds `owner_user_id` column | §3.2 |
+| `server/db/schema/systemAgents.ts` | Add `homeWidget: jsonb('home_widget').$type<HomeWidgetDeclaration | null>()` column reflecting the migration in §5.1's `NNNN_executive_assistant_seed.sql`. Drizzle-level type matches `shared/types/homeWidget.ts` | §7.6, §13 |
 | `server/services/credentialBrokerService.ts` | No change — predecessor extends `injectIntoEnvironment({ ownerUserId? })` | §3.2 |
 | `server/routes/webhooks/slackWebhook.ts` | Extend existing route to handle `event_callback` with `app_mention` event type. Existing approval-callback handling preserved. Dispatches to `externalSourceTriggers` for `slack_mention` event | §10 |
+| `server/jobs/workflowGateStallNotifyJob.ts` | Extend existing stall-handler to cover `ea_drafts` rows: emit one-time 24h reminder for `state = 'pending'` drafts past their reminder threshold; transition expired drafts (`createdAt + 7d`) to `state = 'expired'` and emit the `draft.expired` Run Trace event per §24.3. Existing workflow-gate stall behaviour preserved | §7.5, §20.4, §22.2 |
 | `server/services/agentExecutionService.ts` (and / or its `*Pure.ts` sibling) | Prompt-assembly extension: inject `<voice>` block before the task prompt when the agent has a configured `voice_profile_id` AND the profile's `optOutAt IS NULL`. Single small addition; no other change. Architect in Phase 2 confirms whether the change is in the main service file or in `agentExecutionServicePure.ts` per the existing pure-helper convention | §12.4, §22.3 |
 | `server/routes/oauthIntegrations.ts` | No code change — callback handler is provider-generic and picks up `google_calendar` automatically when registered in `oauthProviders.ts` | §8 |
-| `server/config/rlsProtectedTables.ts` | Add entries for `voice_profiles`, `ea_drafts`, `webhook_channel_registrations`, `external_trigger_dedup` | §21 |
+| `server/config/rlsProtectedTables.ts` | Add entries for `voice_profiles`, `ea_drafts`, `external_trigger_dedup` | §21 |
 | `server/lib/permissions.ts` | Add 6 new permission keys: `VOICE_PROFILE_READ`, `VOICE_PROFILE_WRITE`, `EA_DRAFT_READ`, `EA_DRAFT_DECIDE`, `HOME_WIDGET_READ`, `EA_PROVISION`; each adds an `ALL_PERMISSIONS` entry. Existing `ORG_PERMISSIONS` cover admin redaction (no new admin-only keys) | §21.5 |
 | `shared/types/agentExecutionLog.ts` | Add `AGENT_EXECUTION_EVENT_CRITICALITY` entries for new event types: `trigger.fired` (info), `trigger.suppressed` (warning), `workflow.started` / `workflow.completed` (info), `workflow.failed` (error), `workflow.partial` (warning), `draft.created` / `draft.approved` / `draft.rejected` (info), `draft.expired` (warning), `draft.sent` (info), `voice.profile.refreshed` (info), `delivery_fallback` (warning), `credential.owner_mismatch` (error), `webhook.invalid_signature` (warning), `action.conflict` (warning) | §10.7, §11.4, §24.3 |
 | `client/src/pages/govern/ConnectionsPage.tsx` | Add `Personal` / `Subaccount` chip on the connection-row component, derived from `owner_user_id IS NOT NULL`. Use the capability-grouping layer for capability display | §16, §17 |
@@ -277,6 +278,8 @@ Every file this spec touches. Adding a prose reference in any later section requ
 - `server/lib/permissions.ts` is in §5.2 modified files (adds the 6 new permission keys per §21.5); existing `ORG_PERMISSIONS` + role checks continue to cover admin redaction.
 - `server/db/schema/memoryBlocks.ts` — unchanged (memory remains per-agent per predecessor §3.4).
 - `server/db/schema/integrationConnections.ts` — unchanged (Gmail polling state per §10.4 reuses the existing `config_json` JSONB column with a `lastHistoryId` key; no schema migration).
+- `server/routes/webhooks/googleWebhook.ts` — NOT shipped in V1. Google Calendar push channels are deferred to V1.5 per §26 (Calendar push does not fire at reminder time, so V1's `calendar_event_imminent` trigger comes from `calendarLookaheadJob.ts` scheduled scan instead). Gmail push via Pub/Sub also deferred per §26.
+- `server/db/schema/webhookChannelRegistrations.ts` — NOT created in V1. The `webhook_channel_registrations` table is deferred to V1.5 when Calendar push lands.
 
 If a later section names a file not in §5.1 / §5.2, it is a file-inventory-drift bug and must be either added here or removed from the prose in the same edit.
 
@@ -290,7 +293,6 @@ If a later section names a file not in §5.1 / §5.2, it is a file-inventory-dri
 | Executive Assistant agent (template + per-user instance) | `agents` row per instance (predecessor schema; `owner_user_id` set) + system_agents row for the template | yes (each user instance carries `owner_user_id`) | yes (every instance lives in a subaccount) | inherited via subaccount | provision on user opt-in; archive on user offboarding |
 | Voice profile | `voice_profiles` row | optional (one of) | optional (one of) | optional (one of); CHECK enforces exactly one | derive on first-run setup; refresh on schedule; opt-out blocks derivation + use |
 | EA draft (proposed outbound message awaiting review) | `ea_drafts` row | yes (`owner_user_id` set, owned by the user whose EA proposed it) | yes | inherited | state machine: `pending → approved | rejected | expired`; approved drafts are sent via the action's existing path |
-| Webhook channel registration (Calendar push channel) | `webhook_channel_registrations` row | yes (channels are user-scoped) | yes | inherited | renew before expiration; recreate on connection re-auth |
 | External-source trigger event (transient, not persisted as a domain row — payload lives in `agent_runs.triggerContext` JSONB only) | none (event-only) | inherits from agent's `owner_user_id` | inherits from agent's `subaccount_id` | inherited | fire once, dedup-key prevents replay |
 
 ### 6.2 Ownership-axis semantics
@@ -452,7 +454,7 @@ Approval is the only non-terminal transition; once a draft is `rejected` or `exp
 
 Producer: system_agent seed migration + `c.ts` template definition. Consumer: `homeWidgetService.ts` + `client/src/components/personal/PersonalZoneCard.tsx`.
 
-Lives as a column on the system_agent row (new column or extension of an existing JSONB config column; architect picks in Phase 2). Shape:
+Lives as a new `home_widget jsonb` column on the `system_agents` row, added in `NNNN_executive_assistant_seed.sql` (architect's `NNNN_executive_assistant_seed.sql` migration both creates the column and inserts the EA seed row populating it). Rationale: the existing JSONB columns on `system_agents` (`default_system_skill_slugs`, `default_org_skill_slugs`, etc.) carry typed arrays — overloading one with a discriminated-union object would invite type drift. A dedicated nullable column is clearer; null means the template does not surface to the home zone. Shape:
 
 ```
 homeWidget: {
@@ -484,30 +486,11 @@ Discriminated union on `type`:
 
 Frame component renders each type into a consistent visual shell (the locked mockup `02-my-ea-home.html`). Agents return data only; no markup.
 
-### 7.8 `webhook_channel_registrations` (Calendar push channels)
+### 7.8 `webhook_channel_registrations` — DEFERRED to V1.5
 
-Producer: `googleWebhook.ts` channel-creation flow + `calendarChannelRenewalJob.ts`. Consumer: webhook ingestion handler (verifies the inbound `X-Goog-Channel-Token` matches), renewal job (replaces channels before expiration).
+The Calendar push channel design (table + renewal job + webhook ingestion handler) is deferred to V1.5 per §26. V1's `calendar_event_imminent` trigger comes from `calendarLookaheadJob.ts` (scheduled scan per §10.5), not from push channels. Push doesn't fire at reminder time; even with push, V1 has no local Calendar mirror to update (per §18 live-fetch). The combination of "no mirror" + "no reminder-time push" means push provides no V1 value.
 
-Row fields:
-- `id: uuid`
-- `organisationId: uuid`
-- `subaccountId: uuid`
-- `ownerUserId: uuid`
-- `integrationConnectionId: uuid`
-- `provider: 'google_calendar' | 'gmail'` (V1 only `google_calendar` for push; Gmail uses polling)
-- `channelId: text` (Google's channel id)
-- `resourceId: text`
-- `channelToken: text` (random — verified on inbound)
-- `expiresAt: timestamptz`
-- `state: 'active' | 'renewing' | 'expired' | 'failed'`
-- `createdAt`, `updatedAt`
-
-Source-of-truth precedence (two concerns, distinguished):
-
-- **Local renewal concurrency authority:** `webhook_channel_registrations.state` is canonical. The renewal job per §24.5 uses the optimistic `UPDATE ... WHERE state = 'active'` predicate against the DB row, not against Google. Two workers racing to renew the same connection are arbitrated by the DB row.
-- **State reconciliation source:** live Google channel state (queried via the Calendar API) is the truth for "is this channel actually still active on Google's side." On every renewal cycle, the job reconciles the local row against live Google state and updates the local row if they disagree (e.g. local says `active` but Google says expired → local flips to `expired` and the renewal runs).
-
-The two concerns do not conflict: the DB row decides who-renews-first; live Google state decides whether-renewal-is-needed.
+When V1.5 adds either Gmail push (Pub/Sub) or a push-based Calendar mirror, that spec authors `webhook_channel_registrations` at that time.
 
 ### 7.9 `agent_runs.triggerContext` extension
 
@@ -575,7 +558,7 @@ Six actions added to `server/config/actionRegistry.ts`:
 | `list_events` | read | 2 | auto | `api_status_2xx` | safe | safe-default | false | true |
 | `get_event` | read | 2 | auto | `row_exists` | safe | safe-default | false | true |
 | `find_free_slot` | read (compute over read) | 2 | auto | `api_status_2xx` | safe | safe-default | false | true |
-| `create_event` | write | 4 | **review** | `row_exists` | key-based via Google `requestId` | guarded | false | true |
+| `create_event` | write | 4 | **review** | `row_exists` | state-based via originating `ea_drafts.sentMessageId` (V1 invocation path is draft-mediated; see §7.2 + §24.2) | guarded | false | true |
 | `update_event` | write | 4 | **review** | `row_exists` | state-based via `If-Match` ETag | guarded | false | true |
 | `respond_to_invite` | write | 3 | **review** | `api_status_2xx` | state-based (last-write-wins) | guarded | false | true |
 
@@ -667,15 +650,21 @@ Scope upgrade on existing connected Slack workspaces: existing connections will 
 
 ### 9.3 Auto-send scope dropdown
 
-Per brief §4 q2 (LOCKED). The EA settings page surfaces a single dropdown controlling default gate behaviour for `slack.post_message` and `slack.post_dm`. Three options, default `Only me (DMs)`:
+Per brief §4 q2 (LOCKED, with the §1 framing-assumption ceiling). The EA settings page surfaces a single dropdown controlling auto-send eligibility for `slack.post_dm` only. `slack.post_message` (channel posts) is ALWAYS review-gated regardless of dropdown setting — the §1 framing assumption "Every Tier 4+ write to a third-party system is review-gated; auto-send only to the operator's own surfaces (own Slack DMs, own Gmail Drafts)" is the binding ceiling, and channel posts are third-party-visible by definition.
+
+Three options, default `Only me (DMs)`:
 
 | Setting | Effect on `slack.post_message` (channels) | Effect on `slack.post_dm` (DMs) |
 |---|---|---|
-| **Only me (DMs)** (default) | review-gated | auto when DM target is `userId == ownerUserId`; review-gated otherwise |
-| **My own channels** | auto when channel is one the owner is a member of; review-gated otherwise | auto when DM target is `userId == ownerUserId`; review-gated otherwise |
-| **Anywhere** | auto for any channel; review-gated only when post would land in a channel the owner is NOT a member of | auto for ANY DM; review-gated for nothing |
+| **Only me (DMs)** (default) | review-gated (ALWAYS) | auto when DM target is `userId == ownerUserId`; review-gated otherwise |
+| **My own channels** | review-gated (ALWAYS) | auto when DM target is `userId == ownerUserId`; review-gated otherwise |
+| **Anywhere** | review-gated (ALWAYS) | auto when DM target is `userId == ownerUserId`; review-gated otherwise |
 
-The dropdown writes a memory_block on the user's EA agent (`key = 'ea.slack_auto_send_scope'`, value enum). The Slack action handlers read this block and call `slackActionServicePure.decideAutoSendScope({ scope, action, target, ownerUserId })` to derive the per-call gate.
+V1 ships the dropdown as a single-row UI control with the three labels, but the auto-allow column for channels is identical across all three settings. The labels exist for forward-compatibility — a future spec MAY relax the channel-post review gate by raising the framing-assumption ceiling, at which point the dropdown's behaviour for `post_message` becomes meaningful. Until then, the dropdown's only effect is on `slack.post_dm` (which is always auto when target == owner, always review otherwise — the dropdown does not vary this either; the dropdown's setting is preserved as configuration so a future change in framing assumptions is a no-spec-change UI activation).
+
+(Note: a future relaxation of the §1 ceiling would be a spec-level decision, not a UI toggle — until then, the three options have functionally identical effect.)
+
+The dropdown writes a memory_block on the user's EA agent (`key = 'ea.slack_auto_send_scope'`, value enum). The Slack action handlers read this block and call `slackActionServicePure.decideAutoSendScope({ scope, action, target, ownerUserId, memberChannelIds })` to derive the per-call gate. The pure helper's V1 implementation enforces the §1 ceiling: for `action === 'post_message'`, return `'review'` regardless of `scope`; for `action === 'post_dm'`, return `'auto'` iff `target === ownerUserId`, else `'review'`.
 
 This pattern is reusable. Future agents that gain Slack post capability (Riley brand outreach, future content agents) use the same memory_block key + the same pure decision helper.
 
@@ -721,11 +710,7 @@ Existing rows are unchanged — the enum extension is additive and backwards-com
 
 ### 10.2 Webhook ingestion routes
 
-**`server/routes/webhooks/googleWebhook.ts` (NEW).** Handles Calendar push channels only in V1. Gmail push via Pub/Sub is deferred to V1.5 per §26 — V1 ships no flag-gated push code path; the V1 default for Gmail is polling per §10.4.
-
-- **Calendar push.** Inbound POST carries `X-Goog-Channel-Token`, `X-Goog-Channel-ID`, `X-Goog-Resource-ID`, `X-Goog-Resource-State` headers. Verify `X-Goog-Channel-Token` matches the row in `webhook_channel_registrations`. Verify `X-Goog-Channel-ID` is registered. Resolve `(ownerUserId, integrationConnectionId)` from the row. Compute the lookahead trigger: fire `calendar_event_imminent` immediately for events starting within the configured lookahead window. Defer Step 2 for events further out (re-poll on next reminder).
-
-Per the existing webhook pattern (GHL / Slack / Stripe / Teamwork): HMAC verification, replay-nonce check via the existing `oauth_state_nonces` infrastructure (no new nonce table in V1), per-org dispatch, idempotent emit.
+**No new Google webhook route in V1.** Google Calendar push notifications fire on event create/update/delete, NOT at reminder time — they cannot produce a 15-minute-before trigger. V1's `calendar_event_imminent` comes from `calendarLookaheadJob.ts` (scheduled scan per §10.5), not from push. Gmail push via Pub/Sub is also deferred per §26. `server/routes/webhooks/googleWebhook.ts` lands in V1.5 if/when push-based local mirroring or Gmail push provides a real consumer.
 
 **`server/routes/webhooks/slackWebhook.ts` (EXTENDED).** Currently handles approval-callback events only. V1 extends:
 
@@ -768,17 +753,28 @@ On API errors:
 - 429 → backoff per existing primitive.
 - 5xx → retry per existing pg-boss retry config.
 
-### 10.5 Calendar push channels (V1 default)
+### 10.5 Calendar lookahead scan (V1 default — replaces the prior push-channel design)
 
-`server/jobs/calendarChannelRenewalJob.ts` is a pg-boss recurring job:
+`server/jobs/calendarLookaheadJob.ts` is a pg-boss recurring job. One job per connected Google Calendar account:
 
-1. Find rows in `webhook_channel_registrations` where `provider = 'google_calendar'` AND `expires_at < now() + interval '24h'`.
-2. For each, create a new Google Calendar channel via `events.watch` against the user's primary calendar (V1) with a fresh random `channel_token`.
-3. Insert a new `webhook_channel_registrations` row; mark the old one `state = 'renewing'` then `state = 'expired'` once the new channel has received its first event (or after a safety timeout).
+1. Schedule: every 1 minute (per connected Calendar account). The cadence is tight because the lookahead window is 15 min and missing a minute risks missing a meeting prep notification.
+2. Acquire advisory lock keyed on `('calendar_lookahead', integration_connection_id)` for single-writer guarantee.
+3. Resolve owner-scoped Google Calendar credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'google_calendar', ownerUserId })`.
+4. Call Google Calendar `events.list` with `calendarId = 'primary'`, `timeMin = now()`, `timeMax = now() + lookaheadMinutes` (default 15min), `singleEvents = true`, `orderBy = 'startTime'`. `singleEvents = true` expands recurring events to their individual occurrences.
+5. For each event in the result, compute the per-occurrence dedup key per §7.1 (`(provider='google_calendar', dedup_key=eventId + startAt + lookaheadMinutes, ownerUserId)`). Skip if the dedup ledger already has a row.
+6. For each new event, emit a `calendar_event_imminent` external event with the event's metadata. Insert the dedup row in the same transaction.
+7. Release the advisory lock.
 
-Lookahead semantics: V1 default lookahead `15 minutes` (recommendation in brief §3.6 — spec confirms; multiple lookahead horizons deferred per §26).
+Rationale for scheduled scan over push: Google Calendar push notifications fire on event create/update/delete — NOT at reminder time. There is no Google API that emits "this event starts in 15 minutes." The lookahead must be computed by SynthetOS.
 
-Calendar channel notifications come WITHOUT body content — only the `X-Goog-Resource-State` (`exists` / `not_exists` / `sync`) and channel headers. The webhook handler MUST call the Calendar API to fetch the changed event(s) within the lookahead window before deciding to fire `calendar_event_imminent`. This is read activity, not write — Tier 2 in the trigger emission path.
+API quota: 1 call/min × 1 calendar × 60 min/h × 24 h = 1,440 calls/day per connected Calendar account. Well inside Google's per-user free quota (1M units/day; `events.list` costs ~1 unit per call).
+
+On API errors:
+- 401 / 403 / token revoked → mark connection `expired`; trigger emits `trigger.suppressed`. Job stops polling this account until reconnect.
+- 429 → backoff per existing primitive; if still hitting rate limit, fall back to a 5-minute cadence (loss of fidelity acceptable; meeting prep may fire a few minutes late).
+- 5xx → retry per existing pg-boss retry config.
+
+Lookahead semantics: V1 default lookahead `15 minutes`. Multiple lookahead horizons (e.g. 24h next-day prep + 15min imminent) deferred per §26.
 
 ### 10.6 Slack Events API (V1)
 
@@ -865,7 +861,7 @@ Three workflows ship V1 per brief §4 q5 (LOCKED). Each is a named native workfl
 
 ### 11.3 Workflow C — Meeting prep summary (`calendar_event_imminent` trigger 15 min before)
 
-**Skill slug:** `ea.meeting_prep`. **Trigger:** Type B `calendar_event_imminent` with `lookaheadMinutes = 15`.
+**Skill slug:** `ea.meeting_prep`. **Trigger:** Type B `calendar_event_imminent` with `lookaheadMinutes = 15`. The trigger fires from `calendarLookaheadJob.ts` (scheduled scan per §10.5), not from Calendar push.
 
 **Steps:**
 1. From the trigger payload, identify the event id + attendee list.
@@ -1077,7 +1073,7 @@ Per brief §3.14, EAs are NOT auto-created for every user in the org. The provis
 6. Writes the voice_profile row (if derivation requested) with `source: 'gmail_sent_sampler'` + default config + `optOutAt = NULL`. Enqueues `voiceProfileService.deriveProfile` as a background job (the wizard completes immediately; profile derives asynchronously, typically <1 minute).
 7. Seeds the V1 workflows' RRULE rows in `scheduled_tasks` (07:00 briefing + 07:15 inbox triage).
 8. Seeds the per-Gmail-connection `gmail_inbox_poll` recurring task.
-9. Seeds the Calendar push channel registration (creates a Google channel + writes `webhook_channel_registrations` row).
+9. Seeds the per-Calendar-connection `calendar_lookahead` recurring task (1-minute scan per §10.5).
 10. Sets up Slack Events API subscription (or notes that the workspace-level subscription is already active).
 11. Redirects to the per-agent detail page (Workspace tab).
 
@@ -1529,7 +1525,7 @@ No failure is silent.
 
 ## 21. Permissions and RLS checklist
 
-Per `docs/spec-authoring-checklist.md §4`, every new tenant-scoped table needs: RLS policy + RLS_PROTECTED_TABLES entry + route guard + principal-scoped context. EA V1 introduces four new tenant-scoped tables (`voice_profiles`, `ea_drafts`, `webhook_channel_registrations`, `external_trigger_dedup`).
+Per `docs/spec-authoring-checklist.md §4`, every new tenant-scoped table needs: RLS policy + RLS_PROTECTED_TABLES entry + route guard + principal-scoped context. EA V1 introduces three new tenant-scoped tables (`voice_profiles`, `ea_drafts`, `external_trigger_dedup`). `webhook_channel_registrations` is deferred to V1.5 per §7.8.
 
 ### 21.1 `voice_profiles`
 
@@ -1552,15 +1548,7 @@ Per `docs/spec-authoring-checklist.md §4`, every new tenant-scoped table needs:
 - **Route guard**: `server/routes/eaDrafts.ts` — `authenticate` + `requirePermission('EA_DRAFT_READ' | 'EA_DRAFT_DECIDE')` (NEW permission keys).
 - **Principal-scoped context**: draft creation only happens inside an agent run that has `owner_user_id` set; the run's owner context flows to the draft. Approval is owner-only in V1 (the `decidedByUserId` must equal the draft's `owner_user_id`).
 
-### 21.3 `webhook_channel_registrations`
-
-- **Schema**: per §7.8.
-- **RLS policy**: `owner_user_id = current_setting('app.current_user_id')::uuid OR current_setting('app.current_role')::text IN ('org_admin', 'system_admin')`. Subaccount admins do NOT see other users' channels by default (they're user-scoped).
-- **RLS_PROTECTED_TABLES entry**: ADD.
-- **Route guard**: None directly via HTTP — the table is read by the renewal job (admin connection) and by the webhook ingestion handler (admin connection to look up the channel-token). No user-facing route.
-- **Principal-scoped context**: the renewal job runs as admin (existing pattern for pg-boss jobs); the webhook handler verifies channel-token against the row, then runs as the owner derived from the row.
-
-### 21.3a `external_trigger_dedup`
+### 21.3 `external_trigger_dedup`
 
 - **Schema**: `(provider text NOT NULL, external_event_id text NOT NULL, owner_user_id uuid NOT NULL, organisation_id uuid NOT NULL, subaccount_id uuid NOT NULL, fired_at timestamptz NOT NULL DEFAULT now(), trigger_id uuid, run_id uuid, PRIMARY KEY(provider, external_event_id, owner_user_id))`. The composite PK is the dedup key per §7.1.
 - **RLS policy**: `owner_user_id = current_setting('app.current_user_id')::uuid OR current_setting('app.current_role')::text IN ('org_admin', 'system_admin')`. Webhook handlers and trigger dispatch run as admin connection per existing pattern.
@@ -1570,7 +1558,7 @@ Per `docs/spec-authoring-checklist.md §4`, every new tenant-scoped table needs:
 
 ### 21.4 Tables NOT scoped (intentional opt-outs)
 
-None. All four new tables are tenant-scoped per the standard pattern. No system-wide reference data added by EA V1.
+None. All three new tenant-scoped tables follow the standard pattern. The new `system_agents.home_widget` jsonb column is on a system-wide reference table (no tenant axis); no RLS implication.
 
 ### 21.5 Permissions added
 
@@ -1618,7 +1606,7 @@ Every new code path picks ONE execution model per `docs/spec-authoring-checklist
 ### 22.2 Queued / asynchronous (pg-boss)
 
 - **`gmailInboxPollJob`** — recurring every 5 min per connected Gmail account. Per §10.4.
-- **`calendarChannelRenewalJob`** — recurring nightly. Per §10.5.
+- **`calendarLookaheadJob`** — recurring every 1 minute per connected Calendar account. Per §10.5.
 - **`voiceProfileRefreshJob`** — recurring nightly; processes profiles whose refresh threshold has been triggered.
 - **EA agent runs** — triggered by §6.4 Type A/B/C; existing pattern (run enqueued by trigger or schedule, processed by `agent-scheduled-run` queue).
 - **First-run setup wizard background tasks** — voice-profile initial derive enqueued after wizard completion.
@@ -1698,49 +1686,47 @@ Architect in Phase 2 finalises. Recommended ordering (foundations first, integra
 
 **Chunk group C — External-source trigger primitive** (depends on A.4 + B.7):
 13. `externalSourceTriggers.ts` service + pure helpers.
-14. `googleWebhook.ts` route (Calendar push only; Gmail push deferred to V1.5).
-15. `slackWebhook.ts` extension (app_mention event handling).
-16. `gmailInboxPollJob.ts` + advisory-lock infra.
-17. `calendarChannelRenewalJob.ts`.
+14. `slackWebhook.ts` extension (app_mention event handling).
+15. `gmailInboxPollJob.ts` + advisory-lock infra.
+16. `calendarLookaheadJob.ts` + advisory-lock infra (replaces the prior Calendar push design — `googleWebhook.ts` is deferred to V1.5).
 
 **Chunk group D — VoiceProfile primitive** (depends on A.1):
-18. `voiceProfileService.ts` + pure helpers + samplers.
-19. `voiceProfileRefreshJob.ts`.
-20. Prompt-assembly extension for `<voice>` block.
-21. `voiceProfiles.ts` API route.
+17. `voiceProfileService.ts` + pure helpers + samplers.
+18. `voiceProfileRefreshJob.ts`.
+19. Prompt-assembly extension for `<voice>` block.
+20. `voiceProfiles.ts` API route.
 
 **Chunk group E — EA drafts** (depends on A.2):
-22. `eaDraftService.ts` + pure helpers (state machine).
-23. `eaDrafts.ts` API route.
+21. `eaDraftService.ts` + pure helpers (state machine).
+22. `eaDrafts.ts` API route.
 
 **Chunk group F — EA system-agent template + workflows** (depends on A.5 + B + C + D + E):
-24. `c.ts` entry + template DB seed row body (skill allowlist, default approval policy, system prompt, home_widget declaration).
-25. Workflow skill markdown files (`ea-daily-briefing.md`, `ea-inbox-triage.md`, `ea-meeting-prep.md`).
-26. Workflow bodies — implemented as the three skill markdown files in §5.1 (`ea-daily-briefing.md`, `ea-inbox-triage.md`, `ea-meeting-prep.md`). No separate workflow-module files in V1; each workflow runs through existing native-controller agent-execution path.
-27. Auto-send-scope decision integration on Slack post handlers (depends on B.11).
+23. `c.ts` entry + template DB seed row body (skill allowlist, default approval policy, system prompt, home_widget declaration).
+24. Three workflow skill markdown files (`ea-daily-briefing.md`, `ea-inbox-triage.md`, `ea-meeting-prep.md`) — the workflow bodies live entirely in these files; no separate workflow-module .ts files in V1.
+25. Auto-send-scope decision integration on Slack post handlers (depends on B.11).
 
-**Chunk group G — Home widget contract** (depends on A.5 + F.24):
-28. `homeWidgetService.ts` + pure helpers + `ea-home-widget-summary.md`.
-29. `agentHomeWidgets.ts` API route.
-30. `shared/types/homeWidget.ts` types (already in A.6).
+**Chunk group G — Home widget contract** (depends on A.5 + F.23):
+26. `homeWidgetService.ts` + pure helpers + `ea-home-widget-summary.md`.
+27. `agentHomeWidgets.ts` API route.
+28. `shared/types/homeWidget.ts` types (already in A.6).
 
 **Chunk group H — UI surfaces** (depends on B + C + D + E + F + G + predecessor's UI hooks):
-31. `useUserOwnedAgents.ts` + `useHomeWidgets.ts` + `useVoiceProfile.ts` + `useEADrafts.ts` hooks.
-32. `sidebar.ts` extension (Personal nav group).
-33. `routes.ts` extension (`/personal/:agentId`, `/personal/setup`, `/personal/:agentId/setup`).
-34. `PersonalAssistantPage.tsx` (tabbed shell).
-35. `PersonalZoneCard.tsx` frame component.
-36. `EAFirstRunWizard.tsx` (wizard).
-37. `HomePage.tsx` extension (Personal zone rendering).
-38. `ConnectionsPage.tsx` chip + capability-group rendering.
+29. `useUserOwnedAgents.ts` + `useHomeWidgets.ts` + `useVoiceProfile.ts` + `useEADrafts.ts` hooks.
+30. `sidebar.ts` extension (Personal nav group).
+31. `routes.ts` extension (`/personal/:agentId`, `/personal/setup`, `/personal/:agentId/setup`).
+32. `PersonalAssistantPage.tsx` (tabbed shell).
+33. `PersonalZoneCard.tsx` frame component.
+34. `EAFirstRunWizard.tsx` (wizard).
+35. `HomePage.tsx` extension (Personal zone rendering).
+36. `ConnectionsPage.tsx` chip + capability-group rendering.
 
 **Chunk group I — Doc-sync + final checks**:
-39. `architecture.md` updates (external-source trigger, VoiceProfile, home-widget contract, Personal nav, capability grouping).
-40. `docs/capabilities.md` additions (vendor-neutral language per editorial rules).
+37. `architecture.md` updates (external-source trigger, VoiceProfile, home-widget contract, Personal nav, capability grouping).
+38. `docs/capabilities.md` additions (vendor-neutral language per editorial rules).
 
 (Note: `docs/integration-reference.md` Calendar + new Slack slug additions land in chunk B.12 alongside `capabilityGroups.ts`, NOT in terminal doc-sync — the static gate `verify-integration-reference.ts` runs against B.12 in CI, so the slugs must exist before B.12 ships. The chunk-I doc-sync sweep only updates wording in `integration-reference.md` post-merge if needed.)
 
-Total estimated chunks: ~40. Architect MAY merge or split per implementation cost.
+Total estimated chunks: ~38. Architect MAY merge or split per implementation cost.
 
 ### 23.3 No backward references
 
@@ -1749,7 +1735,7 @@ Every chunk's "introduced by" set is in an EQUAL-OR-EARLIER chunk group. Verifie
 - C (triggers) references A + B — OK.
 - D (voice) references A — OK.
 - E (drafts) references A — OK.
-- F (template + workflows) references A + B + C + D + E — OK.
+- F (template + workflows) references A + B + C + D + E — OK. F.23 (template seed) introduces the `home_widget` jsonb column reflected in A.5 + the modified `systemAgents.ts` schema.
 - G (home widget) references A + F — OK.
 - H (UI) references all — OK.
 - I (docs) — terminal.
@@ -1838,17 +1824,16 @@ Exactly one of `draft.approved`, `draft.rejected`, `draft.expired` fires per dra
 - **Retry:** safe within the lock; lock release on success or failure. Next poll picks up where the prior poll's `last_history_id` left off (or where it failed, since `last_history_id` is updated last).
 - **Race:** if two workers try to poll the same connection simultaneously, one wins the lock; the other returns immediately with no-op.
 
-### 24.5 Calendar push channel registration + renewal
+### 24.5 Calendar lookahead scan
 
-**Channel creation:**
-- **Posture:** state-based.
-- **Predicate:** `UPDATE webhook_channel_registrations SET state = 'renewing' WHERE state = 'active' AND integration_connection_id = $1 RETURNING id`. Zero rows = nothing to renew. Non-zero rows = winning caller does the renewal.
-- **Concurrency:** if two workers race to renew the same connection, the optimistic predicate ensures only one proceeds.
-- **Retry:** guarded; on Google API failure, state reverts to `failed` with retry count incremented.
+**Posture:** state-based via advisory lock + dedup ledger.
 
-**HTTP mapping (webhook ingestion):**
-- Invalid `X-Goog-Channel-Token` → 403; no row updated. Trigger NOT fired. Audit event `webhook.invalid_signature`.
-- Channel not found in `webhook_channel_registrations` (already-expired channel still firing) → 200 (ack to Google) + Run Trace `trigger.suppressed` with reason `channel_unknown`.
+- **Predicate:** advisory lock on `('calendar_lookahead', integration_connection_id)` arbitrates single-writer-per-connection across pg-boss workers. Within the lock, per-occurrence dedup against `external_trigger_dedup` (UNIQUE `(provider, dedup_key, owner_user_id)` per §24.1).
+- **Concurrency:** if two workers try to run the lookahead for the same connection simultaneously, one wins the lock; the other returns immediately with no-op.
+- **Retry:** safe within the lock; the dedup ledger prevents the same `(eventId, startAt)` occurrence from firing twice across retries.
+- **Recurring events:** `events.list?singleEvents=true` expands recurring events to their per-occurrence rows; each occurrence has a distinct `eventId` (e.g. `eventId_20260513T140000Z`). The dedup key per §7.1 includes `startAt` so a re-scheduled occurrence (same `eventId`, different `startAt`) fires separately.
+
+**No `webhook_channel_registrations` row state machine** — that primitive is deferred to V1.5 per §7.8.
 
 ### 24.6 Voice profile derivation
 
@@ -1899,7 +1884,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 
 The following existing gates apply to every chunk and are non-negotiable:
 
-- `verify-rls-coverage.sh` — every new tenant table (`voice_profiles`, `ea_drafts`, `webhook_channel_registrations`, `external_trigger_dedup`) must appear in `RLS_PROTECTED_TABLES` with a matching RLS policy.
+- `verify-rls-coverage.sh` — every new tenant table (`voice_profiles`, `ea_drafts`, `external_trigger_dedup`) must appear in `RLS_PROTECTED_TABLES` with a matching RLS policy.
 - `verify-rls-contract-compliance.sh` — no direct `db` import in user-facing routes; org-scoped reads via `getOrgScopedDb()` / `withOrgTx`; admin-context reads via `withAdminConnection`.
 - `verify-risk-tier-assigned` — every new action in `actionRegistry.ts` has an explicit `riskTier`.
 - `verify-integration-reference.ts` — capability slugs referenced from `capabilityGroups.ts` exist in `integration-reference.md`.
