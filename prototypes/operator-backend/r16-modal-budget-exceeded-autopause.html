@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<!--
+  R16: Modal — Budget cap reached (task auto-paused)
+  ---------------------------------------------------
+  Shown when a task hits its per-task budget cap (default 6000 operator session minutes).
+  Launched automatically when the task pauses. Pattern follows R8/R9 modals.
+
+  Background: faded OpenTaskView (R1) to show launch context.
+  Modal title: "Task paused: budget cap reached"
+  Body: plain English — what happened, what the cap was, what options exist.
+  Two actions:
+    - Primary: "Extend budget +1000 min" (extends by a fixed chunk)
+    - Secondary/destructive: "Cancel task"
+  Below primary: small link "Adjust default in subaccount settings" -> R13 operator tab
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Cap Reached | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 24px 28px; }
+</style>
+</head>
+<body>
+
+<!-- Background: faded OpenTaskView (shows modal launch context) -->
+<div class="app-shell" style="filter:blur(2px);pointer-events:none;user-select:none;opacity:0.45;">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg></div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher"><div class="sidebar-client-dot"></div><span class="sidebar-client-name">Acme Corp</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+        Tasks
+      </a>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar"><div class="topbar-spacer"></div></div>
+    <div class="page-body">
+      <!-- Faint OpenTaskView header context -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e2e8f0;background:white;border-radius:10px 10px 0 0;margin-bottom:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:15px;font-weight:600;color:#0f172a;">Year-end financial summary</span>
+          <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;background:#fef3c7;color:#92400e;">Paused</span>
+        </div>
+      </div>
+      <!-- ChatPane stub -->
+      <div style="display:flex;height:400px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;overflow:hidden;">
+        <div style="width:26%;border-right:1px solid #e2e8f0;padding:16px;background:white;">
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:12px;">Operator messages</div>
+          <div style="font-size:12px;color:#475569;background:#f1f5f9;padding:8px 10px;border-radius:6px;margin-bottom:6px;">Completed step 47: extracted Q3 revenue data...</div>
+          <div style="font-size:12px;color:#475569;background:#f1f5f9;padding:8px 10px;border-radius:6px;">Completed step 48: reconciling with payroll...</div>
+        </div>
+        <div style="flex:1;padding:16px;background:#f8fafc;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal overlay -->
+<div class="modal-overlay">
+  <div class="modal-box" style="width:500px;">
+
+    <!-- Modal header -->
+    <div class="modal-head">
+      <div class="modal-head-title">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" style="flex-shrink:0;color:#d97706;">
+          <path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 9v4M12 17h.01"/>
+          <path stroke="currentColor" stroke-width="2" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        </svg>
+        <span>Task paused: budget cap reached</span>
+      </div>
+      <button class="modal-head-close" onclick="dismiss()">&#215;</button>
+    </div>
+
+    <!-- Modal body -->
+    <div class="modal-body">
+
+      <!-- Plain-English explanation -->
+      <p style="font-size:13.5px;color:#334155;margin:0 0 16px;line-height:1.65;">
+        This task has used <strong>6,000 minutes</strong> of operator session time, which is the limit set for this subaccount. The task is paused so you can review how far it has got before deciding what to do next.
+      </p>
+
+      <!-- Progress so far -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:20px;font-size:13px;color:#475569;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-weight:600;color:#0f172a;">Year-end financial summary</span>
+          <span style="font-size:11px;color:#94a3b8;">50 sessions &middot; ~12 days</span>
+        </div>
+        <div style="font-size:12px;color:#64748b;">Last completed: step 48 — reconciling payroll with Q3 actuals</div>
+        <div style="margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-bottom:4px;">
+            <span>Budget used</span>
+            <span>6,000 / 6,000 min</span>
+          </div>
+          <div style="height:5px;border-radius:3px;background:#e2e8f0;overflow:hidden;">
+            <div style="height:100%;border-radius:3px;background:#f59e0b;width:100%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Two options -->
+      <div style="font-size:12.5px;font-weight:600;color:#334155;margin-bottom:10px;">What would you like to do?</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+
+        <!-- Option: Extend -->
+        <div style="border:1px solid #c7d2fe;border-radius:8px;padding:13px 14px;background:#fafbff;">
+          <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Extend the budget and continue</div>
+          <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Adds 1,000 minutes (about 8 more sessions). The task will resume from where it left off.</div>
+          <button onclick="extend()" style="padding:8px 20px;background:#4f46e5;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;" onmouseover="this.style.background='#4338ca'" onmouseout="this.style.background='#4f46e5'">
+            Extend budget +1,000 min
+          </button>
+        </div>
+
+        <!-- Option: Cancel -->
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:13px 14px;background:#f8fafc;">
+          <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Cancel the task</div>
+          <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Stops the task permanently. Any artefacts produced so far are kept and can be downloaded.</div>
+          <button onclick="cancelTask()" style="padding:7px 18px;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='white'">
+            Cancel task
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Modal footer -->
+    <div class="modal-foot" style="justify-content:space-between;align-items:center;">
+      <a href="r13-subaccount-operator-settings-tab.html" style="font-size:12px;color:#6366f1;text-decoration:none;font-weight:500;">
+        Adjust default budget in subaccount settings &#8594;
+      </a>
+      <button onclick="dismiss()" style="padding:8px 18px;border-radius:7px;border:1px solid #e2e8f0;background:white;color:#475569;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">
+        Dismiss
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function extend() {
+  alert('Budget extended by 1,000 minutes. The task will resume from step 48.');
+  window.location = 'r1-opentaskview-operator-running.html';
+}
+function cancelTask() {
+  if (confirm('Cancel this task? The task will stop and artefacts from steps 1-48 will be kept.')) {
+    alert('Task cancelled. Artefacts are available in the Files tab.');
+    window.location = 'r5-opentaskview-operator-cancelled.html';
+  }
+}
+function dismiss() {
+  window.history.back();
+}
+</script>
+
+</body>
+</html>

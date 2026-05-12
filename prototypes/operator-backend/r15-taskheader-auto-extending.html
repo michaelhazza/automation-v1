@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<!--
+  R15: TaskHeader — Auto-extend inline status
+  -------------------------------------------
+  Existing surface: client/src/components/openTask/TaskHeader.tsx
+
+  TaskHeader.tsx structure observed (same as R14 grounding):
+    - Outer: "flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white"
+    - Left: "flex items-center gap-3" — title, status badge, optional secondary badges
+    - Right: action buttons when canPauseStop
+
+  Auto-extend state: operator has passed the soft cap (120 min) and is within the auto-extend
+  grace period (30 min). The task is still running. TaskHeader temporarily replaces the status
+  row with an inline amber-tinted message. No modal — this is not a blocking event.
+
+  Design rule: One primary action (Stop). No modal is launched. The amber tint is visible but
+  not alarming — the operator is finishing something and will stop cleanly.
+
+  Shows two variants on one spec page:
+    A — auto-extending (past soft cap, within grace)
+    B — after grace, hard stop imminent (count-down last few seconds)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskHeader — Auto-extending | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: #f1f5f9; }
+.spec-page { max-width: 860px; margin: 0 auto; padding: 40px 32px; }
+.spec-title { font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.02em; }
+.spec-sub { font-size: 13px; color: #64748b; margin-bottom: 32px; line-height: 1.6; }
+
+.variant-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #64748b; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.variant-label::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+.variant-block { margin-bottom: 32px; }
+
+/* ── TaskHeader chrome ── */
+.task-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  background: white; border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border-bottom: 1px solid #e2e8f0;
+  overflow: hidden; position: relative;
+}
+
+/* ── Auto-extend tinted background (amber, subtle) ── */
+/* Applied to the entire task-header element — NOT a separate banner */
+.task-header.auto-extending {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.task-header.hard-stop-imminent {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+/* Left area */
+.task-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; flex: 1; }
+.task-title-txt { font-size: 15px; font-weight: 600; color: #0f172a; max-width: 320px; }
+
+/* Status badge variants */
+.status-badge {
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 500; white-space: nowrap; flex-shrink: 0;
+}
+.badge-amber-soft { background: #fef3c7; color: #92400e; }
+.badge-orange-soft { background: #ffedd5; color: #c2410c; }
+
+/* Auto-extend message (replaces the normal status pill content) */
+.auto-extend-msg {
+  font-size: 12px; font-weight: 500; color: #92400e;
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
+}
+.auto-extend-msg .hourglass {
+  font-size: 13px;
+}
+.countdown-chip {
+  font-size: 11px; font-weight: 700; color: #b45309;
+  background: #fde68a; border-radius: 4px;
+  padding: 1px 6px; white-space: nowrap;
+}
+.countdown-chip.urgent { background: #fdba74; color: #c2410c; }
+
+/* Action buttons */
+.task-header-right { display: flex; align-items: center; flex-shrink: 0; }
+.hdr-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 500;
+  border-radius: 6px; cursor: pointer; font-family: inherit;
+  white-space: nowrap; transition: background 0.1s;
+}
+.hdr-btn-stop  { border: 1px solid #fecaca; color: #dc2626; background: white; }
+.hdr-btn-stop:hover { background: #fef2f2; }
+
+/* Annotation */
+.annotation-box {
+  background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px;
+  padding: 11px 14px; font-size: 12px; color: #78350f; line-height: 1.6;
+  margin-top: 10px;
+}
+</style>
+</head>
+<body>
+<div class="spec-page">
+
+  <div class="spec-title">TaskHeader: Auto-extend inline status</div>
+  <div class="spec-sub">
+    Component: <code>client/src/components/openTask/TaskHeader.tsx</code><br>
+    When the operator passes its soft session cap and is within the auto-extend grace period, TaskHeader temporarily shows an inline amber state. No modal is launched. The status row message replaces the normal pill. The "Stop" button stays visible so the operator can halt manually if needed. The amber tint applies only to the TaskHeader background, not to the panes below.
+  </div>
+
+  <!-- Variant A: Auto-extending (past soft cap, within grace, ~22 min of 30 min grace remaining) -->
+  <div class="variant-block">
+    <div class="variant-label">A — Past soft cap, auto-extending (22 of 30 min grace remaining)</div>
+    <div class="task-header auto-extending">
+      <div class="task-header-left">
+        <span class="task-title-txt">Process May invoices</span>
+
+        <!-- Status pill replaced with inline auto-extend message -->
+        <div class="auto-extend-msg">
+          <span class="hourglass">&#8987;</span>
+          Finishing current step
+          <span class="countdown-chip">22 min left to stop cleanly</span>
+        </div>
+      </div>
+      <div class="task-header-right">
+        <button class="hdr-btn hdr-btn-stop">Stop now</button>
+      </div>
+    </div>
+    <div class="annotation-box">
+      The entire TaskHeader gets a light amber background (#fffbeb) with amber border. The normal "Operator running" pill is replaced with "Finishing current step" + a countdown chip showing grace minutes remaining. Pause button is hidden during auto-extend (task is winding down, pausing here would be confusing). Stop remains available for manual override.
+    </div>
+  </div>
+
+  <!-- Variant B: Hard stop imminent (last 3 min of grace, 3 min remaining) -->
+  <div class="variant-block">
+    <div class="variant-label">B — Hard stop imminent (3 min remaining in grace)</div>
+    <div class="task-header hard-stop-imminent">
+      <div class="task-header-left">
+        <span class="task-title-txt">Process May invoices</span>
+
+        <div class="auto-extend-msg">
+          <span class="hourglass">&#8987;</span>
+          Finishing current step
+          <span class="countdown-chip urgent">3 min to hard stop</span>
+        </div>
+      </div>
+      <div class="task-header-right">
+        <button class="hdr-btn hdr-btn-stop">Stop now</button>
+      </div>
+    </div>
+    <div class="annotation-box">
+      As the countdown nears zero, the chip shifts to an orange background (#fdba74) and the header background deepens slightly to #fff7ed. No modal, no toast, no audio. Inline only. If the operator does nothing, the session terminates naturally and the task transitions to the chain-handoff flow (or to Completed if the last session).
+    </div>
+  </div>
+
+  <!-- Baseline: normal running state for comparison -->
+  <div class="variant-block">
+    <div class="variant-label">Baseline — Normal running state (for comparison)</div>
+    <div class="task-header">
+      <div class="task-header-left">
+        <span class="task-title-txt">Process May invoices</span>
+        <span class="status-badge" style="background:#dcfce7;color:#15803d;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:3px;animation:pulse 1.5s infinite;"></span>
+          Operator running
+        </span>
+        <span style="font-size:11px;color:#64748b;">&middot; link 3 of ~12 &middot; ~4 hrs elapsed</span>
+      </div>
+      <div class="task-header-right">
+        <button class="hdr-btn" style="border:1px solid #e2e8f0;color:#475569;background:white;">Pause</button>
+        <button class="hdr-btn hdr-btn-stop" style="margin-left:6px;">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;font-size:12px;color:#64748b;line-height:1.7;margin-top:4px;">
+    <strong style="color:#334155;">Design decision:</strong> The auto-extend state is <em>not</em> a modal. A modal would interrupt the operator and require a decision. Auto-extend is automatic — the system is handling it gracefully. The inline amber state communicates "something is happening, you can watch or intervene," not "you must decide now." This satisfies the brief's requirement: "subtle amber tinted background, NOT a modal."
+  </div>
+
+</div>
+
+<style>@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.5;transform:scale(0.85);}}</style>
+</body>
+</html>

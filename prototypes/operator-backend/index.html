@@ -73,10 +73,108 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
 <div class="proto-index-title">Operator Backend — Phase D Prototypes</div>
 <div class="proto-index-sub">Spec D: Operator backend adapter, session lifecycle, credential injection, fallback, progress visibility, cancellation, Run Trace integration.</div>
 
-<!-- Round 2 banner -->
+<!-- Round 3 banner -->
+<div class="round2-banner" style="background:#f0fdf4;border-color:#a7f3d0;color:#065f46;">
+  <strong>Round 3</strong> — chain-resume and per-subaccount operator settings. R10 deleted and redrawn as R12 against <strong>WorkspaceBoardPage.tsx</strong> (kanban board). Six new screens: workspace board filter, operator settings tab, TaskHeader chain-link status, auto-extend inline state, budget-exceeded modal, and Run Trace chain divider. All extend existing surfaces; no new pages or routes.
+</div>
+
+<!-- Round 2 banner (kept for reference) -->
 <div class="round2-banner">
   <strong>Round 2</strong> — rebuilt against the existing task management UI. Operator runs surface inside the <strong>OpenTaskView</strong> the same way other runs do (TaskHeader + ChatPane + ActivityPane + RightPaneTabs with Now / Plan / Files tabs). There is no parallel "autonomous runs" UI. The 9 round 1 D-screens that invented a separate UI world have been deleted. R1-R11 extend the existing surfaces inline.
 </div>
+
+<!-- ===================================================== -->
+<!-- ROUND 3 SECTION -->
+<!-- ===================================================== -->
+<div class="section-header" style="color:#047857;">Round 3 — Chain-resume and per-subaccount settings</div>
+<div class="section-note">Six new screens. R12 replaces the wrong-shape R10. All extend existing surfaces (WorkspaceBoardPage.tsx, AdminSubaccountDetailPage.tsx, TaskHeader.tsx, RunTracePage.tsx). No new routes.</div>
+<div class="screen-list">
+
+  <a href="r12-workspace-board-operator-filter.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R12</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Workspace Board — Operator filter chip + badge
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">WorkspaceBoardPage.tsx</span>
+      </div>
+      <div class="screen-desc">Kanban board (drag-and-drop columns, TaskCard components) with filter chip row above columns: [All] [Agents only] [Operator runs only]. Operator-driven TaskCards get a 12px monochrome badge top-right. Filter is interactive. Replaces the wrong-shape R10.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r13-subaccount-operator-settings-tab.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R13</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Subaccount: Operator settings tab (org admin only)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">AdminSubaccountDetailPage.tsx</span>
+      </div>
+      <div class="screen-desc">New "Operator" tab inserted between Board Config and Usage &amp; Costs. Two field groups: Session limits (soft cap, auto-extend grace) and Task limits (chain length, wall-clock cap, budget cap, concurrent sessions). Plain-English help text. Save footer with note that changes apply to new sessions only.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r14-taskheader-chain-link-status.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R14</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        TaskHeader: Chain-link status (3 variants)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-comp">Component spec</span>
+        <span class="badge badge-ext">TaskHeader.tsx</span>
+      </div>
+      <div class="screen-desc">Inline chain-link indicator added to the left flex row of TaskHeader. Three variants: (A) known estimate "link 3 of ~12", (B) unknown estimate "link 3 of --" with tooltip, (C) completed "6 sessions, 12h 4m total". Tooltip on hover. No new row, no panel.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r15-taskheader-auto-extending.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R15</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        TaskHeader: Auto-extend inline state
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-comp">Component spec</span>
+        <span class="badge badge-ext">TaskHeader.tsx</span>
+      </div>
+      <div class="screen-desc">When operator is past soft cap and within auto-extend grace, TaskHeader background goes amber and the status row shows "Finishing current step (N min left to stop cleanly)". No modal. Two variants: grace active, and final-minutes countdown. Stop button stays visible.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r16-modal-budget-exceeded-autopause.html" class="screen-item">
+    <div class="screen-num" style="background:#fef3c7;color:#92400e;">R16</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Modal: Budget cap reached (task auto-paused)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-mod">Modal</span>
+      </div>
+      <div class="screen-desc">Launched when a task hits its per-task budget cap (default 6,000 min). Plain-English body: what happened, what the cap was, what to do. Two options: "Extend budget +1,000 min" (primary) or "Cancel task" (destructive secondary). Footer link to Operator settings tab (R13).</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r17-runtrace-chain-link-divider.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R17</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Run Trace: Chain-link dividers in event timeline
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">RunTracePage.tsx + RunTraceEventRenderer</span>
+      </div>
+      <div class="screen-desc">Full 3-link chain trace with two boundary dividers: thin horizontal rule with greyed-out label "chain link N starts -- HH:MM UTC". Events from each session are visually grouped. Minimal space, no heavy chrome. Extends the existing SystemEventRow pattern.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- ===================================================== -->
+<!-- ROUND 2 SECTIONS (kept, R10 card removed) -->
+<!-- ===================================================== -->
 
 <!-- Section 1: Existing surfaces extended -->
 <div class="section-header">Existing surfaces extended</div>
@@ -109,18 +207,7 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
     <span class="screen-arrow">&#8250;</span>
   </a>
 
-  <a href="r10-tasks-list-operator-filter.html" class="screen-item">
-    <div class="screen-num num-r">R10</div>
-    <div class="screen-info">
-      <div class="screen-title">
-        Tasks list — Operator runs filter
-        <span class="badge badge-ext">Existing list + filter chip</span>
-        <span class="badge badge-r2">New R2</span>
-      </div>
-      <div class="screen-desc">The existing tasks list with a new segmented control "All tasks | Operator runs only". Operator-specific metadata (status pill, elapsed/remaining time) surfaces inline on task cards. Replaces round 1 D8 dedicated page.</div>
-    </div>
-    <span class="screen-arrow">&#8250;</span>
-  </a>
+  <!-- R10 deleted (wrong surface — was a generic tasks list, not the kanban board). Replaced by R12 above. -->
 
   <a href="r11-connections-suspended-state.html" class="screen-item">
     <div class="screen-num num-r">R11</div>

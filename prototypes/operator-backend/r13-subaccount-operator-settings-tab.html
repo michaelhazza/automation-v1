@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<!--
+  R13: AdminSubaccountDetailPage — new "Operator" tab
+  -----------------------------------------------------
+  Existing surface: client/src/pages/AdminSubaccountDetailPage.tsx
+  Route: /admin/subaccounts/:subaccountId (tab=operator, new tab)
+
+  AdminSubaccountDetailPage.tsx structure observed:
+    - type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' |
+        'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace'
+    - TAB_LABELS: { ..., board: 'Board Config', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace' }
+    - visibleTabs (admin mode): ['onboarding','engines','workflows','agents','beliefs','categories',
+        'tags','board','usage','workspace','admin']
+    - inputCls: 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white ...'
+    - Tab rendering: flex border-b border-slate-200 rows; active tab: border-b-2 border-indigo-500 text-indigo-600
+
+  New tab added: 'operator' between 'board' (Board Config) and 'usage' (Usage & Costs)
+  Tab label: 'Operator'
+  Visibility: org_admin only (follows AdminSubaccountDetailPage's mode === 'admin' gating)
+
+  Fields grouped into two sections:
+    Section A "Session limits" — fields 1+2
+    Section B "Task limits"   — fields 3-6
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acme Corp — Operator Settings | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 0; }
+
+/* ── Subaccount detail page frame ── */
+.sa-header {
+  padding: 20px 28px 0;
+  background: white; border-bottom: 1px solid #e2e8f0;
+}
+.sa-name { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 2px; letter-spacing: -0.02em; }
+.sa-slug { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+
+/* ── Tab row (matches AdminSubaccountDetailPage.tsx tab render) ── */
+.tab-row {
+  display: flex; align-items: flex-end; gap: 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.tab-btn {
+  padding: 8px 14px; font-size: 13px; font-weight: 500; color: #64748b;
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+  transition: color 0.12s;
+}
+.tab-btn:hover { color: #334155; }
+.tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
+
+/* ── Org admin only pill ── */
+.admin-only-pill {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 700; color: #4338ca;
+  background: #eef2ff; border: 1px solid #c7d2fe;
+  padding: 1px 7px; border-radius: 4px; letter-spacing: 0.02em;
+  vertical-align: middle; margin-left: 6px;
+}
+
+/* ── Tab body ── */
+.tab-body { padding: 24px 28px; max-width: 700px; }
+
+/* ── Settings sections ── */
+.settings-section {
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  margin-bottom: 20px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.settings-section-head {
+  padding: 14px 20px; border-bottom: 1px solid #f1f5f9;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.settings-section-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+.settings-section-body { padding: 4px 0; }
+
+/* ── Individual field rows ── */
+.field-row {
+  display: grid; grid-template-columns: 1fr 140px;
+  align-items: start; gap: 16px;
+  padding: 14px 20px; border-bottom: 1px solid #f8fafc;
+}
+.field-row:last-child { border-bottom: none; }
+
+.field-label {
+  font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px;
+}
+.field-help {
+  font-size: 12px; color: #64748b; line-height: 1.55;
+}
+.field-input-wrap { display: flex; align-items: center; gap: 7px; }
+.field-input {
+  width: 90px; padding: 7px 10px;
+  border: 1px solid #d1d5db; border-radius: 7px;
+  font-size: 13px; color: #0f172a; background: white;
+  font-family: inherit; text-align: right;
+  outline: none; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.field-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+.field-unit {
+  font-size: 12px; color: #64748b; white-space: nowrap;
+}
+
+/* ── Save footer ── */
+.save-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  padding: 16px 28px;
+  border-top: 1px solid #f1f5f9; background: #f8fafc;
+  margin: 0 -0px;
+}
+.save-btn {
+  padding: 9px 22px; background: #4f46e5; color: white;
+  border: none; border-radius: 8px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  transition: background 0.12s;
+}
+.save-btn:hover { background: #4338ca; }
+.save-note { font-size: 12px; color: #94a3b8; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Admin</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Subaccounts
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-spacer"></div>
+      <div class="topbar-right">
+        <div class="topbar-avatar">AO</div>
+      </div>
+    </div>
+
+    <!-- Subaccount header + tabs (mirrors AdminSubaccountDetailPage.tsx structure) -->
+    <div class="sa-header">
+      <div class="sa-name">Acme Corp</div>
+      <div class="sa-slug">acme-corp &middot; active</div>
+
+      <!-- Tab row — matches TAB_LABELS order; 'Operator' inserted between 'Board Config' and 'Usage & Costs' -->
+      <div class="tab-row">
+        <button class="tab-btn" onclick="switchTab(event)">Onboarding</button>
+        <button class="tab-btn" onclick="switchTab(event)">Engines</button>
+        <button class="tab-btn" onclick="switchTab(event)">Workflows</button>
+        <button class="tab-btn" onclick="switchTab(event)">Agents</button>
+        <button class="tab-btn" onclick="switchTab(event)">Beliefs</button>
+        <button class="tab-btn" onclick="switchTab(event)">Categories</button>
+        <button class="tab-btn" onclick="switchTab(event)">Tags</button>
+        <button class="tab-btn" onclick="switchTab(event)">Board Config</button>
+        <!-- NEW TAB: Operator (org_admin only) -->
+        <button class="tab-btn active" onclick="switchTab(event)">
+          Operator
+          <span class="admin-only-pill">Org admin</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab(event)">Usage &amp; Costs</button>
+        <button class="tab-btn" onclick="switchTab(event)">Admin</button>
+        <button class="tab-btn" onclick="switchTab(event)">Workspace</button>
+      </div>
+    </div>
+
+    <!-- Operator tab body -->
+    <div class="tab-body">
+
+      <!-- Section A: Session limits -->
+      <div class="settings-section">
+        <div class="settings-section-head">
+          <span class="settings-section-title">Session limits</span>
+        </div>
+        <div class="settings-section-body">
+
+          <!-- Field 1: Soft session cap -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Soft session cap</div>
+              <div class="field-help">
+                How long one operator session can run before it wraps up and hands off. Shorter sessions keep costs predictable.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="120" min="10" max="480" id="f-soft-cap">
+              <span class="field-unit">minutes</span>
+            </div>
+          </div>
+
+          <!-- Field 2: Auto-extend grace -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Auto-extend grace</div>
+              <div class="field-help">
+                If the operator is mid-step when the soft cap hits, it gets this extra time to finish the current step before stopping. Hard stop at soft cap + grace.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="30" min="0" max="120" id="f-grace">
+              <span class="field-unit">minutes</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Section B: Task limits -->
+      <div class="settings-section">
+        <div class="settings-section-head">
+          <span class="settings-section-title">Task limits</span>
+        </div>
+        <div class="settings-section-body">
+
+          <!-- Field 3: Max chain length -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Max chain length</div>
+              <div class="field-help">
+                A long task may run across multiple chained sessions. This caps how many sessions can chain before the task pauses for a human check-in.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="50" min="1" max="500" id="f-chain">
+              <span class="field-unit">sessions</span>
+            </div>
+          </div>
+
+          <!-- Field 4: Max wall-clock per task -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Max wall-clock per task</div>
+              <div class="field-help">
+                A task that has been running (including pauses between sessions) for longer than this will pause for review, even if it has not used its session budget.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="30" min="1" max="365" id="f-wallclock">
+              <span class="field-unit">days</span>
+            </div>
+          </div>
+
+          <!-- Field 5: Per-task budget cap -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Per-task budget cap</div>
+              <div class="field-help">
+                Tasks pause for review when they use this many operator session minutes in total. About 50 sessions of 120 minutes at the default.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="6000" min="60" max="100000" id="f-budget" style="width:110px;">
+              <span class="field-unit">minutes</span>
+            </div>
+          </div>
+
+          <!-- Field 6: Concurrent operator sessions -->
+          <div class="field-row">
+            <div>
+              <div class="field-label">Concurrent operator sessions</div>
+              <div class="field-help">
+                How many operator runs can be active at the same time across this subaccount. Raising this lets more tasks run in parallel; lowering it protects compute budget.
+              </div>
+            </div>
+            <div class="field-input-wrap">
+              <input class="field-input" type="number" value="5" min="1" max="25" id="f-concur">
+              <span class="field-unit">max 25</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Save footer -->
+      <div class="save-footer">
+        <span class="save-note">Changes apply to new sessions only. In-progress sessions are not affected.</span>
+        <button class="save-btn" onclick="save()">Save settings</button>
+      </div>
+
+    </div><!-- .tab-body -->
+  </main>
+</div>
+
+<script>
+function switchTab(e) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  e.currentTarget.classList.add('active');
+}
+function save() {
+  const btn = document.querySelector('.save-btn');
+  btn.textContent = 'Saved';
+  btn.style.background = '#059669';
+  setTimeout(() => { btn.textContent = 'Save settings'; btn.style.background = ''; }, 2000);
+}
+</script>
+
+</body>
+</html>
