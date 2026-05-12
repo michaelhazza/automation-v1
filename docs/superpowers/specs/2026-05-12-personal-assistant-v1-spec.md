@@ -74,7 +74,7 @@ without EA-specific code branching. V1 ships the contracts + the EA as the first
 3. Promote Slack from a delivery channel to a first-class agent connector. Ship 6 Slack actions: 4 reads + 2 writes. Writes review-gated per the per-instance auto-send-scope dropdown.
 4. Introduce the **external-source trigger** primitive on `agent_triggers`. Three new event types: `gmail_message_received`, `calendar_event_imminent`, `slack_mention`. Source routing via Gmail polling job + Calendar push channels + Slack Events API.
 5. Ship 3 V1 workflows: daily briefing (07:00 cron + Slack DM), inbox triage with drafted replies (cron + webhook), meeting prep summary (calendar-event-imminent trigger 15min before).
-6. Introduce the **VoiceProfile** primitive as a reusable platform resource (designed for EA, Riley, Helena, future content agents). EA's default refresh policy: `periodic` every 30 days. The schema also supports `manual` and `on_send_count` `refreshPolicy` values (one policy per row); a combined "30 days OR N sends" mode is deferred per §26. Opt-in by default with one-click opt-out.
+6. Introduce the **VoiceProfile** primitive as a reusable platform resource (designed for EA, Riley, Helena, future content agents). EA's default refresh policy: `periodic` every 30 days. The schema also supports `manual` refresh policy (operator-triggered only). The `on_send_count` enum value is schema-reserved but rejected by the write API in V1; activation is deferred per §26. Opt-in by default with one-click opt-out.
 7. Introduce the **home-widget contribution contract** so any user-owned agent can declaratively contribute a card to the user's home Personal zone. EA is the first consumer.
 8. Ship the **Personal nav group** in the sidebar (data-driven from `owner_user_id = current_user.id`) and the **home Personal zone** card grid. Both render empty when the user has no user-owned agents.
 9. Ship the **first-run setup wizard** (existing locked mockup `prototypes/personal-assistant-v1/01-first-run-setup.html`), the **per-agent tabbed detail page** (Workspace / Activity / Settings), and the **EA settings page** (existing locked mockup `03-ea-settings.html`).
@@ -413,8 +413,9 @@ Row fields (column-level):
 - `profileJson: jsonb` — distilled feature set. NEVER raw content. Example: `{ greeting: { primary: 'Hi {name},', secondary: 'Hey {name},' }, signoff: { primary: 'Best,\nMichael', secondary: 'Cheers,\nMichael' }, sentenceLengthMean: 14, sentenceLengthP90: 28, formalityScore: 0.42, emDashUsage: 'avoid', commonPhrases: ['quick note', 'happy to chat'], signatureLine: 'Michael — Breakout Solutions' }`. Schema versioned via `profileJson.schemaVersion: 1`.
 - `sampleSize: int`
 - `lastDerivedAt: timestamptz`
-- `refreshPolicy: 'manual' | 'periodic' | 'on_send_count'`
-- `refreshConfig: jsonb` — discriminated on `refreshPolicy`. Examples: `{ kind: 'periodic', days: 30 }`; `{ kind: 'on_send_count', everyN: 50 }`; `{ kind: 'manual' }`.
+- `refreshPolicy: 'manual' | 'periodic' | 'on_send_count'` — V1 ONLY accepts writes with values `'manual'` or `'periodic'`. The `'on_send_count'` enum value is schema-reserved for future use; the write API + Zod schema reject it until a future spec adds the `sent_count_since_derive` counter. Existing rows with `refreshPolicy = 'on_send_count'` (if any) never auto-refresh under V1 (§12.5).
+- `refreshConfig: jsonb` — discriminated on `refreshPolicy`. V1 examples: `{ kind: 'periodic', days: 30 }`; `{ kind: 'manual' }`. (Reserved future shape: `{ kind: 'on_send_count', everyN: 50 }` — not V1.)
+- `state: 'pending' | 'deriving' | 'ready' | 'failed'` — derivation lifecycle. Default `'pending'` on row creation; transitions to `'deriving'` when `voiceProfileService.deriveProfile` starts; transitions to `'ready'` on success or `'failed'` on error. Reads by prompt-assembly check `state = 'ready' AND optOutAt IS NULL` before consuming `profileJson` (state ≠ ready → assemble without voice block).
 - `optOutAt: timestamptz | null` — opt-out marker. When non-null, the profile is NOT used in prompt assembly; the derive/refresh paths skip this row.
 - `createdAt: timestamptz`
 - `updatedAt: timestamptz`
@@ -1529,7 +1530,7 @@ Per `docs/spec-authoring-checklist.md §4`, every new tenant-scoped table needs:
 
 ### 21.1 `voice_profiles`
 
-- **Schema**: `(id, organisation_id NOT NULL, owner_user_id NULLABLE, subaccount_id NULLABLE, org_scope BOOLEAN, name, source, source_config, profile_json, sample_size, last_derived_at, refresh_policy, refresh_config, opt_out_at, created_at, updated_at)`. CHECK: exactly one of `(owner_user_id IS NOT NULL)`, `(subaccount_id IS NOT NULL)`, `(org_scope = true)`.
+- **Schema**: `(id, organisation_id NOT NULL, owner_user_id NULLABLE, subaccount_id NULLABLE, org_scope BOOLEAN, name, source, source_config, profile_json, sample_size, last_derived_at, refresh_policy, refresh_config, opt_out_at, state, created_at, updated_at)`. CHECK: exactly one of `(owner_user_id IS NOT NULL)`, `(subaccount_id IS NOT NULL)`, `(org_scope = true)`. CHECK: `refresh_policy IN ('manual', 'periodic')` for V1 inserts (the `'on_send_count'` enum value is reserved; the schema enum CAN hold it but the write API rejects it until a future spec activates).
 - **RLS policy** (in the table-creation migration):
   - Owner clause: `owner_user_id IS NULL OR owner_user_id = current_setting('app.current_user_id')::uuid`
   - Subaccount clause: `subaccount_id IS NULL OR subaccount_id = ANY(current_setting('app.current_subaccount_ids')::uuid[])`
@@ -1837,10 +1838,11 @@ Exactly one of `draft.approved`, `draft.rejected`, `draft.expired` fires per dra
 
 ### 24.6 Voice profile derivation
 
-**Posture:** state-based.
-- **Predicate:** `UPDATE voice_profiles SET state = 'deriving' WHERE id = $1 AND state IN ('pending', 'ready')`. Currently no `state` column in §7.4 schema — architect adds in Phase 2 if needed, OR uses `lastDerivedAt IS NULL` / `< now() - refresh_interval` as the predicate.
-- **Concurrency:** Two simultaneous `deriveProfile` calls for the same profile id — only one wins; the other returns the existing `profileJson` if available, or `derivation_in_progress` typed error.
-- **Retry:** guarded.
+**Posture:** state-based via the `state` column added to `voice_profiles` per §7.4.
+- **Predicate:** `UPDATE voice_profiles SET state = 'deriving' WHERE id = $1 AND state IN ('pending', 'ready', 'failed') RETURNING id`. Zero rows = derivation already in-flight; winner-takes-all.
+- **Concurrency:** Two simultaneous `deriveProfile` calls for the same profile id — only one wins; the other returns the existing `profileJson` if `state = 'ready'`, or a typed `derivation_in_progress` error if `state = 'deriving'`.
+- **Retry:** guarded. On failure, `state → 'failed'`; manual retry from Settings transitions back to `'pending'` and re-enters the deriveProfile flow.
+- **Terminal events:** `voice.profile.derivation.started` (info) when state transitions to `'deriving'`; `voice.profile.derivation.completed` (info) on `'ready'`; `voice.profile.derivation.failed` (warning) on `'failed'`. These join the existing `voice.profile.refreshed` event in the criticality registry (§5.2 modified `shared/types/agentExecutionLog.ts`).
 
 ### 24.7 Voice profile consumption
 
@@ -1973,7 +1975,7 @@ Per `docs/spec-authoring-checklist.md §7`. Anything mentioned in prose as "defe
 - **`queue_card` and `metric_card` home-widget types.** §7.7 reserves the type-system slots; no agent uses them V1.
 - **Slack `search:read` plan-tier upgrade path.** Free Slack workspaces lack search; V1 returns typed `PLAN_NOT_SUPPORTED`. UI affordance for upgrade-prompt deferred.
 - **VoiceProfile `manual` sampler.** Pasted-content sampling deferred to V1.5. The `manual` enum value is reserved for the future; V1 ships `gmail_sent_sampler` + `drive_doc_sampler` only. Adding `manual` requires a pasted-sample storage column or table + the wizard/Settings UI for pasting + the sampler implementation — not in V1 scope.
-- **VoiceProfile combined "periodic OR send-count" refresh policy.** V1 schema enforces one `refreshPolicy` per row (`manual` | `periodic` | `on_send_count`). A combined "30 days OR N sends" mode would require a new policy enum variant + a `sent_count_since_derive` counter; deferred until the EA dogfood proves which mode actually matters.
+- **VoiceProfile `on_send_count` refresh policy** + **combined "periodic OR send-count" refresh policy.** V1 schema reserves the `'on_send_count'` enum value but the write API + Zod schema reject it (existing rows with that value never auto-refresh). Activating the policy requires a future spec to (a) add the `sent_count_since_derive` counter (likely a column on `voice_profiles` or a small ledger), (b) lift the write-rejection, and (c) define how counter increments interact with concurrent runs. A combined "30 days OR N sends" mode would additionally require a new enum variant; both are deferred until the EA dogfood proves either mode actually matters.
 - **Operator impersonation** (e.g. Sarah running Michael's EA while he's on holiday). Predecessor §5 — future work; V1 forbids cross-user impersonation.
 
 
@@ -1989,27 +1991,25 @@ Carried from brief §4 + spec-time confirmations. Phase 2 architect resolves eac
 
 4. **Calendar lookahead horizon.** V1 default 15 minutes. Confirm value and whether the lookahead is a memory_block setting per-user OR a global constant.
 
-5. **`voice_profiles.state` column.** §24.6 mentions adding a `state` column for derivation guarding. Spec leaves to architect — either add the column or use `lastDerivedAt IS NULL` / `< now() - refresh_interval` as the predicate.
+5. **EA agent's `Specialist` vs alternative `agentRole`.** Spec recommends `Specialist` (matches Sarah / Helena / Patel). Phase 2 confirms vs alternatives (`Worker`, new `Personal_Assistant` role) — recommendation stands unless `agentRole` is consumed by a code path that treats `Specialist` differently than is appropriate.
 
-6. **EA agent's `Specialist` vs alternative `agentRole`.** Spec recommends `Specialist` (matches Sarah / Helena / Patel). Phase 2 confirms vs alternatives (`Worker`, new `Personal_Assistant` role) — recommendation stands unless `agentRole` is consumed by a code path that treats `Specialist` differently than is appropriate.
+6. **System-prompt canonical text.** §13.3 names sections (identity / voice integration / escalation rules / memory awareness / delivery awareness). Phase 2 architect drafts the prompt body itself.
 
-7. **System-prompt canonical text.** §13.3 names sections (identity / voice integration / escalation rules / memory awareness / delivery awareness). Phase 2 architect drafts the prompt body itself.
+7. **Auto-send-scope dropdown memory_block key naming.** Spec uses `ea.slack_auto_send_scope`. Phase 2 confirms naming convention against existing memory_block key conventions.
 
-8. **Auto-send-scope dropdown memory_block key naming.** Spec uses `ea.slack_auto_send_scope`. Phase 2 confirms naming convention against existing memory_block key conventions.
+8. **Stub second user-owned agent (reuse criterion).** §15.6 names the option of adding a no-op Dev Agent template stub. Phase 2 architect decides whether the stub ships in V1 OR the contract proof is left as the integration test in §25.3.
 
-9. **Stub second user-owned agent (reuse criterion).** §15.6 names the option of adding a no-op Dev Agent template stub. Phase 2 architect decides whether the stub ships in V1 OR the contract proof is left as the integration test in §25.3.
+9. **First-run wizard `EA_PROVISION` permission key default-grant.** Spec proposes "every user." Phase 2 confirms — alternatives include subaccount-admin-gated provisioning (admin invites users to provision their EA).
 
-10. **First-run wizard `EA_PROVISION` permission key default-grant.** Spec proposes "every user." Phase 2 confirms — alternatives include subaccount-admin-gated provisioning (admin invites users to provision their EA).
+10. **Operator user's seed EA at deploy time.** §13.5 leaves this to the architect. Recommendation: no seed; operator goes through the wizard like any other user.
 
-11. **Operator user's seed EA at deploy time.** §13.5 leaves this to the architect. Recommendation: no seed; operator goes through the wizard like any other user.
+11. **Capability slug naming for new Slack actions.** Spec proposes `channel_messages_read`, `channel_post_message`, `channel_search_messages`, `dm_send`. Phase 2 confirms against the existing integration-reference naming conventions.
 
-12. **Capability slug naming for new Slack actions.** Spec proposes `channel_messages_read`, `channel_post_message`, `channel_search_messages`, `dm_send`. Phase 2 confirms against the existing integration-reference naming conventions.
+12. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.approved` / `draft.rejected` / `draft.expired` / `draft.sent`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
 
-13. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.approved` / `draft.rejected` / `draft.expired` / `draft.sent`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
+13. **`actionService.proposeAction` composition with `ea_drafts`.** The current spec authors `eaDraftService` with its own state machine (`pending → approved | rejected | expired`) for review-gated sends. An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics. Phase 2 architect investigates: can the `ea_drafts` state machine compose over `proposeAction` (proposeAction owns the approval state row; `ea_drafts` stores the draft body payload and links to the proposed-action row)? Recommendation: compose if `proposeAction`'s contract supports a per-domain payload reference; otherwise keep the parallel state machine and document the rationale in plan.md. Routed to `tasks/todo.md` for deferred review.
 
-14. **`actionService.proposeAction` composition with `ea_drafts`.** The current spec authors `eaDraftService` with its own state machine (`pending → approved | rejected | expired`) for review-gated sends. An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics. Phase 2 architect investigates: can the `ea_drafts` state machine compose over `proposeAction` (proposeAction owns the approval state row; `ea_drafts` stores the draft body payload and links to the proposed-action row)? Recommendation: compose if `proposeAction`'s contract supports a per-domain payload reference; otherwise keep the parallel state machine and document the rationale in plan.md. Routed to `tasks/todo.md` for deferred review.
-
-Phase 2 plan.md addresses each as the architect prefers — none of the 14 above is blocking on operator decision; all are spec-time confirmations the architect resolves with codebase context.
+Phase 2 plan.md addresses each as the architect prefers — none of the 13 above is blocking on operator decision; all are spec-time confirmations the architect resolves with codebase context.
 
 ---
 
