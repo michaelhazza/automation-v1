@@ -1,4 +1,4 @@
-**Status:** DRAFT (2026-05-11) — awaiting operator sign-off before spec authoring
+**Status:** **LOCKED** (2026-05-11) — scope ratified, proceed to spec authoring
 **Date:** 2026-05-11
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `operator-backend`
@@ -136,16 +136,16 @@ Per Spec C Decision 3 risk #1: the customer will blame SynthetOS regardless of w
 
 Small artefact (one-pager + comms templates) but blocks first Plus-tier onboarding.
 
-## 4. Open architectural questions (for the spec)
+## 4. Locked architectural decisions
 
-Flagging now so they don't surface mid-build:
+Resolved 2026-05-11 by operator review. The spec author MUST honour these values; deviations require returning to the operator.
 
-1. **Sandbox persistence across turns.** Recommendation: persistent — it's the point of "long-running session." Confirm e2b session API supports clean persistence across the planned session duration cap.
-2. **Operator runtime crash supervision.** Recommendation: fail the run, do not restart. Crashes signal a vendor bug, not transient state. Restart-on-crash risks silently re-running already-effected side effects.
-3. **Artefact harvest cadence.** Recommendation: end-of-session harvest + on-demand "snapshot now" if a customer requests it. Periodic harvest for very long sessions = Phase 3.5 add.
-4. **Image versioning during in-flight sessions.** Recommendation per § 3.3: pinned per session via `operator_runs.image_tag`.
-5. **Session duration cap.** Spec picks a hard wall-clock cap. Recommendation: 120 min V1 with operator override. Rationale: sandbox cost is real, runaway sessions are a billing risk.
-6. **Concurrent-session cap per subaccount.** Spec picks a default ceiling. Recommendation: 3 concurrent V1, typed error when exceeded.
+1. **Sandbox persistence across turns — PERSISTENT.** One sandbox lives for the whole session; state survives turns. Spec confirms e2b session API supports clean persistence across the duration cap (§ 4.5).
+2. **Operator runtime crash supervision — FAIL THE RUN.** Crashes are not auto-restarted. Restart-on-crash risk: duplicate side effects from already-effected operator turns. Customer retries from scratch when needed.
+3. **Artefact harvest cadence — END-OF-SESSION + ON-DEMAND.** Default harvest at session terminal. Customer-triggered "snapshot now" available mid-session. Periodic checkpointing deferred to Phase 3.5 if requested.
+4. **Image versioning during in-flight sessions — PINNED PER SESSION.** `operator_runs.image_tag` records the image used. New sessions get new image; in-flight sessions complete on their original. No live-migration.
+5. **Session duration cap — 120 MIN V1, OPERATOR OVERRIDE ALLOWED.** Hard wall-clock cap; sandbox tears down on hit. Operator-tier roles can override per-run via a typed setting. Rationale: sandbox compute is real spend; runaway sessions are a billing risk.
+6. **Concurrent-session cap per subaccount — 3 V1.** Typed error (`OPERATOR_SESSION_LIMIT_EXCEEDED`) surfaced when a fourth concurrent session is requested. Per-subaccount ceiling, not per-user.
 
 ## 5. Out of scope (explicit non-goals)
 
