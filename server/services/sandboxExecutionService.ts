@@ -34,7 +34,7 @@ import { FailureError } from '../../shared/iee/failure.js';
 import { failure } from '../../shared/iee/failure.js';
 import { assertValidTransition } from '../../shared/stateMachineGuards.js';
 import type { SandboxRunTaskInput, SandboxRunTaskOutput } from '../../shared/types/sandbox.js';
-import { resolveSandboxCeilings } from './sandboxExecutionServicePure.js';
+import { resolveSandboxCeilings, decideAdoptOrStart, SandboxStartKeyConflict } from './sandboxExecutionServicePure.js';
 import { runHarvest } from './sandboxHarvestService.js';
 
 // ---------------------------------------------------------------------------
@@ -199,6 +199,8 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
     startClaimedAt: now,
     startClaimExpiresAt: leaseExpiry,
     startAttemptCount: 1,
+    // Persist the adoption key when provided so adoptOrStart() can look it up.
+    sandboxStartKey: input.sandboxStartKey ?? null,
   };
 
   let existing: SandboxExecution | undefined;
@@ -238,6 +240,64 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
   }
 
   return await _handleExistingRow(input, existing, resolvedCeilings.wallClockMs);
+}
+
+// ---------------------------------------------------------------------------
+// adoptOrStart — idempotent adoption seam for the Operator Backend (spec §7.1).
+//
+// Provides exactly-once sandbox creation per chain-link row even when dispatch()
+// is retried after a crash. The Operator Backend passes sandboxStartKey = operator_run_id.
+//
+// Behaviour:
+//  1. Look up any existing live row (pending/running/harvesting) keyed by sandboxStartKey.
+//  2. If a live row exists with a DIFFERENT sandboxExecutionId → throw SandboxStartKeyConflict.
+//  3. If a live row exists with the SAME sandboxExecutionId → adopt it (call runTask, which
+//     returns the in-flight row via Case 2/5 without re-starting the provider).
+//  4. If no live row exists for the key → fall through to runTask (fresh start, Case 1).
+//
+// Terminal rows are not adopted: when the existing row is terminal, runTask returns
+// the terminal output via Case 3 (idempotent re-read).
+//
+// Re-exported: SandboxStartKeyConflict from sandboxExecutionServicePure.
+// ---------------------------------------------------------------------------
+
+export { SandboxStartKeyConflict };
+
+export async function adoptOrStart(
+  input: SandboxRunTaskInput & { sandboxStartKey: string },
+): Promise<SandboxRunTaskOutput> {
+  const db = getOrgScopedDb('sandboxExecutionService.adoptOrStart');
+
+  // Look up any existing row that was started under this key.
+  const existing = await db
+    .select({ id: sandboxExecutions.id, status: sandboxExecutions.status })
+    .from(sandboxExecutions)
+    .where(eq(sandboxExecutions.sandboxStartKey, input.sandboxStartKey))
+    .limit(1);
+
+  const existingRow = existing[0] ?? null;
+
+  const decision = decideAdoptOrStart({
+    callerExecutionId: input.sandboxExecutionId,
+    sandboxStartKey: input.sandboxStartKey,
+    existingRow,
+  });
+
+  if (decision.action === 'conflict') {
+    throw new SandboxStartKeyConflict(
+      input.sandboxStartKey,
+      decision.existingExecutionId,
+      input.sandboxExecutionId,
+    );
+  }
+
+  if (decision.action === 'adopt') {
+    // Re-use the existing sandboxExecutionId — runTask handles Cases 2/3/4/5.
+    return runTask({ ...input, sandboxExecutionId: decision.existingExecutionId });
+  }
+
+  // fresh_start: no live row for this key — runTask will INSERT (Case 1).
+  return runTask(input);
 }
 
 // ---------------------------------------------------------------------------

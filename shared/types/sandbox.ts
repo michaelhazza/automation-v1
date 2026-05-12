@@ -168,10 +168,23 @@ export interface SandboxInputFile {
  * (may be an empty array). `sandboxExecutionId` is caller-generated; if a row already
  * exists in `sandbox_executions` with the same ID, its pinned policy / ceilings / template
  * wins on read (idempotent retry contract — spec §20.1).
+ *
+ * `sandboxStartKey`, when set, enables idempotent adoption via `adoptOrStart()`: the
+ * service will return the existing sandbox row keyed on this token if one exists in a
+ * live state (`pending` / `running` / `harvesting`), rather than starting a fresh one.
+ * The Operator Backend sets `sandboxStartKey = operator_run_id` so that a dispatch crash
+ * and retry re-adopts the already-started sandbox rather than creating a duplicate.
+ * Non-operator callers leave this field absent; behaviour is byte-identical to the V1 baseline.
  */
 export interface SandboxRunTaskInput {
   /** Caller-generated UUID. Used as the idempotency key across harvest + cost-ledger writes. */
   sandboxExecutionId: string;
+  /**
+   * Optional idempotency token for adoption-based dispatch-crash recovery (Operator Backend).
+   * When set, `adoptOrStart()` prefers an existing sandbox row keyed by this token.
+   * Non-operator callers omit this field; `runTask()` behaviour is unchanged.
+   */
+  sandboxStartKey?: string;
   organisationId: string;
   subaccountId: string;
   runId: string;

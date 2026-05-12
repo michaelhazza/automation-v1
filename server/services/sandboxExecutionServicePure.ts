@@ -189,6 +189,95 @@ export function mapPolicyToProviderFlags(
   };
 }
 
+// ---------------------------------------------------------------------------
+// § 4: SandboxStartKeyConflict — typed error for adoptOrStart
+//
+// Thrown when a caller passes a `sandboxStartKey` that matches an existing
+// sandbox row but the `sandboxExecutionId` on that row differs from the
+// caller's `sandboxExecutionId`. This is a programmer error: the Operator
+// Backend's discipline of `sandboxStartKey = operator_run_id` makes it
+// impossible in normal operation; the typed error exists for defence in depth.
+// ---------------------------------------------------------------------------
+
+export class SandboxStartKeyConflict extends Error {
+  readonly sandboxStartKey: string;
+  readonly existingExecutionId: string;
+  readonly callerExecutionId: string;
+
+  constructor(sandboxStartKey: string, existingExecutionId: string, callerExecutionId: string) {
+    super(
+      `sandboxStartKey conflict: key "${sandboxStartKey}" is already bound to execution ${existingExecutionId}, ` +
+        `but caller supplied execution ${callerExecutionId}`,
+    );
+    this.name = 'SandboxStartKeyConflict';
+    this.sandboxStartKey = sandboxStartKey;
+    this.existingExecutionId = existingExecutionId;
+    this.callerExecutionId = callerExecutionId;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// § 5: AdoptOrStartDecision — pure adoption-vs-fresh-start decision
+//
+// The non-terminal statuses that the adoptOrStart path recognises as "live"
+// (eligible for adoption). Terminal statuses are returned as-is via the normal
+// runTask path; the adoption seam only short-circuits the INSERT for live rows.
+// ---------------------------------------------------------------------------
+
+const ADOPT_STATUSES = new Set(['pending', 'running', 'harvesting'] as const);
+type AdoptStatus = 'pending' | 'running' | 'harvesting';
+
+function _isAdoptStatus(status: string): status is AdoptStatus {
+  return ADOPT_STATUSES.has(status as AdoptStatus);
+}
+
+export type AdoptOrStartDecision =
+  | { action: 'adopt'; existingExecutionId: string }
+  | { action: 'fresh_start' }
+  | { action: 'conflict'; existingExecutionId: string };
+
+/**
+ * Pure decision function for `adoptOrStart`.
+ *
+ * Given:
+ * - `callerExecutionId`: the `sandboxExecutionId` the caller intends to use
+ * - `sandboxStartKey`: the idempotency token (e.g. `operator_run_id`)
+ * - `existingRow`: the DB row whose `start_key` matches this token, if any
+ *   (`{ id: string; status: string } | null`)
+ *
+ * Returns one of three decisions:
+ * - `adopt` — an existing live row matches the token; re-use it.
+ * - `fresh_start` — no live row for this token; run the normal `runTask` path.
+ * - `conflict` — a live row matches the token but with a DIFFERENT execution ID;
+ *   the caller must throw `SandboxStartKeyConflict`.
+ *
+ * Terminal rows are excluded from adoption: when the existing row is terminal
+ * the caller should fall through to `runTask` (which will return the terminal
+ * output via Case 3). This function returns `fresh_start` for terminal rows.
+ */
+export function decideAdoptOrStart(input: {
+  callerExecutionId: string;
+  sandboxStartKey: string;
+  existingRow: { id: string; status: string } | null;
+}): AdoptOrStartDecision {
+  const { callerExecutionId, existingRow } = input;
+
+  if (existingRow === null) {
+    return { action: 'fresh_start' };
+  }
+
+  // Only adopt live (non-terminal) rows.
+  if (!_isAdoptStatus(existingRow.status)) {
+    return { action: 'fresh_start' };
+  }
+
+  if (existingRow.id !== callerExecutionId) {
+    return { action: 'conflict', existingExecutionId: existingRow.id };
+  }
+
+  return { action: 'adopt', existingExecutionId: existingRow.id };
+}
+
 // Re-export the constants so callers (C7 harvest pipeline, C11 jobs) can
 // reference them without duplicating magic numbers.
 export {
