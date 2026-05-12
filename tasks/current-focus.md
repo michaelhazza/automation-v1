@@ -3,16 +3,16 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
-last_updated: 2026-05-12T21:58:47Z
-last_merge_ready_pr: #291
-last_merge_ready_slug: personal-assistant-v1
-last_merge_ready_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_pr: #284
-last_merged_slug: pre-test-hardening
-last_merged_branch: claude/review-preprod-spec-CmHez
-last_merged_at: 2026-05-11T01:28:16Z
-last_merged_commit: 37067df9
+status: NONE
+last_updated: 2026-05-12T23:41:06Z
+last_merge_ready_pr: none
+last_merge_ready_slug: none
+last_merge_ready_branch: none
+last_merged_pr: #291
+last_merged_slug: personal-assistant-v1
+last_merged_branch: claude/synthetos-personal-assistant-0kaIM
+last_merged_at: 2026-05-12T23:41:06Z
+last_merged_commit: 9002174e
 -->
 
 # Current Focus
@@ -31,13 +31,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — PR [#291](https://github.com/michaelhazza/automation-v1/pull/291) (`personal-assistant-v1`) finalised 2026-05-12T21:58:47Z. ready-to-merge label about to be applied; CI will fire on the final Phase 3 commit.
+**Status:** **NONE** — PR [#291](https://github.com/michaelhazza/automation-v1/pull/291) merged 2026-05-12T23:41:06Z as squash-commit `9002174e`. Pick next from `tasks/todo.md`.
 
-**Just merge-ready:** PR #291 — `personal-assistant-v1`. Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
-
-**Phase 1 complete (2026-05-12):** Spec authored for the Executive Assistant V1 build (~2000 lines, 27 sections). spec-reviewer ran 5 iterations (cap; 52 mechanical fixes); 3 directional decisions ratified (Calendar push deferred → 1-min lookahead scan; Slack auto-send dropdown deferred → fixed policy; risk-tier ceiling 5 → 6). chatgpt-spec-review ran 2 rounds (8 findings, all auto-applied — F1/F2/F3/F4/T1 in round 1, F1/F2/T1 in round 2); APPROVED at round 2. Spec status → accepted. Phase 2 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
-
-**BLOCKING gate before Phase 2 BUILD:** Locked predecessor `user-owned-agents` (`tasks/builds/user-owned-agents/brief.md`, status DRAFT) MUST reach MERGED before launching `feature-coordinator` for EA V1. Predecessor delivers `agents.owner_user_id` + RLS + redaction primitives the EA composes against.
+**Just merged:** PR #291 — `personal-assistant-v1` (squash-commit `9002174e`, 2026-05-12T23:41:06Z). Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion. Post-MERGE_READY CI fix-loop: 4 iterations (`39fe1a59` migration down idempotency + B.2 console gate; `6f113a79` ON CONFLICT requires partial-index predicate; `c66b2e73` manifest fixture + critical-event-set drift; `139596e0` action-registry snapshot + RLS contract + integration-reference drift). Phase 1 spec context: ~2000-line spec, 27 sections, spec-reviewer 5 iterations (cap, 52 mechanical fixes), 3 directional decisions ratified (Calendar push → 1-min lookahead scan; Slack auto-send → fixed policy; risk-tier ceiling 5→6), chatgpt-spec-review 2 rounds APPROVED.
 
 **Just merged:** PR #284 — `pre-test-hardening` (squash-commit `37067df9`, 2026-05-11T01:28:16Z). 14-item launch-blocker security hardening sprint shipped: W1-W3 webhook auth + per-org Teamwork URL token + DB-backed replay nonces; T1-T3 support read subaccount scoping + cross-org scope-ID rejection + taskService caller-supplied tx contract (17 caller sites); S1-S2 four missing support-draft preflight checks + agent-principal overrideCollision guard; V1-V2 connection-status enum + CHECK constraint + advisory-lock knowledge override race fix; O1-O5 working-time-rollup compact + migration 0240 phased-swap runbook + reseed prod-DB guards (allowlist NODE_ENV=development) + branch-protection requirement. 3 migrations 0318/0319/0320 (renumbered post-S2 from 0313-0315 to clear PR #281/283 collision). Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer 2 rounds APPROVED → dual-reviewer Codex APPROVED (4 iterations) → adversarial-reviewer HOLES_FOUND (PTH-ADV-1 closed) → S2 merge → chatgpt-pr-review 8 rounds APPROVED (13 fixes + 2 operator-approved spec deviations: createTask side-effect split + reseed allowlist) → CI auto-fix 3 iterations (gate-script exclusions + integration-test setup fixes). 6 duplicate false-positive `withAdminConnection` import claims auto-rejected. PR #284 handoff: `tasks/builds/pre-test-hardening/handoff.md`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-pre-test-hardening-2026-05-10T23-20-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-pre-test-hardening-2026-05-11T00-50-15Z.md`. CI ALL GREEN at merge time.
 
