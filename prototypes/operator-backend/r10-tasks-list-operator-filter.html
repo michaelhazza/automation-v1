@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<!--
+  R10: Tasks list with Operator filter
+  ------------------------------------
+  The EXISTING tasks list page (AgentRunHistoryPage / tasks board) with a new
+  filter chip / segmented control: "All tasks | Operator runs only".
+
+  This is NOT a new page. It's a filter state on the existing list.
+  "Operator runs only" surfaces operator-specific metadata inline on each task card:
+    - Status pill (running, completed, failed, etc.)
+    - Elapsed / remaining time
+
+  Replaces round 1 D8 dedicated "active sessions" page.
+  Empty state: "No autonomous runs in progress."
+
+  Cross-links: R10 -> R1 (running task) | R8 (launched from here when at limit) | R11 (connections)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasks — Operator runs | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; max-width: 860px; }
+
+/* Filter chips — segmented control */
+.filter-chips { display: inline-flex; align-items: center; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 2px; margin-bottom: 20px; }
+.filter-chip { padding: 6px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 500; color: #64748b; border: none; background: transparent; cursor: pointer; font-family: inherit; transition: background 0.1s, color 0.1s; }
+.filter-chip.active { background: white; color: #0f172a; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+/* Task card — mirrors TaskCard.tsx layout: px-3 py-2.5 bg-white border border-slate-200 rounded-lg */
+.task-card {
+  padding: 12px 14px; background: white; border: 1px solid #e2e8f0;
+  border-radius: 8px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  text-decoration: none;
+}
+.task-card:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.08); }
+.task-card-row1 { display: flex; align-items: center; gap: 6px; }
+.task-card-row2 { display: flex; align-items: center; justify-content: space-between; }
+.priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-normal { background: #6366f1; }
+.dot-high   { background: #f59e0b; }
+.dot-urgent { background: #ef4444; }
+.task-card-title { font-size: 13px; font-weight: 600; color: #0f172a; line-height: 1.3; flex: 1; truncate: true; }
+.task-card-agent { font-size: 11px; background: #f1f5f9; color: #475569; padding: 1px 6px; border-radius: 4px; }
+.task-card-due { font-size: 11px; color: #94a3b8; }
+
+/* Operator run badge — inline on card */
+.op-run-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.op-running { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.op-running .pulse { width: 5px; height: 5px; border-radius: 50%; background: #10b981; animation: pulse 1.5s infinite; }
+.op-completed { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.op-failed { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.op-approaching { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.op-approaching .pulse { width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; animation: pulse 1.5s infinite; }
+
+.section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; margin: 20px 0 8px; }
+
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.85)} }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg></div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher"><div class="sidebar-client-dot"></div><span class="sidebar-client-name">Acme Corp</span><span class="sidebar-client-caret">&#9662;</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+        Tasks
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="r11-connections-suspended-state.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb"><span class="topbar-breadcrumb-current">Tasks</span></div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:4px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h1 style="font-size:22px;font-weight:700;color:#0f172a;margin:0 0 4px;letter-spacing:-0.02em;">Tasks</h1>
+          <p style="font-size:13px;color:#64748b;margin:0;">Click a task to open it.</p>
+        </div>
+        <button style="padding:8px 18px;font-size:13px;font-weight:600;background:#4f46e5;color:white;border:none;border-radius:8px;cursor:pointer;">+ New task</button>
+      </div>
+
+      <!-- Filter segmented control — new addition -->
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:4px;flex-wrap:wrap;">
+        <div class="filter-chips" id="filterChips">
+          <button class="filter-chip" onclick="setFilter('all',this)" id="chip-all">All tasks</button>
+          <button class="filter-chip active" onclick="setFilter('operator',this)" id="chip-operator">Operator runs only</button>
+        </div>
+        <!-- Slot indicator when operator filter active -->
+        <span id="slotIndicator" style="font-size:11.5px;color:#64748b;">
+          3 of 3 slots in use.
+          <a href="r8-modal-concurrency-limit.html" style="color:#dc2626;font-weight:600;text-decoration:none;">At capacity.</a>
+        </span>
+      </div>
+
+      <!-- Operator runs list (active when "Operator runs only" filter selected) -->
+      <div id="view-operator">
+        <div class="section-label">Active</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+
+          <a href="r2-opentaskview-operator-running-approaching-limit.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-high"></span>
+              <span class="task-card-title">Process May invoices — Acme Corp</span>
+              <span class="op-run-badge op-approaching"><span class="pulse"></span>15 min left</span>
+            </div>
+            <div class="task-card-row2">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="task-card-agent">Invoice Processor</span>
+              </div>
+              <span class="task-card-due" style="color:#b45309;font-weight:600;">Approaching limit</span>
+            </div>
+          </a>
+
+          <a href="r1-opentaskview-operator-running.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">Q2 board report draft — Northbridge</span>
+              <span class="op-run-badge op-running"><span class="pulse"></span>52 min left</span>
+            </div>
+            <div class="task-card-row2">
+              <span class="task-card-agent">Executive Assistant</span>
+              <span class="task-card-due">1h 8min elapsed</span>
+            </div>
+          </a>
+
+          <a href="r6-opentaskview-fallback-engaged.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">Vendor contract review — Sunrise Media</span>
+              <span class="op-run-badge op-running"><span class="pulse"></span>83 min left</span>
+            </div>
+            <div class="task-card-row2">
+              <span class="task-card-agent">Contract Reviewer</span>
+              <span style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;padding:1px 6px;border-radius:4px;font-weight:600;">API fallback</span>
+            </div>
+          </a>
+
+        </div>
+
+        <div class="section-label">Recent (last 7 days)</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+
+          <a href="r3-opentaskview-operator-completed.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">April invoices review — Acme Corp</span>
+              <span class="op-run-badge op-completed">Completed</span>
+            </div>
+            <div class="task-card-row2">
+              <span class="task-card-agent">Invoice Processor</span>
+              <span class="task-card-due">2 days ago · 52 min</span>
+            </div>
+          </a>
+
+          <a href="r4-opentaskview-operator-failed.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-high"></span>
+              <span class="task-card-title">March expenses summary — Northbridge</span>
+              <span class="op-run-badge op-failed">Failed</span>
+            </div>
+            <div class="task-card-row2">
+              <span class="task-card-agent">Invoice Processor</span>
+              <span class="task-card-due">3 days ago · Token budget exhausted</span>
+            </div>
+          </a>
+
+        </div>
+      </div>
+
+      <!-- All tasks view (hidden by default in this mockup — filter shows operator) -->
+      <div id="view-all" style="display:none;">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+
+          <a href="r1-opentaskview-operator-running.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">Process May invoices — Acme Corp</span>
+              <span class="op-run-badge op-approaching" style="margin-left:auto;"><span class="pulse"></span>15 min left</span>
+            </div>
+            <div class="task-card-row2"><span class="task-card-agent">Invoice Processor</span><span class="task-card-due">Today</span></div>
+          </a>
+
+          <a href="#" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">Year-end summary slides — Acme Corp</span>
+            </div>
+            <div class="task-card-row2"><span class="task-card-agent">Executive Assistant</span><span class="task-card-due">Due Fri</span></div>
+          </a>
+
+          <a href="#" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-high"></span>
+              <span class="task-card-title">Compliance review Q2 — Northbridge</span>
+            </div>
+            <div class="task-card-row2"><span class="task-card-agent">Contract Reviewer</span><span class="task-card-due">Due Thu</span></div>
+          </a>
+
+          <a href="r1-opentaskview-operator-running.html" class="task-card">
+            <div class="task-card-row1">
+              <span class="priority-dot dot-normal"></span>
+              <span class="task-card-title">Q2 board report draft — Northbridge</span>
+              <span class="op-run-badge op-running" style="margin-left:auto;"><span class="pulse"></span>52 min left</span>
+            </div>
+            <div class="task-card-row2"><span class="task-card-agent">Executive Assistant</span><span class="task-card-due">Today</span></div>
+          </a>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+function setFilter(mode, btn) {
+  document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('view-all').style.display = mode === 'all' ? '' : 'none';
+  document.getElementById('view-operator').style.display = mode === 'operator' ? '' : 'none';
+  document.getElementById('slotIndicator').style.display = mode === 'operator' ? '' : 'none';
+}
+</script>
+
+<div style="position:fixed;bottom:0;left:0;right:0;background:#f8fafc;border-top:1px solid #e2e8f0;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:#94a3b8;z-index:50;">
+  <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+  <div style="display:flex;gap:16px;">
+    <a href="r8-modal-concurrency-limit.html" style="color:#6366f1;text-decoration:none;">R8: Concurrency modal &#8594;</a>
+    <a href="r11-connections-suspended-state.html" style="color:#6366f1;text-decoration:none;">R11: Connections &#8594;</a>
+  </div>
+</div>
+
+</body>
+</html>

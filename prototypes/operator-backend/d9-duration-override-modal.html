@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   Screen D9: Duration override modal — extend a run's time limit.
-  Operator-tier only. Shown as modal on top of session-in-progress layout.
+  Org admin only. Shown as modal on top of OpenTaskView (r2-opentaskview-operator-running-approaching-limit.html).
+
+  ROUND 2 NOTE:
+  This modal is launched from the "Extend duration" CTA in the TaskHeader controls.
+  It is NOT a standalone page. The background shows the OpenTaskView in its
+  "approaching duration limit" state (R2). The modal is triggered by:
+    TaskHeader > "Extend duration" button (visible to Org admin only, per brief §4.5)
+  See r2-opentaskview-operator-running-approaching-limit.html for the full TaskHeader context.
 -->
 <html lang="en">
 <head>
@@ -52,7 +59,7 @@ input[type="range"]::-webkit-slider-thumb {
 </head>
 <body>
 
-<!-- Background page (session in progress, dimmed) -->
+<!-- Background: OpenTaskView approaching-limit state (R2), dimmed behind modal -->
 <div class="app-shell" style="filter:blur(2px);pointer-events:none;user-select:none;opacity:0.5;">
   <aside class="sidebar">
     <div class="sidebar-logo">
@@ -64,21 +71,30 @@ input[type="range"]::-webkit-slider-thumb {
       </div>
     </div>
     <div class="sidebar-client-switcher"><div class="sidebar-client-dot"></div><span class="sidebar-client-name">Acme Corp</span><span class="sidebar-client-caret">&#9662;</span></div>
-    <div class="sidebar-section"><div class="sidebar-section-label">Agents</div><a class="sidebar-link active" href="#"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>Autonomous runs<span class="sidebar-badge">2</span></a></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link active" href="#"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Tasks</a>
+    </div>
   </aside>
   <main class="main">
-    <div class="topbar">
-      <div class="topbar-breadcrumb"><a style="color:#64748b;text-decoration:none;">Autonomous runs</a><span style="color:#cbd5e1;margin:0 4px;">/</span><span class="topbar-breadcrumb-current">Invoice Processor</span></div>
-      <div class="topbar-spacer"></div>
-    </div>
-    <div class="page-body">
-      <div style="font-size:22px;font-weight:700;color:#0f172a;margin-bottom:16px;">Invoice Processor <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:4px 12px;border-radius:20px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">Running</span></div>
-      <div class="time-strip time-strip-warn">
-        <div class="time-strip-item time-strip-warn"><div class="time-strip-label" style="color:#92400e;">Elapsed</div><div class="time-strip-value">105 min</div><div class="time-strip-sub" style="color:#b45309;">of 120 min cap</div></div>
-        <div style="width:1px;background:#fde68a;align-self:stretch;"></div>
-        <div class="time-strip-item time-strip-warn"><div class="time-strip-label" style="color:#92400e;">Remaining</div><div class="time-strip-value" style="color:#b45309;">15 min</div></div>
+    <!-- TaskHeader — approaching limit state (mirrors r2) -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e2e8f0;background:white;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:15px;font-weight:600;color:#0f172a;">Invoice Processor</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 12px;border-radius:20px;background:#fffbeb;color:#b45309;border:1px solid #fcd34d;">
+          <span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>
+          Operator running
+        </span>
+        <span style="font-size:11.5px;color:#b45309;font-weight:600;background:#fffbeb;border:1px solid #fcd34d;padding:2px 8px;border-radius:10px;">15 min left</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button style="padding:6px 12px;font-size:12px;border:1px solid #fcd34d;color:#b45309;border-radius:6px;background:#fffbeb;cursor:pointer;font-weight:600;">Extend duration</button>
+        <button style="padding:6px 12px;font-size:12px;border:1px solid #e2e8f0;color:#64748b;border-radius:6px;background:white;cursor:pointer;">Snapshot now</button>
+        <button style="padding:6px 12px;font-size:12px;border:1px solid #fecaca;color:#dc2626;border-radius:6px;background:white;cursor:pointer;">Cancel run</button>
       </div>
     </div>
+    <!-- Note: body is intentionally minimal — just showing TaskHeader context behind the modal -->
+    <div style="padding:20px;color:#94a3b8;font-size:13px;text-align:center;margin-top:40px;">OpenTaskView body (see r2 for full detail)</div>
   </main>
 </div>
 
@@ -90,7 +106,7 @@ input[type="range"]::-webkit-slider-thumb {
         Extend this run's time limit?
         <span class="admin-only-pill">Org admin only</span>
       </div>
-      <a href="d1-session-in-progress.html" class="modal-head-close">&#215;</a>
+      <a href="r2-opentaskview-operator-running-approaching-limit.html" class="modal-head-close">&#215;</a>
     </div>
     <div class="modal-body">
 
@@ -139,12 +155,17 @@ input[type="range"]::-webkit-slider-thumb {
       </div>
 
     </div>
-    <div class="modal-foot">
-      <a href="d1-session-in-progress.html" class="btn btn-secondary">Cancel</a>
-      <button class="btn btn-primary" onclick="confirmExtend()">
-        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-        Extend run
-      </button>
+    <div class="modal-foot" style="flex-direction:column;align-items:stretch;gap:0;">
+      <div style="padding:10px 0 12px;font-size:11.5px;color:#94a3b8;text-align:center;border-bottom:1px solid #f1f5f9;margin-bottom:12px;">
+        This modal is launched from the "Extend duration" button in the TaskHeader (Org admin only). See <a href="r2-opentaskview-operator-running-approaching-limit.html" style="color:#6366f1;text-decoration:none;">R2 approaching-limit view</a>.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <a href="r2-opentaskview-operator-running-approaching-limit.html" class="btn btn-secondary">Cancel</a>
+        <button class="btn btn-primary" onclick="confirmExtend()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          Extend run
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -164,7 +185,7 @@ function syncSlider(val) {
 function confirmExtend() {
   const val = document.getElementById('extendMinutes').value;
   alert('Run extended by ' + val + ' min. New cap: ' + (120 + parseInt(val)) + ' min.');
-  window.location.href = 'd1-session-in-progress.html';
+  window.location.href = 'r2-opentaskview-operator-running-approaching-limit.html';
 }
 </script>
 </body>

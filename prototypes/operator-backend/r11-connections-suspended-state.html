@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<!--
+  R11: Connections list — suspended subscription state
+  -----------------------------------------------------
+  Extension of Phase C connections list (operator-session-identity/01-connections-list.html).
+  Shows the AI Subscriptions tab with one ChatGPT subscription row in suspended state.
+
+  Replaces round 1 D10 (dedicated suspended-state page).
+  This is a STATE inside the existing Phase C connections surface, not a new page.
+
+  New elements for suspended state:
+    - Status pill "Suspended by OpenAI" (red — mirrors Phase C screen 19 vocabulary)
+    - Inline action row: "Reconnect" (primary) + "View affected tasks" (link -> R10 filtered)
+    - Collapsed expander: "What this means for your tasks" with copyable CS comms snippet
+      and link to disclosure record (per Spec C consent_record_id pattern)
+
+  Cross-links: R11 -> R10 (view affected tasks) | R9 (from modal if no connections)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connections — AI Subscriptions | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.page-header { display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:12px; }
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+
+/* Tab strip (from Phase C 01) */
+.tab-strip { display:flex;align-items:flex-end;border-bottom:2px solid #e2e8f0;margin-bottom:20px;gap:0; }
+.tab-btn { display:inline-flex;align-items:center;gap:7px;padding:9px 18px 10px;font-size:13px;font-weight:500;color:#64748b;background:transparent;border:none;cursor:pointer;font-family:inherit;position:relative;border-bottom:2px solid transparent;margin-bottom:-2px; }
+.tab-btn.active { color:#4338ca;font-weight:700;border-bottom-color:#4338ca; }
+.tab-count { display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:10px;background:#f1f5f9;color:#64748b; }
+
+/* Subscription table rows */
+.sub-table { width:100%;border-collapse:separate;border-spacing:0; }
+.sub-row { background:white; }
+.sub-row td { padding:14px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#334155;vertical-align:top; }
+.sub-row:last-child td { border-bottom:none; }
+.sub-head th { padding:10px 16px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#94a3b8;text-align:left;border-bottom:1px solid #e2e8f0;background:#f8fafc; }
+
+/* Status pills — Phase C vocabulary */
+.status-connected { display:inline-flex;align-items:center;gap:5px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 10px;border-radius:10px;font-size:11.5px;font-weight:600; }
+.status-connected .dot { width:6px;height:6px;border-radius:50%;background:#10b981; }
+.status-suspended { display:inline-flex;align-items:center;gap:5px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:2px 10px;border-radius:10px;font-size:11.5px;font-weight:600; }
+.status-suspended .dot { width:6px;height:6px;border-radius:50%;background:#ef4444; }
+
+/* Suspended row highlight */
+.sub-row-suspended td { background:#fef9f9; }
+.sub-row-suspended td:first-child { border-left:3px solid #fecaca; }
+
+/* Inline action row for suspended */
+.suspended-actions { display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap; }
+
+/* Expander */
+.expander-head { display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:#b45309;cursor:pointer;background:none;border:none;font-family:inherit;padding:0;text-align:left; }
+.expander-head:hover { color:#92400e; }
+.expander-body { display:none;margin-top:12px; }
+.expander-body.open { display:block; }
+
+/* CS comms snippet */
+.comms-snippet {
+  background: #1e293b; color: #94a3b8; border-radius: 8px;
+  padding: 14px 16px; font-family: 'Menlo','Courier New',monospace;
+  font-size: 11.5px; line-height: 1.7; position: relative;
+}
+.copy-btn {
+  position:absolute;top:8px;right:8px;
+  padding:3px 10px;font-size:11px;font-weight:600;
+  background:#334155;color:#94a3b8;border:1px solid #475569;border-radius:5px;
+  cursor:pointer;font-family:inherit;
+}
+.copy-btn:hover { background:#475569;color:white; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg></div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher"><div class="sidebar-client-dot"></div><span class="sidebar-client-name">Acme Corp</span><span class="sidebar-client-caret">&#9662;</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link" href="r10-tasks-list-operator-filter.html"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Tasks</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link active" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb"><span class="topbar-breadcrumb-current">Connections</span></div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:4px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Connections</h1>
+          <p style="font-size:13px;color:#64748b;margin:4px 0 0;">Manage integrations, subscriptions, and API credentials for your workspace.</p>
+        </div>
+      </div>
+
+      <!-- Tab strip — AI Subscriptions active -->
+      <div class="tab-strip">
+        <button class="tab-btn">App Integrations <span class="tab-count">3</span></button>
+        <button class="tab-btn">Web Logins <span class="tab-count">3</span></button>
+        <button class="tab-btn active">AI Subscriptions <span class="tab-count">2</span></button>
+      </div>
+
+      <!-- Add subscription CTA -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <p style="font-size:13px;color:#64748b;margin:0;">Connect an AI subscription to run autonomous tasks using your existing plan.</p>
+        <button style="padding:7px 16px;font-size:12.5px;font-weight:600;background:#4f46e5;color:white;border:none;border-radius:7px;cursor:pointer;">+ Connect AI Subscription</button>
+      </div>
+
+      <!-- Table -->
+      <div class="section-card" style="background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <table class="sub-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Status</th>
+              <th>Plan</th>
+              <th>Added</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <!-- Suspended row — highlighted -->
+            <tr class="sub-row sub-row-suspended">
+              <td colspan="5" style="padding:0;">
+                <!-- Condensed row summary -->
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:14px 16px;gap:12px;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:flex-start;gap:12px;">
+                    <div style="width:36px;height:36px;border-radius:8px;background:#fef2f2;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">&#129302;</div>
+                    <div>
+                      <div style="font-size:13.5px;font-weight:700;color:#0f172a;margin-bottom:3px;">sarah.m@acmecorp.com</div>
+                      <div style="font-size:12px;color:#64748b;margin-bottom:6px;">ChatGPT Pro · Connected 2 Apr 2026</div>
+                      <span class="status-suspended"><span class="dot"></span>Suspended by OpenAI</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Inline action row -->
+                <div style="padding:0 16px 14px 64px;">
+                  <div class="suspended-actions">
+                    <button style="padding:7px 16px;font-size:12.5px;font-weight:600;background:#4f46e5;color:white;border:none;border-radius:7px;cursor:pointer;">Reconnect</button>
+                    <a href="r10-tasks-list-operator-filter.html" style="font-size:12.5px;font-weight:500;color:#6366f1;text-decoration:none;">View affected tasks &#8594;</a>
+                  </div>
+
+                  <!-- Expander: what this means for your tasks -->
+                  <div style="margin-top:12px;padding-top:12px;border-top:1px solid #fecaca;">
+                    <button class="expander-head" onclick="toggleExpander('suspended-detail',this)">
+                      <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" id="chevron-suspended"><polyline points="6 9 12 15 18 9"/></svg>
+                      What this means for your tasks
+                    </button>
+                    <div class="expander-body" id="suspended-detail">
+                      <p style="font-size:12.5px;color:#64748b;line-height:1.65;margin:0 0 12px;">
+                        Any operator runs using this subscription are stopped or falling back to your API key.
+                        Runs with no API key fallback will fail with error <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;font-size:11px;">OPERATOR_SESSION_UNAVAILABLE</code>.
+                      </p>
+                      <!-- CS comms snippet -->
+                      <div style="font-size:11.5px;font-weight:600;color:#334155;margin-bottom:6px;">Customer-facing message template</div>
+                      <div class="comms-snippet">
+                        <button class="copy-btn" onclick="copySnippet()">Copy</button>
+                        <span style="color:#818cf8;">Subject:</span> Automated run paused — action needed<br><br>
+                        Your ChatGPT subscription has been suspended by OpenAI. Any Synthetos runs<br>
+                        using this subscription have stopped or switched to a fallback API key.<br><br>
+                        To resume: reconnect your subscription in Settings &gt; Connections, then<br>
+                        retry the affected tasks.<br><br>
+                        <span style="color:#475569;">Reference: consent_record_<span id="consentId" style="color:#34d399;">R-2847-AC01</span></span>
+                      </div>
+                      <div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b;">
+                        <a href="#" style="color:#6366f1;text-decoration:none;font-weight:500;">View disclosure record &#8594;</a>
+                        <span style="color:#cbd5e1;">|</span>
+                        <span>Ref: consent_record_R-2847-AC01</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Normal connected row -->
+            <tr class="sub-row">
+              <td>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="width:32px;height:32px;border-radius:7px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">&#129302;</div>
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:#0f172a;">ops@acmecorp.com</div>
+                    <div style="font-size:11.5px;color:#64748b;">ChatGPT Pro</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="status-connected"><span class="dot"></span>Connected</span></td>
+              <td><span style="font-size:12.5px;color:#334155;">Pro</span></td>
+              <td><span style="font-size:12.5px;color:#64748b;">1 May 2026</span></td>
+              <td>
+                <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
+                  <button style="padding:5px 12px;font-size:12px;font-weight:500;background:white;color:#475569;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;">Edit</button>
+                  <button style="padding:5px 12px;font-size:12px;font-weight:500;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">Disconnect</button>
+                </div>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+function toggleExpander(id, btn) {
+  const el = document.getElementById(id);
+  const chevron = document.getElementById('chevron-' + id.replace('-detail','').replace('suspended', 'suspended'));
+  const open = el.classList.contains('open');
+  el.classList.toggle('open', !open);
+  btn.querySelector('svg').style.transform = open ? '' : 'rotate(180deg)';
+}
+function copySnippet() {
+  const text = document.querySelector('.comms-snippet').innerText.replace('Copy\n', '');
+  navigator.clipboard?.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
+
+<div style="position:fixed;bottom:0;left:0;right:0;background:#f8fafc;border-top:1px solid #e2e8f0;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:#94a3b8;z-index:50;">
+  <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+  <div style="display:flex;gap:16px;">
+    <a href="r10-tasks-list-operator-filter.html" style="color:#6366f1;text-decoration:none;">R10: View affected tasks &#8594;</a>
+    <a href="../operator-session-identity/01-connections-list.html" style="color:#6366f1;text-decoration:none;">Phase C connections (reference) &#8594;</a>
+  </div>
+</div>
+
+</body>
+</html>

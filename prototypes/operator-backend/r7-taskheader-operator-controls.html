@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<!--
+  R7: TaskHeader operator controls — component spec across 4 states
+  -----------------------------------------------------------------
+  Close-up isolated view of the TaskHeader region (mirrors TaskHeader.tsx)
+  across four operator-run states. This is NOT a full page — it's a
+  component-spec mockup showing the progression.
+
+  States:
+    (a) Idle — task not yet running with operator
+    (b) Operator running — green status pill, countdown, Cancel + Snapshot buttons
+    (c) Approaching limit — amber pill, amber countdown, "Extend duration" CTA (Org admin only)
+    (d) Terminal (completed) — final status pill, "View full Run Trace" link, retry option
+
+  Layout mirrors TaskHeader.tsx exactly:
+    - flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white
+    - Left: title + status pill (+ optional sub-labels)
+    - Right: action buttons
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskHeader: Operator Controls — Component Spec | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: #f1f5f9; padding: 40px 48px; max-width: 900px; margin: 0 auto; font-family: 'Inter', sans-serif; }
+.page-title { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.02em; }
+.page-sub { font-size: 13px; color: #64748b; margin-bottom: 40px; line-height: 1.6; max-width: 640px; }
+
+.state-block { margin-bottom: 28px; }
+.state-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #94a3b8; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+}
+.state-label::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+.state-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+}
+.badge-a { background: #f1f5f9; color: #475569; }
+.badge-b { background: #ecfdf5; color: #047857; }
+.badge-c { background: #fffbeb; color: #b45309; }
+.badge-d { background: #eef2ff; color: #4338ca; }
+
+/* TaskHeader — matches TaskHeader.tsx exactly */
+.task-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 10px;
+  background: white; gap: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.header-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.task-title { font-size: 15px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.status-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* Pill colours — matching TaskHeader.tsx badgeColor logic */
+.pill-active { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.pill-active .dot { background: #10b981; }
+.pill-running { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.pill-running .dot { background: #10b981; animation: pulse 1.5s infinite; }
+.pill-approaching { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.pill-approaching .dot { background: #f59e0b; animation: pulse 1.5s infinite; }
+.pill-completed { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.pill-completed .dot { background: #6366f1; }
+
+.time-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.time-badge-green { color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; }
+.time-badge-amber { color: #b45309; background: #fffbeb; border: 1px solid #fcd34d; font-weight: 700; }
+.time-elapsed { font-size: 11.5px; color: #94a3b8; }
+.fallback-tag { font-size: 10.5px; font-weight: 600; color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; padding: 2px 8px; border-radius: 10px; }
+.admin-pill { font-size: 10px; font-weight: 600; color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe; padding: 1px 6px; border-radius: 5px; }
+
+.header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.hdr-btn { padding: 6px 12px; font-size: 12px; font-weight: 500; border-radius: 6px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.btn-idle { background: #4f46e5; color: white; border: none; font-weight: 600; }
+.btn-secondary { background: white; color: #475569; border: 1px solid #e2e8f0; }
+.btn-danger { background: white; color: #dc2626; border: 1px solid #fecaca; }
+.btn-extend { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; font-weight: 600; }
+.btn-primary-sm { background: #4f46e5; color: white; border: none; font-weight: 600; }
+.btn-link { background: transparent; color: #6366f1; border: none; font-size: 12px; font-weight: 500; padding: 6px 4px; }
+
+/* State description */
+.state-desc { font-size: 12px; color: #64748b; margin-top: 8px; padding: 8px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; line-height: 1.55; }
+.state-desc code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 11px; }
+
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.85)} }
+</style>
+</head>
+<body>
+
+<div class="page-title">TaskHeader: Operator Controls</div>
+<div class="page-sub">Component-spec view of the TaskHeader region (TaskHeader.tsx) across four operator-run states. Each block shows the header at a specific moment. The existing badgeColor and statusBadge logic is reused; operator-run additions are highlighted.</div>
+
+<!-- State (a): Idle -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-a">(a) Idle</span> Task exists, no operator run in progress yet</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <!-- No status pill (task not yet in a run) or use existing "Active" badge -->
+      <span class="status-pill pill-active"><span class="dot" style="animation:none;"></span>Active</span>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn btn-idle">Run with operator</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Task exists, not currently running. "Run with operator" is the primary CTA.
+    No elapsed time or time-remaining badge. Status pill uses existing "Active" style (green, non-pulsing).
+  </div>
+</div>
+
+<!-- State (b): Operator running -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-b">(b) Operator running</span> Run in progress, 23 min elapsed, 97 min left</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <span class="status-pill pill-running"><span class="dot"></span>Operator running</span>
+      <span class="time-badge time-badge-green">97 min left</span>
+      <span class="time-elapsed">23 min elapsed</span>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn btn-secondary">Snapshot now</button>
+      <button class="hdr-btn btn-danger">Cancel run</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Status pill: <code>Operator running</code> (green, pulsing dot). Time-remaining badge shows countdown.
+    Actions: Snapshot now (secondary, launches mid-session harvest) + Cancel run (danger, opens confirm modal).
+    Maps to <code>projection.runStatus === 'running'</code> when adapter is <code>operator_managed</code>.
+  </div>
+</div>
+
+<!-- State (b) variant: with fallback engaged -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-b">(b) variant</span> Operator running + API fallback engaged</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <span class="status-pill pill-running"><span class="dot"></span>Operator running</span>
+      <span class="fallback-tag">API fallback</span>
+      <span class="time-badge time-badge-green">83 min left</span>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn btn-secondary">Snapshot now</button>
+      <button class="hdr-btn btn-danger">Cancel run</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Same as (b), with a small "API fallback" amber tag added inline. Status pill stays green — the run is still progressing.
+    The fallback is surfaced in the ActivityPane inline event row (see R6), not by changing the pill.
+  </div>
+</div>
+
+<!-- State (c): Approaching limit -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-c">(c) Approaching limit</span> 105 min elapsed, 15 min left</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <span class="status-pill pill-approaching"><span class="dot"></span>Operator running</span>
+      <span class="time-badge time-badge-amber">15 min left</span>
+    </div>
+    <div class="header-right">
+      <!-- Extend duration — Org admin only. Hidden from non-admins entirely. -->
+      <button class="hdr-btn btn-extend">
+        Extend duration
+        <span class="admin-pill">Org admin</span>
+      </button>
+      <button class="hdr-btn btn-secondary">Snapshot now</button>
+      <button class="hdr-btn btn-danger">Cancel run</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Status pill switches to amber. Time-remaining badge also amber and bold.
+    "Extend duration" CTA appears (Org admin only — absent from DOM for non-admins, not disabled).
+    Extend button links to D9 modal. See R2 for the full page view.
+  </div>
+</div>
+
+<!-- State (d): Terminal (completed) -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-d">(d) Terminal</span> Run completed — 47 min 22 sec</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <span class="status-pill pill-completed"><span class="dot"></span>Completed</span>
+      <span class="time-elapsed">47 min 22 sec</span>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn btn-link">View full Run Trace &#8594;</button>
+      <button class="hdr-btn btn-primary-sm">Retry run</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Status pill: <code>Completed</code> (indigo) — matches existing <code>statusBadge</code> mapping for <code>stopped</code> and terminal states.
+    Elapsed time shown as plain text. "View full Run Trace" links to C2. Retry is available for failed/cancelled too.
+    Files tab auto-switches to active in RightPaneTabs on terminal state.
+  </div>
+</div>
+
+<!-- State (d) variant: Failed -->
+<div class="state-block">
+  <div class="state-label"><span class="state-badge badge-d">(d) variant</span> Terminal — failed</div>
+  <div class="task-header">
+    <div class="header-left">
+      <span class="task-title">Process May invoices — Acme Corp</span>
+      <span class="status-pill" style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
+        <span class="dot" style="background:#ef4444;"></span>Failed
+      </span>
+      <span style="font-size:11.5px;color:#94a3b8;background:#fef2f2;padding:2px 8px;border-radius:10px;border:1px solid #fecaca;">Token budget exhausted</span>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn btn-link">View full Run Trace &#8594;</button>
+      <button class="hdr-btn btn-primary-sm">Retry run</button>
+    </div>
+  </div>
+  <div class="state-desc">
+    Status pill: <code>Failed</code> (red). Failure reason shown as an inline sub-label badge.
+    Same actions as completed: trace link + retry. See R4 for the full page view.
+  </div>
+</div>
+
+<div style="margin-top:24px;text-align:right;font-size:11.5px;color:#94a3b8;">
+  <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+  &nbsp;|&nbsp;
+  <a href="r1-opentaskview-operator-running.html" style="color:#6366f1;text-decoration:none;">R1: Full running view</a>
+  &nbsp;|&nbsp;
+  <a href="r2-opentaskview-operator-running-approaching-limit.html" style="color:#6366f1;text-decoration:none;">R2: Approaching limit</a>
+</div>
+
+</body>
+</html>

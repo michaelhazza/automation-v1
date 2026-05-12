@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<!--
+  R8: Concurrency limit modal
+  ---------------------------
+  Launched from "Run with operator" when subaccount is at the 3-concurrent cap.
+  Shown on top of a faded tasks list background (R10) so launch context is obvious.
+
+  Modal spec:
+    - Title: "You're at your limit of 3 active autonomous runs."
+    - 3 active session cards inline (agent name, task title links to OpenTaskView, elapsed, Cancel per row)
+    - Footer: "Cancel one or wait. Org admins can change limits in Settings."
+    - Primary action: Close. No primary CTA (user must free a slot).
+  Replaces round 1 D7. No separate dedicated page — this is a modal.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concurrency Limit | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 24px 28px; }
+</style>
+</head>
+<body>
+
+<!-- Background: faded tasks list (R10 context) -->
+<div class="app-shell" style="filter:blur(2px);pointer-events:none;user-select:none;opacity:0.45;">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg></div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher"><div class="sidebar-client-dot"></div><span class="sidebar-client-name">Acme Corp</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link active" href="#"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Tasks</a>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar"><div class="topbar-spacer"></div></div>
+    <div class="page-body">
+      <!-- Simulated tasks list -->
+      <div style="margin-bottom:20px;">
+        <h1 style="font-size:22px;font-weight:700;color:#0f172a;margin:0 0 4px;">Tasks</h1>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+          <span style="padding:5px 14px;background:#4f46e5;color:white;border-radius:20px;font-size:12px;font-weight:600;">All tasks</span>
+          <span style="padding:5px 14px;background:white;border:1px solid #e2e8f0;color:#64748b;border-radius:20px;font-size:12px;">Operator runs only</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="padding:12px 16px;background:white;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;gap:12px;"><div style="width:8px;height:8px;border-radius:50%;background:#10b981;animation:none;"></div><span style="font-size:13px;font-weight:600;color:#0f172a;flex:1;">Process May invoices — Acme Corp</span><span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;">Running · 23 min</span></div>
+          <div style="padding:12px 16px;background:white;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;gap:12px;"><div style="width:8px;height:8px;border-radius:50%;background:#10b981;"></div><span style="font-size:13px;font-weight:600;color:#0f172a;flex:1;">Q2 board report draft — Northbridge</span><span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;">Running · 1h 8min</span></div>
+          <div style="padding:12px 16px;background:white;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;gap:12px;"><div style="width:8px;height:8px;border-radius:50%;background:#10b981;"></div><span style="font-size:13px;font-weight:600;color:#0f172a;flex:1;">Vendor contract review — Sunrise Media</span><span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;">Running · 47 min</span></div>
+          <div style="padding:12px 16px;background:white;border:1px solid #e2e8f0;border-radius:8px;"><span style="font-size:13px;font-weight:600;color:#0f172a;">Year-end summary slides — Acme Corp</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" style="position:fixed;inset:0;background:rgba(15,23,42,0.5);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(2px);">
+  <div class="modal-box" style="width:560px;">
+    <div class="modal-head">
+      <div class="modal-head-title" style="color:#b91c1c;">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+        You're at your limit of 3 active autonomous runs.
+      </div>
+      <button class="modal-head-close" onclick="window.location='r10-tasks-list-operator-filter.html'">&#215;</button>
+    </div>
+    <div class="modal-body">
+
+      <p style="font-size:13.5px;color:#475569;margin:0 0 18px;line-height:1.6;">
+        Cancel one of these runs to start a new one, or wait until one finishes.
+      </p>
+
+      <!-- 3 active session cards -->
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;">
+
+        <!-- Card 1 -->
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Invoice Processor</div>
+            <a href="r1-opentaskview-operator-running.html" style="font-size:12px;color:#6366f1;text-decoration:none;">Process May invoices — Acme Corp &#8594;</a>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;font-weight:600;">23 min</span>
+            <button onclick="cancelConfirm('Invoice Processor')" style="padding:5px 12px;font-size:12px;font-weight:600;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Card 2 -->
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Executive Assistant</div>
+            <a href="#" style="font-size:12px;color:#6366f1;text-decoration:none;">Q2 board report draft — Northbridge &#8594;</a>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;font-weight:600;">1h 8min</span>
+            <button onclick="cancelConfirm('Executive Assistant')" style="padding:5px 12px;font-size:12px;font-weight:600;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Card 3 -->
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Contract Reviewer</div>
+            <a href="#" style="font-size:12px;color:#6366f1;text-decoration:none;">Vendor contract review — Sunrise Media &#8594;</a>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:11px;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:10px;font-weight:600;">47 min</span>
+            <button onclick="cancelConfirm('Contract Reviewer')" style="padding:5px 12px;font-size:12px;font-weight:600;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="modal-foot" style="flex-direction:column;align-items:stretch;gap:0;">
+      <div style="font-size:12px;color:#64748b;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #f1f5f9;text-align:center;">
+        Cancel one or wait.
+        <a href="../operator-session-identity/04-subscription-detail.html" style="color:#6366f1;text-decoration:none;font-weight:500;">Org admins can change limits in Settings &#8594;</a>
+      </div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button onclick="window.location='r10-tasks-list-operator-filter.html'" style="padding:8px 20px;border-radius:7px;border:1px solid #e2e8f0;background:white;color:#475569;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function cancelConfirm(name) {
+  if (confirm('Cancel the ' + name + ' run? This cannot be undone.')) {
+    alert(name + ' run cancelled. You can now start a new run.');
+    window.location = 'r10-tasks-list-operator-filter.html';
+  }
+}
+</script>
+
+</body>
+</html>

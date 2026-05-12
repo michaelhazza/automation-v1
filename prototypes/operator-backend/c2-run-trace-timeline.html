@@ -1,9 +1,24 @@
 <!DOCTYPE html>
 <!--
   Screen C2: Run Trace timeline — operator run (Phase D)
-  Shows a complete autonomous run with all Phase D event types in chronological order.
-  Primary task: operator reviewing what happened in a run.
-  Events: session start, credential injected, step boundaries, fallback engaged, artefact harvest, completed.
+  -------------------------------------------------------
+  ROUND 2 FRAMING NOTE:
+  This is the EXISTING RunTracePage.tsx (/client/src/pages/operate/RunTracePage.tsx)
+  extended with new Phase D event types. There is no new page; this mockup shows
+  what RunTracePage renders when the run's adapter_id is 'operator_managed'.
+
+  New event types added by Phase D (emitted by the Operator Backend adapter):
+    - operator-session.started         (session start, credential envelope)
+    - operator-session.credential_injected  (auth-type pill, plan-tier, token redacted)
+    - operator-session.step_boundary   (step N of N, step activity label)
+    - operator-session.fallback_engaged  (amber, "why?" expandable)
+    - operator-session.artifact_harvest  (artefact count)
+    - operator-session.completed / .failed / .cancelled  (terminal events)
+
+  These are rendered via the existing RunTraceEventRenderer's SystemEventRow pattern.
+  The existing "Tool calls" section follows below, unchanged.
+
+  Primary task: operator reviewing what happened in an autonomous run.
 -->
 <html lang="en">
 <head>
@@ -151,9 +166,9 @@
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
         Agents
       </a>
-      <a class="sidebar-link active" href="d8-active-sessions-list.html">
+      <a class="sidebar-link active" href="r10-tasks-list-operator-filter.html">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-        Autonomous runs
+        Tasks
       </a>
     </div>
     <div class="sidebar-section">
@@ -168,9 +183,9 @@
   <main class="main">
     <div class="topbar">
       <div class="topbar-breadcrumb">
-        <a href="d8-active-sessions-list.html" style="color:#64748b;text-decoration:none;">Autonomous runs</a>
+        <a href="r10-tasks-list-operator-filter.html" style="color:#64748b;text-decoration:none;">Tasks</a>
         <span style="color:#cbd5e1;margin:0 4px;">/</span>
-        <a href="d2-session-completed.html" style="color:#64748b;text-decoration:none;">Invoice Processor</a>
+        <a href="r3-opentaskview-operator-completed.html" style="color:#64748b;text-decoration:none;">Invoice Processor</a>
         <span style="color:#cbd5e1;margin:0 4px;">/</span>
         <span class="topbar-breadcrumb-current">Run Trace</span>
       </div>
@@ -182,7 +197,7 @@
     <div class="page-body">
       <!-- Page header -->
       <div style="margin-bottom:8px;">
-        <a href="d2-session-completed.html" style="font-size:13px;color:#6366f1;text-decoration:none;">&#8592; Invoice Processor run</a>
+        <a href="r3-opentaskview-operator-completed.html" style="font-size:13px;color:#6366f1;text-decoration:none;">&#8592; Invoice Processor task</a>
       </div>
 
       <!-- Run header card -->
@@ -516,7 +531,7 @@
             </div>
           </div>
 
-          <a href="d2-session-completed.html" class="btn btn-secondary" style="text-align:center;justify-content:center;">&#8592; Run summary</a>
+          <a href="r3-opentaskview-operator-completed.html" class="btn btn-secondary" style="text-align:center;justify-content:center;">&#8592; Task view</a>
         </div>
 
       </div>
