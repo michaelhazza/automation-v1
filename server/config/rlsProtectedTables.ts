@@ -1273,6 +1273,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0329_ea_drafts.sql',
     rationale: 'Per-owner EA draft payloads with send-state machine — body and target_ref may contain email content, calendar details, or Slack messages. Owner-scoped visibility with admin read-through; cross-tenant leak exposes personal communications and PII.',
   },
+  // 0330 — Personal Assistant V1: external-source trigger dedup ledger
+  {
+    tableName: 'external_trigger_dedup',
+    schemaFile: 'externalTriggerDedup.ts',
+    policyMigration: '0330_external_source_triggers.sql',
+    rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

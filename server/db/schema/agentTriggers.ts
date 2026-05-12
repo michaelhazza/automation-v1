@@ -22,7 +22,7 @@ export const agentTriggers = pgTable(
       .references(() => subaccountAgents.id),
 
     eventType: text('event_type').notNull()
-      .$type<'task_created' | 'task_moved' | 'agent_completed' | 'org_task_created' | 'org_task_moved' | 'org_agent_completed'>(),
+      .$type<'task_created' | 'task_moved' | 'agent_completed' | 'org_task_created' | 'org_task_moved' | 'org_agent_completed' | 'gmail_message_received' | 'calendar_event_imminent' | 'slack_mention'>(),
 
     // Filter criteria — all keys must match event data for trigger to fire
     eventFilter: jsonb('event_filter').default('{}'),
