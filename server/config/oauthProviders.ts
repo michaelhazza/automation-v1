@@ -46,7 +46,9 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     tokenUrl: 'https://slack.com/api/oauth.v2.access',
     // chat:write.public — post to channels the bot hasn't been invited to
     // files:write       — attach report files
-    scopes: ['chat:write', 'chat:write.public', 'channels:read', 'users:read', 'files:write'],
+    scopes: ['chat:write', 'chat:write.public', 'channels:read', 'users:read', 'files:write',
+     'channels:history', 'im:write', 'im:history', 'mpim:history', 'search:read',
+     'groups:read', 'groups:history', 'mpim:read', 'app_mentions:read'],
   },
 
   ghl: {
@@ -84,6 +86,16 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     tokenUrl: 'https://oauth2.googleapis.com/token',
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
     // Forces refresh_token issuance even after the user has previously consented
+    extra: { access_type: 'offline', prompt: 'consent' },
+  },
+
+  google_calendar: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: [
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar.events',
+    ],
     extra: { access_type: 'offline', prompt: 'consent' },
   },
 };
