@@ -245,10 +245,10 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
     <div class="screen-num num-r-amber">R2</div>
     <div class="screen-info">
       <div class="screen-title">
-        OpenTaskView — Approaching duration limit (15 min left)
+        OpenTaskView — Approaching chain-link cap (15 min left)
         <span class="badge badge-r2">New R2</span>
       </div>
-      <div class="screen-desc">Same layout, same task. Status pill amber. "15 min left" badge amber. ActivityPane amber inline notice. "Extend duration" CTA in TaskHeader (Org admin only). Extend button links to D9 modal.</div>
+      <div class="screen-desc">Same layout, same task. Status pill amber. "15 min left" badge amber. ActivityPane amber inline notice. No manual extend CTA — the next chain link auto-dispatches on handoff; the R15 auto-extend grace state covers mid-step cases.</div>
     </div>
     <span class="screen-arrow">&#8250;</span>
   </a>
@@ -316,7 +316,7 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
         <span class="badge badge-comp">Component spec</span>
         <span class="badge badge-r2">New R2</span>
       </div>
-      <div class="screen-desc">Close-up of TaskHeader.tsx across: (a) Idle, (b) Operator running, (b) variant with API fallback, (c) Approaching limit with "Extend duration" CTA, (d) Terminal. Shows exact pill vocabulary, button layout, and admin-only gating.</div>
+      <div class="screen-desc">Close-up of TaskHeader.tsx across: (a) Idle, (b) Operator running, (b) variant with API fallback, (c) Approaching chain-link cap (no manual extend CTA per brief v2), (d) Terminal. Shows exact pill vocabulary and button layout.</div>
     </div>
     <span class="screen-arrow">&#8250;</span>
   </a>
@@ -325,11 +325,11 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
     <div class="screen-num num-modal">R8</div>
     <div class="screen-info">
       <div class="screen-title">
-        Modal: Concurrency limit (3 of 3 slots)
+        Modal: Concurrency limit (subaccount cap reached)
         <span class="badge badge-mod">Modal</span>
         <span class="badge badge-r2">New R2</span>
       </div>
-      <div class="screen-desc">Launched from "Run with operator" when at the 3-session cap. 3 active session cards with task links and per-row Cancel CTAs. Footer: Org admin settings link. Primary action: Close only. Shown over faded tasks list background. Replaces round 1 D7.</div>
+      <div class="screen-desc">Launched from "Run with operator" when the subaccount is at its concurrent-operator-sessions cap (default 5, configurable 1-25 in R13). Active session cards with task links and per-row Cancel CTAs. Footer: link to R13 subaccount settings. Primary action: Close only. Shown over faded board background. In-flight chain continuations queue FIFO and do NOT trigger this modal — it's for new user-requested runs only.</div>
     </div>
     <span class="screen-arrow">&#8250;</span>
   </a>
@@ -343,19 +343,6 @@ body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter
         <span class="badge badge-r2">New R2</span>
       </div>
       <div class="screen-desc">Launched when user tries to start a run but has neither a subscription nor a fallback API key. Two status cards (what's missing). Primary: "Add fallback API key". Secondary: "Connect a subscription". Shown over faded TaskHeader context. Replaces round 1 D6.</div>
-    </div>
-    <span class="screen-arrow">&#8250;</span>
-  </a>
-
-  <a href="d9-duration-override-modal.html" class="screen-item">
-    <div class="screen-num num-d">D9</div>
-    <div class="screen-info">
-      <div class="screen-title">
-        Modal: Extend duration (Org admin only)
-        <span class="badge badge-mod">Modal</span>
-        <span class="badge badge-kept">From round 1 — updated R2</span>
-      </div>
-      <div class="screen-desc">Duration override modal (slider + number input, max 240 min total). Launched from "Extend duration" button in TaskHeader (state c, approaching limit). Footer note clarifies launch context. Shown over faded OpenTaskView R2 background.</div>
     </div>
     <span class="screen-arrow">&#8250;</span>
   </a>

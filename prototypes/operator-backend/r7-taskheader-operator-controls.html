@@ -9,7 +9,7 @@
   States:
     (a) Idle — task not yet running with operator
     (b) Operator running — green status pill, countdown, Cancel + Snapshot buttons
-    (c) Approaching limit — amber pill, amber countdown, "Extend duration" CTA (Org admin only)
+    (c) Approaching chain-link cap — amber pill, amber countdown. No manual extend (chain-link handoff is automatic; auto-extend grace per R15 covers mid-step cases).
     (d) Terminal (completed) — final status pill, "View full Run Trace" link, retry option
 
   Layout mirrors TaskHeader.tsx exactly:
@@ -158,9 +158,9 @@ body { background: #f1f5f9; padding: 40px 48px; max-width: 900px; margin: 0 auto
   </div>
 </div>
 
-<!-- State (c): Approaching limit -->
+<!-- State (c): Approaching chain-link cap -->
 <div class="state-block">
-  <div class="state-label"><span class="state-badge badge-c">(c) Approaching limit</span> 105 min elapsed, 15 min left</div>
+  <div class="state-label"><span class="state-badge badge-c">(c) Approaching chain-link cap</span> 105 min elapsed, 15 min left in this session</div>
   <div class="task-header">
     <div class="header-left">
       <span class="task-title">Process May invoices — Acme Corp</span>
@@ -168,19 +168,12 @@ body { background: #f1f5f9; padding: 40px 48px; max-width: 900px; margin: 0 auto
       <span class="time-badge time-badge-amber">15 min left</span>
     </div>
     <div class="header-right">
-      <!-- Extend duration — Org admin only. Hidden from non-admins entirely. -->
-      <button class="hdr-btn btn-extend">
-        Extend duration
-        <span class="admin-pill">Org admin</span>
-      </button>
       <button class="hdr-btn btn-secondary">Snapshot now</button>
       <button class="hdr-btn btn-danger">Cancel run</button>
     </div>
   </div>
   <div class="state-desc">
-    Status pill switches to amber. Time-remaining badge also amber and bold.
-    "Extend duration" CTA appears (Org admin only — absent from DOM for non-admins, not disabled).
-    Extend button links to D9 modal. See R2 for the full page view.
+    Status pill switches to amber. Time-remaining badge also amber and bold. No "Extend duration" CTA — brief v2 removed per-run manual extension in favour of automatic chain-link handoff (the operator checkpoints and the next chain link picks up). If the operator is mid-step at the cap, the auto-extend grace state (R15) takes over. Subaccount-level limits adjustable in R13.
   </div>
 </div>
 

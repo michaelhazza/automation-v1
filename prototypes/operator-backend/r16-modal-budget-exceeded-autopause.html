@@ -9,7 +9,7 @@
   Modal title: "Task paused: budget cap reached"
   Body: plain English — what happened, what the cap was, what options exist.
   Two actions:
-    - Primary: "Extend budget +1000 min" (extends by a fixed chunk)
+    - Primary: extend budget. Quick actions for +1,000 min and +3,000 min, plus a custom-amount input (60-60,000 min, in 60-min increments to match brief). All three flow through the same `task.operator_budget.extended` audit event with the chosen minutes.
     - Secondary/destructive: "Cancel task"
   Below primary: small link "Adjust default in subaccount settings" -> R13 operator tab
 -->
@@ -119,10 +119,23 @@
         <!-- Option: Extend -->
         <div style="border:1px solid #c7d2fe;border-radius:8px;padding:13px 14px;background:#fafbff;">
           <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Extend the budget and continue</div>
-          <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Adds 1,000 minutes (about 8 more sessions). The task will resume from where it left off.</div>
-          <button onclick="extend()" style="padding:8px 20px;background:#4f46e5;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;" onmouseover="this.style.background='#4338ca'" onmouseout="this.style.background='#4f46e5'">
-            Extend budget +1,000 min
-          </button>
+          <div style="font-size:12px;color:#64748b;margin-bottom:10px;">Adds minutes to the per-task cap. The task resumes from where it left off.</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button onclick="extend(1000)" style="padding:8px 16px;background:#4f46e5;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;" onmouseover="this.style.background='#4338ca'" onmouseout="this.style.background='#4f46e5'">
+              +1,000 min
+            </button>
+            <button onclick="extend(3000)" style="padding:8px 16px;background:white;color:#4f46e5;border:1px solid #c7d2fe;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;" onmouseover="this.style.background='#fafbff'" onmouseout="this.style.background='white'">
+              +3,000 min
+            </button>
+            <span style="font-size:12px;color:#94a3b8;">or</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="number" id="customAmt" min="60" max="60000" step="60" placeholder="Custom" style="width:90px;padding:7px 9px;font-size:13px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;outline:none;" onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'">
+              <span style="font-size:12px;color:#64748b;">min</span>
+              <button onclick="extendCustom()" style="padding:7px 14px;background:white;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+                Add
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Option: Cancel -->
@@ -152,9 +165,17 @@
 </div>
 
 <script>
-function extend() {
-  alert('Budget extended by 1,000 minutes. The task will resume from step 48.');
+function extend(minutes) {
+  alert('Budget extended by ' + minutes.toLocaleString() + ' minutes. The task will resume from step 48.');
   window.location = 'r1-opentaskview-operator-running.html';
+}
+function extendCustom() {
+  var v = parseInt(document.getElementById('customAmt').value, 10);
+  if (!v || v < 60 || v > 60000) {
+    alert('Enter a value between 60 and 60,000 minutes (in 60-min increments).');
+    return;
+  }
+  extend(v);
 }
 function cancelTask() {
   if (confirm('Cancel this task? The task will stop and artefacts from steps 1-48 will be kept.')) {

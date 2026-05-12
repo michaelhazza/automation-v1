@@ -246,3 +246,57 @@ Codebase read before drafting:
 **Files modified:**
 - `prototypes/operator-backend/r12-workspace-board-operator-filter.html` (filter row swap + script rewrite)
 - `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
+
+## Round 3.2 — 2026-05-12 (brief v2/v2.2 alignment sync)
+
+**Operator feedback:** technical review found stale copy in mockups from earlier brief versions: "3 concurrent" (now 5), "120 min per run" (now per chain link), "Extend duration" CTA (brief v2 removed manual extension in favour of automatic chain-link handoff + auto-extend grace), R13 field min/max ranges mismatched against brief v2.1 §3.14 table, event namespace inconsistency in C2, R16 missing custom-amount extension input, R17 needed attempt-group note for v2.2 fresh-profile restart.
+
+**Codebase grounding (Step 0a) — PER SCREEN:** (this round is mockup-internal sync only; no new screens drawn — all edits are to existing round-2/round-3 mockups to match the locked brief)
+- r2: extends `client/src/pages/OpenTaskView.tsx` (unchanged grounding; copy + control removal)
+- r7: extends `client/src/components/openTask/TaskHeader.tsx` (unchanged grounding; copy + control removal)
+- r8: extends task-create / "Run with operator" flow (unchanged grounding; cap + copy + card count update)
+- r13: extends `client/src/pages/AdminSubaccountDetailPage.tsx` (unchanged grounding; range constraints corrected)
+- r16: standalone modal pattern (unchanged grounding; primary action restructured)
+- r17: extends `client/src/pages/operate/RunTracePage.tsx` (unchanged grounding; attempt-group note added to docblock)
+- c1: extends `client/src/pages/build/AgentEditPage.tsx` (unchanged grounding; copy + cross-link repair)
+- c2: extends `client/src/pages/operate/RunTracePage.tsx` (unchanged grounding; event namespace fix + dead link repair)
+- index.html: prototype navigation only (no app surface)
+
+**Codebase grounding — round-wide:**
+- Files read: none new (this round is a sync pass against the brief, not new grounding work)
+- Vocabulary inherited: "chain link" / "soft cap" / "auto-extend grace" / "subaccount" / "operator runs" from brief v2.x — all already established
+- New dedicated pages proposed: none. D9 duration-override modal **deleted** because brief v2 removed manual per-run extension entirely.
+
+**Changes made:**
+1. **Concurrency default 3 → 5, data-driven phrasing** — C1, R8 modal title and body, index.html copy: now read "Up to 5 running at once" / "your subaccount limit of 5 active autonomous runs" with explicit "Per subaccount" qualifier. R8 modal cards expanded from 3 to 5 to match.
+2. **Per-run duration → per-chain-link semantics** — C1 "Duration cap" renamed to "Session cap", value "120 min per chain link" with "Auto-extends 30 min if mid-step" qualifier. R2 docblock + amber chat warning + ActivityPane inline alert all rewritten to explain automatic chain-link handoff. R7 state (c) renamed "Approaching chain-link cap" and "Extend duration" CTA removed. R7 docblock updated.
+3. **D9 duration-override modal deleted** — concept removed by brief v2. Inbound references cleaned up across R2 and index.html.
+4. **R13 input min/max constraints corrected to match brief §3.14** — soft cap 30–240 (was 10–480), auto-extend grace 0–60 (was 0–120), per-task budget cap 60–60000 (was 60–100000). Defaults unchanged.
+5. **C2 event namespace standardised** — payload preview `event: "operator_session.fallback_engaged"` corrected to `"operator-session.fallback_engaged"` to match the hyphenated lifecycle namespace used throughout C2 and the brief. `operator.*` reserved for incident/audit/system-monitoring events only.
+6. **R16 extension action restructured** — primary action now offers three paths: quick +1,000 min, quick +3,000 min, and a custom-amount input (60–60,000 min, 60-min increments per brief). All three flow through the same audit event with the chosen minutes.
+7. **R17 attempt-group note added** — docblock now references v2.2 §3.13 item 7 fresh-profile restart semantics: when `attempt_number > 1`, Run Trace renders attempt groups above the chain-link structure with superseded attempts collapsed by default.
+8. **Link rot repair across all surfaces** — `d8-active-sessions-list.html` (deleted r2) and `r10-tasks-list-operator-filter.html` (deleted r3) references replaced with `r12-workspace-board-operator-filter.html` everywhere they appeared (C1, C2, R11, R8 modal close + cancel handlers).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — no change in primary-task framing; the brief alignment doesn't shift the surface.
+- Default to hidden: yes — removed the per-run extend CTA (one less control); auto-extend is invisible default behaviour.
+- One primary action: yes — R16 still has one primary action (extend) with three input forms, plus cancel as secondary.
+- Inline state: yes — R2 ActivityPane amber alert is the primary signal; no modal added.
+- Re-check passed: yes — non-technical user reads "next chain link picks up automatically" and doesn't need to do anything.
+- Extends existing surface: yes — every changed mockup still extends its grounded surface; no new surfaces introduced.
+
+**Rule violations flagged:** none.
+
+**Files modified:**
+- `prototypes/operator-backend/c1-agent-edit-model-access-live.html` (policy rows + sidebar link)
+- `prototypes/operator-backend/c2-run-trace-timeline.html` (event namespace + sidebar links)
+- `prototypes/operator-backend/r2-opentaskview-operator-running-approaching-limit.html` (header controls, chat/activity copy, NowTab box, docblock, bottom legend)
+- `prototypes/operator-backend/r7-taskheader-operator-controls.html` (state (c) controls + docblock)
+- `prototypes/operator-backend/r8-modal-concurrency-limit.html` (title, copy, 5 cards, close/cancel handlers, footer link, docblock)
+- `prototypes/operator-backend/r13-subaccount-operator-settings-tab.html` (3 input min/max corrections)
+- `prototypes/operator-backend/r16-modal-budget-exceeded-autopause.html` (primary action restructured + script + docblock)
+- `prototypes/operator-backend/r17-runtrace-chain-link-divider.html` (docblock attempt-group note)
+- `prototypes/operator-backend/r11-connections-suspended-state.html` (dead link repair, 3 instances)
+- `prototypes/operator-backend/index.html` (R2 copy + R7 copy + R8 copy + D9 card removal)
+- `prototypes/operator-backend/d9-duration-override-modal.html` (**deleted** — concept removed by brief v2)
+- `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
