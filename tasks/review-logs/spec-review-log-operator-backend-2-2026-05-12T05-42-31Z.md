@@ -98,5 +98,5 @@ All 18 mechanical fixes to apply this iteration.
 - Ambiguous findings:            0
 - Reclassified → directional:    0
 - Autonomous decisions (directional/ambiguous): 0
-- Spec commit after iteration: (to be recorded after Step 8b)
+- Spec commit after iteration: `90a5c18f`
 

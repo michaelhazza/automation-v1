@@ -155,7 +155,7 @@ The Operator Backend is a pure consumer of three predecessor primitives. Nothing
 
 The adapter declares capabilities `['delegated', 'code_execution', 'long_running', 'cancellation', 'session_identity']`.
 
-`'long_running'` is **new** in this spec — added to `ExecutionCapability` at `server/services/executionBackends/types.ts:86-93`. The propagation invariant has three rules:
+Both `'long_running'` AND `'session_identity'` are **new** in this spec — added to `ExecutionCapability` at `server/services/executionBackends/types.ts:86-93`. (`'session_identity'` was referenced by Spec C but never added to the union there; this spec adds both literals in the same edit.) Both are declared on `operator_managed`; `'long_running'` gates chain-resume behaviour, `'session_identity'` is non-gating at runtime in V1. The propagation invariant has three rules:
 
 1. **Single source of truth.** `'long_running'` is added to the union exactly once, in `types.ts`. All consumers import the union/type — they MUST NOT redeclare or restringify the literal in non-adapter / non-fixture code.
 2. **Zero ad-hoc literals in consumers.** A new CI gate (`scripts/gates/verify-execution-capability-references.sh`) greps the repo for any naked occurrence of the literal `'long_running'` outside the canonical definition. CI fails on a naked occurrence in any of: routes, services other than adapter objects, hooks, jobs, client code. **Permitted occurrences** (enumerated in the gate's allow-list):
@@ -210,7 +210,7 @@ A new tenant-scoped table parallel to `iee_runs`. One row per chain link. Locked
 
 **RLS policy:** standard org+subaccount scoping; see § 6. `FORCE ROW LEVEL SECURITY` enabled to defeat owner-bypass.
 
-**Manifest entry** in `server/config/rlsProtectedTables.ts` added in the same migration.
+**Manifest entry** in `server/config/rlsProtectedTables.ts` added in the same implementation chunk/commit as the migration (the manifest is a TypeScript module; `policyMigration` points at the SQL migration file).
 
 ### 3.4 `agent_runs` state-set extension
 
@@ -225,7 +225,7 @@ The parent task's status enum extends to include the new task-level states. The 
 `'pending'`, `'running'`, `'delegated'`, `'completed'`, `'failed'`, `'cancelled'` already exist. **New** in this spec:
 - `'paused_for_chain_continuation'` — scheduler-owned wait OR FIFO queue for next chain dispatch (§ 3.14, § 3.17).
 - `'paused_chain_failure'` — three consecutive dispatch failures (§ 3.17 item 1) OR a running chain link terminating with `failed_mid_step=true` from hard-cap unresumable (§ 3.14 item 3). Hard-cap unresumable counts in the same consecutive-failure budget as dispatch failures.
-- `'paused_budget_exceeded'` — per-task budget cap reached (§ 3.17 item 4).
+- `'paused_budget_exceeded'` — task paused because a time-budget guard fired. Covers both per-task budget cap (§ 3.17 item 4) and max wall-clock per task (§ 3.14 item 4); `failure_reason` distinguishes (`'budget_cap_exceeded'` vs `'max_wall_clock_exceeded'`).
 
 **Task-terminal states are `completed | failed | cancelled` only.** The three `paused_*` states are resumable/non-terminal — they emit task-state-change events (UI updates, user notifications, scheduler suspension) but DO NOT trigger terminal artefact/cost finalisation. Cost rows for chain links that completed before the pause are written normally per § 3.12. The customer-visible terminal rollup is reserved for the true terminal states. Downstream consumers (cost dashboards, audit, evals) MUST NOT treat partial/pause-state rollups as final. See § 10.4 for the terminal-event guarantee.
 
@@ -233,7 +233,7 @@ A migration extends the existing `agent_runs.status` CHECK constraint (or text-t
 
 The same migration adds a new column `operator_chain_failure_count integer NOT NULL DEFAULT 0` to `agent_runs`. It counts **consecutive** chain-link dispatch failures since the last successful dispatch (per § 7.3 item 5). The chain-link dispatcher is the sole writer:
 
-- Increment under `UPDATE agent_runs SET operator_chain_failure_count = operator_chain_failure_count + 1 WHERE id = $1 AND status IN ('delegated','paused_for_chain_continuation')`.
+- Increment under `UPDATE agent_runs SET operator_chain_failure_count = operator_chain_failure_count + 1 WHERE id = $1 AND status IN ('delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. The dispatcher's queued-job reason gate (§ 7.3 step 2) ensures retries from paused states are only counted when the queued reason matches the current paused-state resume action.
 - Reset to 0 on (a) a successful chain-link dispatch and (b) a user-initiated retry (the `task.operator.chain_failure_retried` audit event path).
 
 **State machine — `agent_runs` task lifecycle (operator-managed paths only):**
@@ -279,7 +279,9 @@ The single biggest production-readiness item. Without it, a rate-limit or suspen
    - Broker refresh failure with `expired_refresh_token | provider_revoked | insufficient_scope` (Spec C classifications).
    - Connection-level errors > 3 consecutive retries against the operator runtime.
 
-2. **Fallback resolution.** Adapter calls `credentialBrokerService.resolveFallback({ subaccountId, agentRunId, originalCredentialId })`. The broker returns `{ envelope: OperatorSessionEnvelope-or-ApiKeyEnvelope, mode: 'operator_session' | 'api_key' } | null`. (Spec C reserved this seam; the spec author wires the broker side in the same chunk that wires the adapter side.)
+2. **Fallback resolution.** Adapter calls `credentialBrokerService.resolveFallback({ subaccountId, agentRunId, originalCredentialId })`. The broker returns `{ envelope: OperatorSessionEnvelope | ApiKeyEnvelope, mode: 'operator_session' | 'api_key' } | null`.
+
+   `ApiKeyEnvelope` is declared in `server/services/credentialBrokerService.ts` with shape `{ credentialId: string, connectionId: string, authType: 'api_key', provider: string, issuedAt: string, expiresAt: string | null }`. Raw API key material remains broker-internal and never leaves the broker — the adapter consumes the envelope reference (`credentialId`) only, mirroring the `OperatorSessionEnvelope` discipline. (Spec C reserved this seam; the spec author wires the broker side in the same chunk that wires the adapter side.)
 
 3. **Mid-run credential swap.** When fallback exists, the adapter:
    - Pauses the operator runtime via its in-band pause signal (vendor-specific; concrete API named in the implementation chunk).
@@ -311,7 +313,7 @@ Two layers, mirroring the existing IEE pattern:
 
 - **Session-level events (push).** Operator runtime step boundaries surface to the adapter; the adapter:
   1. Enqueues a `'operator-session-progressed'` pg-boss event payload `{ runId, chainLinkId, stepIndex, summary, timestamp }` with idempotency key `(operator_run_id, step_index)` (per § 10.1). The adapter does NOT mutate `operator_runs.last_progress_at` or `step_count` directly.
-  2. The pg-boss handler (`operatorSessionProgressedHandler.ts`) is the SOLE writer for `last_progress_at` and `step_count`: `UPDATE operator_runs SET last_progress_at = greatest(last_progress_at, $timestamp), step_count = greatest(step_count, $step_index) WHERE id = $operator_run_id`. Both columns use `greatest(...)` so duplicate or out-of-order deliveries are no-ops.
+  2. The pg-boss handler (`operatorSessionProgressedHandler.ts`) is the SOLE writer for `last_progress_at` and `step_count` (see § 7.4 for the exact SQL with NULL-safety and the `status='running'` post-terminal guard).
   3. The handler then bridges to the WebSocket `agent-run:{runId}` room via `emitAgentRunUpdate(runId, 'operator-session.progressed', payload)`.
 
 - **Polling fallback (pull).** `GET /api/operator-sessions/:operatorRunId/progress` returns the latest progress snapshot from the `operator_runs` row. Route mirrors `server/routes/iee.ts:GET /api/iee/runs/:ieeRunId/progress`. Same auth gates: `authenticate`, `requirePermission('AGENT_RUN_READ')`, subaccount scoping via `getOrgScopedDb()`.
@@ -528,13 +530,13 @@ Runtime limits live on the subaccount, not on the org. Subaccounts are where age
 | Per-task budget cap (op-session minutes) | `per_task_budget_cap_minutes` | 6000 | 60 | 60000 | Task limits |
 | Concurrent operator sessions (per subaccount) | `concurrent_operator_sessions_cap` | 5 | 1 | 25 | Session limits |
 
-**Enforcement points** (each cap is enforced at a specific seam; all reads come from `operator_runs.settings_snapshot` for in-flight chain links and from the live `subaccount_operator_settings` row for new dispatches):
+**Enforcement points and read sources.** Most caps are enforced from `operator_runs.settings_snapshot` for in-flight chain links and from the live `subaccount_operator_settings` row for new dispatches. The concurrency cap is a special case (both sides need the live value):
 
-- `session_soft_cap_minutes`, `auto_extend_grace_minutes` — adapter-side, per § 3.14 item 3.
-- `max_chain_length` — finaliser decision table, per § 3.14 item 4 (`chain_seq >= cap` branch).
-- `max_wall_clock_per_task_days` — finaliser decision table, per § 3.14 item 4 (`now() - first_operator_run.started_at >= cap` → `paused_budget_exceeded` with `failure_reason='max_wall_clock_exceeded'`).
-- `per_task_budget_cap_minutes` — finaliser decision table, per § 3.14 item 4 (consumed budget branch) and § 3.17 item 4.
-- `concurrent_operator_sessions_cap` — adapter `dispatch()`, per § 3.17 item 5 (advisory-lock pattern).
+- `session_soft_cap_minutes`, `auto_extend_grace_minutes` — adapter-side, per § 3.14 item 3. Read from `operator_runs.settings_snapshot`.
+- `max_chain_length` — finaliser decision table, per § 3.14 item 4 (`chain_seq >= cap` branch). Read from `operator_runs.settings_snapshot`.
+- `max_wall_clock_per_task_days` — finaliser decision table, per § 3.14 item 4 (`now() - first_operator_run.started_at >= cap` → `paused_budget_exceeded` with `failure_reason='max_wall_clock_exceeded'`). Read from `operator_runs.settings_snapshot`.
+- `per_task_budget_cap_minutes` — finaliser decision table, per § 3.14 item 4 (consumed budget branch) and § 3.17 item 4. Read from `operator_runs.settings_snapshot`.
+- `concurrent_operator_sessions_cap` — adapter `dispatch()`, per § 3.17 item 5 (advisory-lock pattern). Read from **live** `subaccount_operator_settings` at every dispatch (both new tasks and chain continuations). The settings_snapshot's copy is for audit / incident-payload context only — it is NOT the enforcement source. Rationale: the concurrency cap is a subaccount-wide global, not a per-task contract; changes need to take effect immediately for new dispatches even when other in-flight tasks are using stale per-task caps.
 
 **Storage choice.** A new tenant-scoped table `subaccount_operator_settings` (one row per subaccount; primary key `subaccount_id`). This is preferred over adding six columns to the existing `subaccounts` table — keeps the operator concern isolated, and is the same shape `subaccount_optimiser_settings` already uses for the Sub-account Optimiser feature.
 
@@ -612,7 +614,7 @@ A chain link can fail to dispatch for several reasons (auth lost, runtime unavai
    - Minutes consumed are measured using **DB-anchored timestamps** (`operator_runs.started_at` / `operator_runs.completed_at` written from `now()` inside the chain-link transaction by the adapter). NOT app-process wall-clock.
    - Consumption is the **actual sandbox wall-clock minutes** elapsed, not the allocated cap. A 90-minute chain link consumes 90 minutes.
    - When consumption hits the per-task budget cap mid-chain-link, the running chain link MUST checkpoint and pause at the **next resumable boundary** (NOT hard-kill), UNLESS the chain link also breaches the hard safety limit (soft cap + grace), in which case it terminates per § 3.14 item 3 hard-cap behaviour.
-   - Budget extension actions are additive (`new_cap = old_cap + extension_minutes`), never absolute resets, and write `task.operator_budget.extended` (§ 4.9) with `actor_user_id`, `extension_minutes`, `request_id`, `source`.
+   - Budget extension actions are additive (`new_cap = old_cap + extension_minutes`), never absolute resets, and write audit event `task.operator.budget_extended` (§ 4.9) with `actor_user_id`, `extension_minutes`, `request_id`, `source`.
    - The user can extend at increments of 60 minutes (UI offers presets +1000, +3000, plus a custom-amount input bounded 60..60000 with 60-min step per mockup `r16-modal-budget-exceeded-autopause.html`).
 
 5. **Concurrency-cap behaviour — distinguish new-task vs chain-continuation.**
@@ -968,6 +970,7 @@ This is the single source of truth for every file touched. Prose references anyw
 | `server/services/operatorCostWriter.ts` | Writes `subscription_mediated` + `sandbox_compute` rows on chain-link finalise. |
 | `server/services/operatorCostWriterPure.ts` | Pure helpers (idempotency key derivation, row shape). |
 | `server/services/operatorSessionSuspensionNotifier.ts` | Exports `notifyOperatorSessionSuspended(input): Promise<void>` — emits the `cs.operator_session.suspended_detected` typed CS notification via the existing inbox/notification primitive. Called from the fallback hard-fail path (§ 3.7 item 4) and from broker `usability_state` transitions away from `'connected_usable'` (§ 3.13). No new service layer — wraps the existing inbox notification writer. |
+| `server/services/operatorBackendErrors.ts` | Typed exception classes — `OperatorBackendConflictError` (the 409 unique-constraint envelope from § 10.6), `OperatorSessionLimitExceededError` (429), and one shared mapper helper. The existing route error-handler middleware (the same one that maps `ZodError` and other typed-error classes today) maps these to the HTTP statuses pinned in § 10.6 — modified-files entry below. |
 | `server/services/operatorChainSchedulerService.ts` | FIFO queue logic for chain-continuation dispatch + concurrency-cap accounting. |
 | `server/services/operatorChainSchedulerServicePure.ts` | Pure helpers (slot-count, queue-eligibility). |
 | `server/jobs/operatorSessionCompletedHandler.ts` | pg-boss handler for `'operator-session-completed'` queue — routes to finaliser + chain-resume dispatcher. |
@@ -1034,6 +1037,9 @@ Migration numbering starts at 0327; current latest is 0326 (operator-session-ide
 | `server/db/schema/llmRequests.ts` | Add `operatorRunId: uuid('operator_run_id').references(() => operatorRuns.id)` and `boundary: text('boundary')` columns; declare the partial UNIQUE `(operator_run_id, source_type, boundary)` in the schema annotation. |
 | `server/db/schema/agentRuns.ts` | Extend the `status` type-annotation comment / `$type` to include the three new paused states. |
 | `server/jobs/index.ts` (if it exists) OR `server/lib/createWorker.ts` registration site | Register the four new pg-boss queues: `'operator-session-completed'`, `'operator-session-dispatch-next-chain-link'`, `'operator-session-progressed'`, `'operator-task-profile-gc'`. |
+| `server/lib/permissions.ts` | Add `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` to the permission registry. |
+| `server/services/permissionSeedService.ts` (or the canonical role-grant file) | Grant the new permission key to the `org_admin` role default. |
+| `server/index.ts` (route mounting site, distinct from the adapter registration at lines 687–691) | Mount the three new route modules: `operatorSessions`, `subaccountOperatorSettings`, `operatorTasks`. |
 | `client/src/pages/AdminSubaccountDetailPage.tsx` | Extend `ActiveTab` union with `'operator'`; extend `TAB_LABELS` with `operator: 'Operator'`; insert the new tab between `'board'` and `'usage'` in `visibleTabs`; render `<OperatorSettingsTab />` when active. |
 | `client/src/pages/WorkspaceBoardPage.tsx` | Render `<OperatorFilterToggle />` above the board; pass filter state into the column renderers. |
 | `client/src/components/TaskCard.tsx` | Render `<OperatorBadge />` when `task.executionBackendId === 'operator_managed'`. |
@@ -1046,6 +1052,7 @@ Migration numbering starts at 0327; current latest is 0326 (operator-session-ide
 | `client/src/pages/operate/components/RunTraceEventRenderer.tsx` | Wire the new `operator-session.*` event renderers. |
 | `client/src/pages/govern/ConnectionsPage.tsx` (AI Subscriptions tab) | Render the "Suspended" pill + Reconnect CTA on a connection in `usability_state != 'connected_usable'` (mockup `r11-connections-suspended-state.html`). |
 | `.github/workflows/publish-sandbox-templates.yml` | Update template path from `openclaw-session` to `operator-session`. |
+| `.github/workflows/ci.yml` | Wire the three new CI gates: `verify-execution-capability-references.sh`, `verify-operator-event-registry.sh`, `verify-no-checkpoint-logging.sh`. |
 | `docker-compose.sandbox.yml` (if present) | Update service name / mount path. |
 | `architecture.md` | Add Operator Backend service-layer row under § Key files per domain; add chain-resume section. |
 | `docs/capabilities.md` | Add Operator Backend capability entry (vendor-neutral copy per Editorial Rules). |
@@ -1072,7 +1079,7 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 | Requirement | Status |
 |---|---|
 | **RLS policy** | Included in migration `0327_create_operator_runs.sql`. Standard org+subaccount scoping via the existing `current_setting('app.organisation_id')` and `current_setting('app.subaccount_id')` GUCs. `FORCE ROW LEVEL SECURITY` enabled (defeats owner-bypass). Pattern matches `agent_runs` and `iee_runs`. |
-| **Manifest entry** | Added to `server/config/rlsProtectedTables.ts` in the same migration. `{ tableName: 'operator_runs', schemaFile: 'operatorRuns.ts', policyMigration: '0327_create_operator_runs.sql', rationale: 'Chain-link state for operator-managed backend; one row per chain link; tenant-scoped by org+subaccount.' }`. |
+| **Manifest entry** | Added to `server/config/rlsProtectedTables.ts` in the same implementation chunk/commit as the migration (the manifest is a TypeScript module; SQL migrations cannot mutate it). `policyMigration` points at the SQL migration. `{ tableName: 'operator_runs', schemaFile: 'operatorRuns.ts', policyMigration: '0327_create_operator_runs.sql', rationale: 'Chain-link state for operator-managed backend; one row per chain link; tenant-scoped by org+subaccount.' }`. |
 | **Route guard** | Reads go through `GET /api/operator-sessions/:operatorRunId/progress` — guards: `authenticate`, `requirePermission('AGENT_RUN_READ')`, and `setOrgGUC()` before the query. Direct-DB-access prohibition is enforced by `verify-rls-contract-compliance.sh`. |
 | **Principal-scoped context** | The adapter's `dispatch()`/`finalise()` run inside the existing agent-execution principal context (`PrincipalContext`). The chain-link writer uses `withOrgTx` for every write, propagating the org GUC. |
 
@@ -1081,7 +1088,7 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 | Requirement | Status |
 |---|---|
 | **RLS policy** | Included in migration `0328_create_operator_task_profiles.sql`. Same shape as `operator_runs`. |
-| **Manifest entry** | Added to `rlsProtectedTables.ts` in the same migration. Rationale: "Persistent browser-profile metadata per operator task; tenant-scoped." |
+| **Manifest entry** | Added to `rlsProtectedTables.ts` in the same implementation chunk/commit as the migration. Rationale: "Persistent browser-profile metadata per operator task; tenant-scoped." |
 | **Route guard** | The fresh-profile-restart route (`POST /api/operator-tasks/:agentRunId/fresh-profile-restart`) guards: `authenticate`, `requirePermission('AGENT_RUN_ADMIN')` (org-admin equivalent for this action), `setOrgGUC()`. The debug-retention-extend route reuses the same guard set. |
 | **Principal-scoped context** | Profile-volume mount runs inside the adapter principal context. The GC job runs under `withAdminConnection({ source: 'operatorTaskProfileGc' }) + SET LOCAL ROLE admin_role` (BYPASSRLS) — see § 7.5 and the `workflowDraftsCleanupJob` / `agentRunCleanupJob` precedents. |
 
@@ -1090,7 +1097,7 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 | Requirement | Status |
 |---|---|
 | **RLS policy** | Included in migration `0329_create_subaccount_operator_settings.sql`. Org+subaccount scoping. |
-| **Manifest entry** | Added to `rlsProtectedTables.ts` in the same migration. Rationale: "Per-subaccount operator runtime caps; tenant-scoped; org_admin write, manager read." |
+| **Manifest entry** | Added to `rlsProtectedTables.ts` in the same implementation chunk/commit as the migration. Rationale: "Per-subaccount operator runtime caps; tenant-scoped; org_admin write, manager read." |
 | **Route guard** | `GET /api/subaccounts/:subaccountId/operator-settings` → `authenticate`, `requirePermission('SUBACCOUNT_READ')`, `resolveSubaccount`, `setOrgGUC()`. `PATCH` → `authenticate`, `requirePermission('SUBACCOUNT_OPERATOR_SETTINGS_WRITE')`, `resolveSubaccount`, `setOrgGUC()`. The PATCH permission key is new in this spec — added to the permissions registry and the org-admin role's default grant. |
 | **Principal-scoped context** | All reads through the adapter use the existing principal context's `subaccountId` for row lookup. Defaulting (no row exists) returns the column defaults; the first write inserts. |
 
@@ -1191,8 +1198,8 @@ The handler `operatorSessionCompletedHandler.ts`:
 
 Step-boundary events from the operator runtime are enqueued (`'operator-session-progressed'`) to keep the runtime's hot path off the DB. `operatorSessionProgressedHandler.ts` is the **sole writer** for `operator_runs.last_progress_at` and `step_count`:
 
-1. `UPDATE operator_runs SET last_progress_at = greatest(last_progress_at, $event_timestamp), step_count = greatest(step_count, $step_index) WHERE id = $operator_run_id`. Both fields use `greatest(...)` so duplicate or out-of-order deliveries are idempotent (per § 10.1 progress-event row).
-2. Emits `'operator-session.progressed'` to the `agent-run:{runId}` WebSocket room via `emitAgentRunUpdate`.
+1. `UPDATE operator_runs SET last_progress_at = greatest(coalesce(last_progress_at, '-infinity'::timestamptz), $event_timestamp), step_count = greatest(step_count, $step_index) WHERE id = $operator_run_id AND status = 'running'`. The `status = 'running'` guard enforces the § 10.4 post-terminal prohibition: progress events arriving after the chain link reached terminal state update zero rows and are dropped. The `coalesce(..., '-infinity'::timestamptz)` makes the `greatest()` NULL-safe for the first event when `last_progress_at` is still NULL. `greatest()` on `step_count` (with NOT NULL default 0) is naturally safe.
+2. If step 1 updated 0 rows: log the drop and return (no WebSocket emission). Otherwise emit `'operator-session.progressed'` to the `agent-run:{runId}` WebSocket room via `emitAgentRunUpdate`.
 
 The WebSocket bridge is best-effort: a dropped event is acceptable (the next event picks up the state). The polling fallback route is the durable visibility path.
 
@@ -1249,7 +1256,8 @@ The implementation order is: schemas + migrations FIRST, then services FIRST amo
 |---|---|---|
 | `operator_runs` insert (chain-link start) | **state-based** | optimistic predicate: `INSERT ... WHERE NOT EXISTS (SELECT 1 FROM operator_runs WHERE agent_run_id=$1 AND attempt_number=$2 AND chain_seq=$3)`. 0 rows-affected = a concurrent dispatcher already started this chain link. UNIQUE `(agent_run_id, attempt_number, chain_seq)` per § 3.3 is the DB-level backstop. |
 | `operator_runs` terminal UPDATE | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','running')`. 0 rows-affected = already terminal. |
-| `agent_runs` terminal UPDATE (task-terminal) | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('delegated','paused_*')` (the closed set of pre-terminal states). 0 rows-affected = already terminal; finaliser logs and returns 200 idempotent-hit. |
+| `agent_runs` terminal UPDATE to `completed` or `failed` | **state-based** | optimistic predicate: `UPDATE ... WHERE status='delegated'`. A paused task MUST transition `delegated` first (re-dispatch a chain link) before it can roll up to terminal `completed`/`failed`. 0 rows-affected = already terminal OR still paused; finaliser logs and returns 200 idempotent-hit. |
+| `agent_runs` terminal UPDATE to `cancelled` | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. Any pre-terminal state may transition directly to `cancelled` (user cancel). 0 rows-affected = already terminal; return `409` with current state. |
 | `agent_runs` pause UPDATE (`paused_for_chain_continuation`) | **state-based** | optimistic predicate: `UPDATE ... WHERE status='delegated'`. 0 rows-affected = a concurrent path already paused or terminated. |
 | `operator_task_profiles` insert (first chain link) | **key-based** | unique constraint: `(task_id, attempt_number)`. 23505 → catch and return the existing row (idempotent-hit). |
 | `subaccount_operator_settings` UPSERT | **key-based** | PK: `subaccount_id`. Conflict → If-Match check (state-based concurrency control on top of key-based identity). |
@@ -1321,7 +1329,7 @@ Every flow that can partially complete emits an explicit status. Concretely:
 | Fresh-profile-restart on running chain link | optimistic predicate 0 rows | 409 `OPERATOR_TASK_RESTART_BLOCKED` with `current_status` and `active_chain_link_id` in body. |
 | New operator task over concurrency cap | computed at dispatch | 429 `OPERATOR_SESSION_LIMIT_EXCEEDED` with `cap`, `current`, `subaccount_id` in body. |
 
-No `23505` is allowed to bubble as a 500. The implementation chunk maps each via a typed exception class (`OperatorBackendConflictError`) → mapper middleware that produces the 4xx response.
+No `23505` is allowed to bubble as a 500. The typed exception classes — `OperatorBackendConflictError` for 409 cases and `OperatorSessionLimitExceededError` for 429 — live in `server/services/operatorBackendErrors.ts` (§ 5.1). They are mapped to the HTTP statuses above by the existing route error-handler middleware (the same one already mapping `ZodError` and the other typed-error classes); the build chunk wires the case clauses, no new mapper file is introduced.
 
 ### 10.7 State machine closures (`operator_runs`, `agent_runs`)
 
@@ -1363,8 +1371,8 @@ delegated → paused_chain_failure                     (hard-cap unresumable: ru
 
 Forbidden:
 - Any transition from `completed | failed | cancelled` (terminal).
-- `pending → completed | failed | cancelled` without going through `delegated` (operator-managed tasks must enter delegation first).
-- `paused_* → completed | failed` without re-entering `delegated` (a paused task MUST resume to dispatch a chain link before it can produce a task-terminal status).
+- `pending → completed | failed` without going through `delegated` (operator-managed tasks must enter delegation first before completion or failure). **`pending → cancelled` IS permitted** — a user may cancel a task before its first chain-link dispatch.
+- `paused_* → completed | failed` without re-entering `delegated` (a paused task MUST resume to dispatch a chain link before it can produce a task-terminal `completed`/`failed` status). **`paused_* → cancelled` IS permitted** at any time (user cancel from a paused state).
 
 Enforcement: optimistic predicates on every writer (§ 10.1, § 10.3). No DB-level CHECK on transition graph (Postgres doesn't support state-machine constraints declaratively); the writer-level predicates are the enforcement.
 
@@ -1529,6 +1537,7 @@ Chunk order is sequential; each chunk leaves the system in a forward-compatible 
 - `server/services/operatorCostWriter.ts`
 - `server/services/operatorChainSchedulerService.ts`
 - `server/services/operatorSessionSuspensionNotifier.ts`
+- `server/services/operatorBackendErrors.ts`
 - `server/services/credentialBrokerService.ts` (wire `resolveFallback` + `usability_restored` signal emitter)
 
 **Validation:** lint + typecheck. No new tests required (pure helpers are tested; impure boundary code lives here).
@@ -1565,8 +1574,9 @@ Chunk order is sequential; each chunk leaves the system in a forward-compatible 
 - `server/routes/operatorSessions.ts`
 - `server/routes/subaccountOperatorSettings.ts`
 - `server/routes/operatorTasks.ts`
-- Permission registry entry: `SUBACCOUNT_OPERATOR_SETTINGS_WRITE`
-- Route registration in the main routes index
+- `server/lib/permissions.ts` — add `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` permission key.
+- `server/services/permissionSeedService.ts` (or the canonical role-grant file) — grant the new key to `org_admin` role default.
+- `server/index.ts` — mount `operatorSessions`, `subaccountOperatorSettings`, `operatorTasks` routes alongside existing mounts.
 
 **Validation:** lint + typecheck. Routes mount under `authenticate` + `requirePermission(...)`. Subaccount-scoped via `resolveSubaccount` + `setOrgGUC`.
 
@@ -1593,14 +1603,18 @@ Chunk order is sequential; each chunk leaves the system in a forward-compatible 
 
 **Dependency:** Chunk 9.
 
-### Chunk 11 — UI: TaskHeader + chain-link indicator + auto-extend banner
+### Chunk 11 — UI: TaskHeader + chain-link indicator + auto-extend banner + OpenTaskView family
 
 **Files:**
 - `client/src/components/openTask/OperatorChainLinkIndicator.tsx`
 - `client/src/components/openTask/OperatorAutoExtendBanner.tsx`
 - `client/src/components/openTask/TaskHeader.tsx` (render the indicator + banner; hide pause during auto-extend)
+- `client/src/components/openTask/OpenTaskView.tsx` (conditional rendering of operator-state copy per `r3`/`r4`/`r5`)
+- `client/src/components/openTask/ChatPane.tsx` (operator system messages per `r4`/`r6`)
+- `client/src/components/openTask/ActivityPane.tsx` (fallback-engaged amber row per `r6`; cost-summary footer per `r3`)
+- `client/src/components/openTask/FilesTab.tsx` (harvested-artefact display)
 
-**Validation:** lint + typecheck + build. Visual review across the five mockup state variants.
+**Validation:** lint + typecheck + build. Visual review across the five mockup state variants and the fallback/cost states.
 
 **Dependency:** Chunk 9.
 
