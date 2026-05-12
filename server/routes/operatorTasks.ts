@@ -24,7 +24,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
-import { agentRuns, operatorRuns } from '../db/schema/index.js';
+import { agentRuns, integrationConnections, operatorRuns } from '../db/schema/index.js';
 import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { auditService } from '../services/auditService.js';
@@ -103,11 +103,28 @@ router.post(
       });
     }
 
-    // Reset failure counter (enqueue-only: no status transition)
-    await db
+    // Reset failure counter (enqueue-only: no status transition).
+    // Optimistic predicate guards against a concurrent path transitioning the
+    // task between the read above and this UPDATE: organisation_id pins tenancy,
+    // status='paused_chain_failure' is the only state where a retry is valid.
+    const resetResult = await db
       .update(agentRuns)
       .set({ operatorChainFailureCount: 0 })
-      .where(eq(agentRuns.id, agentRunId));
+      .where(
+        and(
+          eq(agentRuns.id, agentRunId),
+          eq(agentRuns.organisationId, orgId),
+          eq(agentRuns.status, 'paused_chain_failure'),
+        ),
+      )
+      .returning({ id: agentRuns.id });
+
+    if (resetResult.length === 0) {
+      throw new OperatorBackendConflictError({
+        kind: 'TASK_ALREADY_TERMINAL',
+        currentState: { status: run.status },
+      });
+    }
 
     void auditService.log({
       organisationId: orgId,
@@ -371,19 +388,52 @@ router.post(
       throw { statusCode: 403, message: 'Forbidden', errorCode: actorCheck.reason ?? 'FORBIDDEN' };
     }
 
-    await readAgentRunOrThrow(agentRunId, orgId);
+    const run = await readAgentRunOrThrow(agentRunId, orgId);
 
-    await credentialBrokerService.emitUsabilityRestored({ connectionId: '', agentRunId });
+    if (!run.subaccountId) {
+      throw { statusCode: 400, message: 'Task has no subaccount context', errorCode: 'NO_SUBACCOUNT' };
+    }
 
-    void auditService.log({
+    // Resolve the active operator_session connection for this run's subaccount.
+    // The connectionId is required so the lifecycle event payload is tied back
+    // to the actual credential (spec §3.7 item 6). Emitting with a blank id
+    // produces an unauditable event.
+    const [conn] = await db
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, orgId),
+          eq(integrationConnections.subaccountId, run.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+        ),
+      )
+      .limit(1);
+
+    if (!conn) {
+      throw {
+        statusCode: 404,
+        message: 'No active operator-session credential for this subaccount',
+        errorCode: 'NO_OPERATOR_SESSION_CREDENTIAL',
+      };
+    }
+
+    // Persist the audit row first so the stickiness-clearing signal is durable
+    // before the lifecycle event reaches downstream consumers and before the
+    // route returns. The audit event is itself a stickiness-clearing source per
+    // spec §3.7 item 5.
+    await auditService.log({
       organisationId: orgId,
       actorId: actor.id,
       actorType: 'user',
       action: 'task.operator.credential_refreshed',
       entityType: 'agent_run',
       entityId: agentRunId,
-      metadata: { agent_run_id: agentRunId, request_id: req.correlationId },
+      metadata: { agent_run_id: agentRunId, connection_id: conn.id, request_id: req.correlationId },
     });
+
+    await credentialBrokerService.emitUsabilityRestored({ connectionId: conn.id, agentRunId });
 
     res.status(202).json({ ok: true });
   }),

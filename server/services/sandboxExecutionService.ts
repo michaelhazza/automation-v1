@@ -248,15 +248,19 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
 // Provides exactly-once sandbox creation per chain-link row even when dispatch()
 // is retried after a crash. The Operator Backend passes sandboxStartKey = operator_run_id.
 //
-// Behaviour:
-//  1. Look up any existing live row (pending/running/harvesting) keyed by sandboxStartKey.
-//  2. If a live row exists with a DIFFERENT sandboxExecutionId → throw SandboxStartKeyConflict.
-//  3. If a live row exists with the SAME sandboxExecutionId → adopt it (call runTask, which
-//     returns the in-flight row via Case 2/5 without re-starting the provider).
-//  4. If no live row exists for the key → fall through to runTask (fresh start, Case 1).
+// The `sandbox_start_key` column has a unique partial index (migration 0332),
+// so each key binds to exactly one sandbox_executions row across its full
+// lifecycle. The pure decision in `decideAdoptOrStart` treats live and terminal
+// rows identically: adopt-on-match, conflict-on-mismatch, fresh-start only when
+// no row exists.
 //
-// Terminal rows are not adopted: when the existing row is terminal, runTask returns
-// the terminal output via Case 3 (idempotent re-read).
+// Behaviour:
+//  1. Look up any existing row (live or terminal) keyed by sandboxStartKey.
+//  2. If an existing row carries a DIFFERENT sandboxExecutionId → throw
+//     SandboxStartKeyConflict. A fresh INSERT would violate the unique index.
+//  3. If an existing row carries the SAME sandboxExecutionId → adopt it
+//     (runTask returns in-flight rows via Case 2/5, terminal rows via Case 3).
+//  4. If no row exists for the key → fall through to runTask (fresh start, Case 1).
 //
 // Re-exported: SandboxStartKeyConflict from sandboxExecutionServicePure.
 // ---------------------------------------------------------------------------

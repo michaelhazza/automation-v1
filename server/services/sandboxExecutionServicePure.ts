@@ -219,17 +219,12 @@ export class SandboxStartKeyConflict extends Error {
 // ---------------------------------------------------------------------------
 // § 5: AdoptOrStartDecision — pure adoption-vs-fresh-start decision
 //
-// The non-terminal statuses that the adoptOrStart path recognises as "live"
-// (eligible for adoption). Terminal statuses are returned as-is via the normal
-// runTask path; the adoption seam only short-circuits the INSERT for live rows.
+// The sandbox_start_key column carries a unique partial index (migration 0332),
+// so each key binds to exactly one sandbox_executions row for its lifetime.
+// Adoption is therefore the only valid action when a row already exists for
+// the key — for live AND terminal statuses alike. Terminal rows surface their
+// stored output via runTask's Case 3 (idempotent re-read).
 // ---------------------------------------------------------------------------
-
-const ADOPT_STATUSES = new Set(['pending', 'running', 'harvesting'] as const);
-type AdoptStatus = 'pending' | 'running' | 'harvesting';
-
-function _isAdoptStatus(status: string): status is AdoptStatus {
-  return ADOPT_STATUSES.has(status as AdoptStatus);
-}
 
 export type AdoptOrStartDecision =
   | { action: 'adopt'; existingExecutionId: string }
@@ -246,14 +241,14 @@ export type AdoptOrStartDecision =
  *   (`{ id: string; status: string } | null`)
  *
  * Returns one of three decisions:
- * - `adopt` — an existing live row matches the token; re-use it.
- * - `fresh_start` — no live row for this token; run the normal `runTask` path.
- * - `conflict` — a live row matches the token but with a DIFFERENT execution ID;
- *   the caller must throw `SandboxStartKeyConflict`.
- *
- * Terminal rows are excluded from adoption: when the existing row is terminal
- * the caller should fall through to `runTask` (which will return the terminal
- * output via Case 3). This function returns `fresh_start` for terminal rows.
+ * - `fresh_start` — no row for this token; run the normal `runTask` path.
+ * - `adopt` — an existing row (live or terminal) matches the token AND the
+ *   caller's execution ID; re-use it. runTask's Case 2/3/4/5 handles the
+ *   appropriate response (in-flight join, terminal re-read, etc.).
+ * - `conflict` — an existing row (live or terminal) matches the token but
+ *   carries a DIFFERENT execution ID. The unique index on `sandbox_start_key`
+ *   makes a fresh INSERT impossible; the caller must throw
+ *   `SandboxStartKeyConflict`.
  */
 export function decideAdoptOrStart(input: {
   callerExecutionId: string;
@@ -263,11 +258,6 @@ export function decideAdoptOrStart(input: {
   const { callerExecutionId, existingRow } = input;
 
   if (existingRow === null) {
-    return { action: 'fresh_start' };
-  }
-
-  // Only adopt live (non-terminal) rows.
-  if (!_isAdoptStatus(existingRow.status)) {
     return { action: 'fresh_start' };
   }
 

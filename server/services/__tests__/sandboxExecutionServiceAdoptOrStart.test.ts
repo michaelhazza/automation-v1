@@ -67,7 +67,7 @@ describe('decideAdoptOrStart', () => {
     });
   });
 
-  describe('(d) existing row in terminal state → fresh_start (fall through to runTask Case 3)', () => {
+  describe('(d) existing row in terminal state → adopt (runTask returns terminal output via Case 3)', () => {
     const terminalStatuses = [
       'completed',
       'timed_out',
@@ -80,13 +80,16 @@ describe('decideAdoptOrStart', () => {
     ] as const;
 
     for (const status of terminalStatuses) {
-      it(`returns fresh_start for terminal status '${status}'`, () => {
+      it(`returns adopt for terminal status '${status}' (sandbox_start_key unique index makes fresh_start invalid)`, () => {
         const decision = decideAdoptOrStart({
           callerExecutionId: CALLER_EXEC_ID,
           sandboxStartKey: START_KEY,
           existingRow: { id: CALLER_EXEC_ID, status },
         });
-        expect(decision.action).toBe('fresh_start');
+        expect(decision.action).toBe('adopt');
+        if (decision.action === 'adopt') {
+          expect(decision.existingExecutionId).toBe(CALLER_EXEC_ID);
+        }
       });
     }
   });
@@ -113,14 +116,16 @@ describe('decideAdoptOrStart', () => {
       expect(decision.action).toBe('conflict');
     });
 
-    it('does NOT report conflict when terminal row has a different execution id (terminal rows fall through)', () => {
-      // Terminal rows are excluded from adoption — conflict check only applies to live rows.
+    it('reports conflict for a terminal row with a different execution id (unique index binds the key for life)', () => {
       const decision = decideAdoptOrStart({
         callerExecutionId: CALLER_EXEC_ID,
         sandboxStartKey: START_KEY,
         existingRow: { id: OTHER_EXEC_ID, status: 'completed' },
       });
-      expect(decision.action).toBe('fresh_start');
+      expect(decision.action).toBe('conflict');
+      if (decision.action === 'conflict') {
+        expect(decision.existingExecutionId).toBe(OTHER_EXEC_ID);
+      }
     });
   });
 });

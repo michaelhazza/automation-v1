@@ -3980,7 +3980,7 @@ New `operator_managed` execution adapter. Drives long-form autonomous tasks acro
 | Runtime error classifier | `server/services/operatorRuntimeErrors.ts` — closed set; maps HTTP/broker signals to `session_unavailable` etc. |
 | Task-action routes | `server/routes/operatorTasks.ts` — retry-chain-failure, extend-budget, fresh-profile-restart, cancel |
 | Per-subaccount settings routes | `server/routes/subaccountOperatorSettings.ts` — `GET / PATCH` under `/api/admin/subaccounts/:id/operator-settings` |
-| Progress poll route | `server/routes/operatorTaskProgress.ts` — `GET /api/operator-tasks/:agentRunId/progress` |
+| Progress poll route | `server/routes/operatorSessions.ts` — `GET /api/subaccounts/:subaccountId/operator-sessions/:operatorRunId/progress` |
 | pg-boss handlers | `server/jobs/operatorSessionCompletedHandler.ts`, `server/jobs/operatorSessionDispatchNextChainLinkHandler.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/jobs/operatorTaskProfileGcHandler.ts` |
 | Encryption helper | `server/services/agentRunPayloadEncryptionService.ts` — wraps pgcrypto for `checkpoint_payload` at rest |
 | Schema — chain-link rows | `server/db/schema/operatorRuns.ts` (parallel to `iee_runs`; `operator_runs` table) |
