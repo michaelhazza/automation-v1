@@ -19,7 +19,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -126,7 +126,10 @@ router.post(
       });
     }
 
-    void auditService.log({
+    // Await the audit row so it is durable before the dispatch job is enqueued.
+    // The audit record explains why the task resumed; the dispatcher must not
+    // fire ahead of it.
+    await auditService.log({
       organisationId: orgId,
       actorId: actor.id,
       actorType: 'user',
@@ -204,18 +207,40 @@ router.post(
     //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
     // so this extension applies only to this task and never mutates the
     // subaccount-wide subaccount_operator_settings row. Spec §3.17.4.
-    await db.transaction(async (tx) => {
+    //
+    // Optimistic predicate (id + organisationId + status='paused_budget_exceeded')
+    // guards the read-then-write race: another path could transition the task
+    // between the read at line ~154 and the UPDATE below.
+    const updateResult = await db.transaction(async (tx) => {
       await setOrgGUC(tx, orgId);
-      await tx
+      return tx
         .update(agentRuns)
         .set({
           perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
           updatedAt: new Date(),
         })
-        .where(eq(agentRuns.id, agentRunId));
+        .where(
+          and(
+            eq(agentRuns.id, agentRunId),
+            eq(agentRuns.organisationId, orgId),
+            eq(agentRuns.status, 'paused_budget_exceeded'),
+          ),
+        )
+        .returning({ id: agentRuns.id });
     });
 
-    void auditService.log({
+    if (updateResult.length === 0) {
+      throw new OperatorBackendConflictError({
+        kind: 'TASK_ALREADY_TERMINAL',
+        currentState: { status: run.status },
+      });
+    }
+
+    // Await the audit row so it is durable before the dispatch job is enqueued.
+    // The audit record is the operator-visible explanation for why the task
+    // resumed; if the dispatcher fires before the audit lands, an observer
+    // would see "task back to delegated" with no recorded cause.
+    await auditService.log({
       organisationId: orgId,
       actorId: actor.id,
       actorType: 'user',
@@ -248,8 +273,11 @@ router.post(
 // Rev 2 F6 — restricted predicate, org_admin only.
 // Preconditions (in one atomic SELECT FOR UPDATE):
 //   (a) task.status === 'paused_chain_failure'
-//   (b) latest non-superseded chain link has failure_class='profile_corruption'
-//       OR failure_reason='OPERATOR_PROFILE_UNRECOVERABLE'
+//   (b) latest non-superseded chain link has failure_reason='OPERATOR_PROFILE_UNRECOVERABLE'
+//       (V1 only inspects failure_reason — operator_runs has no failure_class column
+//        in V1; spec §3.15 item 7's failure_class='profile_corruption' branch is
+//        reserved for a future column add and is wired through the pure predicate
+//        for forward compatibility but always passes null today.)
 // Action: bump attempt_number, mark prior chain links superseded, reset conversation
 // history, emit fresh_profile_restart lifecycle event.
 router.post(
@@ -283,6 +311,11 @@ router.post(
       await db.transaction(async (tx) => {
         await setOrgAndSubaccountGUC(tx, orgId, run.subaccountId!);
 
+        // Select the LATEST non-superseded chain link. isNull(supersededByAttempt)
+        // already filters to the current attempt; within that attempt, the
+        // highest chain_seq is the most recent — DESC order is mandatory.
+        // ASC would return the earliest chain link and the predicate would
+        // always fail to see the latest failure_reason.
         const [latestChainLink] = await tx
           .select({
             failureReason: operatorRuns.failureReason,
@@ -297,7 +330,7 @@ router.post(
               isNull(operatorRuns.supersededByAttempt),
             ),
           )
-          .orderBy(operatorRuns.chainSeq)
+          .orderBy(desc(operatorRuns.chainSeq))
           .limit(1);
 
         const pred = decideFreshProfileRestartAllowed({
@@ -340,7 +373,11 @@ router.post(
       });
     }
 
-    void auditService.log({
+    // Await: this audit row records the attempt-number bump and the
+    // operator-visible "fresh profile" event; it must be durable before the
+    // 202 lands so the operator UI's polling immediately reflects the new
+    // attempt.
+    await auditService.log({
       organisationId: orgId,
       actorId: actor.id,
       actorType: 'user',
@@ -475,7 +512,10 @@ router.post(
       actor.id,
     );
 
-    void auditService.log({
+    // Await: the debug-retention extension is durable on operator_task_profiles
+    // already; the audit row is the human-readable trail of which operator
+    // granted the extension. Surface it before the 202.
+    await auditService.log({
       organisationId: orgId,
       actorId: actor.id,
       actorType: 'user',

@@ -79,4 +79,72 @@ ChatGPT's concern was based on a stale snippet in uploaded review materials. The
 
 ### Round 1 commit + diff regeneration
 
+Commit `3e482410`. Round 2 diff regenerated at `.chatgpt-diffs/pr288-round2-code-diff.diff`.
+
+## Round 2 — Findings
+
+ChatGPT verdict line: "Round 2 is close, but I'd still hold merge."
+
+| ID | Severity | Triage | Recommendation | User Decision |
+|----|----------|--------|----------------|---------------|
+| F1 | blocker | technical | implement | auto (implement) |
+| F2 | blocker | technical | implement | auto (implement) |
+| F3 | medium | technical | reject (duplicate of Round 1 F3) | auto (reject — duplicate of R1 F3) |
+| F4 | medium | technical | implement | auto (implement) |
+
+Prior-finding status from ChatGPT: F1/F2/F4 Round 1 confirmed fixed; F5 Round 1 fixed for retry-chain-failure but extend-budget was unsafe — that surfaced as Round 2 F1.
+
+### F1 — extend-budget still lacks optimistic predicate + row-count check (BLOCKER)
+
+**Evidence:** `server/routes/operatorTasks.ts:190-198` (Round 1) — `tx.update(agentRuns).set({...}).where(eq(agentRuns.id, agentRunId))`. No `organisationId` filter, no `status='paused_budget_exceeded'` predicate, no row-count check.
+
+**Root cause:** the Round 1 F5 fix landed on retry-chain-failure but extend-budget was missed. Same shape, same race window.
+
+**Fix:** mirror the retry-chain-failure pattern — UPDATE inside the `withOrgGUC` transaction filtered by `id + organisationId + status='paused_budget_exceeded'`; capture `.returning({ id })`; treat 0-rows-affected as `TASK_ALREADY_TERMINAL`; only enqueue the dispatch job after the UPDATE succeeds.
+
+**Files changed:** `server/routes/operatorTasks.ts`.
+
+### F2 — fresh-profile-restart reads earliest chain link, not latest (BLOCKER)
+
+**Evidence:** `server/routes/operatorTasks.ts:300` — `.orderBy(operatorRuns.chainSeq)` (ascending) — returns the earliest chain link in the current attempt. Combined with `latestChainLinkFailureClass: null`, the predicate's failure_reason source was always the wrong chain link's reason — almost always `null` or a transient failure, never the `'OPERATOR_PROFILE_UNRECOVERABLE'` set on the most recent link.
+
+**Root cause:** copy-paste from an earlier query that didn't care about ordering, missed during Phase 2 review.
+
+**Fix:** changed orderBy to `desc(operatorRuns.chainSeq)`. `isNull(supersededByAttempt)` already pins the current attempt; within that, highest chain_seq is the latest link. Added `desc` import.
+
+**V1 failure_class clarification:** the spec's `failure_class='profile_corruption'` branch references a column that does not exist on `operator_runs` in V1. The predicate is wired through `decideFreshProfileRestartAllowed` (which checks both `failureClass` and `failureReason`) for forward compatibility but the route always passes `null` for `failureClass` today. Comment updated to make this explicit so future readers don't re-investigate. Spec §3.15 item 7 already covers this in the deferred-items list.
+
+**Files changed:** `server/routes/operatorTasks.ts`.
+
+### F3 — stale spec/doc `delegated` predicate (MEDIUM) — REJECTED (duplicate of Round 1 F3)
+
+**Investigation:**
+- `grep -rn "'pending','delegated'\|'delegated','paused"` — all three matches are the CANCEL UPDATE predicate, which CORRECTLY includes `'delegated'` because cancelling a delegated task is a valid transition (spec §3.10).
+- The DISPATCH success predicate at `operatorManagedBackend.ts:467` and spec line 1224 both EXCLUDE `'delegated'`, as required.
+
+The Round 1 F3 finding and the Round 2 F3 finding describe the same concern. Round 1 rejected after verifying live code + spec are correct; Round 2 is a substantive duplicate. Per the chatgpt-pr-review duplicate-detection rule (KNOWLEDGE.md 2026-05-01), auto-apply the prior round's decision (reject) without re-triage.
+
+No code change.
+
+### F4 — fire-and-forget audit writes for state-changing routes (MEDIUM)
+
+**Evidence:** `void auditService.log(...)` in:
+- `retry-chain-failure` route (line ~112 Round 1) — state-changing, queues dispatch
+- `extend-budget` route — state-changing, queues dispatch
+- `fresh-profile-restart` route — state-changing, mutates operator_runs
+- `extend-debug-retention` route — state-changing, mutates operator_task_profiles
+
+**Root cause:** the audit log was treated as observability rather than as part of the state-change contract. For state-changing operator actions the audit row IS the operator-visible explanation; if the route returns 202 before the audit is durable, an observer can see the dispatch fire / state change with no recorded cause.
+
+**Fix:** changed all four audit writes from `void auditService.log(...)` to `await auditService.log(...)`. For retry-chain-failure and extend-budget the await sits between the UPDATE and the `boss.send` call so the audit lands before the dispatch job is enqueued. (refresh-credential was already awaited as part of Round 1 F1.)
+
+**Files changed:** `server/routes/operatorTasks.ts`.
+
+### G3 (lint + typecheck) post-fix
+
+- `npm run lint` → 0 errors, 904 warnings (all pre-existing).
+- `npm run typecheck` → clean.
+
+### Round 2 commit + diff regeneration
+
 Pending — see next session entry.
