@@ -56,6 +56,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### A1. `pr-reviewer` — severity tiers + mandatory "Why:"
 
+**Rationale:** Current reviewer output mixes blockers, nice-to-haves, and stylistic nits in a flat list, so the implementer either fixes everything (slow) or skims and risks missing the one blocker (unsafe). Severity tiers let the implementer triage in seconds. The mandatory `Why:` line prevents low-signal "this should probably be X" comments that consume review time without adding rationale — every finding has to earn its space.
+
 **Change:** Update `.claude/agents/pr-reviewer.md` so every review comment carries (a) a severity tier and (b) a one-line "Why:" rationale.
 
 **Tiers:**
@@ -71,6 +73,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 **Non-goals:** changing what `pr-reviewer` *does* — it's still read-only, still independent, still pre-merge gate. Only the *output shape* changes.
 
 ### A2. New `reality-checker` agent
+
+**Rationale:** CLAUDE.md §4 demands "verification before done," but no agent in the current pipeline actually enforces it — `pr-reviewer` reads the diff without running anything, `dual-reviewer` is optional, and the implementing session is biased toward "looks good." LLMs are systematically overconfident about completion, and the recent audit showed five merges where reviewers were silently skipped. A default-pessimistic verifier that demands command-execution proof (test output, log excerpt, screenshot path) turns "should work" into "I ran it and here's the evidence." Cheaper to insert one gate than to debug post-merge regressions.
 
 **Role:** post-`pr-reviewer` completion verifier. Defaults verdict to `NEEDS_WORK`; the implementer must surface command-execution proof to upgrade to `READY`.
 
@@ -92,6 +96,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### A3. `adversarial-reviewer` — STRIDE pass + trust-boundary section
 
+**Rationale:** Adversarial-reviewer currently relies on the reviewer's intuition to spot security holes. Intuitive sweeps reliably catch SQL injection and obvious auth bypass, but consistently miss whole categories — repudiation (no audit trail), information disclosure via error messages, DoS via unbounded loops. STRIDE is a structured checklist that forces a pass over every category, including the ones humans forget. The trust-boundary section makes implicit assumptions explicit — when a change quietly removes the RLS guard a route depended on, that regression now surfaces in the report instead of in production.
+
 **Change:** Extend `.claude/agents/adversarial-reviewer.md` so the report includes:
 
 - A **STRIDE** sweep (Spoofing / Tampering / Repudiation / Information disclosure / DoS / Elevation of privilege) for each changed surface in the diff. Each category gets a one-line finding or an explicit "no applicable risk in this diff."
@@ -100,6 +106,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 **Non-goals:** the agent stays read-only and Phase 1 advisory; auto-trigger surface (`docs/dev-pipeline-coordinators-spec.md §5.1.2`) is unchanged.
 
 ### A4. Minimal-change rules into CLAUDE.md §6 and `builder.md`
+
+**Rationale:** Two recurring failure modes in builder output: (1) premature abstraction — a helper extracted at the second occurrence locks in the wrong shape and has to be refactored when the third call site doesn't fit; (2) scope creep — a chunk that should touch 3 files ends up touching 11 because the builder "noticed" a smell. CLAUDE.md §6 already says "surgical changes," but as a sentence in prose it gets skimmed. Promoting it to enforced checks in `builder.md` (Three-Similar-Lines, line-by-line justification, "Surface, don't smuggle") makes the principle operational instead of aspirational.
 
 **Change:** Promote three principles from agency-agents `minimal-change-engineer` into our own discipline:
 
@@ -110,6 +118,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 **Files touched:** `CLAUDE.md` §6, `.claude/agents/builder.md` (G1 checklist + verdict template).
 
 ### A5. New `incident-commander` agent
+
+**Rationale:** Pre-launch we have `hotfix` for the fast-path fix, but no playbook for the broader "something is on fire" scenario — prod outage, data integrity issue, security incident. In a real incident the first hour is wasted on questions that should be pre-answered: who is coordinating, what severity is this, who's writing the timeline, what's the post-mortem template. Building this now costs an hour while no incidents are live; building it during the first real incident costs the incident's first hour. SEV matrix + scribe role + 48-hour post-mortem template are the standard pattern for a reason.
 
 **Role:** coordinator for *actual production incidents* (broken main, prod outage, data integrity issue, security incident). Distinct from `hotfix` — `hotfix` is the fast-path fix; `incident-commander` is the playbook for "something is on fire and we need to coordinate the response, communicate, and write a post-mortem."
 
@@ -128,6 +138,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 ## 4. WS-B — Gate enforcement & route hygiene
 
 ### B1. Restore `verify-no-db-in-routes.sh` to blocking
+
+**Rationale:** This is one of the load-bearing tenant-isolation rules. Routes that hit `db` directly bypass the service-layer enforcement of `eq(organisationId, ...)` filters; a single missed scope filter becomes a cross-tenant data leak. The CI gate exists precisely so this can't happen by accident — but the gate is currently letting 9 violations through silently, which means we have the *appearance* of safety without the substance. A drifting gate is worse than no gate: developers trust it, so violations stop being caught in review either. Restoring the gate is the single highest-leverage tenant-safety win in the spec.
 
 **Problem:** 10 route files import `db` directly in violation of `DEVELOPMENT_GUIDELINES.md §2` and the route-pattern section of `architecture.md`. Only `workspaceInboundWebhook.ts` carries a documented `guard-ignore` exception. The other 9 are silent drift.
 
@@ -160,6 +172,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### B2. `replit.md` typecheck drift
 
+**Rationale:** `replit.md` is the first file a new Replit session reads — its job is to bootstrap the agent's mental model. A doc that incorrectly says "no typecheck script" trains every new session to skip typecheck, which propagates into every PR that session opens. Cost to fix: two lines. Cost of leaving it: every new session re-learns the same false constraint and ships TS-broken code more often than it should.
+
 **Problem:** `replit.md` line 22 claims "there is no `npm run typecheck` script," but `package.json` defines one.
 
 **Fix:** Single-edit doc correction. Update to reference the actual `typecheck` script and the dual-tsconfig one-liner referenced from CLAUDE.md.
@@ -167,6 +181,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 ## 5. WS-C — Debt cleanup
 
 ### C1. `tasks/todo.md` triage sprint
+
+**Rationale:** A backlog with 281 deferred items is no longer a backlog — it's a graveyard. Real-priority items get buried in noise so planning can't surface them, and the file's frictionless-append design means it only grows. Either we promote items to the work they actually represent (specs, ADRs, accepted stances) or we acknowledge the items aren't getting done and archive them. Pre-launch is the cheapest moment to clear it; once paying customers are on, the backlog grows faster than triage can keep up.
 
 **Problem:** 4,408 lines; 281 items marked "deferred." Unbounded growth.
 
@@ -181,6 +197,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### C2. `KNOWLEDGE.md` sweep
 
+**Rationale:** `KNOWLEDGE.md` is loaded into context routinely — every session pays its token cost. At 3,785 lines it has already crossed the size threshold the file itself declares as "noise," and signal density falls as length grows: a session looking for one pattern wades through many. Patterns cited 3+ times are stable enough to be ADRs (durable, dated, findable); the rest are one-off observations that don't deserve a seat in every session's context window. Sweep restores the file as a focused reference.
+
 **Problem:** 3,785 lines; file's own policy declares ≥3,000 lines "noise."
 
 **Approach:**
@@ -194,6 +212,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### C3. PR #277 (`support-desk-canonical`) — close or finish
 
+**Rationale:** A parked PR is a quiet liability. Every week that passes, `main` evolves and the merge cost grows — eventually crossing the value the PR offers. Holding it open also clutters `tasks/current-focus.md` and tempts future sessions to half-resume it. Forcing the decision now (finish or close) ends the decay either way. The spec doesn't pick — just demands the call be made before plan-authoring.
+
 **Problem:** parked indefinitely on `claude/support-ticket-structure-xMcy8`. Open PRs decay via merge conflicts and stale doc references.
 
 **Decision required from operator before chunk runs:** finish (resume via `tasks/builds/support-desk-canonical/handoff.md`) or close.
@@ -201,6 +221,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 **This spec does not pick one** — it surfaces the decision as a gate. Spec sign-off requires the operator's choice.
 
 ### C4. Working-tree bloat — archive `prototypes/` and `attached_assets/`
+
+**Rationale:** 5.5 MB of stale artifacts at repo root visually drowns the active directories. Both human contributors and Claude sessions treat repo-root entries as "current and load-bearing"; an `_archive/` convention is a visual contract that says "look elsewhere for active work." Git history is preserved via `git mv`, so nothing is lost — just relocated to where it belongs.
 
 **Problem:** `prototypes/` (4.6 MB) + `attached_assets/` (928 KB) live in repo root. Likely stale.
 
@@ -216,6 +238,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 
 ### D1. Reviewer-coverage policy
 
+**Rationale:** A policy that gets silently skipped is worse than a weaker policy that's actually followed — it provides false confidence that reviews happened when they didn't. The audit shows five merges in the last month where required reviewers were marked SKIPPED with no remediation. Either the bar is wrong (tooling can't meet it) or the bar is being ignored (cultural drift). Picking a posture (STRICT/GRADED/ADVISORY) and wiring it into the coordinators so they fail loudly when a required reviewer is unavailable closes the gap between declared and actual policy.
+
 **Problem:** 5 recent merges shipped with `dual-reviewer SKIPPED` or `chatgpt-pr-review SKIPPED`. Either the policy needs to change to match reality, or the tooling needs to be reliable enough to enforce.
 
 **Approach (architecture decision):**
@@ -230,6 +254,8 @@ Source: `msitarzewski/agency-agents` (`engineering/` + `testing/` slice). Person
 **Recommendation embedded in spec:** GRADED, since it matches current intent. Spec-reviewer / operator can override.
 
 ### D2. Testing-posture flip date
+
+**Rationale:** Gates-only is the right posture pre-launch — it saves the test-maintenance overhead while the product shape is still moving. But once paying customers are on, a regression the gates can't catch becomes a customer-visible bug, and the cost of "no integration tests for RLS-protected flows" stops being theoretical. The transition itself is L-effort (integration tests for the four critical service paths alone), so waiting until "first live client" is on the doorstep means scrambling under deadline. A transition plan written now buys lead time and lets the operator pick a trigger date with full cost visibility.
 
 **Problem:** `DEVELOPMENT_GUIDELINES.md §7` ties the gates-only → full-suite transition to "first live agency client onboarding," but the trigger is approaching and the prep work hasn't started.
 
