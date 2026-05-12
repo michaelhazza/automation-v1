@@ -37,6 +37,7 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 
 Work through these in order. An unchecked box is a design finding; every unchecked box means the artifact is under-specified and not ready to build.
 
+- [ ] **Where does this surface live in the existing UI?** Identify the existing page(s) and component(s) the new capability extends *before drafting anything*. Search `client/src/pages/` and `client/src/components/`. Read the actual files. Quote the layout, tab labels, status pill text, vocabulary you'll inherit. New capabilities surface inside existing pages by default. A new dedicated page requires explicit justification (cross-cutting overview, distinct user journey, no extensible surface exists). The most expensive design mistake is inventing a parallel UI universe when the app already has the right surface.
 - [ ] **Who is the primary user of this screen?** Roles: agency operator / solo founder / tenant admin / internal staff / Synthetos admin. Different users tolerate different complexity ceilings. Agency operator = lowest tolerance. Internal staff = highest.
 - [ ] **What single task are they here to complete?** One sentence. Example: *"Attach a document bundle to this scheduled task."* NOT *"Manage document bundles and monitor utilization and review run history."* If the answer is a list, you have multiple screens, not one.
 - [ ] **What is the minimum information needed to complete that task?** List it. Example: bundle name, bundle document count, an attach button. NOT utilization-per-tier, cache-hit-rate, prefix-hash preview, attach button.
@@ -234,6 +235,7 @@ Read for method, not content. If you're adapting this framework to a new project
 Before committing any UI artifact (mockup, PR, component), run through this quickly:
 
 **The five hard rules:**
+- [ ] Did I extend an existing page/component instead of inventing a new one? (If new page: did I justify why no existing surface fits?)
 - [ ] Did I start from the user's task, not the data model?
 - [ ] Is there exactly one primary action on this screen?
 - [ ] Is every element load-bearing for the primary task?
