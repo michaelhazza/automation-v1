@@ -116,6 +116,10 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+import operatorSessionsRouter from './routes/operatorSessions.js';
+import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
 import skillStudioRouter from './routes/skillStudio.js';
@@ -416,6 +420,10 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+app.use(operatorSessionsRouter);
+app.use(subaccountOperatorSettingsRouter);
+app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
 app.use(pulseRouter);
