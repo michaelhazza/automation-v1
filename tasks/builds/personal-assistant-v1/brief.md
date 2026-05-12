@@ -3,6 +3,7 @@
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `personal-assistant-v1`
 **Successor placeholder:** `tasks/builds/personal-assistant-v2-operator/brief.md` (V2 upgrade — Operator Controller, depends on Spec D)
+**Locked predecessor:** `tasks/builds/principal-scoped-agents/brief.md` (foundation spec — user-principal agents + principal-aware credential broker + Run Trace view projection; EA V1 is the first consumer)
 **Concurrent with:** Spec D `tasks/builds/operator-backend/brief.md` (no file overlap; V2 depends on Spec D, V1 does not)
 **Strategic parent:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` §16.1 (Executive Assistant use case), §6.3 (Native Controller), §17 (use-case coverage matrix)
 
@@ -23,7 +24,9 @@
   - [3.7 Use-case shortlist for V1](#37-use-case-shortlist-for-v1)
   - [3.8 Connection UI surfacing](#38-connection-ui-surfacing)
   - [3.9 Notification + delivery surfaces](#39-notification--delivery-surfaces)
-  - [3.10 Failure modes for triggered runs](#310-failure-modes-for-triggered-runs)
+  - [3.10 Multi-user consumption (consumes `principal-scoped-agents`)](#310-multi-user-consumption-consumes-principal-scoped-agents)
+  - [3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)](#311-voice-profile-primitive-introduced-by-ea-v1-designed-for-reuse)
+  - [3.12 Failure modes for triggered runs](#312-failure-modes-for-triggered-runs)
 - [4. Open architectural questions (for operator ratification)](#4-open-architectural-questions-for-operator-ratification)
 - [5. Out of scope (explicit non-goals)](#5-out-of-scope-explicit-non-goals)
 - [6. What unblocks when this ships](#6-what-unblocks-when-this-ships)
@@ -71,8 +74,9 @@ This brief locks scope. The spec is authored next.
 | Webhook ingestion pattern (per-org HMAC, replay nonces) | `server/routes/webhooks/` (GHL, Slack, Stripe, Teamwork) | shipped |
 | HITL approval workflow + Slack-approval delivery channel | shipped | shipped |
 | Three-tier agent model (System / Org / Subaccount) + hierarchical delegation | shipped | shipped |
+| Principal-scoped agents (`principal_type` + `principal_id` on agents and runs, principal-aware Credential Broker lookup, Run Trace view projection) | `tasks/builds/principal-scoped-agents/brief.md` | LOCKED PREDECESSOR — must merge before EA V1 build starts |
 
-Nothing on the foundation is in flux. V1 is a pure composer of existing primitives plus two new connector surfaces (Calendar OAuth + actions, Slack agent actions) plus one new trigger primitive (external-source triggers).
+Nothing on the foundation is in flux. V1 is a pure composer of existing primitives plus the principal-scoped-agents primitive plus two new connector surfaces (Calendar OAuth + actions, Slack agent actions) plus one new trigger primitive (external-source triggers) plus the generic `VoiceProfile` primitive (introduced in this build, designed for reuse by future agents).
 
 ## 3. What this spec must define
 
@@ -222,7 +226,60 @@ Configuration lives on the EA agent's per-subaccount config (existing agent-edit
 
 Operator's email address and Slack user-id are resolved via the operator's identity binding on the subaccount, no new field. If Slack DM delivery is configured but Slack is not yet connected, the EA falls back to email and writes a `delivery_fallback` Run Trace event.
 
-### 3.10 Failure modes for triggered runs
+### 3.10 Multi-user consumption (consumes `principal-scoped-agents`)
+
+The EA is a **user-principal agent** per the predecessor spec. Each user who wants an EA provisions their own agent row from the system template, bound to their `user_id` via `principal_type: 'user'`. Credentials, runs, policy envelope, and Run Trace all key off the user principal automatically (the predecessor spec handles the plumbing).
+
+V1 build implications:
+
+- The EA seed migration creates **one EA agent row per active user in the dogfood subaccount**, not a single subaccount-scoped row. (Phase 3 may automate provisioning; V1 seeds the operator's user explicitly, additional users seed when the dogfood expands.)
+- The Connections page eventually distinguishes "Acme Co's Gmail" (subaccount-principal) from "Michael's Gmail" (user-principal). V1 ships the data model; the UI label add is a small follow-on inside the EA build if simple, or its own UI spec if it surfaces edge cases.
+- Run Trace per-user scoping (predecessor §4 question 7) means each user sees their own EA's runs by default; org admins see all. No new UI for V1, the existing RunTracePage gains a filter chip in a follow-on.
+- Slack DM delivery resolves the operator's Slack user-id from the user-principal binding, not the subaccount owner. Each user gets their own briefing in their own DM.
+- The EA agent's UI label ("Personal Assistant") can be customised per user if desired — recommendation: keep "Personal Assistant" as the universal label, individual users do not need to rename it.
+
+### 3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)
+
+The EA adopts the operator's writing voice from existing content. Implemented as a **generic `VoiceProfile` primitive** the platform can reuse for Riley (brand outreach voice), Helena (client-report voice), Sarah (analyst-report voice), and future content/marketing agents.
+
+New resource:
+
+```ts
+voice_profiles: {
+  id: uuid,
+  organisation_id: uuid,
+  scope_type: 'user' | 'subaccount' | 'org',     // parallel to principal model
+  scope_id: uuid,
+  name: text,                                     // display, e.g. "Michael — personal email voice"
+  source: 'gmail_sent_sampler' | 'drive_doc_sampler' | 'manual',
+  source_config: jsonb,                           // sampler-specific: { last_n: 50, since_days: 90, gmailLabelFilter?: ... }
+  profile_json: jsonb,                            // distilled features: greeting/signoff patterns, sentence-length stats, formality score, em-dash usage, common phrases, signature line
+  sample_size: int,
+  last_derived_at: timestamptz,
+  refresh_policy: 'manual' | 'periodic' | 'on_send_count',
+  refresh_config: jsonb,                          // e.g. { days: 30 } or { every_n_sends: 50 }
+  opt_out_at: timestamptz | null,                 // user opted out — profile not derived/used
+  created_at, updated_at
+}
+```
+
+New service: `VoiceProfileService` with pluggable samplers:
+
+- `gmail_sent_sampler` — pulls last N sent messages from `read_inbox` adapter, runs feature distillation, writes profile.
+- `drive_doc_sampler` — reads specified Drive doc(s) as the source material (for brand-voice cases where the brand has a style guide doc).
+- `manual` — operator pastes example content, profile derives from it.
+
+Agent configs declare which voice profile to use via a `voice_profile_id` field. The EA defaults to a user-scoped Gmail-sampled profile for its principal user. Riley defaults to a subaccount-scoped profile (existing brand-voice configuration in his system prompt becomes data, not prose). Future agents pick their profile at config time.
+
+Prompt integration: every generated draft conditions on the profile JSON. Existing prompt builder gains a `<voice>` block injected before the task prompt when the agent has a configured profile.
+
+Refresh: V1 picks "periodic every 30 days OR every 50 sent messages, whichever first" as the EA default. Manual refresh button on the EA settings page calls `VoiceProfileService.refresh(profileId)`.
+
+Opt-out: per-profile flag in user settings. Recommendation: **default on, with a clear explanation at first-run setup that the EA will read your sent folder to learn your voice; one-click opt-out available.** Spec confirms the exact onboarding copy.
+
+Privacy: derived `profile_json` is feature-level (greeting patterns, sentence-length stats, signature lines) — NOT verbatim content. Source content is read transiently, not stored on the profile.
+
+### 3.12 Failure modes for triggered runs
 
 The spec defines behaviour for the four failure classes:
 
@@ -235,23 +292,27 @@ All four failure paths are visible in the EA's Run Trace view (existing surface)
 
 ## 4. Open architectural questions (for operator ratification)
 
-Flag the operator answer in §4 of the spec before lock.
+Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = awaiting decision.
 
-1. **Calendar write-scope V1.** Read + write, or read-only first? Recommendation: **read + write V1.** The meeting-prep + conflict-detection use cases lose half their value without write. Mitigation: write actions ship review-gated (Tier 4+ default-review per Phase 1 risk-tier policy).
+1. **Calendar write-scope V1.** Read + write, or read-only first? Recommendation: **read + write V1.** The meeting-prep + conflict-detection use cases lose half their value without write. Mitigation: write actions ship review-gated (Tier 4+ default-review per Phase 1 risk-tier policy). **OPEN.**
 
-2. **Slack write-scope V1.** Post + DM, or read-only first? Recommendation: **read + write V1, with self-directed posts (DMs to operator, thread-summary self-replies) auto-gated; third-party channel posts review-gated.** This needs a finer policy than "Tier 6 = always review", the spec defines a `policy_envelope_v1` clause that auto-gates posts whose recipient resolves to the connected operator user-id.
+2. **Slack write-scope V1 — user-facing config.** **LOCKED.** Read + write V1. Auto-send scope is a per-instance setting with three options, default `Only me (DMs)`:
+   - **Only me (DMs)** — every message to a channel or other person needs operator approval (default).
+   - **My own channels** — auto-post to channels I'm a member of; DMs to others and external channels need approval.
+   - **Anywhere** — auto-post to any channel; only DMs to people other than me need approval.
+   Surfaced as a single dropdown on the EA settings page. The same enum is reused on any future agent that gains Slack post capability (Riley, future content agents).
 
-3. **Risk-tier ceiling for the EA agent.** Recommendation: **Tier 5 hard ceiling for V1.** Tier 6 sends (`send_email`, `slack.post_message` to third parties) are allowed but require review. Drafting / scheduling / internal-record updates run auto. This matches the master brief's principle: "Native Controller is default. Operator Controller is escalation."
+3. **Risk-tier ceiling for the EA agent.** Recommendation: **Tier 5 hard ceiling for V1.** Tier 6 sends (`send_email`, `slack.post_message` to third parties) are allowed but require review (except as gated by §3 below for self-directed Slack). Drafting / scheduling / internal-record updates run auto. **OPEN.**
 
-4. **Daily briefing delivery default.** Slack DM, email, both, or operator-selectable at setup? Recommendation: **Slack DM as default**, email as alternate, both available; operator picks at first-run setup.
+4. **Daily briefing delivery default.** Slack DM, email, both, or operator-selectable at setup? Recommendation: **Slack DM as default**, email as alternate, both available; operator picks at first-run setup. **OPEN.**
 
-5. **Use-case shortlist for V1.** Recommendation: **ship #1 (daily briefing), #2 (inbox triage), #3 (meeting prep) — the always-on trio.** Defer #4 (Slack mention summary) and #5 (weekly review) to a fast follow-on if the trio lands cleanly.
+5. **Use-case shortlist for V1.** **LOCKED.** Ship #1 (daily briefing 07:00 cron + Slack DM), #2 (inbox triage + drafted replies), #3 (15-min-before meeting prep summary). Defer #4 (Slack mention summary) and #5 (weekly review) to a fast follow-on if the trio lands cleanly. Confirmed: existing briefing/summary workflows in the codebase are subaccount-focused; the EA briefings are user-principal-focused (new templates, reuses workflow engine).
 
-6. **Gmail push notifications vs polling.** Recommendation: **5-minute polling V1.** Push notifications require provisioning a Google Cloud Pub/Sub topic and subscription per Google account, which is operational overhead the dogfood doesn't need yet. The polling path is one recurring task per subaccount with the existing engine. A flag-gated push path is a Phase 1.5 add if polling latency becomes a felt problem.
+6. **Gmail push notifications vs polling.** **LOCKED.** 5-minute polling V1. Confirmed: polling job is a Gmail `users.history.list` API call (no LLM cost; 288 calls/day per connected account, inside Google's free quota). LLM cost stays zero until a new message arrives AND the EA decides to act. Push path (Gmail Watch → Pub/Sub) is a flag-gated Phase 1.5 add if 5-min latency becomes felt.
 
-7. **Operator's identity binding for V1.** The EA needs to know "which operator am I summarising for?", spec confirms this maps cleanly to the existing `users.id` on the subaccount-owner relation, or whether a dedicated `eaOperatorBinding` field is needed for cases where the EA serves a delegated team member rather than the subaccount owner. Recommendation: **subaccount-owner V1, dedicated binding deferred** until multi-operator dogfood is needed.
+7. **Multi-user EA principal binding.** **LOCKED.** EA is a user-principal agent per the predecessor spec `tasks/builds/principal-scoped-agents/brief.md`. Each user provisions their own EA instance bound to their `user_id`. Credentials, runs, policy envelope, and Run Trace honour the principal model. V1 UI surfaces the operator's own instance; multi-user UI surfaces are a fast follow-on. EA V1 build does not invent new schema for this — it consumes the foundation primitive shipped by the predecessor spec.
 
-8. **System-prompt voice and tone.** Out of scope for this brief, locked at spec authoring. Flag if the operator has a non-default tone preference (e.g., terse vs conversational, em-dash usage, time-zone framing).
+8. **Voice and tone — dynamic, not static.** **LOCKED.** EA voice is data-driven from the operator's own sent mail (per §3.11 — Voice Profile primitive). No static system-prompt tone. Voice profile derives at first-run setup from the last 50 sent emails in the past 90 days, refreshes every 30 days or every 50 new sent emails (whichever first). Manual refresh button on EA settings. Default opt-in with one-click opt-out at first-run setup. Same primitive is reusable across Riley (brand voice, subaccount-scoped), Helena (client-report voice), Sarah (analyst voice), and future content agents. **One remaining OPEN sub-question:** opt-out default — is "default on with clear explanation" acceptable, or should it be "default off and explicit opt-in at first-run setup"? Recommendation: **default on, clear explanation, one-click opt-out** — the EA is meaningfully less useful without voice adaptation and the operator's own sent mail is the operator's own data being read for the operator's own benefit. **OPEN sub-question only.**
 
 ## 5. Out of scope (explicit non-goals)
 
