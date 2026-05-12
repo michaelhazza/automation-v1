@@ -3,7 +3,8 @@
 **Slug:** `fleet-and-codebase-health`
 **Class:** Major (cross-cutting; touches `.claude/agents/`, CLAUDE.md, gate scripts, archive layout, docs)
 **Authored:** 2026-05-12
-**Status:** DRAFT — pending review
+**Locked:** 2026-05-12 — all 4 pre-plan decisions resolved (see §11)
+**Status:** LOCKED — ready for plan-authoring
 
 > **Out of scope (explicitly deferred):** splitting the four obese services (`skillExecutor.ts`, `workflowEngineService.ts`, `skillAnalyzerServicePure.ts`, `agentExecutionService.ts`). That work runs in a separate branch as its own Major spec.
 
@@ -253,18 +254,13 @@ Before any mutation of `KNOWLEDGE.md`, the builder produces `docs/knowledge-swee
 
 **Constraint:** CLAUDE.md §3 — "never edit or remove existing entries — only append." This sweep is the explicit exception, called out as a "quarterly grouping pass." Document the sweep in a single dated header so future readers know the trim happened.
 
-### C3. PR #277 (`support-desk-canonical`) — pre-plan operator decision
+### C3. PR #277 (`support-desk-canonical`) — DECIDED: close
 
-**Rationale:** A parked PR is a quiet liability. Every week that passes, `main` evolves and the merge cost grows — eventually crossing the value the PR offers. Holding it open also clutters `tasks/current-focus.md` and tempts future sessions to half-resume it. Forcing the decision now (finish or close) ends the decay either way.
+**Rationale:** A parked PR is a quiet liability. Every week that passes, `main` evolves and the merge cost grows — eventually crossing the value the PR offers. Holding it open also clutters `tasks/current-focus.md` and tempts future sessions to half-resume it.
 
-**Problem:** parked indefinitely on `claude/support-ticket-structure-xMcy8`. Open PRs decay via merge conflicts and stale doc references.
+**Decision (2026-05-12):** **Close.** Phase 2 was "previously recorded complete" but never finished review; resuming costs more than restarting clean if support-desk redesign is needed later. PR closed with a comment explaining context; `tasks/current-focus.md` paused-build line removed.
 
-**Control model:** This is **not** a chunk of this build. It is a **pre-plan operator decision** that must be resolved before plan-authoring begins. Once the operator chooses:
-
-- **Close** — recorded in `tasks/current-focus.md` paused-build line; no chunk in this spec.
-- **Finish** — handled in a **separate build/branch** sequenced before or after this one; not folded into this spec's chunk list.
-
-This keeps the hygiene build coherent and avoids coupling a stale product PR's review surface into the fleet-and-codebase-health diff.
+**No chunk in this spec.** If support-desk capability matters later, draft a fresh spec.
 
 ### C4. Working-tree bloat — archive `prototypes/` and `attached_assets/`
 
@@ -274,7 +270,7 @@ This keeps the hygiene build coherent and avoids coupling a stale product PR's r
 
 **Approach:**
 
-- Move both to `_archive/` at repo root (kept in-repo for history but visually separated).
+- Move both to `_archive/` at repo root (kept in-repo for history but visually separated). **DECIDED 2026-05-12** — in-repo archive preserves history trivially via `git mv` and keeps mockup-log references valid.
 - Audit any in-code references to either path; update any that exist.
 - Add a one-line `_archive/README.md` explaining the convention.
 
@@ -313,7 +309,7 @@ This keeps the hygiene build coherent and avoids coupling a stale product PR's r
 
 A silent skip with no `REVIEW_GAP` entry is itself a policy violation.
 
-**Recommendation embedded in spec:** GRADED, since it matches current intent. Spec-reviewer / operator can override.
+**Decision (2026-05-12):** **GRADED.** `pr-reviewer` always mandatory; `dual-reviewer` / `adversarial-reviewer` / `chatgpt-pr-review` mandatory by task class (Significant / Major) but skippable with a documented `REVIEW_GAP` entry. This is the posture the coordinators must enforce.
 
 ### D2. Testing-posture flip date
 
@@ -328,11 +324,9 @@ A silent skip with no `REVIEW_GAP` entry is itself a policy violation.
   - Sequencing: which gates flip first, which stay gates-only longest.
   - Estimated effort: rough S/M/L per suite.
 
-**Default trigger embedded in the plan (T8):**
+**Trigger (DECIDED 2026-05-12):** **T-minus-14 calendar days before first live agency client onboarding.** Self-correcting trigger — lands when it needs to, regardless of slippage. A concrete date would have to be guessed today.
 
-The transition plan ships with a default trigger: **T-minus-14 calendar days before first live agency client onboarding.** The plan adopts this default unless the operator explicitly overrides it.
-
-This avoids the deferred-debt antipattern (adding a vague "operator to decide trigger" TODO) that the C1 sweep is trying to eliminate. The trigger is decided by default; override is explicit.
+This avoids the deferred-debt antipattern (adding a vague "operator to decide trigger" TODO) that the C1 sweep is trying to eliminate.
 
 ## 7. Doc-sync impact
 
@@ -431,11 +425,13 @@ PR #277 is **not** a final-acceptance item — it is resolved as a pre-plan oper
 | `incident-commander` never gets used because real incidents are rare pre-launch | Acceptable — agent is cheap to maintain and present-when-needed beats absent-when-needed. |
 | Operator hasn't yet decided on PR #277 | Chunk 14 is gated; the rest of the spec ships independently. |
 
-## 11. Open questions for operator
+## 11. Decisions (LOCKED 2026-05-12)
 
-Resolved as a single pre-plan decision block. Plan-authoring **must not** start until all four are answered.
+All four pre-plan decisions resolved. Plan-authoring may proceed.
 
-1. **PR #277 fate (§5 C3) — pre-plan gate:** finish or close. If **close**: recorded in `tasks/current-focus.md` and PR closed; no further work in this spec. If **finish**: handled in a separate build/branch sequenced before or after this one — not folded into this spec.
-2. **Reviewer posture (§6 D1):** STRICT / GRADED / ADVISORY — recommendation is GRADED. Confirm or pick.
-3. **Archive convention (§5 C4):** `_archive/` at repo root vs. moving the contents out of repo entirely. Recommendation is in-repo for history; confirm.
-4. **Testing-transition trigger (§6 D2):** the default is T-minus-14-days before first live agency client onboarding. Confirm or override with a concrete date.
+| # | Question | Decision | Rationale |
+|---|----------|----------|-----------|
+| 1 | PR #277 fate (§5 C3) | **Close** | Decay liability; restart fresh if support-desk redesign is needed later. PR closed with explanatory comment; paused-build line removed from `tasks/current-focus.md`. |
+| 2 | Reviewer posture (§6 D1) | **GRADED** | Matches reality — `pr-reviewer` always mandatory; heavier reviewers mandatory by class but skippable with a `REVIEW_GAP` entry. STRICT would block on tooling availability; ADVISORY abandons signal. |
+| 3 | Archive convention (§5 C4) | **In-repo `_archive/`** | `git mv` preserves history; existing mockup-log references stay valid; 5.5 MB cost negligible. |
+| 4 | Testing-transition trigger (§6 D2) | **T-minus-14 days** before first live agency client onboarding | Self-correcting trigger; a concrete date would be a guess today. |
