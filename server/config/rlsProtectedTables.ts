@@ -1259,6 +1259,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
     rationale: 'Redacted per-line stdout/stderr log rows from harvested sandbox executions. Cross-tenant leak exposes customer-derived script output and potentially PII or secrets that survived redaction.',
   },
+  // 0328 — Personal Assistant V1: voice profile derivation + opt-out state
+  {
+    tableName: 'voice_profiles',
+    schemaFile: 'voiceProfiles.ts',
+    policyMigration: '0328_voice_profiles.sql',
+    rationale: 'Per-owner derived voice style features used to personalise agent output — contains writing-style signals extracted from sent emails and documents. Three-axis scoping (user / subaccount / org); cross-tenant leak exposes personal communication patterns and PII.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
