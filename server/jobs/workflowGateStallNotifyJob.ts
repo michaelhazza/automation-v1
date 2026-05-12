@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { workflowStepGates } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { isStallFireStale } from '../services/workflowGateStallNotifyServicePure.js';
+import { eaDraftService } from '../services/eaDrafts/eaDraftService.js';
 
 // ---------------------------------------------------------------------------
 // Queue name — exported so both the registrar (index.ts) and the service
@@ -80,4 +81,19 @@ export async function workflowGateStallNotifyHandler(
     cadence: payload.cadence,
     gateKind: payload.gateKind,
   });
+}
+
+// ---------------------------------------------------------------------------
+// EA draft stall-reset pass
+//
+// Resets ea_drafts rows stuck in send_state='sending' for more than 30 minutes
+// back to 'idle'. This is a recoverable stall — NOT a terminal failure.
+// Called by the same job worker that handles workflow-gate stall notifications.
+// ---------------------------------------------------------------------------
+
+export async function eaDraftStallResetHandler(): Promise<void> {
+  const resetIds = await eaDraftService.resetStalledSendingDrafts();
+  for (const id of resetIds) {
+    logger.info('ea_draft_stall_reset', { draftId: id });
+  }
 }

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home — with new Personal zone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; }
+.proto-banner { background: #eef2ff; border-bottom: 1px solid #c7d2fe; padding: 8px 16px; font-size: 11.5px; color: #3730a3; text-align: center; }
+
+/* Sidebar Personal group (same pattern as round 1) */
+.sidebar-personal-group { padding: 12px 0 4px; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); background: linear-gradient(180deg, rgba(99,102,241,0.07), rgba(99,102,241,0)); }
+.sidebar-personal-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: rgba(255,255,255,0.5); padding: 0 16px 8px; }
+.sidebar-personal-label .new-dot { width: 6px; height: 6px; background: #818cf8; border-radius: 50%; }
+.sidebar-personal-item { display: flex; align-items: center; gap: 9px; padding: 6px 12px; margin: 0 6px 2px; border-radius: 7px; color: #fff; font-size: 12.5px; font-weight: 500; cursor: pointer; text-decoration: none; }
+.sidebar-personal-item:hover { background: rgba(255,255,255,0.04); }
+.sidebar-personal-icon { width: 18px; height: 18px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: 700; flex-shrink: 0; }
+
+.section-label { padding: 8px 16px 4px; color: rgba(255,255,255,0.5); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; }
+.nav-item { padding: 6px 12px; margin: 0 6px 2px; color: rgba(255,255,255,0.7); font-size: 12.5px; }
+.nav-item.active { background: rgba(255,255,255,0.07); color: white; border-radius: 7px; }
+
+/* MAIN */
+.page-shell { padding: 32px 40px; max-width: 1140px; }
+.greeting { font-size: 23px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 4px; }
+.greeting-sub { font-size: 13.5px; color: #64748b; line-height: 1.6; margin-bottom: 28px; }
+
+/* ── PERSONAL ZONE (new) ────────────────────────────────────────── */
+.personal-zone { margin-bottom: 32px; }
+.zone-label { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 0 4px; }
+.zone-label-title { font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.08em; }
+.zone-label-dot { width: 6px; height: 6px; background: #818cf8; border-radius: 50%; }
+.zone-label-meta { font-size: 11.5px; color: #94a3b8; margin-left: auto; }
+
+.personal-card { background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%); border: 1px solid #c7d2fe; border-radius: 12px; padding: 20px 22px; box-shadow: 0 2px 8px rgba(99,102,241,0.06); }
+.personal-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #eef2ff; }
+.personal-card-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: white; flex-shrink: 0; }
+.personal-card-title { font-size: 14.5px; font-weight: 700; color: #0f172a; }
+.personal-card-meta { font-size: 11.5px; color: #64748b; }
+.personal-card-open { margin-left: auto; padding: 6px 13px; background: white; border: 1px solid #c7d2fe; border-radius: 7px; font-size: 11.5px; font-weight: 600; color: #4338ca; text-decoration: none; }
+.personal-card-open:hover { background: #eef2ff; }
+
+.personal-card-body { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; }
+.personal-summary { font-size: 13px; color: #334155; line-height: 1.6; padding-right: 16px; border-right: 1px solid #eef2ff; }
+.personal-summary strong { color: #0f172a; font-weight: 600; }
+
+.personal-mini { display: flex; flex-direction: column; gap: 6px; }
+.personal-mini-label { font-size: 10.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+.personal-mini-value { font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1; }
+.personal-mini-meta { font-size: 11px; color: #64748b; }
+
+/* Demo: how a second user-owned agent (Dev Agent, Phase 3) would look in the same zone */
+.future-card { background: white; border: 1.5px dashed #cbd5e1; border-radius: 12px; padding: 16px 20px; margin-top: 10px; display: flex; align-items: center; gap: 14px; opacity: 0.62; }
+.future-icon { width: 30px; height: 30px; background: #e2e8f0; color: #64748b; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.future-body { flex: 1; }
+.future-title { font-size: 13px; font-weight: 600; color: #334155; }
+.future-sub { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+.future-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; background: #f1f5f9; color: #64748b; border-radius: 4px; }
+
+/* ── EXISTING HOME SECTIONS (kept) ──────────────────────────────── */
+.existing-zone-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding: 0 4px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.kpi-card { background: white; border: 1px solid #e2e8f0; border-radius: 11px; padding: 16px 18px; }
+.kpi-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+.kpi-value { font-size: 24px; font-weight: 700; color: #0f172a; line-height: 1; margin-bottom: 4px; }
+.kpi-delta { font-size: 11.5px; color: #64748b; }
+.kpi-delta.pos { color: #059669; }
+.kpi-delta.neg { color: #b91c1c; }
+
+.attention-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; }
+.attention-h { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.attention-h .count-pill { font-size: 11px; padding: 2px 8px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 10px; font-weight: 700; }
+.attention-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; font-size: 12.5px; }
+.attention-row:first-of-type { border-top: none; padding-top: 4px; }
+.attention-name { color: #0f172a; font-weight: 500; flex: 1; }
+.attention-meta { color: #64748b; font-size: 11.5px; }
+
+.activity-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 22px; }
+.activity-h { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
+.activity-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #334155; }
+.activity-row:first-of-type { border-top: none; padding-top: 4px; }
+.activity-dot { width: 7px; height: 7px; background: #94a3b8; border-radius: 50%; flex-shrink: 0; }
+.activity-dot.ok { background: #10b981; }
+.activity-text { flex: 1; }
+.activity-time { color: #94a3b8; font-size: 11.5px; }
+
+.privacy-strip { display: flex; align-items: center; gap: 10px; padding: 11px 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 12px; color: #475569; margin-top: 14px; }
+.privacy-lock { width: 22px; height: 22px; background: #ecfdf5; color: #047857; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  Personal Assistant V1 — Mockup 2 of 3 (round 2): existing home page + new Personal zone at top. No dedicated EA dashboard.
+  <a href="index.html" style="color: #4338ca; font-weight: 600; text-decoration: none; margin-left: 8px;">← Back to index</a>
+</div>
+
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">S</div>
+        <div class="sidebar-logo-text">Synthetos</div>
+      </div>
+    </div>
+
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <div class="sidebar-client-name">Acme Co</div>
+      <div class="sidebar-client-caret">▼</div>
+    </div>
+
+    <!-- Personal nav group (data-driven; same primitive used by home zone) -->
+    <div class="sidebar-personal-group">
+      <div class="sidebar-personal-label"><span class="new-dot"></span>Personal</div>
+      <a class="sidebar-personal-item" href="03-ea-settings.html">
+        <div class="sidebar-personal-icon">PA</div>
+        <span>Personal Assistant</span>
+      </a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Operate</div>
+      <div class="nav-item active">Home</div>
+      <div class="nav-item">Inbox</div>
+      <div class="nav-item">Activity</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">Build</div>
+      <div class="nav-item">Agents</div>
+      <div class="nav-item">Recurring Tasks</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">Govern</div>
+      <div class="nav-item">Connections</div>
+      <div class="nav-item">Knowledge</div>
+      <div class="nav-item">Spending</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main style="flex: 1;">
+    <div class="page-shell">
+
+      <div class="greeting">Good morning, Michael</div>
+      <div class="greeting-sub">Tuesday, 12 May. 4 meetings · 12 new emails · 2 drafts awaiting your review.</div>
+
+      <!-- ─── PERSONAL ZONE (NEW) ─── -->
+      <div class="personal-zone">
+        <div class="zone-label">
+          <span class="zone-label-dot"></span>
+          <span class="zone-label-title">Personal</span>
+          <span class="zone-label-meta">Your private workspace · only visible to you</span>
+        </div>
+
+        <!-- EA's home widget contribution -->
+        <div class="personal-card">
+          <div class="personal-card-head">
+            <div class="personal-card-icon">PA</div>
+            <div>
+              <div class="personal-card-title">Personal Assistant</div>
+              <div class="personal-card-meta">Posted morning briefing to Slack DM · 7:02 AM</div>
+            </div>
+            <a href="03-ea-settings.html" class="personal-card-open">Open →</a>
+          </div>
+
+          <div class="personal-card-body">
+            <div class="personal-summary">
+              <strong>Today is shaping up to be busy.</strong> The 11:30 Atlas Ventures sync needs prep — Jane's expecting your Q1 follow-up. Two urgent emails flagged: Jane Liu re: Q3 contract (drafted reply ready), Stripe failure on Acme account.
+            </div>
+            <div class="personal-mini">
+              <div class="personal-mini-label">Drafts waiting</div>
+              <div class="personal-mini-value">2</div>
+              <div class="personal-mini-meta">Both urgent</div>
+            </div>
+            <div class="personal-mini">
+              <div class="personal-mini-label">Next prep</div>
+              <div class="personal-mini-value">11:30</div>
+              <div class="personal-mini-meta">Atlas Ventures</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Future-state hint: how a second user-owned agent (Dev Agent, Phase 3) would appear here -->
+        <div class="future-card">
+          <div class="future-icon">DA</div>
+          <div class="future-body">
+            <div class="future-title">Dev Agent <span class="future-tag">PHASE 3</span></div>
+            <div class="future-sub">When provisioned, Dev Agent contributes its own card here — PRs in review, CI failures, etc. Same widget contract.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── EXISTING HOME SECTIONS (unchanged shape) ─── -->
+      <div class="existing-zone-label">Acme Co workspace</div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Pending approval</div>
+          <div class="kpi-value">3</div>
+          <div class="kpi-delta">2 are Tier 6 sends</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Clients needing attention</div>
+          <div class="kpi-value">5</div>
+          <div class="kpi-delta neg">+2 since yesterday</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Active agents</div>
+          <div class="kpi-value">7</div>
+          <div class="kpi-delta">Riley, Helena, Patel, Sarah +3</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Runs · last 7 days</div>
+          <div class="kpi-value">142</div>
+          <div class="kpi-delta pos">+18% vs prior week</div>
+        </div>
+      </div>
+
+      <div class="attention-card">
+        <div class="attention-h">Pending your approval <span class="count-pill">3</span></div>
+        <div class="attention-row"><div class="attention-name">Riley — outbound email to 4 leads (re-engagement campaign)</div><div class="attention-meta">2h ago</div></div>
+        <div class="attention-row"><div class="attention-name">Helena — Q1 client report draft for Pinecrest</div><div class="attention-meta">5h ago</div></div>
+        <div class="attention-row"><div class="attention-name">Patel — invoice nudge to Acme · $4,200 overdue</div><div class="attention-meta">Yesterday</div></div>
+      </div>
+
+      <div class="activity-card">
+        <div class="activity-h">Recent activity</div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Riley sent 12 outbound emails (approved)</div><div class="activity-time">14m ago</div></div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Helena published Q1 report draft</div><div class="activity-time">1h ago</div></div>
+        <div class="activity-row"><div class="activity-dot ok"></div><div class="activity-text">Sarah completed insights run for 3 subaccounts</div><div class="activity-time">3h ago</div></div>
+        <div class="activity-row"><div class="activity-dot"></div><div class="activity-text">Patel detected 2 overdue invoices on Acme</div><div class="activity-time">Yesterday</div></div>
+      </div>
+
+      <div class="privacy-strip">
+        <div class="privacy-lock">🔒</div>
+        <div>The <strong style="color: #0f172a;">Personal</strong> zone is private to you. Other staff have their own Personal zones; nobody sees each other's. Org admins see what your assistant did (action, time, status) but not the content it reasoned over.</div>
+      </div>
+
+    </div>
+  </main>
+
+</div>
+
+</body>
+</html>

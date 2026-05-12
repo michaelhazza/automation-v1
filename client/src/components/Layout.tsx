@@ -17,6 +17,7 @@ import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
 import { useViewMode } from '../hooks/useViewMode';
+import { useUserOwnedAgents } from '../hooks/useUserOwnedAgents';
 import { buildNavItems } from '../config/sidebar';
 import type { NavContext, NavItemSpec } from '../config/sidebar';
 import type { AppRoute } from '../config/routes';
@@ -334,6 +335,9 @@ export default function Layout({ user, children }: LayoutProps) {
     },
   });
 
+  // User-owned agents (personal nav group)
+  const { data: userOwnedAgents } = useUserOwnedAgents();
+
   // Module-driven sidebar config
   const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
   const [sidebarLoaded, setSidebarLoaded] = useState(false);
@@ -630,6 +634,7 @@ export default function Layout({ user, children }: LayoutProps) {
     viewMode,
     navProjects: navProjects.map(p => ({ id: p.id, name: p.name, color: p.color, status: p.status })),
     navAgents: navAgents.map(a => ({ id: a.id, agentId: a.agentId, name: a.agent.name, icon: a.agent.icon })),
+    userOwnedAgents: userOwnedAgents.map(a => ({ agentId: a.id, name: a.name })),
     reviewCount,
     liveAgentCount,
     incidentCount,

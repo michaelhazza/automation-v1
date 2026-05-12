@@ -165,6 +165,7 @@ export interface Connection {
   status: 'connected' | 'expired' | 'failed' | 'pending';
   lastSyncAt: string | null;
   owner: { kind: 'workspace' | 'org'; id: string; name: string };
+  ownerUserId: string | null;
   createdAt: string;
 }
 

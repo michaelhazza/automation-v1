@@ -193,6 +193,82 @@ router.get(
   })
 );
 
+// ─── List agent runs by agentId ───────────────────────────────────────────────
+//
+// User-owned-run visibility (spec §3.6 + lib/agentRunVisibility.ts):
+//   - Owner sees the row metadata.
+//   - Admin sees the row metadata.
+//   - Non-owner non-admin: row excluded entirely.
+//
+// triggerContext is INTENTIONALLY OMITTED from this list response
+// (chatgpt-pr-review R2 F3). It may carry external-source payload / PII —
+// callers that need full per-run content go through the existing Run Trace
+// detail endpoint (`GET /api/agent-runs/:id/trace`), which owns content
+// visibility for both user-owned and subaccount-owned runs.
+
+router.get(
+  '/api/agent-runs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const agentId = req.query.agentId as string | undefined;
+    const limit = Math.min(Number(req.query.limit ?? 20), 50);
+    if (!agentId) {
+      res.status(400).json({ error: 'agentId query parameter is required' });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: agentRuns.id,
+        agentId: agentRuns.agentId,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        ownerUserId: agentRuns.ownerUserId,
+      })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.agentId, agentId),
+          eq(agentRuns.organisationId, req.orgId!),
+        ),
+      )
+      .orderBy(sql`${agentRuns.startedAt} DESC`)
+      .limit(limit);
+
+    const role = req.user?.role ?? 'user';
+    const isAdmin = role === 'system_admin' || role === 'org_admin';
+    const requesterId = req.user!.id;
+
+    // Filter per-row using the user-owned-run privacy contract. All rows
+    // returned are metadata-only — `triggerContextRedacted: true` signals
+    // to clients that full content is available via the Run Trace detail
+    // endpoint, gated by its own visibility rules.
+    const runs = rows.flatMap((row) => {
+      if (!row.ownerUserId) {
+        // Subaccount-owned (legacy) run — visible to anyone with AGENTS_CHAT.
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      if (row.ownerUserId === requesterId) {
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      if (isAdmin) {
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      // Non-owner, non-admin — exclude entirely.
+      return [];
+    });
+
+    res.json({ runs });
+  }),
+);
+
 // ─── Get single run detail ────────────────────────────────────────────────────
 
 router.get(

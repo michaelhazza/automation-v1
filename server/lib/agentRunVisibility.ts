@@ -7,6 +7,8 @@
 //   - canView:          can the caller see events / snapshot endpoints
 //   - canViewPayload:   stricter — can the caller see raw LLM payloads
 //                       (AGENTS_EDIT at the appropriate tier) — §7.3
+//   - isContentRedacted: true when an admin sees a user-owned run; API
+//                        layer must mask content fields (payload redaction)
 //
 // Two callers: the HTTP route wraps this in `requireAgentRunViewPermission`
 // (middleware); the socket room handler calls it directly before allowing
@@ -23,6 +25,8 @@ export interface AgentRunVisibilityRun {
   executionScope: 'subaccount' | 'org';
   /** True when the run.agent is a system-managed agent. */
   isSystemRun?: boolean;
+  /** Set when this is a user-owned run (migration 0327). NULL = subaccount-owned. */
+  ownerUserId?: string | null;
 }
 
 export interface AgentRunVisibilityUser {
@@ -42,6 +46,8 @@ export interface AgentRunVisibilityUser {
 export interface AgentRunVisibility {
   canView: boolean;
   canViewPayload: boolean;
+  /** true when an admin sees a user-owned run; API layer must mask content fields */
+  isContentRedacted?: boolean;
 }
 
 // Per the current codebase, agent view/edit permissions exist only at the
@@ -62,6 +68,8 @@ const ORG_AGENTS_EDIT = 'org.agents.edit';
  * `canView` is the gate for the events + prompts endpoints and the
  * `join:agent-run` socket room. `canViewPayload` is the stricter
  * AGENTS_EDIT-scoped gate for the raw LLM payload endpoint (§7.3).
+ * `isContentRedacted` signals the API layer to mask content fields when
+ * an admin views a user-owned run.
  */
 export function resolveAgentRunVisibility(
   run: AgentRunVisibilityRun,
@@ -84,7 +92,20 @@ export function resolveAgentRunVisibility(
 
   // ── org_admin bypass — parity with existing middleware ─────────────────
   if (user.role === 'org_admin') {
+    if (run.ownerUserId) {
+      // Admin sees metadata but content is redacted at API serialisation layer
+      return { canView: true, canViewPayload: false, isContentRedacted: true };
+    }
     return { canView: true, canViewPayload: true };
+  }
+
+  // ── User-owned run: owning user sees full content; other non-admins see nothing
+  if (run.ownerUserId) {
+    if (user.id === run.ownerUserId) {
+      return { canView: true, canViewPayload: true };
+    }
+    // Non-owner, non-admin — no access
+    return { canView: false, canViewPayload: false };
   }
 
   // ── Regular users — check the org-level permission set.

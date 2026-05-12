@@ -34,6 +34,11 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
+  if (req.query.ownerScope === 'user') {
+    const rows = await agentService.listOwnedByUser(req.orgId!, req.user!.id);
+    res.json({ agents: rows });
+    return;
+  }
   const canManageAgents = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_EDIT);
   const result = canManageAgents
     ? await agentService.listAllAgents(req.orgId!)
