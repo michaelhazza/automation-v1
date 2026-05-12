@@ -250,6 +250,8 @@ Before any mutation of `KNOWLEDGE.md`, the builder produces `docs/knowledge-swee
 - duplicate / compression candidates (with rationale)
 - entries retained unchanged
 
+**ADR-creation cap (T1):** prefer one ADR per domain-level pattern, not one per repeated sentence. If the inventory proposes more than **5** new ADRs, group lower-priority candidates under a "defer ADR" bucket rather than generating them all in this sweep. Sprawl is the failure mode this guard prevents.
+
 **Non-deletion rule:** No entry may be deleted outright. Removed or compressed content must either (a) be represented in a new ADR, (b) survive as a canonical compressed entry, or (c) remain recoverable through the sweep inventory. The full pre-sweep file remains in git history regardless.
 
 **Constraint:** CLAUDE.md §3 — "never edit or remove existing entries — only append." This sweep is the explicit exception, called out as a "quarterly grouping pass." Document the sweep in a single dated header so future readers know the trim happened.
@@ -341,8 +343,8 @@ Following `docs/doc-sync.md`. Every WS item below names the docs it touches.
 | A5 | `.claude/agents/incident-commander.md` (new), `docs/incident-response.md` (new), `CLAUDE.md` § Local Dev Agent Fleet, `.claude/CHANGELOG.md` |
 | B1 | `scripts/verify-no-db-in-routes.sh`, 9 route files (or services they migrate into), possibly one new ADR under `docs/decisions/` if a documented exception is added |
 | B2 | `replit.md` |
-| C1 | `tasks/todo-triage-inventory.md` (new, transient), `tasks/todo.md`, `tasks/todo-archive/2026-Q2.md` (new), zero-to-N ADRs |
-| C2 | `docs/knowledge-sweep-inventory.md` (new, transient), `KNOWLEDGE.md`, zero-to-N ADRs |
+| C1 | `tasks/todo-triage-inventory.md` (new, committed), `tasks/todo.md`, `tasks/todo-archive/2026-Q2.md` (new), zero-to-N ADRs |
+| C2 | `docs/knowledge-sweep-inventory.md` (new, committed), `KNOWLEDGE.md`, zero-to-N ADRs |
 | C3 | `tasks/current-focus.md` only (paused-build line updated to reflect operator decision). No chunk in this spec. |
 | C4 | `_archive/README.md` (new), any in-code reference paths, `.gitignore` if affected |
 | D1 | `CLAUDE.md` § Review pipeline, `.claude/agents/feature-coordinator.md`, `.claude/agents/finalisation-coordinator.md` (REVIEW_GAP artifact emission) |
@@ -362,23 +364,25 @@ Ordered. Each chunk is independent at the file-level so a single `builder` invoc
 | 4 | `pr-reviewer` severity tiers + "Why:" + "Files NOT read" disclosure | A1 | S |
 | 5 | `adversarial-reviewer` STRIDE + trust-boundary section | A3 | S |
 | 6 | Minimal-change rules into `CLAUDE.md` §6 + `builder.md` (G1 checklist + verdict notes) | A4 | S |
-| 7 | New `reality-checker` agent + wire into `feature-coordinator` pipeline + update `CLAUDE.md` fleet table + `tasks/review-logs/README.md` | A2 | M |
-| 8 | New `incident-commander` agent + `docs/incident-response.md` SEV matrix + post-mortem template + `CLAUDE.md` fleet table | A5 | M |
+| 7 | New `reality-checker` agent + wire into `feature-coordinator` pipeline + update `CLAUDE.md` fleet table + `tasks/review-logs/README.md`. **Chunk acceptance:** agent file passes existing frontmatter/schema validation; CLAUDE.md fleet table references the exact filename; `.claude/CHANGELOG.md` records the addition; `validate-setup` passes. | A2 | M |
+| 8 | New `incident-commander` agent + `docs/incident-response.md` SEV matrix + post-mortem template + `CLAUDE.md` fleet table. **Chunk acceptance:** agent file passes existing frontmatter/schema validation; CLAUDE.md fleet table references the exact filename; `.claude/CHANGELOG.md` records the addition; `validate-setup` passes. | A5 | M |
 | 9 | Reviewer-coverage policy: audit SKIPPED reasons, document chosen posture in `CLAUDE.md`, update `feature-coordinator`/`finalisation-coordinator` enforcement | D1 | M |
 | 10 | `docs/testing-transition-plan.md` (with default T-minus-14 trigger embedded) | D2 | M |
-| 11 | Route violator triage — each violator migrated to service or documented exception (one builder chunk per violator, or grouped 3-3-3) | B1 | M-L (≈9 sub-chunks) |
+| 11 | Route violator triage — each violator migrated to service or documented exception (one builder chunk per violator, or grouped 3-3-3). **Grouping guard (T2):** do not group migrations when any route requires a new service, an auth-model clarification, or an exception ADR — those must be isolated sub-chunks. | B1 | M-L (≈9 sub-chunks) |
 | 12 | `KNOWLEDGE.md` sweep — produce inventory, get operator approval, then apply | C2 | M |
 | 13 | `tasks/todo.md` triage sprint — produce inventory, get operator approval, then apply | C1 | L |
 
 **Chunk-1 acceptance (F1):**
 
-Chunk 1 is gate-only and must **not** edit any route file. Its acceptance is the *opposite* of final acceptance:
+Chunk 1 is gate-only and must **not** migrate any route. Its acceptance is the *opposite* of final acceptance:
 
 - `scripts/verify-no-db-in-routes.sh` **fails** on current branch state and reports the 9 known violators.
-- `workspaceInboundWebhook.ts` remains exempted only via the documented `guard-ignore` token (in the T1 format).
-- No route files are edited in Chunk 1.
+- `workspaceInboundWebhook.ts` remains exempted via the documented `guard-ignore` token in the T1 format.
+- No route migrations are performed in Chunk 1.
 
-A green gate at Chunk 1 means the gate was weakened or routes were edited prematurely. Both are failures.
+**Allowed edits in Chunk 1 (narrow carve-out):** `scripts/verify-no-db-in-routes.sh` **and** the existing exemption comment in `server/routes/workspaceInboundWebhook.ts` if its current form does not match the T1 token shape. No other route file may be edited. This preserves the "no route migration in Chunk 1" invariant while preventing a false failure on the one legitimate exception.
+
+A green gate at Chunk 1 against the 9 violators means the gate was weakened or routes were edited prematurely. Both are failures.
 
 **Sequencing notes:**
 
@@ -388,14 +392,14 @@ A green gate at Chunk 1 means the gate was weakened or routes were edited premat
 - Chunks 12 and 13 (`KNOWLEDGE.md` and `todo.md` sweeps) are end-of-build because the WS-A/B work will itself emit follow-ups that should land in the inventory, not the live file.
 - Each of Chunks 12 and 13 is **two steps**: produce inventory → operator approval → apply triage.
 
-**Planning guideline — branch split:**
+**Planning posture — branch split (default):**
 
-This spec is broad enough that a single implementation PR may be too large to review well. At plan-authoring time, consider splitting into two branches:
+**Default posture:** split into two branches unless the plan explicitly justifies a single PR.
 
 - **Branch 1 — fleet + process:** chunks 2, 4, 5, 6, 7, 8, 9, 10 (mostly agent files + CLAUDE.md edits; low blast radius).
 - **Branch 2 — codebase health:** chunks 1, 3, 11, 12, 13 (gate fix + route migrations + sweeps; higher blast radius, deserves its own review surface).
 
-The spec stays unified; the plan decides the branch split.
+The spec stays unified; the plan picks the branch shape and records the choice. A single combined PR would mix agent policy, route migrations, todo cleanup, KNOWLEDGE trimming, and archive moves — too broad to review well.
 
 ## 9. Acceptance criteria
 
@@ -423,7 +427,7 @@ PR #277 is **not** a final-acceptance item — it is resolved as a pre-plan oper
 | Reviewer-policy posture pick is wrong | `CLAUDE.md` change is one section; reversible in a single edit. |
 | `reality-checker` adds friction without value on borderline tasks | Skipped on Trivial/Standard; manual override always available; revisit after 5 runs. |
 | `incident-commander` never gets used because real incidents are rare pre-launch | Acceptable — agent is cheap to maintain and present-when-needed beats absent-when-needed. |
-| Operator hasn't yet decided on PR #277 | Chunk 14 is gated; the rest of the spec ships independently. |
+| Future support-desk redesign loses context from closed PR #277 | Closing comment, `tasks/current-focus.md` closed-build record, and branch retention preserve the decision trail. Any future work starts from a fresh spec, not a resume. |
 
 ## 11. Decisions (LOCKED 2026-05-12)
 
