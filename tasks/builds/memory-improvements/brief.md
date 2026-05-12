@@ -1,7 +1,7 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** **LOCKED** for spec handoff (confirmed by reviewer 2026-05-12; CEO scope corrections applied; staged-rollout machinery dropped as over-engineering for pre-production)
-**Revision:** 6 (pre-production simplification: four-mode staged rollout dropped; no user-facing ranker UI; D ships as algorithm + env on/off flag; algorithm safety invariants retained)
+**Status:** **LOCKED** for spec handoff (Rev 6.1 — outstanding open questions resolved by author, all favouring minimum UI)
+**Revision:** 6.1 (resolved open questions in A and B in favour of minimum UI: no edit/view-source cross-links on Sources tab; 30d window only on Memory Utility; pre-migration exclusion surfaced as one caveat-banner line, not a new visual element)
 **Date:** 2026-05-12
 **Spec-handoff non-negotiables** (Rev 6 simplified): B1 must add `injected_entry_ids` before entry utility is reported. B1 aggregate queries must distinguish "not measured" from "0% utility" for pre-migration runs. D ships behind a single env on/off flag (no user-facing UI, no four-mode rollout). **D-Recall invariant:** semantic filtering must never silently empty a previously non-empty candidate category. **D-Embedding-failure invariant:** OpenAI failures fail open to legacy retrieval and emit a degraded reason on the run trace; they must not block agent execution. A must use the join table unless the spec explicitly rejects bidirectional lineage; lineage row retains deletion-safe snapshot metadata even when `source_entry_id` becomes NULL.
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
@@ -119,8 +119,13 @@ This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"
 
 **Why now, not later.** The Trust & Verification Layer pill is the trigger. If we ship that pill without lineage behind the `Auto` case, we ship a dead-end UX. Cheaper to add lineage now (one migration) than to retrofit when operators start clicking and find nothing.
 
-**Open questions for the reviewer:**
-- Should we backfill historical blocks? Cannot — the clusters were never persisted. Acceptable to start from migration forward?
+**Resolved decisions (Rev 6.1, all favouring minimum UI):**
+- **No "edit this block" cross-link from the Sources tab.** Operators who need to correct a block use the existing "Diff vs Canonical" tab on the same page, which already supports manual edits via `updateBlock` (creates a `manual_edit` version). Adding a second edit affordance on Sources is duplicative.
+- **No "view source entry" navigation from each row.** The Sources tab is the read-only audit floor. The run-link per row goes to the run trace (existing surface). Operators who want to inspect a specific workspace memory entry navigate to it via the existing workspace memory admin page; no new affordance needed.
+- **No "regenerate this block" action.** If a source is wrong, operators (a) edit the source entry directly in workspace memory, (b) wait for next weekly synthesis to re-cluster, or (c) manually edit the block via Diff vs Canonical. The closed-loop "exclude this source and regenerate just this block" flow is a documented follow-up, not v1.
+- **Backfill historical blocks:** not possible — clusters were never persisted. Lineage starts from migration forward. Accepted.
+
+**Open questions for the spec:**
 - Should the agent itself see source entries? Default no (prompt bloat); reconsider only if a `cite_sources` tool call wants it.
 
 ---
@@ -171,10 +176,11 @@ Without this, entry-utility on the dashboard would have a numerator but no trust
 - Citation detection is heuristic (`memoryCitationDetector.ts`). False negatives (agent uses memory without quoting it) understate utility. False positives (paraphrase collision) overstate it. The metric is directional, not absolute.
 - Per-agent breakdowns get noisy on low-volume agents. B2's minimum-runs gate handles this for the UI; B1 exposes raw counts for callers who want to set their own threshold.
 
-**Open questions:**
-- Window — 7d, 30d, both? 30d is more stable; 7d catches regressions faster. Recommend: surface both, default chart view 30d.
-- Should we also audit `memoryCitationDetector.ts` accuracy before shipping B1, so the reviewer knows the signal-to-noise floor?
-- Should B2 include a "shadow mode comparison" view tied to Proposal D's shadow rollout (see §5 mockups)? Likely yes — the same dashboard becomes D's rollout instrument.
+**Resolved decisions (Rev 6.1, all favouring minimum UI):**
+- **30-day rolling window only.** No 7d/30d toggle in v1. Adds a UI control and tab state for marginal benefit; B1's substrate exposes raw counts so operators wanting a 7d view can SQL it during the dev period. Promote to a UI toggle only if regression-investigation cadence later justifies it.
+- **"Not measured" vs "0% utility" surfaced as one extra sentence in the existing heuristic-caveat banner.** The B1 acceptance invariant (pre-migration runs distinguishable from genuine 0%) is honoured in the substrate via NULL vs `[]` discriminator. The dashboard surfaces it with one line: *"Runs predating the entry-manifest migration are excluded from utility calculations."* No greyed time-axis bands, no separate annotation, no new visual element.
+- **No shadow-mode comparison view on the dashboard.** That view existed under Rev 5's staged-rollout machinery, which Rev 6 retired. B2 stays focused on utility, not on D-rollout investigation.
+- **Citation-detector accuracy audit:** deferred. The metric is explicitly directional; detector accuracy can be revisited once dashboards expose obvious anomalies in real data.
 
 ---
 
