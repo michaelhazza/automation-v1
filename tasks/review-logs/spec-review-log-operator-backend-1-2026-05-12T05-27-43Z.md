@@ -147,6 +147,6 @@ All 26 mechanical fixes to apply this iteration. F15 routes to `tasks/todo.md`.
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             1 (F15 — see tasks/todo.md § operator-backend deferred items)
 - Spec line count after iteration: 1698 (was 1644; +54 lines, no removals)
-- Spec commit after iteration: (to be recorded after Step 8b)
+- Spec commit after iteration: `b4d2ea37`
 
 

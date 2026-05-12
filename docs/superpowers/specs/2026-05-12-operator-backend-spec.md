@@ -224,7 +224,7 @@ The parent task's status enum extends to include the new task-level states. The 
 
 `'pending'`, `'running'`, `'delegated'`, `'completed'`, `'failed'`, `'cancelled'` already exist. **New** in this spec:
 - `'paused_for_chain_continuation'` — scheduler-owned wait OR FIFO queue for next chain dispatch (§ 3.14, § 3.17).
-- `'paused_chain_failure'` — three consecutive dispatch failures (§ 3.17 item 1).
+- `'paused_chain_failure'` — three consecutive dispatch failures (§ 3.17 item 1) OR a running chain link terminating with `failed_mid_step=true` from hard-cap unresumable (§ 3.14 item 3). Hard-cap unresumable counts in the same consecutive-failure budget as dispatch failures.
 - `'paused_budget_exceeded'` — per-task budget cap reached (§ 3.17 item 4).
 
 **Task-terminal states are `completed | failed | cancelled` only.** The three `paused_*` states are resumable/non-terminal — they emit task-state-change events (UI updates, user notifications, scheduler suspension) but DO NOT trigger terminal artefact/cost finalisation. Cost rows for chain links that completed before the pause are written normally per § 3.12. The customer-visible terminal rollup is reserved for the true terminal states. Downstream consumers (cost dashboards, audit, evals) MUST NOT treat partial/pause-state rollups as final. See § 10.4 for the terminal-event guarantee.
@@ -257,6 +257,7 @@ Forbidden: any transition from a terminal state. Forbidden: `pending → complet
 - **Template path:** `infra/sandbox-templates/operator-session/`. Single source of truth for both e2b (template) and `docker-compose` (local dev).
 - **Rename from `openclaw-session`.** The current branch already carries `infra/sandbox-templates/openclaw-session/`. This spec renames that directory to `operator-session` in the same change-set. Files renamed: `Dockerfile`, `entrypoint.sh`, `README.md`, `CURRENT_VERSION`. Image-tag references in `operator_runs.image_tag`, the CI publish job (`.github/workflows/publish-sandbox-templates.yml`), and any docker-compose service name are updated. Git history preserves the rename via `git mv`.
 - **Image contents.** The vendor operator runtime (pinned version), the model-invocation CLI it ships with, runtime dependencies. The spec author pins the specific vendor product and version inside the Dockerfile; the codename is local to this file only.
+- **Vendor preservation across the rename.** The V1 Dockerfile MUST preserve the existing `openclaw-session` template's vendor runtime and pinned version unchanged during the rename to `operator-session`. Any version change requires a separate spec amendment (the runtime APIs the adapter binds to and the error-classification set in `operatorRuntimeErrors.ts` are load-bearing on this version). The rename is a path-only change.
 - **CI rebuild.** Reuses Spec B's image-build pipeline. Republishes when the Dockerfile or pinned vendor version changes.
 - **Pinned per chain link.** `operator_runs.image_tag` records the specific image used. In-flight chain links complete on their original image when the vendor releases a new version; only new chain links get the new image. **In particular: a single task's chain links can run on different image tags** (link 1 on tag `v1.4.2`, link 17 on tag `v1.5.0` after a republish). The cost ledger and Run Trace record the image tag per chain link.
 - **Mount points.** The persistent browser profile volume (§ 3.15) mounts at the browser's `user-data-dir` path on chain-link start. The Spec B sandbox isolation policy applies — adapter MUST assert task-subaccount matches credential-subaccount before mounting.
@@ -361,7 +362,11 @@ One `source_type: 'sandbox_compute'` row per chain link / sandbox session. Input
 
 **B. Subscription-mediated (zero-cost accounting, per chain link).**
 
-One `source_type: 'subscription_mediated'` row per chain link where `credential_mode = 'operator_session'`. Zero-cost. Carries:
+One `source_type: 'subscription_mediated'` row per chain link where the chain link **started under** `credential_mode = 'operator_session'` (even if a mid-run fallback later switched the row's final `credential_mode` to `'api_key'`). The cost-writer derives eligibility from: (a) the chain link's START mode (preserved via the row's `started_at` snapshot semantics — see below), OR equivalently (b) the presence of a `fallback_engaged` event with `from_mode='operator_session'` for this chain link. The final `operator_runs.credential_mode` value is NOT the trigger.
+
+Implementation note: the writer queries the lifecycle event store for `operator-session.fallback_engaged` for this `operator_run_id`; presence of such an event means the chain link DID start with `operator_session` regardless of the final column value, and `subscription_mediated` writes the pre-swap portion (`step_count` = `fallback_engaged.step_index`, by the cost-writer pure helper).
+
+Row carries:
 
 | Field | Value |
 |---|---|
@@ -383,7 +388,12 @@ When a full chain link runs under fallback (`credential_mode = 'api_key'` from c
 
 **Aggregation:** dashboards use the existing usage views. The `(agent_run_id, source_type)` index on `llm_requests` (or equivalent) supports the rollup. **No new dashboard is built in V1** — data must be queryable from existing usage views.
 
-**Idempotency posture (per § 10.1):** all three writers are **key-based idempotent** on `(operator_run_id, source_type, boundary)`. A retry after partial commit MUST NOT double-write. The cost-writer is invoked exactly once per chain-link terminal event via the finaliser hook (Spec A pattern), not from the adapter's hot path. Boundary key for `subscription_mediated` is `(operator_run_id, 'subscription_mediated', 'chain_link')`. For `sandbox_compute`: `(operator_run_id, 'sandbox_compute', 'chain_link')`. For `per_token` rows that share a chain link with `subscription_mediated`: the existing `llm_requests` writer already keys on `(agent_run_id, request_id)`; this spec adds `operator_run_id` as a column on `llm_requests` (migration extends the existing schema).
+**Idempotency posture (per § 10.1):**
+
+- The `subscription_mediated` and `sandbox_compute` chain-link-summary writers are **key-based idempotent** on `(operator_run_id, source_type, boundary)`. Boundary key for `subscription_mediated` is `(operator_run_id, 'subscription_mediated', 'chain_link')`; for `sandbox_compute`: `(operator_run_id, 'sandbox_compute', 'chain_link')`. Many turns may occur within a chain link, but the cost writer emits exactly ONE summary row per `(operator_run_id, source_type)`.
+- `per_token` rows (one per LLM call, potentially many per chain link) retain the existing `(agent_run_id, request_id)` idempotency from the LLM-request writer. The new `operator_run_id` column on `llm_requests` is nullable attribution only — it does NOT participate in the per-token row's idempotency key.
+
+A retry after partial commit MUST NOT double-write. The chain-link summary writers are invoked exactly once per chain-link terminal event via the finaliser hook (Spec A pattern), not from the adapter's hot path.
 
 **Concurrency guard (per § 10.3):** the cost-writer holds an advisory lock on `(operator_run_id)` for the duration of the rollup transaction. Two concurrent finalises (rare; only possible if the pg-boss event handler retries before idempotency catches it) cannot interleave row writes.
 
@@ -415,7 +425,8 @@ A single operator task spans many 120-min chain-link sessions. Each session is a
 
 3. **Soft cap + auto-extend.**
    - Soft cap = `subaccount_operator_settings.session_soft_cap_minutes` (default 120, range 30–240, per § 3.16).
-   - At `T - 10 min`, the operator emits a `'preparing_checkpoint'` step-state signal. The adapter records `operator_runs.last_progress_at = now()` and propagates the signal via the WebSocket bridge.
+   - At `T - 10 min`, the operator emits a `'preparing_checkpoint'` step-state signal. The adapter enqueues an `operator-session-progressed` event with the step-state `preparing_checkpoint`; per § 3.9 / § 7.4, `operatorSessionProgressedHandler.ts` is the sole writer for `last_progress_at` and `step_count`. The handler bridges the state to the WebSocket room.
+   - **`is_resumable_now` emission contract.** The operator runtime MUST emit `is_resumable_now` as a boolean field in the checkpoint step-state payload consumed by `operatorManagedBackend.dispatch()` (the payload shape is the same step-state envelope used for progress events; the build chunk pins the exact vendor field). Absent or malformed values are treated as `false` and the chain link is logged with `failure_reason='checkpoint_signal_invalid'`.
    - If at the soft cap the operator's `is_resumable_now` boolean is `true`, the chain link terminates `'completed'` with `checkpoint_payload` non-null.
    - If `is_resumable_now` is `false` at the soft cap, the adapter auto-extends up to `subaccount_operator_settings.auto_extend_grace_minutes` (default 30, range 0–60, per § 3.16).
    - At soft-cap + grace, the chain link terminates `'failed'` with `failure_reason='hard_cap_unresumable'` and `failed_mid_step=true`. The next chain link does not auto-dispatch — the task transitions to `paused_chain_failure` (per § 3.17 item 1, treated like a dispatch failure for retry counting). This is the ONLY routing for hard-cap unresumable; it is NOT a task-terminal failure unless the user later cancels or three consecutive retries also fail (the normal `paused_chain_failure` path).
@@ -432,7 +443,7 @@ A single operator task spans many 120-min chain-link sessions. Each session is a
 
 5. **Resume payload.** Chain link N+1 starts with: the original task brief, the accumulated conversation-history pointer, the checkpoint from chain link N, and the persistent browser profile (§ 3.15) mounted. The operator's first action is to verify it's on the expected page and continue from the `next_planned_step`.
 
-6. **Conversation history accumulation.** Per-chain-link blobs joined at read time, capped at last N chain links of context for the operator-model invocation. Concretely: each chain link writes a single artefact `operator-conversation-link-{operator_run_id}.json` to the existing artefact store. The resume payload composer reads the latest K (default 5) artefacts and concatenates them in chain order. K is a constant in `operatorConversationHistoryPure.ts`; not configurable per-subaccount in V1.
+6. **Conversation history accumulation.** Per-chain-link blobs joined at read time, capped at last N chain links of context for the operator-model invocation. Concretely: each chain link writes a single artefact `operator-conversation-link-{operator_run_id}.json` to the existing artefact store. The artefact's MIME type is `application/vnd.synthetos.operator-conversation-link+json;version=1` and its shape is the Zod schema `OperatorConversationLinkArtefact` declared in `shared/types/operatorConversationArtefact.ts` (a new file, § 5.1). The resume payload composer reads the latest K (default 5) artefacts and concatenates them in chain order. K is a constant in `operatorConversationHistoryPure.ts`; not configurable per-subaccount in V1.
 
 7. **Terminal states + failure classification (runtime vs start vs hard-cap).**
    - **Runtime failure (hard error)** — chain link is in state `'running'` at the time of failure due to an operator-runtime crash, heartbeat-stale, or unrecoverable error that does NOT match the hard-cap-unresumable signal → terminates the **task** with the chain link's failure reason (`agent_runs.status='failed'`). Remaining chain dispatch does NOT happen.
@@ -580,6 +591,7 @@ A chain link can fail to dispatch for several reasons (auth lost, runtime unavai
        "session_soft_cap_minutes": 120,
        "auto_extend_grace_minutes": 30,
        "max_chain_length": 50,
+       "max_wall_clock_per_task_days": 30,
        "per_task_budget_cap_minutes": 6000,
        "concurrent_operator_sessions_cap": 5
      },
@@ -833,6 +845,34 @@ Pinned in § 3.17 item 2. The only incident event introduced by this spec.
 
 The system-monitoring agent's behaviour is out of scope for this spec (lives in the system-monitor domain); this spec only ensures every chain-link start failure produces a structurally-complete incident the monitor can act on without re-fetching state.
 
+### 4.8b CS notification event (`cs.operator_session.suspended_detected`)
+
+Single typed CS notification introduced by this spec. Produced by `notifyOperatorSessionSuspended()` (`server/services/operatorSessionSuspensionNotifier.ts`, § 5.1) and consumed by the existing inbox pipeline.
+
+**Producer triggers:** (a) first `OPERATOR_SESSION_UNAVAILABLE` hit on the § 3.7 fallback path; (b) broker `usability_state` transition away from `'connected_usable'` for an active operator-session credential.
+
+**Payload (locked shape):**
+
+```json
+{
+  "event": "cs.operator_session.suspended_detected",
+  "organisation_id": "<uuid>",
+  "subaccount_id": "<uuid>",
+  "agent_run_id": "<uuid|null>",
+  "connection_id": "<uuid>",
+  "credential_id": "<uuid>",
+  "usability_state": "<verbatim broker state>",
+  "failure_reason": "<verbatim error class>",
+  "consent_record_id": "<uuid|null>",
+  "first_detected_at": "<iso-8601>",
+  "request_id": "<correlation id>"
+}
+```
+
+**Idempotency key:** `(connection_id, usability_state, first_detected_at::date)` — at most one CS notification per connection per state per day; subsequent same-day hits are no-ops.
+
+**Consumer:** existing inbox / notification pipeline. No new pipeline component is introduced.
+
 ### 4.9 Audit events
 
 | Event | When | Payload |
@@ -901,7 +941,7 @@ Where the same fact has more than one representation, the read path is:
 | Chain-link terminal status | `operator_runs.status`, `'operator-session.chain_link_*'` event, finaliser log | `operator_runs.status` > event > log |
 | Task terminal status | `agent_runs.status`, `'operator-session.task_*'` event, finaliser log | `agent_runs.status` > event > log |
 | Chain-link wall-clock minutes | `(completed_at - started_at)`, the `sandbox_compute` ledger row's `wall_clock_ms` | DB timestamps win (per § 3.17 item 4 DB-anchored discipline) |
-| Effective per-subaccount caps | `subaccount_operator_settings` row, `operator_runs.checkpoint_payload.settings_snapshot` (if pinned) | `operator_runs`-pinned snapshot for an in-flight chain link; current settings for new dispatches |
+| Effective per-subaccount caps | `subaccount_operator_settings` row, `operator_runs.settings_snapshot` (top-level column, NOT in checkpoint_payload) | `operator_runs.settings_snapshot` wins for an in-flight chain link; current `subaccount_operator_settings` wins for new dispatches |
 | Conversation history | per-link artefacts vs `checkpoint_payload.last_action_summary` | artefacts win (the summary is an operator hint) |
 | Fallback-stickiness state | latest non-superseded `operator_runs.credential_mode` for the task, vs broker `operator-session.usability_restored` events, vs `task.operator.credential_refreshed` audit events | derived per § 3.7 item 6; no separate column. The most recent of the three signals wins; absence of clearing signals after an `'api_key'` link means stickiness persists. |
 | Profile-volume location | `operator_runs.profile_volume_id` (cached pointer), `operator_task_profiles.volume_id` (canonical) | `operator_task_profiles.volume_id` wins; the cached pointer is invalidated if `operator_task_profiles.attempt_number > operator_runs.attempt_number` |
@@ -943,6 +983,7 @@ This is the single source of truth for every file touched. Prose references anyw
 | `shared/types/operatorBackendEvents.ts` | Discriminated union for all `operator-session.*` lifecycle events. |
 | `shared/types/operatorRuns.ts` | Public types for chain-link row + state machine. |
 | `shared/types/checkpointPayload.ts` | Zod schema for the JSONB checkpoint payload (§ 4.6). |
+| `shared/types/operatorConversationArtefact.ts` | Zod schema `OperatorConversationLinkArtefact` for per-chain-link conversation-history artefacts (§ 3.14 item 6); MIME `application/vnd.synthetos.operator-conversation-link+json;version=1`. |
 | `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx` | New tab body for AdminSubaccountDetailPage. |
 | `client/src/pages/govern/operatorSettings/_fields.tsx` | Field components (slider + number input + helper text). |
 | `client/src/components/openTask/OperatorChainLinkIndicator.tsx` | The `link N of ~M` indicator beside the TaskHeader status badge. |
@@ -997,6 +1038,10 @@ Migration numbering starts at 0327; current latest is 0326 (operator-session-ide
 | `client/src/pages/WorkspaceBoardPage.tsx` | Render `<OperatorFilterToggle />` above the board; pass filter state into the column renderers. |
 | `client/src/components/TaskCard.tsx` | Render `<OperatorBadge />` when `task.executionBackendId === 'operator_managed'`. |
 | `client/src/components/openTask/TaskHeader.tsx` | Render `<OperatorChainLinkIndicator />` next to the status badge when applicable; switch to amber + `<OperatorAutoExtendBanner />` when chain-link state is `auto_extending`; hide pause button during auto-extend. |
+| `client/src/components/openTask/OpenTaskView.tsx` | Conditional rendering of operator-state copy (terminal `completed | failed | cancelled` variants per mockups `r3`, `r4`, `r5`); no structural changes. |
+| `client/src/components/openTask/ChatPane.tsx` | Operator-specific system messages (fallback-engaged amber line per `r6`; plain-English failure summary per `r4`). |
+| `client/src/components/openTask/ActivityPane.tsx` | Inline amber event row for fallback-engaged (`r6`); 3-line cost summary footer for terminal-completed (`r3`, § 3.12). |
+| `client/src/components/openTask/FilesTab.tsx` | Harvested-artefact display; no operator-specific rendering — reuses the existing artefact-list pattern. |
 | `client/src/pages/operate/RunTracePage.tsx` | Render `<AttemptGroup />` wrappers when `attempt_number > 1`; render `<ChainLinkDivider />` between events of different `chain_seq`. |
 | `client/src/pages/operate/components/RunTraceEventRenderer.tsx` | Wire the new `operator-session.*` event renderers. |
 | `client/src/pages/govern/ConnectionsPage.tsx` (AI Subscriptions tab) | Render the "Suspended" pill + Reconnect CTA on a connection in `usability_state != 'connected_usable'` (mockup `r11-connections-suspended-state.html`). |
@@ -1058,6 +1103,20 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 
 - **`SUBACCOUNT_OPERATOR_SETTINGS_WRITE`** — granted by default to `org_admin`. Used only by the PATCH route. The implementation chunk adds the key to the permissions registry, the role-default grant, and the permission-coverage CI gate.
 
+### 6.5b Backend route guards for the new task-action routes
+
+All routes in `server/routes/operatorTasks.ts` (§ 5.1) MUST mount under `authenticate`, resolve the agent run + subaccount, call `setOrgGUC()`, and enforce a route-specific actor rule before mutating state. Actor rules match § 6.6 UI gates:
+
+| Route | Actor rule | Permission key |
+|---|---|---|
+| `POST /api/operator-tasks/:agentRunId/retry-chain-failure` | assigned user OR `manager`+ | `AGENT_RUN_WRITE` (existing) |
+| `POST /api/operator-tasks/:agentRunId/extend-budget` | assigned user OR `manager`+ | `AGENT_RUN_WRITE` (existing) |
+| `POST /api/operator-tasks/:agentRunId/refresh-credential` | `org_admin` only | `AGENT_RUN_ADMIN` (existing) |
+| `POST /api/operator-tasks/:agentRunId/fresh-profile-restart` | `org_admin` only | `AGENT_RUN_ADMIN` (existing) |
+| `POST /api/operator-tasks/:agentRunId/extend-debug-retention` | `org_admin` only | `AGENT_RUN_ADMIN` (existing) |
+
+The `manager+` / assigned-user rule is enforced in the route handler (not by a single permission key) because the underlying state transitions are user-initiated lifecycle actions, not admin operations. The route handler reads `agent_runs.assigned_user_id` and `users.role` before authorising.
+
 ### 6.6 UI permission gates
 
 | UI surface | Read | Edit |
@@ -1088,7 +1147,7 @@ The adapter's `dispatch()` call is **inline**: the caller (Spec A's dispatch orc
 
 1. Read `agent_runs` for `(organisation_id, subaccount_id)`.
 2. Set the GUC; resolve effective caps (`subaccountOperatorSettingsService.getEffectiveSettings(subaccountId)`).
-3. Concurrency-cap check (FOR UPDATE on `operator_runs` filtered to running slots; transactional). If new task hitting cap → throw `OPERATOR_SESSION_LIMIT_EXCEEDED` (NOT queued, per § 3.17 item 5). If chain-continuation hitting cap → return a structured response that the chain-resume dispatcher handles by re-queueing (FIFO).
+3. Concurrency-cap check. Acquire `pg_advisory_xact_lock(hashtext('operator_slots:' || subaccount_id))` inside the dispatch tx; then `count(*) FROM operator_runs WHERE subaccount_id=$1 AND status='running' AND superseded_by_attempt IS NULL`; then proceed with the `operator_runs` INSERT under the same lock (released at COMMIT). Plain `SELECT ... FOR UPDATE` is insufficient — aggregate counts do not lock absent rows (§ 10.3). If new task hitting cap → throw `OPERATOR_SESSION_LIMIT_EXCEEDED` (NOT queued, per § 3.17 item 5). If chain-continuation hitting cap → return a structured response that the chain-resume dispatcher handles by re-queueing (FIFO).
 4. Three-way subaccount match (§ 6.7).
 5. Resolve credential via `credentialBrokerService.requestOperatorSessionCredential` (or `resolveFallback` if stickiness is set).
 6. Resolve / create profile via `operatorTaskProfileService.ensureActiveProfile(taskId, attemptNumber)`.
@@ -1118,7 +1177,7 @@ The handler `operatorSessionCompletedHandler.ts`:
 `operatorSessionDispatchNextChainLinkHandler.ts`:
 
 1. Reads the parent `agent_runs` row.
-2. If status is not `'paused_for_chain_continuation'` (or `'delegated'` on the first dispatch — bootstrap path), no-op.
+2. Proceed only when `agent_runs.status` is one of `'pending'`, `'delegated'`, `'paused_for_chain_continuation'`, `'paused_chain_failure'` (after user-initiated retry — counter has been reset), or `'paused_budget_exceeded'` (after user-initiated extension). Each paused-state entry MUST carry a queued-job "reason" tag matching the resume action (`'continuation'`, `'retry'`, `'budget_extension'`); the handler asserts the tag matches the current task state before dispatching. Otherwise no-op (idempotent re-delivery).
 3. Calls `executionBackendRegistry.get('operator_managed').dispatch({ agentRunId, ... })` — re-uses § 7.1 inline path.
 4. On success: writes `agent_runs.status='delegated'` via the optimistic predicate `UPDATE agent_runs SET status='delegated', operator_chain_failure_count=0 WHERE id=$1 AND status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. 0 rows-affected means the task is in a terminal state — no-op.
 5. On failure with `'transient'` failure class: increments `agent_runs.operator_chain_failure_count` (per § 3.4 writer rules — predicate `UPDATE ... WHERE status IN ('delegated','paused_for_chain_continuation')`); enqueues a delayed re-dispatch (1 min → 5 min → 15 min via pg-boss's `startAfter` parameter).
@@ -1126,7 +1185,7 @@ The handler `operatorSessionCompletedHandler.ts`:
 7. On failure with `'permanent' | 'auth' | 'profile_corruption'` failure class: bypasses the backoff and goes directly to `paused_chain_failure`.
 8. Every failure (transient or permanent) emits an `operator.chain_link_start_failed` incident with `retry_attempt` and `is_terminal`.
 
-**Idempotency posture:** key-based on `(agentRunId, chain_seq_next)`. The chain_seq_next is computed from `max(chain_seq) + 1` for the task. Re-delivery of the queue message is a no-op when the chain link is already in `pending`/`running`/terminal state at that seq.
+**Idempotency posture:** key-based on `(agentRunId, attempt_number, chain_seq_next)`. `chain_seq_next` is computed as `max(chain_seq) + 1` **within the current `attempt_number`** (NOT across attempts — fresh-profile restart restarts chain_seq at 1 for the new attempt per § 3.15 item 7). Re-delivery of the queue message is a no-op when the chain link is already in `pending`/`running`/terminal state at that `(attempt_number, chain_seq_next)`.
 
 ### 7.4 Progress events — queued (pg-boss) + WebSocket bridge
 
@@ -1188,7 +1247,7 @@ The implementation order is: schemas + migrations FIRST, then services FIRST amo
 
 | Write path | Posture | Key |
 |---|---|---|
-| `operator_runs` insert (chain-link start) | **state-based** | optimistic predicate: `INSERT ... WHERE NOT EXISTS (SELECT 1 FROM operator_runs WHERE agent_run_id=$1 AND chain_seq=$2)`. 0 rows-affected = a concurrent dispatcher already started this chain link. |
+| `operator_runs` insert (chain-link start) | **state-based** | optimistic predicate: `INSERT ... WHERE NOT EXISTS (SELECT 1 FROM operator_runs WHERE agent_run_id=$1 AND attempt_number=$2 AND chain_seq=$3)`. 0 rows-affected = a concurrent dispatcher already started this chain link. UNIQUE `(agent_run_id, attempt_number, chain_seq)` per § 3.3 is the DB-level backstop. |
 | `operator_runs` terminal UPDATE | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','running')`. 0 rows-affected = already terminal. |
 | `agent_runs` terminal UPDATE (task-terminal) | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('delegated','paused_*')` (the closed set of pre-terminal states). 0 rows-affected = already terminal; finaliser logs and returns 200 idempotent-hit. |
 | `agent_runs` pause UPDATE (`paused_for_chain_continuation`) | **state-based** | optimistic predicate: `UPDATE ... WHERE status='delegated'`. 0 rows-affected = a concurrent path already paused or terminated. |
@@ -1197,7 +1256,7 @@ The implementation order is: schemas + migrations FIRST, then services FIRST amo
 | `operator_runs` progress UPDATE (`last_progress_at`, `step_count`) | **key-based** | event key `(operator_run_id, step_index)`; the handler uses `greatest(last_progress_at, ...)` and `greatest(step_count, ...)` so duplicate / out-of-order deliveries are no-ops. The pg-boss enqueue carries the same singleton key. |
 | `llm_requests` cost rows | **key-based** | unique index: `(operator_run_id, source_type, boundary)` for the new rows (added by migration `0331`); existing `(agent_run_id, request_id)` for `per_token` rows. 23505 → idempotent-hit. |
 | pg-boss `'operator-session-completed'` enqueue | **key-based** | pg-boss singleton key: `'operator-session-completed:' || operator_run_id`. Re-enqueue is a no-op. |
-| pg-boss `'operator-session-dispatch-next-chain-link'` enqueue | **key-based** | singleton key: `'operator-session-dispatch-next-chain-link:' || agent_run_id || ':' || chain_seq_next`. |
+| pg-boss `'operator-session-dispatch-next-chain-link'` enqueue | **key-based** | singleton key: `'operator-session-dispatch-next-chain-link:' || agent_run_id || ':' || attempt_number || ':' || chain_seq_next`. |
 | pg-boss `'operator-task-profile-gc'` cron tick | **state-based** | the cron handler's `UPDATE WHERE status='scheduled_gc' AND scheduled_gc_at <= now() RETURNING id` is the eligibility predicate; concurrent ticks see disjoint row sets. |
 | Audit-event write | **non-idempotent (intentional)** | every action records its own audit row; replays are intentional duplicates so the audit log captures every attempted-action. |
 
@@ -1218,7 +1277,7 @@ The implementation order is: schemas + migrations FIRST, then services FIRST amo
 
 | Race | Guard |
 |---|---|
-| Two concurrent chain-link dispatchers for the same task | `operator_runs (agent_run_id, chain_seq)` UNIQUE + `INSERT ... WHERE NOT EXISTS`. First wins; second gets 0 rows-affected and re-queries to see the winner's row, then no-ops. |
+| Two concurrent chain-link dispatchers for the same task | `operator_runs (agent_run_id, attempt_number, chain_seq)` UNIQUE + `INSERT ... WHERE NOT EXISTS` keyed on the same triple. First wins; second gets 0 rows-affected and re-queries to see the winner's row, then no-ops. |
 | Two concurrent task-cancel callers | `agent_runs` UPDATE with optimistic predicate on the pre-terminal closed set. First wins; second gets 0 rows-affected and returns 409 with the current state. |
 | Two concurrent dispatches racing past the concurrency cap | `pg_advisory_xact_lock(hashtext('operator_slots:' || subaccount_id))` inside the dispatch tx; the lock serialises all dispatchers for the same subaccount. The count then runs against `operator_runs WHERE subaccount_id=$1 AND status='running' AND superseded_by_attempt IS NULL`. The lock is released at COMMIT. Plain `SELECT count(*) FOR UPDATE` is insufficient — aggregate counts don't lock absent rows. |
 | Two concurrent settings-PATCH calls | optimistic concurrency on `updated_at`. Second caller's `If-Match` mismatches → 409. |
@@ -1253,7 +1312,7 @@ Every flow that can partially complete emits an explicit status. Concretely:
 
 | Constraint | Violated when | HTTP status |
 |---|---|---|
-| `operator_runs (agent_run_id, chain_seq) UNIQUE` | Concurrent dispatch race | (internal — converted by `INSERT ... WHERE NOT EXISTS` to 0-rows; no HTTP exposure) |
+| `operator_runs (agent_run_id, attempt_number, chain_seq) UNIQUE` | Concurrent dispatch race | (internal — converted by `INSERT ... WHERE NOT EXISTS` to 0-rows; no HTTP exposure) |
 | `operator_task_profiles (task_id, attempt_number) UNIQUE` | Concurrent ensure-profile | 23505 caught, idempotent-hit, returns existing row body to caller. (Internal route's HTTP equivalent: 200 idempotent.) |
 | `subaccount_operator_settings (subaccount_id) PK` | UPSERT conflict | normal UPSERT semantics (no HTTP exposure). |
 | `llm_requests (operator_run_id, source_type, boundary) UNIQUE` (new) | Cost-writer retry | 23505 caught, idempotent-hit, returns 200. |
@@ -1297,7 +1356,8 @@ paused_chain_failure → delegated                     (user retried)
 delegated → paused_budget_exceeded                   (budget cap hit)
 paused_budget_exceeded → delegated                   (user extended budget)
 delegated → completed                                (final chain link task_completed)
-delegated → failed                                   (operator runtime hard error OR max chain length OR hard-cap unresumable on non-retry path)
+delegated → failed                                   (operator runtime hard error OR max chain length)
+delegated → paused_chain_failure                     (hard-cap unresumable: running chain link with failed_mid_step=true per § 3.14 item 3; counted in the same dispatch-failure budget as start failures)
 {pending | delegated | paused_*} → cancelled         (user cancelled)
 ```
 
@@ -1330,7 +1390,7 @@ Single source of truth. Every "deferred", "later", "future", "Phase 3.5", "Phase
 - **Per-subaccount profile-size-cap configuration.** V1 has a system-wide 500 MB constant (§ 3.15 item 3). If customer demand surfaces, future spec adds it to `subaccount_operator_settings`.
 - **Cross-attempt comparison view in Run Trace.** § 3.15 item 7 / § 3.11 — V1 renders attempts as collapsed groups; a side-by-side compare view is deferred.
 - **In-flight settings hot-application.** V1 snapshots caps at chain-link dispatch time; in-flight chain links use the snapshot. A future spec could push settings changes to a running chain link (the operator runtime would need a "soft re-cap" signal). Deferred — operationally complex, low demand.
-- **In-memory slot-allocator cache** for concurrency-cap checks. V1 always queries the DB with FOR UPDATE. A future optimisation could cache slot counts in Redis if hot-path performance becomes a concern. Deferred — premature.
+- **In-memory slot-allocator cache** for concurrency-cap checks. V1 always queries the DB inside `pg_advisory_xact_lock(hashtext('operator_slots:' || subaccount_id))` (§ 7.1 step 3, § 10.3); no in-memory slot allocator is permitted. A future optimisation could cache slot counts in Redis if hot-path performance becomes a concern. Deferred — premature.
 
 ## 12. Testing posture
 
@@ -1412,6 +1472,7 @@ Chunk order is sequential; each chunk leaves the system in a forward-compatible 
 - `server/db/schema/agentRuns.ts` (extend status `$type`)
 - `shared/types/operatorRuns.ts`
 - `shared/types/checkpointPayload.ts`
+- `shared/types/operatorConversationArtefact.ts`
 
 **Validation:** `npm run lint`, `npm run typecheck`, `npm run db:generate`. Migrations apply cleanly forward + backward.
 
@@ -1687,9 +1748,9 @@ These do NOT block spec acceptance. They are surfaced to the operator for visibi
 
 2. **`per_token` row schema linkage to `operator_run_id`.** Spec C did not extend `llm_requests` with an `operator_run_id` column (only `agent_run_id`). § 4.10 / Chunk 1 add this column. If the existing `llm_requests` writer has a Zod schema that closes off unknown fields, the writer's schema also needs updating in Chunk 5. The implementation chunk verifies before writing.
 
-3. **Conversation-history per-link artefact format.** § 3.14 item 6 names "an artefact in the existing artefact store" but doesn't pin a specific MIME / Zod schema. The build chunk picks a JSONB shape consistent with existing operator-session-style artefacts (the same shape the IEE adapter uses for transcript-style artefacts, if one exists; otherwise a new shape registered in `shared/types/artefacts.ts`).
+3. ~~**Conversation-history per-link artefact format.**~~ RESOLVED in iter 2: pinned to MIME `application/vnd.synthetos.operator-conversation-link+json;version=1` and Zod schema `OperatorConversationLinkArtefact` in `shared/types/operatorConversationArtefact.ts`.
 
-4. **`is_resumable_now` signal source.** § 3.14 item 3 names a boolean the operator runtime emits. The exact emission mechanism (step-state field vs separate signal vs in-band tool call) depends on the vendor product. Build chunk pins.
+4. **`is_resumable_now` signal source.** § 3.14 item 3 pins the contract — the operator runtime MUST emit it as a boolean in the checkpoint step-state payload; absent/malformed → `false` with `failure_reason='checkpoint_signal_invalid'`. The exact VENDOR FIELD NAME (vendor-side) is what the build chunk picks.
 
 5. **Status-pill colour vs auto-extend banner colour clash.** § 3.4 + mockup `r15` show amber for auto-extend and amber for `paused_*` states. The UI implementation must disambiguate (e.g. label text differs; the indicator next to the pill carries the chain-link sub-state). Build chunk picks.
 
