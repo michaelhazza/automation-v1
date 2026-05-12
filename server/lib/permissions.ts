@@ -194,6 +194,12 @@ export const SUBACCOUNT_PERMISSIONS = {
   CORRECTIONS_CREATE:   'subaccount.corrections.create',
   // ── Credentials audit log (SynthetOS Phase 1) ────────────────────────────
   CREDENTIALS_AUDIT_READ: 'credentials:audit:read',
+  // ── AI Subscriptions (operator_session; operator-session-identity chunk 5) ─
+  OPERATOR_SESSION_VIEW:            'subaccount.operator_session.view',
+  OPERATOR_SESSION_CONNECT:         'subaccount.operator_session.connect',
+  OPERATOR_SESSION_DISCONNECT:      'subaccount.operator_session.disconnect',
+  OPERATOR_SESSION_REAUTH:          'subaccount.operator_session.reauth',
+  OPERATOR_SESSION_ALLOW_AGENT_USE: 'subaccount.operator_session.allow_agent_use',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -371,6 +377,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SUPPORT_EVALS_VIEW,               description: 'View support agent eval results',                     groupName: 'org.support' },
   // subaccount.credentials (SynthetOS Phase 1)
   { key: SUBACCOUNT_PERMISSIONS.CREDENTIALS_AUDIT_READ, description: 'View the credential audit log for this subaccount', groupName: 'subaccount.credentials' },
+  // subaccount.operator_session (AI Subscriptions; operator-session-identity chunk 5)
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,            description: 'View AI Subscription metadata (no token material)',              groupName: 'AI Subscriptions' },
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_CONNECT,         description: 'Connect a new AI Subscription and re-accept consent',           groupName: 'AI Subscriptions' },
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_DISCONNECT,      description: 'Disconnect an AI Subscription (terminal disable)',               groupName: 'AI Subscriptions' },
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_REAUTH,          description: 'Trigger re-authentication when sign-in expired',                groupName: 'AI Subscriptions' },
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_ALLOW_AGENT_USE, description: 'Edit per-subscription agent allowlist',                         groupName: 'AI Subscriptions' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

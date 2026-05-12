@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<!--
+  Screen 10: Connect Gmail — per-app connect modal (Round 9)
+  Reached from the App Integrations card: "Connect" or "Add another" on Gmail.
+  No mention of "OAuth". The user just knows they're signing in with Google.
+  Primary action: "Continue to Google"
+  Disclosure: "What we'll access" section, collapsed by default.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect Gmail | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+}
+.modal {
+  background: white; border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.22);
+  width: 460px; max-width: calc(100vw - 48px);
+  padding: 32px 32px 28px;
+  position: relative;
+}
+
+/* App identity header */
+.app-header {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 20px;
+}
+.app-icon-lg {
+  width: 52px; height: 52px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; flex-shrink: 0;
+  background: #fce8e6; color: #c5221f;
+}
+.modal-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.modal-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+
+/* Body copy */
+.modal-body-copy {
+  font-size: 13.5px; color: #334155; line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+/* Form field */
+.form-group { margin-bottom: 18px; }
+.form-label {
+  display: block; font-size: 12px; font-weight: 600; color: #374151;
+  margin-bottom: 5px; letter-spacing: 0.01em;
+}
+.form-label-sub {
+  font-size: 11px; color: #94a3b8; font-weight: 400; margin-left: 4px;
+}
+.form-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 13px; color: #0f172a; font-family: inherit;
+  outline: none; transition: border-color 0.12s; box-sizing: border-box;
+}
+.form-input:focus { border-color: #818cf8; }
+.form-input::placeholder { color: #cbd5e1; }
+.form-hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+
+/* Disclosure section */
+.disclosure-toggle {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 500; color: #64748b;
+  background: none; border: none; cursor: pointer;
+  padding: 8px 0; font-family: inherit;
+  transition: color 0.12s;
+}
+.disclosure-toggle:hover { color: #334155; }
+.disclosure-toggle svg { transition: transform 0.15s; flex-shrink: 0; }
+.disclosure-toggle.open svg { transform: rotate(90deg); }
+
+.disclosure-body {
+  display: none; padding: 10px 0 4px;
+}
+.disclosure-body.open { display: block; }
+.scope-list {
+  list-style: none; padding: 0; margin: 0;
+}
+.scope-list li {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12.5px; color: #475569; padding: 5px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.scope-list li:last-child { border-bottom: none; }
+.scope-icon { color: #10b981; margin-top: 1px; flex-shrink: 0; }
+
+/* Primary action area */
+.modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.btn-primary {
+  width: 100%; padding: 11px 16px; border-radius: 9px;
+  background: #4f46e5; color: white;
+  font-size: 14px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; transition: background 0.12s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-primary:hover { background: #4338ca; }
+.action-note {
+  font-size: 11.5px; color: #94a3b8; text-align: center; line-height: 1.4;
+}
+.btn-cancel {
+  width: 100%; padding: 9px 16px; border-radius: 9px;
+  background: white; color: #334155;
+  font-size: 13px; font-weight: 500; border: 1.5px solid #e2e8f0; cursor: pointer;
+  font-family: inherit; transition: border-color 0.12s;
+}
+.btn-cancel:hover { border-color: #c7d2fe; color: #4338ca; }
+
+/* Divider */
+.modal-divider { border: none; border-top: 1px solid #f1f5f9; margin: 16px 0 12px; }
+</style>
+</head>
+<body>
+<!-- Fake page behind the modal -->
+<div style="position:fixed;inset:0;background:#f8fafc;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+  <div style="font-size:12px;color:#cbd5e1;">Connections / App Integrations</div>
+</div>
+
+<div class="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+
+    <!-- App header -->
+    <div class="app-header">
+      <div class="app-icon-lg">GM</div>
+      <div>
+        <div class="modal-title" id="modalTitle">Connect Gmail</div>
+        <div class="modal-subtitle">Google Workspace / personal Gmail</div>
+      </div>
+    </div>
+
+    <!-- Body copy -->
+    <div class="modal-body-copy">
+      Connect your Gmail account to let agents read, draft, and send mail on your behalf. You'll be taken to Google to sign in and confirm access.
+    </div>
+
+    <!-- Label field (optional) -->
+    <div class="form-group">
+      <label class="form-label" for="gmailLabel">
+        Show as
+        <span class="form-label-sub">optional</span>
+      </label>
+      <input class="form-input" type="text" id="gmailLabel" placeholder="e.g. Marketing Gmail">
+      <div class="form-hint">Useful when you have more than one Gmail account connected.</div>
+    </div>
+
+    <hr class="modal-divider">
+
+    <!-- What we'll access — collapsed by default -->
+    <button class="disclosure-toggle" onclick="toggleDisclosure()" id="disclosureBtn" aria-expanded="false">
+      <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+      What we'll access
+    </button>
+    <div class="disclosure-body" id="disclosureBody">
+      <ul class="scope-list">
+        <li>
+          <svg class="scope-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          Read messages and drafts
+        </li>
+        <li>
+          <svg class="scope-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          Send messages on your behalf
+        </li>
+        <li>
+          <svg class="scope-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          Manage labels and organise mail
+        </li>
+        <li>
+          <svg class="scope-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          View account settings (read-only)
+        </li>
+      </ul>
+    </div>
+
+    <!-- Actions -->
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="handleContinue()">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+          <path d="M17.5 10C17.5 14.142 14.142 17.5 10 17.5C5.858 17.5 2.5 14.142 2.5 10C2.5 5.858 5.858 2.5 10 2.5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M10 2.5L13 5.5M10 2.5L13 0" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Continue to Google
+      </button>
+      <div class="action-note">Google will ask you to sign in and confirm permissions. You'll return here when done.</div>
+      <button class="btn-cancel" onclick="window.location='01b-app-integrations-tab.html'">Cancel</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- State B: pending (shown after clicking Continue) -->
+<div id="pendingOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);display:none;align-items:center;justify-content:center;z-index:300;">
+  <div class="modal" style="text-align:center;padding:40px 32px;">
+    <div style="font-size:28px;margin-bottom:12px;">&#128279;</div>
+    <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:8px;">Waiting for Google</div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.5;">Complete sign-in in the tab that just opened. This window will update automatically when done.</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;color:#64748b;font-size:12.5px;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="animation:spin 1.2s linear infinite;"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      Waiting for authorisation...
+    </div>
+    <button onclick="document.getElementById('pendingOverlay').style.display='none'" style="margin-top:20px;font-size:12px;color:#94a3b8;background:none;border:none;cursor:pointer;font-family:inherit;">Cancel and go back</button>
+  </div>
+</div>
+<style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+
+<!-- Nav hints (outside overlay) -->
+<div style="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);font-size:11.5px;color:#94a3b8;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;z-index:400;">
+  &larr; <a href="01b-app-integrations-tab.html" style="color:#6366f1;text-decoration:none;">Back to App Integrations</a>
+  &nbsp;|&nbsp;
+  <a href="11-connect-app-hubspot.html" style="color:#6366f1;text-decoration:none;">HubSpot modal (11) &rarr;</a>
+</div>
+
+<script>
+function toggleDisclosure() {
+  const btn = document.getElementById('disclosureBtn');
+  const body = document.getElementById('disclosureBody');
+  const open = body.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', open);
+}
+function handleContinue() {
+  const overlay = document.getElementById('pendingOverlay');
+  overlay.style.display = 'flex';
+}
+</script>
+</body>
+</html>

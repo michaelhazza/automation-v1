@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<!--
+  Screen 16: Manage Gmail connections — multi-connect drawer (Round 9, NEW)
+  Opened from "Manage" button on the Gmail app card (2 connected).
+  Drawer pattern: right-side panel over the grid.
+  Lists each individual Gmail connection with status, last refresh, 3-dot menu.
+  CTA: "+ Add another Gmail"
+  Footer note: credential rotation requires disconnect + reconnect.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gmail connections | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Simulated background page (App Integrations grid) */
+.bg-page {
+  position: fixed; inset: 0;
+  background: #f8fafc;
+  z-index: 0;
+}
+
+/* Dim overlay */
+.drawer-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,0.25);
+  z-index: 100;
+  cursor: pointer;
+}
+
+/* Drawer */
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 420px; max-width: 100vw;
+  background: white;
+  box-shadow: -6px 0 32px rgba(0,0,0,0.14);
+  z-index: 200;
+  display: flex; flex-direction: column;
+  animation: slideIn 0.18s ease-out;
+}
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* Drawer header */
+.drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.drawer-header-left { display: flex; align-items: center; gap: 12px; }
+.app-icon-sm {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800;
+  background: #fce8e6; color: #c5221f; flex-shrink: 0;
+}
+.drawer-title { font-size: 16px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; }
+.drawer-subtitle { font-size: 12px; color: #64748b; margin-top: 1px; }
+
+.drawer-close {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 18px; line-height: 1;
+}
+.drawer-close:hover { background: #f1f5f9; color: #334155; }
+
+/* Drawer toolbar */
+.drawer-toolbar {
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 12px 24px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.btn-add-another {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 8px;
+  background: #4f46e5; color: white;
+  font-size: 12.5px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; transition: background 0.12s; text-decoration: none;
+}
+.btn-add-another:hover { background: #4338ca; }
+
+/* Connection list */
+.drawer-body {
+  flex: 1; overflow-y: auto; padding: 4px 0;
+}
+
+.conn-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.1s;
+  cursor: default;
+}
+.conn-row:last-child { border-bottom: none; }
+.conn-row:hover { background: #f8fafc; }
+
+/* Connection icon (letter avatar) */
+.conn-avatar {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+  background: #e0e7ff; color: #4338ca;
+}
+
+.conn-info { flex: 1; min-width: 0; }
+.conn-label { font-size: 13.5px; font-weight: 600; color: #0f172a; margin-bottom: 2px; }
+.conn-email { font-size: 11.5px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Status */
+.conn-status { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.dot-green { width: 7px; height: 7px; border-radius: 50%; background: #10b981; flex-shrink: 0; }
+.dot-amber { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+.status-label { font-size: 11.5px; font-weight: 500; color: #475569; }
+
+/* Last refresh */
+.conn-refresh {
+  font-size: 11px; color: #94a3b8; flex-shrink: 0; white-space: nowrap;
+}
+
+/* 3-dot menu */
+.overflow-wrap { position: relative; flex-shrink: 0; }
+.overflow-btn {
+  width: 28px; height: 28px;
+  background: transparent; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 16px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.overflow-btn:hover { background: #f1f5f9; color: #334155; }
+.ctx-menu {
+  position: absolute; right: 0; top: 32px;
+  background: white; border: 1px solid #e2e8f0;
+  border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  min-width: 180px; padding: 4px; z-index: 50;
+  display: none;
+}
+.ctx-menu.open { display: block; }
+.ctx-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 6px;
+  font-size: 12.5px; color: #334155;
+  cursor: pointer; width: 100%; border: none; background: transparent; text-align: left;
+  font-family: inherit;
+}
+.ctx-item:hover { background: #f8fafc; }
+.ctx-item.danger { color: #dc2626; }
+.ctx-item.danger:hover { background: #fef2f2; }
+.ctx-sep { border: none; border-top: 1px solid #f1f5f9; margin: 3px 4px; }
+.ctx-item-icon { width: 15px; text-align: center; font-size: 12px; opacity: 0.75; flex-shrink: 0; }
+
+/* Drawer footer */
+.drawer-footer {
+  padding: 14px 24px;
+  border-top: 1px solid #e2e8f0;
+}
+.footer-note {
+  font-size: 11.5px; color: #94a3b8; line-height: 1.5; margin-bottom: 12px;
+}
+.btn-close {
+  width: 100%; padding: 9px; border-radius: 8px;
+  background: white; color: #334155;
+  font-size: 13px; font-weight: 500; border: 1.5px solid #e2e8f0; cursor: pointer;
+  font-family: inherit; transition: border-color 0.12s;
+}
+.btn-close:hover { border-color: #c7d2fe; color: #4338ca; }
+</style>
+</head>
+<body>
+
+<!-- Fake background page -->
+<div class="bg-page">
+  <div style="padding:28px 32px;max-width:960px;margin:0 auto;">
+    <div style="font-size:22px;font-weight:700;color:#0f172a;margin-bottom:20px;opacity:0.3;">Connections</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;opacity:0.25;">
+      <div style="background:white;border:1.5px solid #e2e8f0;border-radius:14px;height:180px;"></div>
+      <div style="background:white;border:1.5px solid #e2e8f0;border-radius:14px;height:180px;"></div>
+      <div style="background:white;border:1.5px solid #e2e8f0;border-radius:14px;height:180px;"></div>
+      <div style="background:white;border:1.5px solid #e2e8f0;border-radius:14px;height:180px;"></div>
+      <div style="background:white;border:1.5px solid #e2e8f0;border-radius:14px;height:180px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Backdrop -->
+<div class="drawer-backdrop" onclick="window.location='01b-app-integrations-tab.html'"></div>
+
+<!-- Drawer -->
+<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+
+  <!-- Header -->
+  <div class="drawer-header">
+    <div class="drawer-header-left">
+      <div class="app-icon-sm">GM</div>
+      <div>
+        <div class="drawer-title" id="drawerTitle">Gmail connections</div>
+        <div class="drawer-subtitle">2 connections in this subaccount</div>
+      </div>
+    </div>
+    <button class="drawer-close" onclick="window.location='01b-app-integrations-tab.html'" title="Close">&#215;</button>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="drawer-toolbar">
+    <a class="btn-add-another" href="10-connect-app-gmail.html">
+      <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Add another Gmail
+    </a>
+  </div>
+
+  <!-- Connection list -->
+  <div class="drawer-body">
+
+    <!-- Connection 1: Marketing Gmail -->
+    <div class="conn-row">
+      <div class="conn-avatar">MG</div>
+      <div class="conn-info">
+        <div class="conn-label">Marketing Gmail</div>
+        <div class="conn-email">operator@firm.com</div>
+      </div>
+      <div class="conn-status">
+        <span class="dot-green"></span>
+        <span class="status-label">Connected</span>
+      </div>
+      <div class="conn-refresh">2 min ago</div>
+      <div class="overflow-wrap" onclick="event.stopPropagation()">
+        <button class="overflow-btn" onclick="toggleMenu('m1')">&#8942;</button>
+        <div class="ctx-menu" id="m1">
+          <button class="ctx-item"><span class="ctx-item-icon">&#9654;</span> Test</button>
+          <button class="ctx-item"><span class="ctx-item-icon">&#9998;</span> Edit label</button>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item danger" onclick="window.location='15-disconnect-confirm.html'"><span class="ctx-item-icon">&#8856;</span> Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connection 2: Research Gmail — expired -->
+    <div class="conn-row">
+      <div class="conn-avatar" style="background:#fef3c7;color:#b45309;">RG</div>
+      <div class="conn-info">
+        <div class="conn-label">Research Gmail</div>
+        <div class="conn-email">research@firm.com</div>
+      </div>
+      <div class="conn-status">
+        <span class="dot-amber"></span>
+        <span class="status-label" style="color:#b45309;">Needs sign in</span>
+      </div>
+      <div class="conn-refresh">5 days ago</div>
+      <div class="overflow-wrap" onclick="event.stopPropagation()">
+        <button class="overflow-btn" onclick="toggleMenu('m2')">&#8942;</button>
+        <div class="ctx-menu" id="m2">
+          <button class="ctx-item"><span class="ctx-item-icon">&#9654;</span> Test</button>
+          <button class="ctx-item"><span class="ctx-item-icon">&#8635;</span> Sign in again</button>
+          <button class="ctx-item"><span class="ctx-item-icon">&#9998;</span> Edit label</button>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item danger" onclick="window.location='15-disconnect-confirm.html'"><span class="ctx-item-icon">&#8856;</span> Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="drawer-footer">
+    <div class="footer-note">
+      To rotate credentials, disconnect the connection and reconnect. Gmail connections use Google sign-in; there is no credential to paste or rotate inline.
+    </div>
+    <button class="btn-close" onclick="window.location='01b-app-integrations-tab.html'">Close</button>
+  </div>
+
+</aside>
+
+<!-- Nav hints -->
+<div style="position:fixed;bottom:16px;left:16px;font-size:11.5px;color:#94a3b8;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;z-index:400;">
+  &larr; <a href="01b-app-integrations-tab.html" style="color:#6366f1;text-decoration:none;">App Integrations (01b)</a>
+  &nbsp;|&nbsp;
+  <a href="11-connect-app-hubspot.html" style="color:#6366f1;text-decoration:none;">HubSpot connect (11)</a>
+</div>
+
+<script>
+function toggleMenu(id) {
+  document.querySelectorAll('.ctx-menu').forEach(m => {
+    if (m.id !== id) m.classList.remove('open');
+  });
+  document.getElementById(id).classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.overflow-wrap')) {
+    document.querySelectorAll('.ctx-menu').forEach(m => m.classList.remove('open'));
+  }
+});
+</script>
+</body>
+</html>

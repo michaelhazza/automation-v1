@@ -1,13 +1,15 @@
 // Credential Broker and Identity Boundary primitive per v1.2 brief. See docs/synthetos-nomenclature.md
-// 'operator_session' is Phase-3 forward-compatible — do NOT add the literal yet
 
-import { and, desc, eq, gte, sql as sqlOp } from 'drizzle-orm';
+import { and, desc, eq, gte, ne, sql as sqlOp } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { auditEvents, integrationConnections } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { logger } from '../lib/logger.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
+import { assertCredentialUsableOrThrow, CredentialNotUsableError, orderResolvedCredentials } from './credentialBrokerServicePure.js';
+import type { OrderableRow } from './credentialBrokerServicePure.js';
+import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -18,12 +20,33 @@ export interface IssuedCredential {
   authType: 'oauth2' | 'api_key' | 'web_login';
   issuedAt: Date;
   expiresAt?: Date;
+  /**
+   * Per-execution redaction pattern (spec B §11.3). When set, the harvest
+   * pipeline registers this RegExp for the lifetime of the sandbox execution
+   * to scrub any occurrence of the credential value from output.json, logs,
+   * and artefact metadata. The pattern is discarded on sandbox close.
+   *
+   * Existing callers that do not consume sandbox execution outputs may safely
+   * ignore this field — it is optional and additive.
+   */
+  redactionPattern?: RegExp;
+}
+
+export interface OperatorSessionEnvelope {
+  credentialId: string;
+  connectionId: string;
+  authType: 'operator_session';
+  provider: string;
+  planTier: 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown';
+  usabilityState: 'connected_usable';  // broker refuses to return any other state
+  issuedAt: string;
+  expiresAt: string | null;
 }
 
 export interface ResolvedCredential {
   credentialId: string;
   connectionId: string;
-  authType: 'oauth2' | 'api_key' | 'web_login';
+  authType: 'oauth2' | 'api_key' | 'web_login' | 'operator_session';
   providerType: string;
   subaccountId: string | null;
 }
@@ -79,7 +102,7 @@ export const credentialBrokerService = {
     subaccountId: string;
     connectionId: string;
     purpose: string;
-  }): Promise<IssuedCredential> {
+  }): Promise<IssuedCredential | OperatorSessionEnvelope> {
     const [conn] = await db
       .select()
       .from(integrationConnections)
@@ -97,6 +120,36 @@ export const credentialBrokerService = {
         new Error(`No connection ${params.connectionId} found for org ${params.organisationId}`),
         { statusCode: 404, errorCode: 'credential_not_found' },
       );
+    }
+
+    // operator_session branch: state-gate only; no token decryption in V1
+    if (conn.authType === 'operator_session') {
+      // The decryptHook is a no-op; assertCredentialUsableOrThrow still invokes it
+      // once when usable (preserving the testable contract: hook invocation count = 1).
+      try {
+        assertCredentialUsableOrThrow(conn.usabilityState as UsabilityState, () => undefined);
+      } catch (err) {
+        if (err instanceof CredentialNotUsableError) {
+          throw {
+            statusCode: 409,
+            errorCode: 'credential_not_usable',
+            message: `Credential is not usable: ${err.state}`,
+            state: err.state,
+          };
+        }
+        throw err;
+      }
+
+      return {
+        credentialId: conn.id,
+        connectionId: conn.id,
+        authType: 'operator_session' as const,
+        provider: conn.providerType,
+        planTier: (conn.planTier ?? 'unknown') as 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown',
+        usabilityState: 'connected_usable' as const,
+        issuedAt: new Date().toISOString(),
+        expiresAt: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
+      } satisfies OperatorSessionEnvelope;
     }
 
     const credential = credentialFromConnection(conn);
@@ -118,10 +171,18 @@ export const credentialBrokerService = {
    * site's lifecycle. Delegates to connectionTokenService.
    */
   async injectIntoEnvironment(params: {
-    issuedCredential: IssuedCredential;
+    issuedCredential: IssuedCredential | OperatorSessionEnvelope;
     environment: Record<string, string>;
   }): Promise<void> {
     const { issuedCredential, environment } = params;
+
+    // operator_session: no consumer in V1; injection deferred to Phase 3+ (OpenClaw adapter)
+    if (params.issuedCredential.authType === 'operator_session') {
+      logger.debug('operator_session.inject_no_consumer_v1', {
+        connectionId: params.issuedCredential.connectionId,
+      });
+      return;
+    }
 
     const [conn] = await db
       .select()
@@ -129,7 +190,7 @@ export const credentialBrokerService = {
       .where(
         and(
           eq(integrationConnections.id, issuedCredential.connectionId),
-          eq(integrationConnections.organisationId, issuedCredential.organisationId),
+          eq(integrationConnections.organisationId, (issuedCredential as IssuedCredential).organisationId),
         ),
       )
       .limit(1);
@@ -284,11 +345,23 @@ export const credentialBrokerService = {
    * Resolve the available credentials for a run context.
    * Lists active connections in scope; does NOT decrypt.
    * Used by Policy Envelope to capture credential availability at run start.
+   *
+   * Design note (§812-820): agent-specific filtering for operator_session rows is
+   * applied here via the optional agentId param. When agentId is omitted, only
+   * 'all_agents' operator_session rows are included (safe default for legacy callers).
+   * The specific_agents path is also exercised at the agent-route level via
+   * operatorSessionService.listAllowedSubscriptionsForAgent (Chunk 3).
+   * orderResolvedCredentials (pure helper) is the single source of truth for §9.7
+   * ordering: default operator_session first, then non-default sorted by label, then
+   * all other authTypes in their original SQL order.
    */
   async resolveAvailableCredentials(params: {
     organisationId: string;
     subaccountId: string;
+    agentId?: string;  // Optional: if provided, also includes specific_agents rows for this agent
   }): Promise<ResolvedCredential[]> {
+    // Exclude operator_session rows here — they are handled by the second query below
+    // with the additional usabilityState filter.
     const rows = await db
       .select()
       .from(integrationConnections)
@@ -297,13 +370,66 @@ export const credentialBrokerService = {
           eq(integrationConnections.organisationId, params.organisationId),
           eq(integrationConnections.subaccountId, params.subaccountId),
           eq(integrationConnections.connectionStatus, 'active'),
+          ne(integrationConnections.authType, 'operator_session'),
         ),
       );
 
-    return rows.map((conn) => ({
+    // Include operator_session connections that are usable and allowed for the calling context.
+    // SQL pre-filter: availabilityScope = 'all_agents' always; when agentId is provided,
+    // also include specific_agents rows where allowedAgentIds contains the agentId.
+    const agentIdFilter = params.agentId
+      ? sqlOp`(
+          ${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'
+          OR ${integrationConnections.configJson} -> 'operator_session' -> 'allowedAgentIds' ? ${params.agentId}::text
+        )`
+      : sqlOp`${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'`;
+
+    const operatorSessionRows = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, params.organisationId),
+          eq(integrationConnections.subaccountId, params.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+          eq(integrationConnections.usabilityState, 'connected_usable'),
+          agentIdFilter,
+        ),
+      );
+
+    const allRows = [...rows, ...operatorSessionRows];
+
+    // Build OrderableRow shape for the pure ordering helper.
+    // Non-operator_session rows use sentinel values that pass all filters so they
+    // preserve their original SQL order at the tail of the result (§9.7).
+    type ConfigJson = { operator_session?: { availabilityScope?: 'all_agents' | 'specific_agents'; allowedAgentIds?: string[] | null } };
+    const orderableRows: (typeof allRows[number] & OrderableRow)[] = allRows.map((conn) => {
+      if (conn.authType !== 'operator_session') {
+        return Object.assign(conn, {
+          label: conn.label ?? null,
+          isDefault: conn.isDefault,
+          usabilityState: 'connected_usable' as UsabilityState,
+          allowedAgentIds: null as string[] | null,
+          availabilityScope: 'all_agents' as const,
+        });
+      }
+      const cfg = (conn.configJson as ConfigJson | null)?.operator_session;
+      return Object.assign(conn, {
+        label: conn.label ?? null,
+        isDefault: conn.isDefault,
+        usabilityState: (conn.usabilityState as UsabilityState) ?? 'connected_unverified',
+        allowedAgentIds: cfg?.allowedAgentIds ?? null,
+        availabilityScope: cfg?.availabilityScope ?? 'all_agents',
+      });
+    });
+
+    const ordered = orderResolvedCredentials(orderableRows, params.agentId ?? '');
+
+    return ordered.map((conn) => ({
       credentialId: conn.id,
       connectionId: conn.id,
-      authType: mapAuthType(conn.authType),
+      authType: conn.authType === 'operator_session' ? 'operator_session' : mapAuthType(conn.authType),
       providerType: conn.providerType,
       subaccountId: conn.subaccountId,
     }));

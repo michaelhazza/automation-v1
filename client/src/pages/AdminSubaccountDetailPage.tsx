@@ -13,7 +13,6 @@ import { ManualBaselineForm } from '../components/baseline/ManualBaselineForm';
 import { AdminBaselineResetButton } from '../components/baseline/AdminBaselineResetButton';
 
 const UsagePage = lazy(() => import('./UsagePage'));
-const IntegrationsAndCredentialsPage = lazy(() => import('./IntegrationsAndCredentialsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 const SubaccountTagsPage = lazy(() => import('./SubaccountTagsPage'));
 
@@ -21,10 +20,10 @@ interface Subaccount { id: string; name: string; slug: string; status: string; i
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'integrations' | 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace';
+type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  integrations: 'Integrations', onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
+  onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
   categories: 'Categories', tags: 'Tags', board: 'Board Config', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
 };
 
@@ -42,8 +41,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const [searchParams] = useSearchParams();
   const visibleTabs: ActiveTab[] = mode === 'client'
-    ? ['integrations', 'board', 'categories']
-    : ['integrations', 'onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'usage', 'workspace', 'admin'];
+    ? ['board', 'categories']
+    : ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'usage', 'workspace', 'admin'];
   const initialTab = (() => {
     const t = searchParams.get('tab') as ActiveTab | null;
     return t && visibleTabs.includes(t) ? t : visibleTabs[0];
@@ -418,13 +417,6 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
             )}
           </div>
         </>
-      )}
-
-      {/* Integrations */}
-      {activeTab === 'integrations' && (
-        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading integrations...</div>}>
-          <IntegrationsAndCredentialsPage user={_user as any} subaccountId={subaccountId} embedded />
-        </Suspense>
       )}
 
       {/* Onboarding — spec §9.3: lists owed onboarding workflows per module set */}

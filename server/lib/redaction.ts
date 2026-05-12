@@ -75,6 +75,31 @@ export const DEFAULT_REDACTION_PATTERNS: readonly RedactionPattern[] = [
     regex: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     replacement: '[REDACTED:google_api_key]',
   },
+  // ---------------------------------------------------------------------------
+  // Sandbox-specific patterns (Spec B §11.5, §26 — first-to-land defines
+  // the shared bundle; Spec C appends OAuth refresh-token / consent-state markers).
+  // ---------------------------------------------------------------------------
+  {
+    name: 'sandbox_oauth_alias_token',
+    regex: /oauth_[a-z_]+_[a-z0-9_-]{8,}_token/gi,
+    replacement: '[REDACTED:sandbox_oauth_token]',
+  },
+  {
+    name: 'sandbox_aws_session_token',
+    // AWS session tokens are 40+ chars of base64url characters.
+    // Lookaheads require lower + upper + digit before matching so a long run
+    // of homogeneous filler (e.g. `'x'.repeat(500_000)`) is NOT redacted —
+    // real base64 tokens always mix all three character classes. Phase 3
+    // CI fix-loop iteration 1: closes over-match found by the integration
+    // test failure on `agentRunPayloadWriterPure` truncation tests.
+    regex: /\b(?=.{40,}={0,2}\b)(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}\b/g,
+    replacement: '[REDACTED:aws_session_token]',
+  },
+  {
+    name: 'sandbox_credential_injection_marker',
+    regex: /sandbox_credential_[a-z_]+_token/gi,
+    replacement: '[REDACTED:sandbox_credential]',
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -148,7 +148,7 @@ export interface ConnectionsQuery {
   /** Required when scope='workspace' — the active subaccount/workspace id. */
   subaccountId?: string;
   provider?: string[];
-  authMethod?: ('oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie')[];
+  authMethod?: ('oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie' | 'ai_subscription')[];
   status?: ('connected' | 'expired' | 'failed' | 'pending')[];
   q?: string;
   cursor?: string;
@@ -161,7 +161,7 @@ export interface Connection {
   id: string;
   name: string;
   provider: string;
-  authMethod: 'oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie';
+  authMethod: 'oauth' | 'api_key' | 'web_login' | 'mcp' | 'cookie' | 'ai_subscription';
   status: 'connected' | 'expired' | 'failed' | 'pending';
   lastSyncAt: string | null;
   owner: { kind: 'workspace' | 'org'; id: string; name: string };
@@ -186,4 +186,30 @@ export interface ConnectionTestResponse {
   testedAt: string;
   error?: { code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'; message: string };
   capabilities?: string[];
+}
+
+// ── AI Subscription Connections (operator_session) ─────────────────────────
+// Spec: docs/superpowers/specs/2026-05-11-operator-session-identity-spec.md §9.2
+
+export interface AiSubscriptionConnection {
+  id: string;
+  authMethod: 'ai_subscription';
+  provider: string;
+  planTier: 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown';
+  planVerificationStatus: 'verified' | 'self_declared' | 'failed';
+  planVerifiedAt: string | null;
+  usabilityState: 'connected_usable' | 'connected_needs_consent' | 'connected_needs_reauth' | 'connected_unverified' | 'revoked' | 'disabled';
+  disabledReason: 'owner_inactive' | 'admin_disabled' | 'permission_revoked' | null;
+  pendingReason: 'needs_new_consent' | 'needs_reauth' | 'plan_unverified' | null;
+  isDefault: boolean;
+  availabilityScope: 'all_agents' | 'specific_agents';
+  allowedAgentIds: string[] | null;
+  label: string | null;
+  user: {
+    userId: string | null;
+    userIdNullified: boolean;
+    displayName: string | null;
+  };
+  lastRefreshedAt: string | null;
+  createdAt: string;
 }

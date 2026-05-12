@@ -43,8 +43,6 @@ const RecurringTasksPage = lazy(() => import('./pages/build/RecurringTasksPage')
 const ProjectEditPage = lazy(() => import('./pages/build/ProjectEditPage'));
 const SubaccountBlueprintsPage = lazy(() => import('./pages/SubaccountBlueprintsPage'));
 const ClientPulseSettingsPage = lazy(() => import('./pages/ClientPulseSettingsPage'));
-const McpServersPage = lazy(() => import('./pages/McpServersPage'));
-const IntegrationsAndCredentialsPage = lazy(() => import('./pages/IntegrationsAndCredentialsPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
@@ -247,9 +245,9 @@ function ModuleGuard({ user, slug }: { user: User | null; slug: string }) {
   return <ErrorBoundary><Outlet /></ErrorBoundary>;
 }
 
-function SubaccountIntegrationsRoute({ user }: { user: User }) {
+function SubaccountIntegrationsRoute() {
   const { subaccountId } = useParams<{ subaccountId: string }>();
-  return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
+  return <Navigate to={`/connections?tab=app-integrations&workspace=${subaccountId}`} replace />;
 }
 
 function BriefRedirect() {
@@ -449,7 +447,7 @@ export default function App() {
             {/* Legacy path — kept for bookmarks; renders the renamed page. */}
             <Route path="/admin/agent-templates" element={<SubaccountBlueprintsPage user={user!} />} />
             <Route path="/clientpulse/settings" element={<ClientPulseSettingsPage user={user!} />} />
-            <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
+            <Route path="/admin/mcp-servers" element={<Navigate to="/connections" replace />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/mailbox" element={<AgentMailboxPage user={user!} />} />
@@ -576,8 +574,8 @@ export default function App() {
           </Route>
 
           {/* Subaccount connections */}
-          <Route path="/admin/subaccounts/:subaccountId/connections" element={<SubaccountIntegrationsRoute user={user!} />} />
-          <Route path="/portal/:subaccountId/connections" element={<SubaccountIntegrationsRoute user={user!} />} />
+          <Route path="/admin/subaccounts/:subaccountId/connections" element={<SubaccountIntegrationsRoute />} />
+          <Route path="/portal/:subaccountId/connections" element={<SubaccountIntegrationsRoute />} />
 
           {/* Subaccount team */}
           <Route path="/admin/subaccounts/:subaccountId/team" element={<SubaccountTeamPage user={user!} />} />
