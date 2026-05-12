@@ -4406,3 +4406,15 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 - [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
   - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
   - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
+
+## Deferred spec decisions — personal-assistant-v1 (2026-05-12)
+
+Source: `tasks/review-logs/spec-review-log-personal-assistant-v1-1-20260512T061117Z.md` (Iteration 1). One AUTO-DECIDED item from the spec-reviewer loop; routed here for the Phase 2 architect (not blocking spec finalisation).
+
+- [ ] **EA-V1-AD1 — Investigate composing `actionService.proposeAction` under `ea_drafts` state machine**
+  - Source: Codex Finding #11 (Iteration 1).
+  - Background: The spec authors `eaDraftService` with its own state machine (`pending → approved | rejected | expired`) for review-gated EA sends (§7.5, §24.3, §11.6). An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics (per `docs/spec-context.md` `accepted_primitives`).
+  - The framing question: per the "prefer existing primitives over new abstractions" framing assumption, should `ea_drafts` compose over `proposeAction` instead of authoring a parallel state machine?
+  - Recommendation: Phase 2 architect investigates `actionService.proposeAction`'s exact contract — specifically whether it supports a per-domain payload reference. If yes, `ea_drafts` should hold only the drafted body content + a foreign key to the `proposed_actions` row; the state machine collapses into `proposeAction`'s existing approval semantics. If no, keep the parallel state machine and document the rationale in `plan.md`.
+  - Why it's deferred (not auto-applied to the spec): The composition shape depends on `actionService.proposeAction`'s contract, which I cannot verify from the spec alone. Editing the spec to mandate composition without confirming the primitive's actual surface area would be premature; editing it to mandate the parallel state machine would foreclose the cleaner option. Architect investigation comes first.
+  - Reflected in spec: §27 open question #15 (added in Iteration 1) names this investigation explicitly.
