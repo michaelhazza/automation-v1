@@ -3,7 +3,7 @@
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `personal-assistant-v1`
 **Successor placeholder:** `tasks/builds/personal-assistant-v2-operator/brief.md` (V2 upgrade — Operator Controller, depends on Spec D)
-**Locked predecessor:** `tasks/builds/principal-scoped-agents/brief.md` (foundation spec — user-principal agents + principal-aware credential broker + Run Trace view projection; EA V1 is the first consumer)
+**Locked predecessor:** `tasks/builds/user-owned-agents/brief.md` (foundation spec — `agents.owner_user_id` column + owner-aware credential broker + admin redaction policy; EA V1 is the first consumer)
 **Concurrent with:** Spec D `tasks/builds/operator-backend/brief.md` (no file overlap; V2 depends on Spec D, V1 does not)
 **Strategic parent:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` §16.1 (Executive Assistant use case), §6.3 (Native Controller), §17 (use-case coverage matrix)
 
@@ -12,6 +12,7 @@
 ## Contents
 
 - [0. Naming decision (read first)](#0-naming-decision-read-first)
+- [0.5 Strategic framing + decision rationale (read second)](#05-strategic-framing--decision-rationale-read-second)
 - [1. Purpose](#1-purpose)
 - [2. What's locked from upstream](#2-whats-locked-from-upstream)
 - [3. What this spec must define](#3-what-this-spec-must-define)
@@ -54,6 +55,68 @@ The v1.2 master brief uses **"Executive Assistant"** as the canonical agent name
 
 The agent role per master brief §5.1 is an **organisational entity** — "who owns this work" — not an execution concept. V1 ships the Executive Assistant agent restricted to `controllerStyle: 'native'`. V2 adds `controllerStyle: 'operator'` to the same agent (master brief §5.2 — one organisational agent, multiple controllers).
 
+## 0.5 Strategic framing + decision rationale (read second)
+
+This build is NOT primarily an Executive Assistant product. It is the **first consumer of the user-owned agents primitive** (`tasks/builds/user-owned-agents/brief.md`). The reviewer should evaluate this brief through that lens — EA V1 succeeds if the user-owned agents primitive is proven, not if the EA wins on personal-productivity features alone.
+
+### 0.5.1 Why this distinction matters
+
+A challenge round (2026-05-12) examined whether SynthetOS should build personal-assistant features at all when Claude / ChatGPT / Codex are absorbing that market with native Gmail / Calendar / Drive / Slack connectors. The conclusion: SynthetOS should NOT compete head-on as a generic personal-productivity assistant — that race goes to whoever has the best foundation model and the deepest connector library, and the rate of feature shipping there is faster than SynthetOS can match.
+
+But there IS a SynthetOS-shaped use case: **agents that act under a specific user's identity inside the org's audit / policy / orchestration boundary**. That capability does not exist in Claude / ChatGPT / Codex (those are single-user productivity tools, not multi-tenant governed platforms). It is the strategic asset — and EA is the first proof.
+
+### 0.5.2 Explicit non-goal
+
+> V1 does not attempt to replace Claude, ChatGPT, Codex, Microsoft Copilot, or other general-purpose personal AI assistants. SynthetOS only owns the parts where individual-user automation must be governed, auditable, policy-controlled, connected to SynthetOS-native workflows, and aware of organisation/subaccount context.
+
+This non-goal is binding on V1 scope decisions: features that look like "compete with Claude on personal productivity richness" should be cut; features that prove "governed user-owned agency works end-to-end inside SynthetOS" should ship.
+
+### 0.5.3 Reuse acceptance criterion
+
+The user-owned agents primitive is only worth the engineering investment if it earns its keep with at least one second consumer beyond EA. The build must satisfy the following:
+
+> A stub second user-owned agent (e.g. a placeholder Dev Agent template) must be able to:
+> - appear in the Personal nav group + home Personal zone
+> - render a home-widget contribution via the same contract
+> - open the same Workspace / Activity / Settings tabbed shell
+> - resolve only the owning user's credentials via the broker
+> - emit user-owned run activity scoped to the owner
+> - expose admin metadata without private content
+>
+> All without EA-specific code branching.
+
+The stub does not need to be a full second product — it can be a minimal template registration. The point is to prove the primitive is reusable, not to ship two agents in V1.
+
+### 0.5.4 Tightened V1 scope (what this build will NOT do)
+
+Per the challenge-round decision to constrain V1 to "prove the primitive, don't out-compete Claude":
+
+| Feature | V1 posture |
+|---|---|
+| Read inbox / calendar / drive / slack | yes (live-fetch, no canonical mirror) |
+| Drafts on outbound email | yes (review-gated, never auto-send to third parties) |
+| Send email to operator's own inbox or self-DM on Slack | auto-allowed |
+| Send email to third parties | always review-gated (Tier 6 sends require approval) |
+| Slack post to channels / DMs to others | per the auto-send scope dropdown (default: only DMs to me auto, all else review) |
+| Calendar reads | yes |
+| Calendar writes (create / update / delete events) | **deferred — read-only V1**. Trust earned over time before granting write. Updated from earlier brief; reviewer should note this is a tightening from the previous "read+write V1" recommendation. |
+| Voice-profile derivation from sent mail | yes (default on with one-click opt-out) |
+| Memory (user context blocks via `update_memory_block`) | yes (per-agent, not shared across agents) |
+| Briefing schedule + meeting-prep triggers + inbox-poll triggers | yes |
+| Autonomous "investigate this complex situation" multi-turn behaviour | NO — that's V2 (Operator Mode, depends on Spec D) |
+
+This tightening is documented as ratification of the challenge-round decision. The earlier brief had Calendar at read+write V1; the rewrite defers writes. Rationale: write actions on the operator's calendar are higher-stakes than write actions to internal records — a wrongly created event affects other people's calendars. Read-only V1 is enough to ship the briefing + meeting-prep use cases (the three locked V1 use cases). Write-capable V1.5 follow-on once trust is earned.
+
+### 0.5.5 Decision provenance
+
+Recorded in chat transcript on branch `claude/synthetos-personal-assistant-0kaIM` (2026-05-12):
+
+1. **Schema simplification.** Move from `principal_type` / `principal_id` / `scope_type` abstraction to a single `agents.owner_user_id` column. Same strategic outcome, ~40% of the schema work. Detail: `tasks/builds/user-owned-agents/brief.md` §0.
+2. **Strategic framing.** This build is foundation primitive proof, not EA product. Explicit non-goal vs Claude / Codex.
+3. **Tightened V1 scope.** Calendar writes deferred; third-party sends review-gated; auto-send only to self.
+
+Reviewer should read `tasks/builds/user-owned-agents/brief.md` §0 first to understand the foundation rationale, then this section, then the rest of this brief.
+
 ## 1. Purpose
 
 Ship the first concrete personal-assistant agent — a standing Executive Assistant that runs in short deterministic bursts on schedules, webhooks, and platform events. After this lands, the customer-facing capability is:
@@ -83,9 +146,9 @@ This brief locks scope. The spec is authored next.
 | Webhook ingestion pattern (per-org HMAC, replay nonces) | `server/routes/webhooks/` (GHL, Slack, Stripe, Teamwork) | shipped |
 | HITL approval workflow + Slack-approval delivery channel | shipped | shipped |
 | Three-tier agent model (System / Org / Subaccount) + hierarchical delegation | shipped | shipped |
-| Principal-scoped agents (`principal_type` + `principal_id` on agents and runs, principal-aware Credential Broker lookup, Run Trace view projection) | `tasks/builds/principal-scoped-agents/brief.md` | LOCKED PREDECESSOR — must merge before EA V1 build starts |
+| User-owned agents (`agents.owner_user_id` + owner-scoped credential broker + admin redaction policy) | `tasks/builds/user-owned-agents/brief.md` | LOCKED PREDECESSOR — must merge before EA V1 build starts |
 
-Nothing on the foundation is in flux. V1 is a pure composer of existing primitives plus the principal-scoped-agents primitive plus two new connector surfaces (Calendar OAuth + actions, Slack agent actions) plus one new trigger primitive (external-source triggers) plus the generic `VoiceProfile` primitive (introduced in this build, designed for reuse by future agents).
+Nothing on the foundation is in flux. V1 is a pure composer of existing primitives plus the user-owned agents primitive plus two new connector surfaces (Calendar OAuth + actions, Slack agent actions) plus one new trigger primitive (external-source triggers) plus the generic `VoiceProfile` primitive (introduced in this build, designed for reuse by future agents).
 
 ## 3. What this spec must define
 
@@ -102,19 +165,24 @@ Nothing on the foundation is in flux. V1 is a pure composer of existing primitiv
 
 ### 3.2 Google Calendar actions
 
-Minimum action set in `server/config/actionRegistry.ts` (each with parameter Zod schema, `riskTier`, `defaultGateLevel`, `verify` or null-with-justification, `requiredIntegration: 'google_calendar'`, MCP annotations, retry policy):
+**V1 ships read-only.** Per §0.5.4 (tightened scope decision), Calendar write actions are deferred to a V1.5 follow-on. Read-only is enough for the three locked V1 use cases (briefing assembly, inbox triage, meeting prep). Write capability earned over time.
 
-| Action | Read/Write | Recommended risk tier | Default gate | Verify shape |
+Minimum action set for V1 (read-only) in `server/config/actionRegistry.ts` (each with parameter Zod schema, `riskTier`, `defaultGateLevel`, `verify` or null-with-justification, `requiredIntegration: 'google_calendar'`, MCP annotations, retry policy):
+
+| Action | Read/Write | Risk tier | Default gate | Verify shape |
 |---|---|---|---|---|
 | `list_events` | read | 2 | auto | `row_exists` (event id returned) |
 | `get_event` | read | 2 | auto | `row_exists` |
 | `find_free_slot` | read (compute over read) | 2 | auto | `api_status_2xx` |
-| `create_event` | write | 4 | review (Tier 4+ default) | `row_exists` |
-| `update_event` | write | 4 | review | `row_exists` |
-| `delete_event` | write (destructive) | 5 | review | `row_exists` (returns 404 after delete) |
-| `respond_to_invite` | write | 3 | review | `api_status_2xx` |
 
-Write actions deferred entirely if §4 question 1 resolves to read-only V1.
+Deferred to V1.5 follow-on (NOT in this build):
+
+| Action | Read/Write | Risk tier | Default gate | Reason for deferral |
+|---|---|---|---|---|
+| `create_event` | write | 4 | review | Higher stakes: wrongly created event affects other people's calendars. Earn trust first. |
+| `update_event` | write | 4 | review | Same. |
+| `delete_event` | write (destructive) | 5 | review | Irreversible; defer until V1 read-only patterns prove reliable. |
+| `respond_to_invite` | write | 3 | review | Modifies attendee state; defer with the other write actions. |
 
 Risk-tier rationale per Phase 1 foundation refactor §4.2.3:
 - Tier 2 — external API reads (no customer-facing side effect).
@@ -235,17 +303,17 @@ Configuration lives on the EA agent's per-subaccount config (existing agent-edit
 
 Operator's email address and Slack user-id are resolved via the operator's identity binding on the subaccount, no new field. If Slack DM delivery is configured but Slack is not yet connected, the EA falls back to email and writes a `delivery_fallback` Run Trace event.
 
-### 3.10 Multi-user consumption (consumes `principal-scoped-agents`)
+### 3.10 Multi-user consumption (consumes `user-owned-agents`)
 
-The EA is a **user-principal agent** per the predecessor spec. Each user who wants an EA provisions their own agent row from the system template, bound to their `user_id` via `principal_type: 'user'`. Credentials, runs, policy envelope, and Run Trace all key off the user principal automatically (the predecessor spec handles the plumbing).
+The EA is a **user-owned agent** per the predecessor spec. Each user who wants an EA provisions their own agent row from the system template, bound to their `user_id` via `agents.owner_user_id`. Credentials, runs, and admin visibility all key off the owner automatically (the predecessor spec handles the plumbing).
 
 V1 build implications:
 
-- The EA seed migration creates **one EA agent row per active user in the dogfood subaccount**, not a single subaccount-scoped row. (Phase 3 may automate provisioning; V1 seeds the operator's user explicitly, additional users seed when the dogfood expands.)
-- The Connections page eventually distinguishes "Acme Co's Gmail" (subaccount-principal) from "Michael's Gmail" (user-principal). V1 ships the data model; the UI label add is a small follow-on inside the EA build if simple, or its own UI spec if it surfaces edge cases.
-- Run Trace per-user scoping (predecessor §4 question 7) means each user sees their own EA's runs by default; org admins see all. No new UI for V1, the existing RunTracePage gains a filter chip in a follow-on.
-- Slack DM delivery resolves the operator's Slack user-id from the user-principal binding, not the subaccount owner. Each user gets their own briefing in their own DM.
-- The EA agent's UI label ("Personal Assistant") can be customised per user if desired — recommendation: keep "Personal Assistant" as the universal label, individual users do not need to rename it.
+- The EA seed migration creates **one EA agent row per active user in the dogfood subaccount** (each row carries that user's `owner_user_id`), not a single subaccount-scoped row. Phase 3 may automate provisioning; V1 seeds the operator's user explicitly, additional users seed when the dogfood expands.
+- The Connections page eventually distinguishes "Acme Co's Gmail" (subaccount connection, `owner_user_id IS NULL`) from "Michael's Gmail" (user connection, `owner_user_id = michael`). V1 ships the data model; the UI label add (§3.16) is a small follow-on inside the EA build.
+- Run Trace per-user scoping (predecessor §3.5 RLS clause) means each user sees their own EA's runs by default; org admins see metadata only with content redacted (predecessor §3.6). No new UI for V1; the existing RunTracePage gains a filter chip in a follow-on.
+- Slack DM delivery resolves the operator's Slack user-id from the agent's `owner_user_id`. Each user gets their own briefing in their own DM.
+- The EA agent's display name (`Personal Assistant` by default) is per-instance customisable, but each user's EA is a distinct agent row — no shared agent across users.
 
 ### 3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)
 
@@ -473,7 +541,7 @@ All four failure paths are visible in the EA's Run Trace view (existing surface)
 
 Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = awaiting decision.
 
-1. **Calendar write-scope V1.** **LOCKED:** read + write V1. Write actions ship review-gated (Tier 4+ default-review per Phase 1 risk-tier policy).
+1. **Calendar write-scope V1.** **LOCKED — tightened to read-only V1.** Earlier round 1 locked this as "read + write V1"; the 2026-05-12 challenge round tightened to **read-only V1**, write deferred to V1.5 follow-on. Reason: write actions on the operator's calendar affect other people's calendars (higher stakes than internal record changes). Read-only is enough for the three locked V1 use cases (briefing, inbox triage, meeting prep). Earn trust before granting write. Detail in §0.5.4 and §3.2.
 
 2. **Slack write-scope V1 — user-facing config.** **LOCKED.** Read + write V1. Auto-send scope is a per-instance setting with three options, default `Only me (DMs)`:
    - **Only me (DMs)** — every message to a channel or other person needs operator approval (default).
@@ -489,7 +557,7 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 
 6. **Gmail push notifications vs polling.** **LOCKED.** 5-minute polling V1. Confirmed: polling job is a Gmail `users.history.list` API call (no LLM cost; 288 calls/day per connected account, inside Google's free quota). LLM cost stays zero until a new message arrives AND the EA decides to act. Push path (Gmail Watch → Pub/Sub) is a flag-gated Phase 1.5 add if 5-min latency becomes felt.
 
-7. **Multi-user EA principal binding.** **LOCKED.** EA is a user-principal agent per the predecessor spec `tasks/builds/principal-scoped-agents/brief.md`. Each user provisions their own EA instance bound to their `user_id`. Credentials, runs, policy envelope, and Run Trace honour the principal model. V1 UI surfaces the operator's own instance; multi-user UI surfaces are a fast follow-on. EA V1 build does not invent new schema for this — it consumes the foundation primitive shipped by the predecessor spec.
+7. **Multi-user EA owner binding.** **LOCKED.** EA is a user-owned agent per the predecessor spec `tasks/builds/user-owned-agents/brief.md` (simpler than the originally-proposed `principal-scoped-agents` — single `agents.owner_user_id` column, no principal abstraction). Each user provisions their own EA agent row bound to their `user_id`. Credentials, runs, and admin redaction honour the ownership model. V1 UI surfaces the operator's own instance; multi-user UI surfaces are a fast follow-on. EA V1 build does not invent new schema for this — it consumes the foundation primitive shipped by the predecessor.
 
 8. **Voice and tone — dynamic, not static.** **LOCKED.** EA voice is data-driven from the operator's own sent mail (per §3.11 — Voice Profile primitive). No static system-prompt tone. Voice profile derives at first-run setup from the last 50 sent emails in the past 90 days, refreshes every 30 days or every 50 new sent emails (whichever first). Manual refresh button on EA settings. **Opt-out default LOCKED: default on, clear explanation at first-run setup, one-click opt-out.** Same primitive is reusable across Riley (brand voice, subaccount-scoped), Helena (client-report voice), Sarah (analyst voice), and future content agents.
 

@@ -55,7 +55,7 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
   <div class="sub">Hi-fi clickable prototypes after the round-1 design pushback: capability-first (not provider-first) wizard, Personal zone on existing home (no dedicated EA dashboard), tabbed per-agent detail page.</div>
 
   <a class="brief-link" href="../../tasks/builds/personal-assistant-v1/brief.md">EA V1 brief →</a>
-  <a class="brief-link" href="../../tasks/builds/principal-scoped-agents/brief.md">Foundation brief →</a>
+  <a class="brief-link" href="../../tasks/builds/user-owned-agents/brief.md">Foundation brief (user-owned-agents) →</a>
 
   <div class="round2-banner">
     <strong>Round-2 changes from round 1:</strong>
@@ -67,7 +67,11 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
   </div>
 
   <div class="banner">
-    <strong>Foundation predecessor:</strong> these mockups assume <code>principal-scoped-agents</code> has merged. The EA is a <strong>user-principal</strong> agent — each user has their own instance bound to their identity, with credentials and memory scoped to them. Org admins see metadata only; content is redacted by default.
+    <strong>Foundation predecessor:</strong> these mockups assume <code>user-owned-agents</code> has merged (renamed and simplified from the earlier <code>principal-scoped-agents</code> per the 2026-05-12 challenge round — single <code>agents.owner_user_id</code> column, no principal abstraction). The EA is a <strong>user-owned</strong> agent — each user has their own agent row bound to their identity, with credentials and runs scoped to them. Org admins see metadata only; content is redacted by default.
+  </div>
+
+  <div class="banner" style="background: #fffbeb; border-color: #fde68a; color: #92400e;">
+    <strong>V1 scope tightening (2026-05-12):</strong> Calendar deferred to <strong>read-only V1</strong> (write capability follows in V1.5). All third-party email/Slack sends review-gated. Auto-send only to self (Slack DM to operator). Reason: prove the user-owned primitive without competing on personal-productivity richness against Claude / ChatGPT / Codex. Detail in EA V1 brief §0.5.
   </div>
 
   <div class="section-h">Mockups (3)</div>
