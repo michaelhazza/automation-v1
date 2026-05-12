@@ -16,7 +16,7 @@
       - Bottom row: agent chips (bg-slate-100 px-1.5 py-px rounded text-slate-600) + due date
 
   Round 3 additions only:
-    1. Filter chip row above columns: [All] [Agents only] [Operator runs only]
+    1. Filter toggle above columns: [ Operator runs only ]. Default off — board shows everything; the operator badge on cards does the at-a-glance work.
     2. Operator-icon badge on TaskCard: 12px, top-right, monochrome, only on operator tasks
 -->
 <html lang="en">
@@ -42,20 +42,34 @@
 .board-title { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 2px; letter-spacing: -0.02em; }
 .board-sub    { font-size: 13px; color: #94a3b8; }
 
-/* ── Filter chips (NEW in R12) ── */
+/* ── Filter toggle (NEW in R12) ── */
 .filter-chip-row {
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 14px; flex-shrink: 0;
 }
-.filter-chip {
-  padding: 5px 14px; border-radius: 20px;
+.filter-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 14px 5px 12px; border-radius: 20px;
   font-size: 12px; font-weight: 600; cursor: pointer;
   border: 1px solid #e2e8f0; background: white; color: #64748b;
   font-family: inherit; transition: background 0.1s, border-color 0.1s, color 0.1s;
   white-space: nowrap;
 }
-.filter-chip.active { background: #4f46e5; border-color: #4f46e5; color: white; }
-.filter-chip:not(.active):hover { background: #f8fafc; border-color: #cbd5e1; }
+.filter-toggle:hover { background: #f8fafc; border-color: #cbd5e1; }
+.filter-toggle.active { background: #4f46e5; border-color: #4f46e5; color: white; }
+.filter-toggle-switch {
+  width: 26px; height: 14px; border-radius: 10px;
+  background: #cbd5e1; position: relative;
+  transition: background 0.15s;
+}
+.filter-toggle.active .filter-toggle-switch { background: rgba(255,255,255,0.4); }
+.filter-toggle-switch::after {
+  content: ''; position: absolute;
+  top: 1.5px; left: 1.5px; width: 11px; height: 11px;
+  border-radius: 50%; background: white;
+  transition: transform 0.15s;
+}
+.filter-toggle.active .filter-toggle-switch::after { transform: translateX(12px); }
 
 /* ── Board columns ── */
 .board { display: flex; gap: 12px; flex: 1; overflow-x: auto; padding-bottom: 4px; min-height: 0; scrollbar-width: thin; }
@@ -223,9 +237,10 @@
 
       <!-- Filter chip row (NEW in R12) — sits between header and board columns -->
       <div class="filter-chip-row">
-        <button class="filter-chip active" onclick="setFilter('all', this)">All</button>
-        <button class="filter-chip" onclick="setFilter('agents', this)">Agents only</button>
-        <button class="filter-chip" onclick="setFilter('operator', this)">Operator runs only</button>
+        <button class="filter-toggle" onclick="toggleOperatorOnly(this)" aria-pressed="false">
+          <span class="filter-toggle-switch" aria-hidden="true"></span>
+          <span>Operator runs only</span>
+        </button>
       </div>
 
       <!-- Kanban board — columns from board config, drag-and-drop columns -->
@@ -412,25 +427,20 @@
 <!-- Annotation: explains the two additions -->
 <div class="annotation">
   <strong>R12 additions to WorkspaceBoardPage.tsx:</strong><br>
-  1. Filter chip row (above columns): All / Agents only / Operator runs only. Default: All.<br>
+  1. Filter toggle (above columns): "Operator runs only", default off. Binary toggle, not tri-state — "Agents only" was ambiguous because operator runs ARE agent runs (just executed via a different backend). The 12px operator badge on cards handles the at-a-glance work in mixed view; this toggle is for the user who specifically wants to monitor operator-backed tasks.<br>
   2. Operator badge (top-right of card): 12px monochrome icon, visible only on operator-driven tasks. Hover shows tooltip. No coloured banner — subtle signal only.
 </div>
 
 <script>
-function setFilter(mode, btn) {
-  // Update chip active state
-  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-  btn.classList.add('active');
-
-  // Show/hide cards
+function toggleOperatorOnly(btn) {
+  const next = !btn.classList.contains('active');
+  btn.classList.toggle('active', next);
+  btn.setAttribute('aria-pressed', String(next));
   document.querySelectorAll('.task-card').forEach(card => {
-    const type = card.dataset.type;
-    if (mode === 'all') {
+    if (next) {
+      card.style.display = card.dataset.type === 'operator' ? '' : 'none';
+    } else {
       card.style.display = '';
-    } else if (mode === 'operator') {
-      card.style.display = type === 'operator' ? '' : 'none';
-    } else if (mode === 'agents') {
-      card.style.display = type === 'agent' ? '' : 'none';
     }
   });
 }

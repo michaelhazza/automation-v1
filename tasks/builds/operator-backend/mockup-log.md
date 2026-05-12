@@ -214,3 +214,35 @@ Codebase read before drafting:
 - `prototypes/operator-backend/index.html` (updated)
 - `prototypes/operator-backend/_shared.css` (updated)
 - `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
+
+## Round 3.1 — 2026-05-12 (R12 filter pattern amendment)
+
+**Operator feedback:** "Agents only" label on R12's tri-state filter is ambiguous because operator runs ARE agent runs (executed via a different backend). The chip taxonomy front-loads execution-backend jargon the user doesn't ask for at the board level.
+
+**Codebase grounding (Step 0a) — PER SCREEN:**
+- r12-workspace-board-operator-filter: extends `client/src/pages/WorkspaceBoardPage.tsx` (no change in surface, just R12-internal pattern swap)
+
+**Codebase grounding — round-wide:**
+- Files read: none new (R12 only edit)
+- Vocabulary inherited: existing chip pattern from Round 3
+- New dedicated pages proposed: none
+
+**Changes made:**
+- R12 filter row swapped from tri-state chips (All / Agents only / Operator runs only) to a single binary toggle (Operator runs only, default off).
+- Rationale: operator runs ARE agent runs — "Agents only" mentally parsed as "everything with an agent" which is the entire board. Binary toggle generalises better for future backends, aligns with "default to hidden" principle.
+- Visual: pill-shaped toggle button with embedded switch indicator; indigo when active, default white border.
+- Behaviour: off (default) shows all cards; on shows only `data-type="operator"` cards. 12px operator badge on TaskCard handles the at-a-glance distinction in mixed view.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — board task remains primary; toggle is one secondary control.
+- Default to hidden: yes — execution-backend taxonomy hidden behind one optional toggle, not pre-loaded as 3-state.
+- One primary action: yes — column drag-and-drop is the primary; filter is a passive secondary.
+- Inline state: yes — toggle state is the inline state, no separate panel.
+- Re-check passed: yes — non-technical operator can ignore the toggle entirely and use the board normally.
+- Extends existing surface: yes — minimal addition to WorkspaceBoardPage.
+
+**Rule violations flagged:** none.
+
+**Files modified:**
+- `prototypes/operator-backend/r12-workspace-board-operator-filter.html` (filter row swap + script rewrite)
+- `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
