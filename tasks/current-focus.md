@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
+active_spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md
+active_plan: tasks/builds/operator-backend/plan.md
 build_slug: operator-backend
 branch: claude/sandbox-execution-provider-DLfjn
-status: PLANNING
-last_updated: 2026-05-12
+status: REVIEWING
+last_updated: 2026-05-13
 last_merged_pr: #286
 last_merged_slug: operator-session-identity
 last_merged_branch: claude/evolve-session-identity-brief-17LO4
@@ -24,11 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE** — no active build.
+**Active spec:** [`docs/superpowers/specs/2026-05-12-operator-backend-spec.md`](../docs/superpowers/specs/2026-05-12-operator-backend-spec.md) (LOCKED, 1805+ lines after 5 spec-reviewer iterations + 1 chatgpt-spec-review round closing F1-F5)
+**Active plan:** [`tasks/builds/operator-backend/plan.md`](./builds/operator-backend/plan.md) (12 chunks, all complete)
+**Active build slug:** `operator-backend`
+**Branch:** `claude/sandbox-execution-provider-DLfjn`
+**Status:** **REVIEWING** — feature-coordinator Phase 2 complete. Awaiting Phase 3 (finalisation-coordinator: S2 sync, G4 guard, chatgpt-pr-review, MERGE_READY).
+
+**Phase 2 outcome:** 12 chunks built. Branch HEAD `f464cb45`. Review pass: spec-conformance CONFORMANT (2 rounds), adversarial-reviewer 4 holes closed, pr-reviewer 5 blocking/high issues closed (B1-B4 + H1). Doc-sync complete. Handoff written at `tasks/builds/operator-backend/handoff.md`.
+
+**Next action:** open a new `finalisation-coordinator` session on this branch.
 
 **Just merged:** PR #286 — `operator-session-identity` (squash-commit `62497257`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
 
