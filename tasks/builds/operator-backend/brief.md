@@ -1,4 +1,4 @@
-**Status:** **LOCKED v2.1** (2026-05-12) — chain-state ownership clarified + 10 spec-author guardrails added, proceed to spec authoring
+**Status:** **LOCKED v2.2** (2026-05-12) — final contradiction-cleanup pass; ready for spec authoring
 **Date:** 2026-05-11
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `operator-backend`
@@ -9,6 +9,24 @@
 # Spec D — Operator Backend — Build Brief
 
 ## 0a. Changelog
+
+### v2.2 contradiction-cleanup pass (2026-05-12) — final pre-spec-author tightening
+
+External technical re-review on v2.1 found 9 internal contradictions and ambiguities introduced by the v2 chain-resume additions. All applied; no product-scope change. The four most important:
+
+1. **Broker abstraction reconciled with `credential_mode` use** (§3.4). Adapter MUST NOT inspect raw credentials, but MAY consume the broker-issued redacted `credential_mode` enum for cost attribution, fallback stickiness, and incident payloads. The redacted enum is a public surface of the broker contract.
+2. **Paused states are NOT task-terminal** (§3.2). Finaliser scope locked to `completed | failed | cancelled` only. `paused_chain_failure`, `paused_budget_exceeded`, `paused_for_chain_continuation` emit task-state-change events but do NOT trigger terminal artefact/cost finalisation.
+3. **Cancellation is chain-aware** (§3.8). Task-level cancel MUST: cancel the active chain link, drain queued chain-continuation jobs, prevent further dispatch, mark `agent_runs.status = cancelled`, fire task-terminal event, schedule profile retention/GC. Closes the "queued chain link resurrects a cancelled task" path.
+4. **D1 wording aligned with chain-link model**. "One sandbox lives for the whole **chain-link session**"; task-level continuity comes from `checkpoint_payload` + persistent browser profile, not sandbox persistence.
+
+The other five:
+- §3.1 `long_running` invariant softened from "grep returns only union/registry" to "no ad-hoc string literals; all consumers import canonical capability constant; tests legitimately reference via that import".
+- §3.10 cost rows reframed from "per session" to "per chain link / sandbox session, aggregated at task level". Locked: ONE `subscription_mediated` row per chain link with `step_count` aggregating turns within the chain link (NOT per-turn).
+- §3.12 item 7 distinguishes **runtime failure** (chain link `running` → terminates task) from **start failure** (chain link `pending` → §3.15 retry/pause). State-machine boundary at `pending → running`.
+- §3.13 item 7 fresh-profile restart locked semantics: same `agent_run_id`, new `attempt_number`, conversation history resets at attempt boundary, old chain links marked `superseded_by_attempt`, old profile retained per retention rules, audit event written. Run Trace renders attempts as top-level groups.
+- §3.15 item 5 modal reference softened from `r8-modal-concurrency-limit.html` to "the existing task-create / operator-capacity modal (the round-3 prototype documents the intended pattern; spec author selects canonical component path)" — prototype filenames are not durable product contracts.
+
+Locked decisions §4 (D1-D13) unchanged in count or value — v2.2 only clarifies their implementation surface. D1 wording bumped for chain-link clarity.
 
 ### v2.1 clarification pass (2026-05-12) — chain-state ownership and operational guardrails
 
@@ -89,7 +107,7 @@ Nothing on the foundation is in flux. The Operator Backend is a pure consumer of
 
 - **Adapter id:** `operator_managed` (V1). `operator_external` reserved as a type slot, no registration until Phase 5.
 - **Capabilities:** `['delegated', 'code_execution', 'long_running', 'cancellation', 'session_identity']`. `'long_running'` is added to the `ExecutionCapability` union by this spec (Spec A's union does not include it; this is the additive amendment).
-- **`long_running` propagation invariant.** The new capability tag MUST flow through every consumer: the union type, the registry validation, the capability-level tests, and any UI/routing logic that filters or branches on capability. The spec author MUST verify zero stringly-typed orphan references (`grep -r "'long_running'"` returns only union/registry sites) before declaring the chunk done.
+- **`long_running` propagation invariant.** The new capability tag MUST flow through every consumer: the union type, the registry validation, the capability-level tests, and any UI/routing logic that filters or branches on capability. **Zero ad-hoc string literals.** All consumers MUST import the canonical capability constant/type. Tests, fixtures, and assertions may reference the value through that canonical import (legitimate), but no untyped orphan literals outside the approved capability definition and its test fixtures are allowed. Spec author verifies via grep + targeted code review before declaring the chunk done.
 - **Sandbox requirement:** `'code_execution'`.
 - **Cost model:** `'subscription'` when the broker returns an `auth_type: 'operator_session'` credential; `'per_token'` when it returns an `auth_type: 'api_key'` fallback. Adapter does not branch on auth type at runtime — broker hands back a redacted envelope and the adapter passes it through.
 
@@ -98,7 +116,8 @@ Nothing on the foundation is in flux. The Operator Backend is a pure consumer of
 - **One agent run = one logical operator task.** One operator task may span one or more `operator_runs` chain links (per §3.12). Each `operator_runs` row represents a single sandbox session / chain link; the parent `agent_runs` row remains the customer-visible logical task.
 - Adapter holds the session connection across operator turns within a chain link; sandbox tears down at chain-link terminal status (next chain link starts a fresh sandbox with the persisted browser profile per §3.13).
 - New `operator_runs` table parallel to `iee_runs` for chain-link state. Columns at minimum: `id`, `agent_run_id`, `subaccount_id`, `image_tag`, `vendor_session_id`, `chain_seq`, `parent_chain_link_id`, `checkpoint_payload`, `credential_mode` (`operator_session | api_key`, per §3.5 stickiness), `status` (`pending | running | completed | failed | cancelled`), `failure_reason`, `started_at`, `completed_at`, `event_emitted_at`, `cost_subscription_mediated_cents`, `cost_sandbox_compute_cents`, `step_count`, `last_progress_at`.
-- Parent agent run parks in `'delegated'` on first dispatch; the shared finaliser (Spec A) rolls up status / cost / artefacts when the **task-terminal** event fires (final chain link reaches a terminal state, OR task transitions to `paused_chain_failure` after retries exhausted, OR user cancels).
+- Parent agent run parks in `'delegated'` on first dispatch; the shared finaliser (Spec A) rolls up status / cost / artefacts when the **task-terminal** event fires.
+- **Task-terminal vs paused — finaliser scope.** Task-terminal states are `completed`, `failed`, `cancelled` only. `paused_chain_failure`, `paused_budget_exceeded`, and `paused_for_chain_continuation` are **resumable / non-terminal** states; they emit task-state-change events (UI updates, user notifications, scheduler suspension) but do NOT trigger terminal artefact / cost finalisation. Cost rows for chain links that completed before the pause are written normally (per-chain-link, per §3.10), but the customer-visible terminal rollup is reserved for the true terminal states. This matters for downstream consumers (cost dashboards, audit, evals) that should not see partial/pause-state rollups treated as final.
 
 #### State ownership table (which row owns which state)
 
@@ -125,7 +144,7 @@ The finaliser MUST distinguish chain-link terminal events from task-terminal eve
 
 - Adapter requests a credential from `CredentialBrokerService` at session start. Broker returns a redacted envelope (Spec C invariant — `connected_usable` state only, raw token never leaves the broker).
 - Envelope is injected into the sandbox at start and passed to the operator runtime + CLI.
-- **Adapter never inspects which auth type it received.** That's the point of the abstraction. If a future provider lands, only the broker changes.
+- **Adapter MUST NOT inspect raw credentials or provider-specific auth internals.** It MAY consume the broker-issued redacted `credential_mode` enum (`operator_session | api_key`) for cost attribution (§3.10), fallback stickiness (§3.5 item 6), and incident/reporting payloads (§3.15). The abstraction stops at provider-specific auth shape, NOT at the redacted enum the broker exposes — that enum is a public surface of the broker contract.
 - Sub-account scoping is the broker's responsibility (Spec C). Adapter MUST assert the returned credential's subaccount matches the agent run's subaccount before injection — defence in depth.
 
 ### 3.5 Operator-session → API-key fallback (the critical reliability gate)
@@ -155,11 +174,12 @@ Long-running sessions need progress UI. Two layers per the existing IEE pattern:
 
 Without this, customers stare at "Delegated — last heartbeat 47 minutes ago" and assume the system is broken.
 
-### 3.8 Cancellation
+### 3.8 Cancellation (chain-aware)
 
 - Adapter declares `'cancellation'` capability.
-- Implementation order: (1) operator runtime's native cancellation hook if available, (2) per-step-boundary check (same pattern as IEE adapter), (3) heartbeat-stale backstop from the shared contract.
-- Cancel writes `operator_runs.status = 'cancelled'` and emits the terminal event; finaliser rolls up.
+- Implementation order at the chain-link level: (1) operator runtime's native cancellation hook if available, (2) per-step-boundary check (same pattern as IEE adapter), (3) heartbeat-stale backstop from the shared contract.
+- **Task-level cancellation semantics:** cancelling a task MUST: (a) cancel the active chain link (writes `operator_runs.status = 'cancelled'`), (b) remove any queued chain-continuation jobs from the FIFO scheduler queue (per §3.15 item 5), (c) prevent further chain dispatch (set `agent_runs.status = 'cancelled'`), (d) emit the **task-terminal** event so the finaliser performs full rollup, (e) schedule browser-profile retention/GC per §3.13 item 4 (default 48hr window applies). Without (b) and (c), a queued chain link could resurrect a cancelled task — that path is closed.
+- Cancellation from a paused state (`paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded`) follows the same task-level path: clear scheduler state, mark `agent_runs.status = 'cancelled'`, fire task-terminal event.
 
 ### 3.9 Run Trace integration
 
@@ -169,9 +189,9 @@ Adapter MUST emit Run Trace events for: session start, credential injected (auth
 
 Even when LLM cost is zero (subscription-prepaid), sandbox compute is real spend. Adapter writes to the cost ledger:
 
-- One `source_type: 'sandbox_compute'` row per session (vCPU-seconds, wall-clock duration, peak memory — from Spec B's sandbox output contract).
-- One or more `source_type: 'subscription_mediated'` rows attributing operator-runtime turns to the subscription credential (zero-cost rows, but with `step_count` and `vendor_session_id` for accounting).
-- If § 3.5 fallback engages: additional `source_type: 'per_token'` rows for post-swap turns via the normal `llm_requests` path.
+- One `source_type: 'sandbox_compute'` row **per chain link / sandbox session** (vCPU-seconds, wall-clock duration, peak memory — from Spec B's sandbox output contract). Aggregated at the parent task level in usage views via `agent_run_id` join.
+- **One `source_type: 'subscription_mediated'` row per chain link** (NOT per turn — chosen for storage efficiency and to match the chain-link granularity of the rest of the cost model). Zero-cost row; carries `step_count` (turns within the chain link), `vendor_session_id`, `chain_seq`, and `credential_mode = 'operator_session'` for accounting and audit.
+- If § 3.5 fallback engages: chain links with `credential_mode = 'api_key'` write `source_type: 'per_token'` rows via the normal `llm_requests` path instead of `subscription_mediated`. A task that flips fallback mid-chain-link emits BOTH row types for that chain link with the boundary recorded.
 
 Surface in the existing usage views — no new dashboard required for V1, data must be queryable.
 
@@ -197,7 +217,7 @@ Spec MUST define:
 4. **Chain link dispatch.** End of chain link N writes the checkpoint and emits `operator-session.chain_link_completed`. Existing heartbeat/scheduler picks up the task (it's in a new state `paused_for_chain_continuation`) and dispatches chain link N+1.
 5. **Resume payload.** Chain link N+1 starts with original brief + accumulated conversation history + last checkpoint + persistent browser profile (§3.13). The operator's first action is to verify it's on the expected page and continue from the next planned step.
 6. **Conversation history accumulation.** Each chain link appends to the same logical conversation. Spec defines whether history is stored as one growing JSONB blob, an append-only event log, or per-chain-link blobs joined at read time. Recommendation: per-chain-link blobs joined at read time, capped at last N chain links of context for the operator model invocation if total context grows unbounded.
-7. **Terminal states.** Task terminal status is rolled up from the final chain link's status. Failure on chain link N terminates the task with the chain link's failure reason; remaining chain links are not dispatched.
+7. **Terminal states and failure classification.** Task terminal status is rolled up from the final chain link's status. **Runtime failure on chain link N (after the chain link has started running) terminates the task** with the chain link's failure reason and `agent_runs.status = 'failed'`; remaining chain links are not dispatched. **Chain-link START failures (dispatch-time, before the chain link has begun running) follow §3.15 retry/pause semantics** — backoff retry then `paused_chain_failure`, NOT immediate task termination. Spec defines the runtime/start boundary explicitly via the chain-link state machine (`pending` → `running` is the dispatch boundary; failures at `pending` are start failures, failures at `running` are runtime failures).
 8. **Run trace integration.** Run Trace renders the chain as a single merged timeline with `chain link N starts` dividers between event groups. Existing virtual-view contract from §3.9 extends to span chain links.
 9. **TaskHeader status.** TaskHeader shows "Operator run, link N of ~M, ~T hrs elapsed." Estimate `~M` is computed after the first chain handoff; shown as "—" before then.
 10. **Checkpoint payload security.** Checkpoint payloads (current page URL, screenshot of last state, last action taken, accumulated conversation history pointer) are sensitive task artefacts. They MUST be: encrypted at rest where existing artefact infrastructure supports it; scoped by `organisation_id` + `subaccount_id` + `task_id` (defence in depth on top of Spec B sandbox isolation); excluded from broad logs (no full-payload dumps in app logs or telemetry); redacted in Run Trace by default. Spec defines explicit display policy: the screenshot embedded in a checkpoint is treated as an **internal recovery artefact**, NOT a customer-visible artefact, unless the artefact harvester explicitly promotes it (per §3.10 end-of-session harvest contract). Customer-facing screenshot/artefact display goes through the existing harvested-artefact path, not directly from `checkpoint_payload`.
@@ -214,7 +234,14 @@ Spec MUST define:
 4. **Profile lifecycle and retention.** Volume created on first chain link start. Persists across chain links. **Retention window after task terminal: 48 hours (default), then garbage-collected.** Rationale: a task that just failed mid-chain may need its browser profile preserved for debugging; immediate deletion wipes the evidence. Authorised admins (org_admin) may set a per-task `debug_retention` flag at task-terminal time which extends retention to 14 days for that task. Customer-visible artefacts (per §3.10) are harvested into the artefact store BEFORE the volume is GC'd, regardless of retention window. Hard max lifetime including retention = D9 max wall-clock per task + 14 days.
 5. **Profile permissions.** Volume access scoped to chain links of the owning task. Subaccount isolation enforced by Spec B's sandbox isolation primitive — adapter MUST assert the task's subaccount matches the credential's subaccount before mounting.
 6. **First-chain-link cold start.** First chain link gets a fresh `user-data-dir`. Login from credential broker happens in the model loop, naturally — no special bootstrap.
-7. **Failure recovery.** If the profile volume is corrupted or unrecoverable, chain link start fails with `OPERATOR_PROFILE_UNRECOVERABLE` and §3.15 incident path engages. Operator may opt to "restart task with fresh profile" — a per-task action that wipes the volume and dispatches a new chain seq 1.
+7. **Failure recovery and fresh-profile restart.** If the profile volume is corrupted or unrecoverable, chain link start fails with `OPERATOR_PROFILE_UNRECOVERABLE` and §3.15 incident path engages. Authorised users may opt to "restart task with fresh profile" — a per-task action with the following locked semantics:
+   - **Same `agent_run_id`** (still one logical task; the customer-visible identity is preserved).
+   - New `attempt_number` on `operator_runs` (default `1`; bumps on each fresh-profile restart). All chain links carry their attempt number so superseded vs current is trivially queryable.
+   - **Conversation history resets at the attempt boundary.** A fresh profile means no carry-over login or session state; carrying conversation history forward would mislead the operator about what's already been done. Chain link 1 of attempt N+1 starts with the original task brief only.
+   - **Old chain links retained but marked `superseded_by_attempt = N+1`.** Visible in Run Trace under a collapsed "Attempt 1" group; current attempt is the default-expanded view.
+   - **Old profile retained per §3.13 retention rules** (default 48hr after the attempt-superseded event; admin debug-retention extends to 14 days). The new attempt's volume is created fresh.
+   - **Audit event** `task.operator.fresh_profile_restart` writes `actor_user_id`, `prior_attempt_number`, `new_attempt_number`, `prior_chain_seq_count`, `request_id`.
+   - Run Trace renders attempts as top-level groups; chain links nest under their attempt. The merged-timeline view from §3.12 item 8 spans only the current attempt; cross-attempt comparison is a separate view.
 
 ### 3.14 Per-subaccount operator settings
 
@@ -248,14 +275,14 @@ A chain link can fail to dispatch (auth lost, operator runtime unavailable, prof
    - When consumption hits the per-task budget cap mid-chain-link, the running chain link MUST checkpoint and pause at the **next resumable boundary** (NOT hard-kill), unless the chain link also breaches the hard safety limit (soft cap + grace) in which case it terminates per §3.15 hard-cap behaviour.
    - Budget extension actions are additive (`new_cap = old_cap + extension_minutes`), never absolute resets, and write `task.operator_budget.extended` audit events with `actor_user_id`, `extension_minutes`, `request_id`, and `source`.
 5. **Concurrency-cap behaviour — distinguish new-task vs chain-continuation.**
-   - **New user-requested operator task over the cap:** rejected at task-create / first-dispatch with the typed error `OPERATOR_SESSION_LIMIT_EXCEEDED`. Customer-facing message surfaced via the modal at `r8-modal-concurrency-limit.html`. NOT queued. NOT an incident.
+   - **New user-requested operator task over the cap:** rejected at task-create / first-dispatch with the typed error `OPERATOR_SESSION_LIMIT_EXCEEDED`. Customer-facing message surfaced via the existing task-create / operator-capacity modal (the round-3 prototype `r8-modal-concurrency-limit.html` documents the intended pattern; the spec author selects the canonical component path during implementation). NOT queued. NOT an incident.
    - **Existing chain-continuation hitting the cap mid-task:** queued FIFO. Task state stays `paused_for_chain_continuation`. Dispatched when a slot frees. NOT an incident — normal flow control. The distinction matters: new tasks fail-fast so the user can address the cap immediately; in-flight tasks defer so a busy moment doesn't kill long-running work.
 
 ## 4. Locked architectural decisions
 
 Resolved 2026-05-11 by operator review, amended 2026-05-12 (v2 — D5/D6 reframed, D7-D13 added). The spec author MUST honour these values; deviations require returning to the operator.
 
-1. **Sandbox persistence across turns — PERSISTENT.** One sandbox lives for the whole session; state survives turns. Spec confirms e2b session API supports clean persistence across the duration cap (§ 4.5).
+1. **Sandbox persistence across turns within a chain link — PERSISTENT.** One sandbox lives for the whole **chain-link session**; state survives turns within that chain link. Task-level continuity across chain links is provided by `checkpoint_payload` (§3.12) + persistent browser profile (§3.13), NOT by sandbox persistence — each new chain link gets a fresh sandbox with the persisted profile mounted in. Spec confirms the sandbox API supports clean persistence across the per-chain-link duration cap (§ 4.5).
 2. **Operator runtime crash supervision — FAIL THE RUN.** Crashes are not auto-restarted. Restart-on-crash risk: duplicate side effects from already-effected operator turns. Customer retries from scratch when needed.
 3. **Artefact harvest cadence — END-OF-SESSION + ON-DEMAND.** Default harvest at session terminal. Customer-triggered "snapshot now" available mid-session. Periodic checkpointing deferred to Phase 3.5 if requested.
 4. **Image versioning during in-flight sessions — PINNED PER SESSION.** `operator_runs.image_tag` records the image used. New sessions get new image; in-flight sessions complete on their original. No live-migration.
