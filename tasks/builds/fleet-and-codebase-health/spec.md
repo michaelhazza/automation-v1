@@ -252,6 +252,12 @@ Before any mutation of `KNOWLEDGE.md`, the builder produces `docs/knowledge-swee
 
 **ADR-creation cap (T1):** prefer one ADR per domain-level pattern, not one per repeated sentence. If the inventory proposes more than **5** new ADRs, group lower-priority candidates under a "defer ADR" bucket rather than generating them all in this sweep. Sprawl is the failure mode this guard prevents.
 
+**Inventory lifecycle (applies to both C1 and C2):**
+
+- Inventories must be committed at least until the sweep PR is reviewed and merged.
+- If an inventory is removed before final merge, the operator's approval decision and an inventory summary (counts per end-state, ADR ids generated, archive destinations) must be preserved either in the archive file or in a dated header at the top of the swept file (`KNOWLEDGE.md` / `tasks/todo.md`).
+- Default: keep them committed. They are valuable provenance for future quarterly sweeps.
+
 **Non-deletion rule:** No entry may be deleted outright. Removed or compressed content must either (a) be represented in a new ADR, (b) survive as a canonical compressed entry, or (c) remain recoverable through the sweep inventory. The full pre-sweep file remains in git history regardless.
 
 **Constraint:** CLAUDE.md §3 — "never edit or remove existing entries — only append." This sweep is the explicit exception, called out as a "quarterly grouping pass." Document the sweep in a single dated header so future readers know the trim happened.
