@@ -29,6 +29,15 @@ ALTER TABLE external_trigger_dedup FORCE ROW LEVEL SECURITY;
 -- RLS policy per spec §21.3: admin access is `org_admin` OR `system_admin`
 -- (NOT `subaccount_admin`). Webhook handlers + trigger dispatch run via
 -- admin connection per the existing pattern.
+--
+-- Admin write path (chatgpt-pr-review R2 F1): writes to this table come
+-- exclusively from `server/services/triggers/externalSourceTriggers.ts`,
+-- which wraps both the rate-cap SELECT and the dedup INSERT in
+-- `withAdminConnection` + `SET LOCAL ROLE admin_role`. `admin_role` has
+-- BYPASSRLS, so the WITH CHECK predicate below is intentionally tight
+-- (owner-only) — it only applies if a user-session path ever writes here,
+-- which never happens in V1 (no user-facing surface reads or writes this
+-- table). User-facing read paths never touch this table.
 CREATE POLICY external_trigger_dedup_isolation ON external_trigger_dedup
   USING (
     organisation_id = current_setting('app.organisation_id', true)::uuid

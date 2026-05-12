@@ -101,3 +101,103 @@ Recommended patch order: F1 (split or reclassify) → F2 (owner-only) → F3 (re
 - `npx vitest run server/services/eaDrafts/__tests__/eaDraftServicePure.test.ts` — 19 passed (11 new for redaction + 8 existing).
 
 
+---
+
+## Round 2 — 2026-05-13
+
+### ChatGPT Feedback (raw)
+
+Second PR round is much improved. The prior big issues are mostly closed: owner-only approve/reject/retry is enforced; EA draft read routes pass viewer context for redaction; approval route no longer fire-and-forgets dispatch (now uses `actionService.transitionState` with dispatch in `eaDraftDispatchService`); agent-runs?agentId= has explicit owner/admin redaction logic; external_trigger_dedup correctly documents text-not-enum, and RLS admin read role is org_admin | system_admin.
+
+Still 2 blockers + 1 required tightening.
+
+**F1 (Blocker) — `external_trigger_dedup` admin write path likely fails RLS WITH CHECK.** Migration says webhook handlers and trigger dispatch run via admin connection, and read policy allows org_admin | system_admin. But WITH CHECK only allows:
+```
+organisation_id = current_setting('app.organisation_id')::uuid
+AND owner_user_id = current_setting('app.current_user_id')::uuid
+```
+Admin-ingestion path inserting a dedup row for another owner_user_id will fail unless admin connection bypasses RLS entirely or impersonates the owner. Spec says webhook ingestion and trigger dispatch use admin connection and user-facing surfaces never read this table — admin/system writes need to be valid.
+
+Fix options:
+- Make admin-bypass assumption explicit and tested: comment that writes occur only through `withAdminConnection` using a BYPASSRLS role.
+- Or safer, align WITH CHECK with admin write path:
+  ```
+  WITH CHECK (
+    organisation_id = current_setting('app.organisation_id', true)::uuid
+    AND (
+      owner_user_id = current_setting('app.current_user_id', true)::uuid
+      OR current_setting('app.current_role', true) IN ('org_admin', 'system_admin')
+    )
+  );
+  ```
+Preference: explicit admin WITH CHECK clause unless there's a hard repo convention that `withAdminConnection` bypasses RLS. Add a small RLS test for admin inserting a dedup row for a user-owned trigger.
+
+**F2 (Blocker) — Dispatch errors can leave approved drafts stuck in `idle`.** Dispatch service logs+swallows errors because stall-reset job recovers drafts stuck in `sending`. But that only helps if the handler claimed the draft and moved it to `sending`. If error occurs BEFORE the handler calls `claimSend` (dynamic import failure, malformed body before claim, missing provider module, routing bug, unexpected kind/body mismatch), the draft can remain `actions.status = approved` AND `ea_drafts.send_state = idle`. The dispatch hook will not run again if invoked exactly-once from the approved transition. Manual retry appears to be from `send_failed`, not `idle`. Creates a durable approved-but-never-sent state.
+
+Fix options:
+- **Option A (preferred):** `dispatchAfterApproval` claims first, before routing:
+  ```
+  const claimed = await eaDraftService.claimSend(row.id);
+  if (!claimed.claimed) return;
+  try {
+    await routeDraftSend(row, ctx);
+  } catch (err) {
+    await eaDraftService.markSendFailed(row.id, String(err));
+  }
+  ```
+  Every dispatch failure becomes `send_failed`, manual retry works.
+- **Option B:** If each action handler must own the claim, dispatch hook must mark `send_failed` for errors thrown before action handler takes over.
+
+Either way, approved draft must never remain `idle` after failed dispatch attempt. Add a test: approved EA draft + dispatch route throws before claim ⇒ `ea_drafts.send_state = send_failed`.
+
+**F3 (Required) — `agent-runs?agentId=` still returns full subaccount-owned `triggerContext`.** Route correctly redacts user-owned runs for admin non-owners. But for `ownerUserId IS NULL`, returns the row as-is including `triggerContext` for anyone with AGENTS_CHAT. Comment says that's legacy subaccount-owned behaviour — may be acceptable. But this route is new and generic, creates a new easy path to retrieve `triggerContext` by `agentId`.
+
+Fix options:
+- Reuse existing Run Trace visibility/serialisation service for both user-owned and subaccount-owned runs.
+- Or return only metadata by default from this list endpoint, let existing Run Trace detail endpoint handle full content visibility. Recommended list shape:
+  ```
+  { id, agentId, status, startedAt, completedAt, ownerUserId, triggerContextRedacted: true }
+  ```
+
+Not as severe as F1/F2 because may match current legacy behaviour, but still a new data exposure surface.
+
+What to patch before next round:
+1. Fix `external_trigger_dedup` WITH CHECK so admin/system ingestion can insert rows for user-owned triggers, or prove/test BYPASSRLS admin connection semantics.
+2. Ensure dispatch failures always move approved drafts to `send_failed`, including failures before action handler claim.
+3. Redact or omit `triggerContext` from new agent-runs list endpoint, or explicitly reuse existing Run Trace visibility serialisation.
+
+After those fixes, should be close to merge-ready.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — external_trigger_dedup admin WITH CHECK | technical | implement | auto (implement) | high | `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS) is the repo convention; dispatch path now wraps both rate-cap SELECT and dedup INSERT in admin connection. Migration WITH CHECK kept tight (owner-only) and documented as intentional — user-facing surfaces never read or write this table. |
+| F2 — dispatch can leave drafts idle | technical | implement | auto (implement) | high | Option A applied: `dispatchAfterApproval` calls `claimSend` first; on claim success, routing is wrapped in try/catch and `markSendFailed` runs on error. Handlers honour a `_dispatchPreClaimed` ctx flag and skip their own claim when set. Idempotent — direct-call retry paths unchanged. |
+| F3 — agent-runs list returns triggerContext | technical | implement | auto (implement) | medium | `triggerContext` removed from SELECT and from the response shape. Replaced with `triggerContextRedacted: true` marker. Full content remains available via the existing Run Trace detail endpoint, which owns its own visibility rules. Client `PersonalAssistantPage` does not consume `triggerContext` — no client change required. |
+
+### Top themes
+- security (F3 — data-exposure surface)
+- architecture (F2 — exactly-once dispatch + failure-state correctness)
+- RLS / admin-connection convention (F1)
+
+### Implemented (auto-applied technical)
+
+- [auto] **F1** — `server/services/triggers/externalSourceTriggers.ts` wraps the rate-cap SELECT and the `external_trigger_dedup` INSERT in `withAdminConnection` + `SET LOCAL ROLE admin_role`. The migration WITH CHECK predicate is kept tight (owner-only) and documented with the admin-bypass rationale; admin_role has BYPASSRLS so writes from webhook/job paths succeed regardless of session GUCs. User-facing surfaces never touch this table.
+- [auto] **F2** — `eaDraftDispatchService.dispatchAfterApproval` now claims FIRST (idle → sending) via `eaDraftService.claimSend`, then routes within a try/catch. Any thrown error (dynamic import failure, body shape mismatch, unknown kind, handler failure before its own claim/markFailed runs) triggers `markSendFailed`. Slack and calendar handlers honour a new `_dispatchPreClaimed` ctx flag and skip their internal claim when set (preserving legacy direct-call semantics for retry endpoints). Gmail kinds exit before claiming since they're V1.5-deferred.
+- [auto] **F3** — `GET /api/agent-runs?agentId=` now omits `triggerContext` from the SELECT and from the response. Each row carries `triggerContextRedacted: true` so clients know full content lives at `/api/agent-runs/:id/trace`. Privacy contract simplified: owner / admin / subaccount-owned all get metadata-only; non-owner non-admin still excluded entirely.
+
+### Tests added
+
+- `server/services/eaDrafts/__tests__/eaDraftDispatchService.test.ts` — 3 tests verifying the F2 claim-first invariant:
+  1. Dispatch claims before invoking the handler, and passes `_dispatchPreClaimed: true` to the handler.
+  2. Dispatch returns silently when the claim is already in flight (idempotent).
+  3. Dispatch marks `send_failed` when routing throws after a successful claim — the regression scenario ChatGPT flagged.
+
+### Verification
+
+- `npm run lint` — 0 errors (902 pre-existing warnings unchanged).
+- `npm run typecheck` — clean (both client + server tsconfig).
+- `npx vitest run server/services/eaDrafts/__tests__/eaDraftDispatchService.test.ts` — 3 passed (new).
+- `npx vitest run server/services/eaDrafts/__tests__/eaDraftServicePure.test.ts` — 19 passed (unchanged from R1).
+

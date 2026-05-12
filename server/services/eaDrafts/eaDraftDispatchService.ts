@@ -6,13 +6,19 @@
 // actionService.transitionState) invokes dispatchAfterApproval with the
 // approved action. This service:
 //   1. Loads the linked ea_drafts row.
-//   2. Routes to slack / calendar action handlers based on draft.kind.
-//   3. The action handlers themselves own the optimistic claim
-//      (`UPDATE ea_drafts SET send_state='sending' WHERE send_state='idle'`)
-//      via eaDraftService.claimSend, and mark sent / send_failed.
-//   4. Errors are logged + swallowed — the optimistic claim guarantees
-//      exactly-once across retries, and the stall-reset job recovers
-//      drafts stuck in 'sending'. Approval is not undone on send failure.
+//   2. Claims the draft (idle → sending) via eaDraftService.claimSend
+//      BEFORE routing — guarantees that any routing failure (dynamic
+//      import error, body shape mismatch, missing provider module,
+//      unknown kind, etc.) is paired with markSendFailed so the draft
+//      never gets stuck in `approved` / `idle`.
+//      (chatgpt-pr-review R2 F2.)
+//   3. Routes to slack / calendar action handlers based on draft.kind,
+//      passing `_dispatchPreClaimed: true` so the handler skips its own
+//      claim. The handler still owns the final mark-sent on success and
+//      mark-send_failed on its own internal failures.
+//   4. On any error thrown from routing, calls markSendFailed.
+//      Approval is not undone — the stall-reset job is a safety net for
+//      drafts stuck in 'sending' that never reached markSent/markFailed.
 //
 // Exactly-once guarantee: dispatch is invoked exactly once from
 // actionService.transitionState's 'approved' branch. The HTTP route only
@@ -23,6 +29,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
+import { eaDraftService } from './eaDraftService.js';
 import type {
   CalendarCreateEventInput,
   CalendarUpdateEventInput,
@@ -33,6 +40,12 @@ interface DispatchCtx {
   organisationId: string;
   subaccountId: string;
   ownerUserId: string;
+  /**
+   * Internal flag — `dispatchAfterApproval` claims the draft before
+   * routing and passes this flag to the action handlers so they skip
+   * their own redundant `claimSend`. See module docs above.
+   */
+  _dispatchPreClaimed?: boolean;
 }
 
 export const eaDraftDispatchService = {
@@ -71,10 +84,33 @@ export const eaDraftDispatchService = {
       return;
     }
 
+    // Gmail-kind drafts are deferred to V1.5 per spec §26 — the draft stays
+    // in `idle` and no claim is taken. Return before claiming.
+    if (row.kind === 'gmail_reply' || row.kind === 'gmail_new') {
+      return;
+    }
+
+    // ── Claim first (chatgpt-pr-review R2 F2) ────────────────────────────
+    // Move idle → sending BEFORE any dynamic import / routing. If the claim
+    // returns `{claimed: false}` (already in-flight from a duplicate
+    // dispatch invocation), exit silently — the in-flight path will mark
+    // sent/failed. If the claim succeeds, any subsequent failure (including
+    // before the handler runs) is paired with markSendFailed so the draft
+    // never gets stuck in approved+idle.
+    const claim = await eaDraftService.claimSend(row.id, { organisationId });
+    if (!claim.claimed) {
+      console.info('[ea-draft-dispatch] claim_skipped', {
+        draftId: row.id,
+        reason: claim.reason,
+      });
+      return;
+    }
+
     const ctx: DispatchCtx = {
       organisationId,
       subaccountId: row.subaccountId,
       ownerUserId: row.ownerUserId,
+      _dispatchPreClaimed: true,
     };
 
     try {
@@ -120,31 +156,37 @@ export const eaDraftDispatchService = {
           return;
         }
 
-        case 'gmail_reply':
-        case 'gmail_new': {
-          // Email send path deferred to V1.5 per spec §26.
-          // The draft remains in 'idle' state; no send is attempted.
-          return;
-        }
-
         default: {
-          // Exhaustiveness guard.
+          // Exhaustiveness guard. Gmail kinds are handled above.
           const _exhaustive: never = row.kind;
           void _exhaustive;
           console.warn('[ea-draft-dispatch] unknown draft kind', { draftId: row.id, kind: row.kind });
+          // Unknown kind: nothing to send, but the claim is still held.
+          // Mark failed so a stall-reset isn't needed to recover.
+          await eaDraftService.markSendFailed(row.id, { organisationId });
           return;
         }
       }
     } catch (err) {
-      // Action handlers already mark the draft `send_failed` on error and
-      // emit a Run Trace event. The stall-reset job recovers anything stuck
-      // in 'sending'. We log here for greppable observability but do not
-      // throw — the approval transition is already committed.
-      console.warn('[ea-draft-dispatch] dispatch failed', {
+      // Routing or handler threw. Mark send_failed so manual retry
+      // (POST /api/ea-drafts/:id/retry) can pick this up from send_failed.
+      // The action handlers also mark send_failed on their own internal
+      // failures; calling markSendFailed twice is idempotent (it sets the
+      // same state) so the dispatch-level catch is a safety net for
+      // failures that happen before the handler's try/catch covers them.
+      console.warn('[ea-draft-dispatch] dispatch failed — marking send_failed', {
         draftId: row.id,
         kind: row.kind,
         err: err instanceof Error ? err.message : String(err),
       });
+      try {
+        await eaDraftService.markSendFailed(row.id, { organisationId });
+      } catch (markErr) {
+        console.error('[ea-draft-dispatch] markSendFailed also threw', {
+          draftId: row.id,
+          err: markErr instanceof Error ? markErr.message : String(markErr),
+        });
+      }
     }
   },
 

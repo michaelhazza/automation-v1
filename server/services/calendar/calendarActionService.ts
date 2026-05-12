@@ -23,6 +23,19 @@ interface CalendarCtx {
   organisationId: string;
   subaccountId: string;
   ownerUserId: string;
+  /**
+   * Internal flag — set by `eaDraftDispatchService.dispatchAfterApproval`
+   * when it has already claimed the draft (ea_drafts.send_state idle → sending)
+   * before invoking the handler. The handler MUST then skip its own
+   * `claimSend` call. Default (undefined / false) preserves the legacy
+   * direct-call contract where the handler claims itself.
+   *
+   * chatgpt-pr-review R2 F2: claiming in the dispatch hook ensures any
+   * routing failure before this point (e.g. dynamic import error, body
+   * shape mismatch, missing provider module) is paired with
+   * `markSendFailed` — drafts never get stuck in `approved`/`idle`.
+   */
+  _dispatchPreClaimed?: boolean;
 }
 
 interface CalendarEvent {
@@ -270,12 +283,15 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId);
 
-    const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-    if (!claimed.claimed) {
-      throw Object.assign(
-        new Error(`Draft ${input.eaDraftId} send already in flight`),
-        { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-      );
+    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
+    if (!ctx._dispatchPreClaimed) {
+      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
+      if (!claimed.claimed) {
+        throw Object.assign(
+          new Error(`Draft ${input.eaDraftId} send already in flight`),
+          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
+        );
+      }
     }
 
     let token: string;
@@ -337,12 +353,15 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId);
 
-    const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-    if (!claimed.claimed) {
-      throw Object.assign(
-        new Error(`Draft ${input.eaDraftId} send already in flight`),
-        { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-      );
+    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
+    if (!ctx._dispatchPreClaimed) {
+      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
+      if (!claimed.claimed) {
+        throw Object.assign(
+          new Error(`Draft ${input.eaDraftId} send already in flight`),
+          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
+        );
+      }
     }
 
     let token: string;
@@ -396,12 +415,15 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId);
 
-    const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-    if (!claimed.claimed) {
-      throw Object.assign(
-        new Error(`Draft ${input.eaDraftId} send already in flight`),
-        { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-      );
+    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
+    if (!ctx._dispatchPreClaimed) {
+      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
+      if (!claimed.claimed) {
+        throw Object.assign(
+          new Error(`Draft ${input.eaDraftId} send already in flight`),
+          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
+        );
+      }
     }
 
     let token: string;

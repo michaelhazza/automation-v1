@@ -196,13 +196,15 @@ router.get(
 // ─── List agent runs by agentId ───────────────────────────────────────────────
 //
 // User-owned-run visibility (spec §3.6 + lib/agentRunVisibility.ts):
-//   - Owner sees full row including triggerContext.
-//   - Admin sees metadata only; triggerContext is redacted to {} because
-//     it may carry caller PII / external-source payload context.
+//   - Owner sees the row metadata.
+//   - Admin sees the row metadata.
 //   - Non-owner non-admin: row excluded entirely.
-// Subaccount-owned runs (ownerUserId IS NULL) follow the org-permission
-// path — visible to anyone with AGENTS_CHAT; triggerContext returned in
-// full (no per-user privacy boundary at that tier).
+//
+// triggerContext is INTENTIONALLY OMITTED from this list response
+// (chatgpt-pr-review R2 F3). It may carry external-source payload / PII —
+// callers that need full per-run content go through the existing Run Trace
+// detail endpoint (`GET /api/agent-runs/:id/trace`), which owns content
+// visibility for both user-owned and subaccount-owned runs.
 
 router.get(
   '/api/agent-runs',
@@ -222,7 +224,6 @@ router.get(
         status: agentRuns.status,
         startedAt: agentRuns.startedAt,
         completedAt: agentRuns.completedAt,
-        triggerContext: agentRuns.triggerContext,
         ownerUserId: agentRuns.ownerUserId,
       })
       .from(agentRuns)
@@ -239,28 +240,26 @@ router.get(
     const isAdmin = role === 'system_admin' || role === 'org_admin';
     const requesterId = req.user!.id;
 
-    // Filter + redact per-row using the user-owned-run privacy contract.
+    // Filter per-row using the user-owned-run privacy contract. All rows
+    // returned are metadata-only — `triggerContextRedacted: true` signals
+    // to clients that full content is available via the Run Trace detail
+    // endpoint, gated by its own visibility rules.
     const runs = rows.flatMap((row) => {
       if (!row.ownerUserId) {
-        // Subaccount-owned (legacy) run — return as-is. The base permission
-        // gate (AGENTS_CHAT) is the only check at this tier.
+        // Subaccount-owned (legacy) run — visible to anyone with AGENTS_CHAT.
         const { ownerUserId: _ownerUserId, ...publicRow } = row;
         void _ownerUserId;
-        return [publicRow];
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
       }
       if (row.ownerUserId === requesterId) {
-        // Owner — full visibility.
         const { ownerUserId: _ownerUserId, ...publicRow } = row;
         void _ownerUserId;
-        return [publicRow];
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
       }
       if (isAdmin) {
-        // Admin non-owner — metadata only. Redact triggerContext (may carry
-        // external-source payload / PII) to {}.
-        const { ownerUserId: _ownerUserId, triggerContext: _tc, ...publicRow } = row;
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
         void _ownerUserId;
-        void _tc;
-        return [{ ...publicRow, triggerContext: {} as Record<string, unknown> }];
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
       }
       // Non-owner, non-admin — exclude entirely.
       return [];
