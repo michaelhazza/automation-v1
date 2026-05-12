@@ -229,16 +229,23 @@ After those fixes, should be close to merge-ready.
 - F2: `dispatchAfterApproval` claims FIRST via `eaDraftService.claimSend` then routes inside try/catch with `markSendFailed` on error; Slack/calendar handlers honour `_dispatchPreClaimed` ctx flag. Eliminates the approved-but-`send_state=idle` durability window.
 - F3: `GET /api/agent-runs?agentId=` drops `triggerContext` from SELECT and response; each row carries `triggerContextRedacted: true`; full content remains at `/api/agent-runs/:id/trace` (existing Run Trace detail endpoint owns content visibility).
 
-### Doc-sync verdicts
+### Doc-sync verdicts (finalisation-coordinator pass — 2026-05-13)
 
-Deferred to `finalisation-coordinator` for the full PR-vs-main sweep per the operator's instruction. The chatgpt-pr-review session touched per-round edits already; the broader cross-doc sweep is not in scope here.
+Investigation procedure run per `docs/doc-sync.md`. Candidate-stale-reference set derived from branch diff: ea_drafts / eaDraftService / eaDraftDispatchService / external_trigger_dedup / voice_profiles / EA_PROVISION / HOME_WIDGET_READ / ownerUserId / executive-assistant / capabilityGroups / claim-first / withAdminConnection / Slack / Gmail / Google Calendar / calendar.create_event / slack.post_message / mpim:history / app_mentions:read.
 
-- architecture.md: deferred to finalisation-coordinator
-- docs/capabilities.md: deferred to finalisation-coordinator
-- docs/integration-reference.md: deferred to finalisation-coordinator
-- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: deferred to finalisation-coordinator
-- docs/frontend-design-principles.md: deferred to finalisation-coordinator
-- KNOWLEDGE.md: yes — 5 new entries appended at finalisation (see commit body)
+- **architecture.md**: yes — coverage verified (7 hits across the candidate set; Phase 2 catch-up commit `557b4f64` updated the relevant sections including the EA service tier, voice profile primitive, external trigger dedup pattern, and admin BYPASSRLS convention).
+- **docs/capabilities.md**: yes — Executive Assistant capability + new skill catalogue (2 hits; Phase 2 catch-up).
+- **docs/integration-reference.md**: yes — Slack / Gmail / Google Calendar scope deltas and new write capabilities registered (12 hits; Phase 2 catch-up; `last_verified` refreshed).
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md**: n/a — checked for build-discipline / convention / agent-fleet / locked-rule changes; this PR is a pure feature add reusing existing patterns. The 5 KNOWLEDGE.md entries appended at chatgpt-pr-review finalisation are the right home for the new patterns (claim-first dispatch, list-endpoint privacy, owner-only V1 approval, BYPASSRLS admin-write convention, no fire-and-forget in HTTP routes).
+- **CONTRIBUTING.md**: n/a — no change to lint-suppression policy, contributor convention, or `// reason:` format.
+- **docs/frontend-design-principles.md**: n/a — Personal zone uses existing primitives from `consolidation-foundation` (PageShell, Drawer, EmptyState); no new UI pattern or hard rule introduced.
+- **docs/spec-context.md**: n/a — not a spec-review session.
+- **docs/decisions/**: n/a — no durable "chose X over Y" architectural decision in this PR. Owner-only approval is a V1 product policy (spec §18, not an ADR); claim-first dispatch and BYPASSRLS admin-write are operational patterns (KNOWLEDGE.md); the existing list/detail privacy split is already conventional.
+- **docs/context-packs/**: n/a — no architecture.md section anchor renamed or removed.
+- **references/test-gate-policy.md**: n/a — no test-gate posture change.
+- **references/spec-review-directional-signals.md**: n/a — not a spec-review session.
+- **.claude/FRAMEWORK_VERSION + CHANGELOG.md**: n/a — no framework-level (agent fleet / conventions layer) change.
+- **KNOWLEDGE.md**: yes — 5 new entries appended at finalisation (commit `21fcf853`).
 
 ### Final Verdict
 

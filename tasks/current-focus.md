@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md
-active_plan: tasks/builds/personal-assistant-v1/plan.md
-build_slug: personal-assistant-v1
-branch: claude/synthetos-personal-assistant-0kaIM
-status: REVIEWING
-last_updated: 2026-05-13T00:00:00Z
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
+last_updated: 2026-05-12T21:58:47Z
+last_merge_ready_pr: #291
+last_merge_ready_slug: personal-assistant-v1
+last_merge_ready_branch: claude/synthetos-personal-assistant-0kaIM
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -24,14 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md` (Status: accepted; locked 2026-05-12)
-**Active plan:** `tasks/builds/personal-assistant-v1/plan.md` (pending Phase 2 architect authoring)
-**Active build slug:** `personal-assistant-v1`
-**Branch:** `claude/synthetos-personal-assistant-0kaIM`
-**PR:** [#291](https://github.com/michaelhazza/2026-05-12-personal-assistant-v1-spec)
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR [#291](https://github.com/michaelhazza/automation-v1/pull/291) (`personal-assistant-v1`) finalised 2026-05-12T21:58:47Z. ready-to-merge label about to be applied; CI will fire on the final Phase 3 commit.
 
-**Phase 2 complete (2026-05-13):** All 25 chunks built + reviewed. G2 PASS. spec-conformance CONFORMANT_AFTER_FIXES (OAuth scopes fixed). Adversarial review: 5 confirmed/likely holes closed. PR-reviewer: 7 blocking issues fixed (SKILL_HANDLERS for 12 skills, approval send dispatch, 3 jobs registered + admin-role DB access, homeWidgetService org filter + shape fix, API shape mismatches, dedup race). Doc-sync: architecture.md, capabilities.md, integration-reference.md, KNOWLEDGE.md all updated. Phase 3 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
+**Just merge-ready:** PR #291 — `personal-assistant-v1`. Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
 
 **Phase 1 complete (2026-05-12):** Spec authored for the Executive Assistant V1 build (~2000 lines, 27 sections). spec-reviewer ran 5 iterations (cap; 52 mechanical fixes); 3 directional decisions ratified (Calendar push deferred → 1-min lookahead scan; Slack auto-send dropdown deferred → fixed policy; risk-tier ceiling 5 → 6). chatgpt-spec-review ran 2 rounds (8 findings, all auto-applied — F1/F2/F3/F4/T1 in round 1, F1/F2/T1 in round 2); APPROVED at round 2. Spec status → accepted. Phase 2 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
 

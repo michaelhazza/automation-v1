@@ -84,3 +84,37 @@ launch finalisation
 ```
 
 The new session reads `tasks/current-focus.md` (status FINALISING; build_slug `personal-assistant-v1`), reads this handoff, runs the S2 branch sync, G4 regression guard, chatgpt-pr-review, full doc-sync sweep, KNOWLEDGE.md update, and transitions to MERGE_READY.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #291
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-claude-synthetos-personal-assistant-0kaIM-2026-05-12T21-00-51Z.md`
+**Rounds completed:** 2 (operator finalised after Round 2; no Round 3)
+**chatgpt-pr-review verdict:** APPROVED_AFTER_FIXES
+**spec_deviations reviewed:** n/a (none recorded in Phase 2)
+**REVIEW_GAP:** dual-reviewer's final log was not persisted in Phase 2 (5 codex iteration temp files visible in `tasks/review-logs/.codex-iter*-raw.txt` but never finalised). chatgpt-pr-review covered the second-opinion pass as primary; reduced formal coverage acknowledged.
+
+**Pre-finalisation catch-up:** at finalisation entry, `tasks/current-focus.md` carried `status: FINALISING` (non-canonical — canonical enum is `REVIEWING`) and ~98 Phase-2 files were uncommitted on the working tree despite the handoff claiming Phase 2 complete. Operator-approved single-commit catch-up: `557b4f64 chore(feature-coordinator): Phase 2 catch-up — personal-assistant-v1 chunks 5-24` (+7601 / -95 across 98 files; status name fixed in the same commit). After catch-up, S2 was clean (0 commits behind main) and G4 PASSED (lint 0 errors, typecheck clean).
+
+**chatgpt-pr-review fixes by round:**
+- Round 1: F2 owner-only approve/reject/retry; F3 proposal commit hook owns dispatch (removed fire-and-forget); F4 viewer-aware draft body redaction (11 new tests); F5 `GET /api/agent-runs?agentId=` per-row owner/admin redaction; R2 `external_trigger_dedup` RLS admin role aligned to spec. F1 rejected (combined predecessor + EA scope intentional per operator). R1 rejected (text column, not enum). R3 auto-closed by F1. Commit `0886def6`.
+- Round 2: F1 `external_trigger_dedup` writes wrapped in `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS); F2 claim-first dispatch with `markSendFailed` on pre-claim errors (closes approved-but-`idle` durability window); F3 `triggerContext` dropped from agent-runs list response with `triggerContextRedacted: true` marker. Commit `b010a04c`. KNOWLEDGE.md finalisation commit `21fcf853` added 5 new patterns.
+
+**Doc-sync sweep verdicts** (per `docs/doc-sync.md` investigation procedure):
+- architecture.md: yes (Phase 2 catch-up covered EA service tier, voice profile primitive, external trigger dedup, admin BYPASSRLS convention; 7 candidate-term hits verified)
+- docs/capabilities.md: yes (EA capability + new skill catalogue; 2 hits)
+- docs/integration-reference.md: yes (Slack/Gmail/Google Calendar scopes + new write capabilities; 12 hits)
+- KNOWLEDGE.md: yes (5 entries appended at chatgpt-pr-review finalisation)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: n/a (no build-discipline / convention / locked-rule change; this is a feature add reusing existing patterns)
+- CONTRIBUTING.md: n/a (no lint-suppression or contributor-convention change)
+- docs/frontend-design-principles.md: n/a (Personal zone uses existing `consolidation-foundation` primitives; no new UI pattern)
+- docs/decisions/: n/a (no durable "chose X over Y" decision; V1 owner-only approval is product policy, claim-first is operational pattern)
+- docs/context-packs/ / references/test-gate-policy.md / references/spec-review-directional-signals.md / .claude/FRAMEWORK_VERSION + CHANGELOG.md: n/a (no triggers from this change-set)
+- docs/spec-context.md: n/a (not a spec-review session)
+
+**KNOWLEDGE.md entries added:** 5
+**tasks/todo.md items removed:** 2 (EA-V1-AD1 already RESOLVED; REQ-P6 closed by R2 RLS admin role fix)
+**Remaining deferred items:** 4 adversarial worth-confirming + 11 spec-conformance directional gaps (REQ-C4, REQ-CAL2, REQ-T8, REQ-C1, REQ-EA1, REQ-EA3, REQ-EA4, REQ-EA5, REQ-M15, REQ-C3, REQ-CAL3-naming, REQ-M9 — note REQ-P6 removed)
+**ready-to-merge label applied at:** 2026-05-12T21:58:47Z

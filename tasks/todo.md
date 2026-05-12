@@ -4407,12 +4407,6 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
   - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
   - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
 
-## Deferred spec decisions — personal-assistant-v1 (2026-05-12)
-
-Source: `tasks/review-logs/spec-review-log-personal-assistant-v1-1-20260512T061117Z.md` (Iteration 1). One AUTO-DECIDED item from the spec-reviewer loop; routed here for the Phase 2 architect (not blocking spec finalisation).
-
-- [x] **EA-V1-AD1 — Investigate composing `actionService.proposeAction` under `ea_drafts` state machine** — **RESOLVED 2026-05-12** in chatgpt-spec-review round 1 (F2). Spec §7.5 + §11.6 + §24.3 LOCK composition: `ea_drafts.proposalId` FK to the proposal primitive's row. Approval state lives on the proposal row; `ea_drafts` owns only the draft payload + post-approval `sendState`. Phase 2 architect verifies the existing `actionService.proposeAction` primitive supports a per-domain payload reference (FK or `proposal_payload_ref` column) at plan-authoring time; if not, escalates to spec revision rather than authoring a parallel state machine. Reflected in spec §27 open question #12 (verification-only, not investigation).
-
 ## Deferred adversarial findings — personal-assistant-v1 (2026-05-12)
 
 Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.
@@ -4488,11 +4482,6 @@ before being passed to the LLM.
   - Spec section: §14.1
   - Gap: Spec says Personal group renders at the TOP of the sidebar, above Operate/Build/Govern. Code places it mid-list per `client/src/config/sidebar.ts` ordering comment ("top → work → projects → agents → personal → company → ...").
   - Suggested approach: Move Personal group higher in `buildNavItems` if matching the spec is important for the "first thing the user sees" framing.
-
-- [ ] REQ-P6 — `external_trigger_dedup` RLS admin role mismatch
-  - Spec section: §21.3
-  - Gap: Spec specifies `org_admin OR system_admin`; code uses `org_admin OR subaccount_admin`. The `system_admin` is a platform-level role typically reserved for internal staff debugging; `subaccount_admin` is broader.
-  - Suggested approach: Confirm intent with platform admin model; one option is "use `system_admin` for cross-tenant tables, `subaccount_admin` for tenant-scoped tables".
 
 - [ ] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter
   - Spec section: §7.3
