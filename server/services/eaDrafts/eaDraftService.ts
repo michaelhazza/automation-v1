@@ -4,6 +4,7 @@ import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actionService } from '../actionService.js';
 import type { EADraftKind } from '../../../shared/types/eaDraft.js';
+import { redactDraftForViewer, type EADraftViewer } from './eaDraftServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Kind -> actionType mapping
@@ -182,20 +183,38 @@ export const eaDraftService = {
 
   /**
    * List drafts for an organisation, ordered by createdAt DESC, limit 50.
+   *
+   * Admin redaction (spec §21.2): when `viewer` is supplied, the body field
+   * is redacted to `{}` for any viewer that is not the draft owner. RLS
+   * already filters rows at the DB layer; this is field-level redaction
+   * on rows the viewer is allowed to see at the row level.
+   *
+   * Callers MUST pass `viewer` from authenticated routes — only internal
+   * dispatchers (stall jobs, commit hooks) may omit it. When omitted the
+   * raw rows are returned UNREDACTED; that path is for trusted server
+   * code only.
    */
-  async listDrafts(ctx: { organisationId: string }) {
-    return db
+  async listDrafts(ctx: { organisationId: string; viewer?: EADraftViewer }) {
+    const rows = await db
       .select()
       .from(eaDrafts)
       .where(eq(eaDrafts.organisationId, ctx.organisationId))
       .orderBy(sql`${eaDrafts.createdAt} DESC`)
       .limit(50);
+
+    if (!ctx.viewer) return rows;
+
+    return rows.map((row) => redactDraftForViewer(row, ctx.viewer!));
   },
 
   /**
    * Get a single draft by ID, scoped to the organisation.
+   *
+   * Admin redaction (spec §21.2): see listDrafts. When `viewer` is supplied,
+   * the body field is redacted to `{}` for any viewer that is not the
+   * draft owner.
    */
-  async getDraft(draftId: string, ctx: { organisationId: string }) {
+  async getDraft(draftId: string, ctx: { organisationId: string; viewer?: EADraftViewer }) {
     const [draft] = await db
       .select()
       .from(eaDrafts)
@@ -205,7 +224,9 @@ export const eaDraftService = {
           eq(eaDrafts.organisationId, ctx.organisationId),
         ),
       );
-    return draft ?? null;
+    if (!draft) return null;
+    if (!ctx.viewer) return draft;
+    return redactDraftForViewer(draft, ctx.viewer);
   },
 
   /**

@@ -194,6 +194,15 @@ router.get(
 );
 
 // ─── List agent runs by agentId ───────────────────────────────────────────────
+//
+// User-owned-run visibility (spec §3.6 + lib/agentRunVisibility.ts):
+//   - Owner sees full row including triggerContext.
+//   - Admin sees metadata only; triggerContext is redacted to {} because
+//     it may carry caller PII / external-source payload context.
+//   - Non-owner non-admin: row excluded entirely.
+// Subaccount-owned runs (ownerUserId IS NULL) follow the org-permission
+// path — visible to anyone with AGENTS_CHAT; triggerContext returned in
+// full (no per-user privacy boundary at that tier).
 
 router.get(
   '/api/agent-runs',
@@ -206,7 +215,7 @@ router.get(
       res.status(400).json({ error: 'agentId query parameter is required' });
       return;
     }
-    const runs = await db
+    const rows = await db
       .select({
         id: agentRuns.id,
         agentId: agentRuns.agentId,
@@ -214,6 +223,7 @@ router.get(
         startedAt: agentRuns.startedAt,
         completedAt: agentRuns.completedAt,
         triggerContext: agentRuns.triggerContext,
+        ownerUserId: agentRuns.ownerUserId,
       })
       .from(agentRuns)
       .where(
@@ -224,6 +234,38 @@ router.get(
       )
       .orderBy(sql`${agentRuns.startedAt} DESC`)
       .limit(limit);
+
+    const role = req.user?.role ?? 'user';
+    const isAdmin = role === 'system_admin' || role === 'org_admin';
+    const requesterId = req.user!.id;
+
+    // Filter + redact per-row using the user-owned-run privacy contract.
+    const runs = rows.flatMap((row) => {
+      if (!row.ownerUserId) {
+        // Subaccount-owned (legacy) run — return as-is. The base permission
+        // gate (AGENTS_CHAT) is the only check at this tier.
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [publicRow];
+      }
+      if (row.ownerUserId === requesterId) {
+        // Owner — full visibility.
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [publicRow];
+      }
+      if (isAdmin) {
+        // Admin non-owner — metadata only. Redact triggerContext (may carry
+        // external-source payload / PII) to {}.
+        const { ownerUserId: _ownerUserId, triggerContext: _tc, ...publicRow } = row;
+        void _ownerUserId;
+        void _tc;
+        return [{ ...publicRow, triggerContext: {} as Record<string, unknown> }];
+      }
+      // Non-owner, non-admin — exclude entirely.
+      return [];
+    });
+
     res.json({ runs });
   }),
 );
