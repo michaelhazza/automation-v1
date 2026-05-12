@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<!--
+  Memory Improvements — Surface 2: Citation Utility Dashboard
+  Extends: client/src/pages/UsagePage.tsx (admin observability / metrics page)
+  Proposal B2 — Citation-rate utility metric, operator-facing dashboard
+
+  What's new:
+    - A new "Memory Utility" tab added to the existing Usage page tab strip.
+    - Two line charts: entry utility % (rolling 30d) and block utility % (rolling 30d).
+      One line per workspace. These are hero visualisations for this page — the
+      primary task IS "read the trajectory", so they earn their place.
+    - Per-agent breakdown table: agent name, injected, cited, utility %, run count.
+      Sortable by column. Agents with fewer than 10 runs suppressed.
+    - No KPI tile row at the top — the charts carry the state.
+    - Directional metric caveat shown as a dismissable banner.
+    - Admin-only view (gated; average operator never opens this).
+
+  Design decisions:
+    - Placed inside UsagePage's tab strip ("Memory Utility" tab) — not a new page.
+      UsagePage already has tabs for Runs, Routing, Spend; this is a peer tab.
+    - Two charts are justified: they answer different questions (entry utility vs.
+      block utility). The table answers "which agent is dragging down the score?"
+      These three together are the minimum to act on retrieval quality.
+    - Table: 5 columns (agent, injected, cited, utility %, runs). Utility % is the
+      actionable column. Sorted descending by utility % by default.
+    - No raw IDs exposed. No per-run cost details.
+    - "Fewer than 10 runs" gate enforced in sample data.
+    - Charts are canvas-drawn sparklines using vanilla JS; no chart library dependency.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Usage: Memory Utility | Memory Improvements</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  /* Sidebar items */
+  .sidebar-item { padding: 8px 20px; color: rgba(255,255,255,0.62); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-400); padding-left: 17px; }
+
+  /* Page layout */
+  .page-content { padding: 28px 32px; max-width: 1100px; }
+
+  /* Tab strip — same as UsagePage existing style */
+  .tab-strip { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 24px; }
+  .tab-btn {
+    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.12s;
+  }
+  .tab-btn:hover { color: var(--slate-700); }
+  .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+
+  /* Admin badge on tab */
+  .admin-badge {
+    display: inline-flex; align-items: center;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a;
+    border-radius: 4px; padding: 1px 5px; margin-left: 5px;
+  }
+
+  /* Dismissable caveat banner */
+  .caveat-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--amber-50); border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 22px; font-size: 12.5px; color: #78350f; line-height: 1.55;
+  }
+  .caveat-banner svg { flex-shrink: 0; margin-top: 1px; }
+  .caveat-dismiss {
+    margin-left: auto; font-size: 16px; color: #b45309; cursor: pointer; flex-shrink: 0;
+    border: none; background: transparent; line-height: 1; padding: 0 2px;
+  }
+  .caveat-dismiss:hover { color: #92400e; }
+
+  /* Chart grid */
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+
+  /* Chart card */
+  .chart-card {
+    background: white; border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; box-shadow: var(--shadow-sm);
+  }
+  .chart-card-header {
+    padding: 14px 18px 10px; border-bottom: 1px solid var(--slate-100);
+  }
+  .chart-card-title { font-size: 13.5px; font-weight: 700; color: var(--slate-800); margin-bottom: 2px; }
+  .chart-card-sub { font-size: 12px; color: var(--slate-500); }
+  .chart-canvas-wrap { padding: 16px 18px 14px; }
+
+  /* Legend */
+  .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 0 18px 12px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--slate-600); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Avg line badge */
+  .avg-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 600;
+    background: var(--slate-100); color: var(--slate-600); border-radius: 5px;
+    padding: 2px 8px; margin-left: 8px;
+  }
+
+  /* Table section */
+  .table-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .table-header-title { font-size: 15px; font-weight: 700; color: var(--slate-900); }
+  .table-header-sub { font-size: 12.5px; color: var(--slate-500); margin-top: 2px; }
+  .table-actions { display: flex; align-items: center; gap: 8px; }
+
+  /* Sort indicator */
+  .sort-btn {
+    background: none; border: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10.5px; font-weight: 600; color: var(--slate-500);
+    text-transform: uppercase; letter-spacing: 0.05em; padding: 0;
+  }
+  .sort-btn.active { color: var(--indigo-600); }
+  .sort-btn svg { opacity: 0.6; }
+  .sort-btn.active svg { opacity: 1; }
+
+  /* Utility bar in table */
+  .utility-bar-wrap { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+  .utility-bar-bg { flex: 1; height: 6px; border-radius: 3px; background: var(--slate-100); overflow: hidden; }
+  .utility-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .utility-bar-fill.high   { background: var(--emerald-500); }
+  .utility-bar-fill.medium { background: var(--amber-500); }
+  .utility-bar-fill.low    { background: var(--red-400); }
+  .utility-pct { font-size: 12.5px; font-weight: 600; min-width: 36px; text-align: right; }
+  .utility-pct.high   { color: var(--emerald-600); }
+  .utility-pct.medium { color: var(--amber-600); }
+  .utility-pct.low    { color: var(--red-500); }
+
+  /* Suppressed agents note */
+  .suppressed-note {
+    font-size: 11.5px; color: var(--slate-400); padding: 10px 16px;
+    border-top: 1px solid var(--slate-100); text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path fill="white" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <div class="sidebar-item">Agents</div>
+      <div class="sidebar-item">Knowledge</div>
+      <div class="sidebar-item">Run History</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Govern</div>
+      <div class="sidebar-item">Review Queue</div>
+      <div class="sidebar-item active">Usage</div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Usage</span>
+      </div>
+      <div class="topbar-spacer"></div>
+    </div>
+
+    <!-- Page body -->
+    <div class="page-body">
+      <div class="page-content">
+
+        <div class="page-header">
+          <h1>Usage</h1>
+          <p>Monitor your workspace activity and costs.</p>
+        </div>
+
+        <!-- Tab strip — extends existing UsagePage tabs -->
+        <div class="tab-strip">
+          <button class="tab-btn" onclick="alert('Switches to Runs tab')">Runs</button>
+          <button class="tab-btn" onclick="alert('Switches to Routing tab')">Routing</button>
+          <button class="tab-btn" onclick="alert('Switches to Spend tab')">Spend</button>
+          <button class="tab-btn active">
+            Memory Utility
+            <span class="admin-badge">Admin</span>
+          </button>
+        </div>
+
+        <!-- Caveat banner -->
+        <div class="caveat-banner" id="caveat-banner">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+          <span>
+            <strong>Directional metric.</strong> Citation detection is heuristic: the agent citing memory in its own words may not be counted. Use these numbers to spot trends, not as exact measurements. Per-agent rows are hidden for agents with fewer than 10 runs in the 30-day window.
+          </span>
+          <button class="caveat-dismiss" onclick="document.getElementById('caveat-banner').style.display='none'">×</button>
+        </div>
+
+        <!-- Two charts side by side -->
+        <div class="chart-row">
+
+          <!-- Chart 1: Entry utility -->
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <div class="chart-card-title">
+                Memory entry utility
+                <span class="avg-badge">Avg 54%</span>
+              </div>
+              <div class="chart-card-sub">% of injected workspace-memory entries cited in run output, rolling 30 days</div>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="entryChart" width="440" height="140" style="width:100%;height:140px"></canvas>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Acme Corp</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Luma Media</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Brightfield</div>
+            </div>
+          </div>
+
+          <!-- Chart 2: Block utility -->
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <div class="chart-card-title">
+                Memory block utility
+                <span class="avg-badge">Avg 68%</span>
+              </div>
+              <div class="chart-card-sub">% of injected memory blocks cited in run output, rolling 30 days</div>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="blockChart" width="440" height="140" style="width:100%;height:140px"></canvas>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Acme Corp</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Luma Media</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Brightfield</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-agent breakdown table -->
+        <div class="card">
+          <div class="card-header" style="padding:14px 18px">
+            <div>
+              <h3 style="font-size:14px;font-weight:700;color:var(--slate-900)">Per-agent breakdown</h3>
+              <div style="font-size:12px;color:var(--slate-500);margin-top:2px">Last 30 days. Sorted by utility %. Agents with fewer than 10 runs are not shown.</div>
+            </div>
+            <div class="table-actions">
+              <select style="padding:5px 10px;border:1px solid var(--slate-200);border-radius:6px;font-size:12.5px;color:var(--slate-700);cursor:pointer;background:white"
+                onchange="alert('Filter by workspace: ' + this.value)">
+                <option>All workspaces</option>
+                <option>Acme Corp</option>
+                <option>Luma Media</option>
+                <option>Brightfield</option>
+              </select>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>
+                    <button class="sort-btn">Agent</button>
+                  </th>
+                  <th>
+                    <button class="sort-btn">Workspace</button>
+                  </th>
+                  <th style="text-align:right">
+                    <button class="sort-btn">Injected</button>
+                  </th>
+                  <th style="text-align:right">
+                    <button class="sort-btn">Cited</button>
+                  </th>
+                  <th>
+                    <button class="sort-btn active">
+                      Utility %
+                      <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                    </button>
+                  </th>
+                  <th style="text-align:right">
+                    <button class="sort-btn">Runs</button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+
+                <!-- Row 1 — high utility -->
+                <tr onclick="alert('Drills into Marketing Research Agent details (not in scope for this mockup)')">
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">Marketing Research Agent</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Acme Corp</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">1,240</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">905</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill high" style="width:73%"></div></div>
+                      <span class="utility-pct high">73%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">148</td>
+                </tr>
+
+                <!-- Row 2 -->
+                <tr>
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">Brand Audit Agent</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Acme Corp</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">830</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">548</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill high" style="width:66%"></div></div>
+                      <span class="utility-pct high">66%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">92</td>
+                </tr>
+
+                <!-- Row 3 -->
+                <tr>
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">Content Writer Agent</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Luma Media</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">2,100</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">1,218</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill high" style="width:58%"></div></div>
+                      <span class="utility-pct high" style="color:var(--slate-700)">58%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">261</td>
+                </tr>
+
+                <!-- Row 4 — medium -->
+                <tr>
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">SEO Researcher Agent</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Luma Media</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">540</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">227</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill medium" style="width:42%"></div></div>
+                      <span class="utility-pct medium">42%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">64</td>
+                </tr>
+
+                <!-- Row 5 — medium -->
+                <tr>
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">Onboarding Coordinator</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Brightfield</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">410</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">160</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill medium" style="width:39%"></div></div>
+                      <span class="utility-pct medium">39%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">47</td>
+                </tr>
+
+                <!-- Row 6 — low utility, attention needed -->
+                <tr style="background:#fffbeb">
+                  <td>
+                    <div style="font-weight:600;color:var(--slate-900);font-size:13px">
+                      Social Media Agent
+                    </div>
+                    <div style="font-size:11px;color:var(--amber-600);margin-top:2px">Low utility — check memory coverage</div>
+                  </td>
+                  <td><span style="font-size:12.5px;color:var(--slate-500)">Brightfield</span></td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">980</td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">176</td>
+                  <td>
+                    <div class="utility-bar-wrap">
+                      <div class="utility-bar-bg"><div class="utility-bar-fill low" style="width:18%"></div></div>
+                      <span class="utility-pct low">18%</span>
+                    </div>
+                  </td>
+                  <td style="text-align:right;font-size:12.5px;color:var(--slate-600)">112</td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+          <div class="suppressed-note">
+            4 agents suppressed (fewer than 10 runs in the last 30 days)
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Dismiss caveat banner
+function dismissCaveat() {
+  document.getElementById('caveat-banner').style.display = 'none';
+}
+
+// Draw simple line chart on canvas
+function drawLineChart(canvasId, datasets, opts) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 440;
+  const H = canvas.offsetHeight || 140;
+  canvas.width = W * window.devicePixelRatio;
+  canvas.height = H * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const PAD = { top: 10, right: 16, bottom: 28, left: 36 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top - PAD.bottom;
+
+  const allVals = datasets.flatMap(d => d.data);
+  const minV = 0;
+  const maxV = 100;
+  const numPoints = datasets[0].data.length;
+
+  // Grid lines
+  ctx.strokeStyle = '#f1f5f9';
+  ctx.lineWidth = 1;
+  [0, 25, 50, 75, 100].forEach(pct => {
+    const y = PAD.top + cH - (pct / 100) * cH;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, y);
+    ctx.lineTo(PAD.left + cW, y);
+    ctx.stroke();
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(pct + '%', PAD.left - 4, y + 4);
+  });
+
+  // X-axis labels (last 4 weeks)
+  const labels = ['Apr 13', 'Apr 20', 'Apr 27', 'May 4', 'May 11'];
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  labels.forEach((l, i) => {
+    const x = PAD.left + (i / (labels.length - 1)) * cW;
+    ctx.fillText(l, x, H - 6);
+  });
+
+  // Lines
+  datasets.forEach(ds => {
+    ctx.strokeStyle = ds.color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ds.data.forEach((val, i) => {
+      const x = PAD.left + (i / (numPoints - 1)) * cW;
+      const y = PAD.top + cH - ((val - minV) / (maxV - minV)) * cH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Dots
+    ds.data.forEach((val, i) => {
+      const x = PAD.left + (i / (numPoints - 1)) * cW;
+      const y = PAD.top + cH - ((val - minV) / (maxV - minV)) * cH;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = ds.color;
+      ctx.fill();
+    });
+  });
+}
+
+const entryDatasets = [
+  { color: '#6366f1', data: [48, 51, 52, 54, 54] },
+  { color: '#10b981', data: [60, 63, 61, 65, 66] },
+  { color: '#f59e0b', data: [38, 35, 30, 32, 28] },
+];
+const blockDatasets = [
+  { color: '#6366f1', data: [64, 66, 68, 70, 71] },
+  { color: '#10b981', data: [74, 76, 75, 78, 80] },
+  { color: '#f59e0b', data: [52, 54, 56, 55, 54] },
+];
+
+// Draw after layout
+requestAnimationFrame(() => {
+  drawLineChart('entryChart', entryDatasets, {});
+  drawLineChart('blockChart', blockDatasets, {});
+});
+
+window.addEventListener('resize', () => {
+  drawLineChart('entryChart', entryDatasets, {});
+  drawLineChart('blockChart', blockDatasets, {});
+});
+</script>
+</body>
+</html>

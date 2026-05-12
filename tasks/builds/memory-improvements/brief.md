@@ -1,7 +1,7 @@
 # Memory System Improvements — Pre-Spec Brief
 
 **Status:** Draft, for external review
-**Revision:** 2 (corrects Rev 1's incorrect claim that auto-knowledge-retrieval was paused mid-pipeline)
+**Revision:** 3 (applies first round of external-review feedback: B split into measurement substrate + dashboard, D rollout contract hardened, A defaults to join table, C reframed as config hygiene, brief-level invariants added)
 **Date:** 2026-05-12
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
 
@@ -11,14 +11,16 @@
 2. Current state — what is actually shipped today
 3. Proposals
    - Proposal A — Synthesis lineage on memory-block versions
-   - Proposal B — Citation-rate utility metric
-   - Proposal C — Memory-block candidate-pool knob
+   - Proposal B — Citation-rate utility (B1 measurement substrate + B2 operator dashboard)
+   - Proposal C — Memory-block candidate-pool knob (opportunistic cleanup)
    - Proposal D — Semantic ranker for the auto-knowledge retrieval path
-4. Rejected ideas
+4. Brief-level invariants (applied across all proposals)
+5. UI surfaces affected (mockups)
+6. Rejected ideas
    - SPO entity graph
    - Single consolidated memory surface
-5. Recommended next steps
-6. What this brief deliberately does NOT do
+7. Recommended next steps
+8. What this brief deliberately does NOT do
 
 ---
 
@@ -106,22 +108,24 @@ Per-run citation data is persisted (`agent_runs.cited_entry_ids`, `agent_runs.ap
 
 This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"memory exists but is opaque — users can't audit what's been learned."* The Trust & Verification Layer build (`tasks/builds/trust-verification-layer/plan.md:988`) is already adding a `Source` pill with values `Correction | Manual | Auto`. Without lineage, the `Auto` case is a dead-end — the pill exists but clicking it answers nothing.
 
-**How.** Add `source_entry_ids uuid[]` to `memory_block_versions` (the immutable-versions table, not the mutable block itself). Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that hydrates the IDs into a clickable list of source entries, with links through to the run IDs that produced them. Per-version, so future re-syntheses preserve their own cluster.
+**How.** Add a `memory_block_version_sources` join table — `(block_version_id, source_entry_id, content_hash, quality_score_at_capture, contribution_rank)`. Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that joins through to source entries and the runs that produced them. Per-version, so future re-syntheses preserve their own cluster.
 
-**Why this shape, not others.** A single column on `memory_blocks` instead of `memory_block_versions` loses history when the block is re-synthesised. A full `memory_block_sources` join table with per-entry weights is overkill for the current evidence of need. The `uuid[]` (rather than a foreign key with cascade) is deliberate: the nightly decay job soft-deletes low-quality entries, and cascade delete would nuke historical lineage exactly when an auditor needs it most. If even harder durability is wanted, snapshot `{id, contentHash, qualityScore}` as JSONB so the lineage survives entry deletion entirely.
+**Why a join table is now the default (revised per reviewer F4).** Rev 2 of this brief leaned toward `source_entry_ids uuid[]` as the cheaper option. The reviewer pushed back: if the audit UX will ever answer either "where else did this source entry contribute?" or "which auto-synthesised blocks came from this run?", the array shape paints us into a corner that costs a second migration later. Both questions are plausible given the Trust & Verification angle. A join table is more queryable, indexable, and naturally extends with per-source metadata (`content_hash`, `quality_score_at_capture`, `contribution_rank`, optional `snapshot_excerpt`). The cost difference today is small — one extra table vs. one extra column — and the option-value is large.
 
-**Scope.** ~80 LOC, one migration, one admin route, one UI section on the existing `MemoryBlockDetailPage`. No agent-prompt change — lineage is operator-facing only.
+**Why not cascade-delete.** The nightly decay job soft-deletes low-quality workspace memory entries. If `source_entry_id` were a foreign key with `ON DELETE CASCADE`, decay could nuke historical lineage exactly when an auditor needs it most. Use `ON DELETE SET NULL` and keep the row with `content_hash` populated so the snapshot survives source deletion.
+
+**Scope.** ~100 LOC, one migration, one admin route, one UI section on the existing `MemoryBlockDetailPage`. No agent-prompt change — lineage is operator-facing only.
 
 **Why now, not later.** The Trust & Verification Layer pill is the trigger. If we ship that pill without lineage behind the `Auto` case, we ship a dead-end UX. Cheaper to add lineage now (one migration) than to retrofit when operators start clicking and find nothing.
 
 **Open questions for the reviewer:**
-- Per-version lineage vs. join table — is the audit question only "which entries → this block" (per-version is fine) or also "which versions did this entry contribute to" (needs join table)?
+- Should we ship `snapshot_excerpt` (first ~140 chars of the source entry at capture time) so lineage survives even if the source entry is hard-deleted via GDPR / right-to-be-forgotten flows? Adds storage cost; gains durability.
 - Should we backfill historical blocks? Cannot — the clusters were never persisted. Acceptable to start from migration forward?
 - Should the agent itself see source entries? Default no (prompt bloat); reconsider only if a `cite_sources` tool call wants it.
 
 ---
 
-### Proposal B — Citation-rate utility metric (RECOMMEND)
+### Proposal B — Citation-rate utility (RECOMMEND, split into B1 + B2 per reviewer F1)
 
 **Why.** Every retrieval-quality decision we'd want to make — should we widen k, turn on the reranker by default, change synthesis thresholds, ship the Proposal D semantic ranker — depends on a feedback signal we don't currently surface. We persist per-run citation data (`agent_runs.cited_entry_ids`, `agent_runs.applied_memory_block_citations`, `memory_citation_scores`). What's missing is the aggregate question: of the memory we inject into prompts, what percentage is actually used by the agent?
 
@@ -129,40 +133,57 @@ This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"
 
 **Why this is NOT a duplicate of AKR's observability.** AKR shipped `retrievalObservabilityService` (147 LOC across both files). What it actually emits in production: payload truncation, degraded-reason builders, and always-available capacity warnings (30 docs / 30k tokens). It does **not** emit per-document coverage ("loaded in N of last 30 runs") even though §11 of the AKR spec described it. It does **not** emit any utility metric. The reviewer should treat utility and coverage as separate questions: *coverage* answers "which memory got loaded into the prompt?" — *utility* answers "of what got loaded, how much did the agent actually use?" Coverage belongs as an extension of the existing `retrievalObservabilityService` (same code-owner, same event substrate). Utility is what this proposal adds.
 
-**How.** Background rollup job over the last N days, per workspace and per agent: `cited_entry_count / injected_entry_count` for workspace-memory entries, and equivalent for memory blocks. Surface on the existing admin observability page with two charts (one per category) and a per-agent breakdown. Derived from `agent_runs` + `memory_citation_scores`; no new tables. Heuristic detector accuracy (`memoryCitationDetector.ts`) is a known limitation but acceptable for a directional metric.
+**Why split into B1 + B2 (revised per reviewer F1).** Rev 2 combined the measurement substrate, rollup job, materialised view, and dashboard UI into one proposal. The reviewer pointed out that Proposal D's dependency is actually on the metric and the rollback signal — not on polished dashboard chrome. Splitting the proposal lets D ship into `shadow` / `sampled` modes (see Proposal D rollout invariant) once B1 is queryable, without waiting on B2's UI polish.
 
-**Why this matters for Proposal D.** Proposal D (semantic ranker) needs a measurable success criterion. Without B, we cannot tell whether the ranker improves things or makes them worse. Ship B first or in parallel; do not ship D without it.
+#### B1 — Measurement substrate
 
-**Scope.** ~150 LOC, one new materialised view (refresh nightly), one chart component, one rollup job.
+**What ships.** A materialised view (refreshed nightly) that exposes, per run / agent / workspace / memory category, the counts and ratios needed for utility tracking:
+- `injected_entry_count`, `cited_entry_count`, `entry_utility_rate` (per workspace memory)
+- `injected_block_count`, `cited_block_count`, `block_utility_rate` (per memory block)
+- Rolling 7-day and 30-day aggregates, per agent and per workspace.
 
-**Caveats.**
-- Citation detection is heuristic. False negatives (agent uses memory but doesn't phrase it as a citation) understate utility. False positives (agent paraphrases something coincidentally) overstate it. The metric is directional, not absolute.
-- Per-agent breakdowns get noisy on low-volume agents. Consider a minimum-runs gate before surfacing per-agent numbers.
+Derived from existing `agent_runs.cited_entry_ids`, `agent_runs.applied_memory_block_citations`, `memory_citation_scores`. No new source-of-truth tables. The view is queryable from `psql`, from admin scripts, and from spot-check during D rollout — all without any UI.
+
+**Scope.** ~80 LOC. One migration adding the materialised view + refresh function. One nightly job to refresh. No UI.
+
+#### B2 — Operator dashboard
+
+**What ships.** Charts and a per-agent breakdown over the B1 substrate, surfaced on the admin observability page. Two utility charts (entries, blocks), one per-agent breakdown table with a minimum-runs gate (~10 runs / window) to suppress noise on low-volume agents.
+
+**Why B2 can lag B1.** Per the reviewer's F1 framing: as long as the substrate is queryable and reviewable, D can run in shadow / sampled mode and operators can spot-check with SQL. The dashboard is the durability layer — what makes utility a permanent operating concern rather than a one-off review-period query.
+
+**Scope.** ~100 LOC. One chart component, one breakdown table, route additions. See §5 for mockups.
+
+**B-D dependency contract (per reviewer):** Proposal D depends on **B1**, not B2. D must not ship beyond `shadow` mode until B1 is live and queryable.
+
+**Caveats (apply to both layers).**
+- Citation detection is heuristic (`memoryCitationDetector.ts`). False negatives (agent uses memory without quoting it) understate utility. False positives (paraphrase collision) overstate it. The metric is directional, not absolute.
+- Per-agent breakdowns get noisy on low-volume agents. B2's minimum-runs gate handles this for the UI; B1 exposes raw counts for callers who want to set their own threshold.
 
 **Open questions:**
-- Window — 30 days, 7 days, both? 30d is more stable; 7d catches regressions faster.
-- Per-agent + per-workspace, or only per-workspace?
-- Should we also audit `memoryCitationDetector.ts` accuracy before shipping B, so the reviewer knows the signal-to-noise floor?
+- Window — 7d, 30d, both? 30d is more stable; 7d catches regressions faster. Recommend: surface both, default chart view 30d.
+- Should we also audit `memoryCitationDetector.ts` accuracy before shipping B1, so the reviewer knows the signal-to-noise floor?
+- Should B2 include a "shadow mode comparison" view tied to Proposal D's shadow rollout (see §5 mockups)? Likely yes — the same dashboard becomes D's rollout instrument.
 
 ---
 
-### Proposal C — Memory-block candidate-pool size promoted to env knob (RECOMMEND)
+### Proposal C — Memory-block candidate-pool knob (OPPORTUNISTIC CLEANUP, reframed per reviewer F5)
 
-**Why.** The memory-block relevance path (`memoryBlockService.getRelevantBlocks`) retrieves `poolSize = topK * 3 = 15` candidates before applying token-budget eviction and emitting topK=5 to the prompt. The pool of 15 is hardcoded at `memoryBlockService.ts:177,199`. The Cohere reranker (when enabled) prices the same for 5 or 100 candidates per call. Going from a pool of 15 to 30–60 costs sub-millisecond on the HNSW pull and zero on rerank.
+**Framing change.** Rev 2 listed C alongside A, B, D as a strategic memory-system improvement. The reviewer pushed back: C is a config-hygiene knob, not in the same class as the other three. Reframed here as an opportunistic cleanup item to ship alongside B or D, or as a standalone tiny PR, but **not as an independent strategic recommendation**.
 
-The original Memvid borrow idea ("k=60 then rerank") does not translate cleanly to our other retrieval surfaces. Workspace memory already over-retrieves at 4× with a 1000-row candidate ceiling — plenty of headroom. The AKR auto-knowledge path is not a "pool size" problem because it has no semantic ranker (see Proposal D). The actual narrow surface in the codebase is the memory-block relevance path.
+**Why it still belongs in this brief.** The hardcoded `poolSize = topK * 3 = 15` at `memoryBlockService.ts:177,199` is the only memory-block tunable still living as a magic number rather than alongside the other knobs in `server/config/limits.ts`. The Cohere reranker (when enabled) prices the same for 5 or 100 candidates per call, so the ceiling is artificial. The cleanup is ~20 LOC.
 
-**How.** Promote `BLOCK_RELEVANCE_TOP_K` and the `* 3` multiplier in `memoryBlockService.ts:177` to env-overridable constants (`MEMORY_BLOCK_POOL_MULTIPLIER`, default 3). Add the multiplier to `server/config/limits.ts` so the value lives next to the other retrieval knobs. No flag-day change; default unchanged.
+**How.** Promote `BLOCK_RELEVANCE_TOP_K` and the `* 3` multiplier to env-overridable constants (`MEMORY_BLOCK_POOL_MULTIPLIER`, default 3) in `server/config/limits.ts`. Default unchanged; no behaviour change unless an operator sets the env var.
 
 **Caveats.**
-- Widening only helps if recall is the bottleneck. Without Proposal B, we cannot verify it is. Treat C as a knob to turn after B's dashboard tells us recall is the lever to pull.
+- Widening only helps if recall is the bottleneck. Without B1's substrate, we cannot verify it is. Treat C as a knob to turn after B1 / B2 tells us recall is the lever to pull.
 - The dominance gate in `workspaceMemoryService.ts:441-447` short-circuits the reranker when top-two scores are close. Widening matters most when the result set is ambiguous; that gate limits the upside.
 - The `MAX_MEMORY_SCAN = 1000` candidate-pool ceiling means widening past ~250 has diminishing returns. We are nowhere near that today.
 
-**Scope.** ~20 LOC, no migration. Trivial.
+**Scope.** ~20 LOC, no migration, no UI.
 
 **Open questions:**
-- Should this be per-tenant (column on a workspace-settings table) rather than a global env? Per-tenant is more aligned with how the rest of the stack handles tunables.
+- Should this be per-tenant (column on a workspace-settings table) rather than a global env? Per-tenant is more aligned with how the rest of the stack handles tunables, but adds settings-page work disproportionate to the win. Recommend env-only for v1.
 - Should we widen the AKR auto-knowledge path too? No — that path has no semantic ranker; widening it would just load more zero-scored candidates into the budget cap. The right fix for that path is Proposal D.
 
 ---
@@ -183,13 +204,28 @@ This is the single biggest retrieval-quality lever in the codebase. The infrastr
 
 **Why this is a real follow-up to AKR and not a new build.** Everything except those three pieces is already in production. The pure ranker (`retrievalServicePure.ts:38-91`) has the comparator chain, threshold logic, budget loop, and rejection-reason emission. The observability service emits the truncated payload contract. The schema, indexes, modes, ingestion jobs, UI tabs, and tenant-isolation invariants are live. We are completing a deliberate v1 simplification, not designing a new system.
 
+**D-Rollout invariant (per reviewer F2).** The semantic ranker must ship in one of four explicit modes, with the first production deploy restricted to `off` or `shadow`:
+
+| Mode | Behaviour |
+|---|---|
+| `off` | Current production: `finalScore = 0`, threshold = 0, all eligible chunks pass. No change vs. today. |
+| `shadow` | Compute query embedding, per-candidate cosine score, threshold filter, and a hypothetical selected-payload — emit it to telemetry as `retrieval.shadow_compare` — **but preserve the existing production payload as the actual loaded set.** No agent-visible change. |
+| `sampled` | Apply the ranked payload to a bounded percentage of runs (or to a specific allow-listed set of tenants/agents). Remainder stay on legacy behaviour. |
+| `on` | Apply the ranked payload by default for all runs in the org. |
+
+Mode is configured per-org by an env-driven default with a per-org override on `organisations` (column shape TBD in spec). The first production deploy of D is `shadow` for all orgs. Progression to `sampled` and `on` requires B1 telemetry showing no regression in citation utility, no spike in truncation, and no rise in empty-result fallback events (see recall invariant below).
+
+**D-Recall invariant (per reviewer F3).** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. The current AKR path loads every in-scope active block / chunk; turning on real scores is quality-positive, but **only if the fallback prevents accidental memory starvation.** Concretely:
+
+- For each retrieval category (memory blocks, reference-document chunks), if semantic filtering at the configured threshold would return zero candidates from a previously non-empty pool, the system must either:
+  - **fall back** to the top-N legacy ordering (scope-tier → recency) and load that set, **or**
+  - in `shadow` / `sampled` modes, preserve the legacy payload and emit a `retrieval.empty_after_semantic` degraded reason on the run trace.
+- A `recall_invariant_check` flag on the per-run retrieval telemetry indicates whether the invariant fired. The fallback-fired rate is a Phase-3 release gate alongside utility regression.
+
 **Cost.**
-- One OpenAI embedding call per agent run (~$0.00002 at `text-embedding-3-small` pricing). Negligible.
-- ~50 LOC of new code (query construction, embedding call, score wiring). The threshold is a constant.
-- Risk profile is moderate: changing the production retrieval scoring function for every agent run. Mitigated by:
-  - Threshold defaulting to a permissive value (~0.30) so the change is additive in v2 mode (less loaded), not subtractive (more loaded).
-  - Feature-flag the cutover (`AKR_SEMANTIC_RANKER_ENABLED`, default false on first deploy; flip per-tenant or globally after observing citation-rate impact).
-  - Proposal B's utility metric provides the rollback signal — if citation rate drops, revert the flag.
+- One OpenAI embedding call per agent run (~$0.00002 at `text-embedding-3-small` pricing). Negligible. In `shadow` mode the cost is doubled relative to off (embedding + telemetry write); still negligible.
+- ~50 LOC for the cosine + threshold work, ~50 LOC for the shadow-compare telemetry emitter, ~30 LOC for the mode resolver. Total ~150 LOC, behind a feature flag.
+- Risk profile: moderate, materially reduced by the rollout invariant. The `shadow` step lets us observe the candidate-set delta against real production runs without any agent-visible behaviour change.
 
 **What this does NOT do.**
 - No re-ranking layer (Cohere or LLM). Pure cosine, consistent with AKR spec §1.2 ("no cross-encoder re-ranking. Pure cosine for v1.").
@@ -197,7 +233,7 @@ This is the single biggest retrieval-quality lever in the codebase. The infrastr
 - No backfill of historical chunks — they are already embedded as part of AKR's ingestion pipeline.
 - No new UI. Operator-facing surfaces stay the same; the agent prompt continues to receive what the budget allows, just from a higher-quality candidate set.
 
-**Sequencing.** Proposal D depends on Proposal B (citation-rate utility metric) only for the success criterion and rollback signal. They can be built in parallel; D must not ship without B's dashboard live for at least a week first.
+**Sequencing.** Proposal D depends on **B1** (the measurement substrate), not B2's dashboard. D ships in `shadow` mode once B1 is queryable — operators can spot-check shadow-vs-legacy comparisons in SQL during the first week. Progression to `sampled` and `on` requires either B2 live, or operator confidence built via SQL drill-downs and the per-run shadow-compare view in the retrieval observability surface (see §5 mockups).
 
 **Open questions for the reviewer:**
 - Query definition — is "task description" the right choice over "task description + conversation summary" or "task description + agent master prompt summary"? Combining inputs is plausible; the trade-off is signal-to-noise and embedding cost (per-component embeddings, then weighted average vs. concatenated single embedding).
@@ -208,7 +244,35 @@ This is the single biggest retrieval-quality lever in the codebase. The infrastr
 
 ---
 
-## 4. Rejected ideas
+## 4. Brief-level invariants (apply across all proposals)
+
+These invariants emerged from the first round of external review and apply across the proposal set. Listing them once here so the spec phase can reference them without re-deriving.
+
+**A-Lineage decision.** The spec must explicitly choose between one-way `block-version → source` lookup and bidirectional lineage. Bidirectional lineage requires a join table; `uuid[]` is acceptable only if reverse lookup is intentionally out of scope. Default recommendation in Rev 3: join table (`memory_block_version_sources`).
+
+**B-D dependency.** Proposal D depends on Proposal **B1** (measurement substrate), not on B2's polished dashboard UX. Dashboard polish may follow as long as operators can inspect run-level and aggregate citation utility via the substrate during D's rollout.
+
+**D-Rollout invariant.** The semantic ranker must first ship in `off` or `shadow` mode. `shadow` computes query embeddings, scores, thresholds, and the hypothetical selected payload, but preserves the existing production payload as the actual loaded set. Progression to `sampled` and `on` is telemetry-gated, not calendar-gated.
+
+**D-Recall invariant.** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. Empty semantic results require either a legacy-ordering fallback or an explicit `retrieval.empty_after_semantic` degraded reason on the run trace, with safe payload preservation during `shadow` / `sampled` modes.
+
+---
+
+## 5. UI surfaces affected (mockups)
+
+Three operator-facing UI surfaces are touched by this brief. Mockups produced by the `mockup-designer` agent live under `prototypes/memory-improvements/` and are grounded in existing pages and components; new components are introduced only where the existing pattern is genuinely absent.
+
+| Proposal | Surface | Mockup file | Existing page / component extended |
+|---|---|---|---|
+| A | Memory Block detail — new **Sources** tab | [`prototypes/memory-improvements/memory-block-detail.html`](../../../prototypes/memory-improvements/memory-block-detail.html) | `client/src/pages/MemoryBlockDetailPage.tsx`. Adds a third tab alongside Version History / Diff vs Canonical. Visible only for `auto_synthesised` blocks. Bidirectional lineage as per-row collapsed expander. Version selector lets operator inspect historical synthesis versions. |
+| B2 | Citation-rate utility dashboard | [`prototypes/memory-improvements/citation-utility-dashboard.html`](../../../prototypes/memory-improvements/citation-utility-dashboard.html) | `client/src/pages/UsagePage.tsx`. Adds a "Memory Utility" tab alongside existing Runs / Routing / Spend tabs. Two canvas-drawn line charts (entry utility %, block utility %), per-agent breakdown with inline utility bars and a `<10 runs` suppression note. Dismissable heuristic-metric caveat banner. |
+| D | Auto-knowledge ranker mode selector + shadow-mode comparison | [`prototypes/memory-improvements/akr-ranker-settings.html`](../../../prototypes/memory-improvements/akr-ranker-settings.html) | Settings / Retrieval page + per-run retrieval trace. Four-mode segmented selector (Off / Shadow / Sampled / On), Sampled reveals a percentage slider, save logs to audit. Embedded shadow-mode comparison panel: two-column Legacy vs Semantic payload diff with Promoted / Dropped / Unchanged badges, hover-tooltip cosine scores, recall-invariant status bar (green at-least-1-per-category, amber if a category would empty). Panel defaults collapsed. |
+
+Index page linking all three: [`prototypes/memory-improvements/index.html`](../../../prototypes/memory-improvements/index.html). Per-round summary and codebase-grounding file enumeration: [`tasks/builds/memory-improvements/mockup-log.md`](./mockup-log.md). No net-new components introduced — all surfaces reuse existing tab strips, cards, tables, and chart-canvas patterns. The mockups are advisory, not contractual — the spec phase finalises exact shapes.
+
+---
+
+## 6. Rejected ideas
 
 Documented explicitly so the reviewer can challenge the rejection if the reasoning is wrong.
 
@@ -233,21 +297,24 @@ Documented explicitly so the reviewer can challenge the rejection if the reasoni
 
 Mnemo's MNEMO-CONTEXT pattern works for a solo-developer's single agent with no caching pipeline and no injection threat model. It is the wrong pattern for a multi-tenant SaaS.
 
-**When to revisit.** Never — unless the cache or injection-defence reasoning above turns out to be wrong, in which case we have a bigger problem to fix first.
+**When to revisit.** Do not revisit unless the cache-boundary or trust-boundary assumptions are invalidated by a future prompt-assembly redesign. The rejection is durable but not unconditional — if either assumption changes, this section should be reread before that redesign locks.
 
 ---
 
-## 5. Recommended next steps
+## 7. Recommended next steps (revised sequencing per reviewer)
 
-1. **External reviewer reads this brief.** The most likely places to be wrong are: the rejections in §4, the threshold-tuning starting point in Proposal D, the "task description" choice for the query embedding in D, and the per-version-vs-join-table shape choice in A. Pressure-test those.
-2. **Proposal A and Proposal C can ship independently.** Different files, different surfaces, no shared cutover risk. Either can land first. Both are <100 LOC.
-3. **Proposal B ships before Proposal D, or in parallel.** D must not ship without B's dashboard live for at least a week first — otherwise we have no rollback signal.
-4. **Proposal D is the highest-leverage change.** It completes a deliberate v1 simplification in AKR, with infrastructure already in production. Scope is small (~50 LOC behind a feature flag); risk is moderate (production retrieval scoring change).
-5. **Two months after A, B, C, and D land, check the citation-rate dashboard.** If memory utility is consistently high (say >50% of injected entries cited), we are done. If not, the dashboard tells us where to look next — and gives us a measurable baseline for any further change.
+1. **External reviewer reads this revision.** Most likely places to be wrong now: Proposal D's `shadow → sampled → on` telemetry-gate criteria (do they correctly cover the recall invariant?), the join-table shape in A (is `snapshot_excerpt` worth the storage cost?), Proposal D's query-definition choice ("task description" vs. broader context). Pressure-test those.
+2. **Proposal A ships independently.** Choose the lineage storage shape carefully before spec — default to join table; lock the decision via the A-Lineage invariant before writing the migration.
+3. **B1 (measurement substrate) ships first, or in the same PR as D's `shadow` mode.** This is the gating change for everything else.
+4. **Proposal D ships behind `shadow` mode** in its first production deploy. Telemetry compares legacy-selected vs. semantic-selected payloads per run; recall-invariant fallbacks are tracked.
+5. **D progression to `sampled` and `on`** happens only after B1 telemetry shows: (a) no regression in citation utility on sampled runs, (b) no spike in payload truncation, (c) empty-result-fallback rate below an agreed threshold (suggest <1% of runs).
+6. **Proposal B2 (operator dashboard)** ships in parallel or shortly after D `shadow` mode goes live. It is not on the critical path for D, but becomes the durable governance surface once D is at `on`.
+7. **Proposal C** ships opportunistically — alongside B or D, or as a standalone tiny PR. Default unchanged; ideally land after B telemetry confirms memory-block recall is actually constrained.
+8. **Two months after the full set lands, check the utility dashboard.** Consistently high (e.g. >50% of injected entries cited) means we are done. Lower means the dashboard tells us where to look next — and we have a measurable baseline for any further change.
 
 ---
 
-## 6. What this brief deliberately does NOT do
+## 8. What this brief deliberately does NOT do
 
 - **No tech spec.** Schema columns, API shapes, and UI mockups are sketched only where needed for the reviewer to judge feasibility. Final shapes come in the spec phase. Proposal D in particular may warrant its own spec if the reviewer surfaces design questions on the query-definition axis.
 - **No re-opening of AKR's design choices already shipped.** Scope-tier ranking, the Auto / Always-available / Reference-only modes, the chunked-embedding model, and the pure-cosine "no cross-encoder" stance are all in production. Proposal D completes AKR's deferred semantic ranker without revisiting those choices. The reranking question is flagged as a follow-up open question, not a re-opening.
