@@ -1,4 +1,4 @@
-**Status:** **LOCKED** (2026-05-11) — scope ratified, proceed to spec authoring
+**Status:** **LOCKED v2** (2026-05-12) — chain-resume model + per-subaccount settings ratified, proceed to spec authoring
 **Date:** 2026-05-11
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `operator-backend`
@@ -7,6 +7,22 @@
 **Strategic parent:** `docs/openclaw-strategic-analysis.md` Phases 2–3, `docs/synthetos-governed-agentic-os-brief-v1.2.md` § 7, § 18.3, § 24 deliverable 7
 
 # Spec D — Operator Backend — Build Brief
+
+## 0a. Changelog
+
+### v2 lock (2026-05-12) — chain-resume and per-subaccount settings addendum
+
+Conversation surfaced that the v1 brief's "120-min session cap, fail run on hit" model would make Spec D strictly worse than open-core for any task lasting more than 2 hours. v1 framed each operator run as a single sandboxed session; v2 introduces a **chain-resume model** so a single task can span many 120-min sessions with state preserved across handoffs. v2 also moves the runtime limits from hard-coded constants to a per-subaccount settings surface (consistent with where agents already run).
+
+What changed:
+- New §3.12 — Chain-resume model (the headline addition).
+- New §3.13 — Persistent browser profile per task (the smoothness mechanic).
+- New §3.14 — Per-subaccount operator settings tab on `AdminSubaccountDetailPage` (the UI surface).
+- New §3.15 — Incident emission on chain-link start failure (system-monitor hook).
+- Locked decisions §4 — added D7-D13. D5 reframed as **soft cap** (auto-extend grace added). D6 default updated from 3 to 5 (still per-subaccount).
+- Out-of-scope §5 — added "Manual checkpoint controls", "Predict-and-warn classifier for un-resumable flows", "Operator session export/import to external infra" — all deferred.
+
+No change to §2 (locked upstream), §6 (unblocks), §7 (sequencing). The naming rename (§0) is unaffected.
 
 ## 0. Naming decision (read first)
 
@@ -136,16 +152,80 @@ Per Spec C Decision 3 risk #1: the customer will blame SynthetOS regardless of w
 
 Small artefact (one-pager + comms templates) but blocks first Plus-tier onboarding.
 
+### 3.12 Chain-resume model (the long-running-task mechanic)
+
+A single operator task can span many 120-min sessions. Each session is a "chain link." When the soft cap is approached, the operator drives itself to a checkpoint-safe state, persists a checkpoint, and the session ends. A scheduler picks up the task and dispatches the next chain link, which resumes from the checkpoint. The user sees one task progressing, not many separate runs.
+
+Spec MUST define:
+
+1. **Chain-link data model.** `operator_runs.chain_seq` (int, starts at 1), `operator_runs.parent_chain_link_id` (FK to prior chain link), `operator_runs.checkpoint_payload` (JSONB or pointer to artefact store).
+2. **Checkpoint contents.** Minimum payload that lets a fresh sandbox session resume: original task brief reference, accumulated conversation history (or pointer), current page URL, last action taken, next planned step from the task plan, screenshot of last state.
+3. **Soft cap and auto-extend.** Session targets the soft cap (default 120 min per D5). At T-10 min, operator emits a "preparing checkpoint" status. If mid-step at the soft cap (model-judged via an `is_resumable_now` boolean the operator emits), auto-extend up to D7 grace minutes. Hard stop at soft cap + grace.
+4. **Chain link dispatch.** End of chain link N writes the checkpoint and emits `operator-session.chain_link_completed`. Existing heartbeat/scheduler picks up the task (it's in a new state `paused_for_chain_continuation`) and dispatches chain link N+1.
+5. **Resume payload.** Chain link N+1 starts with original brief + accumulated conversation history + last checkpoint + persistent browser profile (§3.13). The operator's first action is to verify it's on the expected page and continue from the next planned step.
+6. **Conversation history accumulation.** Each chain link appends to the same logical conversation. Spec defines whether history is stored as one growing JSONB blob, an append-only event log, or per-chain-link blobs joined at read time. Recommendation: per-chain-link blobs joined at read time, capped at last N chain links of context for the operator model invocation if total context grows unbounded.
+7. **Terminal states.** Task terminal status is rolled up from the final chain link's status. Failure on chain link N terminates the task with the chain link's failure reason; remaining chain links are not dispatched.
+8. **Run trace integration.** Run Trace renders the chain as a single merged timeline with `chain link N starts` dividers between event groups. Existing virtual-view contract from §3.9 extends to span chain links.
+9. **TaskHeader status.** TaskHeader shows "Operator run, link N of ~M, ~T hrs elapsed." Estimate `~M` is computed after the first chain handoff; shown as "—" before then.
+
+### 3.13 Persistent browser profile per task
+
+Smooth chain handoff requires browser state (cookies, login session, local storage) to survive across chain links. Without this, every chain link starts cold, must replay credentials, and breaks on MFA. Open-core does this naturally by keeping a single browser process alive; we have to engineer the equivalent.
+
+Spec MUST define:
+
+1. **Profile storage.** Each task owns a sandbox volume identified by `operator_task_profiles.task_id`, holding the browser's `user-data-dir`. New table or column on existing task model — spec author's call.
+2. **Profile mount.** The operator-session Docker template (`infra/sandbox-templates/operator-session/`) mounts the volume at the browser's `user-data-dir` path on chain link start. Each chain link reuses the same volume.
+3. **Profile size cap.** Default 500 MB per task. Spec author sets the implementation (Docker volume quota, disk-usage check before chain link start, or both).
+4. **Profile lifecycle.** Volume created on first chain link start. Persists across chain links. Garbage-collected at task terminal (completed, failed, cancelled). Max lifetime = D9 max wall-clock per task.
+5. **Profile permissions.** Volume access scoped to chain links of the owning task. Subaccount isolation enforced by Spec B's sandbox isolation primitive — adapter MUST assert the task's subaccount matches the credential's subaccount before mounting.
+6. **First-chain-link cold start.** First chain link gets a fresh `user-data-dir`. Login from credential broker happens in the model loop, naturally — no special bootstrap.
+7. **Failure recovery.** If the profile volume is corrupted or unrecoverable, chain link start fails with `OPERATOR_PROFILE_UNRECOVERABLE` and §3.15 incident path engages. Operator may opt to "restart task with fresh profile" — a per-task action that wipes the volume and dispatches a new chain seq 1.
+
+### 3.14 Per-subaccount operator settings
+
+Runtime limits live on the subaccount, not on the org. Subaccounts are where agents run. New "Operator" tab on `client/src/pages/AdminSubaccountDetailPage.tsx` between the existing "Board Config" and "Usage" tabs. Org-admin-only. Fields and defaults:
+
+| Field | Default | Min | Max | Notes |
+|---|---|---|---|---|
+| Soft session cap (min) | 120 | 30 | 240 | Per chain link. Matches D5. |
+| Auto-extend grace (min) | 30 | 0 | 60 | Past soft cap, finishes current step. Matches D7. |
+| Max chain length | 50 | 1 | 500 | Sessions per task. Matches D9. |
+| Max wall-clock per task (days) | 30 | 1 | 365 | Matches D9. |
+| Per-task budget cap (operator-session minutes) | 6000 | 60 | 60000 | Auto-pause at cap. Matches D10. |
+| Concurrent operator sessions (per subaccount) | 5 | 1 | 25 | Matches D6 (v2 default). |
+
+Each field has plain-English help text. The settings page MUST NOT overwhelm — group into two sections "Session limits" and "Task limits" if the screen feels dense.
+
+Permission model: only `org_admin` can edit. `manager` can view. Below `manager` cannot see the tab. Audit trail: every edit writes an audit event `subaccount.operator_settings.updated` with before/after diff.
+
+### 3.15 Chain-link start failure and incident emission
+
+A chain link can fail to dispatch (auth lost, operator runtime unavailable, profile volume corrupted, subaccount over concurrency cap, budget cap hit). Spec MUST define:
+
+1. **Backoff retry on transient failure.** Chain link dispatch is retried with exponential backoff: 1 min, 5 min, 15 min. After 3 consecutive failures, task transitions to `paused_chain_failure`.
+2. **Incident emission.** Each transient failure writes an incident via `server/services/incidentIngestor.ts` so the system monitoring agent can pick it up. Typed event: `operator.chain_link_start_failed` with `task_id`, `chain_seq`, `failure_class` (transient/permanent/budget/concurrency), `failure_reason`.
+3. **User notification.** On `paused_chain_failure` transition, notify the assigned user (existing inbox/notification path). User can manually retry (resets backoff counter) or cancel the task.
+4. **Budget-cap auto-pause.** Hitting the per-task budget cap is NOT a failure — it's a deliberate auto-pause. Task transitions to `paused_budget_exceeded`. User can extend budget (additive, +N minutes) or cancel.
+5. **Concurrency-cap deferral.** Chain link N+1 dispatch finding the subaccount at its concurrency cap waits in a queue, dispatched FIFO when a slot frees. NOT an incident — normal flow control. Task state stays `paused_for_chain_continuation`.
+
 ## 4. Locked architectural decisions
 
-Resolved 2026-05-11 by operator review. The spec author MUST honour these values; deviations require returning to the operator.
+Resolved 2026-05-11 by operator review, amended 2026-05-12 (v2 — D5/D6 reframed, D7-D13 added). The spec author MUST honour these values; deviations require returning to the operator.
 
 1. **Sandbox persistence across turns — PERSISTENT.** One sandbox lives for the whole session; state survives turns. Spec confirms e2b session API supports clean persistence across the duration cap (§ 4.5).
 2. **Operator runtime crash supervision — FAIL THE RUN.** Crashes are not auto-restarted. Restart-on-crash risk: duplicate side effects from already-effected operator turns. Customer retries from scratch when needed.
 3. **Artefact harvest cadence — END-OF-SESSION + ON-DEMAND.** Default harvest at session terminal. Customer-triggered "snapshot now" available mid-session. Periodic checkpointing deferred to Phase 3.5 if requested.
 4. **Image versioning during in-flight sessions — PINNED PER SESSION.** `operator_runs.image_tag` records the image used. New sessions get new image; in-flight sessions complete on their original. No live-migration.
-5. **Session duration cap — 120 MIN V1, OPERATOR OVERRIDE ALLOWED.** Hard wall-clock cap; sandbox tears down on hit. Operator-tier roles can override per-run via a typed setting. Rationale: sandbox compute is real spend; runaway sessions are a billing risk.
-6. **Concurrent-session cap per subaccount — 3 V1.** Typed error (`OPERATOR_SESSION_LIMIT_EXCEEDED`) surfaced when a fourth concurrent session is requested. Per-subaccount ceiling, not per-user.
+5. **Session soft cap — DEFAULT 120 MIN, PER-SUBACCOUNT CONFIGURABLE (v2).** Soft wall-clock cap per chain link. At soft cap, auto-extend up to D7 grace if mid-step (model-judged via `is_resumable_now`); hard stop after grace. Configurable per-subaccount via §3.14 settings (range 30-240 min). v1 said "hard cap, operator override per-run" — v2 reframes as soft cap with grace and replaces per-run override with per-subaccount default.
+6. **Concurrent-session cap per subaccount — DEFAULT 5, PER-SUBACCOUNT CONFIGURABLE (v2).** Range 1-25. Typed error (`OPERATOR_SESSION_LIMIT_EXCEEDED`) surfaced when a (cap+1)th concurrent session is requested. Per-subaccount ceiling, not per-user. v1 default was 3; v2 raises to 5 and makes configurable.
+7. **Auto-extend grace — DEFAULT 30 MIN, PER-SUBACCOUNT CONFIGURABLE (v2).** Range 0-60 min. Operator drives itself toward checkpoint-safe state past the soft cap. If `is_resumable_now` stays false at soft cap + grace, hard stop and chain link terminates as `failed_mid_step`. Spec defines whether the failure is recoverable on retry.
+8. **Chain-resume model — REQUIRED (v2).** A task can span many chain links per §3.12. Open-core parity for long-running tasks depends on this. Not optional; not a phase-3.5 deferral.
+9. **Chain-resume per-task limits — PER-SUBACCOUNT CONFIGURABLE (v2).** Max chain length default 50 (range 1-500). Max wall-clock per task default 30 days (range 1-365). Per-task budget cap default 6000 operator-session minutes (range 60-60000, equivalent to 50 chain links of 120 min). All configurable per §3.14.
+10. **Budget-cap behaviour — AUTO-PAUSE (v2).** Hitting per-task budget cap auto-pauses the task in state `paused_budget_exceeded`. User extends budget additively (+N min) or cancels. NOT a failure. Settings UI shows clear "default in subaccount" link for adjusting going forward.
+11. **Persistent browser profile per task — REQUIRED (v2).** Per §3.13. Smooth chain handoff is a hard requirement; cold-restart-per-link is not acceptable. Volume size cap default 500 MB per task (range left to spec author).
+12. **Manual checkpoint controls — DEFERRED (v2).** Chain-resume is entirely automatic in V1. No user-facing "checkpoint now and continue later" controls. Re-evaluate if customer demand surfaces post-launch.
+13. **Incident emission on chain-link start failure — REQUIRED (v2).** Per §3.15. Each failed dispatch attempt writes an `operator.chain_link_start_failed` incident via the existing `incidentIngestor` so the system monitoring agent picks it up. Three consecutive failures transitions task to `paused_chain_failure` with user notification.
 
 ## 5. Out of scope (explicit non-goals)
 
@@ -160,6 +240,9 @@ Resolved 2026-05-11 by operator review. The spec author MUST honour these values
 | "Cost savings vs API" customer-facing dashboard | Phase 3.5 (strategic analysis Phase 3) |
 | Streaming progress as first-class capability (WebSocket / SSE replacement for polling) | Phase 3.5 — polling stays V1 visibility primitive (Spec A § 19) |
 | Customer self-service tier switching UI | Phase 3.5 |
+| Manual checkpoint controls (user-triggered "checkpoint now") | Phase 3.5 — chain-resume is automatic in V1 (D12) |
+| Predict-and-warn classifier for un-resumable flows at task-create time | Phase 3.5 — best-effort with auto-extend grace is V1 policy (D7, H) |
+| Operator session export/import to external infrastructure | Phase 5 — V1 keeps all chain links inside the managed Operator Backend |
 
 ## 6. What unblocks when this ships
 

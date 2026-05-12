@@ -3798,3 +3798,21 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **Detection signal in future:** if a mockup round produces top-level new pages or new nav entries for functionality that has an existing analogue (run-tracking, task-management, connections, settings, agent config), assume the mockup is wrong-shape and challenge it before delivery. The default answer is *extend, don't replace*. The legitimate exception is cross-cutting surfaces (a dashboard that aggregates across multiple existing pages) — and even then, the new page must be justified per item.
 
 **Caller-side reinforcement:** when dispatching mockup-designer, the prompt MUST name the existing UI files the new capability extends. Don't trust the agent to find them via a generic "explore the codebase" instruction — point to specific paths. The Step 0a rule now requires the agent to ask the caller if the brief doesn't name them, but caller specificity is the cheaper safeguard.
+
+### 2026-05-12 Correction — Step 0a "codebase grounding pass" must enumerate exact filenames per screen, not just claim grounding was done
+
+**Concrete failure (Phase D Operator Backend, round 2 mockups, 2026-05-12):** mockup-designer round 2 ran with Step 0a in place and claimed grounding was performed, but produced `r10-tasks-list-operator-filter.html` — a fictional tasks-list page that does not exist anywhere in the codebase. The real kanban-style task board is `client/src/pages/WorkspaceBoardPage.tsx` (route `/admin/subaccounts/:subaccountId/workspace`) with `TaskCard` components in drag-and-drop columns. The agent missed it because it searched for the literal word "kanban" rather than enumerating the page files in `client/src/pages/`.
+
+**Root cause:** Step 0a as originally worded asked the agent to "identify the existing pages/components the new capability touches and Read those files BEFORE drafting any HTML" — but did not require the agent to name those files in its mockup-log entry per screen. A claim of "I grounded" passes the rule's bar even when the grounding missed the actual surface.
+
+**The fix:** Step 0a now requires the mockup-log Round entry to include a "Codebase grounding (existing files identified)" subsection that lists, per screen, the exact filenames in `client/src/pages/` or `client/src/components/` the screen grounds against. If a screen claims to extend an existing surface but doesn't name the file, the grounding pass is incomplete and the round is rejected.
+
+**Detection signal in future:** if a mockup-log Round entry lacks an explicit per-screen filename list, the grounding pass was skipped. Reject the round before reviewing the HTML.
+
+### 2026-05-12 Correction — Verify PR state before referencing it as actionable
+
+**Concrete failure:** mid-session I proposed "push this strengthening commit to PR #289 now" assuming the PR was still open. User corrected: PR #289 had already been merged. A `mcp__github__pull_request_read` call would have shown `state: closed, merged: true` in one call.
+
+**The fix:** before referencing an open-PR action ("push commit to PR #N", "add comment to PR #N", "amend PR #N's description"), run `mcp__github__pull_request_read` with method `get` and check `merged` + `state`. If merged, the action is fresh-branch + fresh-PR, not amend.
+
+**Detection signal:** any phrase like "PR #N" that's older than 30 minutes of conversation state is unsafe to act on without re-reading. PR state changes off-session (operator merges, CI auto-closes, conflicts arise) and assumed-open PRs are a common stale-state failure mode.
