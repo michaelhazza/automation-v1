@@ -26,7 +26,13 @@
   - [3.9 Notification + delivery surfaces](#39-notification--delivery-surfaces)
   - [3.10 Multi-user consumption (consumes `principal-scoped-agents`)](#310-multi-user-consumption-consumes-principal-scoped-agents)
   - [3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)](#311-voice-profile-primitive-introduced-by-ea-v1-designed-for-reuse)
-  - [3.12 Failure modes for triggered runs](#312-failure-modes-for-triggered-runs)
+  - [3.12 First-run setup context attachment](#312-first-run-setup-context-attachment)
+  - [3.13 Personal nav group in sidebar (data-driven)](#313-personal-nav-group-in-sidebar-data-driven)
+  - [3.14 EA provisioning (explicit consent, not automatic)](#314-ea-provisioning-explicit-consent-not-automatic)
+  - [3.15 Spending budgets (pooled to subaccount)](#315-spending-budgets-pooled-to-subaccount)
+  - [3.16 Connection card "Personal" chip labelling](#316-connection-card-personal-chip-labelling)
+  - [3.17 Display name customisation](#317-display-name-customisation)
+  - [3.18 Failure modes for triggered runs](#318-failure-modes-for-triggered-runs)
 - [4. Open architectural questions (for operator ratification)](#4-open-architectural-questions-for-operator-ratification)
 - [5. Out of scope (explicit non-goals)](#5-out-of-scope-explicit-non-goals)
 - [6. What unblocks when this ships](#6-what-unblocks-when-this-ships)
@@ -279,7 +285,91 @@ Opt-out: per-profile flag in user settings. Recommendation: **default on, with a
 
 Privacy: derived `profile_json` is feature-level (greeting patterns, sentence-length stats, signature lines) — NOT verbatim content. Source content is read transiently, not stored on the profile.
 
-### 3.12 Failure modes for triggered runs
+### 3.12 First-run setup context attachment
+
+When a user provisions their EA for the first time, the EA needs context about the user to do its job. Reuses the principal-scoped memory model from `principal-scoped-agents` §3.6 — context answers are stored as user-scoped `memory_blocks`.
+
+First-run wizard collects (5–10 fields max, one screen):
+
+- Timezone (auto-detected from browser, user confirms)
+- Working hours start / end (defaults 9am–6pm Mon–Fri)
+- Preferred briefing delivery (Slack DM / email / both — see §4 q4)
+- Preferred briefing time (defaults 07:00)
+- Default meeting length preference (defaults 30 min)
+- Close colleagues / family the EA might encounter (free-text, optional)
+- Recurring people-or-projects to always flag in briefings (free-text, optional)
+- Anything else worth knowing on day one (free-text, optional)
+
+Each field writes to a `memory_blocks` row with `scope_type: 'user'`, `scope_id: current_user.id`, a structured `key` (e.g., `'ea.working_hours'`, `'ea.timezone'`), and the value. The EA reads these at every run via the principal-aware `runContextLoader`.
+
+Users can edit / delete blocks later via the EA settings page (§3.17 mockup #3). No new admin UI for memory management.
+
+Mockup: `prototypes/personal-assistant-v1/01-first-run-setup.html` — single-screen wizard with the OAuth connection step, the context questionnaire, and the voice-profile derivation confirmation.
+
+### 3.13 Personal nav group in sidebar (data-driven)
+
+User-principal agents need to be discoverable in the sidebar without hardcoding any specific agent name or mode-switch. Approach:
+
+- Extend `client/src/config/sidebar.ts` `buildNavItems` factory with a new nav GROUP keyed `personal`.
+- Group is rendered at the top of the sidebar, ABOVE Operate / Build / Govern.
+- Entries in the group are **data-driven** from the user's user-principal agents (`SELECT * FROM agents WHERE principal_type = 'user' AND principal_id = current_user.id`).
+- Group is visible only when the user has at least one user-principal agent provisioned (zero entries → group hidden entirely).
+- Each entry uses the agent's configured display name. Default display name is "Personal Assistant"; user can rename per §3.17.
+- Group is visible regardless of which Workspace / Org / System view-mode is active. The view-mode switcher continues to control ORGANISATIONAL scope; the Personal group is orthogonal to that, providing always-accessible navigation to user-principal agents.
+
+**Why this is better than a "Personal" view mode:** view modes today (Workspace / Org / System) control organisational scope. A "Personal" mode would mix two orthogonal axes — principal type vs organisational scope — and introduce confusion (auto-switching, "how do I get back," semantic overloading). A persistent nav group keeps the EA one click away in any view mode without UX confusion.
+
+**Phase 3 forward-compat:** when Dev Agent ships as a second user-principal agent, it appears in the same Personal nav group automatically. Zero hardcoding, no nav refactor.
+
+Mockup: `prototypes/personal-assistant-v1/02-my-ea-home.html` shows the sidebar with the Personal group at the top and the EA's home view as main content.
+
+### 3.14 EA provisioning (explicit consent, not automatic)
+
+EAs are NOT auto-created for every user in the org. Each user provisions their own via an explicit "Set up my Personal Assistant" entry point. Reasons:
+
+- Avoids running cost (LLM tokens + scheduled jobs + recurring polls) on EAs nobody is using.
+- Matches the principle of explicit consent for personal-data features (the EA reads your inbox; you opt in).
+- Keeps the Personal nav group empty (and hidden) for users who don't want an EA.
+
+Provisioning entry point: a "Set up my Personal Assistant" card on the user's home page (visible when the Personal group is empty). Click → opens the first-run setup wizard (§3.12). Wizard completion: creates the user-principal EA row, seeds default skills + risk-tier ceiling per §3.4, kicks off voice-profile derivation, fires the first briefing on next 07:00.
+
+### 3.15 Spending budgets (pooled to subaccount)
+
+EA token spend rolls up into the existing subaccount budget. No new per-user budget primitive in V1. Reasons:
+
+- Today's spending budget is subaccount-scoped — splitting per-user adds significant complexity for marginal benefit.
+- The Personal Assistant is a productivity tool, not a billable customer surface. The buyer pays for total subaccount usage; how it splits between staff is the buyer's internal accounting question, not SynthetOS's.
+
+Existing budget alert (`spendAlertConfig.ts`) fires at the subaccount level and applies to EA runs the same as any other agent. Spec confirms no schema or service change.
+
+Per-user budget caps are a Phase 1.5 follow-on IF customer demand emerges. Not in V1.
+
+### 3.16 Connection card "Personal" chip labelling
+
+When a user-principal agent connects their own account (e.g. Michael connects "his" Gmail), the connection card on the Connections page (`client/src/pages/govern/ConnectionsPage.tsx`) distinguishes it from a subaccount-level connection.
+
+Visual: a small chip next to the connection name. Chip text from the `principal_type`:
+
+- `Personal` — user-principal connection (e.g., Michael's Gmail)
+- `Subaccount` — subaccount-principal connection (e.g., Acme Co's CRM) — most existing connections
+- `Org` — org-principal connection (e.g., the org's GitHub App)
+
+Subaccount-level admins see all subaccount + org connections, no chip change. Users see their own Personal connections plus any subaccount/org connections they have access to via existing RLS. Per §3.8 of `principal-scoped-agents`, users do NOT see other users' Personal connections.
+
+No new component — minor edit to the existing `ConnectionsPage` row template.
+
+### 3.17 Display name customisation
+
+The EA's display name is per-instance, defaulting to `Personal Assistant`. Users can rename to anything (e.g., `Jarvis`, `Friday`, `Aria`) in the EA settings page. The display name is used:
+
+- Sidebar nav entry under the Personal group (§3.13)
+- Run Trace event headers ("Your Personal Assistant ran ...")
+- Delivery surfaces (Slack DM signature, email From-name where allowed)
+- Confirmation modals ("Approve Personal Assistant's draft?")
+
+Stored in `agents.name` (existing column). No new schema. Mockup #3 shows the rename field.
+
+### 3.18 Failure modes for triggered runs
 
 The spec defines behaviour for the four failure classes:
 
@@ -294,7 +384,7 @@ All four failure paths are visible in the EA's Run Trace view (existing surface)
 
 Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = awaiting decision.
 
-1. **Calendar write-scope V1.** Read + write, or read-only first? Recommendation: **read + write V1.** The meeting-prep + conflict-detection use cases lose half their value without write. Mitigation: write actions ship review-gated (Tier 4+ default-review per Phase 1 risk-tier policy). **OPEN.**
+1. **Calendar write-scope V1.** **LOCKED:** read + write V1. Write actions ship review-gated (Tier 4+ default-review per Phase 1 risk-tier policy).
 
 2. **Slack write-scope V1 — user-facing config.** **LOCKED.** Read + write V1. Auto-send scope is a per-instance setting with three options, default `Only me (DMs)`:
    - **Only me (DMs)** — every message to a channel or other person needs operator approval (default).
@@ -302,9 +392,9 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
    - **Anywhere** — auto-post to any channel; only DMs to people other than me need approval.
    Surfaced as a single dropdown on the EA settings page. The same enum is reused on any future agent that gains Slack post capability (Riley, future content agents).
 
-3. **Risk-tier ceiling for the EA agent.** Recommendation: **Tier 5 hard ceiling for V1.** Tier 6 sends (`send_email`, `slack.post_message` to third parties) are allowed but require review (except as gated by §3 below for self-directed Slack). Drafting / scheduling / internal-record updates run auto. **OPEN.**
+3. **Risk-tier ceiling for the EA agent.** **LOCKED:** Tier 5 hard ceiling. Tier 6 sends (`send_email`, `slack.post_message` to third parties) allowed but require review (except as gated by question 2 for self-directed Slack). Drafting / scheduling / internal-record updates run auto.
 
-4. **Daily briefing delivery default.** Slack DM, email, both, or operator-selectable at setup? Recommendation: **Slack DM as default**, email as alternate, both available; operator picks at first-run setup. **OPEN.**
+4. **Daily briefing delivery default.** **LOCKED:** Slack DM as default, email as alternate, both available; operator picks at first-run setup.
 
 5. **Use-case shortlist for V1.** **LOCKED.** Ship #1 (daily briefing 07:00 cron + Slack DM), #2 (inbox triage + drafted replies), #3 (15-min-before meeting prep summary). Defer #4 (Slack mention summary) and #5 (weekly review) to a fast follow-on if the trio lands cleanly. Confirmed: existing briefing/summary workflows in the codebase are subaccount-focused; the EA briefings are user-principal-focused (new templates, reuses workflow engine).
 
@@ -312,7 +402,7 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 
 7. **Multi-user EA principal binding.** **LOCKED.** EA is a user-principal agent per the predecessor spec `tasks/builds/principal-scoped-agents/brief.md`. Each user provisions their own EA instance bound to their `user_id`. Credentials, runs, policy envelope, and Run Trace honour the principal model. V1 UI surfaces the operator's own instance; multi-user UI surfaces are a fast follow-on. EA V1 build does not invent new schema for this — it consumes the foundation primitive shipped by the predecessor spec.
 
-8. **Voice and tone — dynamic, not static.** **LOCKED.** EA voice is data-driven from the operator's own sent mail (per §3.11 — Voice Profile primitive). No static system-prompt tone. Voice profile derives at first-run setup from the last 50 sent emails in the past 90 days, refreshes every 30 days or every 50 new sent emails (whichever first). Manual refresh button on EA settings. Default opt-in with one-click opt-out at first-run setup. Same primitive is reusable across Riley (brand voice, subaccount-scoped), Helena (client-report voice), Sarah (analyst voice), and future content agents. **One remaining OPEN sub-question:** opt-out default — is "default on with clear explanation" acceptable, or should it be "default off and explicit opt-in at first-run setup"? Recommendation: **default on, clear explanation, one-click opt-out** — the EA is meaningfully less useful without voice adaptation and the operator's own sent mail is the operator's own data being read for the operator's own benefit. **OPEN sub-question only.**
+8. **Voice and tone — dynamic, not static.** **LOCKED.** EA voice is data-driven from the operator's own sent mail (per §3.11 — Voice Profile primitive). No static system-prompt tone. Voice profile derives at first-run setup from the last 50 sent emails in the past 90 days, refreshes every 30 days or every 50 new sent emails (whichever first). Manual refresh button on EA settings. **Opt-out default LOCKED: default on, clear explanation at first-run setup, one-click opt-out.** Same primitive is reusable across Riley (brand voice, subaccount-scoped), Helena (client-report voice), Sarah (analyst voice), and future content agents.
 
 ## 5. Out of scope (explicit non-goals)
 
@@ -343,15 +433,23 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 
 ## 7. Sequencing
 
-**Mockups required for V1: no.** Every V1 UI surface reuses an existing visual pattern:
+**Mockups required for V1: yes, three.** The multi-user EA design (consuming the `principal-scoped-agents` foundation) introduces genuinely new user-facing surfaces that warrant visual design before build:
 
-- Connections page row (Calendar) — pattern is `client/src/pages/govern/ConnectionsPage.tsx`, no new visual decisions.
-- System agent definition (EA template) — pattern is the existing `SUBACCOUNT_AGENTS` set (Sarah, Johnny, Helena, Patel, Riley, Dana), shipped via DB seed migration.
-- Triggers — Scheduled uses `RecurringTasksPage`, event-driven uses `AgentTriggersPage`, webhook-sourced is mechanical wiring with no new operator surface.
-- Delivery surfaces (Slack DM, email) — existing notification surfaces, no new UI.
-- Run Trace + run history for triggered EA runs — existing `RunTracePage.tsx` surface unchanged.
+| File | Purpose |
+|---|---|
+| `prototypes/personal-assistant-v1/01-first-run-setup.html` | OAuth connections + context questionnaire + voice-profile derivation wizard. New flow, ~5–10 fields, single screen. |
+| `prototypes/personal-assistant-v1/02-my-ea-home.html` | The user-principal home view. Sidebar shows the new Personal nav group with the EA at top; main content shows morning briefing card, drafts awaiting review, today's meeting prep, EA's recent runs. |
+| `prototypes/personal-assistant-v1/03-ea-settings.html` | Per-instance EA configuration: voice profile status + manual refresh + opt-out toggle, briefing delivery preference, Slack auto-send scope dropdown (3 options per §4 q2), display-name field, trigger schedule, context-memory edit. |
 
-If the operator wants a sample of what the morning Slack briefing looks like as plain text, a one-page text mock (no HTML, no clickable prototype) is sufficient and can be inlined into the spec rather than authored as a separate prototype.
+**Reused without new mockups:**
+
+- Connections page row (Calendar) — uses existing `ConnectionsPage.tsx` pattern + the new "Personal" chip from §3.16.
+- System-agent template — shipped via DB seed migration like Sarah/Johnny/Helena (no new visual surface).
+- Triggers — Scheduled uses `RecurringTasksPage`, event-driven uses `AgentTriggersPage`, both unchanged.
+- Run Trace — existing `RunTracePage.tsx` with the redaction policy from `principal-scoped-agents` §3.8 enforced at the API layer (no new UI surface required for the redaction itself).
+- Slack briefing rendering — Slack message formatting, no SynthetOS UI surface.
+
+Visual conventions inherit from `prototypes/consolidation-2026-05-06/_shared.css` (the foundation visual baseline) and `prototypes/operator-backend/_shared.css` (extended pills, time strips, progress patterns).
 
 **Build sequencing:**
 

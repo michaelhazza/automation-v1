@@ -19,8 +19,11 @@
   - [3.3 Credential Broker principal-aware lookup](#33-credential-broker-principal-aware-lookup)
   - [3.4 Policy Envelope principal context](#34-policy-envelope-principal-context)
   - [3.5 Run Trace virtual-view principal projection](#35-run-trace-virtual-view-principal-projection)
-  - [3.6 Migration of existing agents to default principal](#36-migration-of-existing-agents-to-default-principal)
-  - [3.7 Master brief doc update](#37-master-brief-doc-update)
+  - [3.6 Memory blocks principal scope](#36-memory-blocks-principal-scope)
+  - [3.7 Migration of existing agents and memory to default principal](#37-migration-of-existing-agents-and-memory-to-default-principal)
+  - [3.8 Admin visibility and redaction policy](#38-admin-visibility-and-redaction-policy)
+  - [3.9 Cross-principal delegation (design note)](#39-cross-principal-delegation-design-note)
+  - [3.10 Master brief doc update](#310-master-brief-doc-update)
 - [4. Open architectural questions (for operator ratification)](#4-open-architectural-questions-for-operator-ratification)
 - [5. Out of scope (explicit non-goals)](#5-out-of-scope-explicit-non-goals)
 - [6. What unblocks when this ships](#6-what-unblocks-when-this-ships)
@@ -163,7 +166,27 @@ Consequences:
 
 Spec also confirms whether the existing Run Trace UI (`client/src/pages/RunTracePage.tsx`) needs to surface principal in the per-event row. Recommendation: NOT in V1 — surface it on the run-summary header instead ("Run for Michael, Personal Assistant agent"). Per-event principal cluttering is reserved for the eventual canonical ledger consolidation (Phase 3+).
 
-### 3.6 Migration of existing agents to default principal
+### 3.6 Memory blocks principal scope
+
+Memory today is subaccount-scoped via `memory_blocks.subaccount_id`. User-principal agents need user-scoped memory ("Michael's preferences", not "Acme Co's preferences").
+
+Schema change parallel to the agent principal pattern:
+
+- `memory_blocks.scope_type` — text, NOT NULL, default `'subaccount'`, CHECK `IN ('subaccount', 'user', 'org')`.
+- `memory_blocks.scope_id` — uuid, NOT NULL. Backfilled from `subaccount_id`.
+
+`runContextLoader` (and any other memory-reading site) queries by the run's principal: `WHERE organisation_id = ? AND scope_type = run.principal_type AND scope_id = run.principal_id`.
+
+Bounded scope — what this spec does NOT add:
+- No new memory types beyond the existing `memory_blocks` shape.
+- No auto-derivation from inbox / calendar / external sources (Voice Profile in EA V1 is a separate primitive, not memory).
+- No cross-user memory sharing.
+- No memory-driven knowledge graphs.
+- No new admin UI for memory management (existing `update_memory_block` action stays unchanged; users edit their own memory through the agent's normal interaction).
+
+Total cost: one schema migration, one query-path change in `runContextLoader`, one backfill. ~1 dev-day inside this build.
+
+### 3.7 Migration of existing agents and memory to default principal
 
 Every existing row in `agents` and `agent_runs` is set to `principal_type = 'subaccount'`, `principal_id = subaccount_id` by the migration. The CHECK constraint and NOT NULL enforce this for future inserts.
 
@@ -178,7 +201,49 @@ Migration order:
 
 Backfill is idempotent. Reversible down-migration drops columns + view + indexes; spec authors the down-script.
 
-### 3.7 Master brief doc update
+### 3.8 Admin visibility and redaction policy
+
+User-principal agents handle personal data (inbox content, calendar attendees, Slack thread quotes, memory blocks). Default visibility for org admins and subaccount admins MUST honour privacy expectations consistent with industry best practice (Slack admins can't silently read employee DMs; 1Password admins can't read user vaults; Google Workspace audit access is logged and visible).
+
+**Default visibility for user-principal runs:**
+
+| Surface | Owner (the user-principal) | Subaccount admin | Org admin |
+|---|---|---|---|
+| Run Trace metadata (action, status, duration, cost) | full | full | full |
+| Run Trace content payload (inbox snippets, calendar attendees, Slack quotes, prompt text the agent reasoned over) | full | **REDACTED** | **REDACTED** |
+| Memory blocks (user-scoped) | full | **REDACTED** | **REDACTED** |
+| Voice Profile content (the derived profile_json) | full | **REDACTED** | **REDACTED** |
+| Connection presence ("Michael has Gmail connected") | full | full (presence only) | full (presence only) |
+| Cost roll-up | full | full | full |
+| Spending budget breaches and approvals | full | full | full |
+
+**Break-glass admin override:**
+
+- Org admins can request access to a user-principal agent's redacted content via a documented compliance path.
+- The override action requires explicit operator (org-admin) action and writes a typed audit event `principal.content_revealed` to Run Trace.
+- The affected user is notified (email + in-app banner) the next time they log in.
+- Override grant is time-limited (default 7 days) and scoped to a specific run-id range, not blanket access.
+
+Implementation: redaction happens at the API serialisation layer (Run Trace endpoint, memory-blocks endpoint, voice-profile endpoint). RLS policies enforce row-level access; redaction is the second layer (column-level mask) for rows the admin CAN see but should not have full content of.
+
+V1 build delivers the redaction layer and the typed audit event. The break-glass UI surface (admin clicks "request access") is deferred to a Phase 1.5 follow-on — V1 ships with the redaction enforced and the audit-event types defined, but admins requesting access do so via direct DB / API call until the UI surface lands. This is consistent with single-user dogfood reality (no admin investigation needed before customer adoption).
+
+### 3.9 Cross-principal delegation (design note)
+
+Cross-principal delegation is the case where a user-principal agent calls into a subaccount-principal agent (or vice versa). Example: Michael's EA delegates a research task to Sarah-the-analyst (subaccount-principal).
+
+V1 does not implement cross-principal delegation. Existing hierarchical delegation (`DelegationScope` enum) is assumed to operate within a single principal. This brief flags the future requirement so the design does not get retrofitted into the run-attribution model later:
+
+- When cross-principal delegation lands, the delegated run carries BOTH principals — the initiator's (the EA's user-principal) AND the executor's (Sarah's subaccount-principal).
+- Run Trace surfaces the delegation chain with principal at each hop.
+- Credential resolution at each hop uses the executor's principal, not the initiator's (the agent uses its OWN connected accounts, not the initiator's).
+- Audit attribution shows the chain: "Michael's EA → Sarah-the-Analyst → action".
+
+No schema change required today. The `delegation_outcomes` ledger already has the rows needed; the principal projection from §3.5 carries the field through. Implementing cross-principal delegation later is purely a routing / UI / authorisation rule change, not a foundation change.
+
+This note exists so the brief explicitly forecloses on the "user-principal agents and subaccount-principal agents are siloed" assumption, in case anyone reads §3.1–§3.7 and infers that as a design constraint. They are not siloed; they simply do not delegate to each other yet.
+
+### 3.10 Master brief doc update
 
 The v1.2 master brief §5.1 says:
 
@@ -192,21 +257,23 @@ Master brief §9 (Credential Broker) is updated to acknowledge that the broker r
 
 ## 4. Open architectural questions (for operator ratification)
 
-1. **Forward-compat for `'org'` principal — active or reserved?** Recommendation: **active.** Org-scoped agents exist today (orchestrator, head-of-X) and currently have a fuzzy "no subaccount" state. Tagging them `principal_type: 'org'` from day one is correct attribution and costs nothing extra. The alternative — leave `'org'` reserved — means org agents keep the subaccount-default tag, which is a small but real correctness gap.
+Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = none remaining.
 
-2. **Denormalise `principal_id = subaccount_id` for subaccount-principal agents, or store NULL and compute on read?** Recommendation: **denormalise.** Read sites become simpler (one column lookup, no CASE on type). The sync invariant is enforced by a CHECK constraint and a DB trigger; cost is one trigger, value is every read-site stays trivial.
+1. **`'org'` principal type — active or reserved.** **LOCKED: active.** Org-level agents (orchestrator, head-of-X) act for the org. Tagging them `'org'` from day one is correct attribution.
 
-3. **`principal_id` foreign-key target — polymorphic or no FK?** Recommendation: **no FK at the DB level**, validation in the broker / service layer. Polymorphic FKs are an antipattern in Postgres; a single FK column pointing at three possible tables fails to enforce anything useful. Service-layer validation (broker asserts the principal exists before injection) is the standard pattern in this codebase already.
+2. **Denormalise `principal_id = subaccount_id` for subaccount-principal agents.** **LOCKED: yes, denormalise.** Read sites become one-column lookups, no CASE branching. Sync invariant enforced by CHECK constraint + trigger.
 
-4. **Per-link override on `subaccount_agents`?** Question: can the same agent template be linked to a subaccount with different principals for different links? Recommendation: **no override in V1.** Principal is set on the agent row, not the link. If a use case ever needs the same agent template active for multiple users in a subaccount, the right answer is multiple agent rows (one per user) sharing a `system_agent_id`, not a per-link override. EA V1's multi-user design follows this pattern.
+3. **`principal_id` foreign-key target.** **LOCKED: no DB FK.** Service-layer validation in the broker. Standard codebase pattern.
 
-5. **`displayHint` in policy envelope — capture or omit?** Privacy vs debuggability. Recommendation: **omit by default in V1, opt-in via system-admin config.** The principal `id` is sufficient for joining to `users` at audit time; embedding a display name in every envelope snapshot is a data-minimisation hit for marginal log readability gain.
+4. **Per-link principal override on `subaccount_agents`.** **LOCKED: no override.** Principal lives on the agent row. Multi-user EA pattern is multiple agent rows sharing a `system_agent_id`, not a per-link override.
 
-6. **Migration of org-scoped agents (orchestrator, heads).** Recommendation: assign `principal_type: 'org'`, `principal_id: organisation_id`. These agents act on behalf of the org as a whole, not a subaccount or user. This is the cleanest backfill — confirms §4 question 1's "active" decision.
+5. **`displayHint` in policy envelope snapshot.** **LOCKED: omitted entirely.** No config knob, no admin toggle. The `id` is sufficient for audit joins. Less UI optionality is better.
 
-7. **RLS impact.** The codebase has FORCE RLS on most tables. Adding `principal_id` does not change the existing RLS policies (they key off `organisation_id` + `subaccount_id`), but spec confirms whether any policy should additionally restrict user-principal rows to the owning user (e.g. "users can only read their own EA's runs"). Recommendation: **yes for `agent_runs` of user-principal agents** — Run Trace queries default-scope to the operator's own runs unless org-admin overrides. This is the natural extension of multi-user EA: I should not see Sarah's EA work, and vice versa.
+6. **Migration of existing org-scoped agents (orchestrator, heads).** **LOCKED: assign `principal_type: 'org'`, `principal_id: organisation_id`.** Confirms #1's "active" decision in practice.
 
-8. **CredentialBroker backward-compat at the call site.** Today's call sites pass `{ subaccountId, provider }`. Recommendation: **broker treats omitted `principalType` as `'subaccount'` and omitted `principalId` as the `subaccountId`** — existing call sites continue to work unchanged. Only new user-principal call sites (EA, Dev Agent) pass the explicit principal context. Reduces blast radius on the rollout.
+7. **RLS for user-principal runs.** **LOCKED: yes, restrict to owning user by default.** Each user sees their own user-principal agent's runs; org admins see all VIA the redaction policy in §3.8 (metadata visible, content redacted). Spec implements row-level visibility filter on `agent_runs` for user-principal rows.
+
+8. **CredentialBroker backward-compat.** **LOCKED: yes, additive params with defaults.** Omitted `principalType` defaults to `'subaccount'`; omitted `principalId` defaults to `subaccountId`. Existing call sites work unchanged.
 
 ## 5. Out of scope (explicit non-goals)
 

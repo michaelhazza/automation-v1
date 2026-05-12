@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Personal Assistant — Settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; }
+
+.proto-banner { background: #eef2ff; border-bottom: 1px solid #c7d2fe; padding: 8px 16px; font-size: 11.5px; color: #3730a3; text-align: center; }
+
+.page-shell { max-width: 880px; margin: 32px auto 60px; padding: 0 40px; }
+.crumb { font-size: 12px; color: #64748b; margin-bottom: 6px; }
+.crumb a { color: #4338ca; text-decoration: none; font-weight: 500; }
+.page-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 4px; }
+.page-sub { font-size: 13.5px; color: #64748b; line-height: 1.6; margin-bottom: 28px; }
+
+.settings-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 26px; margin-bottom: 16px; }
+.settings-card-title { font-size: 14.5px; font-weight: 700; color: #0f172a; margin-bottom: 2px; }
+.settings-card-sub { font-size: 12.5px; color: #64748b; line-height: 1.6; margin-bottom: 18px; }
+
+.row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.row-grid-1 { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.field-label { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px; display: block; }
+.field-input, .field-select { width: 100%; padding: 8px 11px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 13px; font-family: inherit; color: #0f172a; }
+.field-input:focus, .field-select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.field-hint { font-size: 11.5px; color: #64748b; margin-top: 4px; line-height: 1.5; }
+
+/* voice profile status */
+.voice-status { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 14px; }
+.voice-status-icon { width: 36px; height: 36px; border-radius: 9px; background: #eef2ff; color: #4338ca; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.voice-status-body { flex: 1; }
+.voice-status-h { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 4px; }
+.voice-status-stats { font-size: 12px; color: #64748b; line-height: 1.55; }
+.voice-status-stats strong { color: #334155; font-weight: 600; }
+.voice-refresh-btn { padding: 7px 13px; background: white; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 12px; font-weight: 600; color: #475569; cursor: pointer; flex-shrink: 0; }
+
+/* Toggle */
+.toggle-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.toggle { width: 36px; height: 20px; background: #4338ca; border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0; }
+.toggle::after { content: ''; width: 16px; height: 16px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px; transition: 0.18s; }
+.toggle.off { background: #cbd5e1; }
+.toggle.off::after { right: 18px; }
+.toggle-label { font-size: 13px; color: #334155; font-weight: 500; flex: 1; }
+.toggle-meta { font-size: 11.5px; color: #64748b; line-height: 1.55; margin-top: 2px; }
+
+/* memory blocks */
+.memory-list { display: flex; flex-direction: column; gap: 8px; }
+.memory-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fafbfd; }
+.memory-key { font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.04em; min-width: 130px; flex-shrink: 0; padding-top: 1px; }
+.memory-value { font-size: 12.5px; color: #334155; flex: 1; line-height: 1.5; }
+.memory-edit { font-size: 11.5px; color: #4338ca; cursor: pointer; font-weight: 600; flex-shrink: 0; }
+.memory-add { margin-top: 10px; display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #4338ca; font-weight: 600; cursor: pointer; padding: 8px 12px; border: 1.5px dashed #c7d2fe; border-radius: 8px; justify-content: center; }
+
+.danger-card { border-color: #fecaca; background: #fef2f2; }
+.danger-title { color: #b91c1c; }
+.danger-btn { padding: 8px 16px; background: white; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 7px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+
+/* save bar */
+.save-bar { position: sticky; bottom: 16px; margin-top: 24px; padding: 12px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; }
+.save-status { font-size: 12.5px; color: #64748b; }
+.save-buttons { display: flex; gap: 10px; }
+.btn-secondary { padding: 8px 14px; background: white; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #475569; cursor: pointer; }
+.btn-primary { padding: 8px 16px; background: #4338ca; border: 1px solid #4338ca; border-radius: 7px; font-size: 12.5px; font-weight: 700; color: white; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  Personal Assistant V1 — Mockup 3 of 3: Per-instance EA configuration page.
+  <a href="index.html" style="color: #4338ca; font-weight: 600; text-decoration: none; margin-left: 8px;">← Back to index</a>
+</div>
+
+<div class="page-shell">
+
+  <div class="crumb"><a href="02-my-ea-home.html">← Back to Personal Assistant</a></div>
+  <div class="page-title">Settings</div>
+  <div class="page-sub">Configuration for your Personal Assistant. Changes apply only to your instance — other staff members manage their own.</div>
+
+  <!-- Display name -->
+  <div class="settings-card">
+    <div class="settings-card-title">Display name</div>
+    <div class="settings-card-sub">What your assistant is called in the sidebar, emails, and Slack signatures.</div>
+    <div class="row-grid">
+      <div>
+        <label class="field-label">Name</label>
+        <input class="field-input" type="text" value="Personal Assistant" />
+        <div class="field-hint">Default is "Personal Assistant". You can rename to anything (e.g. "Jarvis", "Friday").</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Briefing -->
+  <div class="settings-card">
+    <div class="settings-card-title">Morning briefing</div>
+    <div class="settings-card-sub">A summary of your day, posted before you start work.</div>
+    <div class="row-grid">
+      <div>
+        <label class="field-label">Time</label>
+        <input class="field-input" type="time" value="07:00" />
+        <div class="field-hint">In your timezone (Australia/Melbourne).</div>
+      </div>
+      <div>
+        <label class="field-label">Delivery</label>
+        <select class="field-select">
+          <option>Slack DM (recommended)</option>
+          <option>Email</option>
+          <option>Both</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slack auto-send scope -->
+  <div class="settings-card">
+    <div class="settings-card-title">Slack auto-send scope</div>
+    <div class="settings-card-sub">Controls when your assistant can post on Slack without your approval. Tighter scopes are safer.</div>
+    <div class="row-grid-1">
+      <div>
+        <label class="field-label">Scope</label>
+        <select class="field-select">
+          <option selected>Only me (DMs) — recommended</option>
+          <option>My own channels</option>
+          <option>Anywhere</option>
+        </select>
+        <div class="field-hint">
+          <strong>Only me (DMs):</strong> every message to a channel or other person needs your approval.<br/>
+          <strong>My own channels:</strong> auto-post to channels you're a member of; DMs to others need approval.<br/>
+          <strong>Anywhere:</strong> auto-post anywhere; only DMs to other people need approval.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice profile -->
+  <div class="settings-card">
+    <div class="settings-card-title">Voice profile</div>
+    <div class="settings-card-sub">Your assistant writes in your voice — derived from your sent mail.</div>
+
+    <div class="voice-status">
+      <div class="voice-status-icon">✍</div>
+      <div class="voice-status-body">
+        <div class="voice-status-h">Voice profile is active</div>
+        <div class="voice-status-stats">
+          Derived from your <strong>last 50 sent emails</strong> · Sampled <strong>6 days ago</strong> · Next refresh in <strong>~24 days</strong> or after <strong>17 more sends</strong>
+        </div>
+      </div>
+      <button class="voice-refresh-btn">Refresh now</button>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle"></div>
+      <div>
+        <div class="toggle-label">Derive voice profile from my sent mail</div>
+        <div class="toggle-meta">Turn off if you'd prefer your assistant to use a generic professional voice. We only store the feature-level profile — not your email content.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context memory -->
+  <div class="settings-card">
+    <div class="settings-card-title">Context your assistant knows about you</div>
+    <div class="settings-card-sub">Things you told your assistant during setup. Edit anything below or add more.</div>
+
+    <div class="memory-list">
+      <div class="memory-row">
+        <div class="memory-key">Timezone</div>
+        <div class="memory-value">Australia/Melbourne</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Working hours</div>
+        <div class="memory-value">9:00 AM — 6:00 PM, Mon–Fri</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Default meeting length</div>
+        <div class="memory-value">30 minutes</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Close contacts</div>
+        <div class="memory-value">Susan (partner), Sarah Chen (CTO at Synthetos), David Kim (head of sales), Jane Liu (Atlas Ventures partner)</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Always flag</div>
+        <div class="memory-value">Investor emails (Atlas, Sequoia), payment failures, Tuesday standup</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Other</div>
+        <div class="memory-value">CEO of Synthetos. Travel frequently. Always cc finance@ on invoice-related emails.</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+    </div>
+    <div class="memory-add">+ Add context</div>
+  </div>
+
+  <!-- Triggers -->
+  <div class="settings-card">
+    <div class="settings-card-title">When your assistant runs</div>
+    <div class="settings-card-sub">Schedules and triggers that wake your assistant up. You can pause any of these.</div>
+
+    <div class="memory-list">
+      <div class="memory-row">
+        <div class="memory-key" style="min-width: 200px;">Morning briefing</div>
+        <div class="memory-value">Every weekday at 7:00 AM</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key" style="min-width: 200px;">Inbox triage</div>
+        <div class="memory-value">Every 5 minutes (Gmail polling) + new-email trigger</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key" style="min-width: 200px;">Meeting prep</div>
+        <div class="memory-value">15 minutes before each calendar event</div>
+        <div class="memory-edit">Edit</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connections -->
+  <div class="settings-card">
+    <div class="settings-card-title">Connected accounts</div>
+    <div class="settings-card-sub">All connections are personal to you. Manage them on the <a href="#" style="color: #4338ca; font-weight: 500;">Connections page</a>.</div>
+
+    <div class="memory-list">
+      <div class="memory-row">
+        <div class="memory-key">Gmail · Personal</div>
+        <div class="memory-value">michael@synthetos.example — Connected, healthy</div>
+        <div class="memory-edit">Manage</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Calendar · Personal</div>
+        <div class="memory-value">Same Google account — Read + write</div>
+        <div class="memory-edit">Manage</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Slack · Personal</div>
+        <div class="memory-value">michael (Synthetos workspace) — Connected, healthy</div>
+        <div class="memory-edit">Manage</div>
+      </div>
+      <div class="memory-row">
+        <div class="memory-key">Drive · Personal</div>
+        <div class="memory-value">Read-only</div>
+        <div class="memory-edit">Manage</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Danger zone -->
+  <div class="settings-card danger-card">
+    <div class="settings-card-title danger-title">Danger zone</div>
+    <div class="settings-card-sub">Pausing stops all scheduled runs and triggers. Deleting removes your assistant's memory, voice profile, and all run history.</div>
+    <div style="display: flex; gap: 10px;">
+      <button class="danger-btn">Pause assistant</button>
+      <button class="danger-btn">Delete assistant…</button>
+    </div>
+  </div>
+
+  <!-- Save bar -->
+  <div class="save-bar">
+    <div class="save-status">Last saved 3 minutes ago</div>
+    <div class="save-buttons">
+      <button class="btn-secondary">Cancel</button>
+      <button class="btn-primary">Save changes</button>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
