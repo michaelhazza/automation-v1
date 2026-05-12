@@ -196,6 +196,13 @@ jobs:
       - name: "Operator Backend: operator-session.* literals confined to event registry (§ 4.7)"
         run: bash scripts/gates/verify-operator-event-registry.sh
 
+      # Operator Backend (§ 3.14 item 10) — checkpoint-payload logging ban.
+      # Bans logger/console calls that reference checkpoint_payload. The payload
+      # is encrypted at rest and contains sensitive session state (page URLs,
+      # screenshots, conversation history) that must never leak into logs.
+      - name: "Operator Backend: no logger/console reference to checkpoint_payload (§ 3.14)"
+        run: bash scripts/gates/verify-no-checkpoint-logging.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/
