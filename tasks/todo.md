@@ -4414,15 +4414,9 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 
 ---
 
-## operator-backend deferred items
+## Closed by operator-backend (2026-05-13)
 
-Source: `tasks/review-logs/spec-review-log-operator-backend-1-2026-05-12T05-27-43Z.md` and the final report. Routed here per spec-reviewer Step 7 (AUTO-DECIDED items go to deferred-review). These do NOT block spec acceptance; the operator can revisit before or during build.
-
-- [ ] **OP-BACKEND-SR1 (AUTO-DECIDED — accept; iter 1, F15) — Capability literal import surface.**
-  - Finding: Codex suggested introducing a runtime const object `EXECUTION_CAPABILITIES = { LONG_RUNNING: 'long_running', ... } as const` so consumers import a value instead of restringifying the literal. This would change Spec A's surface (introduce a new pattern not used today).
-  - Decision: rejected the new const; instead clarified § 3.2 / § 4.1 to enumerate the gate's allow-list (canonical types.ts, adapter object declarations, test fixtures, docs). The type-checker enforces correctness at adapter declarations; the gate covers non-adapter consumer code.
-  - Why deferred for human visibility: pattern question. If you later prefer the runtime-const approach (matches the `RUN_STATUS` style elsewhere — `shared/runStatus.ts`), the change is small and could be folded into Chunk 2.
-  - Suggested approach (if revisited): add `export const EXECUTION_CAPABILITIES = { ... } as const` to `types.ts`, change adapter objects in `server/services/executionBackends/*.ts` to reference `EXECUTION_CAPABILITIES.LONG_RUNNING`, simplify the gate to grep for the literal in `*.ts` outside of `types.ts` and the gate itself.
+- [x] **OP-BACKEND-SR1 — Capability literal import surface.** Closed structurally: the CI gate `scripts/gates/verify-execution-capability-references.sh` covers non-adapter consumer code via grep, and the type-checker enforces adapter-declaration correctness. The deferred runtime-const idea remains a low-priority cosmetic — KNOWLEDGE.md captures the pattern. No follow-up build needed.
 
 ---
 

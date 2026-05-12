@@ -206,3 +206,49 @@ These are flagged in spec § 16 (Open questions) and intentionally NOT blockers:
 - **L1/L2** (pr-reviewer): `is_resumable_now` has no pure test; `extendBudgetBodySchema` doesn't enforce 60-min step. Both low-priority; routed to `tasks/todo.md`.
 
 **Last updated:** 2026-05-13 (Phase 2 complete)
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #288
+**chatgpt-pr-review log:** [`tasks/review-logs/chatgpt-pr-review-operator-backend-2026-05-12T21-39-23Z.md`](../../review-logs/chatgpt-pr-review-operator-backend-2026-05-12T21-39-23Z.md)
+**chatgpt-pr-review rounds:** 4 (APPROVED — operator finalised after Round 4)
+**chatgpt-pr-review fixes by round:**
+- Round 1: F1 refresh-credential connectionId + awaited audit (blocker); F2 adoptOrStart terminal-row adoption (blocker, schema unique-index alignment); F3 dispatcher delegated predicate (high, rejected as doc-residue); F4 progress endpoint doc drift (medium); F5 retry-route reset race (medium). Commit `3e482410`.
+- Round 2: F1 extend-budget optimistic predicate (blocker); F2 fresh-profile-restart orderBy DESC (blocker); F3 stale delegated predicate (medium, duplicate of R1 F3); F4 await audit writes on state-changing routes (medium). Commit `5c63f181`.
+- Round 3: F1 assigned-user wiring (high, architectural escalation, operator-approved Option 2 — added migration 0334 then renumbered to 0342 at S2). Commit `4d557172`.
+- Round 4: F1 outer middleware blocked assigned users (blocker — removed `requireOrgPermission(AGENTS_EDIT)` from user-or-manager routes; admin-only routes retain it). Commit `a33f8b05`.
+
+**S2 branch-sync:** main shipped PR #291 (Personal Assistant V1) mid-review with migrations 0327-0332. Our 0327-0334 collided 6 ways. Renumbered all eight operator-backend migrations to 0335-0342 in lexical order; conflict markers in append-only files union-merged (KNOWLEDGE.md, tasks/todo.md); current-focus.md taken from ours; server/lib/permissions.ts union-merged (kept SUBACCOUNT_PERMISSIONS.OPERATOR_SETTINGS_WRITE entry plus main's six personal-assistant entries); agentRuns.ts auto-merged cleanly with both sides' fields preserved. Sweep of in-spec, plan, code, RLS manifest, and schema-file comments to the new numbers. Commit `b07b1196`.
+
+**G3 post-S2:** lint 0 errors, typecheck clean.
+
+**G4 (regression guard, pre-chatgpt-pr-review):** PASSED.
+
+**spec_deviations reviewed:** none recorded in Phase 2 handoff.
+
+**Doc-sync sweep verdicts (full record in chatgpt-pr-review session log):**
+- KNOWLEDGE.md: yes (Phase 2 added 2 entries + Phase 3 added 5 patterns from chatgpt-pr-review Rounds 1-4 and the S2 renumber process pattern)
+- architecture.md: yes (Operator Backend Key files + Migrations row renumbered 0335-0342 + permissions + dual-GUC + capability literals)
+- docs/capabilities.md: yes (Subscription-Driven Long-Task Execution row, Phase 2)
+- docs/integration-reference.md: n/a (no integration add/remove/rename)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: yes (§9 multi-tenant safety checklist, dual-GUC item, Phase 2)
+- docs/frontend-design-principles.md: no — operator UI surfaces reuse existing primitives
+- docs/decisions/: yes (ADR-0011 added Phase 2)
+- CONTRIBUTING.md: n/a
+- references/test-gate-policy.md: n/a
+
+**KNOWLEDGE.md entries added:** 5 (chatgpt-pr-review Phase 3 patterns + S2 renumber process pattern). Phase 2 had already added 2 operator-backend gotchas.
+
+**tasks/todo.md items closed:** 1 (OP-BACKEND-SR1 — capability literal import surface, structurally closed by CI gate).
+
+**Deferred items still in tasks/todo.md (carried to backlog):**
+- H2 (pr-reviewer): routes access `db` directly — pattern matches existing complex routes; refactoring to services-only would require `agentRunReadService`.
+- H3 (pr-reviewer): `_extractIsResumableNow` reads encrypted blob — V1 writes no `checkpoint_payload` data yet; decrypt-before-read added when ingestion ships.
+- L1/L2 (pr-reviewer): `is_resumable_now` has no pure test; `extendBudgetBodySchema` doesn't enforce 60-min step.
+- 2 mockup-hygiene items (`prototypes/operator-backend/` cleanup).
+
+**ready-to-merge label applied at:** 2026-05-12T23:57:19Z
+
+**Last updated:** 2026-05-12T23:57:19Z (Phase 3 FINALISATION complete)

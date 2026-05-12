@@ -257,13 +257,18 @@ Commit pending. Operator instructed: "after this round, merge in main, fix any c
 
 **Doc-sync sweep:** runs as finalisation-coordinator Step 6 after S2 sync — see next entry in this log.
 
-### Doc-sync field placeholders (filled by finalisation-coordinator Step 6)
+### Doc-sync field verdicts (finalisation-coordinator Step 6, post-S2 sweep)
 
 ```
-- KNOWLEDGE.md updated: pending Step 6
-- architecture.md updated: yes (Operator Backend Key files row corrected for progress route) — additional sweep pending Step 6
-- capabilities.md updated: pending Step 6
-- integration-reference.md updated: pending Step 6
-- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: pending Step 6
-- frontend-design-principles.md updated: pending Step 6
+- KNOWLEDGE.md updated: pending Step 7 pattern extraction (Phase 2 added 2 entries already)
+- architecture.md updated: yes (Operator Backend Key files: progress poll route corrected to operatorSessions.ts; Migrations row renumbered 0335-0339 + 0340 + 0341 + 0342; permissions row added in Phase 2; capability literals CI gate row added in Phase 2; dual-GUC pattern + key files Phase 2)
+- capabilities.md updated: yes (Subscription-Driven Long-Task Execution changelog row added in Phase 2 at line ~1204 — vendor-neutral)
+- integration-reference.md updated: n/a — no integration add/remove/rename in this PR; operator_session credential primitive was added in PR #286 (operator-session-identity) and already documented
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (DEVELOPMENT_GUIDELINES.md §9 multi-tenant safety checklist now includes the setOrgAndSubaccountGUC dual-GUC item — per Phase 2 doc-sync; CLAUDE.md n/a — no playbook-level rule changes)
+- frontend-design-principles.md updated: no — checked operator UI surfaces (OperatorBadge, OperatorChainLinkIndicator, OperatorAutoExtendBanner, modals) all reuse existing PageShell / Drawer / Modal primitives from PR #270; zero new UI pattern, hard rule, or worked example introduced
+- docs/decisions/ updated: yes (ADR-0011 operator-backend-chain-resume-model.md added in Phase 2)
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy changes
+- references/test-gate-policy.md updated: n/a — no test-gate posture changes; the new CI gates (verify-operator-event-registry.sh, verify-execution-capability-references.sh) follow the existing pattern and are CI-only as required
 ```
+
+**Doc-sync invariant check:** 9 doc rows recorded against `docs/doc-sync.md`'s 8 registered docs (spec-context.md omitted — spec-review-only). All verdicts substantiated with grep terms / specific reasons. Sweep complete.
