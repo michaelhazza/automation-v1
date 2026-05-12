@@ -1,8 +1,9 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** **LOCKED** for spec handoff
-**Revision:** 5 (final tightening pass: §1 wording, `snapshot_excerpt` lock, D baseline threshold, D embedding-failure invariant, B1 not-measured-vs-zero acceptance)
+**Status:** **LOCKED** for spec handoff (confirmed by reviewer 2026-05-12)
+**Revision:** 5.1 (final lock — §7 wording aligned with locked status; no conceptual change)
 **Date:** 2026-05-12
+**Spec-handoff non-negotiables** (per reviewer): B1 must add `injected_entry_ids` before entry utility is reported. D must first deploy as `off` or `shadow`. Shadow telemetry persists IDs + scores + status only, never full content. Embedding failure fails open to legacy retrieval. Semantic filtering must never silently empty a previously non-empty candidate category. A must use the join table unless the spec explicitly rejects bidirectional lineage.
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
 
 ## Table of contents
@@ -304,7 +305,7 @@ Mnemo's MNEMO-CONTEXT pattern works for a solo-developer's single agent with no 
 
 ## 7. Recommended next steps (revised sequencing per reviewer)
 
-1. **External reviewer reads this revision.** Most likely places to be wrong now: Proposal D's `shadow → sampled → on` telemetry-gate criteria (do they correctly cover the recall invariant?), the join-table shape in A (is `snapshot_excerpt` worth the storage cost?), Proposal D's query-definition choice ("task description" vs. broader context). Pressure-test those.
+1. **Spec author uses this locked brief as input.** The highest-risk design points to preserve are: Proposal D's `shadow → sampled → on` telemetry gates, A's join-table lineage shape, B1's injected-entry denominator, and D's query-definition choice. Carry the §4 invariants forward as explicit spec invariants — they are non-negotiable.
 2. **Proposal A ships independently.** Choose the lineage storage shape carefully before spec — default to join table; lock the decision via the A-Lineage invariant before writing the migration.
 3. **B1 (measurement substrate) ships first, or in the same PR as D's `shadow` mode.** This is the gating change for everything else.
 4. **Proposal D ships behind `shadow` mode** in its first production deploy. Telemetry compares legacy-selected vs. semantic-selected payloads per run; recall-invariant fallbacks are tracked.
