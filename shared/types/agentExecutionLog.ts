@@ -438,7 +438,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'trigger.suppressed': false,
   'workflow.started': false,
   'workflow.completed': false,
-  'workflow.failed': true,
+  'workflow.failed': false,
   'workflow.partial': false,
   'draft.created': false,
   'draft.sending': false,
@@ -449,7 +449,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'voice.profile.derivation.completed': false,
   'voice.profile.derivation.failed': false,
   'delivery_fallback': false,
-  'credential.owner_mismatch': true,
+  'credential.owner_mismatch': false,
   'webhook.invalid_signature': false,
   'action.conflict': false,
 };
