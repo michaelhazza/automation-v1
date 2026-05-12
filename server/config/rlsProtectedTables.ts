@@ -1266,6 +1266,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0328_voice_profiles.sql',
     rationale: 'Per-owner derived voice style features used to personalise agent output — contains writing-style signals extracted from sent emails and documents. Three-axis scoping (user / subaccount / org); cross-tenant leak exposes personal communication patterns and PII.',
   },
+  // 0329 — Personal Assistant V1: EA draft post-approval send state
+  {
+    tableName: 'ea_drafts',
+    schemaFile: 'eaDrafts.ts',
+    policyMigration: '0329_ea_drafts.sql',
+    rationale: 'Per-owner EA draft payloads with send-state machine — body and target_ref may contain email content, calendar details, or Slack messages. Owner-scoped visibility with admin read-through; cross-tenant leak exposes personal communications and PII.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
