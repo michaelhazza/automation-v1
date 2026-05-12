@@ -7,6 +7,7 @@
 **Scope:** full spec (all sections; Phase 2 BUILD branch verification per caller request)
 **Changed-code set:** 80 files (28 modified, 52 untracked) across `server/`, `client/`, `shared/`, `migrations/`, `prototypes/`
 **Run at:** 2026-05-12T13:15:07Z
+**Commit at finish:** `f844922d`
 
 ---
 

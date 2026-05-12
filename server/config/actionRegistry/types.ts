@@ -57,7 +57,7 @@ export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked' | 'stat
 // Closed list of valid OAuth provider slugs for `requiredIntegration` on actions.
 // Single source of truth — both the type below and `VALID_INTEGRATION_PROVIDERS`
 // in integrationBlockService derive from this constant.
-export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'slack', 'notion', 'ghl', 'stripe_agent'] as const;
+export const REQUIRED_INTEGRATION_SLUGS = ['google_drive', 'gmail', 'google_calendar', 'slack', 'notion', 'ghl', 'stripe_agent'] as const;
 
 export type RequiredIntegrationSlug = typeof REQUIRED_INTEGRATION_SLUGS[number];
 

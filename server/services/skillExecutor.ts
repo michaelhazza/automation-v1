@@ -2349,6 +2349,149 @@ Object.assign(SKILL_HANDLERS, {
   },
 } satisfies Record<string, SkillHandler>);
 
+// ---------------------------------------------------------------------------
+// Calendar + Slack skills (user-owned credential scope)
+// ---------------------------------------------------------------------------
+
+async function resolveAgentOwner(context: SkillExecutionContext): Promise<string> {
+  const { db: agentDb } = await import('../db/index.js');
+  const { agents: agentsTable } = await import('../db/schema/agents.js');
+  const { eq: eqOp } = await import('drizzle-orm');
+  const [agent] = await agentDb
+    .select({ ownerUserId: agentsTable.ownerUserId })
+    .from(agentsTable)
+    .where(eqOp(agentsTable.id, context.agentId))
+    .limit(1);
+  if (!agent?.ownerUserId) {
+    throw Object.assign(
+      new Error('Agent has no owner; this skill requires a user-owned agent'),
+      { statusCode: 422, errorCode: 'AGENT_NO_OWNER' },
+    );
+  }
+  return agent.ownerUserId;
+}
+
+Object.assign(SKILL_HANDLERS, {
+  // ── Calendar skills (user-owned credential scope) ─────────────────────────
+  'calendar.list_events': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    return calendarActionService.listEvents(
+      input as import('../../shared/types/calendarAction.js').CalendarListEventsInput,
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'calendar.get_event': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    return calendarActionService.getEvent(
+      input as import('../../shared/types/calendarAction.js').CalendarGetEventInput,
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'calendar.find_free_slot': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    return calendarActionService.findFreeSlot(
+      input as import('../../shared/types/calendarAction.js').CalendarFindFreeSlotInput,
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'calendar.create_event': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    const { eaDraftId, ...rest } = input;
+    if (!eaDraftId) throw Object.assign(new Error('calendar.create_event requires eaDraftId'), { statusCode: 400, errorCode: 'MISSING_DRAFT_ID' });
+    return calendarActionService.createEvent(
+      { ...(rest as import('../../shared/types/calendarAction.js').CalendarCreateEventInput), eaDraftId: eaDraftId as string },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'calendar.update_event': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    const { eaDraftId, etag, ...rest } = input;
+    if (!eaDraftId) throw Object.assign(new Error('calendar.update_event requires eaDraftId'), { statusCode: 400, errorCode: 'MISSING_DRAFT_ID' });
+    return calendarActionService.updateEvent(
+      { ...(rest as import('../../shared/types/calendarAction.js').CalendarUpdateEventInput), eaDraftId: eaDraftId as string, etag: etag as string | undefined },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'calendar.respond_to_invite': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { calendarActionService } = await import('./calendar/calendarActionService.js');
+    const { eaDraftId, ownerEmail, ...rest } = input;
+    if (!eaDraftId) throw Object.assign(new Error('calendar.respond_to_invite requires eaDraftId'), { statusCode: 400, errorCode: 'MISSING_DRAFT_ID' });
+    if (!ownerEmail) throw Object.assign(new Error('calendar.respond_to_invite requires ownerEmail'), { statusCode: 400, errorCode: 'MISSING_OWNER_EMAIL' });
+    return calendarActionService.respondToInvite(
+      { ...(rest as import('../../shared/types/calendarAction.js').CalendarRespondToInviteInput), eaDraftId: eaDraftId as string, ownerEmail: ownerEmail as string },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+
+  // ── Slack skills (user-owned credential scope) ────────────────────────────
+  'slack.list_channels': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.listChannels(
+      input as { cursor?: string; limit?: number; excludeArchived?: boolean },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'slack.read_channel': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.readChannel(
+      input as { channelId: string; limit?: number; oldest?: string; latest?: string },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'slack.search_messages': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.searchMessages(
+      input as { query: string; count?: number; page?: number; sort?: string; sortDir?: string },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'slack.summarise_thread': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.summariseThread(
+      input as { channelId: string; threadTs: string },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'slack.post_message': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.postMessage(
+      {
+        channelId: input.channelId as string,
+        text: input.text as string,
+        agentId: context.agentId,
+        agentRunId: context.runId,
+        kind: 'slack_post',
+      },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+  'slack.post_dm': async (input: Record<string, unknown>, context: SkillExecutionContext) => {
+    const ownerUserId = await resolveAgentOwner(context);
+    const { slackActionService } = await import('./slack/slackActionService.js');
+    return slackActionService.postDm(
+      {
+        targetUserId: input.targetUserId as string,
+        text: input.text as string,
+        agentId: context.agentId,
+        agentRunId: context.runId,
+        kind: 'slack_dm',
+      },
+      { organisationId: context.organisationId, subaccountId: context.subaccountId ?? '', ownerUserId },
+    );
+  },
+} satisfies Record<string, SkillHandler>);
+
 export const skillExecutor = {
   async execute(params: SkillExecutionParams): Promise<unknown> {
     const { skillName, input, context, toolCallId } = params;

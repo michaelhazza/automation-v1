@@ -64,6 +64,7 @@ function ConnRow({ connection, onDisconnectRequest }: ConnRowProps) {
   }
 
   const abbr = initials(connection.name);
+  const isPersonal = connection.ownerUserId !== null;
 
   return (
     <div className="flex items-center gap-3 px-6 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors">
@@ -74,7 +75,14 @@ function ConnRow({ connection, onDisconnectRequest }: ConnRowProps) {
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="text-[13.5px] font-semibold text-slate-900 truncate">{connection.name}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13.5px] font-semibold text-slate-900 truncate">{connection.name}</span>
+          {isPersonal ? (
+            <span className="inline-flex items-center text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full flex-shrink-0">Personal</span>
+          ) : (
+            <span className="inline-flex items-center text-[10px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full flex-shrink-0">Subaccount</span>
+          )}
+        </div>
         <div className="text-[11px] text-slate-400 truncate">{connection.provider}</div>
       </div>
 

@@ -68,6 +68,11 @@ export const TOPIC_REGISTRY: TopicRule[] = [
     description: 'Platform configuration via the Configuration Assistant',
     keywords: [/\bconfig/i, /\bset\s?up\b/i, /\bagent\b/i, /\bskill\b/i, /\bschedule\b/i, /\bsubaccount\b/i, /\blink\b/i, /\bcustom\s?instructions?\b/i, /\bdata\s?source\b/i, /\bheartbeat\b/i, /\bhealth\s?check\b/i, /\brestore\b/i, /\bhistory\b/i],
   },
+  {
+    topic: 'slack',
+    description: 'Slack messaging and channel actions',
+    keywords: [/\bslack\b/i, /\bchannel\b/i, /\bmessage\b/i, /\bdm\b/i, /\bthread\b/i, /\bpost\b/i],
+  },
 ];
 
 /**

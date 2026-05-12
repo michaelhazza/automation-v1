@@ -31,10 +31,12 @@ CREATE TABLE IF NOT EXISTS voice_profiles (
 ALTER TABLE voice_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_profiles FORCE ROW LEVEL SECURITY;
 
+-- V1: voice profiles are strictly user-scoped. The subaccount-scoped axis was
+-- removed because app.current_subaccount_ids is never set by the auth middleware,
+-- which would silently block all legitimate reads for subaccount-scoped rows.
 CREATE POLICY voice_profiles_isolation ON voice_profiles
   USING (
     (owner_user_id IS NOT NULL AND owner_user_id = current_setting('app.current_user_id', true)::uuid)
-    OR (subaccount_id IS NOT NULL AND subaccount_id = ANY(string_to_array(current_setting('app.current_subaccount_ids', true), ',')::uuid[]))
     OR (org_scope = true AND organisation_id = current_setting('app.organisation_id', true)::uuid)
     OR (current_setting('app.current_role', true) IN ('org_admin', 'subaccount_admin'))
   )

@@ -63,7 +63,7 @@ export const triggerService = {
   async checkAndFire(
     subaccountId: string,
     organisationId: string,
-    eventType: 'task_created' | 'task_moved' | 'agent_completed',
+    eventType: 'task_created' | 'task_moved' | 'agent_completed' | 'gmail_message_received' | 'calendar_event_imminent' | 'slack_mention',
     eventData: Record<string, unknown>
   ): Promise<void> {
     // Rate cap check
@@ -159,7 +159,7 @@ export const triggerService = {
   async dryRun(
     subaccountId: string,
     organisationId: string,
-    eventType: 'task_created' | 'task_moved' | 'agent_completed',
+    eventType: 'task_created' | 'task_moved' | 'agent_completed' | 'gmail_message_received' | 'calendar_event_imminent' | 'slack_mention',
     eventData: Record<string, unknown>
   ): Promise<Array<{ triggerId: string; agentId: string | null; wouldFire: boolean; reason?: string }>> {
     const triggers = await db
@@ -235,7 +235,7 @@ export const triggerService = {
     organisationId: string;
     subaccountId: string;
     subaccountAgentId: string;
-    eventType: 'task_created' | 'task_moved' | 'agent_completed';
+    eventType: 'task_created' | 'task_moved' | 'agent_completed' | 'gmail_message_received' | 'calendar_event_imminent' | 'slack_mention';
     eventFilter?: Record<string, unknown>;
     cooldownSeconds?: number;
   }) {

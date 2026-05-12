@@ -3783,3 +3783,24 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **Source:** finalisation-coordinator finalisation pass on PR #287 (slug: sandbox-isolation), Round 2 R2-T2 follow-on.
 **Pattern:** A CI gate whose strict mode hard-fails on "non-`local-dev-*` version with no matching publish tag" creates a chicken-and-egg problem for the FIRST publish: the PR that introduces the template cannot push the tag before merge (no commit hash to tag), and cannot rely on the tag existing after merge (the tag is the operator's post-merge work). The convention that resolves this: pre-first-publish `CURRENT_VERSION.version` MUST use a `local-dev-*` prefix (e.g. `local-dev-v1.0.0`). The operator flips the prefix off at first-publish time as step 0 of the runbook. The gate's `local-dev-*` exemption is the "we know this isn't tagged yet, it's not supposed to be" signal.
 **Why it matters:** PR #287's initial `CURRENT_VERSION.version=v1.0.0` would have blocked its own `ready-to-merge` label firing (strict gate fails because no `sandbox-template/synthetos-sandbox/v1.0.0` tag exists). Flipping to `local-dev-v1.0.0` keeps the strict gate green during V1 ship while accurately signalling pre-first-publish state. The operator's SANDBOX-F1 step 0 flips back to `v1.0.0` at first-publish. This pattern applies to any "production release fingerprint" file where a CI gate enforces post-publish coherence: the pre-first-publish state needs an explicit "not yet published" sentinel that the gate exempts.
+
+### [2026-05-13] Gotcha — EA Draft F2 invariant: approval state lives ONLY on `actions`, never on `ea_drafts`
+
+`ea_drafts.send_state` is a SEND-only lifecycle (`idle → sending → sent | send_failed`). It NEVER reaches `approved`. Approval state lives exclusively on `actions.status = 'approved'`. The approve route (POST /api/ea-drafts/:id/approve) writes to `actions`, then dispatches a fire-and-forget send job that transitions `send_state` from `idle → sending → sent|send_failed`. The stall-reset job (`workflowGateStallNotifyJob.ts`) recovers drafts stuck in `sending`. Consequence: any code that checks `ea_drafts.state === 'approved'` is always wrong — that state is structurally impossible. Always check `actions.status = 'approved'` for the approval predicate; read `ea_drafts.send_state` only for delivery status.
+
+### [2026-05-13] Pattern — Cross-org background job admin pattern for FORCE RLS tables
+
+Background jobs that must scan across all orgs (e.g. `voiceProfileRefreshJob`, `gmailInboxPollJob`, `calendarLookaheadJob`) cannot use the bare `db` handle — FORCE RLS tables (`voice_profiles`, `ea_drafts`, `integration_connections`, etc.) require `app.organisation_id` to be set, and a plain pg-boss handler never has it. Correct pattern:
+
+```typescript
+await withAdminConnection({ source: 'job-name', reason: 'cross-org scan' }, async (tx) => {
+  await tx.execute(sql`SET LOCAL ROLE admin_role`);
+  return tx.query(...);
+});
+```
+
+`withAdminConnection` acquires a BYPASSRLS connection; `SET LOCAL ROLE admin_role` is required for tables with FORCE RLS (the BYPASSRLS flag alone is not sufficient when the policy uses `FORCE`). Do NOT use raw `db` for cross-org scans against FORCE RLS tables. See `server/lib/adminDbConnection.ts` and `server/jobs/agentRunCleanupJob.ts` as reference implementations.
+
+### [2026-05-13] Pattern — User-owned agent credential isolation: `agents.owner_user_id` gates OAuth token access
+
+User-owned agents (Personal Assistant, executive-assistant slug) introduce `agents.owner_user_id` — which user's OAuth tokens are used for calendar/Slack skill execution. The SKILL_HANDLERS for user-scoped skills (`calendar.*`, `slack.*`) MUST resolve `ownerUserId` from the DB via the agent record (`agents.ownerUserId`), never from LLM-provided input. The canonical resolver is `resolveAgentOwner(agentId, orgId, db)` in `server/services/skillExecutor.ts`. Never trust `context.input.userId` or any caller-supplied user reference for credential resolution — this is a security boundary. An agent cannot execute skills on behalf of a user it is not owned by, regardless of what the LLM puts in the tool input.

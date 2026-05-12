@@ -26,6 +26,7 @@
 // Tiles do NOT share a parent useQuery or a single Promise.all.
 
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { User } from '../../lib/auth';
 import api, { fetchActivity } from '../../lib/api';
 import type { ActivityItem } from '../../../../shared/types/operate';
@@ -35,6 +36,9 @@ import { RunActivityChart } from '../../components/ActivityCharts';
 import { ActivityRow } from './components/ActivityRow';
 import { ActivityDetailModal } from './components/ActivityDetailModal';
 import { HomeActiveAgentsWidget } from '../../components/home/HomeActiveAgentsWidget';
+import { useUserOwnedAgents } from '../../hooks/useUserOwnedAgents';
+import { useHomeWidgets } from '../../hooks/useHomeWidgets';
+import PersonalZoneCard from '../../components/personal/PersonalZoneCard';
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -169,6 +173,95 @@ function fmtCostCents(cents: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Personal zone
+// ---------------------------------------------------------------------------
+
+function PersonalZone() {
+  const { data: ownedAgents, isLoading: agentsLoading } = useUserOwnedAgents();
+  const { data: widgets, isLoading: widgetsLoading } = useHomeWidgets();
+
+  const isLoading = agentsLoading || widgetsLoading;
+
+  if (isLoading) {
+    return (
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-3 px-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+          <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Personal</span>
+        </div>
+        <div className={SHIMMER_CLS + ' h-28 w-full max-w-sm rounded-xl'} />
+      </div>
+    );
+  }
+
+  if (ownedAgents.length === 0) {
+    return (
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-3 px-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+          <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Personal</span>
+        </div>
+        <div className="bg-gradient-to-br from-white to-slate-50 border border-indigo-100 rounded-xl p-5 flex items-center gap-4 max-w-sm">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+            A
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-slate-900">Set up your Personal Assistant</div>
+            <div className="text-xs text-slate-500 mt-0.5">Drafts, calendar, briefings and more.</div>
+          </div>
+          <Link
+            to="/personal/setup"
+            className="flex-shrink-0 px-3 py-1.5 bg-indigo-700 text-white rounded-lg text-xs font-semibold hover:bg-indigo-800 transition-colors"
+          >
+            Set up
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+        <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Personal</span>
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        {ownedAgents.map((agent) => {
+          const widget = widgets.find((w) => w.agentId === agent.id) ?? null;
+          if (!widget) {
+            return (
+              <div
+                key={agent.id}
+                className="bg-gradient-to-br from-white to-slate-50 border border-indigo-200 rounded-xl p-5 shadow-sm min-w-[280px] flex flex-col gap-3"
+              >
+                <div className="flex items-center gap-3 pb-3 border-b border-indigo-50">
+                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                    {agent.name.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-slate-900 truncate">{agent.name}</div>
+                    <div className="text-xs text-slate-500">Personal agent</div>
+                  </div>
+                  <Link
+                    to={`/personal/${agent.id}`}
+                    className="text-xs font-semibold text-indigo-600 bg-white border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-50 transition-colors flex-shrink-0"
+                  >
+                    Open
+                  </Link>
+                </div>
+                <p className="text-sm text-slate-400 italic">No data yet</p>
+              </div>
+            );
+          }
+          return <PersonalZoneCard key={agent.id} widget={widget} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // HomePage
 // ---------------------------------------------------------------------------
 
@@ -296,6 +389,9 @@ export default function HomePage({ user }: { user: User }) {
                 : "Let's get your AI team set up."}
           </p>
         </div>
+
+        {/* ── Personal zone ─────────────────────────────────────────────── */}
+        <PersonalZone />
 
         {/* ── KPI tiles — each owns its own state (locked invariant) ─────── */}
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))] mb-6">

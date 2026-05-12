@@ -193,6 +193,41 @@ router.get(
   })
 );
 
+// ─── List agent runs by agentId ───────────────────────────────────────────────
+
+router.get(
+  '/api/agent-runs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const agentId = req.query.agentId as string | undefined;
+    const limit = Math.min(Number(req.query.limit ?? 20), 50);
+    if (!agentId) {
+      res.status(400).json({ error: 'agentId query parameter is required' });
+      return;
+    }
+    const runs = await db
+      .select({
+        id: agentRuns.id,
+        agentId: agentRuns.agentId,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        triggerContext: agentRuns.triggerContext,
+      })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.agentId, agentId),
+          eq(agentRuns.organisationId, req.orgId!),
+        ),
+      )
+      .orderBy(sql`${agentRuns.startedAt} DESC`)
+      .limit(limit);
+    res.json({ runs });
+  }),
+);
+
 // ─── Get single run detail ────────────────────────────────────────────────────
 
 router.get(

@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md
 active_plan: tasks/builds/personal-assistant-v1/plan.md
 build_slug: personal-assistant-v1
 branch: claude/synthetos-personal-assistant-0kaIM
-status: BUILDING
-last_updated: 2026-05-12T07:50:00Z
+status: REVIEWING
+last_updated: 2026-05-13T00:00:00Z
 last_merged_pr: #284
 last_merged_slug: pre-test-hardening
 last_merged_branch: claude/review-preprod-spec-CmHez
@@ -29,7 +29,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active build slug:** `personal-assistant-v1`
 **Branch:** `claude/synthetos-personal-assistant-0kaIM`
 **PR:** [#291](https://github.com/michaelhazza/2026-05-12-personal-assistant-v1-spec)
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
+
+**Phase 2 complete (2026-05-13):** All 25 chunks built + reviewed. G2 PASS. spec-conformance CONFORMANT_AFTER_FIXES (OAuth scopes fixed). Adversarial review: 5 confirmed/likely holes closed. PR-reviewer: 7 blocking issues fixed (SKILL_HANDLERS for 12 skills, approval send dispatch, 3 jobs registered + admin-role DB access, homeWidgetService org filter + shape fix, API shape mismatches, dedup race). Doc-sync: architecture.md, capabilities.md, integration-reference.md, KNOWLEDGE.md all updated. Phase 3 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
 
 **Phase 1 complete (2026-05-12):** Spec authored for the Executive Assistant V1 build (~2000 lines, 27 sections). spec-reviewer ran 5 iterations (cap; 52 mechanical fixes); 3 directional decisions ratified (Calendar push deferred → 1-min lookahead scan; Slack auto-send dropdown deferred → fixed policy; risk-tier ceiling 5 → 6). chatgpt-spec-review ran 2 rounds (8 findings, all auto-applied — F1/F2/F3/F4/T1 in round 1, F1/F2/T1 in round 2); APPROVED at round 2. Spec status → accepted. Phase 2 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
 
