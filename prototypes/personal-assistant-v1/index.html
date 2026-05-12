@@ -61,8 +61,8 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
     <strong>Round-2 changes from round 1:</strong>
     <ul style="margin: 8px 0 0 16px; padding: 0;">
       <li><strong>Mockup 01:</strong> wizard cards changed from provider names (Gmail / Slack) to <em>capabilities</em> (Email / Calendar / Files / Team chat) — aligns with existing capability taxonomy in <code>integration-reference.md</code>. Outlook / Teams slot in as future providers.</li>
-      <li><strong>Mockup 02:</strong> no longer a dedicated "My EA Home" page. The EA's home card now lives in a new <strong>Personal</strong> zone at the top of the existing home page. Same data-driven pattern handles any future user-principal agent (Dev Agent, etc.).</li>
-      <li><strong>Mockup 03:</strong> reorganised as a tabbed per-agent detail page: <strong>Workspace</strong> (drafts inbox + briefing) | <strong>Activity</strong> (run trace) | <strong>Settings</strong> (config). Generic tab pattern reusable for any user-principal agent.</li>
+      <li><strong>Mockup 02:</strong> no longer a dedicated "My EA Home" page. The EA's home card now lives in a new <strong>Personal</strong> zone at the top of the existing home page. Same data-driven pattern handles any future user-owned agent (Dev Agent, etc.).</li>
+      <li><strong>Mockup 03:</strong> reorganised as a tabbed per-agent detail page: <strong>Workspace</strong> (drafts inbox + briefing) | <strong>Activity</strong> (run trace) | <strong>Settings</strong> (config). Generic tab pattern reusable for any user-owned agent.</li>
     </ul>
   </div>
 
@@ -95,7 +95,7 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
     <div class="screen-num num-2">02</div>
     <div class="screen-body">
       <div class="screen-title">Existing home page with new Personal zone <span class="change-tag">NO NEW PAGE</span></div>
-      <div class="screen-desc">The user's existing home page (with greeting, KPI tiles, attention queue, recent activity — all preserved). A new <strong>Personal</strong> zone sits at the top, rendering one card per user-principal agent the user owns. EA's card shows briefing one-liner + drafts count + next-prep + Open link. Includes a dashed placeholder showing how a future Dev Agent slots into the same zone.</div>
+      <div class="screen-desc">The user's existing home page (with greeting, KPI tiles, attention queue, recent activity — all preserved). A new <strong>Personal</strong> zone sits at the top, rendering one card per user-owned agent the user owns. EA's card shows briefing one-liner + drafts count + next-prep + Open link. Includes a dashed placeholder showing how a future Dev Agent slots into the same zone.</div>
       <div class="screen-covers">
         <span>Brief §3.13 (Personal nav + home zone)</span>
         <span>§3.20 (home-widget contract)</span>
@@ -136,7 +136,7 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
     <div class="review-card-h" style="margin-top: 14px;">What's new but reusable:</div>
     <ul class="review-card-list">
       <li><strong>Capability grouping layer</strong> (~30 lines in <code>server/config/capabilityGroups.ts</code>) — maps user-facing groups to existing slugs.</li>
-      <li><strong>Home-widget contribution contract</strong> on system-agent template — Dev Agent and any future user-principal agent contributes its own card via the same pattern. Zero hardcoding.</li>
+      <li><strong>Home-widget contribution contract</strong> on system-agent template — Dev Agent and any future user-owned agent contributes its own card via the same pattern. Zero hardcoding.</li>
       <li><strong>Voice Profile primitive</strong> — generic scoped resource (per user / per subaccount / per org) with pluggable samplers. EA is the first consumer; Riley / Helena / Sarah become future consumers.</li>
     </ul>
   </div>
@@ -145,7 +145,7 @@ body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding
   <div class="review-card">
     <ul class="review-card-list">
       <li><strong>01:</strong> Capability-first framing — does "Email" / "Calendar" / "Files" / "Team chat" read naturally? Does the provider picker (shown inline under Files) feel right or should it be a modal?</li>
-      <li><strong>02:</strong> Is the Personal zone visually distinct from the existing home content without being jarring? Does the dashed Dev Agent placeholder make the abstraction clear? Should the zone collapse when the user has no user-principal agents (current design: hidden entirely)?</li>
+      <li><strong>02:</strong> Is the Personal zone visually distinct from the existing home content without being jarring? Does the dashed Dev Agent placeholder make the abstraction clear? Should the zone collapse when the user has no user-owned agents (current design: hidden entirely)?</li>
       <li><strong>03:</strong> Do the three tabs (Workspace / Activity / Settings) cover the work surfaces? Is "Workspace" the right name for the drafts + briefing view, or should it be "Today" / "Inbox" / something else?</li>
     </ul>
   </div>

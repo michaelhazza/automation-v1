@@ -25,7 +25,7 @@
   - [3.7 Use-case shortlist for V1](#37-use-case-shortlist-for-v1)
   - [3.8 Connection UI surfacing](#38-connection-ui-surfacing)
   - [3.9 Notification + delivery surfaces](#39-notification--delivery-surfaces)
-  - [3.10 Multi-user consumption (consumes `principal-scoped-agents`)](#310-multi-user-consumption-consumes-principal-scoped-agents)
+  - [3.10 Multi-user consumption (consumes `user-owned-agents`)](#310-multi-user-consumption-consumes-user-owned-agents)
   - [3.11 Voice Profile primitive (introduced by EA V1, designed for reuse)](#311-voice-profile-primitive-introduced-by-ea-v1-designed-for-reuse)
   - [3.12 First-run setup context attachment](#312-first-run-setup-context-attachment)
   - [3.13 Personal nav group in sidebar + home Personal zone (both data-driven)](#313-personal-nav-group-in-sidebar--home-personal-zone-both-data-driven)
@@ -107,7 +107,7 @@ Per the challenge-round decision to constrain V1 to "prove the primitive, don't 
 | Briefing schedule + meeting-prep triggers + inbox-poll triggers | yes |
 | Autonomous "investigate this complex situation" multi-turn behaviour | NO — that's V2 (Operator Mode, depends on Spec D) |
 
-This tightening is documented as ratification of the challenge-round decision. The earlier brief had Calendar at read+write V1; the rewrite defers writes. Rationale: write actions on the operator's calendar are higher-stakes than write actions to internal records — a wrongly created event affects other people's calendars. Read-only V1 is enough to ship the briefing + meeting-prep use cases (the three locked V1 use cases). Write-capable V1.5 follow-on once trust is earned.
+This tightening is documented as ratification of the challenge-round decision, plus the later capability-alignment correction. The final V1 posture is not Calendar read-only: Calendar reads ship auto, Calendar `create_event` / `update_event` / `respond_to_invite` ship review-gated, and only destructive `delete_event` is deferred. This keeps the user-owned EA aligned with the existing `WorkspaceAdapter` capability surface while preserving safety through mandatory review gates on writes.
 
 ### 0.5.5 Decision provenance
 
@@ -363,7 +363,7 @@ Privacy: derived `profile_json` is feature-level (greeting patterns, sentence-le
 
 ### 3.12 First-run setup context attachment
 
-When a user provisions their EA for the first time, the EA needs context about the user to do its job. Reuses the principal-scoped memory model from `principal-scoped-agents` §3.6 — context answers are stored as user-scoped `memory_blocks`.
+When a user provisions their EA for the first time, the EA needs context about the user to do its job. Memory remains per-agent per `user-owned-agents` §3.4 — each user's EA has its own `memory_blocks` rows by virtue of being a separate agent row (no separate scope abstraction). Context answers are stored as memory blocks on the user's EA agent.
 
 First-run wizard collects (5–10 fields max, one screen):
 
@@ -388,20 +388,20 @@ User-principal agents need to be discoverable in the sidebar without hardcoding 
 
 - Extend `client/src/config/sidebar.ts` `buildNavItems` factory with a new nav GROUP keyed `personal`.
 - Group is rendered at the top of the sidebar, ABOVE Operate / Build / Govern.
-- Entries in the group are **data-driven** from the user's user-principal agents (`SELECT * FROM agents WHERE principal_type = 'user' AND principal_id = current_user.id`).
-- Group is visible only when the user has at least one user-principal agent provisioned (zero entries → group hidden entirely).
+- Entries in the group are **data-driven** from the user's user-owned agents (`SELECT * FROM agents WHERE owner_user_id = current_user.id`).
+- Group is visible only when the user has at least one user-owned agent provisioned (zero entries → group hidden entirely).
 - Each entry uses the agent's configured display name. Default display name is "Personal Assistant"; user can rename per §3.17.
-- Group is visible regardless of which Workspace / Org / System view-mode is active. The view-mode switcher continues to control ORGANISATIONAL scope; the Personal group is orthogonal to that, providing always-accessible navigation to user-principal agents.
+- Group is visible regardless of which Workspace / Org / System view-mode is active. The view-mode switcher continues to control ORGANISATIONAL scope; the Personal group is orthogonal to that, providing always-accessible navigation to user-owned agents.
 
-**Why this is better than a "Personal" view mode:** view modes today (Workspace / Org / System) control organisational scope. A "Personal" mode would mix two orthogonal axes — principal type vs organisational scope — and introduce confusion (auto-switching, "how do I get back," semantic overloading). A persistent nav group keeps the EA one click away in any view mode without UX confusion.
+**Why this is better than a "Personal" view mode:** view modes today (Workspace / Org / System) control organisational scope. A "Personal" mode would mix two orthogonal axes — agent ownership vs organisational scope — and introduce confusion (auto-switching, "how do I get back," semantic overloading). A persistent nav group keeps the EA one click away in any view mode without UX confusion.
 
-**Phase 3 forward-compat:** when Dev Agent ships as a second user-principal agent, it appears in the same Personal nav group automatically. Zero hardcoding, no nav refactor.
+**Phase 3 forward-compat:** when Dev Agent ships as a second user-owned agent, it appears in the same Personal nav group automatically. Zero hardcoding, no nav refactor.
 
-**Pair: home page Personal zone.** Discoverability and "what does my assistant want me to look at this morning?" cannot rely on the sidebar alone — users need a glanceable summary when they land. The existing user home page gains a new **Personal zone** at the top that renders one card per user-principal agent the user owns. Cards are contributed by each agent via the home-widget contract in §3.20.
+**Pair: home page Personal zone.** Discoverability and "what does my assistant want me to look at this morning?" cannot rely on the sidebar alone — users need a glanceable summary when they land. The existing user home page gains a new **Personal zone** at the top that renders one card per user-owned agent the user owns. Cards are contributed by each agent via the home-widget contract in §3.20.
 
 EA's home card shows: today's briefing one-liner + count of drafts awaiting review + next meeting prep + "Open" link. Click → goes to the per-agent detail page (Workspace / Activity / Settings tabs per §3.17 mockup).
 
-No dedicated "EA home page" exists — that would be page proliferation. The sidebar entry navigates to a per-agent detail page (deeper work surfaces); the home zone surfaces glanceable summaries. Both data-driven from `agents WHERE principal_type = 'user' AND principal_id = current_user.id`.
+No dedicated "EA home page" exists — that would be page proliferation. The sidebar entry navigates to a per-agent detail page (deeper work surfaces); the home zone surfaces glanceable summaries. Both data-driven from `agents WHERE owner_user_id = current_user.id`.
 
 Mockup: `prototypes/personal-assistant-v1/02-my-ea-home.html` shows the existing home layout with the new Personal zone at top.
 
@@ -413,7 +413,7 @@ EAs are NOT auto-created for every user in the org. Each user provisions their o
 - Matches the principle of explicit consent for personal-data features (the EA reads your inbox; you opt in).
 - Keeps the Personal nav group empty (and hidden) for users who don't want an EA.
 
-Provisioning entry point: a "Set up my Personal Assistant" card on the user's home page (visible when the Personal group is empty). Click → opens the first-run setup wizard (§3.12). Wizard completion: creates the user-principal EA row, seeds default skills + risk-tier ceiling per §3.4, kicks off voice-profile derivation, fires the first briefing on next 07:00.
+Provisioning entry point: a "Set up my Personal Assistant" card on the user's home page (visible when the Personal group is empty). Click → opens the first-run setup wizard (§3.12). Wizard completion: creates the user-owned EA agent row (`owner_user_id = current_user.id`), seeds default skills + risk-tier ceiling per §3.4, kicks off voice-profile derivation, fires the first briefing on next 07:00.
 
 ### 3.15 Spending budgets (pooled to subaccount)
 
@@ -428,15 +428,14 @@ Per-user budget caps are a Phase 1.5 follow-on IF customer demand emerges. Not i
 
 ### 3.16 Connection card "Personal" chip labelling
 
-When a user-principal agent connects their own account (e.g. Michael connects "his" Gmail), the connection card on the Connections page (`client/src/pages/govern/ConnectionsPage.tsx`) distinguishes it from a subaccount-level connection.
+When a user-owned agent connects their own account (e.g. Michael connects "his" Gmail), the connection card on the Connections page (`client/src/pages/govern/ConnectionsPage.tsx`) distinguishes it from a subaccount-level connection.
 
-Visual: a small chip next to the connection name. Chip text from the `principal_type`:
+Visual: a small chip next to the connection name. Chip text derives from whether `integration_connections.owner_user_id` is set:
 
-- `Personal` — user-principal connection (e.g., Michael's Gmail)
-- `Subaccount` — subaccount-principal connection (e.g., Acme Co's CRM) — most existing connections
-- `Org` — org-principal connection (e.g., the org's GitHub App)
+- `Personal` — user-owned connection, `owner_user_id IS NOT NULL` (e.g., Michael's Gmail)
+- `Subaccount` — subaccount-owned connection, `owner_user_id IS NULL` (e.g., Acme Co's CRM) — most existing connections
 
-Subaccount-level admins see all subaccount + org connections, no chip change. Users see their own Personal connections plus any subaccount/org connections they have access to via existing RLS. Per §3.8 of `principal-scoped-agents`, users do NOT see other users' Personal connections.
+Subaccount-level admins see all subaccount connections, no chip change. Users see their own Personal connections plus any subaccount connections they have access to via existing RLS. Per `user-owned-agents` §3.5 + §3.6, users do NOT see other users' Personal connections; admin redaction policy applies to content visibility.
 
 No new component — minor edit to the existing `ConnectionsPage` row template.
 
@@ -499,7 +498,7 @@ Defer to Phase 1.5 IF a real use case requires cross-source SQL (Revenue Ops Ass
 
 ### 3.20 Home-widget contribution contract (introduced by EA V1, designed for reuse)
 
-Generic primitive that any user-principal agent template uses to contribute a card to the user's home Personal zone (§3.13). Designed for reuse by Dev Agent (Phase 3), future personal-research agents, etc.
+Generic primitive that any user-owned agent template uses to contribute a card to the user's home Personal zone (§3.13). Designed for reuse by Dev Agent (Phase 3), future personal-research agents, etc.
 
 Contract on the system-agent template:
 
@@ -512,7 +511,7 @@ home_widget: {
 } | null  // null = agent does not surface to home
 ```
 
-The home page reads `agents WHERE principal_type = 'user' AND principal_id = current_user.id`, looks up each agent's `home_widget` declaration on its system-agent template, invokes the `body_provider_skill`, renders the resulting `WidgetData` inside a consistent visual frame.
+The home page reads `agents WHERE owner_user_id = current_user.id`, looks up each agent's `home_widget` declaration on its system-agent template, invokes the `body_provider_skill`, renders the resulting `WidgetData` inside a consistent visual frame.
 
 EA's contribution (V1):
 
@@ -529,7 +528,7 @@ Visual frame is a single component on the home page; agents only return data, no
 
 `WidgetData` shape per type is defined in `shared/types/homeWidget.ts`. New types can be added as future agents need them; the frame component handles each type's rendering.
 
-Foundation cost: ~1 dev-day. Pays off the day a second user-principal agent ships.
+Foundation cost: ~1 dev-day. Pays off the day a second user-owned agent ships.
 
 ### 3.21 Failure modes for triggered runs
 
@@ -558,7 +557,7 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 
 4. **Daily briefing delivery default.** **LOCKED:** Slack DM as default, email as alternate, both available; operator picks at first-run setup.
 
-5. **Use-case shortlist for V1.** **LOCKED.** Ship #1 (daily briefing 07:00 cron + Slack DM), #2 (inbox triage + drafted replies), #3 (15-min-before meeting prep summary). Defer #4 (Slack mention summary) and #5 (weekly review) to a fast follow-on if the trio lands cleanly. Confirmed: existing briefing/summary workflows in the codebase are subaccount-focused; the EA briefings are user-principal-focused (new templates, reuses workflow engine).
+5. **Use-case shortlist for V1.** **LOCKED.** Ship #1 (daily briefing 07:00 cron + Slack DM), #2 (inbox triage + drafted replies), #3 (15-min-before meeting prep summary). Defer #4 (Slack mention summary) and #5 (weekly review) to a fast follow-on if the trio lands cleanly. Confirmed: existing briefing/summary workflows in the codebase are subaccount-focused; the EA briefings are user-focused (new templates, reuses workflow engine).
 
 6. **Gmail push notifications vs polling.** **LOCKED.** 5-minute polling V1. Confirmed: polling job is a Gmail `users.history.list` API call (no LLM cost; 288 calls/day per connected account, inside Google's free quota). LLM cost stays zero until a new message arrives AND the EA decides to act. Push path (Gmail Watch → Pub/Sub) is a flag-gated Phase 1.5 add if 5-min latency becomes felt.
 
@@ -595,12 +594,12 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 
 ## 7. Sequencing
 
-**Mockups required for V1: yes, three.** The multi-user EA design (consuming the `principal-scoped-agents` foundation) introduces genuinely new user-facing surfaces that warrant visual design before build:
+**Mockups required for V1: yes, three.** The multi-user EA design (consuming the `user-owned-agents` foundation) introduces genuinely new user-facing surfaces that warrant visual design before build:
 
 | File | Purpose |
 |---|---|
 | `prototypes/personal-assistant-v1/01-first-run-setup.html` | OAuth connections + context questionnaire + voice-profile derivation wizard. New flow, ~5–10 fields, single screen. |
-| `prototypes/personal-assistant-v1/02-my-ea-home.html` | The user-principal home view. Sidebar shows the new Personal nav group with the EA at top; main content shows morning briefing card, drafts awaiting review, today's meeting prep, EA's recent runs. |
+| `prototypes/personal-assistant-v1/02-my-ea-home.html` | The user's home view with the new Personal zone. Sidebar shows the data-driven Personal nav group with the EA at top; main content shows existing home layout plus the Personal zone (morning briefing card, drafts awaiting review, today's meeting prep). |
 | `prototypes/personal-assistant-v1/03-ea-settings.html` | Per-instance EA configuration: voice profile status + manual refresh + opt-out toggle, briefing delivery preference, Slack auto-send scope dropdown (3 options per §4 q2), display-name field, trigger schedule, context-memory edit. |
 
 **Reused without new mockups:**
@@ -608,7 +607,7 @@ Status legend: **LOCKED** = ratified by operator on 2026-05-12 chat; **OPEN** = 
 - Connections page row (Calendar) — uses existing `ConnectionsPage.tsx` pattern + the new "Personal" chip from §3.16.
 - System-agent template — shipped via DB seed migration like Sarah/Johnny/Helena (no new visual surface).
 - Triggers — Scheduled uses `RecurringTasksPage`, event-driven uses `AgentTriggersPage`, both unchanged.
-- Run Trace — existing `RunTracePage.tsx` with the redaction policy from `principal-scoped-agents` §3.8 enforced at the API layer (no new UI surface required for the redaction itself).
+- Run Trace — existing `RunTracePage.tsx` with the redaction policy from `user-owned-agents` §3.6 enforced at the API layer (no new UI surface required for the redaction itself).
 - Slack briefing rendering — Slack message formatting, no SynthetOS UI surface.
 
 Visual conventions inherit from `prototypes/consolidation-2026-05-06/_shared.css` (the foundation visual baseline) and `prototypes/operator-backend/_shared.css` (extended pills, time strips, progress patterns).
