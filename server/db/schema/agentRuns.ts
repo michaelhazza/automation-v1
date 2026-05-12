@@ -24,6 +24,9 @@ export const agentRuns = pgTable(
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
+    // User-owned-agents primitive (migration 0327): copied from agent.ownerUserId at run start.
+    // NULL = subaccount-owned run (existing behaviour). Immutable once set.
+    ownerUserId: uuid('owner_user_id'),
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
@@ -316,6 +319,10 @@ export const agentRuns = pgTable(
     backendTaskUniqueIdx: uniqueIndex('agent_runs_backend_task_unique_idx')
       .on(table.backendId, table.backendTaskId)
       .where(sql`${table.backendTaskId} IS NOT NULL`),
+    // User-owned-agents primitive (migration 0327)
+    userOwnedIdx: index('agent_runs_user_owned_idx')
+      .on(table.organisationId, table.ownerUserId, table.startedAt)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
   })
 );
 
