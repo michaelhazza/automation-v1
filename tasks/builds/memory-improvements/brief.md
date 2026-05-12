@@ -1,7 +1,7 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** Draft, for external review
-**Revision:** 4 (applies Round 2 reviewer feedback: shadow-persistence invariant, B1 denominator verifier, A deletion invariant, D rollout baseline window, config surface deferred to existing primitives, C moved out of main proposal list)
+**Status:** **LOCKED** for spec handoff
+**Revision:** 5 (final tightening pass: §1 wording, `snapshot_excerpt` lock, D baseline threshold, D embedding-failure invariant, B1 not-measured-vs-zero acceptance)
 **Date:** 2026-05-12
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
 
@@ -50,7 +50,7 @@ Two additional proposals emerge from the audits and the correction:
 - **Proposal B** — citation-rate utility metric, the feedback signal we need to know whether any of this is working.
 - **Proposal D** — finish the AKR semantic ranker. The single biggest retrieval-quality lever in the codebase. The AKR build deferred it explicitly; the deferral lived through merge into production.
 
-All four proposals are scoped to be additive to what AKR already shipped (chunked embeddings, scoping modes, observability scaffolding, Files/Documents UI), not in competition with it.
+All three strategic proposals, plus the opportunistic cleanup item in §9, are scoped to be additive to what AKR already shipped (chunked embeddings, scoping modes, observability scaffolding, Files/Documents UI), not in competition with it.
 
 ---
 
@@ -108,7 +108,7 @@ Per-run citation data is persisted (`agent_runs.cited_entry_ids`, `agent_runs.ap
 
 This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"memory exists but is opaque — users can't audit what's been learned."* The Trust & Verification Layer build (`tasks/builds/trust-verification-layer/plan.md:988`) is already adding a `Source` pill with values `Correction | Manual | Auto`. Without lineage, the `Auto` case is a dead-end — the pill exists but clicking it answers nothing.
 
-**How.** Add a `memory_block_version_sources` join table. **Required columns** (locked by the A-Deletion invariant in §4): `block_version_id`, `source_entry_id` (nullable FK, `ON DELETE SET NULL`), `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. **Optional:** `snapshot_excerpt` (first ~140 chars, subject to privacy-flow review — must be redactable). Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that joins through to source entries (or surfaces snapshot metadata when the source row is null) and the runs that produced them. Per-version, so future re-syntheses preserve their own cluster.
+**How.** Add a `memory_block_version_sources` join table. **Required columns** (locked by the A-Deletion invariant in §4): `block_version_id`, `source_entry_id` (nullable FK, `ON DELETE SET NULL`), `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `snapshot_excerpt` is **out of scope for v1** per the A-Deletion invariant. Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that joins through to source entries (or surfaces snapshot metadata when the source row is null) and the runs that produced them. Per-version, so future re-syntheses preserve their own cluster.
 
 **Why a join table is now the default (revised per reviewer F4).** Rev 2 of this brief leaned toward `source_entry_ids uuid[]` as the cheaper option. The reviewer pushed back: if the audit UX will ever answer either "where else did this source entry contribute?" or "which auto-synthesised blocks came from this run?", the array shape paints us into a corner that costs a second migration later. Both questions are plausible given the Trust & Verification angle. A join table is more queryable, indexable, and naturally extends with per-source metadata (`content_hash`, `quality_score_at_capture`, `contribution_rank`, optional `snapshot_excerpt`). The cost difference today is small — one extra table vs. one extra column — and the option-value is large.
 
@@ -119,7 +119,6 @@ This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"
 **Why now, not later.** The Trust & Verification Layer pill is the trigger. If we ship that pill without lineage behind the `Auto` case, we ship a dead-end UX. Cheaper to add lineage now (one migration) than to retrofit when operators start clicking and find nothing.
 
 **Open questions for the reviewer:**
-- `snapshot_excerpt` opt-in vs opt-out: the A-Deletion invariant marks it optional and pending privacy-flow review. Default off pending that review, or default on with a redaction path? Recommend default off, opt-in per org via existing org-settings surface.
 - Should we backfill historical blocks? Cannot — the clusters were never persisted. Acceptable to start from migration forward?
 - Should the agent itself see source entries? Default no (prompt bloat); reconsider only if a `cite_sources` tool call wants it.
 
@@ -152,6 +151,8 @@ This means B1 cannot be purely derivative for workspace-memory entries. It must 
 - Migration is backward-compatible (default `[]`); existing runs have null/empty manifests and are excluded from entry-utility aggregates (window-bounded by definition).
 
 Without this, entry-utility on the dashboard would have a numerator but no trustworthy denominator. Block-utility has both today and works without this change.
+
+**B1 acceptance — historical runs must be visibly "not measured", not "0%".** Aggregate queries must distinguish runs that have no `injected_entry_ids` manifest (pre-migration, or where the manifest was not yet wired) from runs that genuinely had an empty injection set. Surface the distinction in both the substrate (`measured: boolean` per-run flag, or a NULL vs `[]` discriminator) and B2's dashboard (e.g. dim or annotate periods with insufficient coverage). Otherwise early dashboards will accidentally imply terrible utility when the denominator was simply unavailable.
 
 **Scope.** ~100 LOC. One migration (materialised view + refresh function + `injected_entry_ids` column). One write-site change in `agentExecutionService.ts` at the memory-composition point. One nightly refresh job. No UI.
 
@@ -203,7 +204,7 @@ This is the single biggest retrieval-quality lever in the codebase. The infrastr
 
 Mode is configured by an env-driven default with a persisted per-org override. **Config surface (revised per reviewer F5):** the spec must reuse the existing `server/lib/featureFlags.ts` extension surface or `server/services/orgSettingsService.ts` — both already exist in the codebase. Adding a column to `organisations` is the fallback, not the default; a retrieval-experiment flag should not become core org schema.
 
-The first production deploy of D is `off` or `shadow`; if `shadow` is enabled globally, it must be bounded by the D-Shadow persistence invariant's telemetry size limits and stay within the embedding-cost guardrails (one embed call per run, ~$0.00002 each). Progression to `sampled` and `on` requires B1 telemetry showing no regression in citation utility, no spike in truncation, and no rise in empty-result fallback events (see recall invariant below), **measured against a per-org baseline window of at least 7 days or 200 qualifying runs collected before `sampled` enablement** (D-Rollout baseline invariant).
+The first production deploy of D is `off` or `shadow`; if `shadow` is enabled globally, it must be bounded by the D-Shadow persistence invariant's telemetry size limits and stay within the embedding-cost guardrails (one embed call per run, ~$0.00002 each). Progression to `sampled` and `on` requires B1 telemetry showing no regression in citation utility, no spike in truncation, and no rise in empty-result fallback events (see recall invariant below), **measured against a per-org baseline window of at least 7 days and 200 qualifying runs collected before `sampled` enablement** (D-Rollout baseline invariant; relaxable only by explicit operator override for high-volume orgs).
 
 **D-Recall invariant (per reviewer F3).** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. The current AKR path loads every in-scope active block / chunk; turning on real scores is quality-positive, but **only if the fallback prevents accidental memory starvation.** Concretely:
 
@@ -213,7 +214,7 @@ The first production deploy of D is `off` or `shadow`; if `shadow` is enabled gl
 - A `recall_invariant_check` flag on the per-run retrieval telemetry indicates whether the invariant fired. The fallback-fired rate is a Phase-3 release gate alongside utility regression.
 
 **Cost.**
-- One OpenAI embedding call per agent run (~$0.00002 at `text-embedding-3-small` pricing). Negligible. In `shadow` mode the cost is doubled relative to off (embedding + telemetry write); still negligible.
+- One OpenAI embedding call per agent run (~$0.00002 at `text-embedding-3-small` pricing). Negligible. In `shadow` mode the cost is doubled relative to off (embedding + telemetry write); still negligible. Failure mode is governed by the D-Embedding-failure invariant in §4 — fail open to legacy retrieval, never block the run.
 - ~50 LOC for the cosine + threshold work, ~50 LOC for the shadow-compare telemetry emitter, ~30 LOC for the mode resolver. Total ~150 LOC, behind a feature flag.
 - Risk profile: moderate, materially reduced by the rollout invariant. The `shadow` step lets us observe the candidate-set delta against real production runs without any agent-visible behaviour change.
 
@@ -240,7 +241,7 @@ These invariants emerged from the first round of external review and apply acros
 
 **A-Lineage decision.** The spec must explicitly choose between one-way `block-version → source` lookup and bidirectional lineage. Bidirectional lineage requires a join table; `uuid[]` is acceptable only if reverse lookup is intentionally out of scope. Default recommendation: join table (`memory_block_version_sources`).
 
-**A-Deletion invariant (reviewer F3).** If `source_entry_id` can become NULL (it can: source entries are soft-deletable today and may be hard-deleted via privacy flows), the lineage row must retain enough non-sensitive snapshot metadata to remain audit-useful even after source loss. **Required at minimum:** `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `snapshot_excerpt` is **optional** and must be reviewed against deletion / privacy semantics (right-to-be-forgotten flows may require it to be redactable). `content_hash` alone is insufficient — it proves content integrity only if the content is still recoverable.
+**A-Deletion invariant (reviewer F3).** If `source_entry_id` can become NULL (it can: source entries are soft-deletable today and may be hard-deleted via privacy flows), the lineage row must retain enough non-sensitive snapshot metadata to remain audit-useful even after source loss. **Required at minimum:** `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `content_hash` alone is insufficient — it proves content integrity only if the content is still recoverable. `snapshot_excerpt` is **out of scope for v1** unless privacy review explicitly approves it; v1 lineage relies on the required metadata only. This keeps v1 clean and avoids accidental sensitive-content retention.
 
 **B-D dependency.** Proposal D depends on Proposal **B1** (measurement substrate), not on B2's polished dashboard UX. Dashboard polish may follow as long as operators can inspect run-level and aggregate citation utility via the substrate during D's rollout.
 
@@ -252,7 +253,9 @@ These invariants emerged from the first round of external review and apply acros
 
 **D-Recall invariant.** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. Empty semantic results require either a legacy-ordering fallback or an explicit `retrieval.empty_after_semantic` degraded reason on the run trace, with safe payload preservation during `shadow` / `sampled` modes.
 
-**D-Rollout baseline invariant (reviewer F4).** Before enabling `sampled` mode for an org, the system must have collected at least 7 days **or** N qualifying runs (N TBD in spec; suggest 200) of legacy/off baseline telemetry per target org. Promotion gates compare sampled-run utility, truncation, and fallback rates against **that org's baseline window**, not against global averages. This prevents low-volume orgs or unusual agent mixes from making the data noisy.
+**D-Embedding-failure invariant.** Embedding failures (OpenAI 5xx, timeout, network error) must **fail open to legacy retrieval behaviour** (scope-tier + recency, threshold 0) and emit a `retrieval.embedding_failed` degraded reason on the run trace. They must **not** block agent execution. Retrieval quality must degrade safely, not interrupt runs.
+
+**D-Rollout baseline invariant (reviewer F4).** Before enabling `sampled` mode for an org, the system must have collected at least 7 days **and** 200 qualifying runs of legacy/off baseline telemetry per target org. The spec may relax this to either-of (7d OR 200 runs) for explicitly opted-in high-volume orgs via operator override; the default is conjunctive to prevent a high-volume org from flipping to `sampled` after a few hours of data. Promotion gates compare sampled-run utility, truncation, and fallback rates against **that org's baseline window**, not against global averages.
 
 ---
 
