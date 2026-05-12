@@ -78,6 +78,14 @@ const LLMCallContextSchema = z.object({
   // `ieeRunId` MUST be set when sourceType='iee' or callSite='worker'.
   // Enforced by the runtime guard below AND a database CHECK constraint.
   ieeRunId:           z.string().uuid().optional(),
+  // ── Operator Backend attribution (migration 0331, spec §3.12, §4.10) ───────
+  // Optional nullable FK to operator_runs.id. Populated for per_token rows
+  // written during operator-session fallback. Does NOT participate in the
+  // per-token row's idempotency key — it is attribution only.
+  operatorRunId:      z.string().uuid().optional(),
+  // Cost-accounting boundary within a chain link (part of idempotency key for
+  // subscription_mediated and sandbox_compute rows).
+  boundary:           z.string().optional(),
   // ── Rev §6 polymorphic attribution (spec §5.1 / §6.1) ────────────────────
   // `sourceId` is the polymorphic FK for non-agent consumers. Required when
   // sourceType='analyzer'; optional when sourceType='system'; must be NULL
@@ -500,6 +508,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId:               ctx.runId,
         executionId:         ctx.executionId,
         ieeRunId:            ctx.ieeRunId,
+        operatorRunId:       ctx.operatorRunId,
+        boundary:            ctx.boundary,
         sourceId:            ctx.sourceId,
         featureTag:          ctx.featureTag ?? 'unknown',
         callSite:            ctx.callSite ?? 'app',
@@ -634,6 +644,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId:               ctx.runId,
         executionId:         ctx.executionId,
         ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        operatorRunId:       ctx.operatorRunId,
+        boundary:            ctx.boundary,
         sourceId:            ctx.sourceId,        // rev §6
         featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
         callSite:            ctx.callSite ?? 'app',
@@ -1130,6 +1142,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         runId:               ctx.runId,
         executionId:         ctx.executionId,
         ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        operatorRunId:       ctx.operatorRunId,
+        boundary:            ctx.boundary,
         sourceId:            ctx.sourceId,        // rev §6
         featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
         callSite:            ctx.callSite ?? 'app',
@@ -1463,6 +1477,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       runId:               ctx.runId,
       executionId:         ctx.executionId,
       ieeRunId:            ctx.ieeRunId,        // §11.7.1
+      operatorRunId:       ctx.operatorRunId,
+      boundary:            ctx.boundary,
       sourceId:            ctx.sourceId,        // rev §6
       featureTag:          ctx.featureTag ?? 'unknown',  // rev §6
       callSite:            ctx.callSite ?? 'app',

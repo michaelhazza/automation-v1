@@ -3,6 +3,7 @@
 import { and, desc, eq, gte, ne, sql as sqlOp } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { auditEvents, integrationConnections } from '../db/schema/index.js';
+import { emitAgentRunUpdate } from '../websocket/emitters.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { logger } from '../lib/logger.js';
@@ -35,10 +36,31 @@ export interface IssuedCredential {
 export interface OperatorSessionEnvelope {
   credentialId: string;
   connectionId: string;
+  /** Defence-in-depth: adapter asserts this matches the task's subaccount_id (spec §3.6). */
+  subaccountId: string;
   authType: 'operator_session';
   provider: string;
   planTier: 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown';
   usabilityState: 'connected_usable';  // broker refuses to return any other state
+  issuedAt: string;
+  expiresAt: string | null;
+}
+
+/**
+ * Redacted API-key credential envelope for operator-session → API-key fallback.
+ *
+ * Raw key material never leaves the broker — the adapter consumes credentialId
+ * only (mirroring the OperatorSessionEnvelope discipline).
+ *
+ * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.7 item 2
+ */
+export interface ApiKeyEnvelope {
+  credentialId: string;
+  connectionId: string;
+  /** Defence-in-depth: adapter asserts this matches the task's subaccount_id (spec §3.6). */
+  subaccountId: string;
+  authType: 'api_key';
+  provider: string;
   issuedAt: string;
   expiresAt: string | null;
 }
@@ -143,6 +165,7 @@ export const credentialBrokerService = {
       return {
         credentialId: conn.id,
         connectionId: conn.id,
+        subaccountId: conn.subaccountId ?? params.subaccountId,
         authType: 'operator_session' as const,
         provider: conn.providerType,
         planTier: (conn.planTier ?? 'unknown') as 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown',
@@ -433,5 +456,144 @@ export const credentialBrokerService = {
       providerType: conn.providerType,
       subaccountId: conn.subaccountId,
     }));
+  },
+
+  /**
+   * Requests an operator-session credential for the given subaccount and agent run.
+   *
+   * Returns an OperatorSessionEnvelope when a usable credential exists, or
+   * { unavailable: true, reason } when no usable credential is available.
+   *
+   * Only returns credentials whose subaccount_id matches the requested subaccountId
+   * (broker-side subaccount-match; adapter performs defence-in-depth assertion).
+   *
+   * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.6
+   */
+  async requestOperatorSessionCredential(params: {
+    subaccountId: string;
+    agentRunId: string;
+  }): Promise<OperatorSessionEnvelope | { unavailable: true; reason: string }> {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.subaccountId, params.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+          eq(integrationConnections.usabilityState, 'connected_usable'),
+        ),
+      )
+      .limit(1);
+
+    if (!conn) {
+      return { unavailable: true, reason: 'no_usable_operator_session_credential' };
+    }
+
+    return {
+      credentialId: conn.id,
+      connectionId: conn.id,
+      subaccountId: conn.subaccountId ?? params.subaccountId,
+      authType: 'operator_session' as const,
+      provider: conn.providerType,
+      planTier: (conn.planTier ?? 'unknown') as 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown',
+      usabilityState: 'connected_usable' as const,
+      issuedAt: new Date().toISOString(),
+      expiresAt: conn.tokenExpiresAt ? conn.tokenExpiresAt.toISOString() : null,
+    };
+  },
+
+  /**
+   * Resolves the fallback credential when the operator-session is unavailable.
+   *
+   * Returns a { envelope, mode } pair, or null if no fallback is available.
+   * Tries a refreshed operator-session first; falls back to an active API-key connection.
+   *
+   * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.7 item 2
+   */
+  async resolveFallback(params: {
+    subaccountId: string;
+    agentRunId: string;
+    originalCredentialId: string;
+  }): Promise<{ envelope: OperatorSessionEnvelope | ApiKeyEnvelope; mode: 'operator_session' | 'api_key' } | null> {
+    // Try a different operator-session credential (not the failing one).
+    const [otherSession] = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.subaccountId, params.subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+          eq(integrationConnections.usabilityState, 'connected_usable'),
+          ne(integrationConnections.id, params.originalCredentialId),
+        ),
+      )
+      .limit(1);
+
+    if (otherSession) {
+      const envelope: OperatorSessionEnvelope = {
+        credentialId: otherSession.id,
+        connectionId: otherSession.id,
+        subaccountId: otherSession.subaccountId ?? params.subaccountId,
+        authType: 'operator_session' as const,
+        provider: otherSession.providerType,
+        planTier: (otherSession.planTier ?? 'unknown') as 'pro' | 'team' | 'enterprise' | 'plus' | 'unknown',
+        usabilityState: 'connected_usable' as const,
+        issuedAt: new Date().toISOString(),
+        expiresAt: otherSession.tokenExpiresAt ? otherSession.tokenExpiresAt.toISOString() : null,
+      };
+      return { envelope, mode: 'operator_session' };
+    }
+
+    // Fall back to an API-key connection for the same subaccount.
+    const [apiKeyConn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.subaccountId, params.subaccountId),
+          eq(integrationConnections.authType, 'api_key'),
+          eq(integrationConnections.connectionStatus, 'active'),
+        ),
+      )
+      .limit(1);
+
+    if (apiKeyConn) {
+      const envelope: ApiKeyEnvelope = {
+        credentialId: apiKeyConn.id,
+        connectionId: apiKeyConn.id,
+        subaccountId: apiKeyConn.subaccountId ?? params.subaccountId,
+        authType: 'api_key' as const,
+        provider: apiKeyConn.providerType,
+        issuedAt: new Date().toISOString(),
+        expiresAt: apiKeyConn.tokenExpiresAt ? apiKeyConn.tokenExpiresAt.toISOString() : null,
+      };
+      return { envelope, mode: 'api_key' };
+    }
+
+    return null;
+  },
+
+  /**
+   * Emits the operator-session.usability_restored lifecycle event.
+   *
+   * Called when the broker detects that a previously unavailable operator-session
+   * credential has become usable again. Clears fallback stickiness for any
+   * agent runs waiting on the next chain-link dispatch.
+   *
+   * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §3.7 item 6
+   */
+  async emitUsabilityRestored(params: {
+    connectionId: string;
+    agentRunId?: string;
+  }): Promise<void> {
+    if (params.agentRunId) {
+      emitAgentRunUpdate(params.agentRunId, 'operator-session.usability_restored', {
+        event: 'operator-session.usability_restored',
+        agent_run_id: params.agentRunId,
+        credential_id: params.connectionId,
+      });
+    }
   },
 };

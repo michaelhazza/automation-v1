@@ -503,12 +503,22 @@ app.use('/api', (req, res) => {
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
 import { ZodError } from 'zod';
+import { mapOperatorBackendErrorToHttp } from './services/operatorBackendErrors.js';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
+  let extraBody: Record<string, unknown> | null = null;
 
-  if (err instanceof ZodError) {
+  // Operator backend typed errors — checked before generic Error branch so
+  // the richer body (kind, current_state / cap, current, subaccount_id) is used.
+  const operatorMapped = mapOperatorBackendErrorToHttp(err);
+  if (operatorMapped) {
+    statusCode = operatorMapped.statusCode;
+    errorCode = operatorMapped.errorCode;
+    message = err instanceof Error ? err.message : String(err);
+    extraBody = operatorMapped.body;
+  } else if (err instanceof ZodError) {
     statusCode = 400;
     errorCode = 'validation_error';
     message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -556,6 +566,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     error: {
       code: errorCode,
       message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+      ...(extraBody ?? {}),
     },
     correlationId,
   });
