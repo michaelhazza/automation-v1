@@ -6,9 +6,13 @@ import { ThinkingBox } from './ThinkingBox';
 import { AskFormCard } from './AskFormCard';
 import { PauseCard } from './PauseCard';
 
-interface ChatPaneProps { taskId: string; projection: TaskProjection }
+interface ChatPaneProps {
+  taskId: string;
+  projection: TaskProjection;
+  operatorRunStatus?: string | null;
+}
 
-export function ChatPane({ taskId, projection }: ChatPaneProps) {
+export function ChatPane({ taskId, projection, operatorRunStatus }: ChatPaneProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -18,11 +22,37 @@ export function ChatPane({ taskId, projection }: ChatPaneProps) {
   const pendingApprovals = projection.approvalGates.filter(g => g.status === 'pending');
   const pendingAsks = projection.askGates.filter(g => g.status === 'pending');
 
+  // Operator system message for r4 (failed) and r6 (fallback engaged) states.
+  const operatorSystemMessage = (() => {
+    if (operatorRunStatus === 'failed') {
+      return (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] px-3 py-2 rounded-lg text-[13px] bg-red-50 text-red-800 border border-red-200">
+            The operator session ended unexpectedly. Review the activity log for details,
+            or retry the task.
+          </div>
+        </div>
+      );
+    }
+    if (operatorRunStatus === 'fallback_engaged') {
+      return (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] px-3 py-2 rounded-lg text-[13px] bg-amber-50 text-amber-800 border border-amber-200">
+            The primary AI Subscription became unavailable. The session is continuing with
+            your fallback API key.
+          </div>
+        </div>
+      );
+    }
+    return null;
+  })();
+
   if (
     projection.chatMessages.length === 0 &&
     projection.milestones.length === 0 &&
     pendingApprovals.length === 0 &&
-    pendingAsks.length === 0
+    pendingAsks.length === 0 &&
+    !operatorSystemMessage
   ) {
     return (
       <div className="flex-1 flex items-center justify-center p-8 text-center">
@@ -63,6 +93,7 @@ export function ChatPane({ taskId, projection }: ChatPaneProps) {
         {projection.runStatus?.startsWith('paused') && (
           <PauseCard taskId={taskId} reason={projection.runStatus as 'paused' | 'paused_cost' | 'paused_wall_clock'} />
         )}
+        {operatorSystemMessage}
         <div ref={bottomRef} />
       </div>
     </div>

@@ -52,7 +52,19 @@ export type RunTraceEventType =
   | 'phase1.file_delivery.downloaded'
   // Phase 1 Showcase — 42 Macro failure events (spec §3.5 / INV-16)
   | 'phase1.macro.report_rendering_failed'
-  | 'phase1.macro.artifact_upload_failed';
+  | 'phase1.macro.artifact_upload_failed'
+  // Operator Backend — operator-session lifecycle events (spec § 4.7)
+  | 'operator-session.chain_link_started'
+  | 'operator-session.chain_link_completed'
+  | 'operator-session.chain_link_failed'
+  | 'operator-session.fallback_engaged'
+  | 'operator-session.auto_extending'
+  | 'operator-session.task_terminal_completed'
+  | 'operator-session.task_terminal_failed'
+  | 'operator-session.fresh_profile_restart'
+  | 'operator-session.progressed'
+  | 'operator-session.preparing_checkpoint'
+  | 'operator-session.usability_restored';
 
 // ---------------------------------------------------------------------------
 // RunTraceEventBase — fields common to every event
@@ -302,6 +314,51 @@ export type RunTraceEvent =
       ieeRunId: string;
       artifactKind: string;
       lastError: string;
+    })
+  // Operator Backend — operator-session lifecycle events (spec § 4.7)
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.chain_link_started';
+      payload?: { chainSeq?: number; imageTag?: string; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.chain_link_completed';
+      payload?: { chainSeq?: number; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.chain_link_failed';
+      payload?: { chainSeq?: number; failureReason?: string; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.fallback_engaged';
+      payload?: { chainSeq?: number; fromMode?: string; toMode?: string; reason?: string; stepIndex?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.auto_extending';
+      payload?: { chainSeq?: number; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.task_terminal_completed';
+      payload?: { totalLinks?: number; totalElapsedMs?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.task_terminal_failed';
+      payload?: { failureReason?: string };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.fresh_profile_restart';
+      payload?: { priorAttemptNumber?: number; newAttemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.progressed';
+      payload?: { chainSeq?: number; stepIndex?: number; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.preparing_checkpoint';
+      payload?: { chainSeq?: number; attemptNumber?: number };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'operator-session.usability_restored';
+      payload?: { connectionId?: string };
     });
 
 // ---------------------------------------------------------------------------

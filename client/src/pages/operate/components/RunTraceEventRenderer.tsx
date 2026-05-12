@@ -27,6 +27,8 @@ import {
   MacroReportRenderingFailedRenderer,
   MacroArtifactUploadFailedRenderer,
 } from '../../../components/run-trace/MacroFailureRenderers';
+import { ChainLinkDivider } from '../../../components/run-trace/ChainLinkDivider';
+import { AttemptGroup } from '../../../components/run-trace/AttemptGroup';
 
 // ── Wire shape returned by /api/agent-runs/:id/trace-events ─────────────────
 
@@ -152,6 +154,88 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
   }
   if (event.eventType === 'phase1.macro.artifact_upload_failed') {
     return <MacroArtifactUploadFailedRenderer event={event as { payload?: Record<string, unknown> }} />;
+  }
+
+  // ── operator-session.* event renderers (mockup r17 / c2) ────────────────────
+
+  if (event.eventType === 'operator-session.chain_link_started') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-[12px] text-indigo-700">
+        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} started</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.chain_link_completed') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-[12px] text-green-700">
+        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} completed</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.chain_link_failed') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[12px] text-red-700">
+        <span className="font-medium">Chain link {event.payload?.chainSeq ?? '?'} failed</span>
+        {event.payload?.failureReason && (
+          <span className="text-slate-400 text-[11px]">{event.payload.failureReason}</span>
+        )}
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.fallback_engaged') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12px] text-amber-700">
+        <span className="font-medium">Fallback engaged</span>
+        <span className="text-amber-600 text-[11px]">Switched to API key</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.auto_extending') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12px] text-amber-700">
+        <span className="font-medium">Auto-extending</span>
+        <span className="text-amber-600 text-[11px]">Extending past soft cap to reach checkpoint</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.task_terminal_completed') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-[12px] text-green-700">
+        <span className="font-medium">Task completed</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.task_terminal_failed') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[12px] text-red-700">
+        <span className="font-medium">Task failed</span>
+        {isLate && <LateChip />}
+      </div>
+    );
+  }
+
+  if (event.eventType === 'operator-session.fresh_profile_restart') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-600">
+        <span className="font-medium">Fresh profile restart</span>
+        {event.payload?.newAttemptNumber !== undefined && (
+          <span className="text-slate-400 text-[11px]">Attempt {event.payload.newAttemptNumber}</span>
+        )}
+        {isLate && <LateChip />}
+      </div>
+    );
   }
 
   if (event.eventType === 'controller_style_decided') {
@@ -375,15 +459,73 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
   }
 
   // Filter system events to the types this renderer handles: known system event
-  // types plus all phase1.* events (support agent + 42 Macro failure events).
+  // types, operator-session.* events, plus all phase1.* events (support agent + Macro failures).
   const SYSTEM_EVENT_TYPES = new Set([
     'controller_style_decided',
     'policy_envelope_resolved',
     'tool_security_decision',
   ]);
   const filteredSystemEvents = systemEvents?.filter((e) =>
-    SYSTEM_EVENT_TYPES.has(e.eventType) || e.eventType.startsWith('phase1.'),
+    SYSTEM_EVENT_TYPES.has(e.eventType) ||
+    e.eventType.startsWith('phase1.') ||
+    e.eventType.startsWith('operator-session.'),
   ) ?? [];
+
+  // ── Operator chain-link divider logic (r17) ──────────────────────────────────
+  // Group operator-session events by attempt_number and insert ChainLinkDividers
+  // between events of different chain_seq values.
+
+  const renderSystemEventList = () => {
+    if (filteredSystemEvents.length === 0) return null;
+
+    const items: React.ReactNode[] = [];
+    let lastChainSeq: number | null = null;
+    let lastAttemptNumber: number | null = null;
+    let currentAttemptEvents: React.ReactNode[] = [];
+
+    const flushAttemptGroup = (attempt: number) => {
+      if (currentAttemptEvents.length === 0) return;
+      if (attempt > 1) {
+        items.push(
+          <AttemptGroup key={`attempt-${attempt}`} attemptNumber={attempt}>
+            {currentAttemptEvents}
+          </AttemptGroup>,
+        );
+      } else {
+        items.push(...currentAttemptEvents);
+      }
+      currentAttemptEvents = [];
+    };
+
+    filteredSystemEvents.forEach((event, idx) => {
+      const opEvent = event as unknown as { payload?: { chainSeq?: number; attemptNumber?: number } };
+      const chainSeq = opEvent.payload?.chainSeq ?? null;
+      const attemptNumber = opEvent.payload?.attemptNumber ?? 1;
+
+      if (lastAttemptNumber !== null && attemptNumber !== lastAttemptNumber) {
+        flushAttemptGroup(lastAttemptNumber);
+        lastChainSeq = null;
+      }
+
+      if (chainSeq !== null && chainSeq !== lastChainSeq && event.eventType.startsWith('operator-session.')) {
+        currentAttemptEvents.push(
+          <ChainLinkDivider key={`divider-${idx}`} chainSeq={chainSeq} startedAt={event.timestamp} />,
+        );
+        lastChainSeq = chainSeq;
+      }
+
+      currentAttemptEvents.push(
+        <SystemEventRow key={`${event.eventType}-${idx}`} event={event} />,
+      );
+      lastAttemptNumber = attemptNumber;
+    });
+
+    if (lastAttemptNumber !== null) {
+      flushAttemptGroup(lastAttemptNumber);
+    }
+
+    return items;
+  };
 
   return (
     <div className="flex flex-col gap-2 animate-[fadeIn_0.2s_ease-out_both]">
@@ -392,9 +534,7 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
           <div className="text-[12px] text-slate-400 font-medium uppercase tracking-wider mb-1">
             System events ({filteredSystemEvents.length})
           </div>
-          {filteredSystemEvents.map((event, idx) => (
-            <SystemEventRow key={`${event.eventType}-${idx}`} event={event} />
-          ))}
+          {renderSystemEventList()}
         </div>
       )}
       <div className="text-[12px] text-slate-400 font-medium uppercase tracking-wider mb-1">
