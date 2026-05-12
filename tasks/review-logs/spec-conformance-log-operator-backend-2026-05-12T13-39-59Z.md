@@ -230,4 +230,4 @@ NON_CONFORMANT — 2 directional gaps must be addressed by the main session befo
 
 These gaps will fail the `verify-operator-event-registry.sh` CI gate on PR open. Lint and typecheck remain clean (0 errors) in the current state — the gap is purely a registry-discipline / event-name-reconciliation issue, not a compile issue. Recommended next action: have the main session decide on the canonical event-name set (spec § 4.7 names are recommended), update adapter + handler + renderer + runTraceEvent.ts in one coordinated commit, then re-run `pr-reviewer` on the expanded changed-code set.
 
-**Commit at finish:** (filled in after the auto-commit step below)
+**Commit at finish:** `1f709aa1`
