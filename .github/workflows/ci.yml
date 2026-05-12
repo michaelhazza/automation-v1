@@ -182,6 +182,13 @@ jobs:
           STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}
         run: bash scripts/gates/verify-template-version-coherence.sh
 
+      # Operator Backend (§ 3.2 item 2) — single-source-of-truth gate for the
+      # 'long_running' and 'session_identity' ExecutionCapability literals.
+      # Enforces that these literals only appear in the canonical definition
+      # (types.ts), adapter declarations, test fixtures, and documentation.
+      - name: "Operator Backend: ExecutionCapability literals confined to canonical sites (§ 3.2)"
+        run: bash scripts/gates/verify-execution-capability-references.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/
