@@ -159,3 +159,34 @@
 **Files modified:**
 - `prototypes/memory-improvements/akr-ranker-settings.html` (updated)
 - `tasks/builds/memory-improvements/mockup-log.md` (updated)
+
+---
+
+## Round 3 — 2026-05-12
+
+**Trigger:** CEO review of the third mockup. Two findings:
+
+1. **The four-mode rollout was over-engineering for a pre-production codebase.** Reviewer F2 ("must first ship in off or shadow mode") had been written assuming a production risk profile. Current codebase context per `docs/spec-context.md`: `pre_production: yes, live_users: no, feature_stability: low`. The staged-rollout machinery was guarding against a risk that does not yet exist.
+
+2. **The mode selector should not have been a user-facing surface.** Surfacing engineering rollout mechanics (off / shadow / sampled / on) as a subaccount admin control is like exposing "BM25 vs vector ranking" to a search-engine end user — wrong product layer.
+
+**Outcome:** Proposal D in the brief was simplified to "backend algorithm change behind a single env on/off flag, no UI." The associated mockup `akr-ranker-settings.html` no longer represents the proposed product surface.
+
+**File operations:**
+
+- **Deleted:** `prototypes/memory-improvements/akr-ranker-settings.html`. Both halves (mode selector card + shadow-mode comparison panel) became obsolete when staged rollout was dropped. Git history retains the file at `ea1fc78` and earlier for re-evaluation if the codebase later approaches live-user readiness.
+- **Updated:** `prototypes/memory-improvements/index.html`. Mockup 3 card retained as a tombstone (greyed-out, strikethrough title) explaining the retirement.
+- **Updated separately:** `citation-utility-dashboard.html` tab labels corrected from `Runs / Routing / Spend` to the actual `Overview / Agents / Models / Runs / Routing / IEE Execution`. Committed in `dd0a3e0`.
+
+**Surviving mockups (2):**
+- `memory-block-detail.html` — Proposal A, Sources tab on MemoryBlockDetailPage. Unchanged in Round 3.
+- `citation-utility-dashboard.html` — Proposal B2, Memory Utility tab on UsagePage. Tab labels corrected.
+
+**New components introduced this round:** none. This round retires UI, does not add any.
+
+**Rule violations flagged:** none.
+
+**Files modified:**
+- `prototypes/memory-improvements/akr-ranker-settings.html` (deleted)
+- `prototypes/memory-improvements/index.html` (updated)
+- `tasks/builds/memory-improvements/mockup-log.md` (updated)

@@ -1,9 +1,9 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** **LOCKED** for spec handoff (confirmed by reviewer 2026-05-12; re-locked after CEO scope correction)
-**Revision:** 5.2 (per-subaccount scope correction: D-Rollout mode and baseline window are subaccount-scoped, not org-scoped; subaccount admin UX must not surface org-inheritance)
+**Status:** **LOCKED** for spec handoff (confirmed by reviewer 2026-05-12; CEO scope corrections applied; staged-rollout machinery dropped as over-engineering for pre-production)
+**Revision:** 6 (pre-production simplification: four-mode staged rollout dropped; no user-facing ranker UI; D ships as algorithm + env on/off flag; algorithm safety invariants retained)
 **Date:** 2026-05-12
-**Spec-handoff non-negotiables** (per reviewer + CEO correction): B1 must add `injected_entry_ids` before entry utility is reported. D must first deploy as `off` or `shadow`. **D mode and baseline are per-subaccount; org-level default is invisible to subaccount admins (no "inherited from org" badges, no greyed fields).** Shadow telemetry persists IDs + scores + status only, never full content. Embedding failure fails open to legacy retrieval. Semantic filtering must never silently empty a previously non-empty candidate category. A must use the join table unless the spec explicitly rejects bidirectional lineage.
+**Spec-handoff non-negotiables** (Rev 6 simplified): B1 must add `injected_entry_ids` before entry utility is reported. B1 aggregate queries must distinguish "not measured" from "0% utility" for pre-migration runs. D ships behind a single env on/off flag (no user-facing UI, no four-mode rollout). **D-Recall invariant:** semantic filtering must never silently empty a previously non-empty candidate category. **D-Embedding-failure invariant:** OpenAI failures fail open to legacy retrieval and emit a degraded reason on the run trace; they must not block agent execution. A must use the join table unless the spec explicitly rejects bidirectional lineage; lineage row retains deletion-safe snapshot metadata even when `source_entry_id` becomes NULL.
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
 
 ## Table of contents
@@ -133,7 +133,7 @@ This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"
 
 **Why this is NOT a duplicate of AKR's observability.** AKR shipped `retrievalObservabilityService` (147 LOC across both files). What it actually emits in production: payload truncation, degraded-reason builders, and always-available capacity warnings (30 docs / 30k tokens). It does **not** emit per-document coverage ("loaded in N of last 30 runs") even though §11 of the AKR spec described it. It does **not** emit any utility metric. The reviewer should treat utility and coverage as separate questions: *coverage* answers "which memory got loaded into the prompt?" — *utility* answers "of what got loaded, how much did the agent actually use?" Coverage belongs as an extension of the existing `retrievalObservabilityService` (same code-owner, same event substrate). Utility is what this proposal adds.
 
-**Why split into B1 + B2 (revised per reviewer F1).** Rev 2 combined the measurement substrate, rollup job, materialised view, and dashboard UI into one proposal. The reviewer pointed out that Proposal D's dependency is actually on the metric and the rollback signal — not on polished dashboard chrome. Splitting the proposal lets D ship into `shadow` / `sampled` modes (see Proposal D rollout invariant) once B1 is queryable, without waiting on B2's UI polish.
+**Why split into B1 + B2 (per reviewer F1).** Rev 2 combined the measurement substrate, rollup job, materialised view, and dashboard UI into one proposal. The reviewer pointed out that Proposal D's dependency is actually on the metric and the rollback signal — not on polished dashboard chrome. Splitting the proposal lets D be enabled (Rev 6: via env flag) once B1 is queryable, without waiting on B2's UI polish.
 
 #### B1 — Measurement substrate
 
@@ -161,11 +161,11 @@ Without this, entry-utility on the dashboard would have a numerator but no trust
 
 **What ships.** Charts and a per-agent breakdown over the B1 substrate, surfaced on the admin observability page. Two utility charts (entries, blocks), one per-agent breakdown table with a minimum-runs gate (~10 runs / window) to suppress noise on low-volume agents.
 
-**Why B2 can lag B1.** Per the reviewer's F1 framing: as long as the substrate is queryable and reviewable, D can run in shadow / sampled mode and operators can spot-check with SQL. The dashboard is the durability layer — what makes utility a permanent operating concern rather than a one-off review-period query.
+**Why B2 can lag B1.** Per the reviewer's F1 framing: as long as the substrate is queryable and reviewable, engineering can enable D via the env flag and spot-check utility with SQL. The dashboard is the durability layer — what makes utility a permanent operating concern rather than a one-off review-period query.
 
 **Scope.** ~100 LOC. One chart component, one breakdown table, route additions. See §5 for mockups.
 
-**B-D dependency contract (per reviewer):** Proposal D depends on **B1**, not B2. D must not ship beyond `shadow` mode until B1 is live and queryable.
+**B-D dependency contract (per reviewer; Rev 6 wording):** Proposal D depends on **B1**, not B2. D's env flag should not be flipped on until B1 is live and queryable — otherwise we have no quality signal to know whether the ranker is helping.
 
 **Caveats (apply to both layers).**
 - Citation detection is heuristic (`memoryCitationDetector.ts`). False negatives (agent uses memory without quoting it) understate utility. False positives (paraphrase collision) overstate it. The metric is directional, not absolute.
@@ -194,44 +194,28 @@ This is the single biggest retrieval-quality lever in the codebase. The infrastr
 
 **Why this is a real follow-up to AKR and not a new build.** Everything except those three pieces is already in production. The pure ranker (`retrievalServicePure.ts:38-91`) has the comparator chain, threshold logic, budget loop, and rejection-reason emission. The observability service emits the truncated payload contract. The schema, indexes, modes, ingestion jobs, UI tabs, and tenant-isolation invariants are live. We are completing a deliberate v1 simplification, not designing a new system.
 
-**D-Rollout invariant (per reviewer F2).** The semantic ranker must ship in one of four explicit modes, with the first production deploy restricted to `off` or `shadow`:
+**Enablement (Rev 6 simplified).** D ships behind a single env-driven on/off flag. When the flag is set, the ranker runs (query embedding → cosine score → threshold filter → budget cap). When unset, the existing legacy behaviour stands unchanged (`finalScore = 0`, threshold = 0, scope-tier + recency + budget). No user-facing UI, no four-mode rollout, no shadow telemetry, no per-subaccount sampling. Engineering controls the flag; if a regression surfaces during internal testing, the flag flips off and the system is back to today's behaviour in seconds.
 
-| Mode | Behaviour |
-|---|---|
-| `off` | Current production: `finalScore = 0`, threshold = 0, all eligible chunks pass. No change vs. today. |
-| `shadow` | Compute query embedding, per-candidate cosine score, threshold filter, and a hypothetical selected-payload — emit it as a **bounded** `retrieval.shadow_compare` record (candidate IDs + scores + status only, never full content) — **but preserve the existing production payload as the actual loaded set.** No agent-visible change. Storage shape (bounded run-trace event vs. dedicated telemetry table) is a spec decision; logs are not acceptable. |
-| `sampled` | Apply the ranked payload to a bounded percentage of runs (or to a specific allow-listed set of tenants/agents). Remainder stay on legacy behaviour. |
-| `on` | Apply the ranked payload by default for all runs in the org. |
+**Why simpler is correct here.** Earlier revisions (Rev 5.x) locked an Off → Shadow → Sampled → On rollout with per-subaccount baseline windows, shadow telemetry persistence, and a recall-fallback flag tied to each mode. That machinery was designed for a production-deployment risk profile. `docs/spec-context.md` records this codebase as `pre_production: yes, live_users: no, feature_stability: low` — the risk model the staged rollout was guarding against does not yet exist. Building the machinery now is over-engineering. The two algorithm safety invariants (recall + embedding failure, both in §4) are the load-bearing guardrails; they remain mandatory. The rollout discussion can be reopened when this codebase approaches live-user readiness.
 
-Mode is **per-subaccount** with an org-level default that subaccount admins inherit but can override. **Subaccount admin UX must perceive the mode as a standalone subaccount setting — no "inherited from org" badges, no greyed-out fields, no org-default indicators visible.** The fact that an org-level default exists is an implementation detail; from the subaccount admin's perspective, this is their setting on their subaccount. **Config surface (revised per reviewer F5 + CEO correction):** the spec must reuse `server/services/orgSettingsService.ts` (for the org default) plus a subaccount-scoped settings primitive (subaccount-keyed table or extension of an existing subaccount settings surface) for the override. Adding a column to `organisations` is rejected; a retrieval flag is not org schema. Resolution order at runtime: subaccount value if set, else org default, else env-driven platform default.
-
-The first production deploy of D is `off` or `shadow`; if `shadow` is enabled across an org, it must be bounded by the D-Shadow persistence invariant's telemetry size limits and stay within the embedding-cost guardrails (one embed call per run, ~$0.00002 each). Progression to `sampled` and `on` happens per-subaccount, gated by B1 telemetry showing no regression in citation utility, no spike in truncation, and no rise in empty-result fallback events (see recall invariant below), **measured against that subaccount's own baseline window of at least 7 days and 200 qualifying runs collected before `sampled` enablement** (D-Rollout baseline invariant; relaxable only by explicit operator override for high-volume subaccounts).
-
-**D-Recall invariant (per reviewer F3).** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. The current AKR path loads every in-scope active block / chunk; turning on real scores is quality-positive, but **only if the fallback prevents accidental memory starvation.** Concretely:
-
-- For each retrieval category (memory blocks, reference-document chunks), if semantic filtering at the configured threshold would return zero candidates from a previously non-empty pool, the system must either:
-  - **fall back** to the top-N legacy ordering (scope-tier → recency) and load that set, **or**
-  - in `shadow` / `sampled` modes, preserve the legacy payload and emit a `retrieval.empty_after_semantic` degraded reason on the run trace.
-- A `recall_invariant_check` flag on the per-run retrieval telemetry indicates whether the invariant fired. The fallback-fired rate is a Phase-3 release gate alongside utility regression.
-
-**Cost.**
-- One OpenAI embedding call per agent run (~$0.00002 at `text-embedding-3-small` pricing). Negligible. In `shadow` mode the cost is doubled relative to off (embedding + telemetry write); still negligible. Failure mode is governed by the D-Embedding-failure invariant in §4 — fail open to legacy retrieval, never block the run.
-- ~50 LOC for the cosine + threshold work, ~50 LOC for the shadow-compare telemetry emitter, ~30 LOC for the mode resolver. Total ~150 LOC, behind a feature flag.
-- Risk profile: moderate, materially reduced by the rollout invariant. The `shadow` step lets us observe the candidate-set delta against real production runs without any agent-visible behaviour change.
+**Cost (Rev 6).**
+- One OpenAI embedding call per agent run when the flag is on (~$0.00002 at `text-embedding-3-small` pricing). Negligible.
+- ~80 LOC: query construction, embedding call, cosine score wiring at `retrievalService.ts:197,276`, env-flag resolver, recall-invariant fallback path. No telemetry-persistence schema, no mode resolver, no sampling logic.
+- Risk profile: low given the small surface area and the recall + embedding-failure invariants. If a regression appears in dev testing, flip the env flag off.
 
 **What this does NOT do.**
-- No re-ranking layer (Cohere or LLM). Pure cosine, consistent with AKR spec §1.2 ("no cross-encoder re-ranking. Pure cosine for v1.").
+- No re-ranking layer (Cohere or LLM). Pure cosine, consistent with AKR spec §1.2.
 - No version-aware retrieval (continues to retrieve the latest version of each document, per AKR spec §1.2).
 - No backfill of historical chunks — they are already embedded as part of AKR's ingestion pipeline.
-- No new agent-facing UI. The agent prompt continues to receive what the budget allows, just from a higher-quality candidate set. Operator-facing settings and per-run trace surfaces **may** change to support rollout visibility (see §5 mockups — ranker mode selector and shadow-mode comparison panel).
+- **No new UI at all.** No agent-facing change, no subaccount-admin settings page, no shadow-comparison panel. The flag is engineering-controlled config; users see only the resulting retrieval quality.
+- No staged rollout machinery. No shadow mode, no sampled %, no baseline window, no shadow-telemetry persistence schema.
 
-**Sequencing.** Proposal D depends on **B1** (the measurement substrate), not B2's dashboard. D ships in `shadow` mode once B1 is queryable — operators can spot-check shadow-vs-legacy comparisons in SQL during the first week. Progression to `sampled` and `on` requires either B2 live, or operator confidence built via SQL drill-downs and the per-run shadow-compare view in the retrieval observability surface (see §5 mockups).
+**Sequencing.** Proposal D depends on **B1** (the measurement substrate). Order: B1 ships first so engineering has a quality signal; D's env flag can then be enabled, and B1's utility numbers tell us whether the ranker is helping or hurting. If hurting, flip the flag off. B2's dashboard polish can land in parallel or after.
 
 **Open questions for the reviewer:**
-- Query definition — is "task description" the right choice over "task description + conversation summary" or "task description + agent master prompt summary"? Combining inputs is plausible; the trade-off is signal-to-noise and embedding cost (per-component embeddings, then weighted average vs. concatenated single embedding).
-- Threshold starting point — 0.30 is a guess based on `text-embedding-3-small` norms. Worth validating against a sample of production runs before defaulting.
-- Feature-flag scope — global, per-tenant, or per-agent? Per-tenant is the natural compromise (operator opt-in, blast radius bounded).
-- Should we revisit the AKR spec §1.2 "no cross-encoder re-ranking" stance once D ships? Cohere rerank-v3.5 is already in the codebase for workspace-memory retrieval (`server/lib/reranker.ts`); reusing it on the AKR path is a one-line plumbing change once cosine ranking is live. Defer the decision until citation-rate data is in.
+- Query definition — is "task description" the right choice over "task description + conversation summary" or "task description + agent master prompt summary"? This is the highest-leverage spec-phase question because it determines what the embedding actually represents.
+- Threshold starting point — 0.30 is a guess based on `text-embedding-3-small` norms. Worth validating against a sample of dev-environment runs before defaulting.
+- Should we revisit the AKR spec §1.2 "no cross-encoder re-ranking" stance once D ships? Cohere rerank-v3.5 is already in the codebase for workspace-memory retrieval (`server/lib/reranker.ts`); reusing it on the AKR path is a one-line plumbing change once cosine ranking is live. Defer the decision until B1 utility data is in.
 - Is D big enough to be its own spec rather than a section of this brief? Recommend: yes if the reviewer pressure-tests it and finds open design questions in the "query definition" axis; no if the task-description approach is accepted.
 
 ---
@@ -244,19 +228,15 @@ These invariants emerged from the first round of external review and apply acros
 
 **A-Deletion invariant (reviewer F3).** If `source_entry_id` can become NULL (it can: source entries are soft-deletable today and may be hard-deleted via privacy flows), the lineage row must retain enough non-sensitive snapshot metadata to remain audit-useful even after source loss. **Required at minimum:** `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `content_hash` alone is insufficient — it proves content integrity only if the content is still recoverable. `snapshot_excerpt` is **out of scope for v1** unless privacy review explicitly approves it; v1 lineage relies on the required metadata only. This keeps v1 clean and avoids accidental sensitive-content retention.
 
-**B-D dependency.** Proposal D depends on Proposal **B1** (measurement substrate), not on B2's polished dashboard UX. Dashboard polish may follow as long as operators can inspect run-level and aggregate citation utility via the substrate during D's rollout.
+**B-D dependency.** Proposal D depends on Proposal **B1** (measurement substrate), not on B2's polished dashboard UX. B1 gives engineering the post-enablement quality signal needed to verify the ranker is helping rather than hurting; dashboard polish may follow.
 
 **B1 denominator invariant (reviewer F2).** B1 must verify that every injected workspace-memory entry ID and memory-block version ID is persisted per run before declaring the substrate complete. Codebase audit confirms blocks are persisted (`appliedMemoryBlockIds`) but entry injection IDs are **not**. B1 therefore must add a bounded injected-entry manifest at prompt-assembly time; without it, citation utility has a numerator but no trustworthy denominator and the dashboard looks scientific while being wrong.
 
-**D-Rollout invariant.** The semantic ranker must first ship in `off` or `shadow` mode. `shadow` computes query embeddings, scores, thresholds, and the hypothetical selected payload, but preserves the existing production payload as the actual loaded set. Progression to `sampled` and `on` is **per-subaccount** and telemetry-gated, not calendar-gated. **Subaccount admin UX treats the mode as a first-class subaccount control** — org-level defaults exist but are invisible to the subaccount admin (no "inherited from org" badges, no greyed fields).
-
-**D-Shadow persistence invariant (reviewer F1).** Shadow-mode comparison data must be persisted in a queryable, bounded form. The spec must choose between (a) a bounded run-trace event with candidate IDs, cosine scores, and pass/drop/promote status only, or (b) a dedicated retrieval-telemetry table — **not** an unbounded payload emitted into logs. Full candidate content is explicitly out of scope for shadow persistence; identifiers + scores + status are sufficient for the B1 substrate and the per-run shadow-comparison surface.
-
-**D-Recall invariant.** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. Empty semantic results require either a legacy-ordering fallback or an explicit `retrieval.empty_after_semantic` degraded reason on the run trace, with safe payload preservation during `shadow` / `sampled` modes.
+**D-Recall invariant.** Semantic filtering must not silently reduce a previously non-empty eligible candidate set to zero. The current AKR path loads every in-scope active block / chunk; turning on real cosine scores is quality-positive only if a fallback prevents accidental memory starvation. If semantic filtering at the configured threshold would return zero candidates from a previously non-empty pool, the ranker must fall back to top-N legacy ordering (scope-tier → recency) for that category and emit a `retrieval.empty_after_semantic` event on the run trace. This is an algorithm safety property, not a rollout discipline — it applies on day one regardless of feature-flag state.
 
 **D-Embedding-failure invariant.** Embedding failures (OpenAI 5xx, timeout, network error) must **fail open to legacy retrieval behaviour** (scope-tier + recency, threshold 0) and emit a `retrieval.embedding_failed` degraded reason on the run trace. They must **not** block agent execution. Retrieval quality must degrade safely, not interrupt runs.
 
-**D-Rollout baseline invariant (reviewer F4 + CEO subaccount correction).** Before enabling `sampled` mode **for a subaccount**, the system must have collected at least 7 days **and** 200 qualifying runs of legacy/off baseline telemetry **from that subaccount**. The spec may relax this to either-of (7d OR 200 runs) for explicitly opted-in high-volume subaccounts via operator override; the default is conjunctive to prevent a high-volume subaccount from flipping to `sampled` after a few hours of data. Promotion gates compare sampled-run utility, truncation, and fallback rates against **that subaccount's own baseline window**, not against org averages or global averages.
+**D-Rollout simplicity (CEO Rev 6 correction).** Earlier revisions of this brief locked a four-mode staged rollout (off / shadow / sampled / on) plus a per-subaccount baseline window, plus shadow-telemetry persistence. **All of that was dropped in Rev 6.** This codebase is pre-production (`live_users: no`, `feature_stability: low` per `docs/spec-context.md`); the staged-rollout machinery was guarding against a production risk profile we are not yet in. D ships behind a single env-driven on/off flag — when set, the semantic ranker runs; when not, legacy behaviour stands. No user-facing mode UI. No shadow telemetry. No baseline window. No sampling. The recall and embedding-failure invariants above are algorithm safety properties and remain mandatory. The staged-rollout discussion can be reopened when we approach live-user readiness and the risk model materially changes.
 
 ---
 
@@ -268,7 +248,7 @@ Three operator-facing UI surfaces are touched by this brief. Mockups produced by
 |---|---|---|---|
 | A | Memory Block detail — new **Sources** tab | [`prototypes/memory-improvements/memory-block-detail.html`](../../../prototypes/memory-improvements/memory-block-detail.html) | `client/src/pages/MemoryBlockDetailPage.tsx`. Adds a third tab alongside Version History / Diff vs Canonical. Visible only for `auto_synthesised` blocks. Bidirectional lineage as per-row collapsed expander. Version selector lets operator inspect historical synthesis versions. |
 | B2 | Citation-rate utility dashboard | [`prototypes/memory-improvements/citation-utility-dashboard.html`](../../../prototypes/memory-improvements/citation-utility-dashboard.html) | `client/src/pages/UsagePage.tsx`. Adds a "Memory Utility" tab alongside existing Runs / Routing / Spend tabs. Two canvas-drawn line charts (entry utility %, block utility %), per-agent breakdown with inline utility bars and a `<10 runs` suppression note. Dismissable heuristic-metric caveat banner. |
-| D | Auto-knowledge ranker mode selector + shadow-mode comparison | [`prototypes/memory-improvements/akr-ranker-settings.html`](../../../prototypes/memory-improvements/akr-ranker-settings.html) | **Subaccount-scoped:** mode selector ships as a new "Retrieval" tab on `SubaccountKnowledgePage` (alongside References / Insights / Memory Blocks), per-subaccount control, no org-inheritance leakage in the UI. Shadow-comparison panel lives on `AgentRunLivePage` (per-run, the actual per-run trace surface — `RunTracePage` does not exist in the codebase). Four-mode segmented selector (Off / Shadow / Sampled / On), Sampled reveals a percentage slider, save logs to audit (neutral wording, no "organisation" leakage). Embedded shadow-mode comparison panel: two-column Legacy vs Semantic payload diff with Promoted / Dropped / Unchanged badges, hover-tooltip cosine scores, recall-invariant status bar (green at-least-1-per-category, amber if a category would empty). Panel defaults collapsed. |
+| D | — | — | **No user-facing UI in Rev 6.** D ships as backend algorithm change behind an env on/off flag. The Rev 5.x mockup (`akr-ranker-settings.html`) was retired when the staged-rollout machinery was dropped — see Rev 6 simplification note in Proposal D body. Engineering controls enablement; users see only the resulting retrieval quality. |
 
 Index page linking all three: [`prototypes/memory-improvements/index.html`](../../../prototypes/memory-improvements/index.html). Per-round summary and codebase-grounding file enumeration: [`tasks/builds/memory-improvements/mockup-log.md`](./mockup-log.md). No net-new components introduced — all surfaces reuse existing tab strips, cards, tables, and chart-canvas patterns. The mockups are advisory, not contractual — the spec phase finalises exact shapes.
 
@@ -303,16 +283,16 @@ Mnemo's MNEMO-CONTEXT pattern works for a solo-developer's single agent with no 
 
 ---
 
-## 7. Recommended next steps (revised sequencing per reviewer)
+## 7. Recommended next steps (Rev 6 simplified sequencing)
 
-1. **Spec author uses this locked brief as input.** The highest-risk design points to preserve are: Proposal D's `shadow → sampled → on` telemetry gates, A's join-table lineage shape, B1's injected-entry denominator, and D's query-definition choice. Carry the §4 invariants forward as explicit spec invariants — they are non-negotiable.
-2. **Proposal A ships independently.** Choose the lineage storage shape carefully before spec — default to join table; lock the decision via the A-Lineage invariant before writing the migration.
-3. **B1 (measurement substrate) ships first, or in the same PR as D's `shadow` mode.** This is the gating change for everything else.
-4. **Proposal D ships behind `shadow` mode** in its first production deploy. Telemetry compares legacy-selected vs. semantic-selected payloads per run; recall-invariant fallbacks are tracked.
-5. **D progression to `sampled` and `on`** happens only after B1 telemetry shows: (a) no regression in citation utility on sampled runs, (b) no spike in payload truncation, (c) empty-result-fallback rate below an agreed threshold (suggest <1% of runs).
-6. **Proposal B2 (operator dashboard)** ships in parallel or shortly after D `shadow` mode goes live. It is not on the critical path for D, but becomes the durable governance surface once D is at `on`.
-7. **Opportunistic cleanup (§9)** ships only if convenient — alongside B or D, or as a standalone tiny PR. Default unchanged. Not on the critical path; intentionally not listed as a strategic proposal.
-8. **Two months after the full set lands, check the utility dashboard.** Consistently high (e.g. >50% of injected entries cited) means we are done. Lower means the dashboard tells us where to look next — and we have a measurable baseline for any further change.
+1. **Spec author uses this locked brief as input.** The highest-risk design points to preserve are: A's join-table lineage shape (with deletion-safe metadata), B1's injected-entry denominator, D's query-definition choice ("task description" vs. broader context), and the two D algorithm safety invariants (recall + embedding-failure). Carry the §4 invariants forward as explicit spec invariants.
+2. **Proposal A ships independently.** Choose the lineage storage shape carefully before spec — default to join table; lock the A-Deletion invariant in the migration shape.
+3. **B1 (measurement substrate) ships before or with D.** B1 is what tells engineering whether the D ranker is helping; without it, D's enablement is unfalsifiable.
+4. **Proposal D ships behind a single env on/off flag.** Off by default in dev. Engineering flips on, watches B1 utility numbers, flips off if it regresses. No staged rollout, no shadow telemetry, no per-subaccount UI.
+5. **Proposal B2 (operator dashboard)** ships in parallel or after, as a durability layer over B1. Not on the critical path.
+6. **Opportunistic cleanup (§9)** ships only if convenient — alongside B or D, or as a standalone tiny PR. Default unchanged.
+7. **When the codebase approaches live-user readiness**, reopen the staged-rollout discussion. The Rev 5 invariants (off / shadow / sampled / on, per-subaccount baseline windows, shadow telemetry persistence) are not deleted — they are deliberately deferred. The reasoning and shapes are preserved in git history under Rev 5.x for that re-evaluation.
+8. **Two months after the full set lands, check the utility dashboard.** Consistently high (e.g. >50% of injected entries cited) means we are done for now. Lower means the dashboard tells us where to look next — and we have a measurable baseline for any further change.
 
 ---
 

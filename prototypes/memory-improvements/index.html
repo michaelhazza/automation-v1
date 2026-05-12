@@ -59,9 +59,10 @@
   </p>
 
   <div class="info">
-    <strong>Reading order:</strong> Surface 1 (Memory Block Detail + Sources tab) sets context for what
-    the "Auto" source pill links to. Surface 2 (Citation utility) is the success-metric dashboard for
-    all retrieval improvements. Surface 3 (Ranker settings + shadow diff) closes the Proposal D loop.
+    <strong>Reading order (Rev 6):</strong> Surface 1 (Memory Block Detail + Sources tab) sets context for
+    what the "Auto" source pill links to. Surface 2 (Citation utility dashboard) is the success-metric
+    dashboard for retrieval improvements. Surface 3 was retired in brief Rev 6 — Proposal D ships as
+    a backend env flag with no UI.
   </div>
 
   <div class="card-grid">
@@ -91,18 +92,18 @@
       <div class="card-proposal prop-b">Proposal B2</div>
     </div>
 
-    <div class="card">
-      <div class="card-num">MOCKUP 3</div>
-      <a href="akr-ranker-settings.html" class="card-title-link">AKR Ranker Mode + Shadow Comparison</a>
-      <div class="card-file">akr-ranker-settings.html</div>
+    <div class="card" style="opacity:0.7">
+      <div class="card-num">MOCKUP 3 — RETIRED</div>
+      <div class="card-title-link" style="color:#666;text-decoration:line-through">AKR Ranker Mode + Shadow Comparison</div>
+      <div class="card-file">akr-ranker-settings.html (deleted in Rev 6)</div>
       <div class="card-desc">
-        Two surfaces on one page: (1) A ranker mode selector in Settings / Retrieval with four
-        rollout modes (Off, Shadow, Sampled, On). Default Off. Mode changes are audited.
-        (2) A shadow-mode retrieval diff panel on a run trace showing legacy vs. semantic-ranker
-        payloads side by side, with Promoted / Dropped diff badges and a recall-invariant check
-        (green if at least 1 item per category kept, amber if a category would be emptied).
+        Proposal D now ships as a backend algorithm change behind a single env on/off flag.
+        No user-facing UI. The previous mockup (four-mode rollout selector + shadow-mode
+        comparison panel) was retired in brief Rev 6 after CEO review identified it as
+        over-engineering for a pre-production codebase. The shapes are preserved in git
+        history (Rev 5.x) for re-evaluation when the codebase approaches live-user readiness.
       </div>
-      <div class="card-proposal prop-d">Proposal D</div>
+      <div class="card-proposal prop-d">Proposal D — no UI</div>
     </div>
   </div>
 </body>
