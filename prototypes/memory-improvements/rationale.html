@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Memory Improvements — Mockup Rationale</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 880px; margin: 0 auto; padding: 32px 24px 64px; color: #1a1a1a; line-height: 1.55; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  .lede { color: #555; font-size: 15px; margin: 0 0 28px; }
+  h2 { font-size: 19px; margin: 32px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+  h3 { font-size: 15px; margin: 18px 0 4px; color: #333; }
+  .verdict { display: inline-block; padding: 2px 9px; border-radius: 4px; font-size: 12px; font-weight: 600; vertical-align: middle; margin-left: 8px; }
+  .v-required { background: #e8f5e9; color: #1b5e20; }
+  .v-optional { background: #fff3e0; color: #e65100; }
+  .v-cheapest { background: #f1f3f5; color: #495057; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; }
+  code { background: #f5f5f5; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  .note { background: #fffbea; border-left: 3px solid #f59e0b; padding: 10px 14px; margin: 14px 0; font-size: 14px; }
+  .bottom { background: #f6f8fa; border-radius: 6px; padding: 16px 20px; margin: 28px 0 0; }
+  .bottom strong { color: #1a1a1a; }
+  ul { margin: 4px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  a { color: #0366d6; }
+</style>
+</head>
+<body>
+
+<h1>Memory Improvements — UI Rationale</h1>
+<p class="lede">Honest CEO-level summary: who clicks each surface, why, and whether it is actually required in v1 or whether a cheaper non-UI path would do.</p>
+
+<div class="note">
+<strong>Important framing:</strong> none of these surfaces are user-facing in the customer sense. All three are operator / admin tooling. The customer benefit is indirect: better AI memory behaviour, fewer hallucinations, faster trust building. The UI gain accrues to the team running the platform, not to the end user.
+</div>
+
+<h2>1. Memory Block Sources tab <span class="verdict v-required">Required</span></h2>
+
+<h3>Who clicks here</h3>
+<p>An operator (or support engineer) investigating "why does this agent think X?" An end user does not see this.</p>
+
+<h3>Why it exists</h3>
+<p>A separate in-flight build, Trust &amp; Verification Layer, is already adding a <code>Source: Auto | Manual | Correction</code> pill to memory blocks. Today, the <code>Auto</code> case has nothing behind it. Operators see "this came from AI synthesis" and cannot answer "from what?" This mockup is the click-through target for that pill.</p>
+
+<h3>Is it actually required?</h3>
+<p><strong>Yes, but conditionally.</strong> If Trust &amp; Verification ships its <code>Source</code> pill, this surface must exist or the pill is a dead-end. If Trust &amp; Verification is paused or descoped, this becomes optional internal tooling.</p>
+
+<h3>Where it lives</h3>
+<p>Extends the existing <code>MemoryBlockDetailPage</code>. New <em>tab</em> alongside Version History and Diff vs Canonical. No new top-level page, no new navigation.</p>
+
+<h3>Cheapest alternative</h3>
+<p>API endpoint only (<code>/api/memory-blocks/:id/sources</code>) with no UI. Operators query via internal tools. Loses the click-through audit story; keeps the data integrity.</p>
+
+<h2>2. Citation Utility dashboard <span class="verdict v-optional">Optional in v1</span></h2>
+
+<h3>Who clicks here</h3>
+<p>An admin tracking whether the AI memory we inject is actually being used by agents. End users do not see this.</p>
+
+<h3>Why it exists</h3>
+<p>We have no way today to answer "of the memory we put into agent prompts, what percentage was actually used?" Without this signal, every retrieval improvement is unfalsifiable. We could ship "improvements" indefinitely with no way to know if they help. <strong>This is the difference between governing AI memory and guessing about it.</strong></p>
+
+<h3>Is it actually required?</h3>
+<p><strong>The data layer (B1) is required for safe rollout of Proposal D.</strong> The dashboard (B2) is convenience on top of it. The reviewer explicitly split these: D only needs the queryable data substrate. A dashboard becomes valuable once retrieval changes are happening regularly, but it does not block anything in v1.</p>
+
+<h3>Where it lives</h3>
+<p>Extends the existing <code>UsagePage</code>. New <em>tab</em> labelled "Memory Utility" alongside Runs / Routing / Spend. No new top-level page, no new navigation. Admin-only label.</p>
+
+<h3>Cheapest alternative</h3>
+<p>Ship B1 (the data layer) with no UI. Operators run SQL against the materialised view during retrieval-change rollouts. Add B2 only when retrieval tuning becomes a recurring activity.</p>
+
+<h2>3. AKR Ranker Settings + Shadow Comparison <span class="verdict v-required">Mode selector required, comparison optional</span></h2>
+
+<div class="note">
+<strong>Codebase reality check:</strong> the mockup labelled this "Settings → Retrieval." That subsection does not exist today. The actual integration is a new <em>section</em> inside <code>AdminSettingsPage.tsx</code> or <code>SystemSettingsPage.tsx</code> (admin-only). The shadow-comparison panel does <strong>not</strong> belong in Settings at all — it belongs on the existing <code>RunTracePage</code>, where operators already debug individual runs.
+</div>
+
+<h3>Who clicks the mode selector</h3>
+<p>A platform operator rolling out a retrieval-quality change to a specific org or globally. End users do not see this.</p>
+
+<h3>Why the mode selector exists</h3>
+<p>Proposal D changes how every agent run picks memory. The reviewer mandated a four-mode rollout (Off → Shadow → Sampled → On) for safety. Someone has to flip the mode per org. That someone is a platform operator, and they need a UI surface to do it without engineering writing config files for every customer.</p>
+
+<h3>Is the mode selector actually required?</h3>
+<p><strong>Yes — unless we accept env-only configuration.</strong> Env-only means engineering deploys a config change every time we want to enable shadow mode for a new tenant. That does not scale past five or six tenants. With more, you need an operator UI. <strong>It can be small.</strong></p>
+
+<h3>Where the mode selector lives</h3>
+<p>Should be a new <em>section</em> within <code>AdminSettingsPage</code>, not a new page. The label "Retrieval" or "AI Memory" tucks in next to other admin toggles. Per-org override is stored via the existing <code>orgSettingsService</code> or <code>featureFlags.ts</code> — both already in the codebase, no schema change needed.</p>
+
+<h3>Who clicks the shadow-comparison panel</h3>
+<p>An operator inspecting a specific agent run during D rollout, asking "would the new ranker have changed what got loaded?" Spot-check tool. Not used routinely once D ships at <code>on</code>.</p>
+
+<h3>Is the comparison panel actually required?</h3>
+<p><strong>No.</strong> It is convenience. The data behind it (the shadow-comparison telemetry) is mandatory for the rollout invariant. The visual diff is a debugging affordance. Could ship as telemetry-only and inspect via SQL.</p>
+
+<h3>Where the comparison panel lives</h3>
+<p>If we ship it, it extends the existing <code>RunTracePage</code> — a collapsible panel below the existing trace, defaulted closed. It does <strong>not</strong> belong in Settings.</p>
+
+<h3>Cheapest alternative</h3>
+<ul>
+  <li><strong>Mode selector:</strong> env-only config, no UI. Acceptable for first 1-3 tenants only.</li>
+  <li><strong>Comparison panel:</strong> telemetry-only, no UI. Operators query the shadow-compare table directly during rollout investigation.</li>
+</ul>
+
+<h2>Aggregate UI cost</h2>
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Required in v1?</th><th>New page?</th><th>Reuses existing component?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A — Sources tab</td><td>Conditional on T&amp;V shipping</td><td>No (new tab on existing page)</td><td>Yes</td></tr>
+    <tr><td>B1 — Data substrate</td><td>Yes (D's rollback signal)</td><td>No UI</td><td>n/a</td></tr>
+    <tr><td>B2 — Utility dashboard</td><td>No</td><td>No (new tab on UsagePage)</td><td>Yes</td></tr>
+    <tr><td>D — Mode selector</td><td>Yes if &gt;5 tenants on D</td><td>No (section on AdminSettings)</td><td>Yes</td></tr>
+    <tr><td>D — Shadow comparison</td><td>No</td><td>No (panel on RunTracePage)</td><td>Yes</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Total net-new pages: zero.</strong> All five surfaces are tabs, sections, or panels inside existing pages.</p>
+
+<div class="bottom">
+<strong>Bottom line.</strong> The only UI surface unconditionally required is the D mode selector, and only because per-tenant operator control is required for safe rollout. Everything else is either conditional on another in-flight build (A on Trust &amp; Verification) or a convenience layer over a mandatory data substrate (B2 on B1, D-comparison on D-telemetry). If we want a truly minimal v1, we can ship: lineage data + minimal Sources tab, B1 substrate only with no dashboard, D mode selector only, no shadow-comparison panel. That is the cheapest path through the brief. The mockups show the maximal path; the spec should pick where on the spectrum to land.
+</div>
+
+</body>
+</html>
