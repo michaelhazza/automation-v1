@@ -269,6 +269,14 @@ export const agentRuns = pgTable(
     // is the dispatcher. Spec §3.4 / §3.17 item 1.
     operatorChainFailureCount: integer('operator_chain_failure_count').notNull().default(0),
 
+    // Operator Backend — per-task budget extension accumulator (migration 0333).
+    // Written by the extend-budget route (additive, never reset). The dispatcher
+    // composes settings_snapshot.per_task_budget_cap_minutes as:
+    //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
+    // so extensions are scoped to this task only and never bleed into the
+    // subaccount-wide settings row. Spec §3.17.4.
+    perTaskBudgetExtensionMinutes: integer('per_task_budget_extension_minutes').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

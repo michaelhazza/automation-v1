@@ -19,18 +19,17 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
 import { agentRuns, operatorRuns } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { auditService } from '../services/auditService.js';
 import { operatorTaskProfileService } from '../services/operatorTaskProfileService.js';
 import { credentialBrokerService } from '../services/credentialBrokerService.js';
-import { subaccountOperatorSettingsService } from '../services/subaccountOperatorSettingsService.js';
 import { OperatorBackendConflictError } from '../services/operatorBackendErrors.js';
 import { OPERATOR_DISPATCH_NEXT_CHAIN_LINK_QUEUE } from '../jobs/operatorSessionDispatchNextChainLinkHandler.js';
 import {
@@ -182,21 +181,21 @@ router.post(
 
     const { extensionMinutes } = parsed.data;
 
-    // Apply the budget extension to the subaccount settings so the dispatcher
-    // picks up the incremented per_task_budget_cap_minutes on the next chain link.
-    // updateSettings validates the new value against the range constraint (max 60000);
-    // if it would exceed the cap, validateOperatorSettingsRange throws a 400-level error.
-    const currentSettings = await subaccountOperatorSettingsService.getEffectiveSettings(
-      orgId,
-      run.subaccountId!,
-    );
-    await subaccountOperatorSettingsService.updateSettings({
-      orgId,
-      subaccountId: run.subaccountId!,
-      patch: {
-        per_task_budget_cap_minutes: currentSettings.per_task_budget_cap_minutes + extensionMinutes,
-      },
-      updatedByUserId: actor.id,
+    // Accumulate the extension on agent_runs.per_task_budget_extension_minutes
+    // (per-task column, never resets). The dispatcher composes the effective
+    // per_task_budget_cap_minutes as:
+    //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
+    // so this extension applies only to this task and never mutates the
+    // subaccount-wide subaccount_operator_settings row. Spec §3.17.4.
+    await db.transaction(async (tx) => {
+      await setOrgGUC(tx, orgId);
+      await tx
+        .update(agentRuns)
+        .set({
+          perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(agentRuns.id, agentRunId));
     });
 
     void auditService.log({
@@ -209,7 +208,6 @@ router.post(
       metadata: {
         agent_run_id: agentRunId,
         extension_minutes: extensionMinutes,
-        new_per_task_budget_cap_minutes: currentSettings.per_task_budget_cap_minutes + extensionMinutes,
         source: 'ui',
         request_id: req.correlationId,
       },

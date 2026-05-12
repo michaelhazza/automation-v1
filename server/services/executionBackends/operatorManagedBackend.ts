@@ -215,11 +215,13 @@ export const operatorManagedBackend: ExecutionBackend = {
     );
 
     // Step 2: Derive chain metadata (attempt number, chain seq, reason).
-    // Read the parent agent_run row to determine current status.
+    // Read the parent agent_run row to determine current status and the
+    // per-task budget extension accumulator (spec §3.17.4).
     const [agentRun] = await db
       .select({
         id: agentRuns.id,
         status: agentRuns.status,
+        perTaskBudgetExtensionMinutes: agentRuns.perTaskBudgetExtensionMinutes,
       })
       .from(agentRuns)
       .where(eq(agentRuns.id, runId))
@@ -230,29 +232,37 @@ export const operatorManagedBackend: ExecutionBackend = {
     }
 
     // Derive current attempt number from the latest operator_run for this task.
-    // V1: attempt number is tracked on operator_runs; agent_runs has no attempt column.
-    const latestAttemptRow = await db
-      .select({ attemptNumber: operatorRuns.attemptNumber })
-      .from(operatorRuns)
-      .where(eq(operatorRuns.agentRunId, runId))
-      .orderBy(desc(operatorRuns.attemptNumber))
-      .limit(1);
+    // Reads must use a dual-GUC transaction so RLS on operator_runs (keyed on
+    // both app.organisation_id AND app.subaccount_id) returns rows instead of
+    // returning empty and defaulting chain_seq to 1 on every dispatch.
+    const { currentAttemptNumber, chainSeqNext } = await db.transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
 
-    const currentAttemptNumber = latestAttemptRow[0]?.attemptNumber ?? 1;
+      const latestAttemptRow = await tx
+        .select({ attemptNumber: operatorRuns.attemptNumber })
+        .from(operatorRuns)
+        .where(eq(operatorRuns.agentRunId, runId))
+        .orderBy(desc(operatorRuns.attemptNumber))
+        .limit(1);
 
-    // Count existing chain links for this attempt to determine chain_seq.
-    const existingLinks = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(operatorRuns)
-      .where(
-        and(
-          eq(operatorRuns.agentRunId, runId),
-          eq(operatorRuns.attemptNumber, currentAttemptNumber),
-          isNull(operatorRuns.supersededByAttempt),
-        ),
-      );
+      const currentAttempt = latestAttemptRow[0]?.attemptNumber ?? 1;
 
-    const chainSeqNext = ((existingLinks[0]?.count as number) ?? 0) + 1;
+      const existingLinks = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(operatorRuns)
+        .where(
+          and(
+            eq(operatorRuns.agentRunId, runId),
+            eq(operatorRuns.attemptNumber, currentAttempt),
+            isNull(operatorRuns.supersededByAttempt),
+          ),
+        );
+
+      return {
+        currentAttemptNumber: currentAttempt,
+        chainSeqNext: ((existingLinks[0]?.count as number) ?? 0) + 1,
+      };
+    });
     const isFirstLink = chainSeqNext === 1;
     const reason = isFirstLink ? 'bootstrap' : 'continuation';
 
@@ -318,7 +328,9 @@ export const operatorManagedBackend: ExecutionBackend = {
           auto_extend_grace_minutes: effectiveSettings.auto_extend_grace_minutes,
           max_chain_length: effectiveSettings.max_chain_length,
           max_wall_clock_per_task_days: effectiveSettings.max_wall_clock_per_task_days,
-          per_task_budget_cap_minutes: effectiveSettings.per_task_budget_cap_minutes,
+          per_task_budget_cap_minutes:
+            effectiveSettings.per_task_budget_cap_minutes +
+            (agentRun.perTaskBudgetExtensionMinutes ?? 0),
           concurrent_operator_sessions_cap: effectiveSettings.concurrent_operator_sessions_cap,
         };
 
@@ -340,18 +352,21 @@ export const operatorManagedBackend: ExecutionBackend = {
           });
         });
 
-        // Write a delegated status on the agent_run — the parent row must
-        // transition before returning so the reconciler can clean it up.
-        // Per spec §13.1.1 orphan path: 0 rows affected → log and exit.
-        await db
-          .update(agentRuns)
-          .set({ status: 'failed', updatedAt: new Date() })
-          .where(
-            and(
-              eq(agentRuns.id, runId),
-              eq(agentRuns.status, agentRun.status),
-            ),
-          );
+        // Transition agent_run to 'failed' (credential-unavailable orphan path).
+        // Must run inside a GUC transaction — FORCE RLS on agent_runs requires
+        // app.organisation_id to be set on the connection. Spec §13.1.1.
+        await db.transaction(async (tx) => {
+          await setOrgGUC(tx, organisationId);
+          await tx
+            .update(agentRuns)
+            .set({ status: 'failed', updatedAt: new Date() })
+            .where(
+              and(
+                eq(agentRuns.id, runId),
+                eq(agentRuns.status, agentRun.status),
+              ),
+            );
+        });
 
         return {
           lifecycle: 'delegated',
@@ -396,12 +411,16 @@ export const operatorManagedBackend: ExecutionBackend = {
     //  not at bootstrap dispatch — the credential is already determined above.)
 
     // Step 6: Write the operator_run row (status='pending').
+    // Compose the effective per-task cap by adding the per-task extension
+    // accumulator so budget extensions are task-scoped (spec §3.17.4).
     const settingsSnapshot = {
       session_soft_cap_minutes: effectiveSettings.session_soft_cap_minutes,
       auto_extend_grace_minutes: effectiveSettings.auto_extend_grace_minutes,
       max_chain_length: effectiveSettings.max_chain_length,
       max_wall_clock_per_task_days: effectiveSettings.max_wall_clock_per_task_days,
-      per_task_budget_cap_minutes: effectiveSettings.per_task_budget_cap_minutes,
+      per_task_budget_cap_minutes:
+        effectiveSettings.per_task_budget_cap_minutes +
+        (agentRun.perTaskBudgetExtensionMinutes ?? 0),
       concurrent_operator_sessions_cap: effectiveSettings.concurrent_operator_sessions_cap,
     };
 
@@ -430,20 +449,26 @@ export const operatorManagedBackend: ExecutionBackend = {
     // Step 7: Transition agent_run to 'delegated' (optimistic UPDATE — Rev 2 invariant 2).
     // Predicate: status IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded').
     // 'delegated', 'cancelled', 'paused_wall_clock_exceeded', terminal states are EXCLUDED.
-    const updateResult = await db
-      .update(agentRuns)
-      .set({
-        status: 'delegated',
-        operatorChainFailureCount: 0,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentRuns.id, runId),
-          sql`${agentRuns.status} IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`,
-        ),
-      )
-      .returning({ id: agentRuns.id });
+    // Must run inside a GUC transaction — FORCE RLS on agent_runs requires
+    // app.organisation_id to be set on the connection or the UPDATE returns 0 rows
+    // and the dispatch path incorrectly interprets it as "race lost". Spec §7.3 step 7.
+    const updateResult = await db.transaction(async (tx) => {
+      await setOrgGUC(tx, organisationId);
+      return tx
+        .update(agentRuns)
+        .set({
+          status: 'delegated',
+          operatorChainFailureCount: 0,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            sql`${agentRuns.status} IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`,
+          ),
+        )
+        .returning({ id: agentRuns.id });
+    });
 
     if (updateResult.length === 0) {
       // Race lost: cancelled/terminal state won. Per spec §13.1.1, mark the
@@ -632,12 +657,27 @@ export const operatorManagedBackend: ExecutionBackend = {
       return { finalised: false, parentTerminalStatus: 'unknown' };
     }
 
-    // Already-terminal parent: check race-loser.
+    // Already-terminal parent: stamp event_emitted_at to stop retry sweep and exit.
+    // The `eventEmittedAt !== null` guard at L614 already handles the
+    // "already processed" case, so reaching here with a terminal parent means
+    // a concurrent finaliser (e.g. cancel beat us). Suppress post-commit side
+    // effects — the winning finaliser already wrote cost rows and enqueued
+    // continuations (if any). Do NOT drop the eventEmittedAt stamp — we must
+    // still mark this operator_run as processed so the reconciler stops retrying.
     const terminalParentStatuses = new Set([
       'completed', 'failed', 'cancelled', 'timeout', 'budget_exceeded',
       'loop_detected', 'completed_with_uncertainty',
     ]);
-    if (terminalParentStatuses.has(parentRun.status) && terminalState.eventEmittedAt !== null) {
+    if (terminalParentStatuses.has(parentRun.status)) {
+      await tx
+        .update(operatorRuns)
+        .set({ eventEmittedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(operatorRuns.id, terminalState.backendTaskId),
+            isNull(operatorRuns.eventEmittedAt),
+          ),
+        );
       return { finalised: false, parentTerminalStatus: parentRun.status };
     }
 
@@ -719,21 +759,37 @@ export const operatorManagedBackend: ExecutionBackend = {
       return { finalised: false, parentTerminalStatus };
     }
 
-    // Write parent agent_run status.
+    // Write parent agent_run status, guarded against terminal-parent race.
+    // If a concurrent finaliser (cancel, timeout, reconciler) already wrote a
+    // terminal status, the IN-clause predicate returns 0 rows and we suppress
+    // the post-commit side effects to avoid double cost rows / continuations.
     const isParentTerminal =
       parentTerminalStatus !== 'paused_for_chain_continuation' &&
       parentTerminalStatus !== 'paused_chain_failure' &&
       parentTerminalStatus !== 'paused_budget_exceeded' &&
       parentTerminalStatus !== 'paused_wall_clock_exceeded';
 
-    await tx
+    const parentUpdateResult = await tx
       .update(agentRuns)
       .set({
         status: sql`${parentTerminalStatus}`,
         updatedAt: new Date(),
         ...(isParentTerminal ? { completedAt: new Date() } : {}),
       })
-      .where(eq(agentRuns.id, row.agentRunId));
+      .where(
+        and(
+          eq(agentRuns.id, row.agentRunId),
+          sql`${agentRuns.status} NOT IN ('completed','failed','cancelled','timeout','budget_exceeded','loop_detected','completed_with_uncertainty')`,
+        ),
+      )
+      .returning({ id: agentRuns.id });
+
+    if (parentUpdateResult.length === 0) {
+      // Race lost — another writer (cancel/timeout/reconciler) already set a
+      // terminal status. eventEmittedAt was already stamped above; suppress
+      // cost-write and continuation enqueue to avoid double-counting.
+      return { finalised: false, parentTerminalStatus: parentRun.status };
+    }
 
     // Post-commit: write cost rows + emit WebSocket + enqueue continuation if needed.
     const agentRunId = row.agentRunId;
@@ -929,7 +985,9 @@ export const operatorManagedBackend: ExecutionBackend = {
       }
     }
 
-    // Step 2: Transition agent_run to 'cancelled' (optimistic, excludes already-cancelled).
+    // Step 2: Transition agent_run to 'cancelled'.
+    // Closed predecessor set per spec §3.10 step 3 — terminal states are
+    // excluded so a late cancel call cannot overwrite a completed/failed run.
     const [agentRun] = await db
       .select({ organisationId: agentRuns.organisationId })
       .from(agentRuns)
@@ -945,7 +1003,7 @@ export const operatorManagedBackend: ExecutionBackend = {
           .where(
             and(
               eq(agentRuns.id, runId),
-              sql`${agentRuns.status} != 'cancelled'`,
+              sql`${agentRuns.status} IN ('delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded','paused_wall_clock_exceeded','pending')`,
             ),
           );
       });
