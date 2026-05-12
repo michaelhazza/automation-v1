@@ -219,22 +219,28 @@ The parent task's status enum extends to include the new task-level states. The 
 
 ```
 'pending' | 'running' | 'delegated' |
-'paused_for_chain_continuation' | 'paused_chain_failure' | 'paused_budget_exceeded' |
+'paused_for_chain_continuation' | 'paused_chain_failure' |
+'paused_budget_exceeded' | 'paused_wall_clock_exceeded' |
 'completed' | 'failed' | 'cancelled'
 ```
 
 `'pending'`, `'running'`, `'delegated'`, `'completed'`, `'failed'`, `'cancelled'` already exist. **New** in this spec:
 - `'paused_for_chain_continuation'` — scheduler-owned wait OR FIFO queue for next chain dispatch (§ 3.14, § 3.17).
-- `'paused_chain_failure'` — three consecutive dispatch (start) failures (§ 3.17 item 1) OR a single hard-cap-unresumable running-state failure (§ 3.14 item 3). The three-failure threshold applies ONLY to start failures (chain link `'pending'` at the time of failure). Hard-cap unresumable is an immediate single-event pause; `operator_chain_failure_count` increments for diagnostic visibility but the pause does not require three occurrences.
-- `'paused_budget_exceeded'` — task paused because a time-budget guard fired. Covers both per-task budget cap (§ 3.17 item 4) and max wall-clock per task (§ 3.14 item 4); `failure_reason` distinguishes (`'budget_cap_exceeded'` vs `'max_wall_clock_exceeded'`).
+- `'paused_chain_failure'` — three consecutive dispatch (start) failures (§ 3.17 item 1) OR a single hard-cap-unresumable running-state failure (§ 3.14 item 3). The three-failure threshold applies ONLY to start failures (chain link `'pending'` at the time of failure). Hard-cap unresumable is an immediate single-event pause and DOES NOT increment `operator_chain_failure_count` — the counter is strictly a dispatch-start retry budget. The hard-cap path's diagnostic surface is the `'operator-session.chain_link_failed'` lifecycle event (§ 4.7) with `failed_mid_step=true` plus the corresponding `'operator-session.task_paused_chain_failure'` task-state event (§ 4.7), not the counter.
+- `'paused_budget_exceeded'` — task paused because the **per-task operator-session budget cap** fired (§ 3.17 item 4). `failure_reason='budget_cap_exceeded'`. Recovery: assignee/admin extends the task budget via the additive `task.operator.budget_extended` flow (§ 3.17 item 4); task resumes via `dispatch-next-chain-link` with `reason='budget_extension'`.
+- `'paused_wall_clock_exceeded'` — task paused because the **max wall-clock per task** governance limit fired (§ 3.14 item 4). `failure_reason='max_wall_clock_exceeded'`. Distinct from `paused_budget_exceeded` because the recovery action is different (governance setting change, not additive task-budget extension). **V1 recovery: user-cancel only.** Org-admin override flow with `settings_snapshot.max_wall_clock_per_task_days` refresh on resume is deferred to Phase 3.5 (see § 11 "DEFER — `paused_wall_clock_exceeded` resume path").
 
-**Task-terminal states are `completed | failed | cancelled` only.** The three `paused_*` states are resumable/non-terminal — they emit task-state-change events (UI updates, user notifications, scheduler suspension) but DO NOT trigger terminal artefact/cost finalisation. Cost rows for chain links that completed before the pause are written normally per § 3.12. The customer-visible terminal rollup is reserved for the true terminal states. Downstream consumers (cost dashboards, audit, evals) MUST NOT treat partial/pause-state rollups as final. See § 10.4 for the terminal-event guarantee.
+**Task-terminal states are `completed | failed | cancelled` only.** The four `paused_*` states are non-terminal — they emit task-state-change events (UI updates, user notifications, scheduler suspension) but DO NOT trigger terminal artefact/cost finalisation. Cost rows for chain links that completed before the pause are written normally per § 3.12. The customer-visible terminal rollup is reserved for the true terminal states. Downstream consumers (cost dashboards, audit, evals) MUST NOT treat partial/pause-state rollups as final. See § 10.4 for the terminal-event guarantee.
+
+**Resumability classification.** Of the four `paused_*` states:
+- `paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded` — **resumable** (have a defined transition back to `delegated`).
+- `paused_wall_clock_exceeded` — **non-resumable in V1** (only transition out is to `cancelled`). The state is "paused" rather than terminal because cost/artefact rollup is not finalised — a future Phase 3.5 admin override would resume rather than create a new task.
 
 A migration extends the existing `agent_runs.status` CHECK constraint (or text-typed allow-list, whichever the current schema uses). The migration is forward-compatible — existing status values are unchanged.
 
-The same migration adds a new column `operator_chain_failure_count integer NOT NULL DEFAULT 0` to `agent_runs`. It counts **consecutive** chain-link dispatch failures since the last successful dispatch (per § 7.3 item 5). The chain-link dispatcher is the sole writer:
+The same migration adds a new column `operator_chain_failure_count integer NOT NULL DEFAULT 0` to `agent_runs`. It counts **consecutive chain-link dispatch-start failures** since the last successful dispatch (per § 7.3 item 5) — purely the retry-budget counter for the `paused_chain_failure` three-strike rule. Running-state failures (including hard-cap unresumable per § 3.14 item 3) DO NOT increment this counter; they pause the task via a different path that emits its own lifecycle/audit events for diagnostic surface. The chain-link dispatcher is the sole writer:
 
-- Increment under `UPDATE agent_runs SET operator_chain_failure_count = operator_chain_failure_count + 1 WHERE id = $1 AND status IN ('delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. The dispatcher's queued-job reason gate (§ 7.3 step 2) ensures retries from paused states are only counted when the queued reason matches the current paused-state resume action.
+- Increment under `UPDATE agent_runs SET operator_chain_failure_count = operator_chain_failure_count + 1 WHERE id = $1 AND status IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. The allowed-predecessor set matches the § 7.3 dispatcher reason gate (step 2) and dispatcher predicates (steps 4 + 5). `'delegated'` is intentionally EXCLUDED — defence in depth against the reason gate regressing (an already-`'delegated'` task has a chain link in flight; dispatcher should not be firing). `'paused_wall_clock_exceeded'` is intentionally excluded — it is non-resumable in V1, so no dispatcher retry can increment from this state. The dispatcher's queued-job reason gate (§ 7.3 step 2) ensures retries from paused states are only counted when the queued reason matches the current paused-state resume action.
 - Reset to 0 on (a) a successful chain-link dispatch and (b) a user-initiated retry (the `task.operator.chain_failure_retried` audit event path).
 
 **State machine — `agent_runs` task lifecycle (operator-managed paths only):**
@@ -247,6 +253,7 @@ delegated → paused_chain_failure  (on 3rd consecutive chain-link start failure
 paused_chain_failure → delegated  (on user-initiated retry)
 delegated → paused_budget_exceeded  (on per-task budget cap hit)
 paused_budget_exceeded → delegated  (on user budget extension)
+delegated → paused_wall_clock_exceeded  (on max wall-clock per task cap hit; V1 non-resumable — only transition out is to cancelled)
 delegated → completed | failed  (on task-terminal event from final chain link)
 {pending | delegated | paused_*} → cancelled  (on user cancel)
 ```
@@ -282,7 +289,7 @@ The single biggest production-readiness item. Without it, a rate-limit or suspen
 
 2. **Fallback resolution.** Adapter calls `credentialBrokerService.resolveFallback({ subaccountId, agentRunId, originalCredentialId })`. The broker returns `{ envelope: OperatorSessionEnvelope | ApiKeyEnvelope, mode: 'operator_session' | 'api_key' } | null`.
 
-   `ApiKeyEnvelope` is declared in `server/services/credentialBrokerService.ts` with shape `{ credentialId: string, connectionId: string, authType: 'api_key', provider: string, issuedAt: string, expiresAt: string | null }`. Raw API key material remains broker-internal and never leaves the broker — the adapter consumes the envelope reference (`credentialId`) only, mirroring the `OperatorSessionEnvelope` discipline. (Spec C reserved this seam; the spec author wires the broker side in the same chunk that wires the adapter side.)
+   `ApiKeyEnvelope` is declared in `server/services/credentialBrokerService.ts` with shape `{ credentialId: string, connectionId: string, subaccountId: string, authType: 'api_key', provider: string, issuedAt: string, expiresAt: string | null }`. Raw API key material remains broker-internal and never leaves the broker — the adapter consumes the envelope reference (`credentialId`) only, mirroring the `OperatorSessionEnvelope` discipline. The `subaccountId` field is the same defence-in-depth subaccount-match the adapter asserts for `OperatorSessionEnvelope` per § 3.6 (mismatch → typed error `OPERATOR_SUBACCOUNT_MISMATCH`, chain link `failed`, incident with `failure_class: 'permanent'`). (Spec C reserved this seam; the spec author wires the broker side in the same chunk that wires the adapter side.)
 
 3. **Mid-run credential swap.** When fallback exists, the adapter:
    - Pauses the operator runtime via its in-band pause signal (vendor-specific; concrete API named in the implementation chunk).
@@ -301,6 +308,8 @@ The single biggest production-readiness item. Without it, a rate-limit or suspen
    - If that row's `credential_mode = 'api_key'` AND no `operator-session.usability_restored` event has fired since the link-boundary timestamp for the same `agent_run_id` AND no `task.operator.credential_refreshed` audit event has fired since the link-boundary timestamp → stickiness applies; chain link N+1 starts with `credential_mode = 'api_key'`.
    - Otherwise stickiness clears; chain link N+1 starts with the normal `operator_session` resolution.
    Both clearing signals (`operator-session.usability_restored` and `task.operator.credential_refreshed`) are looked up by querying the existing event/audit stores (already RLS-scoped to the task). Run Trace renders the `fallback_engaged` event once at the chain-link boundary where it first applied; subsequent chain links inheriting fallback show a passive `credential_mode: api_key` indicator without re-emitting the lifecycle event. The pure helper that implements the derivation lives in `operatorManagedBackendPure.ts` (§ 5.1) and is unit-tested per § 12.
+
+   **Race-safety: derivation is transactional.** Stickiness is computed inside the same `withOrgTx`-scoped transaction that inserts the next `operator_runs` row (§ 7.3 step 4). The dispatcher reads the latest non-superseded `operator_runs` row, the `operator-session.usability_restored` lifecycle events, and the `task.operator.credential_refreshed` audit events under that same org-scoped transaction. The inserted `credential_start_mode` is the durable result of that derivation — it is IMMUTABLE per § 3.3 and never overwritten by a later credential-restoration event. If a credential-restoration commit interleaves between the dispatcher's read and write, the optimistic predicate on the `operator_runs` insert (§ 10.1) does NOT re-check stickiness; the inserted row reflects the state at read time inside the transaction. The post-dispatch chain link receives correct mode on the **next** chain-link boundary, when the dispatcher reads the now-committed restoration signal.
 
 ### 3.8 Token-lifecycle handling mid-session
 
@@ -336,13 +345,16 @@ The adapter declares `'cancellation'` capability. Spec A's contract gives one me
    - For `'pending'`: write `operator_runs.status='cancelled'` immediately (no runtime to wait for).
    - For `'running'`: write `operator_runs.status='cancelled'` only after one of (a) native cancel acknowledgement, (b) clean step-boundary exit from the runtime, or (c) heartbeat-stale timeout per § 3.10 item 3. The terminal-status write is a single transaction with no further events permitted (§ 10.4 post-terminal prohibition).
 2. **Drain queued chain-continuation jobs** — remove FIFO-queued continuation entries (§ 3.17 item 5) for this task from the scheduler queue. Atomic with step 3.
-3. **Prevent further chain dispatch** — set `agent_runs.status = 'cancelled'` via the optimistic predicate `UPDATE agent_runs SET status='cancelled' WHERE id = $1 AND status IN ('delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded','pending')`. 0 rows-affected means the task is already in a terminal state; return `409` with the current state.
+3. **Prevent further chain dispatch** — set `agent_runs.status = 'cancelled'` via the optimistic predicate `UPDATE agent_runs SET status='cancelled' WHERE id = $1 AND status IN ('delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded','paused_wall_clock_exceeded','pending')`. 0 rows-affected means the task is already in a terminal state; return `409` with the current state.
 4. **Emit the task-terminal event** — `operator-session.task_cancelled` (§ 4.7). The finaliser performs full rollup.
 5. **Schedule profile retention/GC** — set `operator_task_profiles.scheduled_gc_at = now() + INTERVAL '48 hours'` per § 3.15 item 4 (default retention).
 
 Cancellation from a paused state follows the same task-level path: drain scheduler state, mark `agent_runs.status='cancelled'`, fire task-terminal event, schedule profile GC.
 
 **Concurrency guard.** Steps 1, 2, 3 happen inside one `withOrgTx`-scoped transaction. If two concurrent cancels race, the first writes `status='cancelled'`; the second sees 0 rows-affected on step 3 and returns `409` to the losing caller. No double-emit of the terminal event.
+
+**Cancel-vs-dispatcher race invariant (consolidating).** Cancellation is task-scoped. It cancels the active chain link if present (steps 1–3 above), tombstones/removes queued chain-continuation jobs (step 2), and atomically marks the parent `agent_runs` cancelled (step 3, optimistic predicate). All dispatcher jobs — both pg-boss continuation handlers and any future scheduler wake-ups — MUST re-read `agent_runs.status` inside their dispatch transaction before inserting a new `operator_runs` row. The dispatcher's optimistic predicate (§ 7.3 step 4) excludes `'cancelled'` from the allowed predecessor states, so a UPDATE racing against a committed cancel affects 0 rows and the dispatcher exits no-op without inserting a new chain link. This pattern is the single source of truth for cancel-vs-dispatch race safety; § 10.1, § 10.3, and § 10.6 references are concrete encodings of this rule.
+
 ### 3.11 Run Trace integration
 
 The adapter MUST emit Run Trace events for: session start, credential injected (auth-type redacted), each step boundary, fallback engaged (if any), chain-link terminal status, artefact harvest, task-terminal status (final chain link only).
@@ -436,8 +448,8 @@ A single operator task spans many 120-min chain-link sessions. Each session is a
    - At soft-cap + grace, the chain link terminates `'failed'` with `failure_reason='hard_cap_unresumable'` and `failed_mid_step=true`. The task transitions IMMEDIATELY to `paused_chain_failure` — this is a single-event pause, NOT a 3-failure threshold. The "three consecutive failures" threshold in § 3.17 item 1 applies only to chain-link START failures (`pending`-state failures). Hard-cap unresumable increments `operator_chain_failure_count` for diagnostic visibility only; it does NOT need three occurrences to trigger the pause. Recovery (user-initiated retry from `paused_chain_failure`) resets the counter.
 
 4. **Chain-link dispatch.** End of chain link N writes `checkpoint_payload` and emits `'operator-session-completed'` (the standard adapter terminal event, with status `'completed'` and a non-null `checkpoint_payload` field — distinct from the task-terminal `'completed'`). The finaliser handler distinguishes (branches evaluated in order; first match wins):
-   - `completed` with non-null `checkpoint_payload` AND consumed-budget-minutes ≥ pinned `settings_snapshot.per_task_budget_cap_minutes` → task transitions to `'paused_budget_exceeded'`; do NOT enqueue the next chain link.
-   - `completed` with non-null `checkpoint_payload` AND (`now() - first_operator_run.started_at`) ≥ pinned `settings_snapshot.max_wall_clock_per_task_days` → task transitions to `'paused_budget_exceeded'` with `failure_reason='max_wall_clock_exceeded'`; do NOT enqueue the next chain link.
+   - `completed` with non-null `checkpoint_payload` AND consumed-budget-minutes ≥ pinned `settings_snapshot.per_task_budget_cap_minutes` → task transitions to `'paused_budget_exceeded'` with `failure_reason='budget_cap_exceeded'`; do NOT enqueue the next chain link.
+   - `completed` with non-null `checkpoint_payload` AND (`now() - first_operator_run.started_at`) ≥ pinned `settings_snapshot.max_wall_clock_per_task_days` → task transitions to `'paused_wall_clock_exceeded'` with `failure_reason='max_wall_clock_exceeded'`; do NOT enqueue the next chain link.
    - `completed` with non-null `checkpoint_payload` AND the parent task is at max chain length (`chain_seq >= settings_snapshot.max_chain_length`) → task-terminal `'failed'` with `failure_reason='max_chain_length_reached'` (rolls up to `agent_runs.status='failed'`).
    - `completed` with non-null `checkpoint_payload` (none of the above caps tripped) → dispatch next chain link via the `'operator-session-dispatch-next-chain-link'` queue.
    - `completed` with NULL `checkpoint_payload` AND `is_resumable_now=true` on the last step AND task scope reports "done" → task-terminal `'completed'`. (The operator runtime emits a `'task_completed'` step-state when the task is genuinely done; that signal sets the writer to NULL checkpoint and triggers task termination.)
@@ -537,7 +549,7 @@ Runtime limits live on the subaccount, not on the org. Subaccounts are where age
 
 - `session_soft_cap_minutes`, `auto_extend_grace_minutes` — adapter-side, per § 3.14 item 3. Read from `operator_runs.settings_snapshot`.
 - `max_chain_length` — finaliser decision table, per § 3.14 item 4 (`chain_seq >= cap` branch). Read from `operator_runs.settings_snapshot`.
-- `max_wall_clock_per_task_days` — finaliser decision table, per § 3.14 item 4 (`now() - first_operator_run.started_at >= cap` → `paused_budget_exceeded` with `failure_reason='max_wall_clock_exceeded'`). Read from `operator_runs.settings_snapshot`.
+- `max_wall_clock_per_task_days` — finaliser decision table, per § 3.14 item 4 (`now() - first_operator_run.started_at >= cap` → `paused_wall_clock_exceeded` with `failure_reason='max_wall_clock_exceeded'`). Read from `operator_runs.settings_snapshot`.
 - `per_task_budget_cap_minutes` — finaliser decision table, per § 3.14 item 4 (consumed budget branch) and § 3.17 item 4. Read from `operator_runs.settings_snapshot`.
 - `concurrent_operator_sessions_cap` — adapter `dispatch()`, per § 3.17 item 5 (advisory-lock pattern). Read from **live** `subaccount_operator_settings` at every dispatch (both new tasks and chain continuations). The settings_snapshot's copy is for audit / incident-payload context only — it is NOT the enforcement source. Rationale: the concurrency cap is a subaccount-wide global, not a per-task contract; changes need to take effect immediately for new dispatches even when other in-flight tasks are using stale per-task caps.
 
@@ -728,7 +740,8 @@ Enum closed set after this spec:
 
 ```
 'pending' | 'running' | 'delegated' |
-'paused_for_chain_continuation' | 'paused_chain_failure' | 'paused_budget_exceeded' |
+'paused_for_chain_continuation' | 'paused_chain_failure' |
+'paused_budget_exceeded' | 'paused_wall_clock_exceeded' |
 'completed' | 'failed' | 'cancelled'
 ```
 
@@ -835,7 +848,8 @@ Event-type family. All events flow through the existing Run Trace virtual-view c
 | `operator-session.task_cancelled` | Task-terminal `cancelled` | `agent_run_id, cancelled_by_user_id` |
 | `operator-session.task_paused_for_chain_continuation` | Task waiting for next chain dispatch | `agent_run_id, last_chain_link_id, reason` |
 | `operator-session.task_paused_chain_failure` | Task auto-paused after 3 dispatch failures | `agent_run_id, last_chain_link_id, last_failure_class` |
-| `operator-session.task_paused_budget_exceeded` | Task auto-paused at budget cap | `agent_run_id, budget_cap_minutes, consumed_minutes` |
+| `operator-session.task_paused_budget_exceeded` | Task auto-paused at per-task budget cap | `agent_run_id, budget_cap_minutes, consumed_minutes` |
+| `operator-session.task_paused_wall_clock_exceeded` | Task auto-paused at max wall-clock per task | `agent_run_id, max_wall_clock_per_task_days, elapsed_days` |
 | `operator-session.fresh_profile_restart` | Authorised fresh-profile restart | `agent_run_id, prior_attempt_number, new_attempt_number, actor_user_id` |
 | `operator-session.usability_restored` | Broker signal that operator-session credential is usable again (clears fallback stickiness) | `agent_run_id, credential_id` |
 
@@ -1021,10 +1035,10 @@ This is the single source of truth for every file touched. Prose references anyw
 
 | Migration | Purpose |
 |---|---|
-| `migrations/0327_create_operator_runs.sql` (+ `.down.sql`) | `operator_runs` table + indexes + FORCE RLS + manifest entry. |
-| `migrations/0328_create_operator_task_profiles.sql` (+ `.down.sql`) | `operator_task_profiles` table + indexes + FORCE RLS + manifest entry. |
+| `migrations/0327_create_operator_runs.sql` (+ `.down.sql`) | `operator_runs` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(agent_run_id, attempt_number, chain_seq)` constraint per § 3.3 (NOT `(agent_run_id, chain_seq)` — fresh-profile restart per § 3.15 item 7 keeps the same `agent_run_id`, bumps `attempt_number`, and restarts `chain_seq` at 1 for each attempt). UNIQUE `(task_id, attempt_number)` belongs to migration 0328 (`operator_task_profiles`), not this one. |
+| `migrations/0328_create_operator_task_profiles.sql` (+ `.down.sql`) | `operator_task_profiles` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(task_id, attempt_number)` constraint per § 3.15 item 1. |
 | `migrations/0329_create_subaccount_operator_settings.sql` (+ `.down.sql`) | `subaccount_operator_settings` table + indexes + FORCE RLS + manifest entry. |
-| `migrations/0330_extend_agent_runs.sql` (+ `.down.sql`) | Extend `agent_runs.status` CHECK / enum / allow-list with `paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded`; add `operator_chain_failure_count integer NOT NULL DEFAULT 0`. |
+| `migrations/0330_extend_agent_runs.sql` (+ `.down.sql`) | Extend `agent_runs.status` CHECK / enum / allow-list with `paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded`, `paused_wall_clock_exceeded`; add `operator_chain_failure_count integer NOT NULL DEFAULT 0`. |
 | `migrations/0331_extend_llm_requests_operator.sql` (+ `.down.sql`) | Add to `llm_requests` (or canonical cost-ledger table): `operator_run_id uuid NULL REFERENCES operator_runs(id)`, `boundary text NULL` (boundary discriminator — currently the single value `'chain_link'` for the new rows, NULL for pre-existing rows), and the partial UNIQUE index `(operator_run_id, source_type, boundary) WHERE operator_run_id IS NOT NULL AND boundary IS NOT NULL`. Plus a covering index `(operator_run_id)` for the cost-writer idempotency lookup. |
 
 Migration numbering starts at 0327; current latest is 0326 (operator-session-identity). The Spec B sandbox migration numbers (0321–0324) are already in the branch.
@@ -1202,13 +1216,13 @@ The handler `operatorSessionCompletedHandler.ts`:
 
 1. Reads the parent `agent_runs` row.
 2. Proceed only when ALL of the following hold:
-   - `agent_runs.status` is one of `'pending'` (first dispatch — bootstrap path), `'paused_for_chain_continuation'`, `'paused_chain_failure'` (after user-initiated retry, counter has been reset), or `'paused_budget_exceeded'` (after user-initiated extension). NOTE: `'delegated'` is intentionally excluded — a `'delegated'` task already has a chain link in flight, and dispatching another would race.
-   - The queued-job reason tag matches the current paused-state resume action (`'continuation'` ↔ `paused_for_chain_continuation`; `'retry'` ↔ `paused_chain_failure`; `'budget_extension'` ↔ `paused_budget_exceeded`; `'bootstrap'` ↔ `pending`).
+   - `agent_runs.status` is one of `'pending'` (first dispatch — bootstrap path), `'paused_for_chain_continuation'`, `'paused_chain_failure'` (after user-initiated retry, counter has been reset), or `'paused_budget_exceeded'` (after user-initiated extension). NOTE: `'delegated'` is intentionally excluded — a `'delegated'` task already has a chain link in flight, and dispatching another would race. `'paused_wall_clock_exceeded'` is also intentionally excluded — V1 has no resume path from this state (cancel-only); a future Phase 3.5 admin-override flow would add `'wall_clock_extension'` ↔ `paused_wall_clock_exceeded` to this set and refresh `settings_snapshot.max_wall_clock_per_task_days` on resume.
+   - The queued-job reason tag matches the current paused-state resume action (`'continuation'` ↔ `paused_for_chain_continuation`; `'retry'` ↔ `paused_chain_failure`; `'budget_extension'` ↔ `paused_budget_exceeded`; `'bootstrap'` ↔ `pending`). V1 has NO reason tag corresponding to `paused_wall_clock_exceeded`.
    - `NOT EXISTS (SELECT 1 FROM operator_runs WHERE agent_run_id = $1 AND attempt_number = $2 AND status IN ('pending','running'))` — there is no in-flight chain link for the current attempt.
    Otherwise no-op (idempotent re-delivery).
 3. Calls `executionBackendRegistry.get('operator_managed').dispatch({ agentRunId, ... })` — re-uses § 7.1 inline path.
-4. On success: writes `agent_runs.status='delegated'` via the optimistic predicate `UPDATE agent_runs SET status='delegated', operator_chain_failure_count=0 WHERE id=$1 AND status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. 0 rows-affected means the task is in a terminal state — no-op.
-5. On failure with `'transient'` failure class: increments `agent_runs.operator_chain_failure_count` under predicate `UPDATE ... WHERE id=$1 AND status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')` (matching § 3.4 writer rules — retries from paused states must be counted before the threshold check). Enqueues a delayed re-dispatch (1 min → 5 min → 15 min via pg-boss's `startAfter` parameter).
+4. On success: writes `agent_runs.status='delegated'` via the optimistic predicate `UPDATE agent_runs SET status='delegated', operator_chain_failure_count=0 WHERE id=$1 AND status IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. `'delegated'` is intentionally EXCLUDED — defence in depth against the reason-gate (step 2) regressing; an already-`'delegated'` task has a chain link in flight and dispatching a new one would race. 0 rows-affected means the task is in a terminal state (or already delegated) — no-op.
+5. On failure with `'transient'` failure class: increments `agent_runs.operator_chain_failure_count` under predicate `UPDATE ... WHERE id=$1 AND status IN ('pending','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')` (matching § 3.4 writer rules — retries from paused states must be counted before the threshold check; `'delegated'` excluded by the same defence-in-depth logic as step 4). Enqueues a delayed re-dispatch (1 min → 5 min → 15 min via pg-boss's `startAfter` parameter).
 6. On the 3rd consecutive failure: writes `agent_runs.status='paused_chain_failure'`, emits `'operator-session.task_paused_chain_failure'` event, sends user notification.
 7. On failure with `'permanent' | 'auth' | 'profile_corruption'` failure class: bypasses the backoff and goes directly to `paused_chain_failure`.
 8. Every failure (transient or permanent) emits an `operator.chain_link_start_failed` incident with `retry_attempt` and `is_terminal`.
@@ -1288,7 +1302,7 @@ The implementation order is: schemas / migrations / state-enum (Chunk 1) → cap
 | `operator_runs` insert (chain-link start) | **state-based** | optimistic predicate: `INSERT ... WHERE NOT EXISTS (SELECT 1 FROM operator_runs WHERE agent_run_id=$1 AND attempt_number=$2 AND chain_seq=$3)`. 0 rows-affected = a concurrent dispatcher already started this chain link. UNIQUE `(agent_run_id, attempt_number, chain_seq)` per § 3.3 is the DB-level backstop. |
 | `operator_runs` terminal UPDATE | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','running')`. 0 rows-affected = already terminal. |
 | `agent_runs` terminal UPDATE to `completed` or `failed` | **state-based** | optimistic predicate: `UPDATE ... WHERE status='delegated'`. A paused task MUST transition `delegated` first (re-dispatch a chain link) before it can roll up to terminal `completed`/`failed`. 0 rows-affected = already terminal OR still paused; finaliser logs and returns 200 idempotent-hit. |
-| `agent_runs` terminal UPDATE to `cancelled` | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded')`. Any pre-terminal state may transition directly to `cancelled` (user cancel). 0 rows-affected = already terminal; return `409` with current state. |
+| `agent_runs` terminal UPDATE to `cancelled` | **state-based** | optimistic predicate: `UPDATE ... WHERE status IN ('pending','delegated','paused_for_chain_continuation','paused_chain_failure','paused_budget_exceeded','paused_wall_clock_exceeded')`. Any pre-terminal state may transition directly to `cancelled` (user cancel). 0 rows-affected = already terminal; return `409` with current state. |
 | `agent_runs` pause UPDATE (`paused_for_chain_continuation`) | **state-based** | optimistic predicate: `UPDATE ... WHERE status='delegated'`. 0 rows-affected = a concurrent path already paused or terminated. |
 | `operator_task_profiles` insert (first chain link) | **key-based** | unique constraint: `(task_id, attempt_number)`. 23505 → catch and return the existing row (idempotent-hit). |
 | `subaccount_operator_settings` UPSERT | **key-based** | PK: `subaccount_id`. Conflict → If-Match check (state-based concurrency control on top of key-based identity). |
@@ -1344,7 +1358,8 @@ The implementation order is: schemas / migrations / state-enum (Chunk 1) → cap
 Every flow that can partially complete emits an explicit status. Concretely:
 
 - A chain link that started but didn't finish a task → `'chain_link_completed'` with checkpoint (NOT silent partial).
-- A task that hit the budget cap mid-chain-link → the chain link `'chain_link_completed'` with checkpoint; the task `'task_paused_budget_exceeded'` (NOT a silent partial on the task).
+- A task that hit the per-task budget cap mid-chain-link → the chain link `'chain_link_completed'` with checkpoint; the task `'task_paused_budget_exceeded'` (NOT a silent partial on the task).
+- A task that hit the max wall-clock per task limit mid-chain-link → the chain link `'chain_link_completed'` with checkpoint; the task `'task_paused_wall_clock_exceeded'` (NOT a silent partial on the task).
 - A task that exhausted max chain length → `'task_failed'` with `failure_reason='max_chain_length_reached'` (NOT silent).
 - A fallback-engaged chain link → mixed cost rows per § 3.12; both row types reflect the boundary explicitly.
 
@@ -1393,11 +1408,12 @@ delegated → paused_for_chain_continuation            (chain link completed wit
 paused_for_chain_continuation → delegated            (next chain link dispatched)
 delegated → paused_chain_failure                     (3 consecutive dispatch failures)
 paused_chain_failure → delegated                     (user retried)
-delegated → paused_budget_exceeded                   (budget cap hit)
+delegated → paused_budget_exceeded                   (per-task budget cap hit)
 paused_budget_exceeded → delegated                   (user extended budget)
+delegated → paused_wall_clock_exceeded               (max wall-clock per task hit; V1 NON-RESUMABLE — no transition back to delegated; only out-transition is cancelled. Phase 3.5 deferred: admin override path with snapshot refresh.)
 delegated → completed                                (final chain link task_completed)
 delegated → failed                                   (operator runtime hard error OR max chain length)
-delegated → paused_chain_failure                     (hard-cap unresumable: running chain link with failed_mid_step=true per § 3.14 item 3; counted in the same dispatch-failure budget as start failures)
+delegated → paused_chain_failure                     (hard-cap unresumable: running chain link with failed_mid_step=true per § 3.14 item 3; immediate single-event pause — NOT counted against the 3-strike start-failure retry budget)
 {pending | delegated | paused_*} → cancelled         (user cancelled)
 ```
 
@@ -1427,6 +1443,7 @@ Single source of truth. Every "deferred", "later", "future", "Phase 3.5", "Phase
 - **DEFER — Manual checkpoint controls (user-triggered "checkpoint now").** Phase 3.5. D12 — chain-resume is entirely automatic in V1.
 - **DEFER — Predict-and-warn classifier for un-resumable flows at task-create time.** Phase 3.5. D7/§3.14 — best-effort with auto-extend grace is V1 policy.
 - **DEFER — Operator session export/import to external infrastructure.** Phase 5. V1 keeps all chain links inside the managed Operator Backend.
+- **DEFER — `paused_wall_clock_exceeded` resume path.** Phase 3.5. V1 recovery from this state is user-cancel only. The future flow: org-admin raises `subaccount_operator_settings.max_wall_clock_per_task_days`; on user-initiated retry, the dispatcher refreshes `settings_snapshot.max_wall_clock_per_task_days` on the next chain link (live read at retry time) and the task transitions back to `delegated`. Adds a new queued-job reason tag `'wall_clock_extension'` ↔ `paused_wall_clock_exceeded` to the § 7.3 mapping; adds a new audit event `task.operator.wall_clock_extended` with `actor_user_id`, `prior_cap_days`, `new_cap_days`, `request_id`.
 - **DEFER — Per-subaccount profile-size-cap configuration.** V1 has a system-wide 500 MB constant (§ 3.15 item 3). If customer demand surfaces, future spec adds it to `subaccount_operator_settings`.
 - **DEFER — Cross-attempt comparison view in Run Trace.** § 3.15 item 7 / § 3.11 — V1 renders attempts as collapsed groups; a side-by-side compare view is deferred.
 - **DEFER — In-flight settings hot-application.** V1 snapshots caps at chain-link dispatch time; in-flight chain links use the snapshot. A future spec could push settings changes to a running chain link (the operator runtime would need a "soft re-cap" signal). Deferred — operationally complex, low demand.
