@@ -3,39 +3,24 @@
   Memory Improvements — Surface 3: Auto-Knowledge Ranker Mode + Shadow Comparison
   Proposal D — Semantic ranker for the auto-knowledge retrieval path
 
-  This file covers BOTH sub-surfaces of Proposal D:
+  ROUND 2 CHANGES:
+  - Re-homed Part A from "Settings / Retrieval" (org-level) to SubaccountKnowledgePage
+    as a new "Retrieval" tab alongside References / Insights / Memory Blocks.
+  - Removed all org-inheritance leaks:
+      • Sidebar no longer shows Settings > Retrieval as active; shows Knowledge as active.
+      • Breadcrumb is now subaccount-scoped: "Acme Corp / Knowledge / Retrieval".
+      • Page header reads "Retrieval" (the tab context), not "Retrieval settings".
+      • Audit copy changed from "organisation action audit trail" to "audit trail".
+      • Removed all "Org admin only" badges from user-visible copy.
+  - Subaccount admin sees the ranker mode as their own setting, with no inheritance framing.
+  - Part B (shadow comparison on run trace) anchored to AgentRunLivePage context,
+    which is the actual per-run trace surface in the codebase. Breadcrumb updated accordingly.
+  - No new components introduced; all patterns reuse the SubaccountKnowledgePage
+    tab strip, card, and table conventions from the existing codebase.
 
-  Part A: Ranker mode selector (admin/operator-only settings control).
-    - Extends: client/src/pages/AdminSettingsPage.tsx or SubaccountKnowledgePage.tsx
-      (placed as a "Retrieval" settings tab inside the workspace/org settings area)
-    - Shows four rollout modes: off / shadow / sampled / on
-    - Default is "off". Mode change is audited (shows audit log entry on save).
-    - Operator-only: absent from non-admin views.
-
-  Part B: Shadow-mode comparison panel on a run trace.
-    - Extends: prototypes/trust-verification-layer/run-trace.html
-      (new "Retrieval" section in the event detail panel, or as a full-height
-       comparison view accessible from a run-trace step)
-    - Shows side-by-side: legacy payload vs. semantic ranker payload
-    - Highlights: dropped items (low score), promoted items (high score)
-    - Recall-invariant check: green/amber per category
-
-  Design decisions:
-    - Part A is a settings card, not a new page.
-      The four modes are displayed as a visual segmented-radio selector, not a plain
-      dropdown, so operators can see the current mode and the transition path at a glance.
-    - Changing mode shows an audit confirmation: "Mode change will be logged to the
-      action audit trail." One confirm step; no heavy modal.
-    - Part B uses the existing run-trace layout. The "Retrieval" panel is a new
-      collapsible section within the event detail drawer, toggled from the run_start
-      event row or a dedicated "Retrieval diff" button in the topbar when ranker mode
-      is shadow/sampled.
-    - Side-by-side is implemented as two fixed-width columns inside the detail panel.
-    - Recall-invariant: green tick = semantic kept at least 1 item per category;
-      amber = semantic would have emptied a category.
-    - No raw scores exposed in the default diff view — only qualitative labels
-      (Promoted / Dropped / Unchanged). Raw cosine score is behind a hover tooltip.
-    - No em-dashes in any copy.
+  Extends:
+  - Part A: client/src/pages/SubaccountKnowledgePage.tsx (new 4th tab: Retrieval)
+  - Part B: client/src/pages/AgentRunLivePage.tsx (shadow comparison panel in run context)
 -->
 <html lang="en">
 <head>
@@ -46,42 +31,28 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
 <style>
-  /* Sidebar items */
-  .sidebar-item { padding: 8px 20px; color: rgba(255,255,255,0.62); font-size: 13px; cursor: pointer; }
-  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-400); padding-left: 17px; }
-  .sidebar-item.sub { padding-left: 34px; font-size: 12.5px; }
-  .sidebar-item.sub.active { padding-left: 31px; }
-
   /* Page layout */
-  .page-content { padding: 28px 32px; max-width: 820px; }
+  .page-content { padding: 28px 32px; max-width: 840px; }
 
-  /* Tab strip for settings page */
+  /* Tab strip — matches SubaccountKnowledgePage TabButton component */
   .tab-strip { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 24px; }
   .tab-btn {
-    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 500;
-    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.12s;
+    background: none; border: none; padding: 8px 16px; font-size: 14px; font-weight: 500;
+    color: var(--slate-600); cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.12s;
   }
-  .tab-btn:hover { color: var(--slate-700); }
-  .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .tab-btn:hover { color: var(--slate-900); }
+  .tab-btn.active { color: var(--indigo-700); border-bottom-color: var(--indigo-600); font-weight: 600; }
 
-  /* Admin-only label on field */
-  .field-admin-label {
-    display: inline-flex; align-items: center;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-    background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a;
-    border-radius: 4px; padding: 1px 5px; margin-left: 7px; vertical-align: middle;
-  }
-
-  /* Settings card */
+  /* Settings card — matches bg-white border border-slate-200 rounded-xl overflow-hidden */
   .settings-card {
     background: white; border: 1px solid var(--border); border-radius: 12px;
-    overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 20px;
+    overflow: hidden; margin-bottom: 20px;
   }
   .settings-card-header {
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid var(--slate-100);
+    background: var(--slate-50);
   }
-  .settings-card-title { font-size: 14px; font-weight: 700; color: var(--slate-900); }
+  .settings-card-title { font-size: 13px; font-weight: 600; color: var(--slate-700); margin: 0; }
   .settings-card-sub { font-size: 12.5px; color: var(--slate-500); margin-top: 3px; line-height: 1.5; }
   .settings-card-body { padding: 20px; }
 
@@ -97,7 +68,6 @@
     border-color: var(--indigo-500); background: var(--indigo-50);
     box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
   }
-  .mode-option.disabled { opacity: 0.5; cursor: default; }
   .mode-option-name { font-size: 13px; font-weight: 700; color: var(--slate-900); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
   .mode-option-desc { font-size: 11.5px; color: var(--slate-500); line-height: 1.4; }
   .mode-radio {
@@ -135,11 +105,10 @@
   }
   .audit-note svg { flex-shrink: 0; margin-top: 1px; }
 
-  /* Save confirmation inline */
+  /* Save row */
   .save-row { display: flex; align-items: center; gap: 10px; }
   .save-confirm-note {
-    font-size: 12px; color: var(--emerald-600); display: flex; align-items: center; gap: 5px;
-    display: none;
+    font-size: 12px; color: var(--emerald-600); display: none; align-items: center; gap: 5px;
   }
 
   /* Current mode status strip */
@@ -154,12 +123,12 @@
   .section-divider { border: none; border-top: 1px solid var(--slate-200); margin: 28px 0; }
 
   /* ============================================================
-     PART B — Shadow mode comparison (run trace overlay)
+     PART B — Shadow mode comparison (run trace context)
      ============================================================ */
 
   .shadow-demo-wrap {
     background: white; border: 1px solid var(--border); border-radius: 12px;
-    overflow: hidden; box-shadow: var(--shadow-sm);
+    overflow: hidden;
   }
   .shadow-demo-topbar {
     padding: 12px 20px; border-bottom: 1px solid var(--border);
@@ -172,8 +141,6 @@
     background: var(--violet-50); color: var(--violet-500); border: 1px solid var(--violet-200);
   }
   .shadow-mode-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--violet-500); }
-
-  .shadow-layout { display: flex; }
 
   /* Recall invariant status bar */
   .recall-bar {
@@ -239,28 +206,12 @@
     opacity: 0; transition: opacity 0.12s;
   }
   .score-hint:hover::after { opacity: 1; }
-
-  /* Empty column placeholder */
-  .compare-col-empty {
-    padding: 32px 16px; text-align: center; color: var(--slate-400); font-size: 12.5px;
-  }
-
-  /* Expand/collapse toggle for the comparison section */
-  .compare-toggle {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--indigo-600); font-weight: 600;
-    cursor: pointer; border: none; background: transparent; padding: 0;
-    transition: color 0.1s;
-  }
-  .compare-toggle:hover { color: var(--indigo-700); }
-  .compare-toggle svg { transition: transform 0.15s; }
-  .compare-toggle.open svg { transform: rotate(90deg); }
 </style>
 </head>
 <body>
 <div class="app-shell">
 
-  <!-- Sidebar -->
+  <!-- Sidebar — Knowledge is the active nav item for a subaccount context -->
   <nav class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-mark">
@@ -271,15 +222,10 @@
       </div>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-section-label">Workspace</div>
+      <div class="sidebar-section-label">Acme Corp</div>
       <div class="sidebar-item">Agents</div>
-      <div class="sidebar-item">Knowledge</div>
-    </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-label">Settings</div>
-      <div class="sidebar-item">General</div>
-      <div class="sidebar-item active">Retrieval</div>
-      <div class="sidebar-item">Integrations</div>
+      <div class="sidebar-item active">Knowledge</div>
+      <div class="sidebar-item">Runs</div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-label">Govern</div>
@@ -289,10 +235,12 @@
 
   <!-- Main -->
   <div class="main">
-    <!-- Topbar -->
+    <!-- Topbar — subaccount-scoped breadcrumb -->
     <div class="topbar">
       <div class="topbar-breadcrumb">
-        <span>Settings</span>
+        <span>Acme Corp</span>
+        <span style="color:var(--slate-300)">›</span>
+        <span>Knowledge</span>
         <span style="color:var(--slate-300)">›</span>
         <span class="topbar-breadcrumb-current">Retrieval</span>
       </div>
@@ -303,360 +251,417 @@
     <div class="page-body">
       <div class="page-content">
 
-        <!-- Page header -->
-        <div class="page-header">
-          <h1>Retrieval settings</h1>
-          <p>Control how knowledge and memory are retrieved during agent runs.
-             <span class="field-admin-label">Org admin only</span>
-          </p>
-        </div>
-
-        <!-- =====================================================
-             PART A: Ranker mode selector
-             ===================================================== -->
-
-        <div class="settings-card">
-          <div class="settings-card-header">
+        <!-- Page header — matches SubaccountKnowledgePage style -->
+        <div class="mb-6">
+          <a href="#" style="font-size:14px;color:var(--indigo-600);text-decoration:none">&larr; Back</a>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px">
             <div>
-              <div class="settings-card-title">
-                Semantic ranker mode
-                <span class="field-admin-label">Org admin only</span>
+              <h1 style="font-size:24px;font-weight:700;color:var(--slate-900);margin:0">Knowledge</h1>
+              <p style="font-size:14px;color:var(--slate-500);margin:4px 0 0">
+                References are long-form notes agents retrieve on demand. Memory Blocks are short
+                stable facts loaded into every agent run.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Baseline artefacts section — kept as-is from SubaccountKnowledgePage -->
+        <div style="margin-bottom:24px;background:white;border:1px solid var(--slate-200);border-radius:12px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--slate-100);background:var(--slate-50)">
+            <h2 style="font-size:13px;font-weight:600;color:var(--slate-700);margin:0">Baseline artefacts</h2>
+          </div>
+          <ul style="list-style:none;margin:0;padding:0">
+            <li style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--slate-50)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;color:var(--slate-800);font-weight:500">Brand voice</span>
+                <span style="font-size:11px;color:var(--slate-400)">Tier 1</span>
               </div>
+              <span class="badge badge-green" style="font-size:11px">Completed</span>
+            </li>
+            <li style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;color:var(--slate-800);font-weight:500">Tone guidelines</span>
+                <span style="font-size:11px;color:var(--slate-400)">Tier 2</span>
+              </div>
+              <span class="badge badge-amber" style="font-size:11px">In progress</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Tab strip — matches SubaccountKnowledgePage TabButton component exactly -->
+        <div class="tab-strip">
+          <button class="tab-btn" onclick="switchTab(this,'references')">References (12)</button>
+          <button class="tab-btn" onclick="switchTab(this,'insights')">Insights (4)</button>
+          <button class="tab-btn" onclick="switchTab(this,'blocks')">Memory Blocks (3)</button>
+          <button class="tab-btn active" onclick="switchTab(this,'retrieval')">Retrieval</button>
+        </div>
+
+        <!-- Retrieval tab content -->
+        <div id="tab-retrieval">
+
+          <!-- =====================================================
+               Ranker mode selector — subaccount-scoped setting
+               ===================================================== -->
+
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <div class="settings-card-title">Semantic ranker mode</div>
               <div class="settings-card-sub">
-                Controls whether the semantic ranker scores candidates before loading them into agent runs.
-                Start with Shadow mode to observe impact without changing what agents receive.
+                Controls how knowledge and memory are ranked before being loaded into agent runs.
+                Start with Shadow to observe the impact without changing what agents receive.
               </div>
+            </div>
+            <div class="settings-card-body">
+
+              <!-- Current mode status -->
+              <div class="current-mode-strip">
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 8v4m0 4h.01"/></svg>
+                Current mode: <strong id="current-mode-label">Off</strong>
+                <span id="current-mode-chip" class="mode-badge mode-badge-off" style="margin-left:4px">Off</span>
+              </div>
+
+              <!-- Mode options -->
+              <div class="mode-selector" id="mode-selector">
+
+                <!-- Off -->
+                <div class="mode-option selected" id="mode-off" onclick="selectMode('off')">
+                  <div class="mode-radio"><div class="mode-radio-dot"></div></div>
+                  <div class="mode-option-name">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M4.93 4.93l14.14 14.14"/></svg>
+                    Off
+                  </div>
+                  <div class="mode-option-desc">All eligible candidates pass. Current behaviour.</div>
+                  <div class="mode-badge mode-badge-off" style="margin-top:6px">Default</div>
+                </div>
+
+                <!-- Shadow -->
+                <div class="mode-option" id="mode-shadow" onclick="selectMode('shadow')">
+                  <div class="mode-radio"></div>
+                  <div class="mode-option-name">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:#8b5cf6"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    Shadow
+                  </div>
+                  <div class="mode-option-desc">Scores computed and logged. Agents receive the existing payload unchanged.</div>
+                  <div class="mode-badge mode-badge-shadow" style="margin-top:6px">Observe only</div>
+                </div>
+
+                <!-- Sampled -->
+                <div class="mode-option" id="mode-sampled" onclick="selectMode('sampled')">
+                  <div class="mode-radio"></div>
+                  <div class="mode-option-name">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--amber-600)"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
+                    Sampled
+                  </div>
+                  <div class="mode-option-desc">Ranked payload applied to a percentage of runs. Remainder uses current scoring.</div>
+                  <div class="mode-badge mode-badge-sampled" style="margin-top:6px">Partial rollout</div>
+                </div>
+
+                <!-- On -->
+                <div class="mode-option" id="mode-on" onclick="selectMode('on')">
+                  <div class="mode-radio"></div>
+                  <div class="mode-option-name">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--emerald-600)"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    On
+                  </div>
+                  <div class="mode-option-desc">Ranked payload applied to all runs. Low-scoring candidates are filtered out.</div>
+                  <div class="mode-badge mode-badge-on" style="margin-top:6px">Full rollout</div>
+                </div>
+              </div>
+
+              <!-- Sampled config (shown only when sampled is selected) -->
+              <div class="sampled-config" id="sampled-config" style="display:none">
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--amber-600);flex-shrink:0"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                <span>Apply to</span>
+                <input type="range" min="5" max="100" step="5" value="20" id="sample-pct-slider"
+                  oninput="document.getElementById('sample-pct-val').textContent=this.value+'%'">
+                <span class="sampled-pct-val" id="sample-pct-val">20%</span>
+                <span>of runs</span>
+              </div>
+
+              <!-- Audit note — no "organisation" language -->
+              <div class="audit-note">
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                Mode changes are recorded in the audit trail with the acting user and timestamp.
+              </div>
+
+              <div class="save-row">
+                <button class="btn btn-primary" onclick="saveMode()">Save</button>
+                <button class="btn btn-secondary" onclick="resetMode()">Cancel</button>
+                <span class="save-confirm-note" id="save-confirm" style="display:none">
+                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  Saved
+                </span>
+              </div>
+
             </div>
           </div>
-          <div class="settings-card-body">
 
-            <!-- Current mode status -->
-            <div class="current-mode-strip">
-              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 8v4m0 4h.01"/></svg>
-              Current mode: <strong id="current-mode-label">Off</strong>
-              <span id="current-mode-chip" class="mode-badge mode-badge-off" style="margin-left:4px">Off</span>
-            </div>
+          <!-- Divider before run trace demo -->
+          <hr class="section-divider">
 
-            <!-- Mode options -->
-            <div class="mode-selector" id="mode-selector">
+          <!-- Part B context note -->
+          <div style="margin-bottom:16px">
+            <h2 style="font-size:15px;font-weight:700;color:var(--slate-900);margin:0 0 4px">Shadow mode: retrieval comparison</h2>
+            <p style="font-size:13px;color:var(--slate-500);margin:0">
+              When ranker mode is Shadow or Sampled, each run includes a retrieval comparison.
+              This shows what the semantic ranker would have loaded versus what was actually delivered.
+            </p>
+          </div>
 
-              <!-- Off -->
-              <div class="mode-option selected" id="mode-off" onclick="selectMode('off')">
-                <div class="mode-radio"><div class="mode-radio-dot"></div></div>
-                <div class="mode-option-name">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M4.93 4.93l14.14 14.14"/></svg>
-                  Off
-                </div>
-                <div class="mode-option-desc">Score 0, threshold 0. Current production behaviour. All eligible candidates pass.</div>
-                <div class="mode-badge mode-badge-off" style="margin-top:6px">Production default</div>
+          <!-- =====================================================
+               PART B: Shadow comparison panel
+               Anchored to AgentRunLivePage — per-run context
+               ===================================================== -->
+
+          <div class="shadow-demo-wrap">
+
+            <!-- Run context topbar — matches AgentRunLivePage meta bar -->
+            <div class="shadow-demo-topbar">
+              <!-- Breadcrumb matching AgentRunLivePage link style -->
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--slate-500);flex:1">
+                <a href="#" style="color:var(--indigo-600);font-weight:500;text-decoration:none">Agents</a>
+                <span style="color:var(--slate-300)">/</span>
+                <a href="#" style="color:var(--indigo-600);font-weight:500;text-decoration:none">Marketing Research Agent</a>
+                <span style="color:var(--slate-300)">/</span>
+                <span style="font-weight:600;color:var(--slate-900)">Run: May 12, 9:14 am</span>
               </div>
-
-              <!-- Shadow -->
-              <div class="mode-option" id="mode-shadow" onclick="selectMode('shadow')">
-                <div class="mode-radio"></div>
-                <div class="mode-option-name">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:#8b5cf6"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                  Shadow
-                </div>
-                <div class="mode-option-desc">Compute scores and emit comparison telemetry. Legacy payload delivered to agents unchanged.</div>
-                <div class="mode-badge mode-badge-shadow" style="margin-top:6px">Observe only</div>
+              <div class="shadow-mode-chip">
+                <span class="dot"></span>
+                Shadow mode active
               </div>
+              <button class="btn btn-sm btn-secondary" onclick="toggleCompare()">
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                <span id="compare-btn-label">Show retrieval diff</span>
+              </button>
+            </div>
 
-              <!-- Sampled -->
-              <div class="mode-option" id="mode-sampled" onclick="selectMode('sampled')">
-                <div class="mode-radio"></div>
-                <div class="mode-option-name">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--amber-600)"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
-                  Sampled
+            <!-- Recall invariant status bar -->
+            <div class="recall-bar" id="recall-bar" style="display:none">
+              <span class="recall-bar-title">Recall check</span>
+              <div class="recall-item">
+                <div class="recall-check ok">
+                  <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 </div>
-                <div class="mode-option-desc">Apply ranked payload to a configurable percentage of runs. Remainder uses legacy scoring.</div>
-                <div class="mode-badge mode-badge-sampled" style="margin-top:6px">Partial rollout</div>
+                <span>Memory blocks: at least 1 kept per category</span>
               </div>
-
-              <!-- On -->
-              <div class="mode-option" id="mode-on" onclick="selectMode('on')">
-                <div class="mode-radio"></div>
-                <div class="mode-option-name">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--emerald-600)"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                  On
+              <div class="recall-item">
+                <div class="recall-check warn">
+                  <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01"/></svg>
                 </div>
-                <div class="mode-option-desc">Apply ranked payload to all runs by default. Threshold filters low-scoring candidates.</div>
-                <div class="mode-badge mode-badge-on" style="margin-top:6px">Full rollout</div>
+                <span style="color:var(--amber-700)">Workspace entries: "Historical context" category would be empty</span>
+              </div>
+              <div style="margin-left:auto;font-size:11px;color:var(--slate-400)">Threshold: 0.30</div>
+            </div>
+
+            <!-- Comparison columns (collapsed by default) -->
+            <div id="compare-panel" style="display:none">
+              <div class="compare-cols">
+
+                <!-- Legacy column -->
+                <div class="compare-col">
+                  <div class="compare-col-header">
+                    Legacy payload
+                    <span class="col-count">10 items loaded</span>
+                  </div>
+
+                  <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Memory blocks</div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-unchanged">same</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name">Brand Voice and Tone Principles</div>
+                      <div class="payload-item-meta">
+                        <span>Memory block</span>
+                        <span>v4</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item would-drop">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-dropped">dropped</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.21 (below threshold 0.30)">Quarterly Reporting Template</div>
+                      <div class="payload-item-meta">
+                        <span>Memory block</span>
+                        <span>v2</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-unchanged">same</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name">Competitor Analysis Framework</div>
+                      <div class="payload-item-meta">
+                        <span>Memory block</span>
+                        <span>v1</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Workspace entries</div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-unchanged">same</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name">Target audience is B2B SaaS, mid-market</div>
+                      <div class="payload-item-meta"><span>Entry: Audience</span></div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item would-drop">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-dropped">dropped</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.18 (below threshold 0.30)">Fiscal year ended March 2023</div>
+                      <div class="payload-item-meta">
+                        <span>Entry: Historical context</span>
+                        <span style="color:var(--amber-600);font-weight:600">Only entry in category</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item would-drop">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-dropped">dropped</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.19 (below threshold 0.30)">Office located in Austin, TX</div>
+                      <div class="payload-item-meta"><span>Entry: General</span></div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-unchanged">same</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name">Product positioning: cost-efficiency focus</div>
+                      <div class="payload-item-meta"><span>Entry: Positioning</span></div>
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- Semantic ranker column -->
+                <div class="compare-col">
+                  <div class="compare-col-header">
+                    Semantic ranker would load
+                    <span class="col-count">7 items</span>
+                    <span style="margin-left:auto;font-size:11px;font-weight:500;color:var(--violet-500);text-transform:none;letter-spacing:0">-3 items</span>
+                  </div>
+
+                  <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Memory blocks</div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-promoted">promoted</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.87">Brand Voice and Tone Principles</div>
+                      <div class="payload-item-meta">
+                        <span>Memory block</span>
+                        <span>v4</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item" style="background:var(--red-50);opacity:0.7">
+                    <div class="payload-item-icon">
+                      <span style="font-size:11px;color:var(--red-500);font-weight:600">Dropped</span>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name" style="color:var(--slate-400);text-decoration:line-through;font-weight:400">Quarterly Reporting Template</div>
+                      <div class="payload-item-meta">Score 0.21, below threshold</div>
+                    </div>
+                  </div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-unchanged">same</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.71">Competitor Analysis Framework</div>
+                      <div class="payload-item-meta">
+                        <span>Memory block</span>
+                        <span>v1</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Workspace entries</div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-promoted">promoted</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.83">Target audience is B2B SaaS, mid-market</div>
+                      <div class="payload-item-meta"><span>Entry: Audience</span></div>
+                    </div>
+                  </div>
+
+                  <!-- Historical context empty warning -->
+                  <div style="padding:8px 14px;background:var(--amber-50);border:1px solid #fde68a;margin:4px 8px;border-radius:6px;font-size:11.5px;color:var(--amber-700);display:flex;align-items:flex-start;gap:6px">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                    <span>Category "Historical context" would be empty. The only entry scored 0.18, below threshold. Recall check: amber.</span>
+                  </div>
+
+                  <div style="padding:8px 14px 4px;"></div>
+
+                  <div class="payload-item">
+                    <div class="payload-item-icon">
+                      <div class="diff-badge diff-promoted">promoted</div>
+                    </div>
+                    <div class="payload-item-body">
+                      <div class="payload-item-name score-hint" data-score="Cosine score: 0.79">Product positioning: cost-efficiency focus</div>
+                      <div class="payload-item-meta"><span>Entry: Positioning</span></div>
+                    </div>
+                  </div>
+
+                </div>
               </div>
             </div>
+            <!-- /compare-panel -->
 
-            <!-- Sampled config (shown only when sampled is selected) -->
-            <div class="sampled-config" id="sampled-config" style="display:none">
-              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--amber-600);flex-shrink:0"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-              <span>Apply to</span>
-              <input type="range" min="5" max="100" step="5" value="20" id="sample-pct-slider"
-                oninput="document.getElementById('sample-pct-val').textContent=this.value+'%'">
-              <span class="sampled-pct-val" id="sample-pct-val">20%</span>
-              <span>of runs</span>
+            <!-- Collapsed placeholder -->
+            <div id="compare-placeholder" style="padding:16px 20px;text-align:center;color:var(--slate-400);font-size:13px;border-top:1px solid var(--slate-100)">
+              Retrieval comparison available for this run.
+              <button class="btn btn-sm btn-secondary" style="margin-left:10px" onclick="toggleCompare()">Show diff</button>
             </div>
 
-            <!-- Audit note -->
-            <div class="audit-note">
-              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--slate-400)"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              Mode changes are recorded in the organisation action audit trail with the acting user, timestamp, and previous value.
-            </div>
+          </div>
+          <!-- /shadow-demo-wrap -->
 
-            <div class="save-row">
-              <button class="btn btn-primary" onclick="saveMode()">Save ranker mode</button>
-              <button class="btn btn-secondary" onclick="resetMode()">Cancel</button>
-              <span class="save-confirm-note" id="save-confirm">
-                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                Mode saved and logged to audit trail
-              </span>
-            </div>
+        </div>
+        <!-- /tab-retrieval -->
 
+        <!-- Other tabs (placeholder content — shown to make tabs interactive) -->
+        <div id="tab-references" style="display:none">
+          <div style="padding:48px 0;text-align:center;color:var(--slate-400)">
+            <p style="font-size:16px;margin-bottom:8px">References tab</p>
+            <p style="font-size:14px">Showing the Retrieval tab in this mockup. Switch to it above.</p>
           </div>
         </div>
-
-        <!-- Divider between settings and trace demo -->
-        <hr class="section-divider">
-
-        <div class="page-header" style="margin-bottom:16px">
-          <h1 style="font-size:17px;font-weight:700">Shadow mode: retrieval comparison</h1>
-          <p style="font-size:13px">
-            When ranker mode is Shadow or Sampled, each run trace includes a retrieval comparison panel.
-            This shows what the semantic ranker would have loaded versus what was actually delivered to the agent.
-          </p>
+        <div id="tab-insights" style="display:none">
+          <div style="padding:48px 0;text-align:center;color:var(--slate-400)">
+            <p style="font-size:16px;margin-bottom:8px">Insights tab</p>
+          </div>
         </div>
-
-        <!-- =====================================================
-             PART B: Shadow mode comparison panel (demo embed)
-             ===================================================== -->
-
-        <div class="shadow-demo-wrap">
-
-          <!-- Mini topbar for the demo context -->
-          <div class="shadow-demo-topbar">
-            <div class="shadow-demo-title">
-              <span style="color:var(--slate-500);font-size:13px">Marketing Research Agent</span>
-              <span style="color:var(--slate-300);margin:0 6px">/</span>
-              <span style="font-size:13.5px;font-weight:700;color:var(--slate-900)">Run: May 12, 9:14 am</span>
-            </div>
-            <div class="shadow-mode-chip">
-              <span class="dot"></span>
-              Shadow mode active
-            </div>
-            <button class="btn btn-sm btn-secondary" onclick="toggleCompare()">
-              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-              <span id="compare-btn-label">Show retrieval diff</span>
-            </button>
+        <div id="tab-blocks" style="display:none">
+          <div style="padding:48px 0;text-align:center;color:var(--slate-400)">
+            <p style="font-size:16px;margin-bottom:8px">Memory Blocks tab</p>
           </div>
-
-          <!-- Recall invariant status bar -->
-          <div class="recall-bar" id="recall-bar" style="display:none">
-            <span class="recall-bar-title">Recall-invariant check</span>
-            <div class="recall-item">
-              <div class="recall-check ok">
-                <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-              </div>
-              <span>Memory blocks: at least 1 kept per category</span>
-            </div>
-            <div class="recall-item">
-              <div class="recall-check warn">
-                <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01"/></svg>
-              </div>
-              <span style="color:var(--amber-700)">Workspace entries: "Historical context" category would be empty</span>
-            </div>
-            <div style="margin-left:auto;font-size:11px;color:var(--slate-400)">Threshold: 0.30</div>
-          </div>
-
-          <!-- Comparison columns (collapsed by default) -->
-          <div id="compare-panel" style="display:none">
-            <div class="compare-cols">
-
-              <!-- Legacy column -->
-              <div class="compare-col">
-                <div class="compare-col-header">
-                  Legacy payload
-                  <span class="col-count">10 items loaded</span>
-                </div>
-
-                <!-- Memory blocks section -->
-                <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Memory blocks</div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-unchanged">same</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name">Brand Voice and Tone Principles</div>
-                    <div class="payload-item-meta">
-                      <span>Memory block</span>
-                      <span>v4</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="payload-item would-drop">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-dropped">dropped</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.21 (below threshold 0.30)">Quarterly Reporting Template</div>
-                    <div class="payload-item-meta">
-                      <span>Memory block</span>
-                      <span>v2</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-unchanged">same</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name">Competitor Analysis Framework</div>
-                    <div class="payload-item-meta">
-                      <span>Memory block</span>
-                      <span>v1</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Workspace entries section -->
-                <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Workspace entries</div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-unchanged">same</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name">Target audience is B2B SaaS, mid-market</div>
-                    <div class="payload-item-meta"><span>Entry · Category: Audience</span></div>
-                  </div>
-                </div>
-
-                <div class="payload-item would-drop">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-dropped">dropped</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.18 (below threshold 0.30)">Fiscal year ended March 2023</div>
-                    <div class="payload-item-meta">
-                      <span>Entry · Category: Historical context</span>
-                      <span style="color:var(--amber-600);font-weight:600">Only entry in category</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="payload-item would-drop">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-dropped">dropped</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.19 (below threshold 0.30)">Office located in Austin, TX</div>
-                    <div class="payload-item-meta"><span>Entry · Category: General</span></div>
-                  </div>
-                </div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-unchanged">same</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name">Product positioning: cost-efficiency focus</div>
-                    <div class="payload-item-meta"><span>Entry · Category: Positioning</span></div>
-                  </div>
-                </div>
-
-              </div>
-
-              <!-- Semantic ranker column -->
-              <div class="compare-col">
-                <div class="compare-col-header">
-                  Semantic ranker would load
-                  <span class="col-count">7 items</span>
-                  <span style="margin-left:auto;font-size:11px;font-weight:500;color:var(--violet-500);text-transform:none;letter-spacing:0">-3 items</span>
-                </div>
-
-                <!-- Memory blocks section -->
-                <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Memory blocks</div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-promoted">promoted</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.87">Brand Voice and Tone Principles</div>
-                    <div class="payload-item-meta">
-                      <span>Memory block</span>
-                      <span>v4</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="payload-item" style="background:var(--red-50);opacity:0.7">
-                  <div class="payload-item-icon">
-                    <span style="font-size:11px;color:var(--red-500);font-weight:600">Dropped</span>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name" style="color:var(--slate-400);text-decoration:line-through;font-weight:400">Quarterly Reporting Template</div>
-                    <div class="payload-item-meta">Score 0.21, below threshold</div>
-                  </div>
-                </div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-unchanged">same</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.71">Competitor Analysis Framework</div>
-                    <div class="payload-item-meta">
-                      <span>Memory block</span>
-                      <span>v1</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Workspace entries section -->
-                <div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-400)">Workspace entries</div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-promoted">promoted</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.83">Target audience is B2B SaaS, mid-market</div>
-                    <div class="payload-item-meta"><span>Entry · Category: Audience</span></div>
-                  </div>
-                </div>
-
-                <!-- Historical context empty warning -->
-                <div style="padding:8px 14px;background:var(--amber-50);border:1px solid #fde68a;margin:4px 8px;border-radius:6px;font-size:11.5px;color:var(--amber-700);display:flex;align-items:flex-start;gap:6px">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-                  <span>Category "Historical context" would be empty. The ranker dropped the only entry in this category (score 0.18). Recall-invariant check: amber.</span>
-                </div>
-
-                <div style="padding:8px 14px 4px;"></div>
-
-                <div class="payload-item">
-                  <div class="payload-item-icon">
-                    <div class="diff-badge diff-promoted">promoted</div>
-                  </div>
-                  <div class="payload-item-body">
-                    <div class="payload-item-name score-hint" data-score="Cosine score: 0.79">Product positioning: cost-efficiency focus</div>
-                    <div class="payload-item-meta"><span>Entry · Category: Positioning</span></div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          </div>
-          <!-- /compare-panel -->
-
-          <!-- Collapsed placeholder -->
-          <div id="compare-placeholder" style="padding:16px 20px;text-align:center;color:var(--slate-400);font-size:13px;border-top:1px solid var(--slate-100)">
-            Retrieval comparison available for this run.
-            <button class="btn btn-sm btn-secondary" style="margin-left:10px" onclick="toggleCompare()">Show diff</button>
-          </div>
-
         </div>
-        <!-- /shadow-demo-wrap -->
 
       </div>
     </div>
@@ -664,34 +669,40 @@
 </div>
 
 <script>
+// ── Tab switching ────────────────────────────────────────────────────────────
+const TAB_IDS = ['references','insights','blocks','retrieval'];
+
+function switchTab(btn, tabId) {
+  // Update button states
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Show/hide panes
+  TAB_IDS.forEach(id => {
+    const el = document.getElementById('tab-' + id);
+    if (el) el.style.display = id === tabId ? 'block' : 'none';
+  });
+}
+
 // ── Part A: Ranker mode selector ─────────────────────────────────────────────
 let selectedMode = 'off';
 const modeLabels = { off: 'Off', shadow: 'Shadow', sampled: 'Sampled', on: 'On' };
 const modeBadgeClass = { off: 'mode-badge-off', shadow: 'mode-badge-shadow', sampled: 'mode-badge-sampled', on: 'mode-badge-on' };
 
 function selectMode(mode) {
-  // Deselect all
   ['off','shadow','sampled','on'].forEach(m => {
     document.getElementById('mode-' + m).classList.remove('selected');
   });
   document.getElementById('mode-' + mode).classList.add('selected');
   selectedMode = mode;
-
-  // Sampled config visibility
   document.getElementById('sampled-config').style.display = mode === 'sampled' ? 'flex' : 'none';
-
-  // Hide save confirm
   document.getElementById('save-confirm').style.display = 'none';
 }
 
 function saveMode() {
-  // Update current mode display
   document.getElementById('current-mode-label').textContent = modeLabels[selectedMode];
   const chip = document.getElementById('current-mode-chip');
   chip.textContent = modeLabels[selectedMode];
   chip.className = 'mode-badge ' + modeBadgeClass[selectedMode];
-
-  // Show confirm
   const confirm = document.getElementById('save-confirm');
   confirm.style.display = 'flex';
   setTimeout(() => { confirm.style.display = 'none'; }, 3500);

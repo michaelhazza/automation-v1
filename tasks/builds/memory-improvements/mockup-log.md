@@ -83,3 +83,79 @@
 - `prototypes/memory-improvements/citation-utility-dashboard.html` (new)
 - `prototypes/memory-improvements/akr-ranker-settings.html` (new)
 - `tasks/builds/memory-improvements/mockup-log.md` (new)
+
+---
+
+## Round 2 — 2026-05-12 01:00
+
+**Operator feedback:** Re-home the ranker mode selector to per-subaccount (SubaccountKnowledgePage). Strip all three org-inheritance leaks from the prototype. Keep shadow comparison panel intact. No new components.
+
+---
+
+**Codebase grounding (Step 0a) — PER SCREEN (mandatory):**
+
+- `akr-ranker-settings.html` Part A (mode selector): extends `client/src/pages/SubaccountKnowledgePage.tsx`. Added as a 4th tab "Retrieval" in the existing tab strip (`TabButton` pattern: `border-b-2 border-indigo-600 text-indigo-700` active state). The page's baseline artefacts card and page header layout are carried forward verbatim.
+
+- `akr-ranker-settings.html` Part B (shadow comparison): anchored to `client/src/pages/AgentRunLivePage.tsx`. The run context topbar matches AgentRunLivePage's breadcrumb pattern (`Agents / [Agent name] / Run: [timestamp]`). `RunTracePage.tsx` does not exist; `AgentRunLivePage.tsx` is the actual per-run trace surface (it links to `/admin/runs/${runId}` for trace detail).
+
+---
+
+**Codebase grounding — round-wide:**
+
+- All files read:
+  - `client/src/pages/SubaccountKnowledgePage.tsx` (full)
+  - `client/src/pages/AgentRunLivePage.tsx` (full — 284 lines)
+  - `client/src/pages/AgentRunHistoryPage.tsx` (partial — breadcrumb and nav patterns)
+  - `prototypes/memory-improvements/akr-ranker-settings.html` (prior round)
+
+- Vocabulary and conventions inherited (quoted from codebase):
+  - Tab strip: `px-4 py-2 text-[14px] font-medium border-b-2 transition-colors` with active `border-indigo-600 text-indigo-700`
+  - Page header: `h1 text-[24px] font-bold text-slate-900` + sub `p text-[14px] text-slate-500`
+  - Breadcrumb back link: `text-[14px] text-indigo-600 hover:text-indigo-700 no-underline`
+  - Baseline artefacts card: `bg-white border border-slate-200 rounded-xl overflow-hidden` header `px-4 py-3 border-b border-slate-100 bg-slate-50` title `text-[13px] font-semibold text-slate-700`
+  - Tab IDs in SubaccountKnowledgePage: `'references' | 'insights' | 'blocks'` — new tab `'retrieval'` added as 4th
+  - AgentRunLivePage breadcrumb: `Agents / [Agent name] / Run history` pattern from `AgentRunHistoryPage`; live page uses `Link to="/agents/${agentId}"` and `Link to="/agents/${agentId}/runs"` patterns
+
+- New dedicated pages proposed: none. Part A is a new tab on an existing page. Part B is a panel within the existing run page.
+
+---
+
+**Changes made:**
+
+- Re-homed Part A mode selector from "Settings / Retrieval" sidebar location to `SubaccountKnowledgePage` as a 4th tab "Retrieval" in the existing tab strip.
+- Updated sidebar: removed `Settings > Retrieval` as active item; set `Knowledge` as active under the subaccount workspace section.
+- Updated breadcrumb: `Settings / Retrieval` changed to `Acme Corp / Knowledge / Retrieval`.
+- Updated page header: no longer reads "Retrieval settings" with "Org admin only" badge. Now reads within the Knowledge page context with the Retrieval tab active.
+- Removed all three explicit org-inheritance leaks:
+    1. Sidebar: `Settings > Retrieval` active item gone; `Knowledge` is active.
+    2. Breadcrumb: now `Acme Corp / Knowledge / Retrieval`, no "Settings" in path.
+    3. Audit copy: changed from "recorded in the organisation action audit trail" to "recorded in the audit trail with the acting user and timestamp".
+- Removed "Org admin only" field badge from settings card title and page header.
+- Part B shadow comparison panel: updated run topbar breadcrumb to match `AgentRunLivePage` pattern (`Agents / Marketing Research Agent / Run: May 12, 9:14 am`). Shadow comparison content and recall-invariant bar are unchanged.
+- Added interactive tab switching script so all four tabs are clickable in the prototype.
+- Cleaned up mode-option "disabled" class (removed unused selector from CSS).
+
+---
+
+**Frontend-design-principles checks:**
+
+- Start with primary task: yes. Subaccount admin's task is "set the ranker mode for my workspace." The tab surfaces this as a direct workspace setting, not a system-level configuration hidden in an org settings hierarchy.
+- Default to hidden: yes. Sampled percentage slider hidden until Sampled is selected. Comparison panel collapsed by default. Raw cosine scores behind hover tooltip only.
+- One primary action: yes. "Save" is the single primary action on the mode selector card.
+- Inline state: yes. Current mode shown inline in the status strip. Save confirmation is an inline dismissing toast, not a redirect.
+- Re-check passed: yes. A non-technical operator landing on the Retrieval tab sees their current mode clearly labeled, four options with plain-English descriptions, and one Save button. No inheritance language. No system identifiers.
+- Extends existing surface: yes. SubaccountKnowledgePage tab strip extended with a 4th tab. AgentRunLivePage run meta context used for Part B.
+
+**Rule violations flagged:** none.
+
+**Org-inheritance language check (critical):**
+- No "Inherited from organisation" badges: confirmed absent.
+- No "set at org level" tooltips: confirmed absent.
+- No "org-default value" labels: confirmed absent.
+- No use of the word "organisation" in any user-visible string: confirmed. The only "org" reference in the file is in the HTML comment block, not in any rendered user-facing copy.
+
+**New components introduced:** none. Reuses tab strip, settings card, mode selector, diff badge, recall bar, and compare panel patterns from Round 1.
+
+**Files modified:**
+- `prototypes/memory-improvements/akr-ranker-settings.html` (updated)
+- `tasks/builds/memory-improvements/mockup-log.md` (updated)
