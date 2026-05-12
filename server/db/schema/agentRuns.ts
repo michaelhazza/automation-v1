@@ -24,6 +24,9 @@ export const agentRuns = pgTable(
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
+    // User-owned-agents primitive (migration 0327): copied from agent.ownerUserId at run start.
+    // NULL = subaccount-owned run (existing behaviour). Immutable once set.
+    ownerUserId: uuid('owner_user_id'),
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
@@ -265,11 +268,11 @@ export const agentRuns = pgTable(
     backendTaskId: text('backend_task_id'),
 
     // Operator Backend — consecutive chain-link dispatch-start failure counter
-    // (migration 0330). Reset to 0 on every successful dispatch. Sole writer
+    // (migration 0338). Reset to 0 on every successful dispatch. Sole writer
     // is the dispatcher. Spec §3.4 / §3.17 item 1.
     operatorChainFailureCount: integer('operator_chain_failure_count').notNull().default(0),
 
-    // Operator Backend — per-task budget extension accumulator (migration 0333).
+    // Operator Backend — per-task budget extension accumulator (migration 0341).
     // Written by the extend-budget route (additive, never reset). The dispatcher
     // composes settings_snapshot.per_task_budget_cap_minutes as:
     //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
@@ -277,7 +280,7 @@ export const agentRuns = pgTable(
     // subaccount-wide settings row. Spec §3.17.4.
     perTaskBudgetExtensionMinutes: integer('per_task_budget_extension_minutes').notNull().default(0),
 
-    // Operator Backend — assigned user (migration 0334). Populated at run
+    // Operator Backend — assigned user (migration 0342). Populated at run
     // creation when a human user owns the task. The operator-task action
     // routes (retry-chain-failure, extend-budget) authorise via
     // "assigned user OR manager+" — the column is the data source for the
@@ -337,6 +340,10 @@ export const agentRuns = pgTable(
     backendTaskUniqueIdx: uniqueIndex('agent_runs_backend_task_unique_idx')
       .on(table.backendId, table.backendTaskId)
       .where(sql`${table.backendTaskId} IS NOT NULL`),
+    // User-owned-agents primitive (migration 0327)
+    userOwnedIdx: index('agent_runs_user_owned_idx')
+      .on(table.organisationId, table.ownerUserId, table.startedAt)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
   })
 );
 

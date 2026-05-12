@@ -169,7 +169,7 @@ These are flagged in spec § 16 (Open questions) and intentionally NOT blockers:
 **pr-reviewer:**
 - CHANGES_REQUESTED — 4 blocking (B1-B4) + 1 high (H1) + 2 high + 2 medium.
 - Fix-loop (commit 2550f228):
-  - B1: extend-budget mutated subaccount-wide settings → per-task `agent_runs.per_task_budget_extension_minutes` column added (migration 0333); dispatcher composes effective cap from settings + per-task delta.
+  - B1: extend-budget mutated subaccount-wide settings → per-task `agent_runs.per_task_budget_extension_minutes` column added (migration 0341); dispatcher composes effective cap from settings + per-task delta.
   - B2: dispatcher reads of operator_runs were bare db.select (no dual-GUC tx) → chain-seq always defaulted to 1 → UNIQUE constraint failure on link 2. Fixed: dual-GUC transaction wraps both reads.
   - B3: dispatcher agent_runs writes (orphan-path 'failed' + success-path 'delegated') were bare db.update (no GUC tx) → always 0 rows affected → every dispatch "race lost". Fixed: wrapped in setOrgGUC transactions.
   - B4: finalise parent UPDATE lacked status predicate → late finaliser could overwrite terminal parent. Dead branch also fixed (unreachable && condition removed). Parent UPDATE now excludes all terminal statuses; 0-rows result suppresses post-commit side effects.

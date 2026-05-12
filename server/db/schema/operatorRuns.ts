@@ -15,7 +15,7 @@ import { users } from './users';
 // terminalStateTable.
 //
 // RLS: dual-GUC scoping on both organisation_id AND subaccount_id.
-// Migration: 0327_create_operator_runs.sql
+// Migration: 0335_create_operator_runs.sql
 // ---------------------------------------------------------------------------
 
 export const operatorRuns = pgTable(

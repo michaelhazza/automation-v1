@@ -14,7 +14,7 @@ import { users } from './users';
 // soft cap boundaries.
 //
 // RLS: dual-GUC scoping on both organisation_id AND subaccount_id.
-// Migration: 0328_create_operator_task_profiles.sql
+// Migration: 0336_create_operator_task_profiles.sql
 // ---------------------------------------------------------------------------
 
 export const operatorTaskProfiles = pgTable(

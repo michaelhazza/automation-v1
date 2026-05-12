@@ -92,6 +92,9 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Modules & subscriptions | `modules.ts` |
 | GEO audits | `geoAudits.ts` |
 | Onboarding | `onboarding.ts` |
+| EA drafts | `eaDrafts.ts` |
+| Personal setup | `personal.ts` (POST /api/personal/setup) |
+| Agent home widgets | `agentHomeWidgets.ts` (GET /api/agent-home-widgets) |
 
 ### Shared route helpers
 
@@ -178,6 +181,15 @@ Subaccount Agent (subaccountAgents table)
   — Has parentSubaccountAgentId for subaccount-level hierarchy
 ```
 
+### User-owned agents (Personal Assistant pattern)
+
+A fourth variant of the org-tier agent: `agents.owner_user_id` is set to a specific user's ID. This is the personal assistant / executive-assistant pattern where the agent operates on behalf of exactly one user — not the org, not a subaccount.
+
+- `owner_user_id` is immutable post-creation. Skills that access user-scoped OAuth tokens (calendar, Slack) resolve the owner via `resolveAgentOwner(agentId, orgId, db)` in `skillExecutor.ts` and never from LLM input.
+- `agents.slug = 'executive-assistant'` is the reserved slug for the personal assistant agent. One per user maximum.
+- Home widgets (`home_widget` JSONB column on `system_agents`) are the per-user dashboard surface for the personal assistant.
+- RLS: `ea_drafts`, `voice_profiles` are FORCE RLS tables scoped to `owner_user_id`. Background jobs that scan them require `withAdminConnection` + `SET LOCAL ROLE admin_role`. See KNOWLEDGE.md [2026-05-13] cross-org job pattern.
+
 ### Key agent fields
 
 | Field | Where | Meaning |
@@ -190,6 +202,7 @@ Subaccount Agent (subaccountAgents table)
 | `agentRole` | agents, subaccountAgents | Role in hierarchy (orchestrator, specialist, etc.) |
 | `parentAgentId` | agents | Org-level hierarchy parent |
 | `parentSubaccountAgentId` | subaccountAgents | Subaccount-level hierarchy parent |
+| `owner_user_id` | agents | When set, agent is user-owned (personal assistant). Scopes all user-credential resolution. |
 
 ### Subaccount agent link overrides
 
@@ -758,6 +771,8 @@ Skills are defined as Markdown files in `server/skills/*.md`. Built-in system sk
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 | Output (operator-facing) | `output.recommend` (write to `agent_recommendations` via single-writer service — see §Agent Recommendations Surface) |
+| Calendar (user-scoped) | `calendar.list_events`, `calendar.get_event`, `calendar.find_free_slot`, `calendar.create_event`, `calendar.update_event`, `calendar.respond_to_invite` — user-scoped Google Calendar skills; write skills route through EA draft + approval gate |
+| Slack (user-scoped) | `slack.list_channels`, `slack.read_channel`, `slack.search_messages`, `slack.summarise_thread`, `slack.post_message`, `slack.post_dm` — user-scoped Slack skills; post skills route through EA draft + approval gate |
 
 `send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
@@ -3920,6 +3935,29 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
 | Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
 
+#### Personal Assistant / Executive Assistant (personal-assistant-v1, 2026-05)
+
+| Concern | Files |
+|---|---|
+| EA draft CRUD routes | `server/routes/eaDrafts.ts` — `GET/POST /api/ea-drafts`, `POST /api/ea-drafts/:id/approve` |
+| EA draft service | `server/services/eaDrafts/eaDraftService.ts` |
+| EA provisioning (personal setup) | `server/services/eaDrafts/eaProvisioningService.ts` + `POST /api/personal/setup` route |
+| Voice profile service | `server/services/calendar/voiceProfileService.ts` + `GET/POST /api/voice-profiles` route |
+| Calendar action service | `server/services/calendar/calendarActionService.ts` — executes `calendar.*` skill handlers |
+| Slack action service | `server/services/slack/slackActionService.ts` — executes `slack.*` skill handlers |
+| Home widget service | `server/services/homeWidgetService.ts` + `GET /api/agent-home-widgets` route |
+| External source triggers | `server/services/triggers/` — Gmail inbox poll, calendar lookahead, external_trigger_dedup dedup table |
+| Action registry — calendar skills | `server/config/actionRegistry/calendar.ts` |
+| Action registry — Slack user skills | `server/config/actionRegistry/slack.ts` |
+| Background jobs | `server/jobs/voiceProfileRefreshJob.ts`, `server/jobs/gmailInboxPollJob.ts`, `server/jobs/calendarLookaheadJob.ts` |
+| Schema | `server/db/schema/eaDrafts.ts`, `server/db/schema/voiceProfiles.ts`, `server/db/schema/externalTriggerDedup.ts` |
+| Client — first-run wizard | `client/src/components/EAFirstRunWizard.tsx` |
+| Client — personal assistant page | `client/src/pages/PersonalAssistantPage.tsx` |
+| Client hooks | `client/src/hooks/useEADrafts.ts`, `client/src/hooks/useHomeWidgets.ts`, `client/src/hooks/useVoiceProfile.ts`, `client/src/hooks/useUserOwnedAgents.ts` |
+| Permissions | `VOICE_PROFILE_READ`, `VOICE_PROFILE_WRITE`, `EA_DRAFT_READ`, `EA_DRAFT_DECIDE`, `HOME_WIDGET_READ`, `EA_PROVISION` |
+| Skill definitions | `server/skills/calendar-*.md` (6 files), `server/skills/slack-*.md` (6 files) |
+| EA draft F2 invariant | `ea_drafts.send_state` is NEVER `approved`; approval is on `actions.status`. See KNOWLEDGE.md [2026-05-13] entry. |
+
 #### Trust & Verification Layer (trust-verification-layer, 2026-05)
 
 Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evaluation (Stage 2), operator correction memory (Stage 3). Spec: `tasks/builds/trust-verification-layer/spec.md`.
@@ -3992,7 +4030,7 @@ New `operator_managed` execution adapter. Drives long-form autonomous tasks acro
 | Task-view operator UI | `client/src/components/openTask/OperatorChainLinkIndicator.tsx`, `client/src/components/openTask/OperatorAutoExtendBanner.tsx` |
 | Operator modals + badge + filter | `client/src/components/operator/OperatorBadge.tsx`, `OperatorFilterToggle.tsx`, `OperatorConcurrencyLimitModal.tsx`, `OperatorUnavailableModal.tsx`, `OperatorBudgetExceededModal.tsx` |
 | Client API helpers | `client/src/lib/api/operatorTasks.ts` |
-| Migrations | `migrations/0327–0331` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions: `operator_chain_failure_count`, llm_requests extensions), `0332` (sandbox_executions: `sandbox_start_key`), `0333` (agent_runs: `per_task_budget_extension_minutes` — per-task accumulator for extend-budget route) |
+| Migrations | `migrations/0335–0339` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions: `operator_chain_failure_count`, llm_requests extensions), `0340` (sandbox_executions: `sandbox_start_key`), `0341` (agent_runs: `per_task_budget_extension_minutes` — per-task accumulator for extend-budget route), `0342` (agent_runs: `assigned_user_id` — data source for the route actor-rule "assigned user OR manager+") |
 | CS runbook | `docs/runbooks/operator-session-account-suspension.md` + comms templates in `docs/runbooks/templates/` |
 
 **Sandbox primitive extension (additive, Spec B unchanged for non-operator callers):**

@@ -181,13 +181,13 @@ ChatGPT confirmed Round 2 fixes:
 **Operator decision:** Option 2 — add the column now.
 
 **Fix:**
-- New migration `migrations/0334_agent_runs_assigned_user_id.sql` (+ `.down.sql`): `ALTER TABLE agent_runs ADD COLUMN assigned_user_id uuid REFERENCES users(id) ON DELETE SET NULL` + partial index `agent_runs_assigned_user_id_idx WHERE assigned_user_id IS NOT NULL`.
+- New migration `migrations/0342_agent_runs_assigned_user_id.sql` (+ `.down.sql`): `ALTER TABLE agent_runs ADD COLUMN assigned_user_id uuid REFERENCES users(id) ON DELETE SET NULL` + partial index `agent_runs_assigned_user_id_idx WHERE assigned_user_id IS NOT NULL`.
 - `server/db/schema/agentRuns.ts`: added `assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' })`.
 - `server/routes/operatorTasks.ts`: `readAgentRunOrThrow` now selects `assignedUserId`; both retry-chain-failure (line 93) and extend-budget (line 180) now pass `run.assignedUserId` to `evaluateRouteActorRule`. Admin-only routes (fresh-profile-restart, refresh-credential, extend-debug-retention) continue to pass `null` because `routeRequiresAdmin: true` short-circuits the assigned-user branch.
 
 **Note:** populating `agent_runs.assigned_user_id` at run-creation time (so the column has data to read) is a separate concern. The operator-task creation path lands in a future build. Until then, the column is null for all rows and the actor rule effectively continues as "manager+ only" — same behaviour as before this fix, but now structurally correct so that adding the populate step in a follow-on PR activates the assigned-user branch with zero further plumbing.
 
-**Files changed:** `migrations/0334_agent_runs_assigned_user_id.sql`, `migrations/0334_agent_runs_assigned_user_id.down.sql`, `server/db/schema/agentRuns.ts`, `server/routes/operatorTasks.ts`.
+**Files changed:** `migrations/0342_agent_runs_assigned_user_id.sql`, `migrations/0342_agent_runs_assigned_user_id.down.sql`, `server/db/schema/agentRuns.ts`, `server/routes/operatorTasks.ts`.
 
 ### G3 (lint + typecheck) post-fix
 

@@ -248,7 +248,7 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
 // Provides exactly-once sandbox creation per chain-link row even when dispatch()
 // is retried after a crash. The Operator Backend passes sandboxStartKey = operator_run_id.
 //
-// The `sandbox_start_key` column has a unique partial index (migration 0332),
+// The `sandbox_start_key` column has a unique partial index (migration 0340),
 // so each key binds to exactly one sandbox_executions row across its full
 // lifecycle. The pure decision in `decideAdoptOrStart` treats live and terminal
 // rows identically: adopt-on-match, conflict-on-mismatch, fresh-start only when

@@ -158,7 +158,7 @@ export const llmRequests = pgTable(
     // Always NULL for 'sandbox_compute' and all non-sandbox rows.
     correctionSequence:     integer('correction_sequence'),
 
-    // Operator Backend attribution (migration 0331) — spec §4.10, §3.12.
+    // Operator Backend attribution (migration 0339) — spec §4.10, §3.12.
     // Populated for subscription_mediated and sandbox_compute rows written by
     // the operator backend cost-writer.
     operatorRunId:  uuid('operator_run_id').references(() => operatorRuns.id),
@@ -201,11 +201,11 @@ export const llmRequests = pgTable(
     sandboxCorrectionSequenceUniqueIdx: uniqueIndex('llm_requests_sandbox_correction_sequence_unique_idx')
       .on(table.sandboxExecutionId, table.correctionSequence)
       .where(sql`${table.sourceType} = 'sandbox_compute_correction'`),
-    // Operator Backend — covering index for per-chain-link cost reads (migration 0331)
+    // Operator Backend — covering index for per-chain-link cost reads (migration 0339)
     operatorRunIdIdx: index('llm_requests_operator_run_id_idx')
       .on(table.operatorRunId)
       .where(sql`${table.operatorRunId} IS NOT NULL`),
-    // Operator Backend — idempotency UNIQUE index (migration 0331)
+    // Operator Backend — idempotency UNIQUE index (migration 0339)
     operatorRunSourceBoundaryUniqueIdx: uniqueIndex('llm_requests_operator_run_source_boundary_unique_idx')
       .on(table.operatorRunId, table.sourceType, table.boundary)
       .where(sql`${table.operatorRunId} IS NOT NULL AND ${table.boundary} IS NOT NULL`),

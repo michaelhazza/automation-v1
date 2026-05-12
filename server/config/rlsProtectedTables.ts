@@ -1232,19 +1232,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'operator_runs',
     schemaFile: 'operatorRuns.ts',
-    policyMigration: '0327_create_operator_runs.sql',
+    policyMigration: '0335_create_operator_runs.sql',
     rationale: 'Chain-link rows for long-running autonomous operator tasks — contain checkpoint payloads, credential mode, and vendor session ids. Dual-GUC (org + subaccount) RLS; cross-tenant or cross-subaccount leak exposes task state and credential attribution.',
   },
   {
     tableName: 'operator_task_profiles',
     schemaFile: 'operatorTaskProfiles.ts',
-    policyMigration: '0328_create_operator_task_profiles.sql',
+    policyMigration: '0336_create_operator_task_profiles.sql',
     rationale: 'Persistent browser profile volume pointers per task attempt — volume ids are opaque but cross-tenant leak exposes task topology and debug-retention state.',
   },
   {
     tableName: 'subaccount_operator_settings',
     schemaFile: 'subaccountOperatorSettings.ts',
-    policyMigration: '0329_create_subaccount_operator_settings.sql',
+    policyMigration: '0337_create_subaccount_operator_settings.sql',
     rationale: 'Per-subaccount operator backend configuration (session caps, task limits, concurrency) — cross-tenant leak exposes operational configuration and financial constraints.',
   },
   // 0321–0323 — Sandbox Isolation: five RLS-protected tables for untrusted Tier 4 code execution (Spec B)
@@ -1277,6 +1277,27 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'sandboxLogs.ts',
     policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
     rationale: 'Redacted per-line stdout/stderr log rows from harvested sandbox executions. Cross-tenant leak exposes customer-derived script output and potentially PII or secrets that survived redaction.',
+  },
+  // 0328 — Personal Assistant V1: voice profile derivation + opt-out state
+  {
+    tableName: 'voice_profiles',
+    schemaFile: 'voiceProfiles.ts',
+    policyMigration: '0328_voice_profiles.sql',
+    rationale: 'Per-owner derived voice style features used to personalise agent output — contains writing-style signals extracted from sent emails and documents. Three-axis scoping (user / subaccount / org); cross-tenant leak exposes personal communication patterns and PII.',
+  },
+  // 0329 — Personal Assistant V1: EA draft post-approval send state
+  {
+    tableName: 'ea_drafts',
+    schemaFile: 'eaDrafts.ts',
+    policyMigration: '0329_ea_drafts.sql',
+    rationale: 'Per-owner EA draft payloads with send-state machine — body and target_ref may contain email content, calendar details, or Slack messages. Owner-scoped visibility with admin read-through; cross-tenant leak exposes personal communications and PII.',
+  },
+  // 0330 — Personal Assistant V1: external-source trigger dedup ledger
+  {
+    tableName: 'external_trigger_dedup',
+    schemaFile: 'externalTriggerDedup.ts',
+    policyMigration: '0330_external_source_triggers.sql',
+    rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
   },
 ];
 

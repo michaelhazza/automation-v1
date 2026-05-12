@@ -219,7 +219,7 @@ export class SandboxStartKeyConflict extends Error {
 // ---------------------------------------------------------------------------
 // § 5: AdoptOrStartDecision — pure adoption-vs-fresh-start decision
 //
-// The sandbox_start_key column carries a unique partial index (migration 0332),
+// The sandbox_start_key column carries a unique partial index (migration 0340),
 // so each key binds to exactly one sandbox_executions row for its lifetime.
 // Adoption is therefore the only valid action when a row already exists for
 // the key — for live AND terminal statuses alike. Terminal rows surface their

@@ -477,6 +477,21 @@ export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 /** Max triggered agent runs per minute per workspace before suppression */
 export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
 
+/** Max external-source triggered runs per minute per owner user before suppression */
+export const MAX_EXTERNAL_TRIGGERED_RUNS_PER_MINUTE_PER_OWNER = 10;
+
+/** EA Calendar lookahead window (minutes). Per spec §10.5. */
+export const CALENDAR_LOOKAHEAD_MINUTES = 15;
+
+/** Gmail polling cadence in minutes. Per spec §10.4. */
+export const GMAIL_POLL_INTERVAL_MINUTES = 5;
+
+/** Calendar polling cadence in milliseconds (60s default). */
+export const CALENDAR_LOOKAHEAD_INTERVAL_MS = 60 * 1000;
+
+/** Calendar polling fallback in milliseconds when sustained 429s detected (5 min). */
+export const CALENDAR_LOOKAHEAD_FALLBACK_INTERVAL_MS = 5 * 60 * 1000;
+
 // ── Tracing limits (Section 7.7) ───────────────────────────────────────────
 
 /** Max spans emitted per agent run before helpers return no-ops */

@@ -109,7 +109,25 @@ export type AgentExecutionEventType =
   | 'foundation.controller_style.derived'
   | 'foundation.policy_envelope.resolved'
   | 'foundation.policy_envelope.resolution_failed'
-  | 'foundation.execution_environment.rejected';
+  | 'foundation.execution_environment.rejected'
+  | 'trigger.fired'
+  | 'trigger.suppressed'
+  | 'workflow.started'
+  | 'workflow.completed'
+  | 'workflow.failed'
+  | 'workflow.partial'
+  | 'draft.created'
+  | 'draft.sending'
+  | 'draft.sent'
+  | 'draft.send_failed'
+  | 'voice.profile.refreshed'
+  | 'voice.profile.derivation.started'
+  | 'voice.profile.derivation.completed'
+  | 'voice.profile.derivation.failed'
+  | 'delivery_fallback'
+  | 'credential.owner_mismatch'
+  | 'webhook.invalid_signature'
+  | 'action.conflict';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -416,6 +434,24 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'foundation.policy_envelope.resolved': false,
   'foundation.policy_envelope.resolution_failed': false,
   'foundation.execution_environment.rejected': false,
+  'trigger.fired': false,
+  'trigger.suppressed': false,
+  'workflow.started': false,
+  'workflow.completed': false,
+  'workflow.failed': false,
+  'workflow.partial': false,
+  'draft.created': false,
+  'draft.sending': false,
+  'draft.sent': false,
+  'draft.send_failed': false,
+  'voice.profile.refreshed': false,
+  'voice.profile.derivation.started': false,
+  'voice.profile.derivation.completed': false,
+  'voice.profile.derivation.failed': false,
+  'delivery_fallback': false,
+  'credential.owner_mismatch': false,
+  'webhook.invalid_signature': false,
+  'action.conflict': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

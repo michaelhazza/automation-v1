@@ -1035,13 +1035,13 @@ This is the single source of truth for every file touched. Prose references anyw
 
 | Migration | Purpose |
 |---|---|
-| `migrations/0327_create_operator_runs.sql` (+ `.down.sql`) | `operator_runs` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(agent_run_id, attempt_number, chain_seq)` constraint per § 3.3 (NOT `(agent_run_id, chain_seq)` — fresh-profile restart per § 3.15 item 7 keeps the same `agent_run_id`, bumps `attempt_number`, and restarts `chain_seq` at 1 for each attempt). UNIQUE `(task_id, attempt_number)` belongs to migration 0328 (`operator_task_profiles`), not this one. |
-| `migrations/0328_create_operator_task_profiles.sql` (+ `.down.sql`) | `operator_task_profiles` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(task_id, attempt_number)` constraint per § 3.15 item 1. |
-| `migrations/0329_create_subaccount_operator_settings.sql` (+ `.down.sql`) | `subaccount_operator_settings` table + indexes + FORCE RLS + manifest entry. |
-| `migrations/0330_extend_agent_runs.sql` (+ `.down.sql`) | Extend `agent_runs.status` CHECK / enum / allow-list with `paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded`, `paused_wall_clock_exceeded`; add `operator_chain_failure_count integer NOT NULL DEFAULT 0`. |
-| `migrations/0331_extend_llm_requests_operator.sql` (+ `.down.sql`) | Add to `llm_requests` (or canonical cost-ledger table): `operator_run_id uuid NULL REFERENCES operator_runs(id)`, `boundary text NULL` (boundary discriminator — currently the single value `'chain_link'` for the new rows, NULL for pre-existing rows), and the partial UNIQUE index `(operator_run_id, source_type, boundary) WHERE operator_run_id IS NOT NULL AND boundary IS NOT NULL`. Plus a covering index `(operator_run_id)` for the cost-writer idempotency lookup. |
+| `migrations/0335_create_operator_runs.sql` (+ `.down.sql`) | `operator_runs` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(agent_run_id, attempt_number, chain_seq)` constraint per § 3.3 (NOT `(agent_run_id, chain_seq)` — fresh-profile restart per § 3.15 item 7 keeps the same `agent_run_id`, bumps `attempt_number`, and restarts `chain_seq` at 1 for each attempt). UNIQUE `(task_id, attempt_number)` belongs to migration 0328 (`operator_task_profiles`), not this one. |
+| `migrations/0336_create_operator_task_profiles.sql` (+ `.down.sql`) | `operator_task_profiles` table + indexes + FORCE RLS + manifest entry. **Acceptance criteria explicitly include:** UNIQUE `(task_id, attempt_number)` constraint per § 3.15 item 1. |
+| `migrations/0337_create_subaccount_operator_settings.sql` (+ `.down.sql`) | `subaccount_operator_settings` table + indexes + FORCE RLS + manifest entry. |
+| `migrations/0338_extend_agent_runs.sql` (+ `.down.sql`) | Extend `agent_runs.status` CHECK / enum / allow-list with `paused_for_chain_continuation`, `paused_chain_failure`, `paused_budget_exceeded`, `paused_wall_clock_exceeded`; add `operator_chain_failure_count integer NOT NULL DEFAULT 0`. |
+| `migrations/0339_extend_llm_requests_operator.sql` (+ `.down.sql`) | Add to `llm_requests` (or canonical cost-ledger table): `operator_run_id uuid NULL REFERENCES operator_runs(id)`, `boundary text NULL` (boundary discriminator — currently the single value `'chain_link'` for the new rows, NULL for pre-existing rows), and the partial UNIQUE index `(operator_run_id, source_type, boundary) WHERE operator_run_id IS NOT NULL AND boundary IS NOT NULL`. Plus a covering index `(operator_run_id)` for the cost-writer idempotency lookup. |
 
-Migration numbering starts at 0327; current latest is 0326 (operator-session-identity). The Spec B sandbox migration numbers (0321–0324) are already in the branch.
+Migration numbering: this spec's eight migrations land at `0335` through `0342` (post-S2 renumber to clear collision with main's PR #291 Executive Assistant V1 migrations `0327`–`0332`). Pre-renumber the spec had allocated `0327`–`0334`; all in-spec references and live filenames were swept during finalisation Phase 3 S2. The Spec B sandbox migration numbers (`0321`–`0324`) are already in the branch.
 
 ### 5.3 Modified files
 
@@ -1101,8 +1101,8 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 
 | Requirement | Status |
 |---|---|
-| **RLS policy** | Included in migration `0327_create_operator_runs.sql`. Standard org+subaccount scoping via the existing `current_setting('app.organisation_id')` and `current_setting('app.subaccount_id')` GUCs. `FORCE ROW LEVEL SECURITY` enabled (defeats owner-bypass). Pattern matches `agent_runs` and `iee_runs`. |
-| **Manifest entry** | Added to `server/config/rlsProtectedTables.ts` in the same implementation chunk/commit as the migration (the manifest is a TypeScript module; SQL migrations cannot mutate it). `policyMigration` points at the SQL migration. `{ tableName: 'operator_runs', schemaFile: 'operatorRuns.ts', policyMigration: '0327_create_operator_runs.sql', rationale: 'Chain-link state for operator-managed backend; one row per chain link; tenant-scoped by org+subaccount.' }`. |
+| **RLS policy** | Included in migration `0335_create_operator_runs.sql`. Standard org+subaccount scoping via the existing `current_setting('app.organisation_id')` and `current_setting('app.subaccount_id')` GUCs. `FORCE ROW LEVEL SECURITY` enabled (defeats owner-bypass). Pattern matches `agent_runs` and `iee_runs`. |
+| **Manifest entry** | Added to `server/config/rlsProtectedTables.ts` in the same implementation chunk/commit as the migration (the manifest is a TypeScript module; SQL migrations cannot mutate it). `policyMigration` points at the SQL migration. `{ tableName: 'operator_runs', schemaFile: 'operatorRuns.ts', policyMigration: '0335_create_operator_runs.sql', rationale: 'Chain-link state for operator-managed backend; one row per chain link; tenant-scoped by org+subaccount.' }`. |
 | **Route guard** | Reads go through `GET /api/operator-sessions/:operatorRunId/progress` — guards: `authenticate`, `requirePermission('AGENT_RUN_READ')`, and `setOrgGUC()` before the query. Direct-DB-access prohibition is enforced by `verify-rls-contract-compliance.sh`. |
 | **Principal-scoped context** | The adapter's `dispatch()`/`finalise()` run inside the existing agent-execution principal context (`PrincipalContext`). The chain-link writer uses `withOrgTx` for every write, propagating the org GUC. |
 
@@ -1110,7 +1110,7 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 
 | Requirement | Status |
 |---|---|
-| **RLS policy** | Included in migration `0328_create_operator_task_profiles.sql`. Same shape as `operator_runs`. |
+| **RLS policy** | Included in migration `0336_create_operator_task_profiles.sql`. Same shape as `operator_runs`. |
 | **Manifest entry** | Added to `rlsProtectedTables.ts` in the same implementation chunk/commit as the migration. Rationale: "Persistent browser-profile metadata per operator task; tenant-scoped." |
 | **Route guard** | The fresh-profile-restart route (`POST /api/operator-tasks/:agentRunId/fresh-profile-restart`) guards: `authenticate`, `requirePermission('AGENT_RUN_ADMIN')` (org-admin equivalent for this action), `setOrgGUC()`. The debug-retention-extend route reuses the same guard set. |
 | **Principal-scoped context** | Profile-volume mount runs inside the adapter principal context. The GC job runs under `withAdminConnection({ source: 'operatorTaskProfileGc' }) + SET LOCAL ROLE admin_role` (BYPASSRLS) — see § 7.5 and the `workflowDraftsCleanupJob` / `agentRunCleanupJob` precedents. |
@@ -1119,7 +1119,7 @@ Three new tenant-scoped tables. Each MUST have the four requirements from `docs/
 
 | Requirement | Status |
 |---|---|
-| **RLS policy** | Included in migration `0329_create_subaccount_operator_settings.sql`. Org+subaccount scoping. |
+| **RLS policy** | Included in migration `0337_create_subaccount_operator_settings.sql`. Org+subaccount scoping. |
 | **Manifest entry** | Added to `rlsProtectedTables.ts` in the same implementation chunk/commit as the migration. Rationale: "Per-subaccount operator runtime caps; tenant-scoped; org_admin write, manager read." |
 | **Route guard** | `GET /api/subaccounts/:subaccountId/operator-settings` → `authenticate`, `requirePermission('SUBACCOUNT_READ')`, `resolveSubaccount`, `setOrgGUC()`. `PATCH` → `authenticate`, `requirePermission('SUBACCOUNT_OPERATOR_SETTINGS_WRITE')`, `resolveSubaccount`, `setOrgGUC()`. The PATCH permission key is new in this spec — added to the permissions registry and the org-admin role's default grant. |
 | **Principal-scoped context** | All reads through the adapter use the existing principal context's `subaccountId` for row lookup. Defaulting (no row exists) returns the column defaults; the first write inserts. |
@@ -1519,11 +1519,11 @@ Chunk order is sequential; each chunk leaves the system in a forward-compatible 
 - `server/db/schema/operatorRuns.ts`
 - `server/db/schema/operatorTaskProfiles.ts`
 - `server/db/schema/subaccountOperatorSettings.ts`
-- `migrations/0327_create_operator_runs.sql` (+ `.down`)
-- `migrations/0328_create_operator_task_profiles.sql` (+ `.down`)
-- `migrations/0329_create_subaccount_operator_settings.sql` (+ `.down`)
-- `migrations/0330_extend_agent_runs.sql` (+ `.down`)
-- `migrations/0331_extend_llm_requests_operator.sql` (+ `.down`)
+- `migrations/0335_create_operator_runs.sql` (+ `.down`)
+- `migrations/0336_create_operator_task_profiles.sql` (+ `.down`)
+- `migrations/0337_create_subaccount_operator_settings.sql` (+ `.down`)
+- `migrations/0338_extend_agent_runs.sql` (+ `.down`)
+- `migrations/0339_extend_llm_requests_operator.sql` (+ `.down`)
 - `server/config/rlsProtectedTables.ts` (three new entries)
 - `server/db/schema/llmRequests.ts` (add `operator_run_id` column)
 - `server/db/schema/agentRuns.ts` (extend status `$type`)

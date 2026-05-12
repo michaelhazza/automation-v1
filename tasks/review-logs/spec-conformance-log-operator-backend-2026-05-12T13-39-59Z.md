@@ -95,7 +95,7 @@ The two directional gaps are **event-name registry drift** between three sources
 | 31 | §5.4 | Sandbox template `openclaw-session` → `operator-session` via git mv (history preserved) | PASS |
 | 32 | §5.3 | `SandboxRunTaskInput` gains optional `sandboxStartKey?: string` (additive) | PASS |
 | 33 | §7.1 dispatch-crash recovery | `sandboxExecutionService.adoptOrStart()` exists; idempotent adoption seam | PASS |
-| 34 | §3.5 | Migration `0332_sandbox_executions_start_key` adds `sandbox_start_key` column to `sandbox_executions` (supplementary; non-blocking) | PASS |
+| 34 | §3.5 | Migration `0340_sandbox_executions_start_key` adds `sandbox_start_key` column to `sandbox_executions` (supplementary; non-blocking) | PASS |
 
 ### Service layer (§3.6, §3.7, §3.13, §3.14, §3.15, §3.16, §3.17, §5.1, §5.3)
 

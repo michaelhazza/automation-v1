@@ -17,7 +17,7 @@ import { users } from './users';
 // settings_version = settings_version + 1.
 //
 // RLS: dual-GUC scoping on both organisation_id AND subaccount_id.
-// Migration: 0329_create_subaccount_operator_settings.sql
+// Migration: 0337_create_subaccount_operator_settings.sql
 // ---------------------------------------------------------------------------
 
 export const subaccountOperatorSettings = pgTable(

@@ -78,7 +78,7 @@ const LLMCallContextSchema = z.object({
   // `ieeRunId` MUST be set when sourceType='iee' or callSite='worker'.
   // Enforced by the runtime guard below AND a database CHECK constraint.
   ieeRunId:           z.string().uuid().optional(),
-  // ── Operator Backend attribution (migration 0331, spec §3.12, §4.10) ───────
+  // ── Operator Backend attribution (migration 0339, spec §3.12, §4.10) ───────
   // Optional nullable FK to operator_runs.id. Populated for per_token rows
   // written during operator-session fallback. Does NOT participate in the
   // per-token row's idempotency key — it is attribution only.
