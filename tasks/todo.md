@@ -4406,3 +4406,15 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 - [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
   - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
   - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
+
+---
+
+## operator-backend deferred items
+
+Source: `tasks/review-logs/spec-review-log-operator-backend-1-2026-05-12T05-27-43Z.md` and the final report. Routed here per spec-reviewer Step 7 (AUTO-DECIDED items go to deferred-review). These do NOT block spec acceptance; the operator can revisit before or during build.
+
+- [ ] **OP-BACKEND-SR1 (AUTO-DECIDED — accept; iter 1, F15) — Capability literal import surface.**
+  - Finding: Codex suggested introducing a runtime const object `EXECUTION_CAPABILITIES = { LONG_RUNNING: 'long_running', ... } as const` so consumers import a value instead of restringifying the literal. This would change Spec A's surface (introduce a new pattern not used today).
+  - Decision: rejected the new const; instead clarified § 3.2 / § 4.1 to enumerate the gate's allow-list (canonical types.ts, adapter object declarations, test fixtures, docs). The type-checker enforces correctness at adapter declarations; the gate covers non-adapter consumer code.
+  - Why deferred for human visibility: pattern question. If you later prefer the runtime-const approach (matches the `RUN_STATUS` style elsewhere — `shared/runStatus.ts`), the change is small and could be folded into Chunk 2.
+  - Suggested approach (if revisited): add `export const EXECUTION_CAPABILITIES = { ... } as const` to `types.ts`, change adapter objects in `server/services/executionBackends/*.ts` to reference `EXECUTION_CAPABILITIES.LONG_RUNNING`, simplify the gate to grep for the literal in `*.ts` outside of `types.ts` and the gate itself.
