@@ -3817,6 +3817,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Modify the Operator Backend (chain-link dispatch, chain-resume, cost writer, settings) | `server/services/executionBackends/operatorManagedBackend.ts` (adapter) + `server/services/operatorChainResumeService.ts` (resume payload) + `server/services/operatorTaskProfileService.ts` (browser profile) + `server/services/subaccountOperatorSettingsService.ts` (per-subaccount settings) + `server/services/operatorCostWriter.ts` (cost rows) + `server/services/operatorChainSchedulerService.ts` (FIFO dispatch). See §Operator Backend (operator-backend, 2026-05) for full file inventory. |
 | Modify operator_session connections (CRUD) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
 | Modify the credential broker | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + provider registry at `server/config/operatorSessionProviders.ts` |
 | Add a new operator_session provider | `server/config/operatorSessionProviders.ts` — extend the registry; bump `OPERATOR_SESSION_DISCLOSURE_VERSION` if disclosure copy changed |
@@ -3945,6 +3946,61 @@ Six new permission keys (migration 0297):
 | `scorecard:judge:forced` | Event-driven (enqueued on correction) | teamSize 4, teamConcurrency 1 | Forced judgement triggered by operator correction |
 | `bench:execute` | Event-driven (enqueued by POST /bench-runs/:id/run) | teamSize 2, teamConcurrency 1 | Execute a bench run against all bench items |
 | `correction:pattern-detect` | Daily 05:00 UTC | teamSize 1, teamConcurrency 1 | Cluster operator corrections; promote patterns to pending_review memory blocks |
+
+#### Operator Backend (operator-backend, 2026-05)
+
+New `operator_managed` execution adapter. Drives long-form autonomous tasks across sequential 120-minute chain links using an operator-session subscription or API-key fallback. Parallel to IEE (`iee_runs`) with chain-link state in `operator_runs`. See ADR `docs/decisions/0011-operator-backend-chain-resume-model.md` for the D8+D11 scope-lock rationale.
+
+**Key files per domain:**
+
+| Concern | Files |
+|---------|-------|
+| Adapter registration + lifecycle | `server/services/executionBackends/operatorManagedBackend.ts` — implements `dispatch`, `loadTerminalState`, `finalise`, `reconcile`, `cancel`; registered at `server/index.ts` alongside the five existing adapters |
+| Pure helpers (failure classifier, finaliser decision, stickiness) | `server/services/executionBackends/operatorManagedBackendPure.ts` |
+| Chain-resume payload composer | `server/services/operatorChainResumeService.ts` + `server/services/operatorChainResumeServicePure.ts` (K=5 conversation-history window) |
+| Per-task browser profile lifecycle | `server/services/operatorTaskProfileService.ts` + `server/services/operatorTaskProfileServicePure.ts` (retention-window math, GC scheduling) |
+| Per-subaccount operator settings | `server/services/subaccountOperatorSettingsService.ts` + `server/services/subaccountOperatorSettingsServicePure.ts` (range validation; ETag = `String(settings_version)` — integer column, R2-F3) |
+| Cost writer (subscription_mediated + sandbox_compute rows) | `server/services/operatorCostWriter.ts` + `server/services/operatorCostWriterPure.ts` (idempotency key: `(operator_run_id, source_type, boundary)`) |
+| Chain-link FIFO scheduler + concurrency-cap accounting | `server/services/operatorChainSchedulerService.ts` + `server/services/operatorChainSchedulerServicePure.ts` |
+| Suspension CS notification | `server/services/operatorSessionSuspensionNotifier.ts` — emits `cs.operator_session.suspended_detected` |
+| Typed error classes | `server/services/operatorBackendErrors.ts` — `OperatorBackendConflictError` (409), `OperatorSessionLimitExceededError` (429) |
+| Runtime error classifier | `server/services/operatorRuntimeErrors.ts` — closed set; maps HTTP/broker signals to `session_unavailable` etc. |
+| Task-action routes | `server/routes/operatorTasks.ts` — retry-chain-failure, extend-budget, fresh-profile-restart, cancel |
+| Per-subaccount settings routes | `server/routes/subaccountOperatorSettings.ts` — `GET / PATCH` under `/api/admin/subaccounts/:id/operator-settings` |
+| Progress poll route | `server/routes/operatorTaskProgress.ts` — `GET /api/operator-tasks/:agentRunId/progress` |
+| pg-boss handlers | `server/jobs/operatorSessionCompletedHandler.ts`, `server/jobs/operatorSessionDispatchNextChainLinkHandler.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/jobs/operatorTaskProfileGcHandler.ts` |
+| Encryption helper | `server/services/agentRunPayloadEncryptionService.ts` — wraps pgcrypto for `checkpoint_payload` at rest |
+| Schema — chain-link rows | `server/db/schema/operatorRuns.ts` (parallel to `iee_runs`; `operator_runs` table) |
+| Schema — persistent browser profiles | `server/db/schema/operatorTaskProfiles.ts` |
+| Schema — per-subaccount settings | `server/db/schema/subaccountOperatorSettings.ts` (mirrors `subaccount_optimiser_settings`; includes `settings_version` integer for ETag) |
+| Shared types | `shared/types/operatorRuns.ts`, `shared/types/checkpointPayload.ts` (`CheckpointPayloadSchemaV1`), `shared/types/operatorConversationArtefact.ts` (`OperatorConversationLinkArtefact`, MIME constant), `shared/types/operatorBackendEvents.ts` (single source of truth for `operator-session.*` event-name literals) |
+| Settings UI tab | `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx` + `_fields.tsx` — "Operator" tab on `AdminSubaccountDetailPage`, between Board Config and Usage |
+| Run Trace integration | `client/src/components/run-trace/ChainLinkDivider.tsx`, `client/src/components/run-trace/AttemptGroup.tsx` |
+| Task-view operator UI | `client/src/components/openTask/OperatorChainLinkIndicator.tsx`, `client/src/components/openTask/OperatorAutoExtendBanner.tsx` |
+| Operator modals + badge + filter | `client/src/components/operator/OperatorBadge.tsx`, `OperatorFilterToggle.tsx`, `OperatorConcurrencyLimitModal.tsx`, `OperatorUnavailableModal.tsx`, `OperatorBudgetExceededModal.tsx` |
+| Client API helpers | `client/src/lib/api/operatorTasks.ts` |
+| Migrations | `migrations/0327–0331` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions, llm_requests extensions) |
+| CS runbook | `docs/runbooks/operator-session-account-suspension.md` + comms templates in `docs/runbooks/templates/` |
+
+**Sandbox primitive extension (additive, Spec B unchanged for non-operator callers):**
+`SandboxRunTaskInput` (`shared/types/sandbox.ts`) gains optional `sandboxStartKey?: string`. `sandboxExecutionService` gains `adoptOrStart(input)` for dispatch-crash recovery. Non-operator callers compile unchanged (field is optional; existing `runTask` path is byte-identical).
+
+**Chain-resume model (ADR-0011):**
+One agent run = 1..N chain links. Each chain link is an `operator_runs` row. When the soft session cap approaches, the operator checkpoints and exits; the `operator-session-dispatch-next-chain-link` queue triggers the next link. Chain links communicate via `operator_runs.checkpoint_payload` (encrypted at rest) and the persistent browser profile (`operator_task_profiles`). The `paused_for_chain_continuation` task state holds the task between links. Dispatcher predicate excludes `'cancelled'` — cancellation-vs-dispatch race is safe.
+
+**Per-subaccount operator settings:**
+`subaccount_operator_settings` table with dual-GUC RLS (`app.organisation_id` AND `app.subaccount_id`). Every read/write calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` (`server/lib/orgScoping.ts`) before touching the table. ETag is `String(settings_version)` (integer column incremented on every PATCH — collision-free even for same-second writes).
+
+**Four new pg-boss queues:**
+
+| Queue name | Purpose |
+|------------|---------|
+| `operator-session-completed` | Terminal chain-link finalisation (triggers `finaliseAgentRunFromBackend`) |
+| `operator-session-dispatch-next-chain-link` | FIFO chain-continuation dispatch |
+| `operator-session-progressed` | Mid-run progress updates (step_count, last_progress_at) |
+| `operator-task-profile-gc` | Deferred browser-profile garbage collection |
+
+**Vendor codename discipline:** the vendor operator runtime codename appears only in `infra/sandbox-templates/operator-session/Dockerfile` and env-manifest entries. It does not appear in code, schema, UI, telemetry, customer copy, or this document.
 
 ---
 
