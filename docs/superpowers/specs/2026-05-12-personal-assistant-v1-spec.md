@@ -198,7 +198,7 @@ Every file this spec touches. Adding a prose reference in any later section requ
 | `server/services/eaDrafts/eaDraftServicePure.ts` | Pure helpers: state-transition rules, expiry computation | §11, §24, §25 |
 | `server/services/homeWidget/homeWidgetService.ts` | Read user-owned agents for current user, invoke each agent template's `body_provider_skill`, return ordered `WidgetData[]` | §19 |
 | `server/services/homeWidget/homeWidgetServicePure.ts` | Pure helpers: widget-card ordering, refresh-policy evaluation | §19, §25 |
-| `server/routes/webhooks/googleWebhook.ts` | Google webhook ingestion route: Gmail push (Pub/Sub envelope verify — flag-gated, V1.5) + Calendar push channels (channel-token + resource-state verify). HMAC + replay-nonce per existing webhook pattern. Dispatches to `externalSourceTriggers` | §10 |
+| `server/routes/webhooks/googleWebhook.ts` | Google webhook ingestion route — Calendar push channels only (channel-token + resource-state verify). HMAC + replay-nonce per existing webhook pattern. Dispatches to `externalSourceTriggers`. Gmail push via Pub/Sub is deferred to V1.5 per §26 — V1 ships no flag-gated push code path | §10 |
 | `server/routes/voiceProfiles.ts` | API: GET / refresh / opt-out endpoints for owner's voice profiles. RLS-defended | §12, §21 |
 | `server/routes/eaDrafts.ts` | API: list / approve / reject endpoints for owner's EA drafts. RLS-defended | §11, §18 |
 | `server/routes/agentHomeWidgets.ts` | API: GET widget data for current user's user-owned agents. RLS-defended | §19 |
@@ -229,6 +229,13 @@ Every file this spec touches. Adding a prose reference in any later section requ
 | `prototypes/personal-assistant-v1/02-my-ea-home.html` | EXISTING locked mockup — home Personal zone | §14 |
 | `prototypes/personal-assistant-v1/03-ea-settings.html` | EXISTING locked mockup — per-instance EA settings | §14 |
 | `prototypes/personal-assistant-v1/index.html` | EXISTING mockup index | §14 |
+| `server/services/calendar/calendarActionServicePure.test.ts` | Vitest sibling — tests `validateCreateEventInput` / `validateUpdateEventInput` / `validateRespondToInviteInput` / `deriveIdempotencyKey` / `normaliseAttendees` / `computeFreeSlots` per §25.2 | §25 |
+| `server/services/slack/slackActionServicePure.test.ts` | Vitest sibling — tests `decideAutoSendScope` (3 scopes × 2 actions × 3 targets = 18 cases) / `validatePostMessageInput` / `validatePostDmInput` / `deriveIdempotencyKey` / `assembleThreadSummaryPrompt` per §25.2 | §25 |
+| `server/services/triggers/externalSourceTriggersPure.test.ts` | Vitest sibling — tests `deriveDedupKey` / `computeCalendarLookahead` per §25.2 | §25 |
+| `server/services/voiceProfile/voiceProfileServicePure.test.ts` | Vitest sibling — tests `distilFeatures` / `shouldRefresh` per §25.2 | §25 |
+| `server/services/eaDrafts/eaDraftServicePure.test.ts` | Vitest sibling — tests `canTransition` / `computeExpiresAt` per §25.2 | §25 |
+| `server/services/homeWidget/homeWidgetServicePure.test.ts` | Vitest sibling — tests `orderAgents` / `shouldRefetch` per §25.2 | §25 |
+| `tests/integration/userOwnedAgentCredentialIsolation.test.ts` | Vitest integration — exercises broker owner-scoping with two users in the same subaccount; cross-fetch attempt raises typed `OWNER_MISMATCH`. Sibling to `rls.context-propagation.test.ts` (an `accepted_primitive` per `docs/spec-context.md`) | §25.3 |
 
 ### 5.2 Modified files
 
@@ -370,7 +377,14 @@ Producer: agent execution path → calendar action handler. Consumer: Google Cal
 - `update_event.input`: `{ calendarId: string, eventId: string, patch: Partial<CreateEventInput>, ifMatchETag?: string }`. Output: `{ eventId, htmlLink, updatedAt }`.
 - `respond_to_invite.input`: `{ calendarId: string, eventId: string, response: 'accepted' | 'declined' | 'tentative', comment?: string }`. Output: `{ eventId, response }`.
 
-Idempotency keys: `create_event` uses `(ownerUserId, calendarId, summary, startAt, endAt)` as a derived key passed to Google's `requestId`. `update_event` uses optimistic `If-Match` on the event ETag. `respond_to_invite` is naturally idempotent (last write wins, no DB-level dedup needed). §24 pins the unique-constraint-to-HTTP mapping.
+Idempotency keys (corrected — Google Calendar's `events.insert` does NOT honour a `requestId` parameter; the prior draft was wrong about that API surface):
+
+- **`create_event` (draft-mediated path — the V1 invocation path).** Every V1 `create_event` invocation is review-gated and proxied through an `ea_drafts` row (Tier 4 in the action registry but Tier 6-equivalent for V1 because EA writes always go through review per §13.1 default approval policy). The draft row IS the idempotency record: `ea_drafts.sentMessageId` is set once on first successful send to Google's `events.insert`; subsequent retries against the same draft return the stored `sentMessageId` without re-calling Google. Concurrency on the draft row uses the optimistic `UPDATE ... WHERE state = 'approved' AND sentMessageId IS NULL` predicate; the losing caller reads the winning row's `sentMessageId`.
+- **`update_event`.** Optimistic `If-Match` on the event ETag (Google honours this). `update_event` invocations are also draft-mediated for V1 (Tier 4 review-gated); on retry, the draft row's stored target eventId + ETag drive the second attempt.
+- **`respond_to_invite`.** Naturally idempotent (last write wins, no DB-level dedup needed).
+- **Non-draft-mediated direct invocations** are out of V1 scope — all V1 EA Calendar writes go through the review/draft path. If a future caller bypasses the draft path (e.g. a different agent template authored later), the architect adds a dedicated idempotency record at that time; V1 does not pre-build one.
+
+§24 pins the unique-constraint-to-HTTP mapping.
 
 ### 7.3 Slack action input / output (Zod schemas, all in `shared/types/slackAction.ts`)
 
@@ -586,7 +600,7 @@ This is the **alignment correction** noted in brief §0.5.4 + §3.2: V1 ships wr
 
 1. Resolve owner-scoped Google Calendar credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'google_calendar', ownerUserId: agent.ownerUserId })`. If `agent.ownerUserId IS NULL`, the broker call is subaccount-scoped (existing path); for V1 this never happens for the EA but the handler is generic.
 2. Validate input against the action's Zod schema.
-3. For write actions: derive an idempotency key per §24.2 + §7.2 and pass it to Google's `requestId` parameter (`create_event`) or `If-Match` header (`update_event`).
+3. For write actions: idempotency per §7.2 + §24.2 — the originating `ea_drafts` row's `sentMessageId` is the idempotency record for `create_event` (set once on first send); `update_event` uses Google's `If-Match` ETag header; `respond_to_invite` is naturally idempotent. Do not pass a `requestId` parameter — Google Calendar `events.insert` does not honour it.
 4. Call Google Calendar API with `withBackoff` wrapping.
 5. Map errors:
    - 401 / 403 → typed `CREDENTIAL_REVOKED` or `INSUFFICIENT_SCOPE`; broker marks the connection `expired`; trigger emits `trigger.suppressed`.
@@ -707,12 +721,11 @@ Existing rows are unchanged — the enum extension is additive and backwards-com
 
 ### 10.2 Webhook ingestion routes
 
-**`server/routes/webhooks/googleWebhook.ts` (NEW).** Handles both Gmail (push notification — flag-gated V1.5) AND Calendar push channels:
+**`server/routes/webhooks/googleWebhook.ts` (NEW).** Handles Calendar push channels only in V1. Gmail push via Pub/Sub is deferred to V1.5 per §26 — V1 ships no flag-gated push code path; the V1 default for Gmail is polling per §10.4.
 
-- **Gmail push (V1.5, flag-gated, NOT shipped V1 default).** Pub/Sub message envelope verify (Google's required `Authorization` header bearer-token check OR JWT verify, depending on the Pub/Sub config). The flag-gated path lives behind `FEATURE_GMAIL_PUSH=true`. V1 default is polling per §10.4.
 - **Calendar push.** Inbound POST carries `X-Goog-Channel-Token`, `X-Goog-Channel-ID`, `X-Goog-Resource-ID`, `X-Goog-Resource-State` headers. Verify `X-Goog-Channel-Token` matches the row in `webhook_channel_registrations`. Verify `X-Goog-Channel-ID` is registered. Resolve `(ownerUserId, integrationConnectionId)` from the row. Compute the lookahead trigger: fire `calendar_event_imminent` immediately for events starting within the configured lookahead window. Defer Step 2 for events further out (re-poll on next reminder).
 
-Per the existing webhook pattern (GHL / Slack / Stripe / Teamwork): HMAC verification, replay-nonce check via `oauth_state_nonces` precedent or a dedicated `webhook_nonces` table (architect picks in Phase 2 — likely reusing `oauth_state_nonces` infra), per-org dispatch, idempotent emit.
+Per the existing webhook pattern (GHL / Slack / Stripe / Teamwork): HMAC verification, replay-nonce check via the existing `oauth_state_nonces` infrastructure (no new nonce table in V1), per-org dispatch, idempotent emit.
 
 **`server/routes/webhooks/slackWebhook.ts` (EXTENDED).** Currently handles approval-callback events only. V1 extends:
 
@@ -944,7 +957,7 @@ Distillation is deterministic — same samples produce the same profile_json. No
 
 - The block is rendered from `profileJson` as a structured instruction (e.g. "Greeting: prefer 'Hi {name},' over 'Hello'; signoff: 'Best, Michael'; avoid em-dashes; informal-leaning (0.42 formality)").
 - Block respects `optOutAt` — opted-out profile produces no block.
-- Block lives in the `stablePrefix` cache partition (per `docs/spec-context.md` accepted primitives) — the profile changes at most once per refresh interval (30 days OR 50 sends), making it a high-cache-hit-rate prompt section.
+- Block lives in the `stablePrefix` cache partition (per `docs/spec-context.md` accepted primitives) — the profile changes at most once per refresh interval (30 days for V1's default `periodic` policy), making it a high-cache-hit-rate prompt section.
 
 ### 12.5 Default refresh policy
 
@@ -958,7 +971,13 @@ refreshConfig: { kind: 'periodic', days: 30 },
 optOutAt: null
 ```
 
-The `voiceProfileRefreshJob.ts` pg-boss job runs nightly, finds rows whose `lastDerivedAt + refreshConfig.days < now()` (for periodic) or whose `sent_count_since_derive > refreshConfig.everyN` (for on_send_count — counter to be tracked in a JSONB meta column or a small ledger; architect decides Phase 2), and calls `refreshProfile({ force: false })`.
+The `voiceProfileRefreshJob.ts` pg-boss job runs nightly and finds rows whose refresh threshold has triggered:
+
+- For `refreshPolicy = 'periodic'`: `lastDerivedAt + refreshConfig.days < now()`.
+- For `refreshPolicy = 'manual'`: never auto-refresh (operator triggers via the Settings page).
+- For `refreshPolicy = 'on_send_count'`: schema-reserved for a future spec — V1 ships the enum value but the counter that drives it (`sent_count_since_derive`) is NOT tracked in V1. Rows with `refreshPolicy = 'on_send_count'` never auto-refresh until a later spec adds the counter. Defer per §26.
+
+For each matching row, the job calls `refreshProfile({ force: false })`. V1 default is `periodic, 30 days`, so the only path the job exercises in V1 is the periodic-time check.
 
 ### 12.6 Opt-out semantics
 
@@ -1609,7 +1628,7 @@ Each new queued job has a row in the job idempotency table per §24.
 
 ### 22.3 Cached / prompt-partition
 
-- **Voice profile block** in agent prompts — placed in `stablePrefix` cache partition per §12.4. Cache window is the refresh interval (30 days OR 50 sends, whichever first).
+- **Voice profile block** in agent prompts — placed in `stablePrefix` cache partition per §12.4. Cache window is the refresh interval (V1 default: 30 days under the `periodic` policy).
 - **EA system prompt** — placed in `stablePrefix`. Changes only when the system_agent template's `default_system_prompt` is updated (rare).
 - **EA default skill allowlist** — `stablePrefix`.
 - **EA per-instance memory_blocks** — `stablePrefix` for unchanging blocks (timezone, working hours); `dynamicSuffix` for blocks edited per session (active context).
@@ -1679,7 +1698,7 @@ Architect in Phase 2 finalises. Recommended ordering (foundations first, integra
 
 **Chunk group C — External-source trigger primitive** (depends on A.4 + B.7):
 13. `externalSourceTriggers.ts` service + pure helpers.
-14. `googleWebhook.ts` route (Calendar push + flag-gated Gmail push).
+14. `googleWebhook.ts` route (Calendar push only; Gmail push deferred to V1.5).
 15. `slackWebhook.ts` extension (app_mention event handling).
 16. `gmailInboxPollJob.ts` + advisory-lock infra.
 17. `calendarChannelRenewalJob.ts`.
@@ -1697,7 +1716,7 @@ Architect in Phase 2 finalises. Recommended ordering (foundations first, integra
 **Chunk group F — EA system-agent template + workflows** (depends on A.5 + B + C + D + E):
 24. `c.ts` entry + template DB seed row body (skill allowlist, default approval policy, system prompt, home_widget declaration).
 25. Workflow skill markdown files (`ea-daily-briefing.md`, `ea-inbox-triage.md`, `ea-meeting-prep.md`).
-26. Workflow implementation modules.
+26. Workflow bodies — implemented as the three skill markdown files in §5.1 (`ea-daily-briefing.md`, `ea-inbox-triage.md`, `ea-meeting-prep.md`). No separate workflow-module files in V1; each workflow runs through existing native-controller agent-execution path.
 27. Auto-send-scope decision integration on Slack post handlers (depends on B.11).
 
 **Chunk group G — Home widget contract** (depends on A.5 + F.24):
@@ -1718,9 +1737,10 @@ Architect in Phase 2 finalises. Recommended ordering (foundations first, integra
 **Chunk group I — Doc-sync + final checks**:
 39. `architecture.md` updates (external-source trigger, VoiceProfile, home-widget contract, Personal nav, capability grouping).
 40. `docs/capabilities.md` additions (vendor-neutral language per editorial rules).
-41. `docs/integration-reference.md` Calendar + new Slack slugs.
 
-Total estimated chunks: ~41. Architect MAY merge or split per implementation cost.
+(Note: `docs/integration-reference.md` Calendar + new Slack slug additions land in chunk B.12 alongside `capabilityGroups.ts`, NOT in terminal doc-sync — the static gate `verify-integration-reference.ts` runs against B.12 in CI, so the slugs must exist before B.12 ships. The chunk-I doc-sync sweep only updates wording in `integration-reference.md` post-merge if needed.)
+
+Total estimated chunks: ~40. Architect MAY merge or split per implementation cost.
 
 ### 23.3 No backward references
 
@@ -1760,10 +1780,10 @@ Per `docs/spec-authoring-checklist.md §10`. Every externally-triggered write an
 ### 24.2 Calendar write actions
 
 **`create_event`**:
-- **Posture:** key-based.
-- **Key:** `deriveIdempotencyKey({ kind: 'create_event', ownerUserId, payload: { calendarId, summary, startAt, endAt } })`. Passed as Google's `requestId` parameter. Google enforces request-id-based dedup for ≤24h.
-- **Concurrency guard:** Google rejects duplicate requestId; our handler maps the rejection to a 200-idempotent-hit returning the original event id.
-- **Retry:** guarded — `retryPolicy: 'guarded'`. Withbackoff. Network 5xx retried automatically; 4xx mapped to typed errors.
+- **Posture:** state-based via the originating `ea_drafts` row (V1 invocation path is always draft-mediated; see §7.2).
+- **Concurrency guard:** optimistic predicate on the draft row — `UPDATE ea_drafts SET sentMessageId = $sent_id WHERE id = $draft_id AND state = 'approved' AND sentMessageId IS NULL RETURNING id`. Zero rows = a concurrent caller already sent; the losing caller reads the existing `sentMessageId` and returns 200-idempotent-hit. Non-zero rows = winning caller calls Google `events.insert` once.
+- **No `requestId` parameter passed to Google.** Google Calendar's `events.insert` does not honour a `requestId` idempotency parameter; the prior version of this spec was wrong about that API surface.
+- **Retry:** guarded — `retryPolicy: 'guarded'`. Withbackoff. Network 5xx retried automatically; 4xx mapped to typed errors. Retry after an unknown outcome (e.g. network failure mid-send) re-enters the handler with the same draft row; the optimistic predicate either commits with the new `sentMessageId` (no prior send succeeded) or surfaces the stored `sentMessageId` (a prior attempt succeeded).
 - **HTTP mapping:** 409 → 422 with `code: 'conflict'`; 401 → 401 with `code: 'credential_revoked'`; 403 → 403 with `code: 'insufficient_scope'`.
 - **Terminal events:** `action.completed` (success | partial | failed) — exactly one per action invocation.
 
@@ -1866,7 +1886,7 @@ No event with the same `correlation_key` after the terminal. This is the existin
 
 The webhook routes (`googleWebhook`, extended `slackWebhook`) follow the existing pattern:
 - HMAC verification per provider.
-- Replay-nonce check via `oauth_state_nonces` (or new `webhook_nonces` — architect picks).
+- Replay-nonce check via the existing `oauth_state_nonces` infrastructure (V1 reuses; no new nonce table).
 - 200 response on success (Google + Slack treat 2xx as ack; both will retry on 5xx).
 - 4xx response on signature/payload failure (no retry expected).
 
@@ -1879,7 +1899,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 
 The following existing gates apply to every chunk and are non-negotiable:
 
-- `verify-rls-coverage.sh` — every new tenant table (`voice_profiles`, `ea_drafts`, `webhook_channel_registrations`) must appear in `RLS_PROTECTED_TABLES` with a matching RLS policy.
+- `verify-rls-coverage.sh` — every new tenant table (`voice_profiles`, `ea_drafts`, `webhook_channel_registrations`, `external_trigger_dedup`) must appear in `RLS_PROTECTED_TABLES` with a matching RLS policy.
 - `verify-rls-contract-compliance.sh` — no direct `db` import in user-facing routes; org-scoped reads via `getOrgScopedDb()` / `withOrgTx`; admin-context reads via `withAdminConnection`.
 - `verify-risk-tier-assigned` — every new action in `actionRegistry.ts` has an explicit `riskTier`.
 - `verify-integration-reference.ts` — capability slugs referenced from `capabilityGroups.ts` exist in `integration-reference.md`.
@@ -1943,7 +1963,7 @@ Per `docs/spec-authoring-checklist.md §7`. Anything mentioned in prose as "defe
 
 - **Calendar `delete_event` action.** V1 does not register this action. Tier 5 destructive. Defer to V1.5 once V1 write patterns prove reliable. Reason: not currently in `WorkspaceAdapter` capability surface; deferral creates no inconsistency.
 - **Drive writes (Docs / Sheets editing).** Defer to V1.5 IF a real use case emerges. Reason: no V1 use case requires it; ~3 dev-days real cost (Docs / Sheets batch-update APIs); workspace adapter doesn't have these capabilities today.
-- **Gmail push notifications (Watch API + Cloud Pub/Sub).** V1 ships 5-minute polling default. Push path flag-gated under `FEATURE_GMAIL_PUSH`. Defer activation to Phase 1.5 if 5-minute latency becomes felt.
+- **Gmail push notifications (Watch API + Cloud Pub/Sub).** V1 ships 5-minute polling only — no Gmail push code path is shipped, flag-gated or otherwise. V1.5 may add Gmail push if the 5-minute polling latency becomes felt; the V1.5 spec will author the full Pub/Sub ingestion path at that time.
 - **Workflow #4 — Slack thread summary on `slack_mention` trigger.** Trigger primitive ships V1 (§10); the workflow body itself defers. Skill slug `ea.slack_thread_summary`.
 - **Workflow #5 — Weekly review (Friday 16:00 cron + Slack DM).** Skill slug `ea.weekly_review`. RRULE seeded in V1.5.
 - **Calendar conflict detection + automated reschedule.** Fast follow-on, NOT V1.
@@ -1984,29 +2004,27 @@ Carried from brief §4 + spec-time confirmations. Phase 2 architect resolves eac
 
 4. **Calendar lookahead horizon.** V1 default 15 minutes. Confirm value and whether the lookahead is a memory_block setting per-user OR a global constant.
 
-5. **`webhook_nonces` reuse vs new table.** V1 spec says "reuse `oauth_state_nonces` OR add a `webhook_nonces` table; architect picks." Recommendation: dedicated `webhook_nonces` table — separates concerns and the oauth-state nonces have a different lifecycle.
+5. **`voice_profiles.state` column.** §24.6 mentions adding a `state` column for derivation guarding. Spec leaves to architect — either add the column or use `lastDerivedAt IS NULL` / `< now() - refresh_interval` as the predicate.
 
-6. **`voice_profiles.state` column.** §24.6 mentions adding a `state` column for derivation guarding. Spec leaves to architect — either add the column or use `lastDerivedAt IS NULL` / `< now() - refresh_interval` as the predicate.
+6. **EA agent's `Specialist` vs alternative `agentRole`.** Spec recommends `Specialist` (matches Sarah / Helena / Patel). Phase 2 confirms vs alternatives (`Worker`, new `Personal_Assistant` role) — recommendation stands unless `agentRole` is consumed by a code path that treats `Specialist` differently than is appropriate.
 
-7. **EA agent's `Specialist` vs alternative `agentRole`.** Spec recommends `Specialist` (matches Sarah / Helena / Patel). Phase 2 confirms vs alternatives (`Worker`, new `Personal_Assistant` role) — recommendation stands unless `agentRole` is consumed by a code path that treats `Specialist` differently than is appropriate.
+7. **System-prompt canonical text.** §13.3 names sections (identity / voice integration / escalation rules / memory awareness / delivery awareness). Phase 2 architect drafts the prompt body itself.
 
-8. **System-prompt canonical text.** §13.3 names sections (identity / voice integration / escalation rules / memory awareness / delivery awareness). Phase 2 architect drafts the prompt body itself.
+8. **Auto-send-scope dropdown memory_block key naming.** Spec uses `ea.slack_auto_send_scope`. Phase 2 confirms naming convention against existing memory_block key conventions.
 
-9. **Auto-send-scope dropdown memory_block key naming.** Spec uses `ea.slack_auto_send_scope`. Phase 2 confirms naming convention against existing memory_block key conventions.
+9. **Stub second user-owned agent (reuse criterion).** §15.6 names the option of adding a no-op Dev Agent template stub. Phase 2 architect decides whether the stub ships in V1 OR the contract proof is left as the integration test in §25.3.
 
-10. **Stub second user-owned agent (reuse criterion).** §15.6 names the option of adding a no-op Dev Agent template stub. Phase 2 architect decides whether the stub ships in V1 OR the contract proof is left as the integration test in §25.3.
+10. **First-run wizard `EA_PROVISION` permission key default-grant.** Spec proposes "every user." Phase 2 confirms — alternatives include subaccount-admin-gated provisioning (admin invites users to provision their EA).
 
-11. **First-run wizard `EA_PROVISION` permission key default-grant.** Spec proposes "every user." Phase 2 confirms — alternatives include subaccount-admin-gated provisioning (admin invites users to provision their EA).
+11. **Operator user's seed EA at deploy time.** §13.5 leaves this to the architect. Recommendation: no seed; operator goes through the wizard like any other user.
 
-12. **Operator user's seed EA at deploy time.** §13.5 leaves this to the architect. Recommendation: no seed; operator goes through the wizard like any other user.
+12. **Capability slug naming for new Slack actions.** Spec proposes `channel_messages_read`, `channel_post_message`, `channel_search_messages`, `dm_send`. Phase 2 confirms against the existing integration-reference naming conventions.
 
-13. **Capability slug naming for new Slack actions.** Spec proposes `channel_messages_read`, `channel_post_message`, `channel_search_messages`, `dm_send`. Phase 2 confirms against the existing integration-reference naming conventions.
+13. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.approved` / `draft.rejected` / `draft.expired` / `draft.sent`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
 
-14. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.approved` / `draft.rejected` / `draft.expired` / `draft.sent`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
+14. **`actionService.proposeAction` composition with `ea_drafts`.** The current spec authors `eaDraftService` with its own state machine (`pending → approved | rejected | expired`) for review-gated sends. An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics. Phase 2 architect investigates: can the `ea_drafts` state machine compose over `proposeAction` (proposeAction owns the approval state row; `ea_drafts` stores the draft body payload and links to the proposed-action row)? Recommendation: compose if `proposeAction`'s contract supports a per-domain payload reference; otherwise keep the parallel state machine and document the rationale in plan.md. Routed to `tasks/todo.md` for deferred review.
 
-15. **`actionService.proposeAction` composition with `ea_drafts`.** The current spec authors `eaDraftService` with its own state machine (`pending → approved | rejected | expired`) for review-gated sends. An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics. Phase 2 architect investigates: can the `ea_drafts` state machine compose over `proposeAction` (proposeAction owns the approval state row; `ea_drafts` stores the draft body payload and links to the proposed-action row)? Recommendation: compose if `proposeAction`'s contract supports a per-domain payload reference; otherwise keep the parallel state machine and document the rationale in plan.md. Routed to `tasks/todo.md` for deferred review.
-
-Phase 2 plan.md addresses each as the architect prefers — none of the 15 above is blocking on operator decision; all are spec-time confirmations the architect resolves with codebase context.
+Phase 2 plan.md addresses each as the architect prefers — none of the 14 above is blocking on operator decision; all are spec-time confirmations the architect resolves with codebase context.
 
 ---
 
