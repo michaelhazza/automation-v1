@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<!--
+  Screen D5: Fallback engaged banner — inline component on session-in-progress layout.
+  Shows the amber mid-session banner when subscription is unavailable and API key fallback kicks in.
+  Also shows the "Why?" popover explainer.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fallback Engaged | Invoice Processor | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+.why-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 12.5px; color: #b45309; font-weight: 600;
+  text-decoration: underline; padding: 0; font-family: inherit;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link active" href="d8-active-sessions-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Autonomous runs
+        <span class="sidebar-badge">2</span>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="d8-active-sessions-list.html" style="color:#64748b;text-decoration:none;">Autonomous runs</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Invoice Processor</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:4px;">SM</div>
+    </div>
+
+    <div class="page-body">
+
+      <div class="page-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+            <h1 style="font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;margin:0;">Invoice Processor</h1>
+            <span class="run-status-pill status-running"><span class="dot"></span>Running</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;">Autonomous run in progress &nbsp;&#183;&nbsp; Started 09:14 today &nbsp;&#183;&nbsp; Run #OP-2847</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-secondary btn-sm">Snapshot artefacts</button>
+          <button class="btn btn-danger btn-sm">Cancel run</button>
+        </div>
+      </div>
+
+      <!-- ─── FALLBACK BANNER (primary component of this screen) ─── -->
+      <div class="fallback-banner" style="position:relative;">
+        <div class="fallback-banner-icon">&#9888;&#65039;</div>
+        <div class="fallback-banner-body">
+          <div class="fallback-banner-title">Switched to API key for the rest of this run.</div>
+          <div>Your ChatGPT subscription wasn't available for the last step. We're continuing on your fallback API key.</div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <button class="why-btn" onclick="togglePopover('whyPopover',this)">Why? &#9660;</button>
+            <a href="../operator-session-identity/01-connections-list.html" class="fallback-banner-link">Check your AI Subscription &#8594;</a>
+          </div>
+        </div>
+
+        <!-- Why? popover -->
+        <div class="popover" id="whyPopover" style="top:100%;left:0;margin-top:8px;max-width:380px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:8px;">What happened?</div>
+          <p style="font-size:12.5px;color:#475569;line-height:1.6;margin-bottom:10px;">
+            Your ChatGPT Pro subscription returned a rate-limit signal during step 5. This can happen when the subscription account has hit its usage limit for a period.
+          </p>
+          <p style="font-size:12.5px;color:#475569;line-height:1.6;margin-bottom:10px;">
+            Rather than stopping the run, we switched to your fallback API key so the work can continue. The rest of this run will use the API key. API key usage is billed normally.
+          </p>
+          <div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:6px;">What to do</div>
+          <ul style="font-size:12px;color:#475569;line-height:1.7;padding-left:16px;margin-bottom:10px;">
+            <li>The run will finish on the API key. No action needed now.</li>
+            <li>Check your ChatGPT subscription status after the run.</li>
+            <li>If this keeps happening, your subscription may need attention.</li>
+          </ul>
+          <a href="../operator-session-identity/04-subscription-detail.html" style="font-size:12px;color:#6366f1;text-decoration:none;font-weight:500;">View subscription status &#8594;</a>
+        </div>
+      </div>
+
+      <!-- Rest of in-progress layout (abbreviated) -->
+      <div class="time-strip" style="margin-bottom:16px;">
+        <div class="time-strip-item">
+          <div class="time-strip-label">Elapsed</div>
+          <div class="time-strip-value">38 min</div>
+          <div class="time-strip-sub">of 120 min cap</div>
+        </div>
+        <div style="width:1px;background:#e2e8f0;align-self:stretch;"></div>
+        <div class="time-strip-item">
+          <div class="time-strip-label">Remaining</div>
+          <div class="time-strip-value">82 min</div>
+        </div>
+        <div style="width:1px;background:#e2e8f0;align-self:stretch;"></div>
+        <div class="time-strip-item">
+          <div class="time-strip-label">Step</div>
+          <div class="time-strip-value">5</div>
+          <div class="time-strip-sub">via API key fallback</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px;justify-content:center;">
+          <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#94a3b8;">
+            <span>0</span><span>120 min</span>
+          </div>
+          <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
+            <div style="width:32%;height:100%;background:#10b981;border-radius:4px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress-strip" style="margin-bottom:16px;">
+        <div class="progress-strip-icon">&#128203;</div>
+        <div class="progress-strip-body">
+          <div class="progress-strip-label">Current activity</div>
+          <div class="progress-strip-activity">Validating disputed invoice INV-2024-0892</div>
+          <div class="progress-strip-step">Step 5 &nbsp;&#183;&nbsp; Checking against purchase orders &nbsp;&#183;&nbsp; via API key</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#f59e0b;animation:pulse-dot 1.5s infinite;"></div>
+          <span style="font-size:12px;color:#92400e;font-weight:500;">Fallback</span>
+        </div>
+      </div>
+
+      <!-- Component annotations (for prototype context) -->
+      <div style="margin-top:32px;padding:16px 20px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#0369a1;margin-bottom:10px;">Prototype notes — D5 component</div>
+        <ul style="font-size:12.5px;color:#0284c7;line-height:1.8;padding-left:16px;">
+          <li>The amber fallback banner appears inline on the session-in-progress page when <code style="background:#e0f2fe;padding:1px 4px;border-radius:3px;">operator_session.fallback_engaged</code> fires.</li>
+          <li>"Why?" button toggles a positioned popover below the link. Popover dismisses on outside click.</li>
+          <li>Running dot changes from green (subscription) to amber (fallback) when engaged.</li>
+          <li>Time strip step sub-label updates to show "via API key fallback".</li>
+          <li>The banner persists for the rest of the run once engaged. It is not dismissable (it's informational, not a one-time notice).</li>
+        </ul>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+function togglePopover(id, btn) {
+  const p = document.getElementById(id);
+  p.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.fallback-banner')) {
+    document.getElementById('whyPopover').classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

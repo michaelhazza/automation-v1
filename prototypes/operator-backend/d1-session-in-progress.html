@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<!--
+  Screen D1: Autonomous run in progress
+  Primary task: Monitor a running autonomous session, cancel if needed.
+  Two state variants on this page:
+    - Normal running state (23 min elapsed / 97 min remaining)
+    - Approaching limit state (105 min elapsed / amber warning)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run in Progress | Invoice Processor | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link active" href="d8-active-sessions-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Autonomous runs
+        <span class="sidebar-badge">2</span>
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="../operator-session-identity/01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="d8-active-sessions-list.html" style="color:#64748b;text-decoration:none;">Autonomous runs</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Invoice Processor</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:4px;">SM</div>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Page header -->
+      <div class="page-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+            <h1 style="font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;margin:0;">Invoice Processor</h1>
+            <span class="run-status-pill status-running"><span class="dot"></span>Running</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;">Autonomous run in progress &nbsp;&#183;&nbsp; Started 09:14 today &nbsp;&#183;&nbsp; Run #OP-2847</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-secondary btn-sm" onclick="snapshotArtefacts()">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Snapshot artefacts
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="showCancelModal()">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            Cancel run
+          </button>
+        </div>
+      </div>
+
+      <!-- ── STATE A: Normal running ── -->
+      <div class="session-layout">
+        <div>
+          <!-- Time strip -->
+          <div class="time-strip" style="margin-bottom:16px;">
+            <div class="time-strip-item">
+              <div class="time-strip-label">Elapsed</div>
+              <div class="time-strip-value">23 min</div>
+              <div class="time-strip-sub">of 120 min cap</div>
+            </div>
+            <div style="width:1px;background:#e2e8f0;align-self:stretch;"></div>
+            <div class="time-strip-item">
+              <div class="time-strip-label">Remaining</div>
+              <div class="time-strip-value">97 min</div>
+            </div>
+            <div style="width:1px;background:#e2e8f0;align-self:stretch;"></div>
+            <div class="time-strip-item">
+              <div class="time-strip-label">Step</div>
+              <div class="time-strip-value">3</div>
+              <div class="time-strip-sub">of unknown</div>
+            </div>
+            <!-- Time bar -->
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px;justify-content:center;">
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#94a3b8;">
+                <span>0</span><span>120 min</span>
+              </div>
+              <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;">
+                <div style="width:19%;height:100%;background:#10b981;border-radius:4px;transition:width 0.5s;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Progress strip -->
+          <div class="progress-strip" style="margin-bottom:16px;">
+            <div class="progress-strip-icon">&#128196;</div>
+            <div class="progress-strip-body">
+              <div class="progress-strip-label">Current activity</div>
+              <div class="progress-strip-activity">Reading invoice PDF: Q1-Vendors-batch-3.pdf</div>
+              <div class="progress-strip-step">Step 3 &nbsp;&#183;&nbsp; Extracting line items from 14 pages</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#10b981;animation:pulse-dot 1.5s infinite;"></div>
+              <span style="font-size:12px;color:#047857;font-weight:500;">Live</span>
+            </div>
+          </div>
+
+          <!-- Log preview -->
+          <div class="section-card">
+            <div class="section-card-head">
+              <div class="section-card-title">Recent steps</div>
+              <a href="c2-run-trace-timeline.html" style="font-size:12.5px;color:#6366f1;text-decoration:none;">View full trace &#8594;</a>
+            </div>
+            <div class="section-card-body" style="padding:0;">
+              <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;gap:12px;">
+                <span style="font-size:11px;color:#94a3b8;white-space:nowrap;margin-top:2px;">09:14</span>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Run started</div>
+                  <div style="font-size:12px;color:#64748b;">Sandbox initialised. Credential injected.</div>
+                </div>
+              </div>
+              <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;gap:12px;">
+                <span style="font-size:11px;color:#94a3b8;white-space:nowrap;margin-top:2px;">09:14</span>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Step 1 complete: Fetch invoice list</div>
+                  <div style="font-size:12px;color:#64748b;">Retrieved 24 pending invoices.</div>
+                </div>
+              </div>
+              <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;gap:12px;">
+                <span style="font-size:11px;color:#94a3b8;white-space:nowrap;margin-top:2px;">09:15</span>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:2px;">Step 2 complete: Classify invoice types</div>
+                  <div style="font-size:12px;color:#64748b;">4 categories. 23 of 24 classifiable.</div>
+                </div>
+              </div>
+              <div style="padding:14px 20px;display:flex;align-items:flex-start;gap:12px;background:#fafff9;">
+                <span style="font-size:11px;color:#10b981;white-space:nowrap;margin-top:2px;font-weight:600;">Now</span>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#047857;margin-bottom:2px;">Step 3 in progress: Extract line items</div>
+                  <div style="font-size:12px;color:#64748b;">Processing PDF batch 3 of 5.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div>
+          <div class="sidebar-info-card">
+            <div class="sidebar-info-card-label">This run</div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">AI Subscription</div>
+              <div class="sidebar-info-value">
+                <a href="../operator-session-identity/04-subscription-detail.html" style="color:#6366f1;text-decoration:none;font-size:12px;">ChatGPT Pro</a>
+              </div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Fallback</div>
+              <div class="sidebar-info-value" style="display:flex;align-items:center;gap:5px;font-size:12px;">
+                <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                <span style="color:#047857;">Configured</span>
+              </div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Duration cap</div>
+              <div class="sidebar-info-value" style="font-size:12px;">120 min</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Started</div>
+              <div class="sidebar-info-value" style="font-size:12px;">09:14 today</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:#94a3b8;line-height:1.6;padding:4px 2px;">
+            Cancelling will stop the run immediately. Any artefacts produced so far can be downloaded.
+          </div>
+          <button class="btn btn-danger" style="width:100%;margin-top:12px;justify-content:center;" onclick="showCancelModal()">
+            Cancel run
+          </button>
+        </div>
+      </div>
+
+      <!-- ── STATE B: Approaching limit ── -->
+      <div class="state-variant-divider">State variant: approaching duration limit (105 min elapsed)</div>
+
+      <div class="page-header" style="margin-bottom:16px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+            <h1 style="font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;margin:0;">Invoice Processor</h1>
+            <span class="run-status-pill status-running"><span class="dot"></span>Running</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;">Autonomous run in progress &nbsp;&#183;&nbsp; Started 09:14 today &nbsp;&#183;&nbsp; Run #OP-2847</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <a href="d9-duration-override-modal.html" class="btn btn-outline-amber btn-sm">Extend time limit</a>
+          <button class="btn btn-secondary btn-sm">Snapshot artefacts</button>
+          <button class="btn btn-danger btn-sm" onclick="showCancelModal()">Cancel run</button>
+        </div>
+      </div>
+
+      <!-- Amber warning banner -->
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;margin-bottom:16px;font-size:13px;color:#78350f;">
+        <span style="font-size:18px;flex-shrink:0;">&#9201;</span>
+        <div style="flex:1;">
+          <div style="font-weight:600;margin-bottom:3px;">Approaching time limit in 15 min</div>
+          <div>This run will stop automatically at 120 min. To keep going, extend the time limit before it expires. Org admins can extend by up to 120 min.</div>
+        </div>
+        <a href="d9-duration-override-modal.html" class="btn btn-outline-amber btn-sm">Extend</a>
+      </div>
+
+      <div class="session-layout">
+        <div>
+          <div class="time-strip time-strip-warn" style="margin-bottom:16px;">
+            <div class="time-strip-item time-strip-warn">
+              <div class="time-strip-label" style="color:#92400e;">Elapsed</div>
+              <div class="time-strip-value">105 min</div>
+              <div class="time-strip-sub" style="color:#b45309;">of 120 min cap</div>
+            </div>
+            <div style="width:1px;background:#fde68a;align-self:stretch;"></div>
+            <div class="time-strip-item time-strip-warn">
+              <div class="time-strip-label" style="color:#92400e;">Remaining</div>
+              <div class="time-strip-value" style="color:#b45309;">15 min</div>
+            </div>
+            <div style="width:1px;background:#fde68a;align-self:stretch;"></div>
+            <div class="time-strip-item">
+              <div class="time-strip-label">Step</div>
+              <div class="time-strip-value">7</div>
+              <div class="time-strip-sub">of unknown</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px;justify-content:center;">
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#94a3b8;">
+                <span>0</span><span>120 min</span>
+              </div>
+              <div style="height:8px;background:#fde68a;border-radius:4px;overflow:hidden;">
+                <div style="width:87.5%;height:100%;background:#f59e0b;border-radius:4px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="progress-strip">
+            <div class="progress-strip-icon" style="background:#fffbeb;color:#b45309;">&#128203;</div>
+            <div class="progress-strip-body">
+              <div class="progress-strip-label">Current activity</div>
+              <div class="progress-strip-activity">Writing review notes for disputed items</div>
+              <div class="progress-strip-step">Step 7 &nbsp;&#183;&nbsp; 6 of 8 flagged items processed</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="sidebar-info-card" style="border-color:#fde68a;background:#fffbeb;">
+            <div class="sidebar-info-card-label" style="color:#92400e;">Time limit</div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Cap</div>
+              <div class="sidebar-info-value" style="font-size:12px;color:#b45309;font-weight:700;">120 min (15 left)</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Override</div>
+              <div class="sidebar-info-value" style="font-size:12px;">
+                <a href="d9-duration-override-modal.html" style="color:#b45309;text-decoration:none;font-weight:600;">Extend by up to 120 min &#8594;</a>
+              </div>
+            </div>
+          </div>
+          <a href="d9-duration-override-modal.html" class="btn btn-outline-amber" style="width:100%;justify-content:center;margin-bottom:10px;">Extend time limit</a>
+          <button class="btn btn-danger" style="width:100%;justify-content:center;" onclick="showCancelModal()">Cancel run</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Cancel modal -->
+<div class="modal-overlay" id="cancelModal" style="display:none;" onclick="hideCancelModal(event)">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="modal-head-title">Cancel this run?</div>
+      <button class="modal-head-close" onclick="hideCancelModal()">&#215;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13.5px;color:#475569;line-height:1.6;margin-bottom:14px;">
+        The run will stop immediately. Any artefacts produced so far will be available to download. This action cannot be undone.
+      </p>
+      <div style="font-size:12.5px;color:#94a3b8;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">
+        Run #OP-2847 &nbsp;&#183;&nbsp; Invoice Processor &nbsp;&#183;&nbsp; 23 min elapsed
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="hideCancelModal()">Keep running</button>
+      <a href="d4-session-cancelled.html" class="btn btn-danger">Cancel run</a>
+    </div>
+  </div>
+</div>
+
+<script>
+function showCancelModal() { document.getElementById('cancelModal').style.display = 'flex'; }
+function hideCancelModal(e) {
+  if (!e || e.target === document.getElementById('cancelModal')) {
+    document.getElementById('cancelModal').style.display = 'none';
+  }
+}
+function snapshotArtefacts() { alert('Snapshot requested. Artefacts will be available shortly.'); }
+</script>
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<!--
+  Screen D3: Autonomous run — Failed state
+  Primary task: Understand what went wrong and decide whether to retry.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Failed | Invoice Processor | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Agents</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link active" href="d8-active-sessions-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        Autonomous runs
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="../operator-session-identity/01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="d8-active-sessions-list.html" style="color:#64748b;text-decoration:none;">Autonomous runs</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">Invoice Processor</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:12px;color:#64748b;">Sarah M.</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:4px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <!-- Page header -->
+      <div class="page-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+            <h1 style="font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;margin:0;">Invoice Processor</h1>
+            <span class="run-status-pill status-failed"><span class="dot"></span>Failed</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;">Autonomous run failed &nbsp;&#183;&nbsp; 12 May 2026</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <a href="c2-run-trace-timeline.html" class="btn btn-secondary btn-sm">View run trace</a>
+          <button class="btn btn-primary btn-sm" onclick="alert('Retry queued.')">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.44"/></svg>
+            Retry
+          </button>
+        </div>
+      </div>
+
+      <!-- Error banner -->
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:18px 20px;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;margin-bottom:20px;">
+        <span style="font-size:22px;flex-shrink:0;">&#10060;</span>
+        <div style="flex:1;">
+          <div style="font-size:15px;font-weight:700;color:#991b1b;margin-bottom:6px;">The operator runtime crashed during step 4</div>
+          <div style="font-size:13.5px;color:#b91c1c;line-height:1.6;margin-bottom:10px;">
+            The sandboxed process stopped unexpectedly while reading a large PDF file. This is not retried automatically to avoid duplicating any actions already taken.
+          </div>
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">Error type: OPERATOR_RUNTIME_CRASH &nbsp;&#183;&nbsp; Step 4: Extract line items</div>
+
+          <!-- What happened expander -->
+          <button class="expander-toggle" onclick="toggleExpander('whatHappened',this)">
+            <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            What does this mean?
+          </button>
+          <div class="expander-content" id="whatHappened">
+            <div style="padding:12px 14px;background:#fff1f2;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#7f1d1d;line-height:1.65;margin-top:8px;">
+              <p style="margin-bottom:8px;">The autonomous run uses a sandboxed process that handles the work. If that process crashes, we stop the run rather than restarting it automatically.</p>
+              <p>This is intentional: autonomous runs often take real actions (sending emails, writing to databases). Auto-restarting could repeat those actions and cause duplicates. You can retry the run from scratch when you're ready.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-layout">
+        <div>
+          <!-- What to do -->
+          <div class="section-card" style="margin-bottom:16px;">
+            <div class="section-card-head">
+              <div class="section-card-title">What to do next</div>
+            </div>
+            <div class="section-card-body">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                  <div style="width:28px;height:28px;border-radius:8px;background:#eef2ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;font-weight:700;">1</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:3px;">Retry the run</div>
+                    <div style="font-size:12.5px;color:#64748b;">Steps 1-3 completed successfully. The run restarts from the beginning.</div>
+                  </div>
+                  <button class="btn btn-primary btn-sm" onclick="alert('Retry queued.')">Retry</button>
+                </div>
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                  <div style="width:28px;height:28px;border-radius:8px;background:#eef2ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;font-weight:700;">2</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:3px;">Check the run trace</div>
+                    <div style="font-size:12.5px;color:#64748b;">See which steps ran and what data was collected before the crash.</div>
+                  </div>
+                  <a href="c2-run-trace-timeline.html" class="btn btn-secondary btn-sm">View trace</a>
+                </div>
+                <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                  <div style="width:28px;height:28px;border-radius:8px;background:#eef2ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;font-weight:700;">3</div>
+                  <div style="flex:1;">
+                    <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:3px;">Report a problem</div>
+                    <div style="font-size:12.5px;color:#64748b;">If this keeps happening, let us know and we'll investigate.</div>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" onclick="alert('Problem report filed.')">Report</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Partial artefacts -->
+          <div class="section-card">
+            <div class="section-card-head">
+              <div class="section-card-title">Partial artefacts</div>
+              <span style="font-size:12px;color:#94a3b8;">From steps 1-3 before crash</span>
+            </div>
+            <div class="section-card-body">
+              <div class="artefact-row">
+                <div class="artefact-icon">&#128196;</div>
+                <div style="flex:1;">
+                  <div class="artefact-name">invoice-list-raw.csv</div>
+                  <div class="artefact-size" style="margin-right:0;">24 invoices from step 1 &nbsp;&#183;&nbsp; 18 KB</div>
+                </div>
+                <a href="#" class="btn btn-secondary btn-sm">Download</a>
+              </div>
+              <div style="font-size:12px;color:#94a3b8;margin-top:10px;">Artefacts from the failed step (4) and beyond were not produced.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div>
+          <div class="sidebar-info-card">
+            <div class="sidebar-info-card-label">Run details</div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Failed at</div>
+              <div class="sidebar-info-value" style="font-size:12px;color:#dc2626;">Step 4 of 8</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Duration</div>
+              <div class="sidebar-info-value" style="font-size:12px;">16 min 41 sec</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Started</div>
+              <div class="sidebar-info-value" style="font-size:12px;">09:14 today</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Failed</div>
+              <div class="sidebar-info-value" style="font-size:12px;">09:30 today</div>
+            </div>
+            <div class="sidebar-info-row">
+              <div class="sidebar-info-key">Cost</div>
+              <div class="sidebar-info-value" style="font-size:12px;">$0.09 (partial)</div>
+            </div>
+          </div>
+
+          <a href="c2-run-trace-timeline.html" class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:10px;text-decoration:none;display:flex;">View run trace</a>
+          <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="alert('Retry queued.')">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.44"/></svg>
+            Retry
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toggleExpander(id, btn) {
+  const el = document.getElementById(id);
+  el.classList.toggle('open');
+  const svg = btn.querySelector('svg');
+  svg.style.transform = el.classList.contains('open') ? 'rotate(180deg)' : '';
+}
+</script>
+</body>
+</html>
