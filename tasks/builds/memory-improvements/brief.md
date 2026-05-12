@@ -1,9 +1,9 @@
 # Memory System Improvements — Pre-Spec Brief
 
-**Status:** **LOCKED** for spec handoff (Rev 6.1 — outstanding open questions resolved by author, all favouring minimum UI)
-**Revision:** 6.1 (resolved open questions in A and B in favour of minimum UI: no edit/view-source cross-links on Sources tab; 30d window only on Memory Utility; pre-migration exclusion surfaced as one caveat-banner line, not a new visual element)
+**Status:** **LOCKED** for spec handoff (Rev 6.2 — final reviewer sync pass applied; no further open issues from review)
+**Revision:** 6.2 (final reviewer F1-F3 + P1-P2 applied: index.html stale D wording fixed; B1 substrate trimmed to raw counts + 30d aggregate only; A lineage schema gains run-provenance columns; rationale doc surface counts updated; reverse-lineage UI marked as optional chrome)
 **Date:** 2026-05-12
-**Spec-handoff non-negotiables** (Rev 6 simplified): B1 must add `injected_entry_ids` before entry utility is reported. B1 aggregate queries must distinguish "not measured" from "0% utility" for pre-migration runs. D ships behind a single env on/off flag (no user-facing UI, no four-mode rollout). **D-Recall invariant:** semantic filtering must never silently empty a previously non-empty candidate category. **D-Embedding-failure invariant:** OpenAI failures fail open to legacy retrieval and emit a degraded reason on the run trace; they must not block agent execution. A must use the join table unless the spec explicitly rejects bidirectional lineage; lineage row retains deletion-safe snapshot metadata even when `source_entry_id` becomes NULL.
+**Spec-handoff non-negotiables** (Rev 6.2): B1 must add `injected_entry_ids` before entry utility is reported. B1 substrate exposes raw per-run counts plus the 30-day aggregate that B2 consumes (no other rolling windows materialised). B1 aggregate queries must distinguish "not measured" from "0% utility" for pre-migration runs. D ships behind a single env on/off flag (no user-facing UI, no four-mode rollout). **D-Recall invariant:** semantic filtering must never silently empty a previously non-empty candidate category. **D-Embedding-failure invariant:** OpenAI failures fail open to legacy retrieval and emit a degraded reason on the run trace; they must not block agent execution. A must use the join table unless the spec explicitly rejects bidirectional lineage; lineage row retains deletion-safe snapshot metadata AND run-provenance columns (`source_run_id`, `source_run_id_hash`, `source_run_label_at_capture`) even when `source_entry_id` or `source_run_id` becomes NULL.
 **Purpose:** Stress-test a set of memory-system improvements before committing to a spec. Each proposal has been vetted against the codebase.
 
 ## Table of contents
@@ -109,7 +109,9 @@ Per-run citation data is persisted (`agent_runs.cited_entry_ids`, `agent_runs.ap
 
 This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"memory exists but is opaque — users can't audit what's been learned."* The Trust & Verification Layer build (`tasks/builds/trust-verification-layer/plan.md:988`) is already adding a `Source` pill with values `Correction | Manual | Auto`. Without lineage, the `Auto` case is a dead-end — the pill exists but clicking it answers nothing.
 
-**How.** Add a `memory_block_version_sources` join table. **Required columns** (locked by the A-Deletion invariant in §4): `block_version_id`, `source_entry_id` (nullable FK, `ON DELETE SET NULL`), `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`. `snapshot_excerpt` is **out of scope for v1** per the A-Deletion invariant. Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that joins through to source entries (or surfaces snapshot metadata when the source row is null) and the runs that produced them. Per-version, so future re-syntheses preserve their own cluster.
+**How.** Add a `memory_block_version_sources` join table. **Required columns** (locked by the A-Deletion invariant in §4): `block_version_id`, `source_entry_id` (nullable FK, `ON DELETE SET NULL`), `source_entry_id_hash`, `content_hash`, `source_type`, `captured_at`, `quality_score_at_capture`, `contribution_rank`, **`source_run_id`** (nullable FK to `agent_runs`, `ON DELETE SET NULL`), **`source_run_id_hash`**, **`source_run_label_at_capture`** (denormalised text — e.g. `"Marketing Research Agent · 2026-05-12 09:14"` — captured at synthesis time). The run-provenance columns (reviewer F3) ensure the audit UX continues to surface "which run produced this source" even if the run row is purged later. `snapshot_excerpt` remains **out of scope for v1** per the A-Deletion invariant. Populate at the version-insert site inside `memoryBlockSynthesisService.ts:195-206`. Surface via a new admin route `/api/memory-blocks/:id/sources` that joins through to source entries and runs when present, falling back to the captured labels when either has been deleted. Per-version, so future re-syntheses preserve their own cluster.
+
+**Reverse-lineage links are optional UI chrome (reviewer P2).** The bidirectional lineage expander on the Sources mockup ("also contributed to N other blocks") is convenient, not required. v1 may ship the expander only if it is low-cost; the mandatory contract is the underlying join-table data, which already supports the query.
 
 **Why a join table is now the default (revised per reviewer F4).** Rev 2 of this brief leaned toward `source_entry_ids uuid[]` as the cheaper option. The reviewer pushed back: if the audit UX will ever answer either "where else did this source entry contribute?" or "which auto-synthesised blocks came from this run?", the array shape paints us into a corner that costs a second migration later. Both questions are plausible given the Trust & Verification angle. A join table is more queryable, indexable, and naturally extends with per-source metadata (`content_hash`, `quality_score_at_capture`, `contribution_rank`, optional `snapshot_excerpt`). The cost difference today is small — one extra table vs. one extra column — and the option-value is large.
 
@@ -142,10 +144,11 @@ This is a real, documented gap. `docs/universal-brief-dev-brief.md:330` says: *"
 
 #### B1 — Measurement substrate
 
-**What ships.** A materialised view (refreshed nightly) that exposes, per run / agent / workspace / memory category, the counts and ratios needed for utility tracking:
-- `injected_entry_count`, `cited_entry_count`, `entry_utility_rate` (per workspace memory)
-- `injected_block_count`, `cited_block_count`, `block_utility_rate` (per memory block)
-- Rolling 7-day and 30-day aggregates, per agent and per workspace.
+**What ships (Rev 6.2 — trimmed per reviewer F2).** A materialised view (refreshed nightly) that exposes:
+- Per-run raw counts: `injected_entry_count`, `cited_entry_count`, `injected_block_count`, `cited_block_count`.
+- A single **30-day rolling aggregate** per agent and per workspace — this is the official aggregate that B2 charts consume.
+
+Seven-day or other windows are **derivable from the raw per-run rows via SQL** and are explicitly **not** a v1 dashboard contract. Operators investigating shorter-window regressions during dev can query the raw rows directly. Materialising additional rolling windows is deferred until the dashboard cadence justifies it.
 
 **The denominator problem (reviewer F2, evidence-verified).** Codebase audit confirms:
 - `agent_runs.appliedMemoryBlockIds` (jsonb string[], migration 0199) **is** the denominator for memory-block utility. Persisted today.

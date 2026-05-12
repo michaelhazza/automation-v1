@@ -31,7 +31,7 @@
 <p class="lede">Honest CEO-level summary: who clicks each surface, why, and whether it is actually required in v1 or whether a cheaper non-UI path would do.</p>
 
 <div class="note">
-<strong>Important framing:</strong> none of these surfaces are user-facing in the customer sense. All three are operator / admin tooling. The customer benefit is indirect: better AI memory behaviour, fewer hallucinations, faster trust building. The UI gain accrues to the team running the platform, not to the end user.
+<strong>Important framing:</strong> the surviving UI surfaces are operator / admin tooling, not customer-facing. Proposal D has no UI at all in Rev 6.1. The customer benefit is indirect: better AI memory behaviour, fewer hallucinations, faster trust building. The UI gain accrues to the team running the platform, not to the end user.
 </div>
 
 <h2>1. Memory Block Sources tab <span class="verdict v-required">Required</span></h2>
@@ -103,7 +103,7 @@
   </tbody>
 </table>
 
-<p><strong>Total net-new pages: zero.</strong> All five surfaces are tabs, sections, or panels inside existing pages.</p>
+<p><strong>Total net-new pages: zero.</strong> The surviving UI surfaces are tabs or sections inside existing pages. Proposal D is backend-only.</p>
 
 <div class="bottom">
 <strong>Bottom line (Rev 6).</strong> The Rev 6 simplification removes the only UI surface that was previously "unconditionally required" — Proposal D ships without any UI at all. Of the surfaces that remain, none are unconditionally required: A's Sources tab is conditional on Trust &amp; Verification shipping its <code>Source: Auto</code> pill, and B2 is a convenience layer over the mandatory B1 substrate. The truly minimal v1 path: B1 substrate (no UI) + D env flag (no UI) + A's Sources tab (small UI gated on T&amp;V). The two surviving mockups (Sources tab, Memory Utility dashboard) show the maximal operator-facing surface; the spec phase decides whether each ships in v1 or follows.
