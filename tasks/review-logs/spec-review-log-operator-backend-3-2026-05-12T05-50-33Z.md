@@ -34,5 +34,5 @@ All accepted mechanical. Brief notes:
 - Ambiguous findings: 0
 - Reclassified → directional: 0
 - Autonomous decisions: 0
-- Spec commit after iteration: (to be recorded after Step 8b)
+- Spec commit after iteration: `a56892be`
 
