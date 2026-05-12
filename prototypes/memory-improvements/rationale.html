@@ -71,20 +71,20 @@
 <h2>3. AKR Ranker Settings + Shadow Comparison <span class="verdict v-required">Mode selector required, comparison optional</span></h2>
 
 <div class="note">
-<strong>Codebase reality check:</strong> the mockup labelled this "Settings → Retrieval." That subsection does not exist today. The actual integration is a new <em>section</em> inside <code>AdminSettingsPage.tsx</code> or <code>SystemSettingsPage.tsx</code> (admin-only). The shadow-comparison panel does <strong>not</strong> belong in Settings at all — it belongs on the existing <code>RunTracePage</code>, where operators already debug individual runs.
+<strong>Codebase reality check + CEO scope correction:</strong> the original mockup labelled this "Settings → Retrieval" (org-level). That subsection does not exist, and more importantly, <strong>org-level is the wrong scope</strong> — each subaccount must act independently. The mode selector lives as a section on <code>SubaccountKnowledgePage</code> (per-subaccount). An org-level default may exist behind the scenes, but the subaccount admin sees this as their own setting (no "inherited from org" badges, no greyed fields). The shadow-comparison panel lives on the existing <code>RunTracePage</code>, where operators already debug individual runs.
 </div>
 
 <h3>Who clicks the mode selector</h3>
-<p>A platform operator rolling out a retrieval-quality change to a specific org or globally. End users do not see this.</p>
+<p>A subaccount admin rolling out a retrieval-quality change for their workspace. End users do not see this.</p>
 
 <h3>Why the mode selector exists</h3>
-<p>Proposal D changes how every agent run picks memory. The reviewer mandated a four-mode rollout (Off → Shadow → Sampled → On) for safety. Someone has to flip the mode per org. That someone is a platform operator, and they need a UI surface to do it without engineering writing config files for every customer.</p>
+<p>Proposal D changes how every agent run picks memory. The reviewer mandated a four-mode rollout (Off → Shadow → Sampled → On) for safety. Each subaccount must flip its own mode independently — an agency's clients evolve at different paces and risk profiles. Someone has to control this per subaccount; that someone is the subaccount admin, and they need a UI surface to do it without engineering involvement.</p>
 
 <h3>Is the mode selector actually required?</h3>
-<p><strong>Yes — unless we accept env-only configuration.</strong> Env-only means engineering deploys a config change every time we want to enable shadow mode for a new tenant. That does not scale past five or six tenants. With more, you need an operator UI. <strong>It can be small.</strong></p>
+<p><strong>Yes — unless we accept env-only configuration.</strong> Env-only means engineering deploys a config change every time we want to enable shadow mode for a new subaccount. Does not scale past a handful of subaccounts. With more, you need an admin UI. <strong>It can be small.</strong></p>
 
 <h3>Where the mode selector lives</h3>
-<p>Should be a new <em>section</em> within <code>AdminSettingsPage</code>, not a new page. The label "Retrieval" or "AI Memory" tucks in next to other admin toggles. Per-org override is stored via the existing <code>orgSettingsService</code> or <code>featureFlags.ts</code> — both already in the codebase, no schema change needed.</p>
+<p>A new <em>section</em> on <code>SubaccountKnowledgePage</code> (per-subaccount), not a new page. The mode is a first-class subaccount control — the subaccount admin sees this as their setting, with no visible inheritance chain. Behind the scenes, resolution at runtime is: subaccount value if set → org default → env-driven platform default. Subaccount-level override is stored via a subaccount-scoped settings primitive; org-level defaults via the existing <code>orgSettingsService</code>. No new column on the <code>organisations</code> table.</p>
 
 <h3>Who clicks the shadow-comparison panel</h3>
 <p>An operator inspecting a specific agent run during D rollout, asking "would the new ranker have changed what got loaded?" Spot-check tool. Not used routinely once D ships at <code>on</code>.</p>
@@ -110,7 +110,7 @@
     <tr><td>A — Sources tab</td><td>Conditional on T&amp;V shipping</td><td>No (new tab on existing page)</td><td>Yes</td></tr>
     <tr><td>B1 — Data substrate</td><td>Yes (D's rollback signal)</td><td>No UI</td><td>n/a</td></tr>
     <tr><td>B2 — Utility dashboard</td><td>No</td><td>No (new tab on UsagePage)</td><td>Yes</td></tr>
-    <tr><td>D — Mode selector</td><td>Yes if &gt;5 tenants on D</td><td>No (section on AdminSettings)</td><td>Yes</td></tr>
+    <tr><td>D — Mode selector</td><td>Yes if &gt;5 subaccounts on D</td><td>No (section on SubaccountKnowledgePage, per-subaccount)</td><td>Yes</td></tr>
     <tr><td>D — Shadow comparison</td><td>No</td><td>No (panel on RunTracePage)</td><td>Yes</td></tr>
   </tbody>
 </table>
