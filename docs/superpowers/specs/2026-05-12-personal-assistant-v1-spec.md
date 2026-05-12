@@ -296,7 +296,7 @@ If a later section names a file not in §5.1 / §5.2, it is a file-inventory-dri
 |---|---|---|---|---|---|
 | Executive Assistant agent (template + per-user instance) | `agents` row per instance (predecessor schema; `owner_user_id` set) + system_agents row for the template | yes (each user instance carries `owner_user_id`) | yes (every instance lives in a subaccount) | inherited via subaccount | provision on user opt-in; archive on user offboarding |
 | Voice profile | `voice_profiles` row | optional (one of) | optional (one of) | optional (one of); CHECK enforces exactly one | derive on first-run setup; refresh on schedule; opt-out blocks derivation + use |
-| EA draft (proposed outbound message awaiting review) | `ea_drafts` row | yes (`owner_user_id` set, owned by the user whose EA proposed it) | yes | inherited | state machine: `pending → approved | rejected | expired`; approved drafts are sent via the action's existing path |
+| EA draft (proposed outbound message awaiting review) | `ea_drafts` row + FK to `actionService.proposeAction` proposal row | yes (`owner_user_id` set, owned by the user whose EA proposed it) | yes | inherited | approval state on the proposal row (`pending → approved | rejected | expired`); send state on `ea_drafts` (`idle → sending → sent | send_failed`); proposal primitive owns approval, `eaDraftService` owns send |
 | External-source trigger event (transient, not persisted as a domain row — payload lives in `agent_runs.triggerContext` JSONB only) | none (event-only) | inherits from agent's `owner_user_id` | inherits from agent's `subaccount_id` | inherited | fire once, dedup-key prevents replay |
 
 ### 6.2 Ownership-axis semantics
@@ -385,13 +385,13 @@ Producer: agent execution path → calendar action handler. Consumer: Google Cal
 - `list_events.input`: `{ calendarId: string = 'primary', timeMin: ISO8601, timeMax: ISO8601, maxResults: number = 50, query?: string }`. Output: `Array<{ eventId, summary, startAt, endAt, attendees: Array<{ email, responseStatus }>, organizerEmail }>`.
 - `get_event.input`: `{ calendarId: string, eventId: string }`. Output: same shape as a single `list_events` row plus optional `description` (sanitised).
 - `find_free_slot.input`: `{ calendarId: string = 'primary', timeMin: ISO8601, timeMax: ISO8601, durationMinutes: number, requiredAttendees?: string[] }`. Output: `Array<{ startAt, endAt }>` ranked earliest-first.
-- `create_event.input`: `{ calendarId: string = 'primary', summary: string, startAt: ISO8601, endAt: ISO8601, attendees?: Array<{ email, optional?: boolean }>, description?: string, location?: string, conferenceData?: 'google_meet' | null }`. Output: `{ eventId, htmlLink }`.
-- `update_event.input`: `{ calendarId: string, eventId: string, patch: Partial<CreateEventInput>, ifMatchETag?: string }`. Output: `{ eventId, htmlLink, updatedAt }`.
-- `respond_to_invite.input`: `{ calendarId: string, eventId: string, response: 'accepted' | 'declined' | 'tentative', comment?: string }`. Output: `{ eventId, response }`.
+- `create_event.input`: `{ eaDraftId: uuid (REQUIRED V1; see §8.4), calendarId: string = 'primary', summary: string, startAt: ISO8601, endAt: ISO8601, attendees?: Array<{ email, optional?: boolean }>, description?: string, location?: string, conferenceData?: 'google_meet' | null }`. Output: `{ eventId, htmlLink }`.
+- `update_event.input`: `{ eaDraftId: uuid (REQUIRED V1; see §8.4), calendarId: string, eventId: string, patch: Partial<CreateEventInput>, ifMatchETag?: string }`. Output: `{ eventId, htmlLink, updatedAt }`.
+- `respond_to_invite.input`: `{ eaDraftId: uuid (REQUIRED V1; see §8.4), calendarId: string, eventId: string, response: 'accepted' | 'declined' | 'tentative', comment?: string }`. Output: `{ eventId, response }`.
 
 Idempotency keys (corrected — Google Calendar's `events.insert` does NOT honour a `requestId` parameter; the prior draft was wrong about that API surface):
 
-- **`create_event` (draft-mediated path — the V1 invocation path).** Every V1 `create_event` invocation is review-gated and proxied through an `ea_drafts` row (Tier 4 in the action registry but Tier 6-equivalent for V1 because EA writes always go through review per §13.1 default approval policy). The draft row IS the idempotency record: `ea_drafts.sentMessageId` is set once on first successful send to Google's `events.insert`; subsequent retries against the same draft return the stored `sentMessageId` without re-calling Google. Concurrency on the draft row uses the optimistic `UPDATE ... WHERE state = 'approved' AND sentMessageId IS NULL` predicate; the losing caller reads the winning row's `sentMessageId`.
+- **`create_event` (draft-mediated path — the V1 invocation path).** Every V1 `create_event` invocation is review-gated and proxied through an `ea_drafts` row (Tier 4 in the action registry but Tier 6-equivalent for V1 because EA writes always go through review per §13.1 default approval policy). The draft row IS the idempotency record: `ea_drafts.externalResultId` is set once on first successful send to Google's `events.insert`; subsequent retries against the same draft return the stored `externalResultId` without re-calling Google. Concurrency on the draft row uses the optimistic `UPDATE ... WHERE state = 'approved' AND externalResultId IS NULL` predicate; the losing caller reads the winning row's `externalResultId`.
 - **`update_event`.** Optimistic `If-Match` on the event ETag (Google honours this). `update_event` invocations are also draft-mediated for V1 (Tier 4 review-gated); on retry, the draft row's stored target eventId + ETag drive the second attempt.
 - **`respond_to_invite`.** Naturally idempotent (last write wins, no DB-level dedup needed).
 - **Non-draft-mediated direct invocations** are out of V1 scope — all V1 EA Calendar writes go through the review/draft path. If a future caller bypasses the draft path (e.g. a different agent template authored later), the architect adds a dedicated idempotency record at that time; V1 does not pre-build one.
@@ -434,7 +434,9 @@ Worked example: see brief §3.11. Source-of-truth precedence: `optOutAt` wins ov
 
 ### 7.5 `EADraft` (row Zod schema in `shared/types/eaDraft.ts`)
 
-Producer: workflow skill execution path (`ea-inbox-triage`). Consumer: `eaDraftService` + Drafts UI on Workspace tab + approval flow + the action handler that finally sends.
+**Approval-primitive composition (LOCKED V1).** `ea_drafts` does NOT own approval state. Approval state, approval audit, expiry, and reviewer decision are owned by the existing `actionService.proposeAction` primitive. `ea_drafts` carries EA-specific draft payload (rendered preview, proposed body, target metadata) and a FK to the proposal row. Approved proposals invoke the underlying action handler once; the result is recorded on the `ea_drafts` row's `externalResultId` for UI convenience, but the proposal row remains the approval source of truth. This is a hard composition contract — the builder MUST NOT introduce a parallel approval state machine on `ea_drafts`. Phase 2 architect verifies `actionService.proposeAction`'s contract supports a per-domain payload reference (FK or JSONB `proposal_payload_ref` column) at plan-authoring time. If the architect discovers the existing primitive cannot accept the FK shape, the architect escalates back to the spec for revision — implementation does NOT proceed with a parallel state machine.
+
+Producer: workflow skill execution path (`ea-inbox-triage`) writes both the proposal row (via `actionService.proposeAction`) AND the `ea_drafts` row (via `eaDraftService.createDraft`). Consumer: `eaDraftService` + Drafts UI on Workspace tab + approval flow (driven by the proposal primitive) + the action handler that finally sends (invoked by the proposal primitive's commit hook).
 
 Row fields:
 - `id: uuid`
@@ -443,27 +445,24 @@ Row fields:
 - `ownerUserId: uuid` (not null)
 - `agentId: uuid` (the EA agent that proposed the draft)
 - `runId: uuid` (the agent run that proposed it)
+- `proposalId: uuid` (not null) — FK to the `actionService.proposeAction` proposal row. THIS is the approval-state source of truth. State queries (`is the draft awaiting approval?`, `expired?`, `rejected?`) read from the proposal row, not from `ea_drafts`. Phase 2 architect names the exact target column (existing primitive's row id).
 - `kind: 'gmail_reply' | 'gmail_new' | 'slack_post' | 'slack_dm' | 'calendar_create' | 'calendar_update' | 'calendar_respond'`
 - `targetRef: jsonb` — kind-specific shape (e.g. `{ kind: 'gmail_reply', threadId, inReplyToMessageId, recipientEmail }`)
 - `body: jsonb` — proposed action payload (e.g. for `gmail_reply`: `{ subject, body, cc?, bcc? }`)
-- `state: 'pending' | 'approved' | 'sending' | 'rejected' | 'expired'` — the `'sending'` value is a transitional state used by the action handler during the optimistic-predicate / unknown-success-recovery path per §24.2; it surfaces as `'approved'` in user-facing UI (operators see drafts as "approved, sending" → "approved, sent").
-- `decidedAt: timestamptz | null`
-- `decidedByUserId: uuid | null` (always the `ownerUserId` for V1 — no cross-user approval)
-- `expiresAt: timestamptz` — default `createdAt + 7 days`; existing `workflowGateStallNotifyJob.ts` handles stall semantics
-- `sentMessageId: text | null` — populated when an approved draft is sent; the action's external id (Gmail messageId, Slack messageTs, Calendar eventId)
+- `sendState: 'idle' | 'sending' | 'sent' | 'send_failed'` — POST-approval send-attempt state (NOT the approval state — that lives on the proposal row). Default `'idle'` until the proposal is approved + the action handler is invoked. `'sending'` is the transitional state during the action's optimistic-predicate / unknown-success-recovery path per §24.2. `'sent'` when `externalResultId` is set. `'send_failed'` if all retries exhaust without producing an external object.
+- `externalResultId: text | null` — populated when the draft's underlying action completes; the action's external result id, kind-specific (Gmail messageId for `gmail_reply` / `gmail_new`; Slack messageTs for `slack_post` / `slack_dm`; Calendar eventId for `calendar_create` / `calendar_update`; Calendar eventId of the responded-to event for `calendar_respond`). Set once; immutable thereafter. Used by Run Trace + operator UI to deep-link to the resulting external object.
 - `createdAt`, `updatedAt`
 
-State machine (closed set; §24 names valid transitions):
+Send-state machine (closed set; §24 names valid transitions). NOT the approval state machine — approval lives on the proposal row:
 ```
-pending ─approve→ approved ─claim-send→ sending ─complete-send→ approved (with sentMessageId set)
-       ─reject→ rejected (terminal)
-       ─expire→ expired (terminal — fires from workflowGateStallNotifyJob)
-
+idle ─proposal-approved+send-claimed→ sending ─complete-send→ sent (with externalResultId set)
 sending ─unknown-outcome-recovery→ sending (idempotent retry pickup)
-       ─complete-send→ approved (with sentMessageId set)
-       ─stall→ approved (no sentMessageId — recovery handler resets after timeout)
+       ─complete-send→ sent (with externalResultId set)
+       ─exhaust-retries→ send_failed
+sending ─stall→ idle (recovery handler resets after timeout; ready for a new claim)
+send_failed ─manual-retry→ sending (operator clicks retry; new claim cycle)
 ```
-Approval is the only operator-driven transition; once a draft is `rejected` or `expired`, no further transition is permitted. Once `approved + sentMessageId` is set, no re-send (the row is the audit trail). The `sending` transitional state appears as `approved` in the operator UI; only the action handler observes it directly.
+Approval / rejection / expiry are recorded on the proposal row, NOT on `ea_drafts`. Once `sendState = 'sent' AND externalResultId IS NOT NULL`, no further transition is permitted (the row is the audit trail). The `'sending'` transitional state surfaces as `'sent (sending)'` in the operator UI for visibility; recovery is automatic.
 
 ### 7.6 `HomeWidgetDeclaration` (on system_agent template)
 
@@ -572,8 +571,8 @@ Six actions added to `server/config/actionRegistry.ts`:
 | `list_events` | read | 2 | auto | `api_status_2xx` | safe | safe-default | false | true |
 | `get_event` | read | 2 | auto | `row_exists` | safe | safe-default | false | true |
 | `find_free_slot` | read (compute over read) | 2 | auto | `api_status_2xx` | safe | safe-default | false | true |
-| `create_event` | write | 4 | **review** | `row_exists` | state-based via originating `ea_drafts.sentMessageId` (V1 invocation path is draft-mediated; see §7.2 + §24.2) | guarded | false | true |
-| `update_event` | write | 4 | **review** | `row_exists` | state-based via `If-Match` ETag | guarded | false | true |
+| `create_event` | write | 4 | **review** | `row_exists` | state-based via originating `ea_drafts.externalResultId` (V1 invocation path is draft-mediated; handler REJECTS calls without `eaDraftId` per §8.4 + §7.2 + §24.2) | guarded | false | true |
+| `update_event` | write | 4 | **review** | `row_exists` | state-based via originating `ea_drafts.externalResultId` + `If-Match` ETag (handler REJECTS calls without `eaDraftId` per §8.4) | guarded | false | true |
 | `respond_to_invite` | write | 3 | **review** | `api_status_2xx` | state-based (last-write-wins) | guarded | false | true |
 
 Risk-tier justifications per Phase 1 foundation §4.2.3:
@@ -596,8 +595,8 @@ This is the **alignment correction** noted in brief §0.5.4 + §3.2: V1 ships wr
 `server/services/calendar/calendarActionService.ts` action handler responsibilities (per action):
 
 1. Resolve owner-scoped Google Calendar credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'google_calendar', ownerUserId: agent.ownerUserId })`. If `agent.ownerUserId IS NULL`, the broker call is subaccount-scoped (existing path); for V1 this never happens for the EA but the handler is generic.
-2. Validate input against the action's Zod schema.
-3. For write actions: idempotency per §7.2 + §24.2 — the originating `ea_drafts` row's `sentMessageId` is the idempotency record for `create_event` (set once on first send); `update_event` uses Google's `If-Match` ETag header; `respond_to_invite` is naturally idempotent. Do not pass a `requestId` parameter — Google Calendar `events.insert` does not honour it.
+2. Validate input against the action's Zod schema. **For write actions (`create_event`, `update_event`):** the input MUST include `eaDraftId: uuid` referencing an `ea_drafts` row in state `approved` owned by the caller's `ownerUserId`. If `eaDraftId` is missing OR the referenced row is not in state `approved` OR `ea_drafts.ownerUserId !== agent.ownerUserId`, the handler REJECTS with typed error `code: 'missing_draft_context'` and a 422 response. Generic, non-draft-mediated Calendar event creation is deferred to V1.5 per §26 (the V1.5 spec adds either a generic `external_action_idempotency` table OR a direct-call idempotency record on a per-action basis; V1 does not pre-build either).
+3. For write actions: idempotency per §7.2 + §24.2 — the originating `ea_drafts` row's `externalResultId` is the idempotency record for `create_event` (set once on first send); `update_event` uses Google's `If-Match` ETag header; `respond_to_invite` is naturally idempotent. Do not pass a `requestId` parameter — Google Calendar `events.insert` does not honour it.
 4. Call Google Calendar API with `withBackoff` wrapping.
 5. Map errors:
    - 401 / 403 → typed `CREDENTIAL_REVOKED` or `INSUFFICIENT_SCOPE`; broker marks the connection `expired`; trigger emits `trigger.suppressed`.
@@ -606,7 +605,7 @@ This is the **alignment correction** noted in brief §0.5.4 + §3.2: V1 ships wr
    - 429 (rate-limited) → backoff per existing primitive; if budget exceeded, return `partial` outcome.
    - 5xx → retry per `retryPolicy: 'guarded'`; if exhausted, propagate.
 6. Emit `action.completed` Run Trace event with `result` + redaction-safe metadata.
-7. On `create_event` / `update_event` / `respond_to_invite` success, write the external event id back to the originating `ea_drafts` row's `sentMessageId` if one exists (§7.5 lifecycle).
+7. On `create_event` / `update_event` / `respond_to_invite` success, write the external event id back to the originating `ea_drafts` row's `externalResultId` if one exists (§7.5 lifecycle).
 
 ### 8.5 Pure helpers (`calendarActionServicePure.ts`)
 
@@ -615,7 +614,7 @@ Pure functions per `docs/spec-context.md` runtime_tests posture:
 - `validateCreateEventInput(input)` → branded `ValidatedCreateEventInput` or typed Zod error.
 - `validateUpdateEventInput(input)` → branded type.
 - `validateRespondToInviteInput(input)` → branded type.
-- `deriveIdempotencyKey({ kind, ownerUserId, payload })` → 128-bit hex key. Used only for internal draft/action correlation (e.g. detecting "the same propose-action payload was generated twice within a workflow run"). NOT passed to Google Calendar; per §24.2, Google `events.insert` does not honour a `requestId` parameter, and `create_event` idempotency goes through the `ea_drafts.sentMessageId` state-based path + `extendedProperties.private.ea_draft_id` recovery tag.
+- `deriveIdempotencyKey({ kind, ownerUserId, payload })` → 128-bit hex key. Used only for internal draft/action correlation (e.g. detecting "the same propose-action payload was generated twice within a workflow run"). NOT passed to Google Calendar; per §24.2, Google `events.insert` does not honour a `requestId` parameter, and `create_event` idempotency goes through the `ea_drafts.externalResultId` state-based path + `extendedProperties.private.ea_draft_id` recovery tag.
 - `normaliseAttendees(attendees)` → deduped, lower-cased, optional-flag preserved.
 - `computeFreeSlots({ events, timeMin, timeMax, durationMinutes, workingHours })` → ranked `Array<{ startAt, endAt }>`. Working-hours window read from the EA agent's `memory_blocks` (`key = 'ea.working_hours'`).
 
@@ -638,8 +637,10 @@ Six actions added to `server/config/actionRegistry.ts`. Slack OAuth is already w
 | `slack.read_channel` | read | 2 | auto | `api_status_2xx` | safe | safe-default | `slack` |
 | `slack.search_messages` | read | 2 | auto | `api_status_2xx` | safe | safe-default | `slack` |
 | `slack.summarise_thread` | read + LLM | 2 | auto | `api_status_2xx` | safe | safe-default | `slack` |
-| `slack.post_message` | write (channel) | 6 | review per scope dropdown (§9.3) | `row_exists` | key-based via `client_msg_id` | guarded | `slack` |
-| `slack.post_dm` | write (user DM) | 6 | review per scope dropdown (§9.3); auto when DM target is the owner | `row_exists` | key-based via `client_msg_id` | guarded | `slack` |
+| `slack.post_message` | write (channel) | 6 | review (fixed V1; see §9.3) | `row_exists` | key-based via `client_msg_id` | guarded | `slack` |
+| `slack.post_dm` | write (user DM) | 6 | dynamic: auto when target = owner; review otherwise (fixed V1; see §9.3) | `row_exists` | key-based via `client_msg_id` | guarded | `slack` |
+
+There is no configurable per-instance auto-send dropdown in V1. The Settings mockup `03-ea-settings.html` renders the locked policy as static explanatory text. Activating the dropdown is deferred per §26.
 
 `topics: ['slack']` (NEW topic registered alongside `'calendar'`).
 
@@ -682,7 +683,7 @@ This pattern is forward-compat reusable. Future agents that gain Slack post capa
 
 1. Resolve owner-scoped Slack credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'slack', ownerUserId })`.
 2. Validate input.
-3. For write actions: derive `client_msg_id` idempotency key per `slackActionServicePure.deriveIdempotencyKey`; call `slackActionServicePure.decideAutoSendScope`; if `decision === 'review'`, write an `ea_drafts` row in state `pending` and return — the action does not call Slack at this point. The send happens after operator approval via the existing approval workflow.
+3. For write actions: derive `client_msg_id` idempotency key per `slackActionServicePure.deriveIdempotencyKey`; call `slackActionServicePure.decideAutoSendScope`; if `decision === 'review'`, write a proposal row via `actionService.proposeAction({ action, payload, ownerUserId, agentId, runId })` AND a linked `ea_drafts` row with `proposalId` + `sendState: 'idle'` (in the same transaction) and return — the action does not call Slack at this point. The send happens after operator approval via the proposal primitive's commit hook, which re-enters the handler with `eaDraftId` set.
 4. For approved drafts: re-enter the handler from the approval path; idempotency key is the same; Slack rejects duplicate `client_msg_id` with `already_in_channel` which we map to a 200-idempotent-hit response.
 5. Map errors per Slack API conventions; emit Run Trace events.
 
@@ -720,16 +721,12 @@ Existing rows are unchanged — the enum extension is additive and backwards-com
 
 **No new Google webhook route in V1.** Google Calendar push notifications fire on event create/update/delete, NOT at reminder time — they cannot produce a 15-minute-before trigger. V1's `calendar_event_imminent` comes from `calendarLookaheadJob.ts` (scheduled scan per §10.5), not from push. Gmail push via Pub/Sub is also deferred per §26. `server/routes/webhooks/googleWebhook.ts` lands in V1.5 if/when push-based local mirroring or Gmail push provides a real consumer.
 
-**`server/routes/webhooks/slackWebhook.ts` (EXTENDED).** Currently handles approval-callback events only. V1 extends:
+**`server/routes/webhooks/slackWebhook.ts` (EXTENDED for url_verification only).** Currently handles approval-callback events. V1 changes:
 
 - Existing `payload.type === 'block_actions'` path (approval) — unchanged.
-- New `payload.type === 'event_callback'` path:
-  - `payload.event.type === 'app_mention'` → resolve EA owner via this query: find the `integration_connections` row where `provider = 'slack'` AND `config_json->>'team_id' = payload.team_id` AND `owner_user_id IS NOT NULL` AND the row's owner has an EA agent (`agents WHERE owner_user_id = connection.owner_user_id AND slug = 'executive-assistant' AND subaccount_id = connection.subaccount_id`). The Slack-side `payload.event.user` is the sender of the mention, NOT the EA owner; the bot's app-level subscription means the same `app_mention` event lands at the same webhook for every workspace the SynthetOS Slack app is installed in.
-  - If zero matches (no SynthetOS user has connected Slack with this team_id, or no EA exists for them) → emit `trigger.suppressed` with reason `owner_unresolved`. Return 200 to Slack.
-  - If multiple matches (e.g. two SynthetOS users in different subaccounts share the same Slack workspace — unusual but possible) → emit `trigger.suppressed reason='owner_ambiguous'`. Future spec may add explicit user-disambiguation (e.g. via Slack user-id mapping). V1 fails closed.
-  - Other event types passed through (no-op for V1).
-
-Slack URL verification handshake (Slack sends `payload.type === 'url_verification'` with a `challenge` field at app install) — V1 spec adds the trivial echo handler if not already present.
+- Slack URL verification handshake (`payload.type === 'url_verification'` with `challenge`) — V1 spec adds the trivial echo handler if not already present. Needed so the Slack app's Events API subscription can be configured at install time (forward-compat for V1.5 when the `app_mention` handler ships).
+- **`payload.type === 'event_callback'` with `payload.event.type === 'app_mention'` — DEFERRED to V1.5** alongside Workflow #4 (Slack thread summary). The `slack_mention` enum value lives in the `agent_triggers.event_type` enum (V1 ships the enum extension for forward-compat) but no V1 webhook path fires the trigger. Any `app_mention` event received in V1 is no-op'd at the route (200 OK to Slack, no internal dispatch). This avoids shipping owner-routing logic with no V1 consumer.
+- Other event types passed through (no-op for V1).
 
 ### 10.3 Source routing → trigger dispatch
 
@@ -863,9 +860,9 @@ Three workflows ship V1 per brief §4 q5 (LOCKED). Each is a named native workfl
 **Steps:**
 1. Read inbox new-mail batch via `read_inbox` (live-fetch).
 2. Classify each message: urgent / normal / promotional / spam.
-3. For known patterns (acks, simple Qs, calendar requests), draft a reply via the voice-profile-aware prompt. Write the proposed reply as an `ea_drafts` row in state `pending`.
+3. For known patterns (acks, simple Qs, calendar requests), draft a reply via the voice-profile-aware prompt. Write the proposal via `actionService.proposeAction({ action: 'send_email', payload, ownerUserId, agentId, runId })` — the proposal primitive owns approval state. Then write the linked `ea_drafts` row with `proposalId` = the proposal row's id and `sendState: 'idle'`. Both writes happen inside the same transaction so the FK is never dangling.
 4. Notify the operator via `slack.post_dm` with a summary of drafts awaiting review + a link to the Drafts tab (per-agent detail page Workspace tab).
-5. Approval is the operator's responsibility — done via the Drafts UI on the per-agent detail page. Approval → state machine transition per §7.5 → `send_email` invoked with the approved body. Approved drafts also create a Gmail Drafts row optionally (operator-configurable) so they appear in the operator's native Gmail Drafts folder during review.
+5. Approval is the operator's responsibility — driven by the proposal primitive's approval surface. On approval, the proposal primitive's commit hook invokes the underlying action handler (`send_email`) with the approved payload from `ea_drafts.body`; the handler records `externalResultId` on the `ea_drafts` row and transitions `sendState: idle → sending → sent`. Approved drafts may also create a Gmail Drafts row optionally (operator-configurable) so they appear in the operator's native Gmail Drafts folder during review. Rejection / expiry are recorded on the proposal row; the linked `ea_drafts` row remains with `sendState: 'idle'` and is hidden from the Workspace tab after the proposal primitive marks it terminal.
 
 **Drafts go to Gmail Drafts by definition.** No outbound until approved. `send_email` is Tier 6 review-gated (existing action — unchanged).
 
@@ -897,14 +894,14 @@ All three workflows:
 
 Per brief §4 q5, two workflows are deferred to a fast follow-on:
 
-- **Workflow #4 — Slack thread summary on `slack_mention`** (Type B). Skill slug `ea.slack_thread_summary`. The trigger event type ships V1 (§10), the workflow itself ships V1.5.
+- **Workflow #4 — Slack thread summary on `slack_mention`** (Type B). Skill slug `ea.slack_thread_summary`. The `slack_mention` enum value ships V1 (forward-compat in `agent_triggers.event_type`), but the webhook handler that fires the trigger AND the workflow itself BOTH defer V1.5. V1 receives `app_mention` events but no-ops them.
 - **Workflow #5 — Weekly review (Friday 16:00 cron + Slack DM).** Skill slug `ea.weekly_review`. RRULE `FREQ=WEEKLY;BYDAY=FR;BYHOUR=16;BYMINUTE=0`.
 
 Both deferred workflows can land in V1.5 with NO foundation changes — only the new skill markdown + the workflow body code. V1 ships everything they depend on.
 
-### 11.6 Workflow framing — interaction with EA drafts state machine
+### 11.6 Workflow framing — interaction with the approval primitive + EA drafts
 
-Workflow B (inbox triage) is the only V1 workflow that writes `ea_drafts` rows. The state machine in §7.5 + §24.3 is owned by `eaDraftService.ts`. Workflow B calls `eaDraftService.createDraft({ kind: 'gmail_reply', ... })`; the operator-driven approval flow calls `eaDraftService.approve({ draftId })` which transitions state + invokes `send_email` with the approved body + records the resulting `sentMessageId`.
+Workflow B (inbox triage) is the only V1 workflow that writes `ea_drafts` rows. Approval state lives on the proposal row (`actionService.proposeAction` primitive), NOT on `ea_drafts` (per §7.5 composition lock). Workflow B writes a proposal row + a linked `ea_drafts` row in the same transaction. The operator-driven approval surface is the proposal primitive's existing UI (existing approval-flow components); the per-agent Workspace tab in §14.3 is a JOIN view that surfaces `ea_drafts.body` (the preview) alongside the proposal primitive's approve/reject buttons. On approval, the proposal primitive's commit hook invokes the underlying action handler with `eaDraftId` in the input (per §8.4 reject-if-missing for Calendar actions, same pattern for Gmail/Slack). The action handler records `externalResultId` on the `ea_drafts` row + transitions `sendState`. No parallel approval primitive on `ea_drafts`.
 
 
 ## 12. Voice Profile primitive
@@ -1159,7 +1156,7 @@ Refresh policy `on_login` per EA's `home_widget` declaration — invalidates on 
 
 `client/src/pages/personal/PersonalAssistantPage.tsx` is a tabbed shell:
 
-- **Workspace tab** (default). Lists drafts awaiting review, today's briefing inline, next meeting prep, active triggers. Drafts UI: list of `ea_drafts` rows in state `pending` with approve / reject buttons. Approve triggers the action's send path; reject transitions to `rejected`. (Reference: mockup `02-my-ea-home.html` content style, repurposed as the Workspace tab body.)
+- **Workspace tab** (default). Lists drafts awaiting review, today's briefing inline, next meeting prep, active triggers. Drafts UI: JOIN view of `ea_drafts` rows with their linked proposal row (approval state `pending`). Approve / reject buttons drive the proposal primitive's approval surface; approval triggers the proposal's commit hook → action's send path. Send state from `ea_drafts.sendState` shown as a secondary indicator ("sending" / "sent" / "retry needed"). (Reference: mockup `02-my-ea-home.html` content style, repurposed as the Workspace tab body.)
 - **Activity tab**. Lists recent agent runs (existing RunTracePage style, scoped to this agent). Admin redaction policy (predecessor §3.6) applies — owners see full content, admins see metadata only.
 - **Settings tab**. Per-instance settings (locked mockup `03-ea-settings.html`):
   - Display name (rename).
@@ -1383,7 +1380,7 @@ The codebase supports both paths via `readPath: 'liveFetch' | 'canonical'` on ea
 | `voice_profiles.profileJson` (derived features) | Feature-level summary, small, valuable persistence; opt-out enforced. |
 | `memory_blocks` (per-agent user context) | Already canonical (existing primitive). |
 | Run Trace + run history | Already canonical (foundation primitive). |
-| `ea_drafts` (drafts awaiting review) | Needs to survive across sessions; "show me pending drafts" is a primary UX. Small (~10 cols), indexed by `(organisation_id, owner_user_id, state)`. |
+| `ea_drafts` (draft payload + send state for proposed outbound actions) | Needs to survive across sessions; the proposal primitive's row tracks approval state, `ea_drafts` tracks the draft payload + send state. Small (~10 cols), indexed by `(organisation_id, owner_user_id, sendState)` + `(proposalId)` for the JOIN. |
 | External-event dedup ledger (option per §24.1) | Needed for trigger idempotency. Small. |
 
 ### 18.3 Out of scope (explicitly NOT built)
@@ -1458,7 +1455,7 @@ Per CLAUDE.md async-polling cadence guidance: `every_5m` should be the minimum f
 }
 ```
 
-Implementation: live-fetch `ea_drafts` count (`state = 'pending'`), latest briefing (search recent `agent_runs` for this agent with `triggerContext.eventType = scheduledTask of daily_briefing`), upcoming `calendar_event_imminent` queue. NO LLM call — pure data read. Run cost: zero.
+Implementation: live-fetch drafts-awaiting-review count via the proposal primitive's "open proposals for owner = current user where the linked agent is this EA" query (count of `proposalRow.state = 'pending'`); latest briefing (search recent `agent_runs` for this agent with `triggerContext.eventType = scheduledTask of daily_briefing`); upcoming `calendar_event_imminent` queue. NO LLM call — pure data read. Run cost: zero.
 
 ### 19.5 Frame component
 
@@ -1502,7 +1499,7 @@ Skipped runs visible in the EA's Run Trace view (existing surface). No silent re
 **Behaviour**:
 1. Retry per the action's `retryPolicy: 'guarded'` (existing pattern).
 2. If retries exhausted AND the run is a triggered briefing (daily / inbox / meeting prep): emit `workflow.partial` with the sources that DID succeed and a "data unavailable" line for sources that didn't. Briefing still posts.
-3. If retries exhausted AND the run is a write action invocation: emit `workflow.failed`. The originating `ea_drafts` row (which already exists — the write was draft-mediated per §11.6) retains state `approved` with `sentMessageId IS NULL`; the Workspace tab's Drafts UI shows it under a "Retry needed" section with a single re-attempt button that re-runs the send path. No new `ea_drafts` row is created — the existing row is the retry record.
+3. If retries exhausted AND the run is a write action invocation: emit `workflow.failed`. The originating `ea_drafts` row (which already exists — the write was draft-mediated per §11.6) transitions `sendState → 'send_failed'`; the linked proposal row remains `approved` (the approval was valid; only the send failed). The Workspace tab's Drafts UI shows it under a "Retry needed" section with a single re-attempt button that resets `sendState → 'sending'` and re-runs the send path. No new `ea_drafts` row is created — the existing row is the retry record.
 
 **Best-effort partial output** is the read-heavy pattern. Per `docs/spec-authoring-checklist.md §10.5`: status MUST be `partial` (not `success`) when any source is unavailable.
 
@@ -1523,7 +1520,7 @@ This is "no silent partial success" applied to suppression — the operator lear
 **Behaviour**:
 1. Existing `workflowGateStallNotifyJob.ts` handles this.
 2. The job sends a one-time reminder at 24h.
-3. At 7 days (default `ea_drafts.expiresAt`), the draft transitions to `expired` state.
+3. At 7 days (default expiry on the proposal row), the PROPOSAL row transitions to `expired`. The linked `ea_drafts` row's `sendState` remains `idle` and is hidden from the Workspace tab. Expiry is owned by the proposal primitive, NOT `eaDraftService`.
 4. Expired drafts are visible in the Workspace tab under a separate "Expired" section (one click to re-create the draft from the underlying source mail or calendar event).
 
 No silent stale drafts. Every state transition is visible in Run Trace.
@@ -1786,65 +1783,64 @@ Per `docs/spec-authoring-checklist.md §10`. Every externally-triggered write an
 ### 24.2 Calendar write actions
 
 **`create_event`**:
-- **Posture:** state-based via the originating `ea_drafts` row + deterministic-property recovery for unknown-success outcomes (V1 invocation path is always draft-mediated; see §7.2).
+- **Posture:** state-based via the originating `ea_drafts.sendState` + deterministic-property recovery for unknown-success outcomes (V1 invocation path is always draft-mediated; handler rejects calls without `eaDraftId` per §7.2 + §8.4).
 - **Deterministic-property tag.** Every `events.insert` call carries a synthetic property `extendedProperties.private.ea_draft_id = <ea_drafts.id>`. This survives the round-trip — Google preserves `extendedProperties` on inserted events.
 - **Concurrency guard + unknown-success recovery:**
-  - On first send attempt: optimistic predicate on the draft row — `UPDATE ea_drafts SET state = 'sending' WHERE id = $draft_id AND state = 'approved' AND sentMessageId IS NULL RETURNING id`. Zero rows = a concurrent caller already in flight or already sent.
-  - Winning caller calls `events.insert` once. On success, `UPDATE ea_drafts SET sentMessageId = $google_event_id, state = 'approved' WHERE id = $draft_id RETURNING id` and emit `draft.sent`.
-  - On UNKNOWN outcome (timeout, network failure before response, or DB write failure after Google ack): re-enter the handler with the same draft row. The recovery path is: `events.list?privateExtendedProperty=ea_draft_id=$draft_id&timeMin=$draft.created_at - interval '1h'`. If the search returns an event, treat it as the prior-attempt's result: record `sentMessageId` and emit `draft.sent`. If the search returns nothing, the prior attempt did not commit — retry `events.insert`.
-  - Two simultaneous handlers for the same draft are arbitrated by the `state = 'sending'` predicate; the losing caller polls until `state` transitions to `'approved' AND sentMessageId IS NOT NULL` or the lock is released by a stall handler.
+  - On first send attempt: the proposal primitive has already approved the proposal (approval state on the proposal row); the action handler runs the commit hook. Optimistic predicate on the draft row — `UPDATE ea_drafts SET sendState = 'sending' WHERE id = $draft_id AND sendState = 'idle' RETURNING id`. Zero rows = a concurrent caller already in flight or already sent.
+  - Winning caller calls `events.insert` once. On success, `UPDATE ea_drafts SET externalResultId = $google_event_id, sendState = 'sent' WHERE id = $draft_id RETURNING id` and emit `draft.sent`.
+  - On UNKNOWN outcome (timeout, network failure before response, or DB write failure after Google ack): re-enter the handler with the same draft row. The recovery path is: `events.list?privateExtendedProperty=ea_draft_id=$draft_id&timeMin=$draft.created_at - interval '1h'`. If the search returns an event, treat it as the prior-attempt's result: record `externalResultId` and emit `draft.sent`. If the search returns nothing, the prior attempt did not commit — retry `events.insert`.
+  - Two simultaneous handlers for the same draft are arbitrated by the `sendState = 'sending'` predicate; the losing caller polls until `sendState` transitions to `'sent'` or the lock is released by a stall handler (which resets `sendState → 'idle'` for a fresh claim).
 - **No `requestId` parameter passed to Google.** Google Calendar's `events.insert` does not honour a `requestId` idempotency parameter; the prior version of this spec was wrong about that API surface.
-- **Retry:** guarded — `retryPolicy: 'guarded'`. Withbackoff. Network 5xx retried automatically; 4xx mapped to typed errors. Retry after an unknown outcome uses the recovery path above before re-attempting `events.insert`.
-- **HTTP mapping:** 409 → 422 with `code: 'conflict'`; 401 → 401 with `code: 'credential_revoked'`; 403 → 403 with `code: 'insufficient_scope'`.
+- **Retry:** guarded — `retryPolicy: 'guarded'`. Withbackoff. Network 5xx retried automatically; 4xx mapped to typed errors. Retry after an unknown outcome uses the recovery path above before re-attempting `events.insert`. If retries exhaust without `externalResultId`, `sendState → 'send_failed'`; operator-driven manual retry from the Workspace tab re-enters the claim cycle.
+- **HTTP mapping:** 409 → 422 with `code: 'conflict'`; 401 → 401 with `code: 'credential_revoked'`; 403 → 403 with `code: 'insufficient_scope'`; 422 with `code: 'missing_draft_context'` when `eaDraftId` is absent or invalid (per §8.4).
 - **Terminal events:** `action.completed` (success | partial | failed) — exactly one per action invocation.
 
-**`ea_drafts.state` extension.** The state machine in §7.5 gains a transitional `'sending'` value: `pending → approved → sending → approved (with sentMessageId set)` for the happy path; `sending → approved (no sentMessageId yet)` for unknown-outcome retry pickup. The transitional `'sending'` is not exposed to the operator's UI — it appears as `'approved'` in user-facing surfaces. Update §7.5 state machine + §24.3 valid transitions accordingly.
-
 **`update_event`**:
-- **Posture:** state-based via `If-Match` ETag.
-- **Predicate:** `If-Match: <eventEtag>` header on the Calendar `events.patch` call.
+- **Posture:** state-based via the originating `ea_drafts.sendState` (V1 draft-mediated; handler rejects calls without `eaDraftId`) + `If-Match` ETag for the underlying Google call.
+- **Predicate:** same claim-cycle as `create_event`; `If-Match: <eventEtag>` header on the Calendar `events.patch` call.
 - **Concurrency guard:** Google returns 412 on stale ETag; our handler returns 409 with `code: 'stale_etag'` to the caller. Losing caller MAY retry with re-fetched ETag (caller-driven, not auto-retried).
 - **Retry:** guarded.
-- **HTTP mapping:** 412 → 409; same other mappings as create_event.
+- **HTTP mapping:** 412 → 409; 422 with `code: 'missing_draft_context'`; same other mappings as create_event.
 
 **`respond_to_invite`**:
-- **Posture:** state-based (last-write-wins is acceptable — Google merges naturally).
-- **Concurrency guard:** none required (Google handles).
+- **Posture:** state-based via the originating `ea_drafts.sendState` (V1 draft-mediated). Naturally idempotent against Google (last write wins).
+- **Concurrency guard:** the `sendState` claim-cycle prevents duplicate Google calls; Google itself merges duplicate responses.
 - **Retry:** guarded.
-- **HTTP mapping:** standard.
+- **HTTP mapping:** standard; 422 with `code: 'missing_draft_context'` when `eaDraftId` is absent.
 
-### 24.3 EA draft state machine
+### 24.3 EA draft send-state machine + approval-primitive composition
 
-State enum: `pending | approved | sending | rejected | expired`.
+**Approval state lives on the proposal row, NOT on `ea_drafts`.** Per §7.5 composition lock. The `actionService.proposeAction` primitive owns: approval enum (`pending | approved | rejected | expired`), `decided_at`, `decided_by_user_id`, expiry handling (`workflowGateStallNotifyJob`), audit trail. This section pins ONLY the post-approval send-state machine that lives on `ea_drafts.sendState`.
 
-**Valid transitions:**
-- `pending → approved` (via `eaDraftService.approve`).
-- `pending → rejected` (via `eaDraftService.reject`).
-- `pending → expired` (via `workflowGateStallNotifyJob`).
-- `approved → sending` (via the action handler claiming the send via the optimistic predicate per §24.2).
-- `sending → approved` (with `sentMessageId` set, on successful send).
-- `sending → approved` (with `sentMessageId` still null, on stall-timeout reset by `workflowGateStallNotifyJob` — re-entry path).
+`ea_drafts.sendState` enum: `idle | sending | sent | send_failed`.
+
+**Valid transitions on `ea_drafts.sendState`:**
+- `idle → sending` (when the proposal's commit hook claims a send via the optimistic predicate per §24.2; only after the proposal row reaches `approved`).
+- `sending → sent` (with `externalResultId` set, on successful action completion).
+- `sending → idle` (stall-timeout reset by `workflowGateStallNotifyJob` — re-entry path for unknown-outcome recovery).
+- `sending → send_failed` (when retries exhaust without producing an external object).
+- `send_failed → sending` (manual retry from the Workspace tab; new claim cycle).
 
 **Forbidden transitions:**
-- Any transition out of `rejected` or `expired` (terminal states).
-- `pending` directly to `sending` or to a terminal "sent" state (must go via `approved` first).
-- `approved → approved` re-send when `sentMessageId IS NOT NULL` (the row is the audit trail; subsequent calls return the existing `sentMessageId`).
-- Approval by a user other than the draft's `owner_user_id` (V1 — cross-user approval is a future feature).
+- `idle → sent` directly (must go via `sending`).
+- `sent → anything` (terminal; the row is the audit trail).
+- Any send-state transition while the linked proposal row is NOT in approved state.
 
-**Status set closure:** the enum is closed. Adding a new state requires a spec amendment.
+**Status set closure:** the enum is closed. Adding a new send-state value requires a spec amendment. Approval-state enum closure is owned by the proposal primitive's own spec.
 
 **Concurrency:**
-- Two concurrent approvals for the same draft → first commit wins via optimistic predicate `UPDATE ... WHERE state = 'pending'`. Losing caller receives the winning state in the response (`already_approved` flag = true).
-- `decided_at` and `decided_by_user_id` are stamped in the same `UPDATE`.
+- Two concurrent send-claims for the same draft → first commit wins via optimistic predicate `UPDATE ea_drafts SET sendState = 'sending' WHERE id = $1 AND sendState = 'idle'`. Losing caller polls or returns the winning send state.
+- Two concurrent approval calls on the proposal row are handled by the proposal primitive (NOT this spec's concern).
 
-**Terminal events:**
-- `draft.created` (info) at row insertion.
-- `draft.approved` (info) on state → approved.
-- `draft.rejected` (info) on state → rejected.
-- `draft.expired` (warning) on state → expired.
-- `draft.sent` (info) on `sentMessageId` set.
+**Terminal events on `ea_drafts`:**
+- `draft.created` (info) at row insertion (paired with the proposal row's own creation event).
+- `draft.sending` (info) on `sendState → sending` claim.
+- `draft.sent` (info) on `externalResultId` set + `sendState → sent`.
+- `draft.send_failed` (warning) on `sendState → send_failed`.
 
-Exactly one of `draft.approved`, `draft.rejected`, `draft.expired` fires per draft. `draft.sent` fires at most once per draft.
+Approval-side terminal events (`proposal.approved`, `proposal.rejected`, `proposal.expired`) are emitted by the proposal primitive, not by `eaDraftService`. The per-agent Workspace tab UI displays both sets in a single timeline.
+
+`draft.sent` fires at most once per draft.
 
 ### 24.4 Gmail polling
 
@@ -1890,7 +1886,7 @@ No event with the same `correlation_key` after the terminal. This is the existin
 | Constraint | Likely violation source | HTTP mapping | Code |
 |---|---|---|---|
 | `voice_profiles` CHECK exactly-one-of | API write with bad shape | 422 | `voice_profile_invalid_scope` |
-| `ea_drafts` race on approve | Two simultaneous approvals | 409 | `draft_already_decided` (return current state) |
+| `ea_drafts` race on send-claim | Two simultaneous send-claims | 409 | `draft_send_in_flight` (return current `sendState`) — approval-race handling is owned by the proposal primitive |
 | `integration_connections` UNIQUE on `(org, subaccount, owner_user_id, provider)` (PREDECESSOR) | Duplicate user connection | 409 | `connection_already_exists` |
 | `external_trigger_dedup` PRIMARY KEY on `(provider, dedup_key, owner_user_id)` | Replay of external event (webhook or poll) | 200 (no-op for caller) | n/a |
 | Any other `23505` | unexpected | 500 mapped to typed error envelope with correlationId | per `pre-launch-phase-2` envelope contract |
@@ -1979,7 +1975,9 @@ Per `docs/spec-authoring-checklist.md §7`. Anything mentioned in prose as "defe
 - **Calendar `delete_event` action.** V1 does not register this action. Tier 5 destructive. Defer to V1.5 once V1 write patterns prove reliable. Reason: not currently in `WorkspaceAdapter` capability surface; deferral creates no inconsistency.
 - **Drive writes (Docs / Sheets editing).** Defer to V1.5 IF a real use case emerges. Reason: no V1 use case requires it; ~3 dev-days real cost (Docs / Sheets batch-update APIs); workspace adapter doesn't have these capabilities today.
 - **Gmail push notifications (Watch API + Cloud Pub/Sub).** V1 ships 5-minute polling only — no Gmail push code path is shipped, flag-gated or otherwise. V1.5 may add Gmail push if the 5-minute polling latency becomes felt; the V1.5 spec will author the full Pub/Sub ingestion path at that time.
-- **Workflow #4 — Slack thread summary on `slack_mention` trigger.** Trigger primitive ships V1 (§10); the workflow body itself defers. Skill slug `ea.slack_thread_summary`.
+- **Workflow #4 — Slack thread summary on `slack_mention` trigger.** Enum value ships V1; the webhook handler (`app_mention` event_callback dispatch) AND the workflow body BOTH defer V1.5. V1 ships the slackWebhook url_verification handler for the Slack-app subscription setup but no-ops `app_mention` events. Skill slug `ea.slack_thread_summary`. Owner-routing rules (DM vs channel; ambiguous-mention suppression) authored in the V1.5 spec.
+- **Generic, non-draft-mediated Calendar event creation.** V1 invocation path for `create_event` / `update_event` / `respond_to_invite` is always draft-mediated (handler rejects calls without `eaDraftId`). A future V1.5 may add either a generic `external_action_idempotency` table OR a direct-call idempotency record on a per-action basis to support non-draft callers. Today no such caller exists.
+- **EA-V1-AD1 (`actionService.proposeAction` composition).** RESOLVED in this spec — `ea_drafts` composes over the proposal primitive per §7.5 + §11.6 + §24.3. Phase 2 architect verifies the primitive's contract supports a per-domain payload reference at plan-authoring time. If the existing primitive cannot accept the FK shape, the architect escalates back to the spec for revision — implementation does NOT proceed with a parallel state machine.
 - **Workflow #5 — Weekly review (Friday 16:00 cron + Slack DM).** Skill slug `ea.weekly_review`. RRULE seeded in V1.5.
 - **Calendar conflict detection + automated reschedule.** Fast follow-on, NOT V1.
 - **Expense receipt extraction from Drive.** Phase 1.5 (depends on canonical receipt schema).
@@ -2032,9 +2030,9 @@ Carried from brief §4 + spec-time confirmations. Phase 2 architect resolves eac
 
 10. **Capability slug naming for new Slack actions.** Spec proposes `channel_messages_read`, `channel_post_message`, `channel_search_messages`, `dm_send`. Phase 2 confirms against the existing integration-reference naming conventions.
 
-11. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.approved` / `draft.rejected` / `draft.expired` / `draft.sent`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
+11. **Workflow execution-event taxonomy.** §10.7 names `trigger.fired` / `trigger.suppressed`; §11.4 names `workflow.started` / `workflow.completed` / `workflow.failed` / `workflow.partial`; §24.3 names `draft.created` / `draft.sending` / `draft.sent` / `draft.send_failed` on `ea_drafts`; approval-side events (`proposal.approved` / `proposal.rejected` / `proposal.expired`) are emitted by the proposal primitive, not by `eaDraftService`. Phase 2 architect verifies each new event type lands in `shared/types/agentExecutionLog.ts` `AGENT_EXECUTION_EVENT_CRITICALITY` with appropriate criticality and is consumable by Run Trace.
 
-12. **`actionService.proposeAction` composition with `ea_drafts`.** The current spec authors `eaDraftService` with its own state machine (`pending → approved | sending | rejected | expired`) for review-gated sends. An existing primitive `actionService.proposeAction` covers generic action-proposal approval semantics. Phase 2 architect investigates: can the `ea_drafts` state machine compose over `proposeAction` (proposeAction owns the approval state row; `ea_drafts` stores the draft body payload and links to the proposed-action row)? Recommendation: compose if `proposeAction`'s contract supports a per-domain payload reference; otherwise keep the parallel state machine and document the rationale in plan.md. Routed to `tasks/todo.md` for deferred review.
+12. **`actionService.proposeAction` FK shape verification.** §7.5 LOCKS the composition: `ea_drafts.proposalId` FK to the proposal primitive's row. Phase 2 architect verifies the existing `actionService.proposeAction` primitive supports being the approval source for an external draft row (i.e. the existing row schema accepts a per-domain payload reference OR `ea_drafts` is the inverse-FK direction so the proposal row's payload is just `{ kind: 'ea_draft', draftId }`). If the existing primitive cannot accept either shape, the architect escalates BACK to spec revision rather than proceeding with a parallel state machine. Routed to `tasks/todo.md` (`EA-V1-AD1`) resolved by this spec — Phase 2 verification only.
 
 Phase 2 plan.md addresses each as the architect prefers — none of the 12 above is blocking on operator decision; all are spec-time confirmations the architect resolves with codebase context.
 
