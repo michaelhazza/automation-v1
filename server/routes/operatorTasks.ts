@@ -57,6 +57,7 @@ async function readAgentRunOrThrow(agentRunId: string, orgId: string) {
       status: agentRuns.status,
       organisationId: agentRuns.organisationId,
       subaccountId: agentRuns.subaccountId,
+      assignedUserId: agentRuns.assignedUserId,
       operatorChainFailureCount: agentRuns.operatorChainFailureCount,
     })
     .from(agentRuns)
@@ -89,7 +90,7 @@ router.post(
     const actorCheck = evaluateRouteActorRule({
       actorUserId: actor.id,
       actorRole: resolveActorRole(actor.role),
-      assignedUserId: null,
+      assignedUserId: run.assignedUserId,
       routeRequiresAdmin: false,
     });
     if (!actorCheck.allowed) {
@@ -176,7 +177,7 @@ router.post(
     const actorCheck = evaluateRouteActorRule({
       actorUserId: actor.id,
       actorRole: resolveActorRole(actor.role),
-      assignedUserId: null,
+      assignedUserId: run.assignedUserId,
       routeRequiresAdmin: false,
     });
     if (!actorCheck.allowed) {

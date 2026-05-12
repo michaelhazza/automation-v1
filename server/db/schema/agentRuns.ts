@@ -277,6 +277,14 @@ export const agentRuns = pgTable(
     // subaccount-wide settings row. Spec §3.17.4.
     perTaskBudgetExtensionMinutes: integer('per_task_budget_extension_minutes').notNull().default(0),
 
+    // Operator Backend — assigned user (migration 0334). Populated at run
+    // creation when a human user owns the task. The operator-task action
+    // routes (retry-chain-failure, extend-budget) authorise via
+    // "assigned user OR manager+" — the column is the data source for the
+    // assigned-user branch of that rule. ON DELETE SET NULL keeps run history
+    // intact when a user is removed. Spec §6.5b.
+    assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

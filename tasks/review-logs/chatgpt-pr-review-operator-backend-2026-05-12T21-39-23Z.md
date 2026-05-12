@@ -147,4 +147,53 @@ No code change.
 
 ### Round 2 commit + diff regeneration
 
+Commit `5c63f181`. Round 3 diff regenerated at `.chatgpt-diffs/pr288-round3-code-diff.diff`.
+
+## Round 3 — Findings
+
+ChatGPT verdict line: "Almost final. The previous blockers look fixed in the latest patch... One remaining pre-finalisation issue."
+
+| ID | Severity | Triage | Recommendation | User Decision |
+|----|----------|--------|----------------|---------------|
+| F1 | high | technical (architectural — schema/contract change) | implement (operator-approved Option 2: add column now) | operator-approved (Add the column now) |
+
+ChatGPT confirmed Round 2 fixes:
+- extend-budget now uses optimistic predicate + row check + awaited audit (Round 2 F1 closed)
+- retry-chain-failure uses optimistic predicate + row check + awaited audit (Round 1 F5 closed)
+- progress route uses subaccount-scoped URL + dual-GUC (Round 1 F4 closed)
+- fresh-profile-restart narrowed to V1's failure_reason='OPERATOR_PROFILE_UNRECOVERABLE' with future-compat note for failure_class (Round 2 F2 closed)
+
+### F1 — assigned-user route rule not wired (HIGH; ARCHITECTURAL escalation)
+
+**Evidence:** `server/routes/operatorTasks.ts:92,180` — `assignedUserId: null` hardcoded into the actor-rule call for retry-chain-failure and extend-budget. The route comment claims "assigned user OR manager+" but the actor-rule helper's assigned-user branch is unreachable.
+
+**Root cause investigation:**
+- The spec §6.5b line 1148: *"The route handler reads `agent_runs.assigned_user_id` and `users.role` before authorising."*
+- But `agent_runs` schema in V1 has NO `assigned_user_id` column. The closest analogues (`actingAsUserId`, `principalId`) are not the intended source.
+- The spec was authored assuming the column existed; Phase 2 build matched the spec aspirationally, leaving the field hardcoded `null` because there was no column to read from.
+- Result: a Phase 3.5-shaped gap where the intended actor rule degrades to "manager+ only" in V1 because the data source is missing.
+
+**Triage:** technical (no UX surface). Recommendation: `implement` — but `scope_signal: architectural` (schema/contract change) triggered step-3b escalation. Operator presented with three options:
+1. Document V1 reality, defer wiring (no schema change, smallest scope, recommended-default)
+2. Add the column now (small migration 0334, modest scope, full wire-up)
+3. Remove the dead branch (smallest functional surface, loses forward-compat)
+
+**Operator decision:** Option 2 — add the column now.
+
+**Fix:**
+- New migration `migrations/0334_agent_runs_assigned_user_id.sql` (+ `.down.sql`): `ALTER TABLE agent_runs ADD COLUMN assigned_user_id uuid REFERENCES users(id) ON DELETE SET NULL` + partial index `agent_runs_assigned_user_id_idx WHERE assigned_user_id IS NOT NULL`.
+- `server/db/schema/agentRuns.ts`: added `assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' })`.
+- `server/routes/operatorTasks.ts`: `readAgentRunOrThrow` now selects `assignedUserId`; both retry-chain-failure (line 93) and extend-budget (line 180) now pass `run.assignedUserId` to `evaluateRouteActorRule`. Admin-only routes (fresh-profile-restart, refresh-credential, extend-debug-retention) continue to pass `null` because `routeRequiresAdmin: true` short-circuits the assigned-user branch.
+
+**Note:** populating `agent_runs.assigned_user_id` at run-creation time (so the column has data to read) is a separate concern. The operator-task creation path lands in a future build. Until then, the column is null for all rows and the actor rule effectively continues as "manager+ only" — same behaviour as before this fix, but now structurally correct so that adding the populate step in a follow-on PR activates the assigned-user branch with zero further plumbing.
+
+**Files changed:** `migrations/0334_agent_runs_assigned_user_id.sql`, `migrations/0334_agent_runs_assigned_user_id.down.sql`, `server/db/schema/agentRuns.ts`, `server/routes/operatorTasks.ts`.
+
+### G3 (lint + typecheck) post-fix
+
+- `npm run lint` → 0 errors, 904 warnings (all pre-existing).
+- `npm run typecheck` → clean.
+
+### Round 3 commit + diff regeneration
+
 Pending — see next session entry.
