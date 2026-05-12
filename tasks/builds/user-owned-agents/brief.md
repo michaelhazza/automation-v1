@@ -6,6 +6,8 @@
 **Concurrent with:** Spec D `tasks/builds/operator-backend/brief.md` (small predictable conflict surface — see §7)
 **Strategic parent:** `docs/synthetos-governed-agentic-os-brief-v1.2.md` §5.1 (agents are organisational entities), §6.6 (Model Access and Identity), §9 (Credential Broker and Identity Boundary), §16.1 (Executive Assistant), §16.3 (Dev Agent)
 
+> **Implementation status (post-build, 2026-05-12):** This foundation was implemented **inline inside the `personal-assistant-v1` PR**, not as a standalone predecessor PR as originally planned. The merge boundary was collapsed during the build phase. Operator decision (Option B per PR review F1) was to **reclassify the EA V1 PR as a combined foundation + product PR** rather than split. This brief is preserved unchanged as the design specification of the foundation primitive; the actual code lives in the EA V1 PR. See `tasks/builds/personal-assistant-v1/pr-review-response-f1.md` for the review-side rationale.
+
 # User-Owned Agents — Build Brief
 
 ## Contents

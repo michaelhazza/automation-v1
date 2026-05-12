@@ -117,8 +117,9 @@ Recorded in chat transcript on branch `claude/synthetos-personal-assistant-0kaIM
 2. **Strategic framing.** This build is foundation primitive proof, not EA product. Explicit non-goal vs Claude / Codex.
 3. **Tightened V1 scope.** Third-party sends review-gated; auto-send only to self.
 4. **Capability-alignment correction (later same day).** Restored Calendar write actions to V1 (`create_event`, `update_event`, `respond_to_invite`) after a capability audit found the existing `WorkspaceAdapter` contract already exposes these for subaccount-owned agents. Deferring on user-owned agents would have created an artificial capability regression. All restored actions are review-gated (Tier 3–4 with mandatory approval); only `delete_event` remains deferred. Drive writes (Docs / Sheets editing) explicitly considered and deferred — no V1 use case, ~3 dev-days real cost, no inconsistency with workspace adapter (which also lacks them).
+5. **Foundation consolidation (post-build PR review, 2026-05-12).** The plan called for `user-owned-agents` to ship as a sequenced predecessor PR before EA V1. The implementation phase collapsed the boundary — both foundation and product landed in this PR. Reviewer flagged as F1; operator decision (Option B) was to reclassify the PR as a combined foundation + product PR rather than split. Both briefs preserved unchanged as design documentation. Detail and reviewer guidance in `tasks/builds/personal-assistant-v1/pr-review-response-f1.md`.
 
-Reviewer should read `tasks/builds/user-owned-agents/brief.md` §0 first to understand the foundation rationale, then this section, then the rest of this brief.
+Reviewer should read `tasks/builds/user-owned-agents/brief.md` §0 first to understand the foundation rationale, then this section, then `pr-review-response-f1.md` for the consolidation context, then the rest of this brief.
 
 ## 1. Purpose
 
@@ -149,7 +150,7 @@ This brief locks scope. The spec is authored next.
 | Webhook ingestion pattern (per-org HMAC, replay nonces) | `server/routes/webhooks/` (GHL, Slack, Stripe, Teamwork) | shipped |
 | HITL approval workflow + Slack-approval delivery channel | shipped | shipped |
 | Three-tier agent model (System / Org / Subaccount) + hierarchical delegation | shipped | shipped |
-| User-owned agents (`agents.owner_user_id` + owner-scoped credential broker + admin redaction policy) | `tasks/builds/user-owned-agents/brief.md` | LOCKED PREDECESSOR — must merge before EA V1 build starts |
+| User-owned agents (`agents.owner_user_id` + owner-scoped credential broker + admin redaction policy) | `tasks/builds/user-owned-agents/brief.md` | **Implemented inline in this PR** (foundation consolidated with EA V1 per operator decision on PR review F1 — see `pr-review-response-f1.md`). Original plan had this as a sequenced predecessor PR; build phase collapsed the boundary. Brief preserved as design documentation; code lives in the EA V1 PR. |
 
 Nothing on the foundation is in flux. V1 is a pure composer of existing primitives plus the user-owned agents primitive plus two new connector surfaces (Calendar OAuth + actions, Slack agent actions) plus one new trigger primitive (external-source triggers) plus the generic `VoiceProfile` primitive (introduced in this build, designed for reuse by future agents).
 
