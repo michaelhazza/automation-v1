@@ -246,3 +246,21 @@ Investigation procedure ran per `docs/doc-sync.md`. Candidate-stale-reference se
 - **.claude/FRAMEWORK_VERSION** — n/a (repo-specific architecture change, not a framework-level update).
 
 All registered docs have a verdict. No missing verdicts. Stale `writeVersionSourceLinks` references closed in same Phase 2 close commit.
+
+### S2 sync — main merged 2026-05-13
+
+Before launching finalisation, main was merged in. Absorbed PRs:
+
+- **PR #296** — close deferred personal-assistant-v1 items (squash `27b00d1d`). Added migrations 0343_ea_home_widget_spec_align + 0344_ea_drafts_proposal_action_unique.
+- **PR #295** — docs/guidelines: codify recurring ChatGPT review findings (`2bdebb83`).
+- CI snapshot regen (`dd592927`).
+
+**Migration renumber:** Our `0343_memory_utility_30d` collided with main's `0343_ea_home_widget_spec_align`. Renumbered to `0345_memory_utility_30d` in commit `e65035f8` before the merge so the merge resolved cleanly on the migrations side. All live references updated (architecture.md, server/db/schema/index.ts, server/services/memoryUtilityAggregatorPure.ts, migrations/0334 header comment, handoff/plan/progress, tasks/todo.md). Historical review logs preserved as-is.
+
+**Conflicts resolved:**
+- `KNOWLEDGE.md` — both sides added new entries at the bottom; merged by concatenating PR #296's two entries first (idempotency-key discriminator pattern, chatgpt-pr-review override rule) followed by our 4 memory-improvements entries. No content lost.
+- `architecture.md` + `tasks/todo.md` — auto-merged cleanly.
+
+**Post-merge G3 (lint + typecheck on integrated state):** PASS (0 lint errors; typecheck clean on both client and server tsconfigs; warning count rose by 1 from main's incoming code — unrelated to this branch).
+
+**Merge commit:** `a728eef2 chore(sync): merge main into claude/add-memvid-integration-ehAOr (S2)`.
