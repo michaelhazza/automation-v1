@@ -333,18 +333,20 @@ interface IeeDispatchArgs {
  *      `ParentRunNotDispatchable`.
  */
 export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatchResult> {
-  if (args.type === 'browser') {
-    return ieeDispatchBrowser(args);
-  }
-
   const { type, adapterId, input } = args;
   const opts = input.backendOptions;
 
-  // Mismatch check — every adapter's dispatch() first statement. Pinning
-  // the discriminator narrows `opts` to the IEE variant of the union so
-  // `opts.ieeTask` is reachable below without a cast.
+  // Mismatch check — every adapter's dispatch() FIRST statement, before the
+  // type branch (Execution Backend Adapter Contract spec § 16 #13). Pinning
+  // the discriminator first means a misrouted browser→dev or dev→browser
+  // backendId surfaces BackendOptionsMismatch (the typed contract error),
+  // not a downstream feature-flag error from inside the type branch.
   if (opts.backendId !== adapterId) {
     throw new BackendOptionsMismatch(adapterId, opts.backendId);
+  }
+
+  if (type === 'browser') {
+    return ieeDispatchBrowser(args);
   }
 
   // Required-task guard. The dispatch-site no longer pre-validates this

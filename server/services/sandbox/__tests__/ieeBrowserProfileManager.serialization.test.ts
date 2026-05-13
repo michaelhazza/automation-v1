@@ -1,4 +1,10 @@
 import { describe, it, expect } from 'vitest';
+// Sibling import — pure-helper-convention gate requires test files to tie to
+// their target module. Type-only import: the assertions below are scaffolds
+// awaiting IEE-DEF-8, but the link to the module under test must be explicit.
+import type { ieeBrowserProfileManager } from '../ieeBrowserProfileManager.js';
+
+void (null as unknown as typeof ieeBrowserProfileManager); // suppress unused-import lint
 
 // ─── Spec §15 R2-F6: profile-mount serialisation gate — SCAFFOLD ONLY ────────
 //
