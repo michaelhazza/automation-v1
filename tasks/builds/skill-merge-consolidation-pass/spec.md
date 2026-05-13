@@ -64,7 +64,7 @@ The reviewer continues to see the existing three-column diff view (Current / Inc
 | Post-LLM validation | `validateMergeOutput()` (`skillAnalyzerServicePure.ts:1866`) | Re-invoked on the consolidated output |
 | Per-result LLM concurrency | `p-limit` with concurrency 3 in `skillAnalyzerJob.ts:790` | Consolidation runs inline inside the same limiter slot — no new concurrency primitive |
 | Config snapshot for thresholds | `job.configSnapshot` → `ValidationThresholds` (`skillAnalyzerJob.ts:99–104`) | Extended with two new fields (see §6) |
-| Warning tier map for new warning codes | `warningTierMap` jsonb on `skill_analyzer_config` (`skillAnalyzerConfig.ts:67`) | Two new codes added to default map |
+| Warning tier map for new warning codes | `warningTierMap` jsonb on `skill_analyzer_config` (`skillAnalyzerConfig.ts:67`) | Three new codes added to default map (`CONSOLIDATION_APPLIED`, `CONSOLIDATION_DECLINED`, `CONSOLIDATION_FAILED`) |
 | Reviewer audit trail | `originalProposedMerge` jsonb column on `skill_analyzer_results` | Repurposed: stores **post-consolidation** merge so Reset still hands the reviewer the best AI draft. Pre-consolidation draft moves to new column. |
 
 No new tables, no new services, no new routes. One new migration (column adds + config defaults).
@@ -104,7 +104,7 @@ The consolidation prompt receives:
 
 `ProposedMerge` shape: `{ name, description, definition, instructions, mergeRationale }` per `skillAnalyzerServicePure.ts:378–390`. Consolidation **must not change** `name`, `description`, `definition`, `mergeRationale` — only `instructions`.
 
-Parser rejection rules — a response failing any of the following is rejected at parse time and treated as `declinedToConsolidate=true` with `declineReason='parse_rejected: <rule>'`:
+Parser rejection rules — a response failing any of the following is rejected at parse time. Parser rejection is treated as `consolidationOutcome='failed'` (NOT `declined`): orchestration keeps the pre-consolidation draft, appends `CONSOLIDATION_FAILED` to the warning set, and records `failureReason='parse_rejected: <rule>'` in the warning detail. `declinedToConsolidate=true` is reserved for valid parsed responses where the model explicitly declines (see §5 step 5).
 
 - The response mutates any of `name`, `description`, `definition`, or `mergeRationale`.
 - `instructions` is not a string.
@@ -119,9 +119,11 @@ Parser rejection rules — a response failing any of the following is rejected a
 |---|---|---|---|
 | `CONSOLIDATION_APPLIED` | warning | informational | Consolidation ran and produced a smaller output. Detail records `{ preWords, postWords, reductionPct }`. |
 | `CONSOLIDATION_DECLINED` | warning | informational | Consolidation ran but LLM returned `declinedToConsolidate=true`. Detail records `declineReason`. |
-| `CONSOLIDATION_FAILED` | warning | informational | Consolidation call timed out, parse-failed, or post-consolidation validator detected a hard-constraint violation (HITL/tool-ref/invocation lost) and the system reverted to the pre-consolidation draft. Detail records the failure reason. |
+| `CONSOLIDATION_FAILED` | warning | informational | Consolidation call timed out, parse-failed, or post-consolidation validator detected a hard-constraint violation (HITL/tool-ref/invocation lost) and the system reverted to the pre-consolidation draft. Detail records `failureReason` (e.g. `parse_rejected: <rule>`, `timeout`, `hard_constraint_violation: <code>`). |
 
 All three are informational tier — they never block approval and never participate in the critical-warning confirmation gate.
+
+**Size-delta telemetry source.** The UI banner (§7) derives `preWords`, `postWords`, and `reductionPct` from the `CONSOLIDATION_APPLIED` warning detail, NOT from dedicated result columns. This avoids schema bloat: `mergeWarnings` already exists and the warning-detail object is the canonical source for consolidation telemetry. The `failureReason` field in `CONSOLIDATION_FAILED` detail and the `declineReason` field in `CONSOLIDATION_DECLINED` detail follow the same convention.
 
 ### 4.5 Source-of-truth precedence (post-consolidation row)
 
@@ -145,7 +147,7 @@ Sequencing inside one result slot:
 2. Existing post-LLM remediation (decontamination, invocation prepend, table recovery, output format recovery).
 3. Existing `validateMergeOutput()` call (line 1217).
 4. **NEW: consolidation gate.** If config has `consolidationEnabled=true` AND warnings include `SCOPE_EXPANSION` or `SCOPE_EXPANSION_CRITICAL` (subject to `consolidationTriggerSeverity` filter), capture pre-consolidation merge then run `routeCall` with consolidation prompt.
-5. **NEW: consolidation parse + apply.** On success, replace `storedMerge` with consolidated output. On parse fail or `declinedToConsolidate`, keep draft.
+5. **NEW: consolidation parse + apply.** On a parser-valid response with `declinedToConsolidate=false`, replace `storedMerge` with `consolidatedMerge`. On a parser-valid response with `declinedToConsolidate=true`, orchestration ignores `consolidatedMerge` regardless of whether the response also carries a mutated payload, keeps the pre-consolidation draft, writes `consolidationOutcome='declined'`, and appends `CONSOLIDATION_DECLINED` (detail: `declineReason`). On parse rejection (per §4.3 rules), orchestration keeps the pre-consolidation draft, writes `consolidationOutcome='failed'`, and appends `CONSOLIDATION_FAILED` (detail: `failureReason='parse_rejected: <rule>'`).
 6. **NEW: re-validate.** Re-run `validateMergeOutput()` on the final merge. If consolidation succeeded but introduced a hard-constraint violation (`HITL_LOST`, `INVOCATION_LOST`, `REQUIRED_FIELD_DEMOTED`, or `CAPABILITY_OVERLAP` newly emitted by consolidation), revert to pre-consolidation merge and emit `CONSOLIDATION_FAILED` with the violating code. **Warning-set replacement rule:** the final stored `mergeWarnings` MUST correspond to the final stored `proposedMergedContent`. When consolidation is reverted, discard the post-consolidation validation warnings, recompute (or restore) warnings against the pre-consolidation draft, then append `CONSOLIDATION_FAILED`. The reviewer never sees warnings for a draft they are not reviewing.
 7. Existing confidence adjustment.
 8. `insertSingleResult()` with the new fields.
@@ -237,7 +239,12 @@ Dependency graph: Chunk 1 strictly before Chunks 2 and 3; Chunk 2 strictly befor
 
 Per `references/test-gate-policy.md` and `docs/spec-context.md`:
 
-- **Pure-function tests (Vitest, allowed).** New file `skillAnalyzerServicePure.consolidation.test.ts`. Coverage targets: prompt builder includes preservation inventory; parser rejects mutated non-instructions fields; parser handles `declinedToConsolidate=true`; integration of new warning codes into tier map.
+- **Pure-function tests (Vitest, allowed).** New file `skillAnalyzerServicePure.consolidation.test.ts`. Coverage targets:
+  - prompt builder includes the tiered preservation inventory (Tier 1 verbatim list + Tier 2 best-effort list);
+  - parser rejects mutated non-instructions fields, non-string/empty `instructions`, missing/empty `consolidationNote`, non-boolean `declinedToConsolidate`, and `declinedToConsolidate=true` with empty `declineReason`;
+  - parser-rejected response routes to `consolidationOutcome='failed'` with `CONSOLIDATION_FAILED` and `failureReason='parse_rejected: <rule>'` (distinct from a valid `declined` response);
+  - parser handles valid `declinedToConsolidate=true` and orchestration ignores any payload that carries with it (route to `consolidationOutcome='declined'`);
+  - integration of the three new warning codes into the tier map and `RESOLUTIONS_FOR_CODE` map.
 - **Static gates.** Lint + typecheck + build:server + build:client. All chunks must pass G1.
 - **No new frontend tests, no new API contract tests, no E2E** (matches framing in `docs/spec-context.md`).
 - **Manual smoke (operator).** After Chunk 4, run the analyzer against a known-bloating fixture (one ~2,000-word marketing skill matched against a ~600-word library skill — the canonical SCOPE_EXPANSION reproducer in prior test runs) and confirm: (a) consolidation banner renders, (b) Recommended column shows the tightened output, (c) Reset rolls back to the consolidated draft, (d) approval + execute still write the consolidated content to the system_skills row.
