@@ -59,7 +59,7 @@ export const calendarActions: Record<string, ActionDefinition> = {
     slug: 'calendar.create_event',
     description: 'Create a new event on the owner\'s Google Calendar. Requires an EA draft (`eaDraftId`) — the handler enforces that `actions.status = \'approved\'` AND `ea_drafts.send_state = \'idle\'` before sending. Supports attendees, conferencing, recurrence, and a private `ea_draft_id` extended property for idempotency recovery.',
     topics: ['calendar'],
-    riskTier: 6,
+    riskTier: 4,
     defaultGateLevel: 'review',
     payloadFields: ['eaDraftId', 'calendarId', 'summary', 'start', 'end', 'attendees', 'description', 'location', 'conferenceType', 'recurrence', 'ownerUserId'],
     parameterSchema: z.object({
@@ -82,7 +82,7 @@ export const calendarActions: Record<string, ActionDefinition> = {
     slug: 'calendar.update_event',
     description: 'Update an existing event on the owner\'s Google Calendar. Requires an EA draft (`eaDraftId`). Uses etag-based conflict detection. Handler enforces write-action invariant: `actions.status = \'approved\'` AND `ea_drafts.send_state = \'idle\'`.',
     topics: ['calendar'],
-    riskTier: 6,
+    riskTier: 4,
     defaultGateLevel: 'review',
     payloadFields: ['eaDraftId', 'eventId', 'calendarId', 'summary', 'start', 'end', 'attendees', 'description', 'location', 'etag', 'ownerUserId'],
     parameterSchema: z.object({

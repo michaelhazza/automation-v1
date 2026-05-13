@@ -1,6 +1,6 @@
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
-import { db } from '../db/index.js';
+import { db, type Transaction } from '../db/index.js';
 import { actions, actionEvents, tasks, flowRuns } from '../db/schema/index.js';
 import {
   getActionDefinition,
@@ -119,8 +119,20 @@ export const actionService = {
   /**
    * Propose a new action. Validates against registry, checks idempotency,
    * creates the record, and applies the initial gate transition.
+   *
+   * **Atomicity contract.** Pass `opts.tx` to enrol all writes (action insert,
+   * suspend-update, transition-state, emitted events) in a caller-owned
+   * transaction. Callers that also need to insert dependent rows in the same
+   * transaction (e.g. `eaDraftService.createDraftWithProposal`) MUST pass tx
+   * so the dependent row + the action row commit-or-rollback together; the
+   * pre-2026-05-13 non-tx variant left orphaned `pending_approval` actions
+   * if the dependent insert failed.
    */
-  async proposeAction(input: ProposeActionInput): Promise<ProposeActionResult> {
+  async proposeAction(
+    input: ProposeActionInput,
+    opts: { tx?: Transaction } = {},
+  ): Promise<ProposeActionResult> {
+    const exec = opts.tx ?? db;
     const definition = getActionDefinition(input.actionType);
     if (!definition) {
       throw Object.assign(new Error(`Unknown action type: ${input.actionType}`), { statusCode: 400 });
@@ -139,7 +151,7 @@ export const actionService = {
           eq(actions.idempotencyKey, input.idempotencyKey)
         );
 
-    const [existing] = await db
+    const [existing] = await exec
       .select({ id: actions.id, status: actions.status })
       .from(actions)
       .where(idempotencyCondition);
@@ -165,7 +177,7 @@ export const actionService = {
     })();
 
     // Create the action record
-    const [action] = await db
+    const [action] = await exec
       .insert(actions)
       .values({
         organisationId: input.organisationId,
@@ -191,11 +203,11 @@ export const actionService = {
       .returning();
 
     // Emit created event
-    await this.emitEvent(action.id, input.organisationId, 'created');
+    await this.emitEvent(action.id, input.organisationId, 'created', undefined, undefined, opts);
 
     // Apply gate logic
     if (resolved.gate === 'block') {
-      await this.transitionState(action.id, input.organisationId, 'blocked');
+      await this.transitionState(action.id, input.organisationId, 'blocked', undefined, undefined, opts);
       return { actionId: action.id, status: 'blocked', isNew: true };
     }
 
@@ -208,32 +220,95 @@ export const actionService = {
         : 30 * 60 * 1000;
       const suspendUntil = new Date(Date.now() + timeoutMs);
 
-      await db.update(actions).set({
+      await exec.update(actions).set({
         suspendCount: sql`suspend_count + 1`,
         suspendUntil,
         updatedAt: new Date(),
       }).where(eq(actions.id, action.id));
 
-      await this.transitionState(action.id, input.organisationId, 'pending_approval');
+      await this.transitionState(action.id, input.organisationId, 'pending_approval', undefined, undefined, opts);
       return { actionId: action.id, status: 'pending_approval', isNew: true };
     }
 
-    // auto gate — move to approved immediately
-    await this.transitionState(action.id, input.organisationId, 'approved');
+    // auto gate — move to approved immediately. When the caller passed
+    // `opts.tx`, also propagate `skipDispatch: true` — the dispatch hook
+    // cannot safely run inside an uncommitted tx (see transitionState
+    // doc-comment). Today no production caller hits this combination
+    // (`createDraftWithProposal` forces `gateOverride: 'review'`), but the
+    // propagation here keeps the contract self-consistent if a future
+    // caller passes `opts.tx` to a non-review path.
+    //
+    // **Invariant pin (REVIEW-T1-followup, 2026-05-13).** As of this commit,
+    // NO production call site invokes `proposeAction({ tx })` for an
+    // EA-draft-like action that resolves to the `auto` gate. The only
+    // tx-backed caller is `eaDraftService.createDraftWithProposal`, which
+    // hard-codes `gateOverride: 'review'` — so the gate resolution in
+    // `resolveGateLevel` cannot land on `auto` for that path. The
+    // `transitionState` runtime assertion above (line ~285) catches the
+    // failure mode if a future caller passes `opts.tx` to a non-review
+    // path without acknowledging `skipDispatch: true`. If you change this
+    // invariant — e.g. add a tx-backed auto-approved path for a new draft
+    // kind — you MUST also wire a post-commit dispatch callback (the
+    // assert covers the missing acknowledgement, but not the missing
+    // dispatch itself).
+    await this.transitionState(
+      action.id,
+      input.organisationId,
+      'approved',
+      undefined,
+      undefined,
+      opts.tx ? { tx: opts.tx, skipDispatch: true } : opts,
+    );
     return { actionId: action.id, status: 'approved', isNew: true };
   },
 
   /**
    * Transition an action to a new state. Enforces legal transitions.
+   *
+   * Pass `opts.tx` to enrol the select / update / emit-event writes in a
+   * caller-owned transaction (see `proposeAction` doc-comment for context).
+   *
+   * **Tx + approval-dispatch contract.** When `opts.tx` is passed AND
+   * `newStatus === 'approved'`, the caller MUST also pass
+   * `opts.skipDispatch = true` to acknowledge that the EA-draft dispatch
+   * hook is being skipped (the hook does network I/O against post-commit
+   * state and cannot safely run inside the caller's tx). The caller is
+   * then responsible for invoking
+   * `eaDraftDispatchService.dispatchAfterApproval` AFTER their tx commits.
+   * The runtime assertion below enforces this — a future approval path
+   * that atomically transitions to approved without providing the
+   * acknowledgement will throw rather than silently failing to dispatch.
    */
   async transitionState(
     actionId: string,
     organisationId: string,
     newStatus: ActionStatus,
     actorId?: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    opts: { tx?: Transaction; skipDispatch?: boolean } = {},
   ): Promise<void> {
-    const [action] = await db
+    // Tx-contract guard: when a caller passes `opts.tx` and transitions to
+    // `approved`, the EA-draft dispatch hook below is skipped (the hook does
+    // network I/O against post-commit state and cannot safely run inside the
+    // caller's tx — see comment block lower down). The caller MUST
+    // acknowledge that contract by passing `skipDispatch: true` and is
+    // responsible for invoking
+    // `eaDraftDispatchService.dispatchAfterApproval` themselves AFTER their
+    // tx commits. Without this assert a future approval path could
+    // atomically transition to approved and silently never dispatch.
+    if (opts.tx && newStatus === 'approved' && !opts.skipDispatch) {
+      throw Object.assign(
+        new Error(
+          'actionService.transitionState: callers passing opts.tx for an ' +
+            "'approved' transition MUST set opts.skipDispatch=true and call " +
+            'eaDraftDispatchService.dispatchAfterApproval after their tx ' +
+            'commits. See actionService.transitionState doc-comment.',
+        ),
+        { statusCode: 500 },
+      );
+    }
+    const exec = opts.tx ?? db;
+    const [action] = await exec
       .select({ status: actions.status })
       .from(actions)
       .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
@@ -265,7 +340,7 @@ export const actionService = {
       updates.executedAt = new Date();
     }
 
-    await db.update(actions).set(updates).where(eq(actions.id, actionId));
+    await exec.update(actions).set(updates).where(eq(actions.id, actionId));
 
     // Map status to event type
     const eventMap: Record<string, string> = {
@@ -280,7 +355,7 @@ export const actionService = {
     };
 
     const eventType = (eventMap[newStatus] ?? newStatus) as typeof actionEvents.eventType._.data;
-    await this.emitEvent(actionId, organisationId, eventType, actorId, metadata);
+    await this.emitEvent(actionId, organisationId, eventType, actorId, metadata, opts);
 
     // Proposal commit hook — invoked exactly once on approved transition.
     // Spec: 2026-05-12-personal-assistant-v1-spec.md §11 + §24.2. When the
@@ -289,7 +364,19 @@ export const actionService = {
     // + mark-sent / mark-failed lifecycle on ea_drafts.sendState; errors
     // are logged but do not undo the approval (stall-reset job recovers
     // any draft stuck in 'sending').
-    if (newStatus === 'approved') {
+    //
+    // Tx contract (2026-05-13 sweep): when the caller passes `opts.tx`, the
+    // dispatch hook is SKIPPED — it runs network I/O (Slack/Calendar API
+    // calls) and would be either (a) executing against an uncommitted action
+    // row (the action transitions to executing inside the tx, but the draft
+    // SELECT in dispatchAfterApproval would read pre-commit state if it ran
+    // inside the same tx connection) or (b) blocked on the tx releasing its
+    // connection. Callers that pass `opts.tx` MUST invoke
+    // `eaDraftDispatchService.dispatchAfterApproval` themselves AFTER their
+    // own tx commits. `createDraftWithProposal` is exempt — it forces
+    // `gateOverride: 'review'`, so the dispatch path never fires from inside
+    // its tx.
+    if (newStatus === 'approved' && !opts.tx) {
       const { eaDraftDispatchService } = await import('./eaDrafts/eaDraftDispatchService.js');
       if (await eaDraftDispatchService.isEADraftAction(actionId, organisationId)) {
         await eaDraftDispatchService.dispatchAfterApproval(actionId, organisationId);
@@ -537,15 +624,19 @@ export const actionService = {
 
   /**
    * Emit an action event (immutable audit log entry).
+   *
+   * Pass `opts.tx` to enrol the insert in a caller-owned transaction.
    */
   async emitEvent(
     actionId: string,
     organisationId: string,
     eventType: typeof actionEvents.eventType._.data,
     actorId?: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    opts: { tx?: Transaction } = {},
   ): Promise<void> {
-    await db.insert(actionEvents).values({
+    const exec = opts.tx ?? db;
+    await exec.insert(actionEvents).values({
       organisationId,
       actionId,
       eventType,

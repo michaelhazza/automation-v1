@@ -157,11 +157,13 @@ async function slackFetch(
 async function writePreFlight(
   draftId: string,
   organisationId: string,
+  callerOwnerUserId: string,
 ): Promise<void> {
   const rows = await db
     .select({
       sendState: eaDrafts.sendState,
       actionStatus: actions.status,
+      draftOwnerUserId: eaDrafts.ownerUserId,
     })
     .from(eaDrafts)
     .innerJoin(actions, eq(eaDrafts.proposalActionId, actions.id))
@@ -178,6 +180,14 @@ async function writePreFlight(
     throw Object.assign(
       new Error(`EA draft ${draftId} not found`),
       { statusCode: 404, errorCode: 'DRAFT_NOT_FOUND' },
+    );
+  }
+
+  // Owner-mismatch guard — see calendarActionService.writePreFlight for context.
+  if (row.draftOwnerUserId !== callerOwnerUserId) {
+    throw Object.assign(
+      new Error(`Draft ${draftId} does not belong to caller ${callerOwnerUserId}`),
+      { statusCode: 403, errorCode: 'DRAFT_OWNER_MISMATCH' },
     );
   }
 
@@ -204,7 +214,12 @@ export const slackActionService = {
   // ── Read actions ─────────────────────────────────────────────────────────
 
   async listChannels(
-    input: { cursor?: string; limit?: number; excludeArchived?: boolean },
+    input: {
+      cursor?: string;
+      limit?: number;
+      excludeArchived?: boolean;
+      types?: Array<'public_channel' | 'private_channel' | 'mpim' | 'im'>;
+    },
     ctx: SlackCtx,
   ): Promise<{ channels: unknown[]; nextCursor?: string }> {
     const token = await resolveSlackToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
@@ -214,6 +229,10 @@ export const slackActionService = {
       exclude_archived: String(input.excludeArchived ?? true),
     });
     if (input.cursor) params.set('cursor', input.cursor);
+    if (input.types && input.types.length > 0) {
+      // Slack's conversations.list expects a comma-separated `types` param.
+      params.set('types', input.types.join(','));
+    }
 
     const data = await slackFetch(`conversations.list?${params.toString()}`, token);
 
@@ -409,7 +428,7 @@ export const slackActionService = {
     draftId: string,
     ctx: SlackCtx,
   ): Promise<{ sent: true; ts: string }> {
-    await writePreFlight(draftId, ctx.organisationId);
+    await writePreFlight(draftId, ctx.organisationId, ctx.ownerUserId);
 
     // When the dispatch hook has already claimed (chatgpt-pr-review R2 F2),
     // skip the redundant claim. Direct callers (e.g. retry) still claim here.
