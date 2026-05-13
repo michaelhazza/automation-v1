@@ -19,6 +19,7 @@ import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from './securityA
 import { auditEvent } from '../../shared/types/securityAuditEvents.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { GHL_AUTO_ENROL_PAGE_JOB } from '../jobs/ghlAutoEnrolLocationsPageJob.js';
+import { withOrgTx } from '../instrumentation.js';
 
 export async function exchangeGhlAuthCode(
   code: string,
@@ -370,4 +371,31 @@ export async function autoEnrolAgencyLocations(
   });
 
   return { enrolled: locations.length, insertedCount };
+}
+
+/**
+ * Wraps autoEnrolAgencyLocations in a db.transaction with GUC propagation and
+ * withOrgTx context. Called from the GHL OAuth callback route, which is
+ * unauthenticated, so no org context exists at the middleware level.
+ *
+ * guard-ignore-next-line: rls-contract-compliance reason="db.transaction opens an org-scoped tx with set_config GUC on the pre-auth GHL OAuth callback path — no authenticated org context exists for getOrgScopedDb (AR-3.1 fix, S-P0-4)"
+ */
+export async function enrolAgencyLocationsInOrgTx(
+  orgId: string,
+  connection: { id: string; companyId: string | null; organisationId: string; accessToken?: string | null },
+  correlationId: string,
+): Promise<void> {
+  // guard-ignore-next-line: rls-contract-compliance reason="db.transaction opens an org-scoped tx with set_config GUC on the pre-auth GHL OAuth callback path — no authenticated org context exists for getOrgScopedDb (AR-3.1 fix, S-P0-4)"
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+    await withOrgTx(
+      { tx, organisationId: orgId, source: 'oauth:callback:ghl:enrol' },
+      () => Promise.race([
+        autoEnrolAgencyLocations(orgId, connection, correlationId),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
+        ),
+      ]),
+    );
+  });
 }

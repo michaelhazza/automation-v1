@@ -4,7 +4,7 @@
 **Author:** Claude (spec-coordinator, Opus 4.7)
 **Build slug:** support-desk-canonical
 **Source brief:** `tasks/builds/support-desk-canonical/brief.md` (LOCKED v5.3, commit `0e04cc0d`)
-**Source mockups:** `prototypes/support-desk-canonical/` (5 hi-fi screens, commit `0a768abd`)
+**Source mockups:** `_archive/prototypes/support-desk-canonical/` (5 hi-fi screens, commit `0a768abd`)
 **Source branch:** `claude/support-ticket-structure-xMcy8`
 **Scope class:** Major
 
@@ -133,7 +133,7 @@ The PR is broken into ordered build chunks for the implementer (`feature-coordin
 | C10 | `supportTicketService` (read-only canonical reads + thread assembly) and `supportInboxService` (config CRUD with `agent_config` JSONB) | new service files; principal-scoped methods; pure thread-ordering helper + test |
 | C11 | Three-phase dispatch service (`supportDraftDispatchService`) — preflight → durable transition → adapter call — with `needs_reconciliation` reconciler worker | new service file + pg-boss worker (`createWorker`); pure state-machine transition guard + test; reconciliation policy module + test |
 | C12 | Skill registrations (`support.list_open_tickets`, `support.read_thread`, `support.propose_reply`, `support.approve_draft`, `support.reject_draft`, `support.add_internal_note`, `support.set_status`, `support.assign`, `support.tag`, `support.find_customer_history`) | `server/skills/support/` directory; one markdown skill definition per skill; `actionRegistry` updates |
-| C13 | UI surfaces — connection setup screen integration, tickets list, ticket detail (thread + draft overlay), draft review queue, inbox config | `client/src/pages/support/`; reuses primitives from `consolidation-foundation` (PageShell, SortableTable, FormFooter, etc.); references `prototypes/support-desk-canonical/` as design source of truth |
+| C13 | UI surfaces — connection setup screen integration, tickets list, ticket detail (thread + draft overlay), draft review queue, inbox config | `client/src/pages/support/`; reuses primitives from `consolidation-foundation` (PageShell, SortableTable, FormFooter, etc.); references `_archive/prototypes/support-desk-canonical/` as design source of truth |
 | C14 | Operational state surfaces — sync-health pill on tickets list, connection-health on connection setup success page, `needs_reconciliation` callout in draft review queue, status pills on inbox config | extends C13 surfaces; reuses existing health/sync state from `connector_configs` |
 | C15 | Documentation, ADR, and `architecture.md` doc-sync — adds canonical Support Desk section, updates "Key files per domain", adds ADR for the canonical-not-conversations boundary decision | `architecture.md`; `docs/decisions/`; `docs/capabilities.md` (new capabilities); `KNOWLEDGE.md` patterns once the build settles |
 
@@ -1005,7 +1005,7 @@ The reconciler reads provider state with the same connection token + `getOrgScop
 
 ### 8.5 Manual-review surface for exhausted reconciliation
 
-Drafts whose reconciliation budget is exhausted appear in the draft review queue (existing prototype `prototypes/support-desk-canonical/draft-review.html`) with a distinct visual treatment. Brief §5.12 + §6.5 + §10 #3.
+Drafts whose reconciliation budget is exhausted appear in the draft review queue (existing prototype `_archive/prototypes/support-desk-canonical/draft-review.html`) with a distinct visual treatment. Brief §5.12 + §6.5 + §10 #3.
 
 The surface offers three operator actions. **UI labels matter** — they communicate to the operator that they are confirming provider state, not synthesising canonical state:
 
@@ -1079,15 +1079,15 @@ Permissions register in the existing `permission_sets` system (not a new system)
 
 ## 10. UI surfaces
 
-The five hi-fi prototypes at `prototypes/support-desk-canonical/` are the **design source of truth** for this spec. Phase 2 implementation re-uses primitives from the `consolidation-foundation` build (PR #270): `PageShell`, `Drawer`, `Modal`, `SortableTable`, `FormFooter`, `SearchBox`, `EmptyState`, `ErrorState`. Layout, chrome, badges, and pill systems already exist; this spec adds support-domain content inside that frame.
+The five hi-fi prototypes at `_archive/prototypes/support-desk-canonical/` are the **design source of truth** for this spec. Phase 2 implementation re-uses primitives from the `consolidation-foundation` build (PR #270): `PageShell`, `Drawer`, `Modal`, `SortableTable`, `FormFooter`, `SearchBox`, `EmptyState`, `ErrorState`. Layout, chrome, badges, and pill systems already exist; this spec adds support-domain content inside that frame.
 
 | Prototype | Implements as | Notes |
 |---|---|---|
-| `prototypes/support-desk-canonical/integration-setup.html` | `client/src/pages/integrations/SupportDeskSetupPage.tsx` (or extension to existing connection-setup wizard) | Three-step wizard: connect (OAuth tab + API-key tab), choose inboxes (multi-select with toggle-all), confirm (backfill window radio + summary). Success state shows `running | degraded | failed` sync-health pill (brief §5.12). |
-| `prototypes/support-desk-canonical/tickets-list.html` | `client/src/pages/support/TicketsListPage.tsx` | Five default-visible status filters (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`) plus a distinct `quarantined` filter for `unknown_provider_status` (brief §6.1 UI filter semantics — never folded into "Actionable"). Inbox filter pills. Inline quarantine banner if any quarantined tickets exist. Sync-health indicator at top when underlying connector is degraded. |
-| `prototypes/support-desk-canonical/ticket-detail.html` | `client/src/pages/support/TicketDetailPage.tsx` | Three-panel layout. Thread reads via `supportTicketService.readThreadForHumanUi()` — confirmed messages + `dispatching` / `needs_reconciliation` draft overlay (visually distinct, labelled "pending send" / "reconciling" per §5.2.B). Right rail surfaces customer identity (name, CRM contact link if matched, account if matched), recent tickets, and CRM revenue summary via `support.find_customer_history`. |
-| `prototypes/support-desk-canonical/draft-review.html` | `client/src/pages/support/DraftReviewQueue.tsx` | Split-pane: list of `awaiting_review` and `needs_reconciliation` drafts; right detail shows proposed reply, provenance block, pre-send policy checks, and the action set (Approve / Edit / Reject / Override-collision when blocked). Per brief §5.12, `needs_reconciliation` drafts are explicitly surfaced (NOT silently retried in the background); reconciliation status visible inline. |
-| `prototypes/support-desk-canonical/inbox-config.html` | `client/src/pages/support/InboxConfigPage.tsx` | Per-inbox config: mode radio (autonomous / assisted / disabled), collision-window controls, draft-expiry inputs, advanced collapsed section for model + prompt overrides. Save bar with dirty state. Provider connection-health status inline alongside each inbox row (brief §5.12). |
+| `_archive/prototypes/support-desk-canonical/integration-setup.html` | `client/src/pages/integrations/SupportDeskSetupPage.tsx` (or extension to existing connection-setup wizard) | Three-step wizard: connect (OAuth tab + API-key tab), choose inboxes (multi-select with toggle-all), confirm (backfill window radio + summary). Success state shows `running | degraded | failed` sync-health pill (brief §5.12). |
+| `_archive/prototypes/support-desk-canonical/tickets-list.html` | `client/src/pages/support/TicketsListPage.tsx` | Five default-visible status filters (`open`, `pending_internal`, `waiting_on_customer`, `resolved`, `closed`) plus a distinct `quarantined` filter for `unknown_provider_status` (brief §6.1 UI filter semantics — never folded into "Actionable"). Inbox filter pills. Inline quarantine banner if any quarantined tickets exist. Sync-health indicator at top when underlying connector is degraded. |
+| `_archive/prototypes/support-desk-canonical/ticket-detail.html` | `client/src/pages/support/TicketDetailPage.tsx` | Three-panel layout. Thread reads via `supportTicketService.readThreadForHumanUi()` — confirmed messages + `dispatching` / `needs_reconciliation` draft overlay (visually distinct, labelled "pending send" / "reconciling" per §5.2.B). Right rail surfaces customer identity (name, CRM contact link if matched, account if matched), recent tickets, and CRM revenue summary via `support.find_customer_history`. |
+| `_archive/prototypes/support-desk-canonical/draft-review.html` | `client/src/pages/support/DraftReviewQueue.tsx` | Split-pane: list of `awaiting_review` and `needs_reconciliation` drafts; right detail shows proposed reply, provenance block, pre-send policy checks, and the action set (Approve / Edit / Reject / Override-collision when blocked). Per brief §5.12, `needs_reconciliation` drafts are explicitly surfaced (NOT silently retried in the background); reconciliation status visible inline. |
+| `_archive/prototypes/support-desk-canonical/inbox-config.html` | `client/src/pages/support/InboxConfigPage.tsx` | Per-inbox config: mode radio (autonomous / assisted / disabled), collision-window controls, draft-expiry inputs, advanced collapsed section for model + prompt overrides. Save bar with dirty state. Provider connection-health status inline alongside each inbox row (brief §5.12). |
 
 ### Ticket-list UI filter semantics (brief §6.1, locked)
 

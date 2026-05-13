@@ -5,10 +5,7 @@
  */
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
-import { db } from '../db/index.js';
-import { integrationConnections } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission, requireOrgPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -16,20 +13,11 @@ import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
 import { credentialBrokerService } from '../services/credentialBrokerService.js';
 import { listConnections, getConnectionUsage, disconnectConnection } from '../services/connectionsService.js';
+import { integrationConnectionService } from '../services/integrationConnectionService.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
-
-function sanitizeConnection(conn: typeof integrationConnections.$inferSelect) {
-  const { accessToken, refreshToken, secretsRef, ...rest } = conn;
-  return {
-    ...rest,
-    hasAccessToken: !!accessToken,
-    hasRefreshToken: !!refreshToken,
-    hasSecretsRef: !!secretsRef,
-  };
-}
 
 // List connections for a subaccount
 router.get(
@@ -38,10 +26,8 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const rows = await db.select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.subaccountId, subaccount.id));
-    res.json(rows.map(sanitizeConnection));
+    const rows = await integrationConnectionService.listSubaccountConnections(subaccount.id, req.orgId!);
+    res.json(rows);
   })
 );
 
@@ -58,27 +44,19 @@ router.post(
       throw { statusCode: 400, message: 'providerType and authType are required' };
     }
 
-    // Encrypt tokens before storage
-    const encryptedAccess = accessToken ? connectionTokenService.encryptToken(accessToken) : null;
-    const encryptedRefresh = refreshToken ? connectionTokenService.encryptToken(refreshToken) : null;
-    const encryptedSecret = secretsRef ? connectionTokenService.encryptToken(secretsRef) : null;
-
-    const [connection] = await db.insert(integrationConnections).values({
-      organisationId: req.orgId!,
-      subaccountId: subaccount.id,
+    const connection = await integrationConnectionService.createSubaccountConnection(subaccount.id, req.orgId!, {
       providerType,
       authType,
-      label: label ?? null,
-      displayName: displayName ?? null,
-      configJson: configJson ?? null,
-      accessToken: encryptedAccess,
-      refreshToken: encryptedRefresh,
-      tokenExpiresAt: tokenExpiresAt ? new Date(tokenExpiresAt) : null,
-      secretsRef: encryptedSecret,
-      connectionStatus: 'active',
-    }).returning();
+      label,
+      displayName,
+      configJson,
+      accessToken,
+      refreshToken,
+      tokenExpiresAt,
+      secretsRef,
+    });
 
-    res.status(201).json(sanitizeConnection(connection));
+    res.status(201).json(connection);
   })
 );
 
@@ -89,15 +67,10 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [connection] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
+    const connection = await integrationConnectionService.getSubaccountConnection(req.params.id, subaccount.id, req.orgId!);
 
     if (!connection) throw { statusCode: 404, message: 'Connection not found' };
-    res.json(sanitizeConnection(connection));
+    res.json(connection);
   })
 );
 
@@ -122,37 +95,18 @@ router.patch(
     }
 
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
-
-    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
-
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-
-    if (req.body.label !== undefined) updates.label = req.body.label;
-    if (req.body.displayName !== undefined) updates.displayName = req.body.displayName;
-    if (parsed.data.connectionStatus !== undefined) updates.connectionStatus = parsed.data.connectionStatus;
-    if (req.body.configJson !== undefined) updates.configJson = req.body.configJson;
-
-    // Re-encrypt if new tokens provided
-    if (req.body.accessToken) updates.accessToken = connectionTokenService.encryptToken(req.body.accessToken);
-    if (req.body.refreshToken) updates.refreshToken = connectionTokenService.encryptToken(req.body.refreshToken);
-    if (req.body.tokenExpiresAt) updates.tokenExpiresAt = new Date(req.body.tokenExpiresAt);
-    if (req.body.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(req.body.secretsRef);
-
-    const [updated] = await db.update(integrationConnections)
-      .set(updates)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-      ))
-      .returning();
+    const updated = await integrationConnectionService.updateSubaccountConnection(req.params.id, subaccount.id, req.orgId!, {
+      label: req.body.label,
+      displayName: req.body.displayName,
+      connectionStatus: parsed.data.connectionStatus,
+      configJson: req.body.configJson,
+      accessToken: req.body.accessToken,
+      refreshToken: req.body.refreshToken,
+      tokenExpiresAt: req.body.tokenExpiresAt,
+      secretsRef: req.body.secretsRef,
+    });
     if (!updated) throw { statusCode: 404, message: 'Connection not found' };
-    res.json(sanitizeConnection(updated));
+    res.json(updated);
   })
 );
 
@@ -187,15 +141,9 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [conn] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-        eq(integrationConnections.providerType, 'slack'),
-      ));
+    const conn = await integrationConnectionService.getSubaccountConnectionWithToken(req.params.id, subaccount.id, req.orgId!);
 
-    if (!conn) throw { statusCode: 404, message: 'Slack connection not found' };
+    if (!conn || conn.providerType !== 'slack') throw { statusCode: 404, message: 'Slack connection not found' };
     if (!conn.accessToken) throw { statusCode: 422, message: 'Slack connection has no token — reconnect first' };
 
     const token = connectionTokenService.decryptToken(conn.accessToken);

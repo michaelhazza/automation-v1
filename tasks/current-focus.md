@@ -8,11 +8,11 @@ last_updated: 2026-05-13
 last_merge_ready_pr: none
 last_merge_ready_slug: none
 last_merge_ready_branch: none
-last_merged_pr: #288
-last_merged_slug: operator-backend
-last_merged_branch: claude/sandbox-execution-provider-DLfjn
-last_merged_at: 2026-05-13T00:22:37Z
-last_merged_commit: 83fd8347
+last_merged_pr: #294
+last_merged_slug: fleet-and-codebase-health
+last_merged_branch: codebase-health
+last_merged_at: 2026-05-13T13:34:22Z
+last_merged_commit: effe82ac
 -->
 
 # Current Focus
@@ -31,7 +31,7 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Branch:** `claude/add-memvid-integration-ehAOr`
 **Status:** **BUILDING** — Phase 1 (SPEC) complete 2026-05-13. Phase 2 plan LOCKED 2026-05-13: 11 chunks across A synthesis lineage (`memory_block_version_sources`, migration 0333), B1+B2 citation-rate utility (`agent_runs.injected_entry_ids` migration 0334 + `mv_memory_utility_30d` migration 0343 with null-stable unique index for REFRESH CONCURRENTLY, COALESCEd aggregate totals, jsonb_typeof guards, array-shape `measured_entries`), D semantic ranker for AKR (env-flagged, no UI; per-candidate vector-error skip). chatgpt-plan-review 3 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs (commit `331ee9cc`); R2 closed 3 BLOCKERs + 4 TIGHTENINGs + 1 polish (commit `a5b27331`); R3 closed 3 final TIGHTENINGs, APPROVED. All 19 findings TECHNICAL, auto-applied. Phase 1 handoff updated with resume contract for Sonnet execution session: `tasks/builds/memory-improvements/handoff.md`. Plan: `tasks/builds/memory-improvements/plan.md`. **Next:** operator opens new Claude Code session on Sonnet, runs the chunk loop against the locked plan.
 
-**Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
+**Last merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 

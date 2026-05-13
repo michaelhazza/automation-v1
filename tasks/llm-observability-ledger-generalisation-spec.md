@@ -87,7 +87,7 @@ Override: none. If reviewer flags a directional finding against these defaults, 
 - **Contracts** are called out explicitly per §3 of `docs/spec-authoring-checklist.md`. Every data shape crossing a service boundary has a Contracts entry in §19.
 - **Migration numbers** use the next free sequence from `migrations/` as of 2026-04-20 (latest is 0179 — this spec claims 0180, 0181, 0182, and 0183 across phases, see §15; a prior draft reserved 0184 for a pg-boss cron registration but that was cut because job registration is application code, not DDL).
 - **Phase labels** are P1–P5 and map 1:1 to the sequencing graph in §15.
-- **Reference UI** — the authoritative visual reference for §11 is `prototypes/system-costs-page.html` (committed to this branch), which includes all four tab views with worked dummy data.
+- **Reference UI** — the authoritative visual reference for §11 is `_archive/prototypes/system-costs-page.html` (committed to this branch), which includes all four tab views with worked dummy data.
 
 ---
 
@@ -104,7 +104,7 @@ Four coordinated changes to turn the existing `llm_requests` ledger from an agen
 1. **Generalise the ledger's attribution model** so non-agent consumers (skill analyzer, workspace-memory compile, belief extraction, future background jobs) plug in with zero new FK columns per consumer. Polymorphic `sourceId` + extended `sourceType` enum + freeform `featureTag` column. See §5.1, §5.2, §6.
 2. **Harden the adapter layer** with an `AbortController`, explicit HTTP 499 detection, and a truncated parse-failure response excerpt. These close the three observability gaps that made the skill-analyzer incident that kicked off this spec impossible to diagnose from our own data. See §8.
 3. **Migrate the skill analyzer** off direct `anthropicAdapter.call()` and onto `llmRouter.routeCall()` as the proof-of-concept consumer. After this lands, analyzer calls show up in `llm_requests`, `cost_aggregates`, the Usage page, and the new System P&L page — every future direct-adapter caller becomes a review gate, not the default. See §10.
-4. **Ship a System P&L admin page** at `/system/llm-pnl` that surfaces platform-wide revenue, cost, gross profit, platform overhead, and net profit across four grouping axes (organisation / subaccount / source type / provider & model). First client-side surface for cross-org financials; UI anchor is `prototypes/system-costs-page.html`. See §11.
+4. **Ship a System P&L admin page** at `/system/llm-pnl` that surfaces platform-wide revenue, cost, gross profit, platform overhead, and net profit across four grouping axes (organisation / subaccount / source type / provider & model). First client-side surface for cross-org financials; UI anchor is `_archive/prototypes/system-costs-page.html`. See §11.
 
 ### 1.2 The outcome, stated as verifiable assertions
 
@@ -196,7 +196,7 @@ This matters more than "operator convenience" because:
 2. **Close the three adapter-level observability gaps** (499 discrimination, parse-failure excerpt, AbortController) uniformly across every registered provider adapter (`anthropicAdapter`, `openaiAdapter`, `geminiAdapter`, `openrouterAdapter`) — see §8.4 for parity matrix.
 3. **Migrate the skill-analyzer** to route through `llmRouter` end-to-end, retiring all four direct `anthropicAdapter.call()` sites in the analyzer subsystem — three in `server/jobs/skillAnalyzerJob.ts` (§10.1–§10.3) and one in `server/services/skillAnalyzerService.ts` (§10.4).
 4. **Extend `cost_aggregates`** with a `sourceType` dimension so system-level spend can be rolled up and displayed separately from org-billable spend.
-5. **Ship a System P&L admin page** at `/system/llm-pnl` with four grouping tabs (organisation / subaccount / source type / provider-model), four KPI cards (Revenue / Gross profit / Platform overhead / Net profit), a 30-day trend chart, and a top-calls-by-cost list (ranked by cost desc, includes platform-overhead rows). UI contract: `prototypes/system-costs-page.html`.
+5. **Ship a System P&L admin page** at `/system/llm-pnl` with four grouping tabs (organisation / subaccount / source type / provider-model), four KPI cards (Revenue / Gross profit / Platform overhead / Net profit), a 30-day trend chart, and a top-calls-by-cost list (ranked by cost desc, includes platform-overhead rows). UI contract: `_archive/prototypes/system-costs-page.html`.
 6. **Add a nightly retention job** that moves `llm_requests` rows older than `env.LLM_LEDGER_RETENTION_MONTHS` (default 12) into a `llm_requests_archive` table of identical shape, with lighter indexing.
 7. **Enforce no-regression** via a new static gate `scripts/gates/verify-no-direct-adapter-calls.sh` that fails CI if any non-router, non-test file imports the adapters directly.
 8. **Audit the codebase** for other direct-adapter callers (§9) and produce a remediation plan — not necessarily remediation itself within this spec.
@@ -275,7 +275,7 @@ Not introducing any. This spec doesn't touch the skill system or the agent middl
 | `VisibilitySegmentedControl` pattern | **REUSE** (conceptually) | Not this exact component, but the same inline segmented-control styling. |
 | `SystemPnlPage.tsx` (new page) | **NEW** | New route. Follows `SystemSkillsPage.tsx` as the closest-in-spirit system-admin page. |
 | `SystemPnlKpiCard`, `SystemPnlTable`, `SystemPnlTrendChart` (new components) | **NEW — scoped to this page** | No generic reuse expected. Scoped folder `client/src/components/system-pnl/`. |
-| Micro-sparkline pattern | **NEW — trivial** | Inline SVG, no library. Pattern shown in `prototypes/system-costs-page.html`. |
+| Micro-sparkline pattern | **NEW — trivial** | Inline SVG, no library. Pattern shown in `_archive/prototypes/system-costs-page.html`. |
 
 ### 4.7 Static gates
 
@@ -1121,7 +1121,7 @@ Verification is manual during Phase 3 rollout. `docs/spec-context.md` precludes 
 
 ## 11. System P&L page
 
-**Reference UI:** [prototypes/system-costs-page.html](prototypes/system-costs-page.html) — the committed high-fidelity mockup is the authoritative visual and interaction specification. Every production component in this section matches that mockup's structure, column order, status-row treatment, and interaction patterns.
+**Reference UI:** [_archive/prototypes/system-costs-page.html](_archive/prototypes/system-costs-page.html) — the committed high-fidelity mockup is the authoritative visual and interaction specification. Every production component in this section matches that mockup's structure, column order, status-row treatment, and interaction patterns.
 
 ### 11.1 Route + permissions
 
@@ -1284,7 +1284,7 @@ See §19 Contracts for the full TypeScript types. Column order matches the mocku
 - Margin: "overhead" badge instead of percentage
 - Pulled out visually with a subtle indigo background
 
-**Which tabs render overhead rows** (matches `prototypes/system-costs-page.html`):
+**Which tabs render overhead rows** (matches `_archive/prototypes/system-costs-page.html`):
 
 | Tab | Overhead treatment |
 |---|---|
@@ -2044,7 +2044,7 @@ Note: analyzer rows carry `marginMultiplier: "1.0000"` because system-level work
 
 **Nullability:** none — platform-admin view aggregates always return populated rows.
 
-**Producer:** `systemPnlService.getByOrganisation()`. The method returns `{ orgs: OrgRow[]; overhead: OverheadRow }`: the per-org rows plus a single synthetic aggregated overhead row (see `OverheadRow` below). The client renders `overhead` as the bottom-of-table indigo row per `prototypes/system-costs-page.html` lines 534-560.
+**Producer:** `systemPnlService.getByOrganisation()`. The method returns `{ orgs: OrgRow[]; overhead: OverheadRow }`: the per-org rows plus a single synthetic aggregated overhead row (see `OverheadRow` below). The client renders `overhead` as the bottom-of-table indigo row per `_archive/prototypes/system-costs-page.html` lines 534-560.
 
 **Consumer:** `PnlByOrganisationTable.tsx`.
 

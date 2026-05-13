@@ -4,7 +4,7 @@
 **Date:** 2026-04-29
 **Author:** Main session (Opus 4.7)
 **Source brief:** `tasks/builds/agent-as-employee/brief.md`
-**UI mockups (canonical):** [`prototypes/agent-as-employee/`](../../../prototypes/agent-as-employee/index.html) — 16 HTML mockups, source of truth for visual design
+**UI mockups (canonical):** [`_archive/prototypes/agent-as-employee/`](../../../_archive/prototypes/agent-as-employee/index.html) — 16 HTML mockups, source of truth for visual design
 **Build slug:** `agent-as-employee`
 **Class:** Major (cross-cutting — schema, identity, integrations, permissions, UX)
 
@@ -113,7 +113,7 @@ This spec turns the brief's "agents are employees" thesis into concrete schema, 
 
 ## 3. UX walkthrough — see HTML prototypes
 
-The canonical visual reference lives outside this spec, in `prototypes/agent-as-employee/index.html`. 16 standalone HTML mockups walk an operator (Maya at Acme Agency) end-to-end: configure the workspace backend, onboard an existing agent, watch it appear on the org chart with its email and photo, review its Identity tab, view its mailbox / calendar / activity, suspend or revoke, then migrate the subaccount from native to Google.
+The canonical visual reference lives outside this spec, in `_archive/prototypes/agent-as-employee/index.html`. 16 standalone HTML mockups walk an operator (Maya at Acme Agency) end-to-end: configure the workspace backend, onboard an existing agent, watch it appear on the org chart with its email and photo, review its Identity tab, view its mailbox / calendar / activity, suspend or revoke, then migrate the subaccount from native to Google.
 
 The mockups have been reviewed and signed off. The implementation should match them on layout, copy, primary actions, and information density. Tailwind class choices, animation, and exact spacing are implementation detail.
 
@@ -129,22 +129,22 @@ The mockups have been reviewed and signed off. The implementation should match t
 
 | # | Surface | File |
 |---|---|---|
-| 01 | Workspace backend setup — Synthetos-native | `prototypes/agent-as-employee/01-workspace-setup-native.html` |
-| 02 | Workspace backend setup — Google Workspace | `prototypes/agent-as-employee/02-workspace-setup-google.html` |
-| 03 | Subaccount Agents tab — per-row Onboard CTA | `prototypes/agent-as-employee/03-subaccount-agents-list.html` |
-| 04 | Onboard step 1: identity (name, email, send-mail toggle) | `prototypes/agent-as-employee/04-onboard-step1-identity.html` |
-| 05 | Onboard step 2: confirm | `prototypes/agent-as-employee/05-onboard-step2-confirm.html` |
-| 06 | Onboard step 3: progress (native + Google variants) | `prototypes/agent-as-employee/06-onboard-step3-progress.html` |
-| 07 | Onboard success | `prototypes/agent-as-employee/07-onboard-success.html` |
-| 08 | Org chart — humans + agents on one canvas | `prototypes/agent-as-employee/08-org-chart.html` |
-| 09 | Agent profile — Identity tab | `prototypes/agent-as-employee/09-agent-identity-tab.html` |
-| 10 | Agent mailbox (same shell, backend-aware) | `prototypes/agent-as-employee/10-agent-mailbox.html` |
-| 11 | Agent calendar (same shell, backend-aware) | `prototypes/agent-as-employee/11-agent-calendar.html` |
-| 12 | Suspend confirmation | `prototypes/agent-as-employee/12-suspend-dialog.html` |
-| 13 | Revoke confirmation (type-the-name gate) | `prototypes/agent-as-employee/13-revoke-dialog.html` |
-| 14 | Subaccount-wide Activity page (existing `ActivityPage`, new actor filter) | `prototypes/agent-as-employee/14-subaccount-activity.html` |
-| 15 | Agent profile — Activity tab (focused inline view) | `prototypes/agent-as-employee/15-agent-activity-tab.html` |
-| 16 | Workspace migration (native → Google) | `prototypes/agent-as-employee/16-migration-modal.html` |
+| 01 | Workspace backend setup — Synthetos-native | `_archive/prototypes/agent-as-employee/01-workspace-setup-native.html` |
+| 02 | Workspace backend setup — Google Workspace | `_archive/prototypes/agent-as-employee/02-workspace-setup-google.html` |
+| 03 | Subaccount Agents tab — per-row Onboard CTA | `_archive/prototypes/agent-as-employee/03-subaccount-agents-list.html` |
+| 04 | Onboard step 1: identity (name, email, send-mail toggle) | `_archive/prototypes/agent-as-employee/04-onboard-step1-identity.html` |
+| 05 | Onboard step 2: confirm | `_archive/prototypes/agent-as-employee/05-onboard-step2-confirm.html` |
+| 06 | Onboard step 3: progress (native + Google variants) | `_archive/prototypes/agent-as-employee/06-onboard-step3-progress.html` |
+| 07 | Onboard success | `_archive/prototypes/agent-as-employee/07-onboard-success.html` |
+| 08 | Org chart — humans + agents on one canvas | `_archive/prototypes/agent-as-employee/08-org-chart.html` |
+| 09 | Agent profile — Identity tab | `_archive/prototypes/agent-as-employee/09-agent-identity-tab.html` |
+| 10 | Agent mailbox (same shell, backend-aware) | `_archive/prototypes/agent-as-employee/10-agent-mailbox.html` |
+| 11 | Agent calendar (same shell, backend-aware) | `_archive/prototypes/agent-as-employee/11-agent-calendar.html` |
+| 12 | Suspend confirmation | `_archive/prototypes/agent-as-employee/12-suspend-dialog.html` |
+| 13 | Revoke confirmation (type-the-name gate) | `_archive/prototypes/agent-as-employee/13-revoke-dialog.html` |
+| 14 | Subaccount-wide Activity page (existing `ActivityPage`, new actor filter) | `_archive/prototypes/agent-as-employee/14-subaccount-activity.html` |
+| 15 | Agent profile — Activity tab (focused inline view) | `_archive/prototypes/agent-as-employee/15-agent-activity-tab.html` |
+| 16 | Workspace migration (native → Google) | `_archive/prototypes/agent-as-employee/16-migration-modal.html` |
 
 ### What we deliberately did NOT build (per CLAUDE.md frontend rules)
 
@@ -339,7 +339,7 @@ This table is the **only** authoritative list of what this spec touches. Every p
 | `architecture.md` | Add a "Workspace canonical layer" subsection mirroring the existing CRM canonical pattern note. Add the new route files to the route conventions table. |
 | `docs/capabilities.md` | Add "Agent-as-employee identity" capability. Add Google Workspace integration. Editorial rules apply. |
 | `docs/spec-context.md` | Add `workspaceActorService` / `workspaceIdentityService` / `workspaceEmailPipeline` / `<ActivityFeedTable>` to `accepted_primitives`. |
-| `prototypes/agent-as-employee/` | Canonical UI mockups — already shipped. Source of truth for visual design. |
+| `_archive/prototypes/agent-as-employee/` | Canonical UI mockups — already shipped. Source of truth for visual design. |
 
 ---
 
@@ -1261,7 +1261,7 @@ Per brief §8 success conditions, plus the spec-level checks:
 - [ ] All new tenant tables have RLS policies, manifest entries, and pass `verify-rls-coverage.sh`.
 - [ ] `verify-workspace-actor-coverage.ts` passes in CI.
 - [ ] The `deriveSeatConsumption` rollup matches the inline display on the Workspace tab.
-- [ ] Every screen in `prototypes/agent-as-employee/index.html` is implemented in the live app (layout, copy, primary actions match).
+- [ ] Every screen in `_archive/prototypes/agent-as-employee/index.html` is implemented in the live app (layout, copy, primary actions match).
 
 ---
 
@@ -1331,14 +1331,14 @@ Aligned with `docs/spec-context.md` 2026-04-16:
 - **No frontend unit tests.** Per `frontend_tests: none_for_now`.
 - **No e2e tests of the SaaS app.** Per `e2e_tests_of_own_app: none_for_now`.
 - **No migration-safety tests.** Per `migration_safety_tests: defer_until_live_data_exists`.
-- **Manual UAT.** Each UI surface in `prototypes/agent-as-employee/` is exercised manually against a dev database before merge. The acceptance criteria in §16 are the manual checklist. Mockups are the visual contract; the implementation should match them on layout, copy, primary actions, and information density.
+- **Manual UAT.** Each UI surface in `_archive/prototypes/agent-as-employee/` is exercised manually against a dev database before merge. The acceptance criteria in §16 are the manual checklist. Mockups are the visual contract; the implementation should match them on layout, copy, primary actions, and information density.
 
 ---
 
 ## 21. Cross-references
 
 - Source brief: `tasks/builds/agent-as-employee/brief.md`
-- **UI mockups (canonical):** [`prototypes/agent-as-employee/index.html`](../../../prototypes/agent-as-employee/index.html) — 16 HTML screens, source of truth for visual design
+- **UI mockups (canonical):** [`_archive/prototypes/agent-as-employee/index.html`](../../../_archive/prototypes/agent-as-employee/index.html) — 16 HTML screens, source of truth for visual design
 - Architecture: `architecture.md` (key files per domain, RLS three-layer model, permission system)
 - Spec context: `docs/spec-context.md` (framing assumptions)
 - Spec authoring checklist: `docs/spec-authoring-checklist.md` (this spec was authored against it)

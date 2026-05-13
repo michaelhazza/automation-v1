@@ -16,13 +16,10 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { subaccounts, integrationConnections } from '../db/schema/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { getGitHubAppConfig } from '../config/oauthProviders.js';
-import { connectionTokenService } from '../services/connectionTokenService.js';
+import { integrationConnectionService } from '../services/integrationConnectionService.js';
 import { env } from '../lib/env.js';
 
 const router = Router();
@@ -51,18 +48,8 @@ router.get(
     }
 
     // Verify the subaccount belongs to the authenticated org
-    const [subaccount] = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, req.orgId!),
-        ),
-      )
-      .limit(1);
-
-    if (!subaccount) {
+    const subaccountIdVerified = await integrationConnectionService.verifySubaccountOwnership(subaccountId, req.orgId!);
+    if (!subaccountIdVerified) {
       throw Object.assign(new Error('Subaccount not found'), { statusCode: 404 });
     }
 
@@ -145,47 +132,17 @@ router.get(
 
     // Store (or update) the connection
     try {
-      await db
-        .insert(integrationConnections)
-        .values({
-          subaccountId,
-          organisationId,
-          providerType: 'github',
-          authType: 'github_app',
-          connectionStatus: 'active',
-          label: label || null,
-          displayName,
-          configJson: {
-            installationId: Number(installation_id),
-            setupAction: setup_action,
-            accountLogin: installationMeta?.account?.login ?? null,
-            accountType: installationMeta?.account?.type ?? null,
-            repositorySelection: installationMeta?.repository_selection ?? null,
-          },
-          oauthStatus: 'active',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [
-            integrationConnections.subaccountId,
-            integrationConnections.providerType,
-            integrationConnections.label,
-          ],
-          set: {
-            connectionStatus: 'active',
-            displayName,
-            configJson: {
-              installationId: Number(installation_id),
-              setupAction: setup_action,
-              accountLogin: installationMeta?.account?.login ?? null,
-              accountType: installationMeta?.account?.type ?? null,
-              repositorySelection: installationMeta?.repository_selection ?? null,
-            },
-            oauthStatus: 'active',
-            updatedAt: new Date(),
-          },
-        });
+      await integrationConnectionService.upsertGitHubAppConnection({
+        subaccountId,
+        organisationId,
+        installationId: Number(installation_id),
+        setupAction: setup_action,
+        accountLogin: installationMeta?.account?.login ?? null,
+        accountType: installationMeta?.account?.type ?? null,
+        repositorySelection: installationMeta?.repository_selection ?? null,
+        displayName,
+        label: label || null,
+      });
     } catch (err) {
       console.error('[GitHub App] Failed to store installation connection:', err);
       return res.redirect(`${appBase}/settings/integrations?error=storage_failed`);
@@ -210,19 +167,7 @@ router.get(
       throw Object.assign(new Error('connectionId is required'), { statusCode: 400 });
     }
 
-    const [conn] = await db
-      .select()
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, connectionId),
-          eq(integrationConnections.organisationId, req.orgId!),
-          eq(integrationConnections.providerType, 'github'),
-          eq(integrationConnections.connectionStatus, 'active'),
-        ),
-      )
-      .limit(1);
-
+    const conn = await integrationConnectionService.getActiveGitHubConnection(connectionId, req.orgId!);
     if (!conn) {
       throw Object.assign(new Error('GitHub connection not found'), { statusCode: 404 });
     }

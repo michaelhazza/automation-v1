@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { db } from '../db/index.js';
-import { agents } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { agentService } from '../services/agentService.js';
 import { webhookAdapterService } from '../services/webhookAdapterService.js';
 import { logger } from '../lib/logger.js';
 
@@ -23,13 +21,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
 
-    // Verify agent belongs to org
-    const [agent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!), isNull(agents.deletedAt)));
-
-    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+    await agentService.getFull(agentId, req.orgId!);
 
     const config = await webhookAdapterService.getConfig(agentId, req.orgId!);
     if (!config) {
@@ -55,13 +47,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
 
-    // Verify agent belongs to org
-    const [agent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!), isNull(agents.deletedAt)));
-
-    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+    await agentService.getFull(agentId, req.orgId!);
 
     const {
       endpointUrl,
@@ -120,13 +106,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
 
-    // Verify agent belongs to org
-    const [agent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!), isNull(agents.deletedAt)));
-
-    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+    await agentService.getFull(agentId, req.orgId!);
 
     const deleted = await webhookAdapterService.deleteConfig(agentId, req.orgId!);
     if (!deleted) {

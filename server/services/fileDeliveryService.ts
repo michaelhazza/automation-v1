@@ -4,14 +4,17 @@
 // the internal finalize route; the original iee_artifacts row is never moved.
 
 import { createHash } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+import { db } from '../db/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { logger } from '../lib/logger.js';
 import { withBackoff } from '../lib/withBackoff.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { withOrgTx } from '../instrumentation.js';
 import { runArtifacts } from '../db/schema/runArtifacts.js';
 import {
   deriveStorageKey,
@@ -291,9 +294,9 @@ export async function deleteByRun(
   agentRunId: string,
   organisationId: string,
 ): Promise<void> {
-  const db = getOrgScopedDb('fileDeliveryService.deleteByRun');
+  const scopedDb = getOrgScopedDb('fileDeliveryService.deleteByRun');
 
-  await db
+  await scopedDb
     .delete(runArtifacts)
     .where(
       and(
@@ -301,4 +304,76 @@ export async function deleteByRun(
         eq(runArtifacts.organisationId, organisationId),
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// finalizeWorkerUpload — internal worker entrypoint
+//
+// Called by the internal finalize route. Verifies that the worker-supplied
+// organisationId owns the agentRunId (cross-tenant isolation check), then
+// opens an org-scoped transaction with the app.organisation_id GUC set and
+// delegates to upload(). The route has no HTTP auth context, so getOrgScopedDb
+// cannot be used here — we open the transaction manually.
+// ---------------------------------------------------------------------------
+
+async function verifyRunBelongsToOrg(
+  agentRunId: string,
+  organisationId: string,
+): Promise<boolean> {
+  return withAdminConnection(
+    {
+      source: 'fileDeliveryService:finalizeWorkerUpload:verifyRunBelongsToOrg',
+      reason: 'Verify worker-supplied organisationId owns the run before opening org-scoped tx',
+    },
+    async (tx) => {
+      // Elevate to admin_role so this cross-org SELECT bypasses agent_runs' FORCE RLS.
+      // The worker-supplied organisationId is what we are validating here, so the
+      // GUC-based RLS policy cannot apply.
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+      const result = await tx.execute<{ organisation_id: string }>(
+        sql`SELECT organisation_id FROM agent_runs WHERE id = ${agentRunId}::uuid LIMIT 1`,
+      );
+      const rows = Array.isArray(result)
+        ? result
+        : ((result as { rows?: unknown[] }).rows ?? []);
+      const row = rows[0] as { organisation_id?: string } | undefined;
+      return row?.organisation_id === organisationId;
+    },
+  );
+}
+
+export async function finalizeWorkerUpload(input: UploadInput): Promise<UploadResult> {
+  const runOwnedByOrg = await verifyRunBelongsToOrg(input.agentRunId, input.organisationId);
+  if (!runOwnedByOrg) {
+    logger.warn('internal.run_artifacts.finalize.tenant_mismatch', {
+      suppliedOrganisationId: input.organisationId,
+      agentRunId: input.agentRunId,
+    });
+    throw { statusCode: 403, message: 'agentRunId does not belong to organisationId', errorCode: 'tenant_mismatch' };
+  }
+
+  let result: UploadResult | undefined;
+
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.organisation_id', ${input.organisationId}, true)`,
+    );
+    await withOrgTx(
+      {
+        tx,
+        organisationId: input.organisationId,
+        source: 'internal:run-artifacts:finalize',
+      },
+      async () => {
+        result = await upload(input);
+      },
+    );
+  });
+
+  if (!result) {
+    throw { statusCode: 500, message: 'Upload did not complete', errorCode: 'internal_error' };
+  }
+
+  return result;
 }
