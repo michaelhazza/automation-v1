@@ -2463,6 +2463,11 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 
 - [ ] `verify-no-direct-credential-service-calls.sh` — author the advisory CI gate sketched in `tasks/builds/synthetos-foundation-refactor/spec.md` §11. Mirrors `verify-no-direct-adapter-calls.sh`; scans non-test source files outside the broker/token/connection services for direct imports. Phase 1 advisory; promote to a hard CI gate in Phase 1.5 if any drift is observed post-merge. Source: chatgpt-spec-review round 1 finding F7. [auto]
 
+### operator-backend (2026-05-12)
+
+- [ ] Mockup hygiene: remove unused `.btn-extend` CSS class from `prototypes/operator-backend/r7-taskheader-operator-controls.html`. The corresponding "Extend duration" CTA was removed (R7 now uses automatic chain-link handoff), but the orphan CSS rule remains. Harmless but tidy-up. Source: chatgpt-spec-review round 1 smaller-polish item. [auto]
+- [ ] Mockup hygiene: archive or delete `prototypes/operator-backend/d9-duration-override-modal.html`. The file describes the removed manual "Extend duration" / "120 min cap" override flow that conflicts with the current auto-extend grace + chain-link handoff model. Move to an archived/deprecated folder the spec does not reference, OR delete outright. Source: chatgpt-spec-review round 2 optional cleanup. [auto]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
@@ -4407,6 +4412,31 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
   - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
   - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
 
+---
+
+## Closed by operator-backend (2026-05-13)
+
+- [x] **OP-BACKEND-SR1 — Capability literal import surface.** Closed structurally: the CI gate `scripts/gates/verify-execution-capability-references.sh` covers non-adapter consumer code via grep, and the type-checker enforces adapter-declaration correctness. The deferred runtime-const idea remains a low-priority cosmetic — KNOWLEDGE.md captures the pattern. No follow-up build needed.
+
+---
+
+## Deferred from spec-conformance review — operator-backend (2026-05-12)
+
+**Captured:** 2026-05-12T13:39:59Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-backend-2026-05-12T13-39-59Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-12-operator-backend-spec.md`
+
+- [x] REQ #63 — Naked `'operator-session.*'` literals at emit sites bypass the registry (CI gate will fail on PR open)
+  - Spec section: §3.2 item 1 (single source of truth), §4.7 (namespace discipline)
+  - Gap: 18+ naked literals in `server/services/executionBackends/operatorManagedBackend.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/services/credentialBrokerService.ts`, and `shared/types/runTraceEvent.ts`. The `verify-operator-event-registry.sh` gate's allow-list only includes `shared/types/operatorBackendEvents.ts` + `__tests__/` + `.test.ts` + `docs/` + `tasks/` + `.sh:` + `.md:` files. Adapter and handler files are NOT allowed, so every emit-site literal will trip the gate.
+  - Suggested approach: either (a) widen the gate's allow-list to include `server/services/executionBackends/*.ts` and `server/jobs/operator*.ts` (matches spec § 3.2 item 2 intent — the spec already lists "adapter declarations under `server/services/executionBackends/*.ts`" as permitted), or (b) replace naked literals at emit sites with constants imported from the registry. Option (a) is smaller; option (b) is more idiomatic.
+  - Resolved: 2026-05-13 by commit `4106ad2b`. 20 per-event named constants added to `shared/types/operatorBackendEvents.ts` (registry); 8 naked literals at emit sites replaced with imported constants across adapter, progressed handler, and broker. `runTraceEvent.ts` added to gate allow-list (consumer-side type registry). Verified PASS by Round 2 spec-conformance.
+
+- [x] REQ #64 — Lifecycle event names diverge across three sources of truth (RunTrace will not render the chain-link/task lifecycle events)
+  - Spec section: §4.7 (lifecycle events)
+  - Gap: Three name sets in play. Spec §4.7 + registry (`operatorBackendEvents.ts`) uses `chain_link_completed/failed/cancelled` + `task_completed/failed/cancelled` + `dispatched`. Adapter `operatorManagedBackend.ts:754,927` emits `'operator-session.completed'` and `'operator-session.cancelled'` (unprefixed). `shared/types/runTraceEvent.ts:57-67,320-348` defines parallel `eventType` union with `'chain_link_started'`, `'task_terminal_completed'`, `'task_terminal_failed'` (different names again). `RunTraceEventRenderer.tsx:161,211,220` listens on the runTraceEvent.ts names — so the Run Trace never receives the chain-link/task lifecycle events that the adapter actually emits.
+  - Suggested approach: pick spec § 4.7 names as canonical. Update (1) adapter line 754 to emit `'operator-session.task_completed'` or `'operator-session.chain_link_completed'` depending on `action`; (2) adapter line 927 to emit `'operator-session.task_cancelled'`; (3) `runTraceEvent.ts` lines 57-67 + 320-348 to use spec names; (4) `RunTraceEventRenderer.tsx` to listen on spec names. The WebSocket payload shapes also need to match spec § 4.7 per-event fields (the adapter currently sends `{operatorRunId, chainSeq, parentStatus, action}` for `operator-session.completed`; the spec's `task_completed` payload is `{agent_run_id, total_chain_links, total_wall_clock_ms}`).
+  - Resolved: 2026-05-13 by commit `4106ad2b`. Adapter line 754 (now ~767) emits `chain_link_completed/failed/cancelled` based on `terminalState.status`; adapter line 927 (now ~940) emits `task_cancelled`. `runTraceEvent.ts` renamed `chain_link_started → dispatched`, `task_terminal_completed → task_completed`, `task_terminal_failed → task_failed`; added `chain_link_cancelled` and `task_cancelled` discriminated union members. `RunTraceEventRenderer.tsx` switch cases use canonical names + new variant renderers. Verified PASS by Round 2 spec-conformance.
 ## Deferred adversarial findings — personal-assistant-v1 (2026-05-12)
 
 Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.

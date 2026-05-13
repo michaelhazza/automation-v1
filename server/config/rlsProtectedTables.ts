@@ -1228,6 +1228,25 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0325_operator_session_consents.sql',
     rationale: 'Consent event ledger — records granted/revoked/superseded events; cross-tenant leak would allow one org to see another org\'s consent history.',
   },
+  // 0327–0329 — Operator Backend: three new tables with dual-GUC (org+subaccount) RLS (Spec D)
+  {
+    tableName: 'operator_runs',
+    schemaFile: 'operatorRuns.ts',
+    policyMigration: '0335_create_operator_runs.sql',
+    rationale: 'Chain-link rows for long-running autonomous operator tasks — contain checkpoint payloads, credential mode, and vendor session ids. Dual-GUC (org + subaccount) RLS; cross-tenant or cross-subaccount leak exposes task state and credential attribution.',
+  },
+  {
+    tableName: 'operator_task_profiles',
+    schemaFile: 'operatorTaskProfiles.ts',
+    policyMigration: '0336_create_operator_task_profiles.sql',
+    rationale: 'Persistent browser profile volume pointers per task attempt — volume ids are opaque but cross-tenant leak exposes task topology and debug-retention state.',
+  },
+  {
+    tableName: 'subaccount_operator_settings',
+    schemaFile: 'subaccountOperatorSettings.ts',
+    policyMigration: '0337_create_subaccount_operator_settings.sql',
+    rationale: 'Per-subaccount operator backend configuration (session caps, task limits, concurrency) — cross-tenant leak exposes operational configuration and financial constraints.',
+  },
   // 0321–0323 — Sandbox Isolation: five RLS-protected tables for untrusted Tier 4 code execution (Spec B)
   {
     tableName: 'sandbox_executions',

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!--
+  R3: OpenTaskView — operator run completed
+  -----------------------------------------
+  Terminal-completed state. Same task as R1/R2. Differences:
+    - TaskHeader status pill "Completed" (indigo, matches existing statusBadge mapping)
+    - TaskHeader: "View full Run Trace" link (secondary action)
+    - ChatPane: operator's final summary message
+    - ActivityPane: full timeline including terminal event
+    - RightPaneTabs: "Files" tab active (auto-switched on terminal)
+    - Files tab: all artefacts with download CTAs
+    - ActivityPane bottom: inline cost summary (small, not a dashboard)
+  Cross-links: R3 -> C2 (run trace) | R10 (tasks list)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice Processor — Completed | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.otv-shell { display:flex;flex-direction:column;height:100vh;background:white;overflow:hidden; }
+.otv-header { display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e2e8f0;background:white;flex-shrink:0;gap:12px; }
+.otv-header-left { display:flex;align-items:center;gap:10px;min-width:0; }
+.otv-task-title { font-size:15px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px; }
+.otv-status-pill { display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0; }
+.otv-status-pill .dot { width:6px;height:6px;border-radius:50%; }
+.pill-completed { background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe; }
+.pill-completed .dot { background:#6366f1; }
+.otv-body { display:flex;flex:1;min-height:0;overflow:hidden; }
+.otv-chat { flex:0 0 26%;border-right:1px solid #e2e8f0;overflow:hidden;display:flex;flex-direction:column; }
+.otv-activity { flex:0 0 22%;border-right:1px solid #e2e8f0;overflow:hidden;display:flex;flex-direction:column; }
+.otv-right { flex:1;overflow:hidden;display:flex;flex-direction:column; }
+.chat-scroll { flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px; }
+.chat-msg-agent { max-width:85%;padding:8px 12px;border-radius:10px;background:#f1f5f9;color:#1e293b;font-size:13px;line-height:1.5;align-self:flex-start; }
+.chat-msg-user { max-width:80%;padding:8px 12px;border-radius:10px;background:#4f46e5;color:white;font-size:13px;line-height:1.5;align-self:flex-end; }
+.chat-msg-system { max-width:90%;padding:8px 12px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.5;align-self:flex-start;display:flex;align-items:flex-start;gap:7px; }
+.chat-msg-success { max-width:90%;padding:10px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#064e3b;font-size:13px;line-height:1.6;align-self:flex-start; }
+.activity-header { display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:600;color:#475569; }
+.activity-scroll { flex:1;overflow-y:auto;padding:8px 12px; }
+.activity-row { display:flex;align-items:flex-start;gap:6px;padding:4px 0;font-size:12px;color:#475569;line-height:1.4; }
+.activity-time { color:#94a3b8;font-size:11px;flex-shrink:0;margin-top:1px;min-width:44px; }
+.activity-dot { width:6px;height:6px;border-radius:50%;margin-top:4px;flex-shrink:0; }
+.activity-terminal { display:flex;align-items:center;gap:6px;padding:8px 10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;margin-top:4px;font-size:12px;color:#047857;font-weight:600; }
+.cost-note { padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11.5px;color:#64748b;margin-top:8px;line-height:1.55; }
+.tabs-strip { display:flex;border-bottom:1px solid #e2e8f0;padding:0 16px; }
+.tab-btn { padding:10px 12px;font-size:13px;border:none;background:transparent;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;color:#64748b;font-weight:500; }
+.tab-btn.active { color:#4f46e5;font-weight:600;border-bottom-color:#4f46e5; }
+.tab-content { flex:1;overflow-y:auto; }
+.artifact-row { display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #f1f5f9; }
+.artifact-kind { display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600; }
+.artifact-kind-report { background:#eef2ff;color:#4338ca; }
+.artifact-kind-transcript { background:#f1f5f9;color:#475569; }
+.artifact-kind-attachment { background:#fffbeb;color:#92400e; }
+</style>
+</head>
+<body style="margin:0;padding:0;font-family:'Inter',sans-serif;">
+
+<div class="otv-shell">
+
+  <!-- TaskHeader — completed state -->
+  <div class="otv-header">
+    <div class="otv-header-left">
+      <span class="otv-task-title">Process May invoices — Acme Corp</span>
+      <span class="otv-status-pill pill-completed">
+        <span class="dot"></span>Completed
+      </span>
+      <span style="font-size:11.5px;color:#94a3b8;">47 min 22 sec</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="c2-run-trace-timeline.html" style="font-size:12px;color:#6366f1;text-decoration:none;font-weight:500;">View full Run Trace &#8594;</a>
+    </div>
+  </div>
+
+  <!-- Three-pane body -->
+  <div class="otv-body">
+
+    <!-- ChatPane -->
+    <div class="otv-chat">
+      <div class="chat-scroll">
+        <div class="chat-msg-user">Process all May invoices: match GL codes, flag disputed items, and export a summary spreadsheet.</div>
+        <div class="chat-msg-system">
+          <span style="font-size:13px;flex-shrink:0;">&#9654;&#65039;</span>
+          <div><strong style="color:#334155;">Operator started</strong></div>
+        </div>
+        <div class="chat-msg-agent">Fetched 24 invoices and classified all types.</div>
+        <div class="chat-msg-agent">Extracted 187 line items. 179 GL codes matched automatically.</div>
+        <div class="chat-msg-agent">Disputed invoices validated. 2 discrepancies found.</div>
+        <div class="chat-msg-agent">Summary report generated. Spreadsheet exported.</div>
+        <!-- Final summary -->
+        <div class="chat-msg-success">
+          <strong>All done.</strong>
+          <div style="margin-top:6px;">Processed 24 invoices across 8 steps. 179 matched automatically, 8 flagged for manual review, 2 disputes found. Your files are ready to download.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ActivityPane -->
+    <div class="otv-activity">
+      <div class="activity-header">
+        <span>Activity</span>
+        <button style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;">&#8212;</button>
+      </div>
+      <div class="activity-scroll">
+        <div class="activity-row"><span class="activity-time">09:14</span><span class="activity-dot" style="background:#10b981;"></span><span>Session started</span></div>
+        <div class="activity-row"><span class="activity-time">09:14</span><span class="activity-dot" style="background:#6366f1;"></span><span>Step 1: Fetch invoice list</span></div>
+        <div class="activity-row"><span class="activity-time">09:15</span><span class="activity-dot" style="background:#10b981;"></span><span>Step 1 complete (23 sec)</span></div>
+        <div class="activity-row"><span class="activity-time">09:15</span><span class="activity-dot" style="background:#6366f1;"></span><span>Step 2: Classify invoices</span></div>
+        <div class="activity-row"><span class="activity-time">09:16</span><span class="activity-dot" style="background:#10b981;"></span><span>Step 2 complete (51 sec)</span></div>
+        <div class="activity-row"><span class="activity-time">09:16</span><span class="activity-dot" style="background:#6366f1;"></span><span>Step 3: Extract line items</span></div>
+        <div class="activity-row"><span class="activity-time">09:18</span><span class="activity-dot" style="background:#10b981;"></span><span>Step 3 complete (1m 39s)</span></div>
+        <div class="activity-row"><span class="activity-time">09:18</span><span class="activity-dot" style="background:#6366f1;"></span><span>Step 4: Match GL codes</span></div>
+        <div class="activity-row"><span class="activity-time">09:22</span><span class="activity-dot" style="background:#10b981;"></span><span>Step 4 complete (4m 24s)</span></div>
+        <div class="activity-row"><span class="activity-time">09:22</span><span class="activity-dot" style="background:#6366f1;"></span><span>Step 5: Validate disputed</span></div>
+        <div class="activity-row"><span class="activity-time">09:35</span><span class="activity-dot" style="background:#10b981;"></span><span>Steps 5-8 complete</span></div>
+        <div class="activity-row"><span class="activity-time">10:01</span><span class="activity-dot" style="background:#10b981;"></span><span>Artefacts harvested (2 files)</span></div>
+        <!-- Terminal event -->
+        <div class="activity-terminal">
+          <span>&#10003;</span> Run completed — 47 min 22 sec
+        </div>
+        <!-- Inline cost summary — small, inline, not a dashboard -->
+        <div class="cost-note" style="margin-top:8px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#94a3b8;margin-bottom:6px;">Cost</div>
+          <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Subscription</span><span style="color:#047857;font-weight:600;">$0.00</span></div>
+          <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Sandbox compute</span><span>$0.24</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid #e2e8f0;margin-top:4px;font-weight:700;"><span>Total</span><span>$0.24</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RightPaneTabs — Files tab active on completion -->
+    <div class="otv-right">
+      <div class="tabs-strip">
+        <button class="tab-btn" onclick="switchTab('now',this)">Now</button>
+        <button class="tab-btn" onclick="switchTab('plan',this)">Plan</button>
+        <button class="tab-btn active" onclick="switchTab('files',this)">Files</button>
+      </div>
+      <div id="tab-now" class="tab-content" style="display:none;padding:16px;">
+        <p style="font-size:13px;color:#94a3b8;">No active steps. Run completed.</p>
+      </div>
+      <div id="tab-plan" class="tab-content" style="display:none;padding:16px;">
+        <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#94a3b8;margin-bottom:12px;">All steps completed</p>
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">1</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Fetch invoice list</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">2</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Classify invoice types</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">3</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Extract line items</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">4</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Match GL codes</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">5</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Validate disputed invoices</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">6</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Generate summary report</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">7</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Export to spreadsheet</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;"><span style="font-size:11px;color:#94a3b8;width:16px;text-align:right;">8</span><span style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;"></span><span style="font-size:13px;color:#334155;">Write review notes</span></div>
+        </div>
+      </div>
+      <!-- Files tab — all artefacts (active by default on completion) -->
+      <div id="tab-files" class="tab-content">
+        <div style="display:flex;gap:6px;padding:12px 16px 8px;border-bottom:1px solid #f1f5f9;">
+          <button style="padding:4px 12px;font-size:12px;border-radius:20px;border:1px solid #4f46e5;background:#4f46e5;color:white;cursor:pointer;">outputs (2)</button>
+          <button style="padding:4px 12px;font-size:12px;border-radius:20px;border:1px solid #e2e8f0;color:#475569;background:white;cursor:pointer;">references (3)</button>
+          <button style="padding:4px 12px;font-size:12px;border-radius:20px;border:1px solid #e2e8f0;color:#475569;background:white;cursor:pointer;">versions (0)</button>
+        </div>
+        <div style="padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid #f1f5f9;">
+          <div style="display:inline-flex;flex-direction:column;align-items:center;padding:8px 10px;border:2px solid #4f46e5;border-radius:8px;background:#eef2ff;min-width:72px;cursor:pointer;">
+            <span style="font-size:24px;">&#128196;</span>
+            <span style="font-size:10px;text-align:center;margin-top:4px;color:#4338ca;font-weight:500;">invoice-report.xlsx</span>
+            <span style="font-size:9px;color:#6366f1;">v1</span>
+          </div>
+          <div style="display:inline-flex;flex-direction:column;align-items:center;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:white;min-width:72px;cursor:pointer;">
+            <span style="font-size:24px;">&#128221;</span>
+            <span style="font-size:10px;text-align:center;margin-top:4px;">review-notes.md</span>
+            <span style="font-size:9px;color:#94a3b8;">v1</span>
+          </div>
+        </div>
+        <!-- Selected file preview area / action row -->
+        <div style="padding:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#eef2ff;color:#4338ca;">report</span>
+            <span style="font-size:13px;font-weight:600;color:#0f172a;flex:1;">invoice-report.xlsx</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a href="#" style="font-size:12px;font-weight:500;color:#4f46e5;padding:6px 12px;border-radius:6px;background:#eef2ff;text-decoration:none;">Preview</a>
+            <a href="#" style="font-size:12px;font-weight:500;color:#4f46e5;padding:6px 12px;border-radius:6px;background:#eef2ff;text-decoration:none;">Download</a>
+            <a href="#" style="font-size:12px;font-weight:500;color:#4f46e5;padding:6px 12px;border-radius:6px;background:#eef2ff;text-decoration:none;">Copy link</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = '';
+  btn.classList.add('active');
+}
+</script>
+
+<div style="position:fixed;bottom:0;left:0;right:0;background:#f8fafc;border-top:1px solid #e2e8f0;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:#94a3b8;z-index:50;">
+  <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+  <div style="display:flex;gap:16px;">
+    <a href="r1-opentaskview-operator-running.html" style="color:#6366f1;text-decoration:none;">&#8592; R1: Running</a>
+    <a href="c2-run-trace-timeline.html" style="color:#6366f1;text-decoration:none;">C2: Run Trace &#8594;</a>
+  </div>
+</div>
+
+</body>
+</html>

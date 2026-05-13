@@ -252,6 +252,10 @@ function buildBackendOptionsForMode(
         backendId: 'iee_dev',
         ieeTask: request.ieeTask as never,
       };
+    case 'operator_managed':
+      // operator_managed runs are dispatched by the operator backend service,
+      // not through this function. Reaching here is a programming error.
+      throw new Error(`buildBackendOptionsForMode: 'operator_managed' runs must be dispatched via operatorRunService, not agentExecutionService`);
     default: {
       const _exhaustive: never = mode;
       void _exhaustive;

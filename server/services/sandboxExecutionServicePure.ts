@@ -189,6 +189,85 @@ export function mapPolicyToProviderFlags(
   };
 }
 
+// ---------------------------------------------------------------------------
+// § 4: SandboxStartKeyConflict — typed error for adoptOrStart
+//
+// Thrown when a caller passes a `sandboxStartKey` that matches an existing
+// sandbox row but the `sandboxExecutionId` on that row differs from the
+// caller's `sandboxExecutionId`. This is a programmer error: the Operator
+// Backend's discipline of `sandboxStartKey = operator_run_id` makes it
+// impossible in normal operation; the typed error exists for defence in depth.
+// ---------------------------------------------------------------------------
+
+export class SandboxStartKeyConflict extends Error {
+  readonly sandboxStartKey: string;
+  readonly existingExecutionId: string;
+  readonly callerExecutionId: string;
+
+  constructor(sandboxStartKey: string, existingExecutionId: string, callerExecutionId: string) {
+    super(
+      `sandboxStartKey conflict: key "${sandboxStartKey}" is already bound to execution ${existingExecutionId}, ` +
+        `but caller supplied execution ${callerExecutionId}`,
+    );
+    this.name = 'SandboxStartKeyConflict';
+    this.sandboxStartKey = sandboxStartKey;
+    this.existingExecutionId = existingExecutionId;
+    this.callerExecutionId = callerExecutionId;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// § 5: AdoptOrStartDecision — pure adoption-vs-fresh-start decision
+//
+// The sandbox_start_key column carries a unique partial index (migration 0340),
+// so each key binds to exactly one sandbox_executions row for its lifetime.
+// Adoption is therefore the only valid action when a row already exists for
+// the key — for live AND terminal statuses alike. Terminal rows surface their
+// stored output via runTask's Case 3 (idempotent re-read).
+// ---------------------------------------------------------------------------
+
+export type AdoptOrStartDecision =
+  | { action: 'adopt'; existingExecutionId: string }
+  | { action: 'fresh_start' }
+  | { action: 'conflict'; existingExecutionId: string };
+
+/**
+ * Pure decision function for `adoptOrStart`.
+ *
+ * Given:
+ * - `callerExecutionId`: the `sandboxExecutionId` the caller intends to use
+ * - `sandboxStartKey`: the idempotency token (e.g. `operator_run_id`)
+ * - `existingRow`: the DB row whose `start_key` matches this token, if any
+ *   (`{ id: string; status: string } | null`)
+ *
+ * Returns one of three decisions:
+ * - `fresh_start` — no row for this token; run the normal `runTask` path.
+ * - `adopt` — an existing row (live or terminal) matches the token AND the
+ *   caller's execution ID; re-use it. runTask's Case 2/3/4/5 handles the
+ *   appropriate response (in-flight join, terminal re-read, etc.).
+ * - `conflict` — an existing row (live or terminal) matches the token but
+ *   carries a DIFFERENT execution ID. The unique index on `sandbox_start_key`
+ *   makes a fresh INSERT impossible; the caller must throw
+ *   `SandboxStartKeyConflict`.
+ */
+export function decideAdoptOrStart(input: {
+  callerExecutionId: string;
+  sandboxStartKey: string;
+  existingRow: { id: string; status: string } | null;
+}): AdoptOrStartDecision {
+  const { callerExecutionId, existingRow } = input;
+
+  if (existingRow === null) {
+    return { action: 'fresh_start' };
+  }
+
+  if (existingRow.id !== callerExecutionId) {
+    return { action: 'conflict', existingExecutionId: existingRow.id };
+  }
+
+  return { action: 'adopt', existingExecutionId: existingRow.id };
+}
+
 // Re-export the constants so callers (C7 harvest pipeline, C11 jobs) can
 // reference them without duplicating magic numbers.
 export {
