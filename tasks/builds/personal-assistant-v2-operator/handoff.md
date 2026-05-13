@@ -1,7 +1,7 @@
 # Handoff — personal-assistant-v2-operator
 
-**Phase complete:** SPEC
-**Next phase:** BUILD (run `feature-coordinator` in a new session)
+**Phase complete:** BUILD
+**Next phase:** FINALISE (run `launch finalisation` in a new session)
 **Spec path:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md`
 **Branch:** `claude/personal-assistant-post-merge-audit`
 **Build slug:** `personal-assistant-v2-operator`
@@ -61,6 +61,66 @@ Round 2 (commit `e27a218a`): 5 technical fixes applied, 0 rejected, 0 deferred. 
 - **Acceptance criterion (§8 Chunk 1):** typecheck + lint + `verify-capability-map-shape.sh` + `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` all pass on fresh DB; `operator_run_files` registered in `rlsProtectedTables.ts`.
 - **Chunk 7 (live-file events) acceptance criterion (§10 #5):** long-running operator-mode EA task writes 5 files at different chain-link boundaries; `file.created` / `file.modified` events appear on the `agent-run` WebSocket channel before terminal completion; `FilesTab` shows files updating live.
 - **Reuse acceptance test (Appendix A):** stub Dev Agent with `owner_user_id` + equivalent `capability_map` passes all four routing fixtures (direct-owner, cross-ownership, approval-owner, ambiguous-fail-closed) with no EA-specific branching in matcher / approval router / delegation path.
+
+## Phase 2 — BUILD (complete)
+
+**Phase complete:** BUILD
+**Next phase:** FINALISE (run `launch finalisation` in a new session)
+**Branch HEAD:** `96e5df6c` (chore: record dual-review log commit hash)
+**Branch ahead of main:** ~54 commits
+**Spec used:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md`
+
+### Chunks built
+
+| Chunk | Status | Key deliverable |
+|-------|--------|-----------------|
+| 1a | done | Migrations 0345–0348, `operatorRunFiles` Drizzle schema, RLS manifest |
+| 1b | done | Shared types, `verify-capability-map-shape.sh` CI gate, capability-map `owner_user_id` axis, backfill script |
+| 2 | done | `RoutingContext.target_owner_user_id`, addressing parser (`@PA`/`@<DisplayName>`), matcher rule |
+| 3 | done | `crossOwnerDelegationAuthorisationPure.ts`, `crossOwnerDelegationRequestAssemblerPure.ts`, `runTracePure.ts` projection |
+| 4 | done | `approverUserId` override column, stall-job cross-owner branch, `decideTimeoutPolicyAction`, `ask_initiator` substep |
+| 5 | done | Operator-mode EA enablement — no-op confirmed (guard already wired from prior sprint) |
+| 6 | done | `operatorSessionInitialContextBundler.ts` — 4 KB cap, voice profile, memory, calendar context |
+| 7 | done | `operatorSandboxFileEventBridge.ts` — UPSERT writer, R2 + DB + event-emit, `isR2Retryable`, `shouldWatcherSkip` |
+| 8 | done | `file-watcher.js` (chokidar), `entrypoint.sh`, `Dockerfile`, IPC retry, path-safety |
+| 9 | done | `architecture.md` (cross-owner delegation, run-trace invariant, capability-map scope axis), `capabilities.md`, `KNOWLEDGE.md` (4 entries), ADR-0023 |
+
+### Branch-level review pass results
+
+| Reviewer | Verdict | Key outcomes |
+|----------|---------|-------------|
+| G2 gate (lint + typecheck) | PASS | 0 lint errors; 2 pre-existing typecheck errors only (`@react-pdf/renderer`) |
+| `adversarial-reviewer` | HOLES_FOUND → fixed | 6 holes fixed (migration columns, IPC semantics, path traversal, approver gate, regex bug); 1 deferred (`deriveApproverUserId` wiring) |
+| `spec-conformance` | NON_CONFORMANT | 8 directional gaps routed to `tasks/todo.md` (PA-V2-CONFORMANCE-1 through 8); 0 mechanical fixes; all require design judgment — none blocking merge |
+| `pr-reviewer` (pass 1) | CHANGES_REQUESTED | 5 blocking issues identified |
+| Fix-loop (pass 1) | SUCCESS | 5 blocking fixes applied (rejectItem gate, run-trace vocab, db-in-routes, org-filter, Pure.test.ts) |
+| `pr-reviewer` (pass 2) | CHANGES_REQUESTED | 1 remaining: run_terminated vs phantom run_finished/run_failed |
+| Fix inline | done | `run_terminated` substituted; POSSESSIVE_RE Unicode apostrophe escapes fixed; approveItem uses `isWrongApprover` |
+| `pr-reviewer` (pass 3) | APPROVED | All 5 blockers resolved; 7 should-fix items deferred to backlog |
+| `reality-checker` | READY | All 8 success criteria verified with file:line evidence |
+| `dual-reviewer` (Codex, 3 iter.) | APPROVED | 5 fixes applied (cursor advance, ask_initiator dedup, replay serialization, R2 retry scope) |
+
+### Review-log artifacts
+
+- `tasks/review-logs/spec-conformance-log-personal-assistant-v2-operator-full-2026-05-13T20-55-39Z.md`
+- `tasks/review-logs/dual-review-log-personal-assistant-v2-operator-2026-05-13T22-04-43Z.md`
+- Adversarial review committed inline (no separate log; findings were fix-loop driven)
+
+### Open deferred items (tasks/todo.md)
+
+- `PA-V2-CONFORMANCE-1` through `PA-V2-CONFORMANCE-8` — 8 spec-conformance directional gaps requiring design judgment (callers not wired, payload convention delta, RLS context, admin bypass)
+- `deriveApproverUserId` dead-code wiring — requires `MiddlewareContext` changes + execution loop integration (tracked with full remediation plan in todo.md)
+- 7 should-fix items from pr-reviewer (all DEFER_TO_BACKLOG) — admin bypass for run-trace, voice-profile RLS outside HTTP request, R2→DB ordering comment, `isR2Retryable` test, ambiguous-name test, file-watcher boundary asymmetry, shallow-module smell
+
+### REVIEW_GAP entries
+
+None required. All mandatory reviewers ran:
+- `spec-conformance`: ran (NON_CONFORMANT, directional gaps to todo.md — not a policy violation)
+- `adversarial-reviewer`: ran (triggered: routes, auth, schema in diff)
+- `pr-reviewer`: ran (3 passes)
+- `reality-checker`: ran (READY)
+- `dual-reviewer`: ran (APPROVED, 3 Codex iterations)
+- `chatgpt-pr-review`: deferred to Phase 3 (per CLAUDE.md — finalisation-coordinator handles this, not feature-coordinator)
 
 ## Phase 1 review summary
 

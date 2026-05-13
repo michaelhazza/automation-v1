@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-sp
 active_plan: tasks/builds/personal-assistant-v2-operator/plan.md
 build_slug: personal-assistant-v2-operator
 branch: claude/personal-assistant-post-merge-audit
-status: BUILDING
-last_updated: 2026-05-13T09:00:00Z
+status: REVIEWING
+last_updated: 2026-05-14T07:45:00Z
 last_merged_pr: #296
 last_merged_slug: claude-close-deferred-pa-v1-13lHR
 last_merged_branch: claude/close-deferred-pa-v1-13lHR
@@ -22,15 +22,17 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (design APPROVED at commit `e27a218a`; migration numbers renumbered 0343–0346 → 0345–0348 post-merge at commit `66fce3d4` — design unchanged)
-**Active plan:** `tasks/builds/personal-assistant-v2-operator/plan.md` (Phase 2 architect output; awaiting plan-gate)
+**Active spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (design APPROVED at commit `e27a218a`)
+**Active plan:** `tasks/builds/personal-assistant-v2-operator/plan.md`
 **Active build slug:** `personal-assistant-v2-operator`
 **Branch:** `claude/personal-assistant-post-merge-audit`
-**Status:** **BUILDING** (plan written; plan-gate pending)
+**Status:** **REVIEWING** — Phase 2 complete; awaiting Phase 3 finalisation
 
-Phase 1 (SPEC) complete. Spec went through 5 spec-reviewer (Codex) iterations + 2 chatgpt-spec-review rounds; APPROVED 2026-05-13. Handoff at `tasks/builds/personal-assistant-v2-operator/handoff.md`. Two architectural schema decisions locked (new `operator_run_files` table, extend `delegation_outcomes` for state machine). Brief at `tasks/builds/personal-assistant-v2-operator/brief.md`.
+Phase 1 (SPEC) complete. Spec APPROVED 2026-05-13 after 5 spec-reviewer + 2 chatgpt-spec-review rounds.
 
-Phase 2 (BUILD) in flight. Architect plan written at `tasks/builds/personal-assistant-v2-operator/plan.md` (10 chunks, ≈60 files). Mid-session main-sync merge (`66fce3d4`) brought in 9 commits including PR #296. Migration collision on planned numbers 0343/0344 resolved by renumbering V2's four migrations to 0345–0348. Plan.md Chunk 4 carries a post-merge integration note for `actionService.ts` and `workflowGateStallNotifyJob.ts` (PR #296 touched both). Plan-gate awaiting operator `proceed` / `revise` / `abort`.
+Phase 2 (BUILD) complete 2026-05-14. All 10 chunks built (1a, 1b, 2–9). Full review pass complete: adversarial-reviewer (HOLES_FOUND → 6 fixed), spec-conformance (NON_CONFORMANT — 8 directional gaps to todo.md), pr-reviewer x3 (APPROVED), reality-checker (READY), dual-reviewer (APPROVED — 5 fixes). Branch HEAD: `96e5df6c`. Handoff at `tasks/builds/personal-assistant-v2-operator/handoff.md`.
+
+Phase 3 (FINALISE): run `launch finalisation` in a new session.
 
 **Last merged:** PR #296 — `claude/close-deferred-pa-v1-13lHR` (commit `27b00d1d`, 2026-05-13). Closed all deferred PA-V1 items + adversarial findings; idempotency-key discriminator pattern extracted to `KNOWLEDGE.md`.
 
