@@ -12,6 +12,7 @@
 
 import crypto from 'crypto';
 import { env } from '../lib/env.js';
+import { logger } from '../lib/logger.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -25,7 +26,9 @@ const CURRENT_KEY_VERSION = 'k1';
 
 const KEY_REGISTRY: Record<string, Buffer> = {};
 if (!env.TOKEN_ENCRYPTION_KEY) {
-  console.warn('[agentRunPayloadEncryptionService] TOKEN_ENCRYPTION_KEY is not set — encryption/decryption will fail at runtime');
+  logger.warn('agentRunPayloadEncryptionService.token_encryption_key_missing', {
+    message: 'TOKEN_ENCRYPTION_KEY is not set — encryption/decryption will fail at runtime',
+  });
 } else {
   KEY_REGISTRY[CURRENT_KEY_VERSION] = Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex');
 }
