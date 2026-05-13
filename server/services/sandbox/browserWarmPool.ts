@@ -175,7 +175,7 @@ async function evictStale(): Promise<{ evicted: number }> {
   return { evicted };
 }
 
-// TODO: cross-tenant sweep needs withAdminConnection — deferred
+// TODO: add organisationId to ctx and wrap db calls in db.transaction + setOrgAndSubaccountGUC — deferred until refill is wired to a caller
 async function refillIfEligible(ctx: { subaccountId: string }): Promise<void> {
   const [settings] = await db.select().from(subaccountIeeBrowserSettings)
     .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
