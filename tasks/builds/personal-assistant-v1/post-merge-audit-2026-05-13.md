@@ -107,13 +107,14 @@ Don't open a single sweep PR. Pick them off as natural follow-on opportunities a
 - Defines persistent operator-session memory (or defers to Phase 3)
 - Sets operator-mode duration / concurrency / approval defaults for the EA
 
-**V2 dependencies (status check needed):**
+**V2 dependencies (status — corrected 2026-05-13):**
 
-- **Spec D `operator-backend`** — brief locked but build NOT done. The runtime that consumes Spec A (adapter contract), Spec B (sandbox isolation, ✅ merged #287), Spec C (operator-session identity) end-to-end.
-- **Spec A `execution-backend-adapter-contract`** — adapter contract; verify status.
-- **Spec C `operator-session-identity`** — operator-session credentials (ChatGPT OAuth); verify status.
+- **Spec D `operator-backend`** — ✅ **MERGED** (PR #288). The full operator-backend service tier shipped: `operator_runs` + `operator_task_profiles` + `subaccount_operator_settings` tables (migrations 0335-0342), `OperatorSessionEnvelope` + `ApiKeyEnvelope` types, dispatcher + chain-resume scheduler, credential broker extensions for operator sessions, cost writer, suspension notifier, sandbox template at `infra/sandbox-templates/operator-session/`. Four chatgpt-pr-review rounds APPROVED.
+- **Spec B `sandbox-isolation`** — ✅ merged #287
+- **Spec A `execution-backend-adapter-contract`** — shipped inline alongside Spec D (the IEE generalisation work is part of PR #288)
+- **Spec C `operator-session-identity`** — ✅ merged (operator-session credentials, ChatGPT OAuth)
 
-The V2 brief itself (`tasks/builds/personal-assistant-v2-operator/brief.md`) does NOT exist yet. It needs to be authored before V2 can build.
+**All Phase 3 operator-backend foundations are in main.** V2 (`personal-assistant-v2-operator`) has its full predecessor stack ready. The V2 brief itself (`tasks/builds/personal-assistant-v2-operator/brief.md`) does NOT exist yet — it needs to be authored before V2 can build, but no further predecessor work is required.
 
 **B. V1 follow-on use cases (small adds, after V1 settles in dogfood)**
 
@@ -143,36 +144,54 @@ Pick off in natural follow-on PRs. No urgency.
 | IEE browser worker (Playwright) | Currently the `worker/` Node process running Playwright; deployed on DigitalOcean | DigitalOcean retirement question is open |
 | Operator Backend (Spec D) | Will use e2b (per `tasks/builds/operator-backend/brief.md` §3.3 — "Template path: `infra/sandbox-templates/operator-session/`. Single source of truth for both e2b (template) and `docker-compose` (local dev).") | Brief locked, build not started |
 
-### Answer to "e2b for both browser and operator?"
+### Answer to "e2b for both browser and operator?" — RECOMMENDED YES
 
-**Architecturally yes, but not yet decided / documented as a hard call.**
+**Recommendation: migrate IEE browser worker to e2b. Retire DigitalOcean.** Confirmation rationale below.
 
-What the briefs say:
-- Spec B (sandbox) uses e2b — locked.
-- Spec D (operator-backend) uses e2b — locked.
-- The current IEE browser worker (Playwright on DigitalOcean) — **not addressed** in any brief. This is the open question your AWS reviewer flagged.
+What's already on e2b:
+- Spec B (sandbox isolation) — e2b is the chosen provider, infrastructure shipped in PR #287
+- Spec D (operator-backend) — e2b sandbox template at `infra/sandbox-templates/operator-session/`, shipped in PR #288. Chain-resume model + persistent browser-profile pattern for operator chain-link sessions already designed (§3.13 of operator-backend spec).
 
-What e2b supports today: e2b has a browser sandbox product. Technically the IEE browser worker could be migrated onto e2b, which would unify the execution substrate.
+What remains on DigitalOcean today:
+- The IEE browser worker (`worker/` Node process running Playwright)
+- Browser-task execution for the existing `iee_browser` mode (42 Macro Task, scraping flows, EA's webhook-triggered work where applicable)
 
-What's blocking the decision: nobody has explicitly written the spec saying "iee_browser worker migrates from DigitalOcean to e2b" with the cost / latency / browser-profile-persistence implications. The operator-backend brief §3.13 mentions persistent browser profiles for operator chain-link sessions, but that's the Phase 3 operator pattern, not the Phase 2 deterministic browser worker.
+Why e2b wins for iee-browser:
 
-**Recommendation:** open a small spec brief — something like `iee-browser-on-e2b` — that explicitly answers:
+1. **One execution substrate.** SynthetOS becomes a single-vendor execution story. Spec B + Spec D + iee-browser all on e2b = clean architecture, one set of operational tools, one billing line. The "governed agentic OS" pitch is sharper when there's one substrate.
 
-1. Can e2b browser sandboxes host the current Playwright workflow at acceptable latency / cost?
-2. Does the existing browser-profile lifecycle work on e2b (cookies, login state, downloads)?
-3. Migration plan from `worker/` Node process → e2b sandbox-based browser execution
-4. DigitalOcean retirement sequence
+2. **Per-task isolation.** Today's DigitalOcean droplet runs all browser tasks in one shared worker — no per-task isolation. e2b gives each session its own sandbox. Material safety win because browser tasks regularly hold customer credentials (Gmail login, OAuth flows, scraped paywalled content). One rogue script in shared-worker territory can leak across tasks; e2b sessions can't.
 
-If the answer is yes to (1) and (2), DigitalOcean retires and SynthetOS has zero AWS dependency for execution substrate. If no, fall back to AWS Fargate or Bedrock AgentCore Browser Tool (the reviewer's other options).
+3. **Concurrency scales without operations work.** DO single-worker = serial execution (or you spin up + manage multiple droplets manually). e2b = native parallel sessions. As multi-user EA + scheduled triggers ramp, parallel browser execution becomes valuable.
+
+4. **Browser profile persistence is solved.** The operator-backend brief §3.13 already designed the persistent-profile pattern for chain-link sessions on e2b. iee-browser reuses the same primitive — login state, cookies, downloaded artefacts persist across sandbox lifecycles via the same profile-snapshot mechanic. No new infrastructure.
+
+5. **Audit + observability.** e2b sandboxes have richer per-task telemetry built in (session id, resource usage, lifecycle events). Plugs into Run Trace cleanly. DO needs custom logging to match.
+
+6. **Cost is competitive, not the headline reason.** e2b pricing is per-second-of-active-session for ~$0.50/vCPU-hour. For a 5-minute browser task that's ~$0.04; a 30-minute task ~$0.25. DO at $6-12/month flat is cheap if utilisation is low and single-tenant, but per-session cost on e2b becomes equal-or-better once you'd need a second DO droplet for concurrency. At the scale of multiple staff EAs running scheduled briefings + on-demand triggers, e2b is similar cost AND removes operational toil. At scale further, e2b wins on cost too.
+
+Trade-offs to manage:
+
+- **Cold start latency.** e2b cold start is 10-30s vs DO-worker hot ~0s. Mitigation: maintain a warm pool of 1-2 sandboxes for the common workloads. For scheduled tasks (morning briefing at 07:00) cold start is fine. For user-triggered tasks ("scrape this page now") warm pool eliminates the issue.
+- **Sandbox lifecycle vs persistent worker.** Today's worker process knows nothing about per-task lifecycle; just runs Playwright. On e2b, every task starts and stops a sandbox. The migration must wrap the existing `worker/src/browser/` code path in the e2b session lifecycle pattern — straightforward, follows the operator-backend chain-link template.
+- **One-vendor risk.** Yes, you're concentrating on e2b. Acceptable in exchange for the architectural consolidation. The `SandboxExecutionService` provider abstraction (shipped in Spec B) means a future second provider plugs in without touching adapters.
+
+**Recommended action:** open a small scope brief at `tasks/builds/iee-browser-on-e2b/brief.md` covering:
+
+1. Migration plan: wrap the current `worker/src/browser/` Playwright path in an e2b session lifecycle (likely a `BrowserExecutionService` mirror of the operator-backend pattern)
+2. Browser profile lifecycle reuse from operator-backend §3.13 — persistent profile snapshots keyed by `(subaccount_id, owner_user_id?, agent_id)` so deterministic browser flows resume cleanly
+3. Warm-pool configuration for cold-start mitigation on user-triggered flows
+4. DigitalOcean retirement sequence: parallel-run period → cutover → DO decommission
+5. Cost forecast: per-task-volume × per-session price vs current DO bill, validating crossover point
 
 ### AWS recommendations from the reviewer — my prioritisation
 
 | # | Item | Priority | Cost | Notes |
 |---|---|---|---|---|
-| 1 | **Confirm e2b covers browser sessions** (write the `iee-browser-on-e2b` spec) | **URGENT** — blocks DO retirement | Small spec, decision artifact only | Most important item; everything else can wait |
+| 1 | **Migrate IEE browser to e2b + retire DigitalOcean** (write `iee-browser-on-e2b` spec, execute migration) | **HIGH** — unlocks DO retirement + completes the single-substrate story | Spec brief small; migration build probably 1–2 weeks | Recommendation per §4 above. Reuses operator-backend §3.13 profile-snapshot pattern. |
 | 2 | **Amazon Bedrock as 4th LLM provider** | Phase 1.5 | Small — `llmRouter` already abstracts providers | Unlocks enterprise-AWS buyers + Bedrock Guardrails as Policy Envelope enforcement |
 | 3 | **AWS KMS for credential master key** | Phase 1.5 | Small — `connectionTokenService` already supports versioned key format | Removes a real audit risk; bundles cleanly with the credential-broker work already done |
-| 4 | **Bedrock AgentCore Runtime** as Phase 3 Operator Controller candidate | Phase 3 | None today — candidate list work for Spec D | Add to the Operator Controller backend candidate set alongside OpenClaw + future internal backend |
+| 4 | **Bedrock AgentCore Runtime** as Phase 3 Operator Controller candidate | Phase 3.5 (post-Spec-D-merge) | None today — candidate list work for the next operator-backend spec iteration | Note: Spec D (operator-backend) is already merged with e2b as the runtime. Bedrock AgentCore Runtime would be a **second adapter** alongside the e2b one, not a replacement. Useful for enterprise customers who require AWS-resident execution. |
 
 Everything else from the reviewer's list (RDS, SQS, Cognito, OpenSearch, CloudWatch, etc.) — skip per their own recommendation.
 
@@ -213,12 +232,13 @@ V2 BRIEF SHOULD COVER:
 8. Upgrade path — when V2 ships, V1 EA gains the operator controller;
    existing V1 native-only triggers keep working unchanged.
 
-LOCKED PREDECESSORS (must merge before V2 build):
-- Spec A `execution-backend-adapter-contract` — verify status
+LOCKED PREDECESSORS (all merged — V2 build is unblocked):
+- Spec A `execution-backend-adapter-contract` — shipped inline with Spec D
 - Spec B `sandbox-isolation` — merged #287
-- Spec C `operator-session-identity` — verify status
-- Spec D `operator-backend` — BRIEF LOCKED at
-  tasks/builds/operator-backend/brief.md, BUILD NOT STARTED
+- Spec C `operator-session-identity` — merged
+- Spec D `operator-backend` — MERGED #288 (full operator-backend service
+  tier shipped, migrations 0335-0342, sandbox template, dispatcher +
+  chain-resume scheduler, four chatgpt-pr-review rounds APPROVED)
 
 V2 BRIEF FORMAT (mirror V1 brief structure):
 - Header (status, date, type, build slug, predecessors, strategic parent)
@@ -246,36 +266,54 @@ AFTER AUTHORING:
   feature-coordinator for build planning
 ```
 
-### Option β — Open the e2b-browser spec (urgent if DigitalOcean retirement matters)
+### Option β — Open the iee-browser-on-e2b scope brief + migration plan
 
 ```
-Author a small scope brief at tasks/builds/iee-browser-on-e2b/brief.md
-answering whether the current IEE browser worker (Playwright on
-DigitalOcean today, in worker/src/browser/) can migrate onto e2b's
-browser sandbox product.
+Author a scope brief at tasks/builds/iee-browser-on-e2b/brief.md for
+migrating the current IEE browser worker (Playwright in worker/src/browser/,
+deployed on DigitalOcean) onto e2b's sandbox substrate. RECOMMENDATION
+ALREADY MADE — migrate, not "evaluate whether to migrate". This brief
+captures the migration plan, not the decision.
 
 CONTEXT:
-- e2b is the chosen sandbox provider for Spec B (sandbox isolation,
-  merged #287) and Spec D (operator-backend, brief locked).
-- The current IEE browser worker is a separate Node process running
-  Playwright. Deployment platform retirement (DigitalOcean) is on the
-  roadmap. Without a browser substrate decision, retirement is blocked.
+- e2b is the sandbox provider for Spec B (sandbox isolation, merged #287)
+  and Spec D (operator-backend, merged #288). Both shipped with the
+  shared `SandboxExecutionService` provider abstraction.
+- The IEE browser worker is the last piece on DigitalOcean. Retiring DO
+  is the goal; this build is the unlock.
+- Decision rationale lives in `tasks/builds/personal-assistant-v1/
+  post-merge-audit-2026-05-13.md` §4 — one execution substrate, per-task
+  isolation, native concurrency, audit, persistent-profile reuse from
+  Spec D §3.13.
 
-THE BRIEF MUST ANSWER:
-1. Does e2b's browser sandbox product support the existing Playwright
-   workflow used by worker/src/browser/?
-2. Latency / cost comparison: e2b browser sandboxes vs current DO setup.
-3. Browser-profile lifecycle (cookies, login state, downloads,
-   contractEnforcedPage / observability) — does it survive on e2b?
-4. Migration plan if yes — sequence + tests + cutover.
-5. Fallback if no — AWS Fargate or Bedrock AgentCore Browser Tool;
-   trade-offs.
+THE BRIEF MUST DEFINE:
+1. Migration plan: wrap worker/src/browser/ Playwright code path in an
+   e2b session lifecycle. Likely a `BrowserExecutionService` mirror of
+   the operator-backend pattern. Identify which files migrate vs which
+   stay (Playwright code itself likely stays; the runner harness changes).
+2. Browser profile persistence: reuse the operator-backend §3.13
+   profile-snapshot pattern. Profile keyed by
+   `(subaccount_id, owner_user_id?, agent_id)`. Define lifecycle
+   (creation, snapshot, restore, GC) — likely a direct reuse with
+   different scoping rules.
+3. Warm-pool configuration: keep 1-2 hot sandboxes for user-triggered
+   browser flows to mask cold start. Configurable per subaccount.
+4. DigitalOcean retirement sequence: parallel-run → cutover → DO
+   decommission. Include rollback path for the parallel-run period.
+5. Cost forecast: per-task-volume × per-session price vs current DO bill.
+   Validate crossover point at expected EA + IEE scale.
 
 OUT OF SCOPE:
-- The operator-backend Phase 3 browser pattern (persistent profile
-  across chain-link sessions) — owned by Spec D §3.13.
-- AWS Bedrock LLM provider — separate item.
-- AWS KMS credential master key — separate item.
+- AWS Bedrock LLM provider — separate item, Phase 1.5.
+- AWS KMS credential master key — separate item, Phase 1.5.
+- New browser capability work (e.g. richer scraping APIs) — separate
+  future spec.
+- Migration of the cron/job system from pg-boss — not affected by browser
+  substrate change.
+
+WORK SIZING: spec ~1 day, build probably 1-2 weeks (most effort is in
+profile-lifecycle wiring + parallel-run validation, not raw e2b
+integration which is already done for Spec B/D).
 ```
 
 ### Option γ — Sweep V1 deferred items
@@ -304,10 +342,13 @@ Run pr-reviewer + adversarial-reviewer at the end.
 
 ### My recommendation
 
-**Run Option α first** (V2 brief authoring) — it's the natural continuation of the Personal Assistant work and is the only path that meaningfully extends the product's capability. Verify Spec A and Spec C status before authoring; if they're not merged yet, the V2 brief still gets written but the build sequencing will note them as locked predecessors.
+**Run Option α and Option β in parallel sessions.** They touch independent code areas:
 
-**Then Option β** (e2b browser spec) — important infrastructure decision but doesn't extend product capability. Lower priority unless DigitalOcean retirement is time-sensitive.
+- **Option α (V2 brief)** — extends product capability (Operator Mode on EA). Predecessors all merged. V2 brief can be authored immediately, then `feature-coordinator` builds it.
+- **Option β (iee-browser-on-e2b)** — completes the infrastructure consolidation story. Unlocks DigitalOcean retirement. Reuses the operator-backend persistent-profile pattern, so the technical risk is low.
 
-**Option γ** (sweep) can wait — pick off opportunistically as related code is touched. None of the deferred items block product work.
+Both are roughly 1-2 week builds. Running them concurrently is feasible (no file overlap — V2 touches `server/config/c.ts` + orchestrator-routing services + agent-mode UI; e2b migration touches `worker/src/browser/` + new `BrowserExecutionService` + DO decommission). Migration-numbering collision is the only real conflict surface, handled the same way operator-backend + EA V1 handled it at S2 sync.
+
+**Option γ** (V1 sweep) can wait — pick off opportunistically as related code is touched. None of the deferred items block product work.
 
 ## End of audit
