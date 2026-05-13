@@ -1,3 +1,61 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e1ffe-879d-71f1-8409-2b97ce7fa1b0
+--------
+user
+You are reviewing iteration 2 of a draft specification document for implementation-readiness. Iteration 1 already fixed 16 mechanical defects (file-inventory drift, contract producer/consumer naming, terminal-state vocabulary, score-scale source-of-truth, ranked-source coverage, ask_initiator terminal path, substep_id correlation key naming, etc.).
+
+One AUTO-DECIDED item from iteration 1 is now BLOCKED awaiting operator/architect input and routed to `tasks/todo.md` as PA-V2-OP-S1: the schema strategy for `execution_files` vs a new `operator_run_files` table (the existing `execution_files` schema has none of the columns the file-event contract assumes). Do NOT re-raise this — it's tracked. The spec acknowledges this as §13 open question #1 explicitly marked BLOCKS CHUNK 7.
+
+Your job for iteration 2: re-review the spec from a fresh starting point. Look for:
+
+1. **Defects iteration 1 fixes might have INTRODUCED.** Iteration 1 added new service rows (crossOwnerDelegationRequestAssembler), new chunk-7 migration placeholder (0346), new §4.8 "Referenced existing primitives" sub-table, new event types in §4.6. Check whether §8 chunk sequencing now lists the new services in the right chunks; whether §11 self-consistency claims still hold; whether §9 execution-safety contracts still enumerate all paths.
+
+2. **Defects iteration 1 may have MISSED.** Run the same rubric pass:
+   - Contradictions between sections (same concept described two ways)
+   - Stale or retired language in prose after a section was rewritten
+   - Load-bearing claims without a named mechanism
+   - File inventory drift (prose mentions of paths not in §4)
+   - Schema overlaps without a source-of-truth statement
+   - Sequencing-ordering bugs (item A in chunk N depends on item B in chunk >N)
+   - Invariants stated in one place but not enforced elsewhere
+   - Missing per-item verdicts
+   - Concretely-unnamed new primitives
+
+3. **Cross-section consistency:**
+   - §5.4 CROSS_OWNER_DELEGATION_REQUEST — does its producer match §4.2's assembler service?
+   - §4.6 cross-owner pause-reason constants — referenced consistently in §5.6 and §9?
+   - §8 chunk sequencing — `crossOwnerDelegationRequestAssembler` should ship alongside the authorisation service in Chunk 3. Does the prose say so?
+   - §13 open question #1 — does the prose hold up to scrutiny (the placeholder migration 0346 in §4.1, the open-question entry in §13, the §9.3 allocator note)?
+
+Project context (do NOT re-derive from spec; use as ground truth):
+
+- Pre-production codebase: NO live users, NO staged rollouts, NO feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only, NO E2E tests, NO API contract tests.
+- Architecture: prefer existing primitives. No new abstractions duplicating existing primitives.
+
+Treat as OUT OF SCOPE — do NOT raise:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, predictive cost modelling, new abstractions duplicating existing primitives.
+- The execution_files schema decision (PA-V2-OP-S1) — already routed to operator.
+
+For each finding, give:
+1. A short title (one sentence).
+2. The exact section heading or line range.
+3. The defect (what's wrong).
+4. The minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say so explicitly — "no new findings, the spec is clean". Do not invent findings to fill space.
+
+The spec is:
+
 **Status:** draft
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
@@ -121,15 +179,15 @@ No new RLS policies expected. If strategy (a) is chosen, `operator_run_files` is
 
 | Path | Purpose |
 |---|---|
-| `server/services/operatorSandboxFileEventBridge.ts` | Tool-call interceptor for runtime tool-registry file writes. Uploads file to R2 via existing `getS3Client()` / `getBucketName()` (`server/lib/storage.ts`), persists a file-metadata row in the §13 #1 backing-store table (whichever strategy is chosen: a new `operator_run_files` row OR an extended `execution_files` row), emits `file.created` / `file.modified` via `pg-boss` `operator-session-progressed` channel, bridges to WebSocket `agent-run` channel. The schema-strategy choice is opaque to this service — it writes via a thin Drizzle helper exported by the chosen schema module. |
-| `server/services/operatorSandboxFileEventBridgePure.ts` | Pure helpers: shape validation, version + mime detection, content-sha256 computation, decision tree for `created` vs `modified` (looks up prior file-metadata row by `agent_run_id` + relative path; backing-store table per §13 #1). |
+| `server/services/operatorSandboxFileEventBridge.ts` | Tool-call interceptor for runtime tool-registry file writes. Uploads file to R2 via existing `getS3Client()` / `getBucketName()` (`server/lib/storage.ts`), persists `executionFiles` row, emits `file.created` / `file.modified` via `pg-boss` `operator-session-progressed` channel, bridges to WebSocket `agent-run` channel. |
+| `server/services/operatorSandboxFileEventBridgePure.ts` | Pure helpers: shape validation, version + mime detection, content-sha256 computation, decision tree for `created` vs `modified` (looks up prior `executionFiles` row by `agentRunId` + relative path). |
 | `server/services/crossOwnerDelegationAuthorisation.ts` | Two-layer authorisation signal detection (Layer 1: parser-emitted named-owner reference in `RoutingContext.normalised_intent_text`; Layer 2: explicit owner-scoped capability request emitted by a trusted parent-agent tool call payload). Returns `{ authorised: true, target_owner_user_id, signal }` or `{ authorised: false, clarifying_question: string }`. Does NOT build the full `CROSS_OWNER_DELEGATION_REQUEST` — the assembler below does that. |
 | `server/services/crossOwnerDelegationAuthorisationPure.ts` | Pure rules: regex set for possessives (`"Michael's calendar"`, `"my colleague Jane's inbox"`), known-user resolution against subaccount membership, normalisation. |
 | `server/services/crossOwnerDelegationRequestAssembler.ts` | Higher-level assembler. Inputs: parent-run record + `RoutingContext` + authorisation result + parent-agent tool-call payload. Output: a complete `CROSS_OWNER_DELEGATION_REQUEST` (§5.4) including `required_capabilities`, `delegation_scope`, and `cross_owner_approval_timeout_policy`. Owns the WRITE of `delegation_outcomes.cross_owner_approval_timeout_policy` (column added in migration 0345). Consumed by the delegation router. |
 | `server/services/crossOwnerDelegationRequestAssemblerPure.ts` | Pure derivation rules for `delegation_scope` (inherits from parent tool-call payload) and `cross_owner_approval_timeout_policy` (default `'fail_parent'`; `'continue_without_substep'` when parent tool-call payload sets `{ optional: true }`; `'ask_initiator'` when parent emits explicit "fall back to initiator" capability signal). |
 | `server/services/operatorSessionInitialContextBundler.ts` | Builds the initial-context bundle (memory blocks + voice profile + owner identity context) under 4 KB budget. Reads `memory_blocks WHERE agent_id = ea.id`, `voice_profiles WHERE owner_user_id = ea.owner_user_id`, `users WHERE id = ea.owner_user_id` for timezone + working hours, and recent-activity summary (last 24h, from existing summary store). |
 | `server/services/operatorSessionInitialContextBundlerPure.ts` | Pure trimming algorithm under §5.8. Priority: voice profile features > most-recent memory blocks > older memory blocks. Hard cap 4096 bytes serialised; trim algorithm deterministic. |
-| `server/services/runTracePure.ts` (extend existing if present; otherwise new) | Add `runTraceProjectionForViewer(viewerUserId, run)` — pure projection helper for the cross-owner privacy invariant (§5.4). Called at read time by every consumer of the cross-owner run trace. Concrete consumers (added to §4.3 below) MUST invoke this helper before serialising any cross-owner run-trace payload over HTTP or WebSocket. |
+| `server/services/runTracePure.ts` (extend existing if present; otherwise new) | Add `runTraceProjectionForViewer(viewerUserId, run)` — pure projection helper for the cross-owner privacy invariant (§5.4). Called at read time by every consumer of the cross-owner run trace. |
 
 ### 4.3 Modified service code
 
@@ -145,9 +203,6 @@ No new RLS policies expected. If strategy (a) is chosen, `operator_run_files` is
 | `server/services/controllerStyleResolver.ts` | NO CHANGE expected. Spec records the no-op confirmation as an acceptance criterion — when the EA's allowed-set is `'native_and_operator'`, the resolver's existing four-case logic (explicit override, subaccount default, mode default, constraint downgrade) selects operator on the orchestrator's request without modification. |
 | `server/tools/capabilities/capabilityDiscoveryHandlers.ts` | Orchestrator-side intent parser + matcher entry point (`executeCheckCapabilityGap`, dispatched by `server/services/skillExecutor.ts:1767-1770`). Propagate `requester_user_id` from the authenticated request principal into the `RoutingContext`; parse `@PA` / `@MyAssistant` / `@<DisplayName>` and populate `addressed_agent`; resolve `target_owner_user_id` from intent text or tool-call payload via `crossOwnerDelegationAuthorisation`. |
 | `server/services/skillExecutor.ts` | No direct change expected: this file dispatches to the `check_capability_gap` handler above. Spec records the no-op confirmation as an acceptance criterion. If the audit during Chunk 2 reveals that `requester_user_id` propagation requires plumbing through `skillExecutor`'s `context` object, the change is additive and remains within this row. |
-| `server/services/agentExecutionEventService.ts` | Run-trace event-stream read path. On every cross-owner run-trace fetch (paginated read, replay, snapshot dump), the service invokes `runTraceProjectionForViewer(viewerUserId, run)` (§4.2) BEFORE returning to the route layer. The projection applies the §5.4 privacy invariant by filtering owner-private fields from initiator-side views. Existing primitive — V2 only adds the projection invocation; no schema or per-event filtering changes. |
-| `server/routes/taskEventStream.ts` | Server-Sent-Events / WebSocket bridge for the `agent-run` channel. Adds the same `runTraceProjectionForViewer(viewerUserId, run)` invocation on the outbound side before sending an event frame to the FE. Two-layer enforcement (service + route) is deliberate: a future direct consumer of `agentExecutionEventService` that bypasses the route still gets the projection because the service applies it first. |
-| `server/routes/agentRuns.ts` | Run-trace HTTP read endpoints. Same projection invocation on the outbound serialisation path. Cross-owner runs MUST NOT serialise raw owner-side payloads to the initiator's HTTP response. Acceptance criterion in Chunk 3: write a small pure-function test that asserts `runTraceProjectionForViewer` blanks the owner-private fields when `viewerUserId !== run.ownerUserId`. |
 
 ### 4.4 New CI gate
 
@@ -167,7 +222,7 @@ No new RLS policies expected. If strategy (a) is chosen, `operator_run_files` is
 |---|---|
 | `shared/types/routingContext.ts` (new file if absent; otherwise extend existing) | Add `requester_user_id: string`, `target_owner_user_id?: string`, `raw_intent_text: string`, `normalised_intent_text: string`, `addressed_agent: { id: string; score_boost: number } | null`, `address_parse_result: 'matched' | 'not_found' | 'collision' | 'unsupported_cross_owner'`. |
 | `shared/types/capabilityMap.ts` (new if absent) | Add optional `owner_user_id?: string` on the JSONB shape; type-narrows when `agentRow.owner_user_id` is non-null. |
-| `shared/types/operatorEvents.ts` (extend existing operator-event types) | Add four new event variants: `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`. `file.*` payload shape per §5.7; `cross_owner_substep.completed` payload per §9.4 (carries `parent_run_id`, `substep_id`, `status: 'success' | 'partial' | 'failed'`, optional typed `reason`); `cross_owner_substep.awaiting_initiator_decision` payload carries `parent_run_id`, `substep_id`, and the typed decision request shape (see §5.6 `ask_initiator` branch). Each variant must be registered with criticality in the `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) so `verify-operator-event-registry.sh` passes. Other sub-step lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked on `delegation_outcomes.status` and do NOT surface as run-trace events (per §9.4). |
+| `shared/types/operatorEvents.ts` (extend existing operator-event types) | Add `file.created`, `file.modified`, and `cross_owner_substep.completed` event variants. `file.*` payload shape per §5.7; `cross_owner_substep.completed` payload per §9.4 (carries `parent_run_id`, `substep_id`, `status: 'success' | 'partial' | 'failed'`, optional typed `reason`). Each variant must be registered with criticality in the `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) so `verify-operator-event-registry.sh` passes. |
 | `shared/types/crossOwnerApproval.ts` (new) | `CrossOwnerApprovalTimeoutPolicy` literal union; two pause-reason constants: `awaiting_cross_owner_approval` (V1 same-owner approval path, V2 cross-owner approval path) and `awaiting_initiator_decision_after_cross_owner_timeout` (emitted only when `cross_owner_approval_timeout_policy = 'ask_initiator'` fires per §5.6). |
 
 ### 4.7 Doc-sync (mandatory at finalisation)
@@ -193,10 +248,6 @@ Files and gates that this spec cites in §6, §8, §9, §10, and Appendix B but 
 | `references/test-gate-policy.md` | Appendix B: confirm `verify-capability-map-shape.sh` is listed. No edit required unless the gate is missing. |
 | `docs/spec-authoring-checklist.md` | §5 intro: anatomy reference for contract rigour. No edit required. |
 | `chatgpt-pr-review` agent | §8 Chunk 9: the doc-sync gate at finalisation. Defined in `.claude/agents/chatgpt-pr-review.md`. No code change. |
-| `client/src/pages/OpenTaskView.tsx` | §1 non-goals: the universal task-view surface that operator-mode runs render through unchanged. |
-| `client/src/components/global-ask-bar/GlobalAskBar.tsx` | §1 non-goals: orchestrator entry; `@`-parsing is server-side, the FE component is unchanged. |
-| `server/db/schema/executionFiles.ts` | §13 open question #1, §4.1 migration 0346: existing schema definition referenced when evaluating the strategy-(b) extension path. |
-| `server/services/__tests__/capabilityMapServicePure.routing.test.ts` (CREATED in Chunk 2) | Appendix A: concrete test fixtures for the four routing fixtures. New file; the path is locked here even though the file lands in Chunk 2 — see §4.2/§4.3 for the implementation files those tests cover. |
 
 ## 5. Domain model + contracts
 
@@ -319,7 +370,7 @@ Address forms:
 ### 5.4 Cross-owner delegation contract
 
 **Name:** `CROSS_OWNER_DELEGATION_REQUEST`
-**Producer:** `crossOwnerDelegationRequestAssembler.build(...)` (§4.2). Upstream inputs to the assembler include the parent-run record, the `RoutingContext` (§5.2), the result of `crossOwnerDelegationAuthorisation.authorise(...)` (which contributes `authorisation_signal` + `target_owner_user_id`), and the parent-agent tool-call payload (which contributes `delegation_scope` + the `{ optional: true }` flag and any explicit "fall back to initiator" capability signal).
+**Producer:** parent run's delegation step (via `crossOwnerDelegationAuthorisation.authorise(...)`)
 **Consumer:** matcher (sub-step routing) + credential broker + approval router + run-trace projection
 
 ```ts
@@ -375,7 +426,7 @@ The projection is enforced at READ time by `runTraceProjectionForViewer(viewerUs
 ### 5.6 Cross-owner approval timeout policy
 
 **Name:** `CROSS_OWNER_APPROVAL_TIMEOUT_POLICY`
-**Producer:** `crossOwnerDelegationRequestAssembler.build(...)` (§4.2) writes `delegation_outcomes.cross_owner_approval_timeout_policy` as part of the assembled `CROSS_OWNER_DELEGATION_REQUEST` row.
+**Producer:** orchestrator at delegation time (writes to `delegation_outcomes.cross_owner_approval_timeout_policy`)
 **Consumer:** `workflowGateStallNotifyJob` at the 24-hour hard-stop
 
 ```ts
@@ -388,7 +439,7 @@ type CrossOwnerApprovalTimeoutPolicy = 'fail_parent' | 'continue_without_substep
 
 - `'fail_parent'` → parent task transitions to `failed` with reason `cross_owner_approval_timeout`; sub-run emits `cross_owner_substep.completed { status: 'failed', reason: 'cross_owner_approval_timeout' }` (terminal — per §9.4).
 - `'continue_without_substep'` → mark the sub-step skipped; sub-run emits `cross_owner_substep.completed { status: 'partial', reason: 'cross_owner_approval_timed_out_optional' }` (terminal — per §9.4). Resume parent on next event.
-- `'ask_initiator'` → sub-run is NOT yet terminal at the 24-hour boundary. The stall job emits a non-terminal `cross_owner_substep.awaiting_initiator_decision` event (the second emitted `cross_owner_substep.*` variant, registered alongside `.completed` in `AGENT_EXECUTION_EVENT_CRITICALITY` per §4.6), surfaces a typed decision request to the initiator, and the parent stays paused with `awaiting_initiator_decision_after_cross_owner_timeout`. When the initiator decides, the sub-run emits its single terminal `cross_owner_substep.completed { status: 'success' | 'failed', reason: 'initiator_resumed_after_cross_owner_timeout' | 'initiator_abandoned_after_cross_owner_timeout' }` event. There is no second 24-hour stall — the initiator decision is its own pg-boss lifecycle handler.
+- `'ask_initiator'` → sub-run is NOT yet terminal at the 24-hour boundary. The stall job emits a non-terminal `cross_owner_substep.awaiting_initiator_decision` event (registered in `AGENT_EXECUTION_EVENT_CRITICALITY`), surfaces a typed decision request to the initiator, and the parent stays paused with `awaiting_initiator_decision_after_cross_owner_timeout`. When the initiator decides, the sub-run emits its single terminal `cross_owner_substep.completed { status: 'success' | 'failed', reason: 'initiator_resumed_after_cross_owner_timeout' | 'initiator_abandoned_after_cross_owner_timeout' }` event. There is no second 24-hour stall — the initiator decision is its own pg-boss lifecycle handler.
 
 ### 5.7 File events (`file.created`, `file.modified`)
 
@@ -434,7 +485,7 @@ Example:
 
 **Source-of-truth precedence for files:** the R2 storage key is canonical content. `execution_files` table row is a metadata index. Event stream is a derived projection — replay of events MUST be idempotent against the row + storage key.
 
-**Tool-call interceptor vs watcher precedence:** tool-call interceptor wins on `version` allocation. The watcher only emits events for paths it didn't see come through the tool registry. Deduplication: the watcher checks the §13 #1 backing-store table (whichever strategy is chosen) `WHERE agent_run_id = $1 AND path = $2 AND content_sha256 = $3` and skips emit if the row already exists with the same hash.
+**Tool-call interceptor vs watcher precedence:** tool-call interceptor wins on `version` allocation. The watcher only emits events for paths it didn't see come through the tool registry. Deduplication: the watcher checks `executionFiles WHERE agent_run_id = $1 AND path = $2 AND content_sha256 = $3` and skips emit if the row already exists with the same hash.
 
 ### 5.8 Operator session initial-context bundle
 
@@ -477,9 +528,9 @@ type OperatorSessionInitialContextBundle = {
 
 ## 6. Permissions / RLS checklist
 
-V2 touches three tenant-scoped tables: `subaccount_agents` (via `capability_map`), `actions` (via `approver_user_id`), `delegation_outcomes` (via `cross_owner_approval_timeout_policy`). All three are already RLS-policied and present in `server/config/rlsProtectedTables.ts` — V2 adds columns to existing tables, not new tables, so no new RLS work is required for the three.
+V2 touches three tenant-scoped tables: `subaccount_agents` (via `capability_map`), `actions` (via `approver_user_id`), `delegation_outcomes` (via `cross_owner_approval_timeout_policy`). All three are already RLS-policied and present in `server/config/rlsProtectedTables.ts` — V2 adds columns to existing tables, not new tables, so no new RLS work is required.
 
-**6.1 Tenant-scoped table inventory — conditional on §13 #1.** The three tables above are confirmed-no-new. The fourth potentially-new table depends on the unresolved §13 #1 schema decision (migration 0346). If strategy (a) is chosen, a new `operator_run_files` table is added to `server/config/rlsProtectedTables.ts` with a policy that joins on `agent_runs.organisation_id` (the canonical org-scoped pattern). If strategy (b) is chosen, the existing `execution_files` policy is verified to cover the new columns and no new entry is added. Both paths preserve "no direct DB access" via the existing `verify-rls-contract-compliance.sh` gate.
+**6.1 No new tenant-scoped tables.** Confirmed.
 
 **6.2 Route guards.** The orchestrator's request-intake path is already gated by `authenticate` middleware (sets `req.user.id` → `requester_user_id`). No new HTTP endpoints in V2.
 
@@ -526,12 +577,12 @@ Verifies: typecheck, lint, `verify-capability-map-shape.sh` passes on fresh DB.
 Prerequisites: Chunk 1 (capability_map.owner_user_id exists for matcher to read).
 Verifies: typecheck, lint. Pure-function unit tests for the matcher (allowed under `runtime_tests: pure_function_only`).
 
-**Chunk 3 — Cross-owner delegation authorisation + request assembly + credentials**
+**Chunk 3 — Cross-owner delegation authorisation + credentials**
 
-`crossOwnerDelegationAuthorisation` service + pure helper (Layer-1/Layer-2 detection). `crossOwnerDelegationRequestAssembler` service + pure helper (assembles the full `CROSS_OWNER_DELEGATION_REQUEST` per §5.4; owns the WRITE of `delegation_outcomes.cross_owner_approval_timeout_policy` added in migration 0345). Wire both into the delegation router (authorisation first, then assembler). Credential-broker invocation with `ownerUserId = target_owner_user_id` is existing behaviour (no change required, but spec records the acceptance criterion: a sub-run routed to Michael's PA reads Michael's credentials). The `runTraceProjectionForViewer` pure helper (§4.2) lands here so the privacy invariant is in place before any cross-owner sub-run ships.
+`crossOwnerDelegationAuthorisation` service + pure helper. Wire into delegation router. Credential-broker invocation with `ownerUserId = target_owner_user_id` is existing behaviour (no change required, but spec records the acceptance criterion: a sub-run routed to Michael's PA reads Michael's credentials).
 
 Prerequisites: Chunk 2 (matcher must already route correctly).
-Verifies: typecheck, lint. Pure-function unit tests for the authorisation rules, the assembler's `delegation_scope` / timeout-policy derivation, and `runTraceProjectionForViewer`.
+Verifies: typecheck, lint. Pure-function unit tests for the authorisation rules.
 
 **Chunk 4 — Approval-owner routing + stall job**
 
@@ -556,7 +607,7 @@ Verifies: typecheck, lint. Pure-function unit tests for trim algorithm budget co
 
 **Chunk 7 — Live-file events: tool-call interceptor**
 
-`operatorSandboxFileEventBridge` + pure helper. Wire into `operatorSessionService` tool-registry handler. R2 upload via existing `getS3Client()` / `getBucketName()`. File-metadata row writes against the §13 #1 backing-store table (resolved before this chunk ships). Event emission onto `operator-session-progressed` channel; bridge to WebSocket `agent-run` channel.
+`operatorSandboxFileEventBridge` + pure helper. Wire into `operatorSessionService` tool-registry handler. R2 upload via existing `getS3Client()` / `getBucketName()`. `executionFiles` row writes. Event emission onto `operator-session-progressed` channel; bridge to WebSocket `agent-run` channel.
 
 Prerequisites: Chunk 5 (operator-mode runs must exist to emit file events from).
 Verifies: typecheck, lint. Pure-function unit tests for create-vs-modify decision and version allocation.
@@ -588,7 +639,7 @@ Verifies: doc-sync checklist (`docs/doc-sync.md`) passes; `chatgpt-pr-review` do
 | Migration 0345 (timeout policy add) | `state-based` | `ADD COLUMN IF NOT EXISTS`. |
 | `capability_map` recompute | `state-based` | Always full-replace within the same transaction; no partial updates. |
 | Cross-owner action proposal (`actionService.proposeAction` with `approver_user_id`) | `key-based` | Existing `proposeAction` idempotency key (unchanged). |
-| File-metadata row write on `file.created` (§13 #1 backing-store table) | `key-based` | UNIQUE `(agent_run_id, path)` added in migration 0346 — emit `file.modified` on conflict; never INSERT duplicate. |
+| `executionFiles` row write on `file.created` | `key-based` | UNIQUE `(agent_run_id, path)` — emit `file.modified` on conflict; never INSERT duplicate. |
 | File event emit | `state-based` | Watcher checks existing row by `content_sha256` before emitting. Tool-call path increments version monotonically. |
 | Cross-owner timeout job | `state-based` | UPDATE … WHERE `status = 'pending_approval' AND created_at < NOW() - INTERVAL '24 hours'`. 0 rows affected = already resolved. |
 
@@ -598,7 +649,7 @@ Verifies: doc-sync checklist (`docs/doc-sync.md`) passes; `chatgpt-pr-review` do
 |---|---|---|
 | `proposeAction` (with `approver_user_id`) | `guarded` | Existing idempotency key. Retry-safe. |
 | R2 upload of file content | `safe` | Existing `withBackoff` wrapper at the storage layer. R2 PUT is idempotent. |
-| File-metadata row insert (§13 #1 backing-store table) | `guarded` | UNIQUE constraint added in migration 0346. Retry-on-conflict → fall through to modify path. |
+| `executionFiles` row insert | `guarded` | UNIQUE constraint. Retry-on-conflict → fall through to modify path. |
 | Event emit onto pg-boss | `safe` | pg-boss `send()` is at-least-once; consumers must dedupe by `agentRunId + path + version`. |
 | `controllerStyleResolver` decisions | `safe` | Pure. Deterministic. |
 | Authorisation signal resolution | `safe` | Pure. Deterministic. |
@@ -627,7 +678,7 @@ Multi-path termination (closed set — adding a status requires a spec amendment
 - `partial` — `continue_without_substep` timeout policy fired; sub-step skipped; parent continues without the result (explicit, not silent).
 - `failed` — `fail_parent` timeout policy fired, the credential broker failed to resolve, the sub-run hard-failed inside operator runtime, OR the `ask_initiator → initiator_abandoned_after_cross_owner_timeout` path resolved to abandonment (§5.6).
 
-Lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked as values of the existing `delegation_outcomes.status` column — they are state-machine transitions, NOT separate emitted events. The only `cross_owner_substep.*` event variants V2 emits onto the run-trace stream are: (a) `cross_owner_substep.awaiting_initiator_decision` (non-terminal, emitted ONLY when the `ask_initiator` timeout-policy branch fires per §5.6) and (b) `cross_owner_substep.completed` (the single terminal event). Both are inventoried in §4.6. State-machine state changes that are NOT emitted as run-trace events MAY still produce ordinary `delegation_outcomes` row UPDATEs but they do not surface to the FE event stream — the FE renders the run-trace from `.completed` plus, if the path goes through the `ask_initiator` branch, the intermediate `.awaiting_initiator_decision`.
+Non-terminal lifecycle events with the same correlation key (`cross_owner_substep.proposed`, `cross_owner_substep.authorised`, `cross_owner_substep.routed`, `cross_owner_substep.executing`, `cross_owner_substep.awaiting_initiator_decision`) are emitted along the path but do NOT count as terminal — only `cross_owner_substep.completed` does.
 
 ### 9.5 No-silent-partial-success
 
@@ -637,7 +688,7 @@ Lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked a
 
 | Constraint | Violation HTTP status | Reason |
 |---|---|---|
-| §13 #1 backing-store table UNIQUE `(agent_run_id, path)` (added in migration 0346) | No HTTP exposure — internal event path only | Caught and routed to modify path. |
+| `executionFiles` UNIQUE `(agent_run_id, path)` | No HTTP exposure — internal event path only | Caught and routed to modify path. |
 | `actions` UNIQUE (existing keys) | Unchanged — V1 behaviour | n/a |
 | `delegation_outcomes` no new UNIQUE | n/a | n/a |
 
@@ -670,7 +721,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 - **Pure-function unit tests** for new pure helpers: matcher rule, authorisation detector, trim algorithm, file event create-vs-modify decision, version allocator, run-trace projection.
 - **Static gates** as the primary safety net:
   - `verify-capability-map-shape.sh` (new) — guards capability-map invariants.
-  - `verify-operator-event-registry.sh` (existing) — extended check that all four V2-added variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) are registered with criticality in `AGENT_EXECUTION_EVENT_CRITICALITY` per §4.6.
+  - `verify-operator-event-registry.sh` (existing) — extended check that `file.created` / `file.modified` / `cross_owner_substep.completed` are registered with criticality.
   - `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` (existing) — no new tables, so just confirm the new columns don't introduce direct-DB-access patterns.
 - **CI typecheck + lint** — load-bearing for shape correctness across the new contracts.
 
@@ -695,7 +746,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 Performed at draft completion (2026-05-13):
 
 - **Goals ↔ Implementation match.** Every goal in §1 maps to chunks in §8. No orphaned goals.
-- **Single-source-of-truth claims survive.** `agents.owner_user_id` is the canonical source (§5.1); `capability_map.owner_user_id` is a recomputed projection. R2 storage key is the canonical file content; the file-metadata index (either `operator_run_files` per §13 #1 strategy (a) or extended `execution_files` per strategy (b)) is a derived row. Event stream is a derived projection (§5.7). The §13 #1 resolution selects which row backs the projection; the source-of-truth statement is unaffected by the strategy choice.
+- **Single-source-of-truth claims survive.** `agents.owner_user_id` is the canonical source (§5.1); `capability_map.owner_user_id` is a recomputed projection. R2 storage key is the canonical file content; `execution_files` row is a metadata index (§5.7). Event stream is a derived projection (§5.7).
 - **Non-functional claims match execution model.** No latency budgets, no cache-efficiency targets. The 4 KB initial-context budget (§5.8) is enforced by the trim algorithm in the inline bundler. The 24-hour stall threshold is inherited from V1 unchanged.
 - **Every load-bearing claim has a named mechanism.**
   - "Credentials follow the executor" → credential broker (`user-owned-agents` §3.3 invariant)
@@ -762,3 +813,79 @@ Per `docs/doc-sync.md`:
 - [ ] `docs/decisions/` — consider ADR for "approval follows executor's owner, not initiator" (durable policy decision)
 
 ## End of spec
+
+codex
+Reviewing the spec as a consistency pass, focusing on iteration-1 deltas and cross-section contracts first. I’m checking producer/consumer ownership, chunk ordering, and whether the new event/type inventory still closes cleanly.
+codex
+1. Run-trace privacy projection is specified but not actually wired into any read path.  
+Section: §4.2 `server/services/runTracePure.ts`, §5.4 “Run-trace privacy projection”, §6.5 “Run-trace projection”, §8 chunk plan.  
+Defect: the spec names `runTraceProjectionForViewer(viewerUserId, run)` as the enforcement mechanism, but no modified consumer service/handler is listed that must call it. §6.5 says all reads go through `agentExecutionEventService`, yet that service is not in §4.3 or §8. As written, the privacy invariant is declarative, not implementation-bound.  
+Minimum fix: add the concrete read-path owner(s) to §4.3 and §8, and state that every HTTP/WebSocket run-trace read for cross-owner runs must pass through `runTraceProjectionForViewer`.  
+Severity: critical
+
+2. `CROSS_OWNER_DELEGATION_REQUEST` names the wrong producer.  
+Section: §5.4 “Cross-owner delegation contract”, compared with §4.2 `server/services/crossOwnerDelegationRequestAssembler.ts`.  
+Defect: §5.4 says the request is produced “via `crossOwnerDelegationAuthorisation.authorise(...)`”, but §4.2 explicitly says that service does not build the full request and that the assembler does. That is a direct producer/consumer contradiction.  
+Minimum fix: make `crossOwnerDelegationRequestAssembler` the producer in §5.4 and describe `crossOwnerDelegationAuthorisation` as an upstream input only.  
+Severity: important
+
+3. Chunk 3 does not ship the new assembler that later sections depend on.  
+Section: §4.2 `crossOwnerDelegationRequestAssembler*`, §8 “Chunk 3 — Cross-owner delegation authorisation + credentials”.  
+Defect: iteration 1 added `crossOwnerDelegationRequestAssembler` and its pure helper, but §8 Chunk 3 still only mentions the authorisation service and credential wiring. The assembler owns `required_capabilities`, `delegation_scope`, and `cross_owner_approval_timeout_policy`, so later approval/runtime behaviour depends on work that is not assigned to any chunk.  
+Minimum fix: add the assembler and its pure helper to Chunk 3, including the `delegation_outcomes.cross_owner_approval_timeout_policy` write.  
+Severity: important
+
+4. The cross-owner event inventory is no longer closed.  
+Section: §4.6 “Shared types”, §5.6 “Cross-owner approval timeout policy”, §9.4 “Terminal event guarantee”, §10 “Testing posture”.  
+Defect: §4.6 says V2 adds only `file.created`, `file.modified`, and `cross_owner_substep.completed`, but §5.6 says `cross_owner_substep.awaiting_initiator_decision` is emitted and registered, and §9.4 also describes emitted `cross_owner_substep.proposed|authorised|routed|executing` lifecycle events. Those variants are missing from the declared type inventory and from the registry/gate statement in §10.  
+Minimum fix: either declare all emitted `cross_owner_substep.*` event types in §4.6 and include them in the registry/test language, or restate that only `.completed` is a first-class event and the intermediate states are derived, not emitted as separate event variants.  
+Severity: important
+
+5. The tracked PA-V2-OP-S1 schema question is still treated as resolved in downstream sections.  
+Section: §4.1 migration `0346`, §4.2 `operatorSandboxFileEventBridge*`, §5.7, §6.1, §9.1/§9.2/§9.6, §13 open question #1.  
+Defect: the open question is correctly tracked, but the rest of the spec hard-codes `executionFiles`/`execution_files` as the backing store and states “no new tenant-scoped tables” as if strategy `(b)` had already been chosen. That makes the document internally inconsistent even though the decision itself is already routed.  
+Minimum fix: keep all backing-store references strategy-neutral until PA-V2-OP-S1 is resolved, and make §6’s no-new-table claim explicitly conditional on choosing strategy `(b)`.  
+Severity: important
+
+6. The file-inventory lock still has drift.  
+Section: §1 “Non-goals”, §4 inventory lock, Appendix A, §13 open question #1.  
+Defect: exact referenced paths including `client/src/pages/OpenTaskView.tsx`, `client/src/components/global-ask-bar/GlobalAskBar.tsx`, `server/db/schema/executionFiles.ts`, and `server/services/__tests__/capabilityMapServicePure.routing.test.ts` appear in prose but do not appear in any §4 table. That breaks the spec’s own “every file mentioned must appear in §4” rule.  
+Minimum fix: add those paths to §4.8 or remove the exact-path mentions from prose.  
+Severity: minor
+tokens used
+47,113
+1. Run-trace privacy projection is specified but not actually wired into any read path.  
+Section: §4.2 `server/services/runTracePure.ts`, §5.4 “Run-trace privacy projection”, §6.5 “Run-trace projection”, §8 chunk plan.  
+Defect: the spec names `runTraceProjectionForViewer(viewerUserId, run)` as the enforcement mechanism, but no modified consumer service/handler is listed that must call it. §6.5 says all reads go through `agentExecutionEventService`, yet that service is not in §4.3 or §8. As written, the privacy invariant is declarative, not implementation-bound.  
+Minimum fix: add the concrete read-path owner(s) to §4.3 and §8, and state that every HTTP/WebSocket run-trace read for cross-owner runs must pass through `runTraceProjectionForViewer`.  
+Severity: critical
+
+2. `CROSS_OWNER_DELEGATION_REQUEST` names the wrong producer.  
+Section: §5.4 “Cross-owner delegation contract”, compared with §4.2 `server/services/crossOwnerDelegationRequestAssembler.ts`.  
+Defect: §5.4 says the request is produced “via `crossOwnerDelegationAuthorisation.authorise(...)`”, but §4.2 explicitly says that service does not build the full request and that the assembler does. That is a direct producer/consumer contradiction.  
+Minimum fix: make `crossOwnerDelegationRequestAssembler` the producer in §5.4 and describe `crossOwnerDelegationAuthorisation` as an upstream input only.  
+Severity: important
+
+3. Chunk 3 does not ship the new assembler that later sections depend on.  
+Section: §4.2 `crossOwnerDelegationRequestAssembler*`, §8 “Chunk 3 — Cross-owner delegation authorisation + credentials”.  
+Defect: iteration 1 added `crossOwnerDelegationRequestAssembler` and its pure helper, but §8 Chunk 3 still only mentions the authorisation service and credential wiring. The assembler owns `required_capabilities`, `delegation_scope`, and `cross_owner_approval_timeout_policy`, so later approval/runtime behaviour depends on work that is not assigned to any chunk.  
+Minimum fix: add the assembler and its pure helper to Chunk 3, including the `delegation_outcomes.cross_owner_approval_timeout_policy` write.  
+Severity: important
+
+4. The cross-owner event inventory is no longer closed.  
+Section: §4.6 “Shared types”, §5.6 “Cross-owner approval timeout policy”, §9.4 “Terminal event guarantee”, §10 “Testing posture”.  
+Defect: §4.6 says V2 adds only `file.created`, `file.modified`, and `cross_owner_substep.completed`, but §5.6 says `cross_owner_substep.awaiting_initiator_decision` is emitted and registered, and §9.4 also describes emitted `cross_owner_substep.proposed|authorised|routed|executing` lifecycle events. Those variants are missing from the declared type inventory and from the registry/gate statement in §10.  
+Minimum fix: either declare all emitted `cross_owner_substep.*` event types in §4.6 and include them in the registry/test language, or restate that only `.completed` is a first-class event and the intermediate states are derived, not emitted as separate event variants.  
+Severity: important
+
+5. The tracked PA-V2-OP-S1 schema question is still treated as resolved in downstream sections.  
+Section: §4.1 migration `0346`, §4.2 `operatorSandboxFileEventBridge*`, §5.7, §6.1, §9.1/§9.2/§9.6, §13 open question #1.  
+Defect: the open question is correctly tracked, but the rest of the spec hard-codes `executionFiles`/`execution_files` as the backing store and states “no new tenant-scoped tables” as if strategy `(b)` had already been chosen. That makes the document internally inconsistent even though the decision itself is already routed.  
+Minimum fix: keep all backing-store references strategy-neutral until PA-V2-OP-S1 is resolved, and make §6’s no-new-table claim explicitly conditional on choosing strategy `(b)`.  
+Severity: important
+
+6. The file-inventory lock still has drift.  
+Section: §1 “Non-goals”, §4 inventory lock, Appendix A, §13 open question #1.  
+Defect: exact referenced paths including `client/src/pages/OpenTaskView.tsx`, `client/src/components/global-ask-bar/GlobalAskBar.tsx`, `server/db/schema/executionFiles.ts`, and `server/services/__tests__/capabilityMapServicePure.routing.test.ts` appear in prose but do not appear in any §4 table. That breaks the spec’s own “every file mentioned must appear in §4” rule.  
+Minimum fix: add those paths to §4.8 or remove the exact-path mentions from prose.  
+Severity: minor
