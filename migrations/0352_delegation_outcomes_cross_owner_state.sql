@@ -1,4 +1,4 @@
--- Migration 0347: Add cross-owner state-machine columns to delegation_outcomes
+-- Migration 0352: Add cross-owner state-machine columns to delegation_outcomes
 --
 -- Three additive columns for the cross-owner delegation sub-step state machine
 -- (spec §9.7). All additions are idempotent (ADD COLUMN IF NOT EXISTS).
@@ -24,7 +24,7 @@
 --   0 rows affected = already terminal; losing caller reads and emits no event.
 --
 -- Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
--- §4.1 (migration 0347), §9.4 (terminal event guarantee), §9.7 (state machine)
+-- §4.1 (migration 0352), §9.4 (terminal event guarantee), §9.7 (state machine)
 
 ALTER TABLE delegation_outcomes
   ADD COLUMN IF NOT EXISTS cross_owner_approval_timeout_policy TEXT NULL

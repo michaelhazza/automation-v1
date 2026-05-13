@@ -343,5 +343,5 @@ export * from './operatorRuns.js';
 export * from './operatorTaskProfiles.js';
 export * from './subaccountOperatorSettings.js';
 
-// Operator run files — per-run file artefact pointers (migration 0348)
+// Operator run files — per-run file artefact pointers (migration 0353)
 export * from './operatorRunFiles.js';

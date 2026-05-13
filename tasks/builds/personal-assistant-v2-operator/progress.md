@@ -55,7 +55,7 @@ See `handoff.md` § "Decisions made in Phase 1" for the full list (9 ratified de
 
 - **Spec status:** APPROVED at commit `e27a218a`.
 - **Review effort:** 5 spec-reviewer (Codex) iterations + 2 chatgpt-spec-review (manual) rounds = 7 rounds; 48 findings applied, 2 rejected.
-- **Architectural decisions locked:** new `operator_run_files` table (Migration 0348); extend `delegation_outcomes` with state-machine columns (Migration 0347).
+- **Architectural decisions locked:** new `operator_run_files` table (Migration 0353); extend `delegation_outcomes` with state-machine columns (Migration 0352).
 - **One durable pattern extracted to KNOWLEDGE.md:** "Derive event type from UPSERT result, never from a preflight existence check."
 - **Next session:** `launch feature coordinator` to start Phase 2.
 

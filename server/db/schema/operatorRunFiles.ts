@@ -23,15 +23,15 @@ import { subaccounts } from './subaccounts.js';
 // Event type is derived from the returned version (1 => file.created,
 // >1 => file.modified). Preflight lookups are never the event-type source.
 //
-// RLS: canonical org-isolation policy on organisation_id (migration 0348).
+// RLS: canonical org-isolation policy on organisation_id (migration 0353).
 // No JOIN through agent_runs — direct org column for fast plan.
 //
-// Partial index on (agent_run_id, path) — enforced by migration 0348 UNIQUE
+// Partial index on (agent_run_id, path) — enforced by migration 0353 UNIQUE
 // constraint. Drizzle's unique() below matches it for typecheck purposes.
 //
 // Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
 // §4.1, §4.8, §5.7, §6.1, §9.1, §9.3
-// Migration: 0348_operator_run_files.sql
+// Migration: 0353_operator_run_files.sql
 // ---------------------------------------------------------------------------
 
 export const operatorRunFiles = pgTable(

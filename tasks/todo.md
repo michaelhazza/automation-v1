@@ -125,9 +125,9 @@ These are noted to prevent re-discovery — none are urgent.
 
 From `spec-reviewer` iteration 1 against `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (2026-05-13). PA-V2-OP-S1 and PA-V2-OP-S2 RESOLVED 2026-05-13 by operator via spec-coordinator decision prompt; the spec now encodes both decisions directly. Items below retained for audit trail.
 
-- RESOLVED 2026-05-13: **PA-V2-OP-S1** — strategy (a): new table `operator_run_files`. Migration 0346 creates the table keyed on `agent_run_id → agent_runs.id` with full column set, UNIQUE `(agent_run_id, path)`, RLS policy filtering on the row's own `organisation_id`, plus an entry in `server/config/rlsProtectedTables.ts`. Spec §4.1 + §6.1 + §13 #1 updated. No longer blocks Chunk 7.
+- RESOLVED 2026-05-13: **PA-V2-OP-S1** — strategy (a): new table `operator_run_files`. Migration 0353 creates the table keyed on `agent_run_id → agent_runs.id` with full column set, UNIQUE `(agent_run_id, path)`, RLS policy filtering on the row's own `organisation_id`, plus an entry in `server/config/rlsProtectedTables.ts`. Spec §4.1 + §6.1 + §13 #1 updated. No longer blocks Chunk 7.
 
-- RESOLVED 2026-05-13: **PA-V2-OP-S2** — strategy (a): extend `delegation_outcomes`. Migration 0345 (renamed to `0345_delegation_outcomes_cross_owner_state.sql`) adds three columns: `cross_owner_approval_timeout_policy TEXT NULL`, `substep_status TEXT NOT NULL DEFAULT 'proposed'` (canonical §9.7 vocabulary), `terminal_at TIMESTAMPTZ NULL`, plus a partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` for the §9.4 uniqueness predicate. Spec §4.1 + §5.4 + §9.4 + §13 #2 updated. No longer blocks Chunk 3.
+- RESOLVED 2026-05-13: **PA-V2-OP-S2** — strategy (a): extend `delegation_outcomes`. Migration 0352 (`0352_delegation_outcomes_cross_owner_state.sql`) adds three columns: `cross_owner_approval_timeout_policy TEXT NULL`, `substep_status TEXT NOT NULL DEFAULT 'proposed'` (canonical §9.7 vocabulary), `terminal_at TIMESTAMPTZ NULL`, plus a partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` for the §9.4 uniqueness predicate. Spec §4.1 + §5.4 + §9.4 + §13 #2 updated. No longer blocks Chunk 3.
    
    Spec-reviewer (iteration 3) recommends strategy (a). Operator/architect input needed; spec encodes both options in §13 open question #2.
 
@@ -162,9 +162,9 @@ Discovered by: adversarial-reviewer, 2026-05-14.
 **Spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md`
 
 - [ ] **PA-V2-CONFORMANCE-1** — `operator_run_files.subaccount_id` nullability divergence
-  - Spec section: §4.1 (migration 0348 column list)
-  - Gap: Spec specifies `subaccount_id UUID NOT NULL`. Migrations 0348 + 0349 add the column as NULL (and Drizzle schema `server/db/schema/operatorRunFiles.ts` mirrors this without `.notNull()`). Spec inventory is explicit about NOT NULL.
-  - Suggested approach: Author migration 0350 to backfill any NULL `subaccount_id` from `agent_runs.subaccount_id`, then add `SET NOT NULL`. Update Drizzle schema in the same PR. Alternative: amend spec §4.1 if the operator decides the looser constraint is correct (a backfill via FK may surface migration-time pain that the spec did not anticipate).
+  - Spec section: §4.1 (migration 0353 column list)
+  - Gap: Spec specifies `subaccount_id UUID NOT NULL`. Migration 0353 adds the column as NULL (and Drizzle schema `server/db/schema/operatorRunFiles.ts` mirrors this without `.notNull()`). Spec inventory is explicit about NOT NULL.
+  - Suggested approach: Author a new follow-up migration (0357 or later) to backfill any NULL `subaccount_id` from `agent_runs.subaccount_id`, then add `SET NOT NULL`. Update Drizzle schema in the same PR. Alternative: amend spec §4.1 if the operator decides the looser constraint is correct (a backfill via FK may surface migration-time pain that the spec did not anticipate).
 
 - [ ] **PA-V2-CONFORMANCE-2** — Initial-context bundler reads timezone from `subaccount_agents.scheduleTimezone`, not `users` table
   - Spec section: §5.8 (`owner_identity.timezone`), §4.2 bundler row ("Reads ... `users WHERE id = ea.owner_user_id` for timezone + working hours")

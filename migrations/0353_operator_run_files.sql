@@ -1,4 +1,4 @@
--- Migration 0348: Create operator_run_files table
+-- Migration 0353: Create operator_run_files table
 --
 -- Tenant-scoped artefact-metadata table for operator-session file events.
 -- Keyed on (agent_run_id, path) — one row per file path per run (latest-metadata
@@ -28,7 +28,7 @@
 -- reusing it would force confusing dual-parent semantics.
 --
 -- Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
--- §4.1 (migration 0348), §5.7, §6.1, §9.1, §9.3
+-- §4.1 (migration 0353), §5.7, §6.1, §9.1, §9.3
 
 CREATE TABLE IF NOT EXISTS operator_run_files (
   id               UUID        NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),

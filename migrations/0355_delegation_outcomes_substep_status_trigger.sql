@@ -1,6 +1,6 @@
--- Migration 0350: Centrally enforce substep_status_updated_at + emit-audit column.
+-- Migration 0355: Centrally enforce substep_status_updated_at + emit-audit column.
 --
--- Round 2 chatgpt-pr-review for PA-V2 operator. Two follow-ups to migration 0349:
+-- Round 2 chatgpt-pr-review for PA-V2 operator. Two follow-ups to migration 0354:
 --
 -- (F7) substep_status_updated_at is documented as mandatory but was only set by
 -- the three writers that exist today (workflowGateStallNotifyJob.ts). Any future
@@ -19,7 +19,7 @@
 --
 -- Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
 -- §5.6 (timeout sweep), §9.4 (terminal event guarantee), §9.7 (state machine).
--- Pairs with migration 0349 (column add).
+-- Pairs with migration 0354 (column add).
 
 -- Audit column: NULL until the awaiting_initiator_decision event lands; set to
 -- NOW() immediately after appendEvent succeeds. Nullable + no default so an

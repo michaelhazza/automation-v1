@@ -33,13 +33,13 @@ None blocking. All architectural decisions ratified before / during Phase 1. Two
 
 ### Spec-coordinator decisions (operator-confirmed via decision prompts 2026-05-13)
 
-8. **File-events backing store (PA-V2-OP-S1):** new table `operator_run_files` keyed on `agent_run_id → agent_runs.id`. Migration 0348. UNIQUE `(agent_run_id, path)`. RLS policy filters on row's own `organisation_id`. Rejected the alternative of extending `execution_files` (distinct lifecycle/domain).
-9. **Cross-owner sub-step state machine (PA-V2-OP-S2):** extend `delegation_outcomes` rather than create a new table. Migration 0347 adds `cross_owner_approval_timeout_policy`, `substep_status`, `terminal_at`, plus partial index `(run_id, substep_status) WHERE terminal_at IS NULL`. Rejected the alternative of a separate state-machine table (would split cross-owner state across two tables).
+8. **File-events backing store (PA-V2-OP-S1):** new table `operator_run_files` keyed on `agent_run_id → agent_runs.id`. Migration 0353. UNIQUE `(agent_run_id, path)`. RLS policy filters on row's own `organisation_id`. Rejected the alternative of extending `execution_files` (distinct lifecycle/domain).
+9. **Cross-owner sub-step state machine (PA-V2-OP-S2):** extend `delegation_outcomes` rather than create a new table. Migration 0352 adds `cross_owner_approval_timeout_policy`, `substep_status`, `terminal_at`, plus partial index `(run_id, substep_status) WHERE terminal_at IS NULL`. Rejected the alternative of a separate state-machine table (would split cross-owner state across two tables).
 
 ### chatgpt-spec-review decisions (auto-applied, technical findings only)
 
 Round 1 (commit `b235d3f6`): 11 technical fixes applied, 1 rejected, 0 deferred. Highlights:
-- §4.1 migration 0348 rewritten with canonical UPSERT pattern (`INSERT ... ON CONFLICT (agent_run_id, path) DO UPDATE SET version = operator_run_files.version + 1`) + 4 CHECK constraints (`version >= 1`, `size_bytes >= 0`, non-empty path/storage_key).
+- §4.1 migration 0353 rewritten with canonical UPSERT pattern (`INSERT ... ON CONFLICT (agent_run_id, path) DO UPDATE SET version = operator_run_files.version + 1`) + 4 CHECK constraints (`version >= 1`, `size_bytes >= 0`, non-empty path/storage_key).
 - `server/config/rlsProtectedTables.ts` moved from "referenced existing primitives" to "modified" (TypeScript file, not SQL — the migration creates the table + RLS policy; the implementation chunk edits the manifest).
 - §1 testing-posture clause reworded: "pure-function Vitest tests, no API/UI/Playwright" (resolves the contradiction with the new pure-function unit-test files the spec requires).
 - §5.5 `approver_user_id` pinned as override-only (NULL = "derive approver via V1 default rule", not "unknown"); forbids backfill.
@@ -57,7 +57,7 @@ Round 2 (commit `e27a218a`): 5 technical fixes applied, 0 rejected, 0 deferred. 
 
 ## Implementation entry points
 
-- **Start chunk:** Chunk 1 (Foundation — schema + types + CI gate). Migrations 0345–0348, new shared types, new schema file `server/db/schema/operatorRunFiles.ts`, new CI gate `scripts/gates/verify-capability-map-shape.sh`, `computeCapabilityMapPure` extension. No prerequisites.
+- **Start chunk:** Chunk 1 (Foundation — schema + types + CI gate). Migrations 0345 + 0351–0353, new shared types, new schema file `server/db/schema/operatorRunFiles.ts`, new CI gate `scripts/gates/verify-capability-map-shape.sh`, `computeCapabilityMapPure` extension. No prerequisites.
 - **Acceptance criterion (§8 Chunk 1):** typecheck + lint + `verify-capability-map-shape.sh` + `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` all pass on fresh DB; `operator_run_files` registered in `rlsProtectedTables.ts`.
 - **Chunk 7 (live-file events) acceptance criterion (§10 #5):** long-running operator-mode EA task writes 5 files at different chain-link boundaries; `file.created` / `file.modified` events appear on the `agent-run` WebSocket channel before terminal completion; `FilesTab` shows files updating live.
 - **Reuse acceptance test (Appendix A):** stub Dev Agent with `owner_user_id` + equivalent `capability_map` passes all four routing fixtures (direct-owner, cross-ownership, approval-owner, ambiguous-fail-closed) with no EA-specific branching in matcher / approval router / delegation path.
@@ -74,7 +74,7 @@ Round 2 (commit `e27a218a`): 5 technical fixes applied, 0 rejected, 0 deferred. 
 
 | Chunk | Status | Key deliverable |
 |-------|--------|-----------------|
-| 1a | done | Migrations 0345–0348, `operatorRunFiles` Drizzle schema, RLS manifest |
+| 1a | done | Migrations 0345 + 0351–0353, `operatorRunFiles` Drizzle schema, RLS manifest |
 | 1b | done | Shared types, `verify-capability-map-shape.sh` CI gate, capability-map `owner_user_id` axis, backfill script |
 | 2 | done | `RoutingContext.target_owner_user_id`, addressing parser (`@PA`/`@<DisplayName>`), matcher rule |
 | 3 | done | `crossOwnerDelegationAuthorisationPure.ts`, `crossOwnerDelegationRequestAssemblerPure.ts`, `runTracePure.ts` projection |

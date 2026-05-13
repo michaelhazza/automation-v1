@@ -1,4 +1,4 @@
--- 0347 down — remove cross-owner state-machine columns from delegation_outcomes
+-- 0352 down — remove cross-owner state-machine columns from delegation_outcomes
 
 DROP INDEX IF EXISTS delegation_outcomes_open_substeps_idx;
 

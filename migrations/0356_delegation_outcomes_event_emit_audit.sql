@@ -1,7 +1,7 @@
--- Migration 0351: Atomic claim + emit audit columns for cross-owner timeout events.
+-- Migration 0356: Atomic claim + emit audit columns for cross-owner timeout events.
 --
 -- Round 3 chatgpt-pr-review for PA-V2 operator. Two follow-ups to migrations
--- 0349 and 0350:
+-- 0354 and 0355:
 --
 -- (F10) The fail_parent and continue_without_substep timeout branches transition
 -- delegation_outcomes to a terminal state (sets terminalAt) BEFORE emitting the
@@ -34,7 +34,7 @@
 --
 -- Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
 -- §5.6 (timeout sweep), §9.4 (terminal event guarantee).
--- Pairs with migrations 0349 + 0350.
+-- Pairs with migrations 0354 + 0355.
 
 ALTER TABLE delegation_outcomes
   ADD COLUMN IF NOT EXISTS terminal_event_claim_at TIMESTAMP WITH TIME ZONE NULL,

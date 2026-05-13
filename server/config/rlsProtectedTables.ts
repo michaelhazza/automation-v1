@@ -1306,11 +1306,11 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0333_memory_block_version_sources.sql',
     rationale: 'Per-version audit record of which workspace_memory_entries contributed to each auto-synthesised memory block version. Cross-tenant leak would expose another org\'s agent knowledge base, synthesis history, and captured source labels including agent run provenance.',
   },
-  // 0348 — Personal Assistant V2 Operator: per-run operator file artefact pointers
+  // 0353 — Personal Assistant V2 Operator: per-run operator file artefact pointers
   {
     tableName: 'operator_run_files',
     schemaFile: 'operatorRunFiles.ts',
-    policyMigration: '0348_operator_run_files.sql',
+    policyMigration: '0353_operator_run_files.sql',
     rationale: 'Per-run operator file artefact pointers with R2 storage keys — content-sha256, MIME type, and emitted_by metadata are scoped per org. Cross-tenant leak exposes another org\'s operator run file paths and storage keys.',
   },
 ];

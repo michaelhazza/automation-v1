@@ -25,7 +25,7 @@ import type { CrossOwnerSubstepCompletedPayload, CrossOwnerSubstepAwaitingPayloa
 // threshold (5 min) releases the slot for a future sweep to retry. Residual
 // edge case: a crash between step 2 success and step 3 then waiting past the
 // stale-claim threshold can re-emit the same event. Documented in migration
-// 0351 header. Out-of-scope full fix is event idempotency in appendEvent.
+// 0356 header. Out-of-scope full fix is event idempotency in appendEvent.
 // ---------------------------------------------------------------------------
 
 const EVENT_CLAIM_STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
@@ -182,7 +182,7 @@ async function claimTerminalEventEmit(rowId: string): Promise<boolean> {
  * Atomic awaiting-initiator-event claim helper (Round 3 F11).
  *
  * Same shape as claimTerminalEventEmit but keyed on the awaiting columns.
- * Pairs with the existing awaiting_initiator_event_emitted_at column (0350).
+ * Pairs with the existing awaiting_initiator_event_emitted_at column (0355).
  */
 async function claimAwaitingInitiatorEventEmit(rowId: string): Promise<boolean> {
   const staleClaimCutoff = new Date(Date.now() - EVENT_CLAIM_STALE_AFTER_MS);
@@ -371,7 +371,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       const newStatus = decision.action === 'fail_parent' ? 'failed' : 'partial';
 
       // Atomic transition — substep_status_updated_at is bumped automatically
-      // by the trigger from migration 0350 (no manual write needed; T5).
+      // by the trigger from migration 0355 (no manual write needed; T5).
       const updated = await db
         .update(delegationOutcomes)
         .set({ substepStatus: newStatus, terminalAt: new Date() })

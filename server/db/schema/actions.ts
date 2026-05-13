@@ -53,7 +53,7 @@ export const actions = pgTable(
     // Override approval recipient for cross-owner action proposals.
     // NULL = V1 initiator-defaulted path (no behaviour change for existing rows).
     // Cross-owner proposals set this to the executor agent's owner_user_id so
-    // approval routes to the right user (spec §5.5, migration 0346).
+    // approval routes to the right user (spec §5.5, migration 0351).
     approverUserId: uuid('approver_user_id')
       .references(() => users.id, { onDelete: 'restrict' }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
