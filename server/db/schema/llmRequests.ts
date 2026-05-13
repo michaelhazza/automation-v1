@@ -165,6 +165,13 @@ export const llmRequests = pgTable(
     // Cost-accounting boundary within a chain link (e.g. 'pre_fallback' /
     // 'post_fallback'). Part of the idempotency key for operator rows.
     boundary:       text('boundary'),
+
+    // IEE Browser cost-row discriminator (migration 0347) — spec §8.6.
+    // subtype non-null only when source_type = 'sandbox_compute'.
+    // Values: 'task' (written by sandboxHarvestService) | 'warm_pool' (written by browserWarmPool.terminate).
+    // FK warm_session_id → browser_warm_sessions(id) lands in migration 0349 (after 0348 creates the target).
+    subtype:        text('subtype'),
+    warmSessionId:  uuid('warm_session_id'),
   },
   (table) => ({
     orgMonthIdx:          index('llm_requests_org_month_idx').on(table.organisationId, table.billingMonth),
