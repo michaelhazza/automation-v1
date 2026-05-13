@@ -1,26 +1,41 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 
-interface SourceRow {
-  sourceEntryId: string | null;
+interface SourceEntry {
+  id: string;
+  content: string;
+  isDeleted: boolean;
+}
+
+interface SourceRun {
+  id: string;
+  label: string;
+  isDeleted: boolean;
+}
+
+interface SourceItem {
+  rowId: string;
+  sourceType: string;
+  contributionRank: number;
+  capturedAt: string;
+  qualityScoreAtCapture: number | null;
+  sourceEntry: SourceEntry | null;
   sourceEntryIdHash: string;
   contentHash: string;
-  sourceType: string;
-  capturedAt: string;
-  qualityScoreAtCapture: string | null;
-  contributionRank: number;
-  sourceRunId: string | null;
-  sourceRunLabel: string | null;
-  contentExcerpt: string | null;
-  isDeleted: boolean;
+  sourceRun: SourceRun | null;
+  sourceRunLabelAtCapture: string | null;
   usedInOtherBlocksCount?: number;
 }
 
 interface MemoryBlockSourcesPayload {
   blockId: string;
-  blockSource: string;
+  // Null when the block has no version rows (legacy blocks predating version
+  // tracking). The empty-sources branch below renders before these fields are
+  // read, so consumers never observe null here in practice.
+  blockVersionId: string | null;
   versionNumber: number | null;
-  sources: SourceRow[];
+  capturedAt: string | null;
+  sources: SourceItem[];
   reverseLineageByEntry?: Record<string, number>;
 }
 
@@ -103,6 +118,12 @@ export default function MemoryBlockSourcesTab({ blockId, orgId }: Props) {
     );
   }
 
+  const runLabel = (s: SourceItem): string | null =>
+    s.sourceRun?.label ?? s.sourceRunLabelAtCapture;
+
+  const runHref = (s: SourceItem): string | null =>
+    s.sourceRun && !s.sourceRun.isDeleted ? `/admin/runs/${s.sourceRun.id}` : null;
+
   return (
     <div>
       {payload.versionNumber !== null && (
@@ -113,59 +134,63 @@ export default function MemoryBlockSourcesTab({ blockId, orgId }: Props) {
       )}
 
       <div className="flex flex-col gap-2">
-        {payload.sources.map((s) => (
-          <div
-            key={s.sourceEntryIdHash}
-            className={`border rounded p-3 ${s.isDeleted ? 'opacity-50' : 'border-slate-200'}`}
-          >
-            {s.contentExcerpt !== null ? (
-              <p className={`text-sm text-slate-700 mb-1 ${s.isDeleted ? 'line-through' : ''}`}>
-                {s.contentExcerpt}
-              </p>
-            ) : (
-              <p className="text-sm text-slate-400 italic mb-1">(source removed)</p>
-            )}
+        {payload.sources.map((s) => {
+          const deleted = s.sourceEntry?.isDeleted ?? s.sourceEntry === null;
+          const content = s.sourceEntry?.content ?? null;
+          const label = runLabel(s);
+          const href = runHref(s);
 
-            <div className="flex flex-wrap gap-3 text-xs text-slate-400">
-              {s.sourceRunLabel && (
-                <span>
-                  {s.sourceRunId ? (
-                    <a
-                      href={`/admin/runs/${s.sourceRunId}`}
-                      className="text-indigo-600 hover:underline"
-                    >
-                      {s.sourceRunLabel}
-                    </a>
-                  ) : (
-                    s.sourceRunLabel
-                  )}
-                </span>
+          return (
+            <div
+              key={s.rowId}
+              className={`border rounded p-3 ${deleted ? 'opacity-50' : 'border-slate-200'}`}
+            >
+              {content !== null && content !== '' ? (
+                <p className={`text-sm text-slate-700 mb-1 ${deleted ? 'line-through' : ''}`}>
+                  {content}
+                </p>
+              ) : (
+                <p className="text-sm text-slate-400 italic mb-1">(source removed)</p>
               )}
-              <span>{new Date(s.capturedAt).toLocaleString()}</span>
-              {s.qualityScoreAtCapture && (
-                <span>Quality: {(parseFloat(s.qualityScoreAtCapture) * 100).toFixed(0)}%</span>
+
+              <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+                {label && (
+                  <span>
+                    {href ? (
+                      <a href={href} className="text-indigo-600 hover:underline">
+                        {label}
+                      </a>
+                    ) : (
+                      label
+                    )}
+                  </span>
+                )}
+                <span>{new Date(s.capturedAt).toLocaleString()}</span>
+                {s.qualityScoreAtCapture !== null && (
+                  <span>Quality: {(s.qualityScoreAtCapture * 100).toFixed(0)}%</span>
+                )}
+                <span>Rank #{s.contributionRank}</span>
+              </div>
+
+              {s.usedInOtherBlocksCount !== undefined ? (
+                <p className="text-xs text-slate-400 mt-1">
+                  Used in {s.usedInOtherBlocksCount} other block
+                  {s.usedInOtherBlocksCount !== 1 ? 's' : ''}
+                </p>
+              ) : (
+                s.sourceEntryIdHash && (
+                  <button
+                    type="button"
+                    onClick={() => expandReverseLineage(s.sourceEntryIdHash)}
+                    className="text-xs text-indigo-500 hover:underline mt-1 block"
+                  >
+                    Show usage in other blocks
+                  </button>
+                )
               )}
-              <span>Rank #{s.contributionRank}</span>
             </div>
-
-            {s.usedInOtherBlocksCount !== undefined ? (
-              <p className="text-xs text-slate-400 mt-1">
-                Used in {s.usedInOtherBlocksCount} other block
-                {s.usedInOtherBlocksCount !== 1 ? 's' : ''}
-              </p>
-            ) : (
-              s.sourceEntryIdHash && (
-                <button
-                  type="button"
-                  onClick={() => expandReverseLineage(s.sourceEntryIdHash)}
-                  className="text-xs text-indigo-500 hover:underline mt-1 block"
-                >
-                  Show usage in other blocks
-                </button>
-              )
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

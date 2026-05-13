@@ -24,9 +24,9 @@ export async function getSourcesForBlock(
 ): Promise<MemoryBlockSourcesPayload> {
   const db = getOrgScopedDb('memoryBlockSourcesService');
 
-  // Resolve the block and its source field
+  // Resolve the block
   const [blockRow] = await db
-    .select({ source: memoryBlocks.source })
+    .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
     .where(and(eq(memoryBlocks.id, blockId), eq(memoryBlocks.organisationId, organisationId)));
 
@@ -37,10 +37,18 @@ export async function getSourcesForBlock(
   // Resolve the target version
   let blockVersionId: string;
   let resolvedVersionNumber: number | null;
+  let blockVersionCapturedAt: Date;
+  // Note: the empty-versions early return (block exists but has zero version
+  // rows — only reachable for legacy blocks predating version tracking) passes
+  // nulls directly to assembleSourcesPayload instead of populating these.
 
   if (opts.version != null) {
     const [vRow] = await db
-      .select({ id: memoryBlockVersions.id, version: memoryBlockVersions.version })
+      .select({
+        id: memoryBlockVersions.id,
+        version: memoryBlockVersions.version,
+        createdAt: memoryBlockVersions.createdAt,
+      })
       .from(memoryBlockVersions)
       .where(
         and(
@@ -53,26 +61,36 @@ export async function getSourcesForBlock(
     }
     blockVersionId = vRow.id;
     resolvedVersionNumber = vRow.version;
+    blockVersionCapturedAt = vRow.createdAt;
   } else {
     // Default: latest version
     const [latestVersion] = await db
-      .select({ id: memoryBlockVersions.id, version: memoryBlockVersions.version })
+      .select({
+        id: memoryBlockVersions.id,
+        version: memoryBlockVersions.version,
+        createdAt: memoryBlockVersions.createdAt,
+      })
       .from(memoryBlockVersions)
       .where(eq(memoryBlockVersions.memoryBlockId, blockId))
       .orderBy(sql`${memoryBlockVersions.version} DESC`)
       .limit(1);
 
     if (!latestVersion) {
-      // Block exists but has no version rows — return empty sources
-      return assembleSourcesPayload(blockId, blockRow.source, null, []);
+      // Block exists but has no version rows — return empty sources with null
+      // version metadata so consumers can distinguish "no version" from a real
+      // version captured at epoch. The Sources tab UI short-circuits on
+      // sources.length === 0 and never reads these top-level fields.
+      return assembleSourcesPayload(blockId, null, null, null, []);
     }
     blockVersionId = latestVersion.id;
     resolvedVersionNumber = latestVersion.version;
+    blockVersionCapturedAt = latestVersion.createdAt;
   }
 
   // Fetch lineage rows with LEFT JOIN on workspace_memory_entries
   const rawRows = await db
     .select({
+      rowId: memoryBlockVersionSources.id,
       sourceEntryId: memoryBlockVersionSources.sourceEntryId,
       sourceEntryIdHash: memoryBlockVersionSources.sourceEntryIdHash,
       contentHash: memoryBlockVersionSources.contentHash,
@@ -94,6 +112,7 @@ export async function getSourcesForBlock(
     .orderBy(memoryBlockVersionSources.contributionRank);
 
   const typedRows: RawSourceDbRow[] = rawRows.map((r) => ({
+    rowId: r.rowId,
     sourceEntryId: r.sourceEntryId ?? null,
     sourceEntryIdHash: r.sourceEntryIdHash,
     contentHash: r.contentHash,
@@ -105,6 +124,7 @@ export async function getSourcesForBlock(
     sourceRunLabelAtCapture: r.sourceRunLabelAtCapture ?? null,
     entryContent: r.entryContent ?? null,
     entryDeletedAt: r.entryDeletedAt ?? null,
+    runLabel: null, // agent_runs has no label column; captured label is the display value
   }));
 
   // Optionally compute reverse-lineage counts (index-covered via idx_mbvs_source_entry_hash)
@@ -125,8 +145,9 @@ export async function getSourcesForBlock(
 
   return assembleSourcesPayload(
     blockId,
-    blockRow.source,
+    blockVersionId,
     resolvedVersionNumber,
+    blockVersionCapturedAt,
     typedRows,
     reverseCounts,
   );
