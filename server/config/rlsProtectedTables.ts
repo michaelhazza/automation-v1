@@ -1306,6 +1306,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0345_create_iee_browser_session_profiles.sql',
     rationale: 'Per-subaccount browser profile volume pointers keyed by session_key — volume ids are opaque but cross-tenant leak exposes browser session topology and profile state.',
   },
+  // 0346 — IEE Browser on e2b: per-subaccount browser settings (dual-GUC org + subaccount)
+  {
+    tableName: 'subaccount_iee_browser_settings',
+    schemaFile: 'subaccountIeeBrowserSettings.ts',
+    policyMigration: '0346_create_subaccount_iee_browser_settings.sql',
+    rationale: 'Per-subaccount IEE browser configuration (status, rollout gate, retention, cost ceilings) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes operational configuration and cost controls.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
