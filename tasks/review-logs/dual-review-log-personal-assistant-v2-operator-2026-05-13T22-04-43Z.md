@@ -3,6 +3,7 @@
 **Files reviewed:** branch-level diff vs `main` on `claude/personal-assistant-post-merge-audit` (Major task — cross-owner delegation, operator session lifecycle, sandbox filesystem watcher; ~250 files / ~25k LoC). Focused review on caller-named high-risk areas: cross-owner privacy projection, approver gate, path traversal prevention, delegation state machine, IPC retry, multi-tenant safety on new tables.
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-13T22:04:44Z
+**Commit at finish:** 9c7a6518
 
 ---
 
