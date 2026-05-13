@@ -198,6 +198,30 @@ export const scheduledTaskService = {
   },
 
   /**
+   * Find the most-recently-scheduled active task for a workflow slug within a
+   * subaccount. Returns { id, nextRunAt } or null. Used by the portal
+   * intelligence-briefing card to surface the next scheduled run time.
+   */
+  async findActiveSubaccountScheduleByWorkflowSlug(
+    subaccountId: string,
+    workflowSlug: string,
+  ): Promise<{ id: string; nextRunAt: Date | null } | null> {
+    const [row] = await db
+      .select({ id: scheduledTasks.id, nextRunAt: scheduledTasks.nextRunAt })
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.createdByWorkflowSlug, workflowSlug),
+          eq(scheduledTasks.isActive, true),
+        ),
+      )
+      .orderBy(desc(scheduledTasks.nextRunAt))
+      .limit(1);
+    return row ?? null;
+  },
+
+  /**
    * Deactivates every system-owned task for the given playbook slug in a
    * sub-account. Soft-delete only — the row stays for audit. pg-boss cron
    * deregistration would happen here in a full pg-boss setup; the current

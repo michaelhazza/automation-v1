@@ -2,10 +2,10 @@
 active_spec: tasks/builds/fleet-and-codebase-health/spec.md
 active_plan: tasks/builds/fleet-and-codebase-health/plan.md
 build_slug: fleet-and-codebase-health
-branch: fleet-and-process
-branch_role: branch-1-of-2
+branch: codebase-health
+branch_role: branch-2-of-2
 status: REVIEWING
-last_updated: 2026-05-13T02:30:00Z
+last_updated: 2026-05-13T02:55:00Z
 last_merged_pr: #288
 last_merged_slug: operator-backend
 last_merged_branch: claude/sandbox-execution-provider-DLfjn
@@ -26,10 +26,10 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Active spec:** `tasks/builds/fleet-and-codebase-health/spec.md`
 **Active plan:** `tasks/builds/fleet-and-codebase-health/plan.md`
 **Active build slug:** `fleet-and-codebase-health`
-**Branch:** `fleet-and-process` (Branch 1 of 2)
+**Branch:** `codebase-health` (Branch 2 of 2)
 **Status:** **REVIEWING**
 
-Branch 1 of the fleet-and-codebase-health build (agent fleet upgrades + GRADED review policy + new reality-checker / incident-commander agents + testing-transition-plan doc). Phase 2 complete; reconstructed handoff at `tasks/builds/fleet-and-codebase-health/handoff.md`. Spec-conformance CONFORMANT (47/47), pr-reviewer findings addressed in commit `bade4357`, dual-reviewer REVIEW_GAP recorded. Ready for finalisation-coordinator. Sibling Branch 2 (`codebase-health`) finalises after this one merges.
+Branch 2 of the fleet-and-codebase-health build (gate fix + 9 route service-layer migrations + archive moves + KNOWLEDGE/todo sweeps). Phase 2 complete after deferred-item closure; reconstructed handoff at `tasks/builds/fleet-and-codebase-health/handoff-branch-2.md`, progress at `progress-branch-2.md`. Spec-conformance NON_CONFORMANT verdict (committed) with two of three deferred items now closed by post-conformance commits; one open (REQ-FCH-C4 new prototypes dirs). pr-reviewer findings addressed in commit `79fc01db`. Sibling Branch 1 (`fleet-and-process` / PR #293) is APPROVED after chatgpt-pr-review and lands first per plan §2.
 
 **Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
 

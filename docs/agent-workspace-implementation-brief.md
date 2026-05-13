@@ -11,13 +11,13 @@
 > - **Phase 1 dependency:** `docs/auto-knowledge-retrieval-dev-brief.md`. The Knowledge → Files tab, the per-agent Data Sources tab refresh, and the underlying retrieval observability hooks all ship there. This brief consumes those surfaces, does not duplicate them.
 > - **Concurrent work:** AI agent quality verification is in flight on a separate branch. Coordination is minimal (both touch Run trace; no logical conflict). See §11.
 >
-> **Mockups attached** (in `prototypes/agent-workspace/`):
-> - [Index of all mockups](../prototypes/agent-workspace/index.html)
-> - **Mockup 1:** [Home page: Active Agents widget enhancement](../prototypes/agent-workspace/home-active-agents.html)
-> - **Mockup 2:** [Agent Overview tab, active state](../prototypes/agent-workspace/agent-overview-active.html)
-> - **Mockup 3:** [Agent Overview tab, idle state](../prototypes/agent-workspace/agent-overview-idle.html)
-> - **Mockup 4:** [Agent Overview tab, first-run state](../prototypes/agent-workspace/agent-overview-first-run.html)
-> - **Mockup 5:** [Run trace: inline file lineage](../prototypes/agent-workspace/run-trace-lineage.html)
+> **Mockups attached** (in `_archive/prototypes/agent-workspace/`):
+> - [Index of all mockups](../_archive/prototypes/agent-workspace/index.html)
+> - **Mockup 1:** [Home page: Active Agents widget enhancement](../_archive/prototypes/agent-workspace/home-active-agents.html)
+> - **Mockup 2:** [Agent Overview tab, active state](../_archive/prototypes/agent-workspace/agent-overview-active.html)
+> - **Mockup 3:** [Agent Overview tab, idle state](../_archive/prototypes/agent-workspace/agent-overview-idle.html)
+> - **Mockup 4:** [Agent Overview tab, first-run state](../_archive/prototypes/agent-workspace/agent-overview-first-run.html)
+> - **Mockup 5:** [Run trace: inline file lineage](../_archive/prototypes/agent-workspace/run-trace-lineage.html)
 
 ---
 
@@ -157,7 +157,7 @@ If Phase 1 slips, the Agent Overview tab can ship a degraded version (no per-doc
 
 - **Name:** "Overview" (per the existing `frontend-design-principles.md` Recurring UI Patterns guidance, neutral term that doesn't collide with "Workspace" already used in the ViewModeSwitcher).
 - **Position:** Leftmost tab on the per-agent edit page tab strip. Default landing.
-- **Tab strip today** (per `prototypes/consolidation-2026-05-06/agent-edit.html` and shipped code): Configure (default), Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs. **There is no current Overview tab.** The page today lands on Configure, which is an authoring surface, not a status surface.
+- **Tab strip today** (per `_archive/prototypes/consolidation-2026-05-06/agent-edit.html` and shipped code): Configure (default), Behaviour, Personality, Skills, Data sources, Schedule, Budget, Runs. **There is no current Overview tab.** The page today lands on Configure, which is an authoring surface, not a status surface.
 - **Tab strip after change:** Overview (new default), Configure, Behaviour, Personality, Skills, **Scorecards** (added by Trust spec, Stage 2), Data sources, Schedule, Budget, Runs. **Locked at 10 tabs.** Scorecards sits adjacent to Skills because both are about agent capability and quality. Confirmed with the trust-verification-layer spec to avoid concurrent-merge collision.
 
 ### What the tab shows
@@ -484,7 +484,7 @@ That's it. No checklist. No empty cards for sections that will populate naturall
 
 ## 6. Home Active Agents widget enhancement
 
-The shipped Home page (`client/src/pages/operate/HomePage.tsx`) currently has Active Agents as a single number tile (just the count). The consolidation prototype (`prototypes/consolidation-2026-05-06/home.html`) shows the richer pattern that was specced but not built: per-agent live-status rows with current step, elapsed time, and pulsing dot.
+The shipped Home page (`client/src/pages/operate/HomePage.tsx`) currently has Active Agents as a single number tile (just the count). The consolidation prototype (`_archive/prototypes/consolidation-2026-05-06/home.html`) shows the richer pattern that was specced but not built: per-agent live-status rows with current step, elapsed time, and pulsing dot.
 
 This brief ships that richer widget.
 
@@ -555,7 +555,7 @@ This is the highest-risk piece in the brief. Container lifecycle is hairy: heart
 
 ## 8. Run trace inline file lineage
 
-Small. The existing Run trace surface (`prototypes/consolidation-2026-05-06/run-trace.html`) is a 3-column layout: run chain on the left, event list in the middle, event detail panel on the right. Each event shows seq, type, content, time. Some events produce files. Today, those files are not visible inline; you have to navigate to a separate surface.
+Small. The existing Run trace surface (`_archive/prototypes/consolidation-2026-05-06/run-trace.html`) is a 3-column layout: run chain on the left, event list in the middle, event detail panel on the right. Each event shows seq, type, content, time. Some events produce files. Today, those files are not visible inline; you have to navigate to a separate surface.
 
 **Change:** when an event produced a file, show a "📎 Output" chip row inline below the event content. Each chip is a clickable file (icon + filename) that deep-links to the file in Knowledge → Files (Phase 1 surface). Sub-agent events that produced files surface them too (labeled "📎 From sub-agent"). The Event detail panel on the right also surfaces produced files in a dedicated section so they are visible whether you scan or drill in.
 

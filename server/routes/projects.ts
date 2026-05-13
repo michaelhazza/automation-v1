@@ -1,11 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { db } from '../db/index.js';
-import { projects, agentRuns } from '../db/schema/index.js';
-import { eq, and, isNull, desc, count, inArray } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 import { projectService } from '../services/projectService.js';
 
 const router = Router();
@@ -47,15 +43,7 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const rows = await db
-      .select()
-      .from(projects)
-      .where(and(
-        eq(projects.subaccountId, subaccountId),
-        isNull(projects.deletedAt),
-      ))
-      .orderBy(desc(projects.createdAt));
-
+    const rows = await projectService.list(req.orgId!, subaccountId);
     res.json(rows);
   })
 );
@@ -71,35 +59,7 @@ router.post(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const { name, description, color, repoUrl, githubConnectionId, targetDate, budgetCents, budgetWarningPercent, goalId } = req.body as {
-      name?: string;
-      description?: string;
-      color?: string;
-      repoUrl?: string;
-      githubConnectionId?: string;
-      targetDate?: string;
-      budgetCents?: number;
-      budgetWarningPercent?: number;
-      goalId?: string;
-    };
-
-    if (!name?.trim()) throw { statusCode: 400, message: 'name is required' };
-
-    const [project] = await db.insert(projects).values({
-      organisationId: req.orgId!,
-      subaccountId,
-      name: name.trim(),
-      description: description?.trim() || null,
-      color: color || '#6366f1',
-      repoUrl: repoUrl?.trim() || null,
-      githubConnectionId: githubConnectionId || null,
-      targetDate: targetDate ? new Date(targetDate) : null,
-      budgetCents: budgetCents ?? null,
-      budgetWarningPercent: budgetWarningPercent ?? 75,
-      goalId: goalId || null,
-      createdBy: req.user?.id ?? null,
-    }).returning();
-
+    const project = await projectService.create(req.orgId!, subaccountId, req.body, req.user?.id ?? null);
     res.status(201).json(project);
   })
 );
@@ -141,16 +101,8 @@ router.delete(
     const { subaccountId, projectId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [existing] = await db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.subaccountId, subaccountId), isNull(projects.deletedAt)));
-
-    if (!existing) throw { statusCode: 404, message: 'Project not found' };
-
-    await db.update(projects).set({ deletedAt: new Date() }).where(eq(projects.id, projectId));
-
-    res.json({ success: true });
+    const result = await projectService.softDelete(req.orgId!, subaccountId, projectId);
+    res.json(result);
   })
 );
 
@@ -172,16 +124,8 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [result] = await db
-      .select({ count: count() })
-      .from(agentRuns)
-      .where(and(
-        eq(agentRuns.subaccountId, subaccountId),
-        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
-        eq(agentRuns.isSubAgent, false),
-      ));
-
-    res.json({ runningAgents: Number(result?.count ?? 0) });
+    const runningAgents = await projectService.getInFlightRunCount(req.orgId!, subaccountId);
+    res.json({ runningAgents });
   })
 );
 

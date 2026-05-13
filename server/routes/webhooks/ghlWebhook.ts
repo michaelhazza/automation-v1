@@ -1,8 +1,6 @@
 import { Router, raw } from 'express';
-import { db } from '../../db/index.js';
-import { connectorConfigs, canonicalAccounts } from '../../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
 import { adapters } from '../../adapters/index.js';
+import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { canonicalDataService } from '../../services/canonicalDataService.js';
 import { fromOrgId } from '../../services/principal/fromOrgId.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
@@ -147,15 +145,7 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), asyncHandler
   let config;
   let dbAccount;
   try {
-    const [result] = await db
-      .select({ config: connectorConfigs, account: canonicalAccounts })
-      .from(canonicalAccounts)
-      .innerJoin(connectorConfigs, eq(connectorConfigs.id, canonicalAccounts.connectorConfigId))
-      .where(and(
-        eq(canonicalAccounts.externalId, locationId),
-        eq(connectorConfigs.connectorType, 'ghl')
-      ))
-      .limit(1);
+    const result = await connectorConfigService.findByAccountExternalId(locationId, 'ghl');
 
     if (!result) {
       console.warn(`[GHL Webhook] No connector config found for locationId ${locationId}`);

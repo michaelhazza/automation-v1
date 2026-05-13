@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import { decideFreshProfileRestartAllowed } from '../freshProfileRestartPredicatePure.js';
+import { decideFreshProfileRestartAllowed } from '../../services/freshProfileRestartPredicatePure.js';
 
 describe('decideFreshProfileRestartAllowed', () => {
   test('paused_chain_failure + failure_class profile_corruption → allowed', () => {

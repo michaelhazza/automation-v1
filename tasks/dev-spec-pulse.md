@@ -2,7 +2,7 @@
 
 > **Status:** Draft — ready for spec-reviewer loop (local dev)
 > **Classification:** Major (new subsystem; replaces three admin-scope pages)
-> **Prototype:** `prototypes/pulse/index.html` — UX source of truth
+> **Prototype:** `_archive/prototypes/pulse/index.html` — UX source of truth
 > **Branch:** `claude/evaluate-ai-strategy-gHP7t`
 > **Note:** This document is self-contained. It incorporates design decisions from the architect plan (`tasks/architect-plan-pulse.md`) as a preamble — no need to read the architect plan separately.
 
@@ -193,7 +193,7 @@ Chunks 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9b → 10 → 11.
 - Existing middleware: `authenticate`, `requireOrgPermission`, `requireSubaccountPermission`, `asyncHandler`, `resolveSubaccount`.
 - Existing WebSocket rooms: `subaccount:<id>`, `org:<orgId>` with events `review:item_updated`, `task:status_changed`, `agent:run:failed`, `workspace_health:finding_created`.
 - Action registry: `server/config/actionRegistry.ts` — reads `isExternal`, `defaultGateLevel`, MCP annotations (`destructiveHint`, `idempotentHint`, `openWorldHint`).
-- Prototype: `prototypes/pulse/index.html` — authoritative UX source.
+- Prototype: `_archive/prototypes/pulse/index.html` — authoritative UX source.
 
 ---
 

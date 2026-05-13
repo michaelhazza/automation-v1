@@ -16,8 +16,8 @@
 
 | Action | File | Spec section |
 |--------|------|--------------|
-| Move | `tasks/mockups/org-chart-redesign.html` → `prototypes/org-chart-redesign.html` | §9.3 |
-| Move | `tasks/mockups/tier-1-ui-uplift.html` → `prototypes/tier-1-ui-uplift.html` | §9.3 (implicit) |
+| Move | `tasks/mockups/org-chart-redesign.html` → `_archive/prototypes/org-chart-redesign.html` | §9.3 |
+| Move | `tasks/mockups/tier-1-ui-uplift.html` → `_archive/prototypes/tier-1-ui-uplift.html` | §9.3 (implicit) |
 | Delete | `tasks/mockups/` (directory) | §9.3 |
 | Create | `.claude/agents/builder.md` | §4.1 |
 | Create | `.claude/agents/mockup-designer.md` | §4.2 |
@@ -32,11 +32,11 @@
 
 ---
 
-## Task 1: Housekeeping — migrate tasks/mockups/ to prototypes/
+## Task 1: Housekeeping — migrate tasks/mockups/ to _archive/prototypes/
 
 **Files:**
-- Move: `tasks/mockups/org-chart-redesign.html` → `prototypes/org-chart-redesign.html`
-- Move: `tasks/mockups/tier-1-ui-uplift.html` → `prototypes/tier-1-ui-uplift.html`
+- Move: `tasks/mockups/org-chart-redesign.html` → `_archive/prototypes/org-chart-redesign.html`
+- Move: `tasks/mockups/tier-1-ui-uplift.html` → `_archive/prototypes/tier-1-ui-uplift.html`
 - Delete: `tasks/mockups/` directory (empty after moves)
 - Update any references found in docs
 
@@ -51,8 +51,8 @@ Expected: `org-chart-redesign.html  tier-1-ui-uplift.html`
 - [ ] **Step 2: Move both files**
 
 ```bash
-git mv tasks/mockups/org-chart-redesign.html prototypes/org-chart-redesign.html
-git mv tasks/mockups/tier-1-ui-uplift.html prototypes/tier-1-ui-uplift.html
+git mv tasks/mockups/org-chart-redesign.html _archive/prototypes/org-chart-redesign.html
+git mv tasks/mockups/tier-1-ui-uplift.html _archive/prototypes/tier-1-ui-uplift.html
 ```
 
 - [ ] **Step 3: Remove empty directory**
@@ -67,7 +67,7 @@ rmdir tasks/mockups
 grep -rn "tasks/mockups" . --include="*.md" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" | grep -v "node_modules" | grep -v ".git" | grep -v "docs/superpowers/specs"
 ```
 
-If any files reference `tasks/mockups`, update each reference to `prototypes/`. Likely candidates: `docs/frontend-design-principles.md`, `architecture.md`, `CLAUDE.md`.
+If any files reference `tasks/mockups`, update each reference to `_archive/prototypes/`. Likely candidates: `docs/frontend-design-principles.md`, `architecture.md`, `CLAUDE.md`.
 
 - [ ] **Step 5: Verify acceptance criteria**
 
@@ -77,7 +77,7 @@ grep -rn "tasks/mockups" . --include="*.md" | grep -v "node_modules" | grep -v "
 # Should not exist
 ls tasks/mockups 2>&1
 # Should exist
-ls prototypes/org-chart-redesign.html prototypes/tier-1-ui-uplift.html
+ls _archive/prototypes/org-chart-redesign.html _archive/prototypes/tier-1-ui-uplift.html
 ```
 
 Expected: first command returns empty, second returns "No such file or directory", third shows both files.
@@ -264,7 +264,7 @@ Expected: "No such file or directory"
 ```markdown
 ---
 name: mockup-designer
-description: Produces hi-fi clickable HTML prototypes for UI-touching briefs. Runs on Sonnet. Step 0 — reads docs/frontend-design-principles.md (MANDATORY every round, not just round 1). Step 1 — emits TodoWrite skeleton. Step 2 — format decision (single-file prototypes/{slug}.html vs multi-screen prototypes/{slug}/ directory). Step 3 — implements the prototype applying the five hard rules. Step 4 — appends round summary to tasks/builds/{slug}/mockup-log.md. Returns file paths and change summary to caller. Does NOT decide when to stop — caller controls the loop.
+description: Produces hi-fi clickable HTML prototypes for UI-touching briefs. Runs on Sonnet. Step 0 — reads docs/frontend-design-principles.md (MANDATORY every round, not just round 1). Step 1 — emits TodoWrite skeleton. Step 2 — format decision (single-file _archive/prototypes/{slug}.html vs multi-screen _archive/prototypes/{slug}/ directory). Step 3 — implements the prototype applying the five hard rules. Step 4 — appends round summary to tasks/builds/{slug}/mockup-log.md. Returns file paths and change summary to caller. Does NOT decide when to stop — caller controls the loop.
 tools: Read, Glob, Grep, Bash, Edit, Write, TodoWrite
 model: sonnet
 ---
@@ -295,8 +295,8 @@ Emit at start of each round:
 
 ## Step 2 — Format decision (round 1 only)
 
-- **Single-file** (`prototypes/{slug}.html`) — one screen, no flow, no navigation
-- **Multi-screen directory** (`prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — workflow, multiple screens, or navigation
+- **Single-file** (`_archive/prototypes/{slug}.html`) — one screen, no flow, no navigation
+- **Multi-screen directory** (`_archive/prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — workflow, multiple screens, or navigation
 
 Record decision in return summary so caller can tell operator. Operator can override.
 
@@ -314,10 +314,10 @@ If the brief asks for behaviour that violates a hard rule (e.g. "five KPI tiles"
 
 ### Styling convention
 
-Match existing prototypes. Inspect `prototypes/agent-as-employee/_shared.css` and `prototypes/pulse/*.html` for the current pattern.
+Match existing prototypes. Inspect `_archive/prototypes/agent-as-employee/_shared.css` and `_archive/prototypes/pulse/*.html` for the current pattern.
 
 - Multi-screen directory: link `_shared.css` from every page
-- Single-file: embed styles in `<style>` tags inline (matches `prototypes/system-costs-page.html`)
+- Single-file: embed styles in `<style>` tags inline (matches `_archive/prototypes/system-costs-page.html`)
 
 Do NOT introduce new CSS frameworks the existing prototypes don't use.
 
@@ -353,7 +353,7 @@ Rule violations: [list, or "none"]
 ## Hard rules
 
 - Never invoke other agents.
-- Never modify the brief or the spec — only write to `prototypes/` and `tasks/builds/{slug}/mockup-log.md`.
+- Never modify the brief or the spec — only write to `_archive/prototypes/` and `tasks/builds/{slug}/mockup-log.md`.
 - Never declare the mockup "complete" — only the operator decides that via the caller.
 - Never commit.
 ```
@@ -673,7 +673,7 @@ last_updated: {YYYY-MM-DD}
 
 Stage and commit:
 - The spec file
-- `prototypes/{slug}/` or `prototypes/{slug}.html` (if mockup loop ran)
+- `_archive/prototypes/{slug}/` or `_archive/prototypes/{slug}.html` (if mockup loop ran)
 - `tasks/builds/{slug}/handoff.md`
 - `tasks/builds/{slug}/progress.md`
 - `tasks/builds/{slug}/mockup-log.md` (if mockup loop ran)
@@ -1421,7 +1421,7 @@ Expected: ≥ 3, match found.
 
 ```bash
 ls tasks/mockups 2>&1
-ls prototypes/org-chart-redesign.html prototypes/tier-1-ui-uplift.html
+ls _archive/prototypes/org-chart-redesign.html _archive/prototypes/tier-1-ui-uplift.html
 grep -rn "tasks/mockups" . --include="*.md" | grep -v "node_modules" | grep -v ".git" | grep -v "docs/superpowers/specs"
 ```
 

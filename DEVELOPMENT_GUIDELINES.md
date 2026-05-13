@@ -237,6 +237,23 @@ Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durabl
 
 When adding a no-circular-import assertion (e.g. a test that reads file source and asserts no import of module X), extend the assertion to cover every file in the chain that could reintroduce the cycle — not only the root file. A gap at any downstream node leaves the cycle risk undetected by the test.
 
+### 8.33 Suppression-is-success for single-writer event emitters
+
+For emitters where a single writer owns the per-entity stream (Home dashboard live reactivity, terminal status-transition writers under last-write-wins ordering, cache populators, idempotent webhook receivers, notification dedup, `writeDiagnosis`, etc.), the contract is suppression-is-success: when the emitter loses a coordination race (another writer got there first, or a stamped-newer payload makes this write redundant), it returns SUCCESS, not failure. Required pattern:
+
+- Return shape `{ success: true, suppressed: true, reason }` — `reason` is a short string naming the suppression cause (e.g. `'lost_race'`, `'newer_payload_already_written'`, `'already_emitted'`).
+- `suppressed: false` (or absence of the field) means a write actually happened.
+- Callers MUST treat `suppressed: true` as success; never retry, never log as warning, never increment a failure-rate metric.
+- The emitter MUST NOT throw on suppression paths — throwing inverts the natural control flow for what is, by design, a healthy outcome.
+
+Failure mode if violated: retry storms on intentional suppressions, false incident signals, broken success-rate metrics, and alert fatigue (the four regressions ADR-0013 was written to prevent).
+
+Does NOT apply to genuine failures: DB connection lost, malformed payload, permission denied, downstream API 5xx — those return `{ success: false, error: ... }` as normal. The convention is specifically for the class where "another writer beat me" is a healthy outcome.
+
+A `suppressedSuccess(reason)` helper at the call site is preferred over hand-rolling the shape every time.
+
+Reference: ADR-0013 (canonical), `architecture.md § Home dashboard live reactivity`, and the 2026-05-13 KNOWLEDGE.md entry "Pattern — 'Suppression is success' for single-writer event emitters".
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

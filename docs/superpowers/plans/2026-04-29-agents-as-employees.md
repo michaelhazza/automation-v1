@@ -10,7 +10,7 @@
 
 **Tech Stack:** Node/Express + TypeScript + Drizzle ORM + Postgres (RLS), React 18 + React Router v6 + TypeScript + Tailwind, pg-boss for queues, transactional email provider (Postmark / SendGrid / Mailgun) for native SMTP, Google Admin SDK + Gmail + Calendar APIs via service-account + domain-wide delegation.
 
-**Testing posture (per `docs/spec-context.md` 2026-04-16 + spec §20):** static gates are **CI-only** per CLAUDE.md, never run locally. Targeted `tsx` pure-function tests for `workspaceEmailPipelinePure`, `seatDerivation`, `workspaceIdentityServicePure`. One adapter contract test suite at `server/adapters/workspace/__tests__/canonicalAdapterContract.test.ts` exercising both adapters against scripted scenarios (Google in mock mode). No new vitest / supertest / playwright suites. No frontend unit tests. Manual UAT against `prototypes/agent-as-employee/` is the visual contract.
+**Testing posture (per `docs/spec-context.md` 2026-04-16 + spec §20):** static gates are **CI-only** per CLAUDE.md, never run locally. Targeted `tsx` pure-function tests for `workspaceEmailPipelinePure`, `seatDerivation`, `workspaceIdentityServicePure`. One adapter contract test suite at `server/adapters/workspace/__tests__/canonicalAdapterContract.test.ts` exercising both adapters against scripted scenarios (Google in mock mode). No new vitest / supertest / playwright suites. No frontend unit tests. Manual UAT against `_archive/prototypes/agent-as-employee/` is the visual contract.
 
 **Migration numbering:** spec references `0240` / `0241` / `0242`. Current latest committed migration is `0253` (`rate_limit_buckets`, merged via PR #234). Renumber to the next-available trio — at execution time use the smallest unused integers >= `0254` (i.e. `0254` / `0255` / `0256` if no further migrations have landed) per `DEVELOPMENT_GUIDELINES.md` §6.2. Verify the latest number by running `ls migrations | grep -E "^[0-9]{4}_" | sort | tail -3` immediately before creating the migration files. Plan uses spec numbers `0240` / `0241` / `0242` as placeholders only — they MUST be substituted before any commit.
 
@@ -2506,7 +2506,7 @@ git commit -m "feat(workspace): typed API client wrappers"
 - [ ] **Step 1: Read mockup 09 to confirm IdentityCard layout**
 
 ```bash
-cat prototypes/agent-as-employee/09-agent-identity-tab.html
+cat _archive/prototypes/agent-as-employee/09-agent-identity-tab.html
 ```
 
 Match the visual structure: avatar / display name / email (visible) / lifecycle dot + word / send-mail toggle row / Suspend / Revoke buttons (one primary at a time depending on state).
@@ -2538,10 +2538,10 @@ git commit -m "feat(workspace): IdentityCard, LifecycleProgress, EmailSendingTog
 - [ ] **Step 1: Read all four mockups**
 
 ```bash
-cat prototypes/agent-as-employee/04-onboard-step1-identity.html
-cat prototypes/agent-as-employee/05-onboard-step2-confirm.html
-cat prototypes/agent-as-employee/06-onboard-step3-progress.html
-cat prototypes/agent-as-employee/07-onboard-success.html
+cat _archive/prototypes/agent-as-employee/04-onboard-step1-identity.html
+cat _archive/prototypes/agent-as-employee/05-onboard-step2-confirm.html
+cat _archive/prototypes/agent-as-employee/06-onboard-step3-progress.html
+cat _archive/prototypes/agent-as-employee/07-onboard-success.html
 ```
 
 Note copy, button labels, layout, and the single primary action at each step.
@@ -2609,8 +2609,8 @@ git commit -m "feat(workspace): SuspendIdentityDialog + RevokeIdentityDialog (mo
 - [ ] **Step 1: Read mockups 01 + 02**
 
 ```bash
-cat prototypes/agent-as-employee/01-workspace-setup-native.html
-cat prototypes/agent-as-employee/02-workspace-setup-google.html
+cat _archive/prototypes/agent-as-employee/01-workspace-setup-native.html
+cat _archive/prototypes/agent-as-employee/02-workspace-setup-google.html
 ```
 
 - [ ] **Step 2: Build `WorkspaceTabContent`**
@@ -2645,7 +2645,7 @@ git commit -m "feat(workspace): Workspace tab on AdminSubaccountDetailPage"
 - [ ] **Step 1: Read mockup 03**
 
 ```bash
-cat prototypes/agent-as-employee/03-subaccount-agents-list.html
+cat _archive/prototypes/agent-as-employee/03-subaccount-agents-list.html
 ```
 
 Note: per-row CTA reads "Onboard to workplace" only on agents NOT yet onboarded (`workspaceActorId` exists but no `workspace_identities` row exists for the configured backend).
@@ -2682,7 +2682,7 @@ git commit -m "feat(workspace): per-row Onboard to workplace CTA"
 - [ ] **Step 1: Read mockup 09**
 
 ```bash
-cat prototypes/agent-as-employee/09-agent-identity-tab.html
+cat _archive/prototypes/agent-as-employee/09-agent-identity-tab.html
 ```
 
 - [ ] **Step 2: Add `'identity'` to the Tab union**
@@ -2727,7 +2727,7 @@ git commit -m "feat(workspace): Identity tab on SubaccountAgentEditPage"
 - [ ] **Step 1: Read mockup 10**
 
 ```bash
-cat prototypes/agent-as-employee/10-agent-mailbox.html
+cat _archive/prototypes/agent-as-employee/10-agent-mailbox.html
 ```
 
 - [ ] **Step 2: Build the page**
@@ -2763,7 +2763,7 @@ git commit -m "feat(workspace): AgentMailboxPage (mockup 10)"
 - [ ] **Step 1: Read mockup 11**
 
 ```bash
-cat prototypes/agent-as-employee/11-agent-calendar.html
+cat _archive/prototypes/agent-as-employee/11-agent-calendar.html
 ```
 
 - [ ] **Step 2: Build the page**
@@ -3380,7 +3380,7 @@ git commit -m "feat(workspace): adapter contract test suite — both adapters pa
 - [ ] **Step 1: Read mockup 02**
 
 ```bash
-cat prototypes/agent-as-employee/02-workspace-setup-google.html
+cat _archive/prototypes/agent-as-employee/02-workspace-setup-google.html
 ```
 
 - [ ] **Step 2: Enable the Google card**
@@ -3738,7 +3738,7 @@ git commit -m "feat(workspace): ActivityFeedTable shared primitive"
 - [ ] **Step 1: Read mockup 14**
 
 ```bash
-cat prototypes/agent-as-employee/14-subaccount-activity.html
+cat _archive/prototypes/agent-as-employee/14-subaccount-activity.html
 ```
 
 - [ ] **Step 2: Add actor filter dropdown**
@@ -3774,7 +3774,7 @@ git commit -m "feat(workspace): ActivityPage — actor filter + new event types 
 - [ ] **Step 1: Read mockup 15**
 
 ```bash
-cat prototypes/agent-as-employee/15-agent-activity-tab.html
+cat _archive/prototypes/agent-as-employee/15-agent-activity-tab.html
 ```
 
 - [ ] **Step 2: Build `AgentActivityTab`**
@@ -3819,7 +3819,7 @@ git commit -m "feat(workspace): AgentActivityTab — focused inline view (mockup
 - [ ] **Step 1: Read mockup 08**
 
 ```bash
-cat prototypes/agent-as-employee/08-org-chart.html
+cat _archive/prototypes/agent-as-employee/08-org-chart.html
 ```
 
 - [ ] **Step 2: Inspect current data fetch**
@@ -4461,7 +4461,7 @@ git commit -m "feat(workspace): migrate route + status-poll endpoint"
 - [ ] **Step 1: Read mockup 16**
 
 ```bash
-cat prototypes/agent-as-employee/16-migration-modal.html
+cat _archive/prototypes/agent-as-employee/16-migration-modal.html
 ```
 
 - [ ] **Step 2: Build the modal**
@@ -4696,7 +4696,7 @@ After every phase has merged, run this end-to-end against a fresh dev environmen
 - [ ] All new tenant tables pass `verify-rls-coverage.sh` in CI.
 - [ ] `verify-workspace-actor-coverage.ts` passes in CI.
 - [ ] `deriveSeatConsumption` rollup matches the inline `SeatsPanel` (within the eventual-consistency window).
-- [ ] Every screen in `prototypes/agent-as-employee/` is implemented in the live app (layout, copy, primary actions match).
+- [ ] Every screen in `_archive/prototypes/agent-as-employee/` is implemented in the live app (layout, copy, primary actions match).
 
 ### Final close-out
 

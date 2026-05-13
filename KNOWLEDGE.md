@@ -1,7 +1,11 @@
 # Project Knowledge Base
 
+## 2026-05 quarterly trim — see docs/knowledge-sweep-inventory.md for the full inventory and docs/decisions/ for promoted patterns.
+
 Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
-Read this at the start of every session. Never edit or remove existing entries — only append.
+Read this at the start of every session. Default rule: append only — do not edit or remove existing entries.
+
+**Controlled exception: quarterly compression.** Once per quarter, a maintainer may compress or promote entries when ALL of the following hold: (1) the change is captured in `docs/knowledge-sweep-inventory.md` with before/after rationale, (2) any removed material is preserved either in an ADR under `docs/decisions/` or in git history (with the inventory naming the recovery path), (3) compressed bodies leave a pointer to the new canonical location so future readers can trace from the old anchor. Day-to-day edits remain forbidden; compression is a deliberate, documented, quarterly sweep — never a drive-by trim.
 
 > **Architecture decisions live in [`docs/decisions/`](./docs/decisions/), not here** (convention introduced 2026-05-03). KNOWLEDGE.md captures the "watch out for this" stream — observations, gotchas, learned conventions, user corrections. ADRs capture the "we chose X over Y because Z" stream — durable architectural choices with rationale and trade-offs. When in doubt, write a KNOWLEDGE entry first; promote to ADR if the decision keeps coming up.
 >
@@ -13,7 +17,7 @@ KNOWLEDGE.md is append-only and grows. At year 1, a healthy KNOWLEDGE.md is ~1,5
 
 Two safety valves:
 
-1. **Quarterly grouping pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. The originals stay; the summary becomes the entry future sessions read first. Never edit existing entries.
+1. **Quarterly grouping / compression pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. Compression / removal-by-pointer is also permitted in this pass under the controlled-exception rules at the top of the file: every change recorded in `docs/knowledge-sweep-inventory.md`, removed material recoverable from ADRs or git history, pointers left where bodies were trimmed. Day-to-day edits between sweeps remain forbidden — only the quarterly pass touches existing entries.
 2. **Promote to ADR / architecture.md when an entry keeps being cited.** If a Pattern entry has been quoted in 3+ specs or review logs, promote it: write an ADR or extend `architecture.md`, then leave a final entry pointing future readers to the new home.
 
 The file's value is in retrieval, not preservation. If retrieval slows down, the file is too big.
@@ -131,18 +135,7 @@ Always cross-check against the consolidating branch's App.tsx (`git show origin/
 
 ### [2026-05-08] Pattern — Coordinators run INLINE in the main session, never dispatched as sub-agents
 
-**Date:** 2026-05-08
-**Source:** Phase 2 launch attempt for `trust-verification-layer` build. Operator typed `launch feature coordinator`; main session called `Agent({subagent_type: "feature-coordinator", ...})`; the dispatched coordinator immediately hit `No such tool available: Task. Task is not available inside subagents.` when it tried to invoke `architect` at Step 3. Same constraint applies to `spec-coordinator` (mockup-designer + spec-reviewer + chatgpt-spec-review dispatches) and `finalisation-coordinator` (chatgpt-pr-review + builder dispatches).
-
-**Pattern:** the three coordinators (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`) and `audit-runner` run INLINE in the main Claude Code session. The operator's entry phrase (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `audit-runner: <mode>`) signals the main session to ADOPT the playbook — read the agent file at `.claude/agents/<name>.md` and execute its steps directly. It does NOT mean call `Agent({subagent_type: "<coordinator>"})`.
-
-**Why this matters:** the Claude Code runtime returns a hard error when a dispatched sub-agent attempts to dispatch a further sub-agent. The coordinator playbooks are built around sub-agent dispatch (architect, builder, the four reviewers, mockup-designer, chatgpt-pr-review, chatgpt-spec-review). Nesting a coordinator inside an `Agent` call breaks the pipeline at its first dispatch step. The main session has top-level `Agent` access — that's where the dispatches must issue from.
-
-**Two valid entry paths:**
-1. Fresh session: open a new Claude Code session, type the entry phrase as the first message, the main session adopts the playbook.
-2. In-flight adoption: operator types the entry phrase mid-session, the current main session reads the agent file and follows it directly. Same outcome.
-
-The agent definitions at `.claude/agents/feature-coordinator.md`, `.claude/agents/spec-coordinator.md`, and `.claude/agents/finalisation-coordinator.md` each carry an `## Invocation` section with this rule. CLAUDE.md's "Common invocations" section codifies the constraint for all four (three coordinators + audit-runner).
+Promoted to ADR 0014 on 2026-05.
 
 ### [2026-05-08] Pattern — Cross-tenant source-pill compression rule
 
@@ -207,6 +200,8 @@ Subaccount-scoped routes that carry both `:subaccountId` and `:agentId` in the U
 **Rule:** for any subaccount-scoped route that carries both `:subaccountId` AND a target-resource id (`:agentId`, `:templateId`, etc.), add an explicit application-layer assertion that the resource has an active link to the named subaccount via `subaccount_agents` (or the relevant join table). Fail-403 not 404 — 404 leaks the resource's existence in another subaccount; 403 is the standard cross-tenant rejection envelope. Pure verdict-shaping helper (`assertAgentSubaccountMembership`) keeps the route → HTTP mapping testable.
 
 ### [2026-05-08] Pattern — Workers that opt out of `createWorker` auto-org-tx must wrap FORCE-RLS reads in a short org-scoped tx before any external I/O
+
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` above for the broader "what goes wrong" family.
 
 **Date:** 2026-05-08
 **Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); dual-reviewer iter 1 (3 P1 fixes in `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`).
@@ -573,6 +568,8 @@ A patch to one ingest path is incomplete unless the symmetric paths are patched 
 
 
 ### [2026-05-09] Pattern — cross-tenant boot scans against FORCE-RLS tables silently no-op without admin role
+
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` above for the broader "what goes wrong" family.
 
 **Date:** 2026-05-09
 **Source:** pr-reviewer round 3 B2 on `support-desk-canonical` Phase 2. `supportDispatchBootRecovery.ts` imported raw `db` and ran a `SELECT ... FROM canonical_ticket_drafts WHERE status = 'dispatching'` at server boot. Intended behaviour: scan all orgs for stranded drafts and re-enqueue. Actual behaviour: the FORCE-RLS policy on `canonical_ticket_drafts` requires `current_setting('app.organisation_id', true) IS NOT NULL`. At boot, no session var is set; the policy fails closed; the SELECT returns ZERO rows even when stranded drafts exist. **The R5 mitigation is silently a no-op** — every restart leaks dispatching drafts.
@@ -945,11 +942,7 @@ server/config/actionRegistry/
 
 ## Pattern: Migration-number collision after S2 sync requires renumbering forward, not backward
 
-**Context.** Pre-test-hardening S2 merge (2026-05-11) — main had advanced to migrations 0313 (run_artifacts + execution_backend_columns, two distinct migrations sharing the number) / 0314 (support_agent_install) / 0315 (support_eval_runs) / 0316 / 0317 via PR #281 + PR #283. Pre-test-hardening reserved 0313-0315 (webhook_replay_nonces / connector_configs_webhook_token / connections_status_check). Resolution: renumber the feature branch's migrations FORWARD (to 0318/0319/0320), not backward. Forward-renumbering is safe because (a) no other branch can claim numbers we just took, (b) the migrations have not run anywhere in production yet, (c) update is mechanical (filenames + a small set of code references). Backward-renumbering would conflict with main's already-deployed sequence.
-
-**Rule.** After S2 sync, if both sides claimed the same migration number, the feature branch renumbers to the next free slot AFTER main's highest. Never renumber main's migrations and never reuse a number main has already deployed. Update: (1) the `.sql` + `.down.sql` filenames, (2) `RLS_PROTECTED_TABLES` `policyMigration` field, (3) any inline RAISE EXCEPTION messages that quote the migration number, (4) test files that name the migration in skip-reasons or assertions, (5) build artefacts (spec.md, plan.md, progress.md). Review-log files (frozen historical record) are left untouched. Confirm with `npx tsc --noEmit -p server/tsconfig.json` clean after the rename.
-
-**Detection heuristic.** Before opening a PR, run `git ls-tree -r origin/main migrations/ | grep -E "${RANGE}"` to confirm the feature branch's migration range is still free on main. Re-run after every `git pull origin main` or S2 sync. The check costs nothing; the alternative is a migration sequence break in CI that requires forced operator intervention.
+[compressed 2026-05] Duplicate of the 2026-05-08 `Migration-number collision after S2 sync requires renaming on the feature branch` entry above — same rule, different wording. Forward-renumbering (not reuse) is the canonical action.
 
 ### [2026-05-10] Correction — apply defence-in-depth patterns consistently across siblings; cross-check Drizzle schema against the migration
 
@@ -984,6 +977,8 @@ Three corrections from `chatgpt-pr-review` Round 3 on PR #284 pre-test-hardening
 **Generalises to:** any route handler in `server/routes/*` that gates row visibility or write access via a permission helper. The same trap exists in reverse (passing an `ORG_PERMISSIONS.*` constant into `hasSubaccountPermission`). A future linting rule could enforce: the `<TIER>_` prefix of the constant must match the tier embedded in the helper name, statically. Until that exists, code review catches it via the pattern above.
 
 ### [2026-05-11] Gotcha — DB-time bucket queries must fail closed; never fall back to `Date.now()` for ordering / dedupe keys
+
+[cross-reference 2026-05] See also the 2026-04-29 entry `DB-canonical now_epoch must be threaded through any time-delta computation derived from a rate-limit check` above — same DB-canonical-time principle, different application surface.
 
 `server/jobs/operatorSessionRefreshJob.ts:runOperatorSessionRefreshSweep` (PR #286) computed a 5-minute bucket via `SELECT floor(extract(epoch from transaction_timestamp()) / 300)::bigint AS bucket` to dedupe sweep ticks across pods, and computed `expiryThreshold = Date.now() + REFRESH_WINDOW_MINUTES * 60_000` to filter sessions that needed refreshing. Two regressions snuck in during chunk-level implementation:
 
@@ -1022,6 +1017,9 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **Why it matters:** PR #287 originally swept `pending → harvesting` transitions in both `sandboxCeilingMonitorJob.markForHarvest` and `sandboxHarvestReconciliationJob.reconcileExecution` — a pending row would have NULL `provider_sandbox_id` and the harvesting flip would violate the CHECK. The fix is `classifyCeilingTransition(status, providerSandboxId, ceilingType): CeilingTransition` in `sandboxCeilingMonitorPure.ts` with four outcomes (`harvesting`, `start_failed`, `noop:already_harvesting`, `noop:unexpected_state`). Both call sites consult the classifier; the pure-test matrix encodes every (status, providerSandboxId) cell. The race-safe `status=` WHERE predicate on the UPDATE backs it up. This pattern generalises to any table where a CHECK constraint involves a conditional on >1 column.
 
 ## DB-anchored elapsed time in correctness-sensitive paths (ceiling monitor)
+
+[cross-reference 2026-05] See also the 2026-04-29 entry `DB-canonical now_epoch must be threaded through any time-delta computation derived from a rate-limit check` above — same DB-canonical-time principle, different application surface.
+
 **Date:** 2026-05-11
 **Source:** finalisation-coordinator finalisation pass on PR #287 (slug: sandbox-isolation), Round 2 R2-T1.
 **Pattern:** When a path enforces a quantitative invariant (timeout, cost ceiling, rate limit, billing window) by comparing elapsed time against a threshold, BOTH endpoints of the comparison MUST come from the same time source. Compute the elapsed value inside the SQL that loads the row: `(EXTRACT(EPOCH FROM (NOW() - {column})) * 1000)::bigint`. Never compute elapsed in Node code by combining DB-stored `started_at` with `Date.now()` — that mixes DB clock with Node wall-clock, and cross-instance clock skew (NTP drift, container clock drift) silently changes the outcome.
@@ -1185,3 +1183,10 @@ Detection: any new write path to a FORCE RLS table — if the path is webhook in
 Source: PR #291 chatgpt-pr-review Round 1 F2. Spec §18 line 1573 locks V1 EA approval to the draft owner only: `if (draft.ownerUserId !== req.user.id) → 403`. The original route allowed `org_admin | system_admin` to approve another user's draft — this is rejected for V1 because it conflates "admin can see metadata" with "admin can act on content". Admin break-glass for EA drafts (read body, approve on behalf, reject on behalf) requires an explicit V2 spec with an audit gate: every break-glass action writes an audit row with reason, the admin's identity, and the affected draft owner. Until that spec exists, admin paths return 403 on approve/reject/retry.
 
 Generalises beyond EA: any "AI-drafted content awaiting user decision" surface (EA drafts, agent recommendations awaiting user approval, generated reports pending publish) defaults to owner-only action. Admin metadata visibility is fine (list endpoints can show "Bob has 3 pending drafts"). Admin content visibility and admin content action are separate, gated capabilities that require their own audit story. Detection: any new route that gates by `isAdmin || isOwner` for an action on user-generated content — challenge it. The default is `isOwner` only; the `isAdmin` branch requires a documented audit-and-rationale layer.
+### 2026-05-13 Pattern — "Suppression is success" for single-writer event emitters _(promoted from tasks/todo.md)_
+
+When a single-writer event emitter loses a coordination race (another writer already produced the canonical event), the emitter MUST return `{ success: true, suppressed: true, reason }` rather than `{ success: false, ... }`. Returning failure triggers retries, false incident signals, and broken metrics — the metaphor is "we agreed not to write, that IS success." ADR-0013 formalises the rule; `architecture.md § Home dashboard live reactivity` documents the canonical implementation; `system-monitoring writeDiagnosis` enforces it; this KNOWLEDGE entry captures the pattern in retrievable form. When introducing a new single-writer emitter, name a helper (e.g. `suppressedSuccess(reason)`) that returns the shape above rather than hand-rolling it at the call site.
+
+### 2026-05-13 Pattern — Closed-enum service-boundary error mapping _(promoted from tasks/todo.md)_
+
+When a service throws typed errors with a `code` discriminator, the route MUST map the code to its HTTP envelope via a closed `switch` (every branch enumerated, `default: throw`). Open-ended string-comparison mapping (`if (err.code === 'foo') ...` cascades) is a blocking review finding — new codes silently fall through with the wrong HTTP status and the wrong envelope shape. The canonical pattern: define the error-code union at the service boundary (`shared/types/...` if shared across routes), import it into both the service and the route, and let TypeScript's exhaustiveness checking enforce the mapping. Surfaced repeatedly during consolidation-govern (CONSOL-GOV-DEF-9) and audit-remediation reviews; promoted because the pattern is reusable across every service that throws typed errors. Cross-link: `architecture.md § Service Layer` now references this entry directly.
