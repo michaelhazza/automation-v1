@@ -4,6 +4,8 @@ This document describes the first-launch criteria, dogfood gate, rollout-approva
 
 ## First-launch criteria
 
+> **Blocked today.** This first-launch checklist is gated by IEE-DEF-7 (production network policy), IEE-DEF-4 (CI sandbox-template build pipeline + real `PUBLISHED_VERSION` digest), IEE-DEF-5 (real Playwright executor in the harness), and the e2b SDK install (SANDBOX-DEF-EGRESS-MECH). Until those land, the iee-browser PR is **schema + settings + dispatch seam + scaffold only** — not production browser execution. The criteria below describe the post-wiring state.
+
 Before the first subaccount is approved for rollout, confirm:
 
 1. CI passes on the `claude/migrate-browser-e2b-snI99` branch (lint, typecheck, build, all static gates including `verify-no-do-references.sh`).

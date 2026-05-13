@@ -102,6 +102,35 @@ Round 1 applies 9 of 11 fixes inline (F1, F2, F3, F4, F6, F7, T1, T2, T3). F5 an
 
 ### Round 4
 
-Pending operator paste of next ChatGPT-web response.
+**Diff sent:** `.chatgpt-diffs/pr297-round4-code-diff.diff` (251K, 71 files).
 
-Round 4 diff: `.chatgpt-diffs/pr297-round4-code-diff.diff` (regenerated post-commit).
+**ChatGPT verdict:** **Mergeable after small comment/doc cleanup.** No new blockers. Round 3 blockers all materially addressed in the uploaded diff.
+
+| ID | Severity | Description | Action |
+|---|---|---|---|
+| T10 | Should-fix | Two migration SQL header comments still drift by one (0348 says target in 0348, 0349 says FK in 0349) | Aligned to actual filenames (0349 / 0350) |
+| T11 | Should-fix | checkout() should filter on template_name + compatible template_version before adoption once refill goes live | Added forward-looking TODO IEE-DEF-9 + invariant note; queued IEE-DEF-9 in tasks/todo.md |
+| T12 | Should-fix | Rollout doc reads slightly ahead of implementation | Added "Blocked today" callout pointing to IEE-DEF-4/5/7 + SDK install |
+
+### Round 4 commit
+
+(Will be filled in after commit.)
+
+### Final verdict
+
+**APPROVED for merge** — chatgpt-pr-review session closed.
+
+Operator-explicit "Mergeable after the small comment/doc cleanup" + "no new blockers found" = done signal. Round 4 fixes were comment/doc cleanup only; no runtime logic touched. Per the iterative-loop discipline, no additional round needed.
+
+Outstanding deferred items (queued in tasks/todo.md):
+- IEE-DEF-1: browserWarmPool.evictStale withAdminConnection wiring
+- IEE-DEF-2: browserWarmPool.refillIfEligible org-scoping + real provisioning
+- IEE-DEF-3: ieeBrowserProfileManager.gcSweep withAdminConnection wiring
+- IEE-DEF-4: CI sandbox-template build pipeline + real PUBLISHED_VERSION
+- IEE-DEF-5: Real Playwright executor in harness/index.ts
+- IEE-DEF-6: Pre-existing host-disk profile migration decision (revisit if needed)
+- IEE-DEF-7: Production network policy in dispatch
+- IEE-DEF-8: Real assertions in serialization gate test
+- IEE-DEF-9: Template identity validation in browserWarmPool.checkout
+
+All gated behind SDK-not-installed factory + placeholder-digest rejection — production cannot reach any of these code paths today.

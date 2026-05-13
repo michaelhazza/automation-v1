@@ -5,7 +5,7 @@
 -- warm_session_id: UUID of the warm session row; non-null only when subtype = 'warm_pool'.
 --
 -- NOTE: NO FK on warm_session_id yet — the target table browser_warm_sessions is
--- created in migration 0348. FK + unique partial index land in migration 0349.
+-- created in migration 0349. FK + unique partial index land in migration 0350.
 --
 -- CHECK constraints use IS DISTINCT FROM (not =) for null-safe three-valued-logic.
 -- Existing rows with source_type='sandbox_compute' are backfilled to subtype='task'
@@ -18,7 +18,7 @@ ALTER TABLE llm_requests ADD COLUMN warm_session_id UUID;
 -- Backfill: every pre-existing 'sandbox_compute' row originated from the
 -- per-task harvest pipeline (sandboxHarvestService). The 'warm_pool' subtype
 -- is introduced in this PR via browserWarmPool.terminate and cannot have
--- been written before migration 0347 lands. Backfill before enforcing the
+-- been written before migration 0348 lands. Backfill before enforcing the
 -- CHECK constraint so the ALTER does not fail on populated databases.
 UPDATE llm_requests
   SET subtype = 'task'

@@ -2,7 +2,7 @@
 --
 -- Per-subaccount warm-pool session rows. Rows transition available → leased →
 -- terminated and are NEVER deleted (audit / cost-attribution trail).
--- FK warm_session_id on llm_requests lands in migration 0349.
+-- FK warm_session_id on llm_requests lands in migration 0350.
 --
 -- Spec: tasks/builds/iee-browser-on-e2b/spec.md §10.3
 -- RLS: dual-GUC policy on BOTH app.organisation_id AND app.subaccount_id

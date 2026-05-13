@@ -101,6 +101,11 @@ async function _terminateAndWriteCostRow(
 // Public methods
 // ---------------------------------------------------------------------------
 
+// TODO IEE-DEF-9: once refillIfEligible is wired (IEE-DEF-2), checkout must
+// filter the SELECT below on `template_name = 'iee-browser'` AND on a compatible
+// `template_version` set so we never lease a warm session created against an
+// incompatible browser template digest. Today only one template exists and the
+// refill path is RUNTIME-DISABLED, so this is a forward-looking invariant note.
 async function checkout(ctx: { organisationId: string; subaccountId: string }): Promise<{
   warmSessionId: string;
   sandboxId: string;
@@ -114,6 +119,8 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
       logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'feature_disabled' });
       return null;
     }
+    // NOTE (IEE-DEF-9): add template_name + compatible-template_version filter
+    // here before refill goes live.
     const [available] = await tx.select().from(browserWarmSessions)
       .where(and(
         eq(browserWarmSessions.subaccountId, ctx.subaccountId),
