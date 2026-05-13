@@ -103,7 +103,7 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 - **Run individual tests** with `npx vitest run <path-to-test-file>` — do not use `npx tsx` or `scripts/run-all-unit-tests.sh` for Vitest tests.
 - **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
-When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
+When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture. For the inventory of suites that must exist before the flip, the trigger condition, and the sequencing plan, see [`docs/testing-transition-plan.md`](./docs/testing-transition-plan.md).
 
 ## 8. Development discipline
 
