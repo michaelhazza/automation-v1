@@ -1,9 +1,21 @@
-**Status:** DRAFT v1 (2026-05-13) — awaiting operator ratification before spec authoring
+**Status:** DRAFT v2 (2026-05-13) — awaiting operator ratification before spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `iee-browser-on-e2b`
 **Locked predecessors:** Spec A `tasks/builds/execution-backend-adapter-contract/spec.md` (#281), Spec B `tasks/builds/sandbox-isolation/spec.md` (#287), Spec D `tasks/builds/operator-backend/brief.md` (#288 — locked profile-snapshot pattern §3.13)
-**Decision source:** operator post-merge audit (2026-05-13) §4 — recommendation locked: YES, migrate IEE browser worker to e2b; retire DigitalOcean.
+**Decision source:** operator post-merge audit `tasks/builds/personal-assistant-v1/post-merge-audit-2026-05-13.md` §4 — recommendation locked: YES, redirect IEE browser to e2b before launch.
+
+## v2 reframe (post-operator-clarification)
+
+v1 of this brief was written on the assumption that the IEE browser worker was running in production on DigitalOcean. Operator clarification: **DO was never launched.** The worker exists in the repo as deploy-ready code (`worker/Dockerfile`, `worker/src/browser/`) but no production VPS was ever provisioned. This is not a "migration with parallel run + retirement"; it is "redirect the unlaunched path to e2b before first launch + remove the DO-bound code from the repo."
+
+v2 changes:
+- §1 Purpose reframed: no DO production traffic exists; the substrate change happens before first launch.
+- §3.5 Renamed "Launch validation" (was "Parallel-run validation"). No shadow window, no DO traffic to compare against. Validation is local-dev + staging-e2b only.
+- §3.6 Renamed "DO code-path retirement" (was "DigitalOcean retirement sequence"). No infrastructure to tear down; only the DO-bound code paths come out of the repo.
+- §3.7 Renamed "Cost-tracking plan" (was "Cost forecast"). No DO baseline exists. Cost is observed from day one of production e2b traffic; alarms fire on per-task or per-subaccount cost drift.
+- §4 locked decisions: items 6, 7, 8 (parallel-run mandate, cutover threshold, decommission soak) are removed. Items 5 (warm pool), 9 (one-vendor risk), 10 (no customer UI changes) stand.
+- §3.3 GC inactivity window default raised from 14 days to **30 days** pending operator confirmation (see §3.3 explainer).
 
 # IEE Browser on e2b — Build Brief
 
@@ -27,14 +39,15 @@
 
 ## 1. Purpose
 
-The IEE browser worker (Playwright code under `worker/src/browser/`) currently runs as a long-lived Node.js Docker container on a DigitalOcean VPS. The repo has since standardised on e2b as the sandbox substrate for Spec B (`SandboxExecutionService` provider abstraction, merged #287) and Spec D (Operator Backend, merged #288). The IEE browser path is now the only remaining workload pinned to DigitalOcean.
+The IEE browser worker (Playwright code under `worker/src/browser/`) was designed for a DigitalOcean VPS deployment that was never launched. The product is pre-launch. The repo has since standardised on e2b as the sandbox substrate for Spec B (`SandboxExecutionService` provider abstraction, merged #287) and Spec D (Operator Backend, merged #288). The IEE browser is the last code path still bound to DigitalOcean as its intended runtime.
 
-This brief locks scope for a **substrate swap, not a re-architecture**:
+This brief locks scope for a **substrate redirect before first launch**, not a migration of running traffic:
 
 - Playwright code stays. The browser action vocabulary (`navigate / click / type / extract / download`), the contract-enforced page, the artefact validator, the streaming-video capture path, the login flow, and the executor stay byte-identical where possible.
-- The runner harness changes: the worker's persistent VPS process is replaced by a per-task e2b sandbox session managed through the `SandboxExecutionService` provider contract.
+- The runner harness changes: the worker's persistent VPS process design is replaced by a per-task e2b sandbox session managed through the `SandboxExecutionService` provider contract.
 - Persistent browser profile is preserved via the Spec D §3.13 profile-snapshot primitive, scoped to the IEE browser's multi-tenant key shape.
-- DigitalOcean is decommissioned after a measured parallel-run window.
+- The DO-bound code paths (`worker/Dockerfile`, the VPS-resident pg-boss handlers, deploy scripts) are removed from the repo. No DO infrastructure exists to decommission.
+- First production traffic lands on e2b. No parallel-run / shadow window.
 
 This brief locks scope. The spec is authored next.
 
@@ -57,7 +70,7 @@ Nothing on the foundation is in flux. This brief is a consumer of these primitiv
 
 ### 3.1 The runner harness migration
 
-- **Today:** the worker is a persistent VPS-resident Docker container that pulls pg-boss `browserTask` jobs and runs `worker/src/browser/executor.ts` against a Playwright `BrowserContext` opened from a host-disk `userDataDir`.
+- **As-designed (in repo, never launched):** the worker is a persistent VPS-resident Docker container that pulls pg-boss `browserTask` jobs and runs `worker/src/browser/executor.ts` against a Playwright `BrowserContext` opened from a host-disk `userDataDir`.
 - **Target:** each browser task runs inside a per-task e2b sandbox session. The dispatch path goes through `SandboxExecutionService.runTask` (or a thin browser-shaped wrapper — see §3.2), and the Playwright code inside the sandbox is unchanged except for where it reads `userDataDir`.
 - **Files migrating** (harness only — content stays):
   - `worker/Dockerfile` — replaced by an e2b sandbox template at `infra/sandbox-templates/iee-browser/` (deterministic-build rules per Spec B §15.2, same as `synthetos-sandbox`). Playwright base image (`mcr.microsoft.com/playwright:v1.59.1-jammy`) plus ffmpeg, pinned by digest.
@@ -69,7 +82,7 @@ Nothing on the foundation is in flux. This brief is a consumer of these primitiv
   - `worker/src/browser/playwrightContext.ts` — minor edit only: `buildUserDataDir(...)` resolves to the mounted profile volume path inside the sandbox (per §3.3) instead of a host-disk path. Path-traversal regex, corruption-recovery rename, and launch-failure backoff stay intact.
   - `worker/src/loop/executionLoop.ts`, `failureClassification.ts`, `heartbeat.ts`, `stepHistory.ts`, `systemPrompt.ts` — pure execution-loop logic, sandbox-agnostic.
 - **Files retiring entirely:**
-  - The DigitalOcean VPS provisioning + deployment artefacts (env-secrets templates, deploy scripts, monitoring agents — whatever lives outside the repo today). Inventory and decommission steps in §3.6.
+  - The DigitalOcean VPS provisioning + deployment artefacts (env-secrets templates, deploy scripts, monitoring agents — whatever exists in the repo for the never-launched DO target). Inventory and removal steps in §3.6.
 
 ### 3.2 Browser-shape integration with `SandboxExecutionService`
 
@@ -90,12 +103,23 @@ The Spec D persistent-browser-profile primitive is reused as-is for the IEE brow
 |---|---|
 | Key: `task_id` (one logical operator task per profile) | Key: `(organisation_id, subaccount_id, session_key)` — preserves the existing multi-tenant scoping at `worker/src/browser/playwrightContext.ts:buildUserDataDir`. `session_key` defaults to `'default'` and is validated against the existing `SESSION_KEY_RE` regex. |
 | Single-tenant operator chain link | Multi-tenant deterministic browser tasks. Many tasks across many agent runs may share a profile if they share `(org, subaccount, session_key)`. |
-| Lifecycle: created on first chain link, persists across chain links, GC 48hr after task terminal (admin can extend to 14d) | Lifecycle: created lazily on first task that uses `session_key`, persists indefinitely while in use, GC after a per-subaccount inactivity window (default 14 days; range left to spec author). No notion of "task terminal" because many tasks share the profile. |
+| Lifecycle: created on first chain link, persists across chain links, GC 48hr after task terminal (admin can extend to 14d) | Lifecycle: created lazily on first task that uses `session_key`, persists indefinitely while in use, GC after a per-subaccount inactivity window (default **30 days**; range 7-90 days; see GC explainer below). No notion of "task terminal" because many tasks share the profile. |
 | Profile corruption recovery: `OPERATOR_PROFILE_UNRECOVERABLE` + fresh-profile restart with new `attempt_number` | Profile corruption recovery: existing `playwrightContext.ts` rename-to-`.corrupt.<ts>` + fresh-dir backoff. Lifted into the sandbox profile primitive — the rename happens against the mounted volume, not host disk. Fresh-profile-restart concept does NOT apply (no chain-link attempts model). |
 | Profile size cap: 500 MB per task | Profile size cap: 500 MB per `(org, subaccount, session_key)`. Same enforcement primitive (volume quota or pre-mount disk check). |
 | Subaccount isolation enforced by Spec B sandbox isolation | Same. Adapter MUST assert the task's subaccount matches the profile's subaccount before mount. |
 
 Profile snapshot / restore semantics from §3.13 carry over unchanged. The only new state is a lightweight table or column tracking `(organisation_id, subaccount_id, session_key) → volume_id, last_used_at, size_bytes` for GC scheduling — spec author's call on whether to extend `operator_task_profiles` or introduce a sibling table.
+
+**GC retention explainer (plain English).** A "browser profile" is the saved state of a Chromium browser — cookies, login session, saved passwords, downloaded files. When a task uses a profile, then no task touches it for a while, we have to decide when to delete it to save storage.
+
+Trade-offs:
+
+- **Short window (7-14 days):** less storage cost. But if a task only runs every two or three weeks, the profile gets deleted between runs and the agent has to log in again — which can mean MFA prompts, captchas, or breakage on sites with aggressive anti-bot checks. High operational friction.
+- **Medium window (30 days, recommended):** covers monthly tasks getting back to weekly cadence with margin. Storage cost is bounded (500 MB max per profile, low number of profiles per subaccount in early product). Most stale cookies expire on their own inside this window anyway.
+- **Long window (60-90 days):** maximum convenience; minimum re-login friction. Storage cost still small. Larger blast radius if a profile is compromised (an attacker with the profile cookies would have a longer-lived foothold), but this is mitigated by Spec B isolation + the 500MB cap.
+- **Indefinite:** not recommended. Profiles for one-off "I ran this once six months ago" tasks accumulate forever.
+
+Default recommendation: **30 days inactivity → GC.** Range 7-90 days. Per-subaccount configurable. If a profile is in active use (any task touched it inside the window), `last_used_at` resets and the timer starts again — only truly unused profiles get GC'd.
 
 ### 3.4 Warm-pool configuration
 
@@ -110,47 +134,56 @@ Spec MUST define:
 5. **Cost attribution.** Warm sessions waiting on a task DO consume sandbox compute. The cost ledger records this as `source_type: 'sandbox_compute'` with a `subtype` discriminator (`warm_pool` vs `task`) so finance can see the cost separately. Spec author confirms the existing `source_type` schema supports this without a migration, or designs the minimum migration.
 6. **Per-subaccount on/off in the settings UI.** New "Warm pool size" field on the existing operator-settings tab from Spec D §3.14, OR a sibling "IEE Browser" tab if the field set grows past 1-2 items. Spec author's call.
 
-### 3.5 Parallel-run validation
+### 3.5 Launch validation
 
-Both paths run simultaneously for a defined window so the e2b path can be measured before DO is decommissioned.
-
-Spec MUST define:
-
-1. **Routing primitive.** A feature flag (per Spec B's existing flag infrastructure) selects which path executes for a given task. Granularity: per subaccount (default). Override: per agent run (operator-tooled, for targeted testing).
-2. **Flag values.**
-   - `do_only` — task dispatches to the existing DigitalOcean worker.
-   - `e2b_shadow` — task dispatches to DO (canonical); a shadow copy runs on e2b. Both write to `iee_runs` with discriminator `harness_kind: 'do' | 'e2b'`. Shadow result is compared against canonical via the metrics pipeline (item 4), but does NOT affect the customer-visible terminal status.
-   - `e2b_canonical` — task dispatches to e2b. DO does not run for this task.
-   - `e2b_only` — same as `e2b_canonical` but with the DO path disabled for this subaccount (no fallback). Set after cutover threshold met.
-3. **Default schedule.** Spec author proposes a rollout plan; default starting point: 100% `do_only` at week 0, ramp to 100% `e2b_shadow` by week 2 (all production traffic shadowed; no customer impact), `e2b_canonical` rollout per-subaccount starting week 3 based on shadow-metric health, `e2b_only` per-subaccount after the cutover threshold is met.
-4. **Cutover threshold metric.** A subaccount moves from `e2b_canonical` to `e2b_only` only after **e2b success rate ≥ DO success rate – 1pp** over a rolling 7-day window with a minimum sample of 100 tasks. "Success" = `iee_runs.status = 'completed'` and artefact-harvest validation passed. Spec author confirms metric definitions are achievable from existing observability.
-5. **Shadow-run comparison.** For each task that ran on both paths, the metrics pipeline compares: terminal status agreement, artefact bytes agreement (or byte-similarity for video artefacts), action-step count delta, wall-clock duration delta, cost delta. Disagreements emit incidents via `incidentIngestor` with `failure_class: 'shadow_disagreement'` so the system monitor can investigate. Shadow runs that fail while canonical succeeds (or vice versa) are first-class incidents.
-6. **Rollback path.** Setting the flag back to `do_only` (or `e2b_shadow`) for a subaccount is a one-config-change rollback. Spec MUST confirm the rollback is bidirectional during the parallel-run window — once a subaccount has moved to `e2b_only`, rollback requires re-provisioning DO capacity, which is NOT in scope after decommission (§3.6).
-
-### 3.6 DigitalOcean retirement sequence
-
-Decommission happens AFTER all subaccounts have reached `e2b_only` AND a defined soak period has elapsed with no rollbacks.
+No DO production traffic exists; this section is NOT about shadow / cutover. It is about proving the e2b harness is production-ready before it carries first traffic.
 
 Spec MUST define:
 
-1. **Decommission preconditions.** (a) 100% of subaccounts at `e2b_only`, (b) ≥ 14 days at `e2b_only` for all subaccounts, (c) no rollback-to-DO events in the last 14 days, (d) the system monitor confirms no `shadow_disagreement` incidents are open.
-2. **Decommission steps.** (i) Remove the `do_only` and `e2b_shadow` flag values from the routing primitive (the values become reserved-but-rejected). (ii) Retire `worker/Dockerfile`, the worker-as-container build pipeline, the DO deployment scripts, and the DO-only handlers (`browserTask.ts`, `cleanupOrphans.ts`, `runHandler.ts`) — keep the directories `worker/src/browser/`, `worker/src/loop/`, `worker/src/llm/` (these are reused inside the sandbox harness). (iii) Tear down the DO VPS, revoke DO API tokens, archive DO monitoring dashboards. (iv) Delete the DO secrets from the production secret store. (v) Update `docs/iee-development-spec.md` Part 10 and `architecture.md` to remove DO-runtime references — the doc-sync gate enforces this.
-3. **Rollback window.** A 30-day window AFTER decommission step (i) AND BEFORE step (iii) where the VPS still exists but routes nothing. If a regression surfaces in this window, the routing primitive is re-enabled and DO is re-engaged. After (iii), rollback requires re-provisioning DO from scratch — explicitly out of scope.
-4. **Audit trail.** A `tasks/builds/iee-browser-on-e2b/decommission-log.md` artefact records: per-subaccount cutover date, per-subaccount last-DO-task timestamp, decommission date, final DO bill, rollback events (none expected). Updated through the rollout.
+1. **Local-dev validation.** The `synthetos-sandbox` template + local docker-compose path (per Spec B) is extended so a developer can exercise the full browser stack end-to-end on their laptop. Same code path that will run in e2b production. Validates: harness entrypoint, profile volume mount, executor wiring, artefact harvest, cost-row write, lifecycle event emission, cancellation, corruption recovery.
+2. **Staging-e2b validation.** A staging environment runs against the real e2b SDK and the published template image. A fixed set of browser-task fixtures (navigate, login, extract, download, streaming-video capture, multi-task profile reuse, corruption recovery, cancellation mid-step) runs against staging on every PR that touches the harness or the template. Pass/fail gates the merge.
+3. **Production rollout primitive.** A feature flag controls whether the IEE browser path is enabled at all for a given subaccount. Default at first launch: enabled only for the operator's own dogfood subaccount(s); rollout to other subaccounts gated on operator-approved per-subaccount toggle. NOT a shadow-vs-canonical mechanism — the flag is "on" or "off." Spec author chooses the flag mechanism (reuses existing flag infrastructure from Spec B or `personal-assistant-v1`).
+4. **First-launch criteria.** Before flipping the flag on for a non-dogfood subaccount: (a) staging-e2b fixture suite passes, (b) dogfood subaccount has run ≥ N real browser tasks (spec author proposes N; reasonable starting point: 50 across at least 5 distinct skills) over ≥ 7 days with no harness-related incidents, (c) per-task cost is within the alarm thresholds set in §3.7.
+5. **Rollback path.** Setting the flag off for a subaccount halts new IEE browser dispatches for that subaccount; in-flight tasks finish on e2b. No fallback substrate (DO does not exist as a fallback). If a regression appears that affects all subaccounts, the flag goes off globally and the harness is fixed before re-enable. Spec defines the operator-tooling surface for the flip (existing admin UI or new minimal control — spec author's call).
 
-### 3.7 Cost forecast
+### 3.6 DO code-path retirement
 
-**Status: needs operator-supplied numbers before spec finalisation.** This brief flags what the spec MUST resolve; it does NOT lock the numbers.
+No DO infrastructure exists to tear down. This section is purely **repo cleanup**: removing the DO-bound code paths that would otherwise mislead future contributors into thinking DO is a target runtime.
 
 Spec MUST define:
 
-1. **Per-task e2b cost model.** Inputs: per-second sandbox compute rate (e2b billing), expected task wall-clock (current DO-measured p50 / p90), template-image cold-start surcharge if any, warm-pool overhead (warm sessions consume compute even while idle).
-2. **Current DO cost baseline.** The current monthly DO bill (operator supplies). Allocation: how much is the VPS itself vs egress vs storage. Profile-disk storage on the VPS today is effectively free; on e2b it is volume-cost-attributed (per Spec B).
-3. **Per-task volume forecast.** Expected EA + IEE task volume at 6 months and 12 months (operator supplies). Distinguish: human-triggered (warm-pool-sensitive) vs scheduled (cold-start-tolerant).
-4. **Crossover point.** Compute the per-task-volume threshold at which e2b becomes more expensive than the DO baseline, and the per-task-volume threshold at which the warm-pool overhead changes that calculus. Spec defines actions if the forecast crosses an unfavourable boundary (e.g. "if scheduled-task volume exceeds X/day, revisit batch-mode dispatch to amortise warm-pool overhead").
-5. **Per-subaccount cost visibility.** Existing `source_type: 'sandbox_compute'` rows already provide per-subaccount attribution. Spec confirms no additional cost-visibility work is needed for V1.
+1. **Files to retire entirely** (delete from repo, not move to `_retired/`):
+   - `worker/Dockerfile` (worker-as-VPS-container build).
+   - `worker/src/handlers/browserTask.ts`, `runHandler.ts`, `cleanupOrphans.ts` — replaced by the sandbox-harness entrypoint pattern from `synthetos-sandbox` / `operator-session`.
+   - Any DO-specific deploy scripts, GitHub Actions workflows that target DO, env-template files referencing DO secrets. Spec author inventories during spec authoring.
+   - `docs/iee-development-spec.md` Part 10 (Verification, MVP Acceptance & DigitalOcean Rollout) — rewritten to describe e2b rollout instead, or split into a new `docs/iee-on-e2b-rollout.md` and the legacy Part 10 deleted.
+   - `tasks/windows-iee-setup-guide.md` — DO references in `_install` paths are corrected; the doc keeps its purpose (Windows dev setup) but the production-target paragraph becomes "production runs on e2b."
+2. **Files to retain unchanged or near-unchanged:**
+   - Everything under `worker/src/browser/`, `worker/src/loop/`, `worker/src/llm/`, `worker/src/persistence/`, `worker/src/runtime/sampler.ts` — reused inside the sandbox harness.
+   - `worker/package.json` — retained as the install manifest for the harness image.
+3. **Reference updates:**
+   - `architecture.md` — every mention of "DigitalOcean" in the deployment-context tables is rewritten to "e2b sandbox" or deleted if redundant.
+   - `docs/synthetos-governed-agentic-os-brief-v1.2.md` — substrate references checked, updated.
+   - `tasks/strategic-recommendations.md` — DO cost lines deleted or marked superseded.
+   - `replit.md` — no change expected; replit boot path is unaffected.
+   - The doc-sync gate enforces these updates land in the same PR as the harness build.
+4. **No infrastructure actions.** No DO account to wind down, no DNS to repoint, no secrets to revoke, no monitoring dashboards to archive. If any DO API tokens exist in 1Password / the operator's secret store, they are deleted as a one-line cleanup task surfaced in the brief but not gated.
 
-Spec author MUST surface the forecast in the spec doc with concrete numbers before the build session begins. If the forecast shows e2b is meaningfully more expensive at expected volume and there is no mitigation, the audit §4 decision is re-opened. (Operator has acknowledged this is locked direction; the forecast is for sizing, not relitigation.)
+### 3.7 Cost-tracking plan
+
+**No DO baseline exists** (DO was never launched; no prior bill to compare against). e2b is the first-launch substrate. The spec's job here is to make sure cost is observable from day one and alarms fire if something is off-script — NOT to forecast against a baseline that doesn't exist.
+
+Spec MUST define:
+
+1. **Per-task cost row.** Every IEE browser task writes a `source_type: 'sandbox_compute'` row (already shipped in Spec B). The row carries `subaccount_id`, `agent_run_id`, vCPU-seconds, wall-clock seconds, peak memory. Spec confirms this is wired for the IEE browser harness identically to how `iee_dev` already writes it.
+2. **Warm-pool cost discriminator.** Warm sessions consume sandbox compute while idle. Spec confirms the `sandbox_compute` row carries a `subtype` field (`task` vs `warm_pool`) so finance can see warm-pool overhead separately from task compute. If the schema doesn't already support `subtype`, spec author designs the minimum migration.
+3. **Per-subaccount cost summary view.** Existing usage views already aggregate `sandbox_compute` rows by subaccount. Spec confirms IEE browser rows roll up correctly alongside `iee_dev` and `operator_managed` rows. No new dashboard required for V1.
+4. **Alarm thresholds.** Spec defines two simple alarms wired into the existing `incidentIngestor`:
+   - **Per-task alarm:** any single task that exceeds X minutes wall-clock OR Y cents of sandbox compute. Default X = 30 min, Y = 100 cents (operator confirms these once first dogfood data lands). Fires `iee_browser.task_cost_anomaly` incident.
+   - **Per-subaccount per-day alarm:** subaccount sandbox compute spend exceeds Z cents/day across all IEE browser tasks. Default Z = $5/day (500 cents) per subaccount during dogfood; tightened or relaxed once real usage data lands. Fires `iee_browser.subaccount_cost_anomaly` incident.
+5. **First-month cost-report artefact.** 30 days after first production traffic, the spec deliverable includes a one-pager at `tasks/builds/iee-browser-on-e2b/cost-report-month-1.md` summarising: total sandbox compute spend, per-subaccount breakdown, per-skill breakdown, warm-pool overhead as % of total, alarm events fired, recommendations for tuning the warm-pool defaults and the alarm thresholds. This is a build deliverable, not a follow-up.
+
+Spec author does NOT attempt a forecast against an imaginary DO baseline. The cost data lands when real traffic lands; thresholds are tuned from observation, not estimation.
 
 ### 3.8 Test plan
 
@@ -166,18 +199,18 @@ Spec MUST define:
 
 ## 4. Locked architectural decisions
 
-Resolved 2026-05-13 by operator post-merge audit §4. The spec author MUST honour these values; deviations require returning to the operator.
+Resolved 2026-05-13 by operator post-merge audit §4 + operator clarification (pre-launch reframe). The spec author MUST honour these values; deviations require returning to the operator.
 
 1. **Single-vendor execution substrate.** e2b is the chosen substrate for all sandbox-class workloads, including IEE browser. Do not introduce a parallel substrate; do not relitigate.
-2. **Substrate swap, not re-architecture.** Playwright code in `worker/src/browser/` stays; the runner harness changes. New code surface is constrained to the template image, the harness entrypoint, the warm-pool service, the routing primitive, and the profile-key extension. The action vocabulary, contract-enforced page, login flow, artefact validator, streaming-video capture, execution loop, failure classification, and step history are NOT touched in this build.
+2. **Substrate redirect before first launch, not migration.** No DO production traffic exists. Playwright code in `worker/src/browser/` stays; the runner harness changes. New code surface is constrained to the template image, the harness entrypoint, the warm-pool service, the launch-flag primitive, the profile-key extension, and the cost-alarm wiring. The action vocabulary, contract-enforced page, login flow, artefact validator, streaming-video capture, execution loop, failure classification, and step history are NOT touched in this build.
 3. **Persistent browser profile reuses Spec D §3.13.** No parallel profile-persistence scheme. The only delta is the profile-scoping key shape (per §3.3). If a delta beyond key shape becomes necessary mid-spec, return to the operator before introducing it.
 4. **Default integration surface: extend `SandboxExecutionService` (Option A in §3.2).** Spec author may justify Option B but the bar is high; reuse beats parallel infrastructure.
 5. **Warm pool is mandatory; default size is 1 per subaccount.** Cold-start latency is unacceptable for human-triggered tasks; the warm pool exists to mask it. Range 0-5; per-subaccount configurable.
-6. **Parallel-run is mandatory; minimum shadow window is 1 week per subaccount before `e2b_canonical`.** No subaccount jumps straight from `do_only` to `e2b_canonical`. Shadow must run for at least 7 days with metrics agreement before canonical cutover.
-7. **Cutover threshold: e2b success rate ≥ DO success rate – 1pp over 7-day rolling window, min 100 tasks.** Not negotiable downward (don't move a low-volume subaccount on too small a sample).
-8. **DO decommission requires 14-day soak at `e2b_only` AND zero open shadow-disagreement incidents.** The decommission preconditions (§3.6 item 1) are gates, not guidance.
+6. **First-launch criteria are operator-gated, not metric-gated.** Dogfood subaccount runs first; non-dogfood subaccounts opt in on operator approval after the §3.5 first-launch criteria are met (staging fixtures pass + dogfood soak + cost alarms within thresholds). No shadow window or success-rate cutover threshold (no DO baseline to compare to).
+7. **DO code paths come out of the repo in the same PR as the e2b harness lands.** Not a follow-up. The doc-sync gate enforces it.
+8. **Cost is observation-driven, not forecast-driven.** Per-task and per-subaccount cost rows + two alarm thresholds (§3.7) provide the visibility. A 30-day cost-report artefact is a build deliverable, not a follow-up. Thresholds are tuned from real usage data, not estimated upfront.
 9. **One-vendor risk is acknowledged and accepted.** The `SandboxExecutionService` provider abstraction is the mitigation. If e2b becomes unavailable, the provider contract supports a future second provider; that work is out of scope here.
-10. **No customer-facing UI changes in V1.** The substrate swap is invisible to customers. Internal admin surfaces (per-subaccount settings tab from Spec D §3.14, the routing-flag override, the warm-pool size field) are the only UI additions, all admin-scoped.
+10. **No customer-facing UI changes in V1.** The substrate is invisible to customers. Internal admin surfaces (per-subaccount settings additions on the existing Spec D §3.14 tab, the launch flag toggle, the warm-pool size field, the GC retention field) are the only UI additions, all admin-scoped.
 
 ## 5. Out of scope (explicit non-goals)
 
@@ -198,7 +231,7 @@ Resolved 2026-05-13 by operator post-merge audit §4. The spec author MUST honou
 
 ## 6. What unblocks when this ships
 
-- **DigitalOcean is retired.** One fewer infrastructure substrate to maintain, monitor, secure, and bill.
+- **DigitalOcean is removed from the codebase as a target runtime.** No fork in the road for future contributors: the only deployment path is e2b. No risk of accidentally launching a DO instance.
 - **The execution substrate is single-vendor.** Every sandbox-class workload (`iee_dev`, `iee_browser`, `operator_managed`) runs on the same provider with the same isolation primitive, lease state machine, harvest pipeline, and cost ledger.
 - **The warm-pool primitive becomes reusable.** Future low-latency-sensitive sandbox workloads (e.g. interactive operator UI, on-demand code execution from chat) can use the same warm-pool service.
 - **Profile-persistence-by-key becomes a reusable primitive.** Future browser-using features that need persistent state across tasks (Personal Assistant browser workflows, ClientPulse browser polling) inherit the multi-tenant profile primitive instead of inventing one.
@@ -208,13 +241,13 @@ Resolved 2026-05-13 by operator post-merge audit §4. The spec author MUST honou
 
 Recommended order:
 
-1. **Operator reviews this brief, locks scope.** Open questions: cost-forecast inputs (current DO bill, expected EA + IEE task volume at 6 and 12 months), warm-pool size default upper bound, profile-inactivity GC default window.
+1. **Operator reviews this brief, locks scope.** One open question: confirm the 30-day GC retention default (or pick a different value in the 7-90 day range — see §3.3 explainer). All other open items from v1 are resolved: no cost forecast required (no DO baseline exists), warm-pool default 1 per subaccount stands.
 2. Spawn a new Claude Code session for the build slug; the session adopts `spec-coordinator`.
 3. Session runs: brief intake (this doc) → spec authoring → `spec-reviewer` (Codex loop) → `chatgpt-spec-review` (manual rounds) → handoff to `feature-coordinator`.
-4. Build session ships: the `infra/sandbox-templates/iee-browser/` template, the sandbox-harness entrypoint, the `SandboxExecutionService` browser-class extension (or Option B `BrowserExecutionService`), the warm-pool service, the routing-flag primitive + per-subaccount settings field, the profile-key extension on the Spec D primitive, the parallel-run metrics + shadow-disagreement incident shape, the decommission-log artefact scaffolding, and the doc-sync updates to `docs/iee-development-spec.md` Part 10 + `architecture.md`.
-5. Cutover proceeds per the §3.5 schedule. Decommission per §3.6 once all subaccounts are at `e2b_only` and the soak window has elapsed.
+4. Build session ships: the `infra/sandbox-templates/iee-browser/` template, the sandbox-harness entrypoint, the `SandboxExecutionService` browser-class extension (or Option B `BrowserExecutionService`), the warm-pool service, the launch-flag primitive + per-subaccount settings additions (warm-pool size, GC retention window), the profile-key extension on the Spec D primitive, the cost-alarm wiring (per-task + per-subaccount), the 30-day cost-report artefact, the DO code-path deletions, and the doc-sync updates.
+5. First launch lands on the dogfood subaccount per §3.5. Other subaccounts opt in on operator approval after the first-launch criteria are met.
 
-**Estimated sizing (per operator brief):** spec ~1 day; build 1-2 weeks (most effort: profile-lifecycle wiring + parallel-run validation + warm-pool service; raw e2b integration is already done for Specs B / D). Cutover + decommission are calendar-time-bound (parallel-run window + soak), not engineering-time-bound.
+**Estimated sizing:** spec ~1 day; build 1-2 weeks (most effort: profile-lifecycle wiring + warm-pool service + cost-alarm wiring; raw e2b integration is already done for Specs B / D; no parallel-run / cutover engineering needed). The 30-day cost-report artefact is calendar-time-bound (real production traffic must accrue), not engineering-time-bound.
 
 **Branch:** `claude/migrate-browser-e2b-{nonce}` off post-#287/#288 `main`. (Current branch: `claude/migrate-browser-e2b-snI99`.)
 
