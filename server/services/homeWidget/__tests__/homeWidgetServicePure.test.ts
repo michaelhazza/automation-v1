@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { orderAgents, shouldRefetch } from '../homeWidgetServicePure.js';
+import { orderAgents, shouldRefetch, resolveTitleTemplate } from '../homeWidgetServicePure.js';
 import type { AgentForWidget, ShouldRefetchArgs } from '../homeWidgetServicePure.js';
 
 // ---------------------------------------------------------------------------
@@ -130,5 +130,35 @@ describe('shouldRefetch', () => {
       };
       expect(shouldRefetch(args)).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTitleTemplate (REQ-EA5 — spec §13.1 rename feature)
+// ---------------------------------------------------------------------------
+
+describe('resolveTitleTemplate', () => {
+  it('substitutes ${agent.displayName} with the agent displayName', () => {
+    expect(resolveTitleTemplate('${agent.displayName}', { displayName: 'Riley' })).toBe('Riley');
+  });
+
+  it('substitutes multiple occurrences', () => {
+    expect(
+      resolveTitleTemplate('${agent.displayName} — ${agent.displayName}', { displayName: 'EA' }),
+    ).toBe('EA — EA');
+  });
+
+  it('passes literal text without placeholders through unchanged', () => {
+    expect(resolveTitleTemplate('Personal Assistant', { displayName: 'X' })).toBe('Personal Assistant');
+  });
+
+  it('falls back to displayName when the template is empty', () => {
+    expect(resolveTitleTemplate('', { displayName: 'My EA' })).toBe('My EA');
+    expect(resolveTitleTemplate(null, { displayName: 'My EA' })).toBe('My EA');
+    expect(resolveTitleTemplate(undefined, { displayName: 'My EA' })).toBe('My EA');
+  });
+
+  it('does NOT substitute unknown placeholder syntaxes', () => {
+    expect(resolveTitleTemplate('${agent.email}', { displayName: 'EA' })).toBe('${agent.email}');
   });
 });

@@ -5,7 +5,7 @@ import { systemAgents } from '../../db/schema/systemAgents.js';
 import { actions } from '../../db/schema/actions.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import type { HomeWidgetDeclaration, HomeWidget, SummaryCardData } from '../../../shared/types/homeWidget.js';
-import { orderAgents } from './homeWidgetServicePure.js';
+import { orderAgents, resolveTitleTemplate } from './homeWidgetServicePure.js';
 import type { AgentForWidget } from './homeWidgetServicePure.js';
 
 interface AgentWidgetRow extends AgentForWidget {
@@ -84,7 +84,7 @@ export const homeWidgetService = {
 
           const data: SummaryCardData = {
             widgetType: 'summary_card',
-            title: declaration.titleTemplate || 'Personal Assistant',
+            title: resolveTitleTemplate(declaration.titleTemplate, { displayName: row.name }),
             summary: `${draftCount} pending approval · ${latestBriefingLine}`,
             updatedAt: new Date().toISOString(),
           };
@@ -99,7 +99,7 @@ export const homeWidgetService = {
         } else {
           const data: SummaryCardData = {
             widgetType: 'summary_card',
-            title: declaration.titleTemplate || row.name,
+            title: resolveTitleTemplate(declaration.titleTemplate, { displayName: row.name }),
             summary: '',
             updatedAt: new Date().toISOString(),
           };

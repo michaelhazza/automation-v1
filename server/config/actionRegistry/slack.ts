@@ -6,14 +6,20 @@ export const slackActions: Record<string, ActionDefinition> = {
   // ── Slack skills ───────────────────────────────────────────────────────────
   'slack.list_channels': defineExternalRead({
     slug: 'slack.list_channels',
-    description: 'List public and private Slack channels the bot is a member of. Returns channel name, ID, member count, and topic. Supports pagination via cursor.',
+    description: 'List Slack channels the bot is a member of, filtered by `types` (public/private/mpim/im — see spec §7.3). Returns channel name, ID, member count, and topic. Supports pagination via cursor.',
     topics: ['slack'],
     riskTier: 2,
-    payloadFields: ['cursor', 'limit', 'excludeArchived', 'ownerUserId'],
+    payloadFields: ['cursor', 'limit', 'excludeArchived', 'types', 'ownerUserId'],
     parameterSchema: z.object({
       cursor: z.string().optional().describe('Pagination cursor from a previous response'),
       limit: z.number().max(200).optional().describe('Maximum number of channels to return (max 200)'),
       excludeArchived: z.boolean().optional().describe('Exclude archived channels'),
+      types: z
+        .array(z.enum(['public_channel', 'private_channel', 'mpim', 'im']))
+        .optional()
+        .describe(
+          'Channel-kind filter (spec §7.3). Defaults to [\'public_channel\'] when omitted — matches the slack.com `conversations.list` default.',
+        ),
       ownerUserId: z.string().optional().describe('User ID for scoping the request'),
     }),
     requiredIntegration: 'slack',
