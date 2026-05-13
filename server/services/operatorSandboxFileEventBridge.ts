@@ -30,10 +30,30 @@ export interface WatcherFileEventInput extends FileEventInput {
   existingContentSha256: string | null;
 }
 
+function isR2Retryable(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message;
+    if (msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND')) return true;
+  }
+  const e = err as { $metadata?: { httpStatusCode?: number } };
+  const status = e.$metadata?.httpStatusCode;
+  if (typeof status !== 'number') return false;
+  // 429 Too Many Requests + 408 Request Timeout are transient throttling /
+  // timeout responses R2 commonly returns under load — must be retried.
+  // 5xx covers the upstream-error class. Anything else (4xx auth / validation)
+  // is permanent and would just burn retries.
+  return status === 408 || status === 429 || status >= 500;
+}
+
 async function handleToolCallEvent(input: FileEventInput): Promise<void> {
+  if (!isPathSafe(input.path)) {
+    logger.warn('operator_file_event.path_rejected', { reason: 'unsafe_path', emittedBy: input.emittedBy });
+    return;
+  }
+
   const contentSha256 = computeSha256(input.content);
   const mimeType = detectMimeType(input.path);
-  const storageKey = `operator-run-files/${input.agentRunId}/${input.path}`;
+  const storageKey = `runs/${input.agentRunId}/${input.path}`;
 
   await withBackoff(
     () =>
@@ -48,7 +68,7 @@ async function handleToolCallEvent(input: FileEventInput): Promise<void> {
     {
       label: 'operatorSandboxFileEventBridge.r2.put',
       maxAttempts: 3,
-      isRetryable: () => true,
+      isRetryable: isR2Retryable,
       correlationId: input.agentRunId,
       runId: input.agentRunId,
     },

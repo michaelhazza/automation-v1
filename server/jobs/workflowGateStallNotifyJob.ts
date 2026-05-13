@@ -1,7 +1,7 @@
 import type PgBoss from 'pg-boss';
 import { eq, and, lt, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowStepGates, delegationOutcomes, subaccountAgents, agents } from '../db/schema/index.js';
+import { workflowStepGates, delegationOutcomes, subaccountAgents, agents, actions } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { isStallFireStale } from '../services/workflowGateStallNotifyServicePure.js';
 import { eaDraftService } from '../services/eaDrafts/eaDraftService.js';
@@ -251,6 +251,35 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       const initiatorUserId = row.initiatorUserId ?? null;
 
       if (initiatorUserId) {
+        // Re-sweep dedupe: ask_initiator keeps substep_status non-terminal by
+        // design (terminalAt stays NULL), so the outer WHERE clause matches
+        // this row again on every sweep until the initiator decides. The
+        // approval-row write is already deduped via the DB unique constraint
+        // on the idempotency key, but appendEvent is not — without this gate
+        // each sweep would append a fresh awaiting_initiator_decision event
+        // to the run trace. Check whether the approval row already exists
+        // and short-circuit the whole branch (suppression-is-success per
+        // DEVELOPMENT_GUIDELINES §8.33) when it does.
+        const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
+        const existingAsk = await db
+          .select({ id: actions.id })
+          .from(actions)
+          .where(
+            and(
+              eq(actions.organisationId, row.organisationId),
+              eq(actions.idempotencyKey, idempotencyKey),
+            ),
+          )
+          .limit(1);
+
+        if (existingAsk.length > 0) {
+          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
+            runId: row.runId,
+            substepId: row.id,
+          });
+          continue;
+        }
+
         const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
           eventType: 'cross_owner_substep.awaiting_initiator_decision',
           parent_run_id: row.runId,
@@ -271,7 +300,6 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
           // Keyed on the delegation_outcomes row only — no sweep-varying timestamp
           // so re-sweeps while the substep is still open produce the same key
           // and the DB unique constraint deduplicates the approval row.
-          const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
           await actionService.proposeAction({
             organisationId: row.organisationId,
             subaccountId: row.subaccountId,

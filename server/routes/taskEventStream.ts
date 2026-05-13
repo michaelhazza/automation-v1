@@ -108,10 +108,18 @@ router.get(
       events: page.events as unknown as import('../services/runTracePure.js').ProjectableEvent[],
     });
 
+    // Surface the raw-page cursor high-water marks so clients can advance
+    // past fully redacted (non-owner-projected) pages. `streamEventsByTask`
+    // derives these from the raw rows — not the projected events — so even
+    // when `events` is empty after projection the client gets a forward
+    // cursor and avoids retrying the same private window (spec §5.4).
     res.json({
       events: routeProjected.events,
       hasGap,
       oldestRetainedSeq,
+      hasMore: page.hasMore,
+      highestSequenceNumber: page.highestSequenceNumber,
+      highestTaskSequence: page.highestTaskSequence,
     });
   }),
 );
