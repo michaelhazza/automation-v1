@@ -39,7 +39,8 @@ export type AgentExecutionSourceService =
   | 'requestClarification'
   | 'correctionCaptureService'
   | 'retrievalService'
-  | 'workflowGateStallNotifyJob';
+  | 'workflowGateStallNotifyJob'
+  | 'operatorSandboxFileEventBridge';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy

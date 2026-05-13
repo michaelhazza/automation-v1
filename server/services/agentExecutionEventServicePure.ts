@@ -128,6 +128,7 @@ const SOURCE_SERVICES: ReadonlyArray<AgentExecutionSourceService> = [
   'requestClarification',
   'retrievalService',
   'workflowGateStallNotifyJob',
+  'operatorSandboxFileEventBridge',
 ];
 
 export function isValidSourceService(value: unknown): value is AgentExecutionSourceService {
