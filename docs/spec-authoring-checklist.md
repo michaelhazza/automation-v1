@@ -163,6 +163,10 @@ Every new tenant-scoped table (anything with `organisation_id` or `subaccount_id
 3. **Route-level or middleware guard** if the table is accessed via HTTP. Name the guard in the spec (`authenticate`, `requirePermission(key)`, `resolveSubaccount`, or a new guard with a named location).
 4. **Principal-scoped context** if the table is read from an agent execution path. See `architecture.md §1116 "P3B — Principal-scoped RLS"`.
 
+### Canonical RLS-posture sentence
+
+State the posture explicitly in the spec, using this exact phrasing: **"RLS enforces the organisation boundary; subaccount filtering is service-layer."** If the table actually uses dual-GUC (RLS checks both `app.organisation_id` and `app.subaccount_id`), say so and link to architecture.md's "Dual-GUC pattern". Prose that claims tables are "scoped to (org, subaccount)" without a `app.subaccount_id` GUC reference is a blocking spec review finding — reviewers cannot tell whether RLS or the service layer is doing the work.
+
 ### Opt-out rule
 
 If a new table is intentionally *not* tenant-scoped (e.g. system-wide reference data), write one line explaining why. The reviewer's rubric correctly flags "missing RLS on org-scoped table" and won't be satisfied by implicit reasoning.
@@ -261,6 +265,18 @@ After completing Sections 1–7, do one final read-through focused on contradict
 - Does every "single source of truth" claim survive? Grep for the claimed source — is it actually written to by every path the spec describes? Is it filtered out anywhere?
 - Do non-functional claims (cache efficiency, latency budgets, cost budgets) match the execution model in Section 5?
 - Does every phrase using "must", "guarantees", "idempotent", "source of truth" have a backing mechanism named? Load-bearing claims without a mechanism are the most expensive finding class to fix in review.
+
+### Numeric-count reconciliation pass
+
+Before handoff, grep the draft for inventory counts and reconcile every occurrence against the file-inventory table. Counts of "N tables / N migrations / N jobs / N files / N columns" routinely drift across sections — §14.4 says "four tables", §19.3 lists three, §19.4 says "five migrations" but one is a script.
+
+Run:
+
+```bash
+grep -E "([Ff]our|[Ff]ive|[Ss]ix|[Ss]even|[Ee]ight|[Nn]ine|[Tt]en|[0-9]+) (tables|migrations|jobs|files|columns|endpoints|services|routes)" <spec.md>
+```
+
+Every hit must reconcile to the same number in the file inventory. Mismatched counts are the dominant spec review finding in sandbox-isolation and consolidation reviews.
 
 ### Reviewer signal this prevents
 
@@ -409,10 +425,12 @@ Before invoking `spec-reviewer` on a draft spec, answer yes to all of the follow
 - [ ] Every data shape crossing a boundary has a Contracts entry with an example
 - [ ] Every contract that writes to multiple representations declares the source-of-truth precedence
 - [ ] Every new tenant-scoped table has RLS policy + manifest entry + route guard + principal-scoped context (or a documented reason for opting out)
+- [ ] RLS posture stated using the canonical sentence ("RLS enforces the organisation boundary; subaccount filtering is service-layer"), or dual-GUC explicitly declared
 - [ ] Execution model (sync/async, inline/queued, cached/dynamic) is picked explicitly and the prose + inventory + goals all agree
 - [ ] Phase dependency graph has no backward references, no orphaned deferrals, no phase-boundary contradictions
 - [ ] `## Deferred Items` section exists (even if "None.")
 - [ ] Self-consistency pass complete: Goals ↔ Implementation match; every load-bearing claim has a named mechanism
+- [ ] Numeric-count reconciliation grep run; every count of tables / migrations / jobs / files matches the file inventory
 - [ ] Testing plan consistent with `docs/spec-context.md`
 - [ ] **[Section 10]** Every externally-triggered write has an idempotency posture, retry classification, and concurrency guard declared
 - [ ] **[Section 10]** Every cross-flow chain has a declared terminal event + post-terminal prohibition
