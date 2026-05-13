@@ -1299,6 +1299,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0330_external_source_triggers.sql',
     rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
   },
+  // 0348 — Personal Assistant V2 Operator: per-run operator file artefact pointers
+  {
+    tableName: 'operator_run_files',
+    schemaFile: 'operatorRunFiles.ts',
+    policyMigration: '0348_operator_run_files.sql',
+    rationale: 'Per-run operator file artefact pointers with R2 storage keys — content-sha256, MIME type, and emitted_by metadata are scoped per org. Cross-tenant leak exposes another org\'s operator run file paths and storage keys.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
