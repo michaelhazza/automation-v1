@@ -74,16 +74,28 @@ function isContainedInRoot(absPath, watchedRoots) {
 // IPC send helper
 // ---------------------------------------------------------------------------
 
-function sendIpc(payload) {
-  if (!process.send) {
-    console.warn('[file-watcher] IPC not available (not a child process); skipping send');
+const IPC_MAX_ATTEMPTS = 3;
+const IPC_RETRY_DELAYS_MS = [0, 100, 500];
+
+function sendIpcWithRetry(payload, attempt) {
+  if (attempt >= IPC_MAX_ATTEMPTS) {
+    console.warn('[file-watcher] IPC send failed after max attempts — dropped', { maxAttempts: IPC_MAX_ATTEMPTS });
     return;
   }
   try {
     process.send(payload);
   } catch (err) {
-    console.warn('[file-watcher] IPC send failed', { reason: 'ipc_send_failed', message: err && err.message });
+    console.warn('[file-watcher] IPC send failed, retrying', { attempt, message: err && err.message });
+    setTimeout(() => sendIpcWithRetry(payload, attempt + 1), IPC_RETRY_DELAYS_MS[attempt + 1] || 500);
   }
+}
+
+function sendIpc(payload) {
+  if (!process.send) {
+    console.warn('[file-watcher] IPC not available (not a child process); skipping send');
+    return;
+  }
+  sendIpcWithRetry(payload, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +125,8 @@ function handleFileEvent(eventPath) {
     return;
   }
 
+  // Step (d): parent-directory escapes handled by realpathSync + isContainedInRoot above.
+
   // Step (e): read file content
   let content;
   try {
@@ -129,7 +143,7 @@ function handleFileEvent(eventPath) {
   sendIpc({
     type: 'file_event',
     path: resolvedPath,
-    sha256,
+    existingContentSha256: sha256,
     sizeBytes: content.length,
     emittedBy: 'watcher',
   });
