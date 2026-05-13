@@ -1,7 +1,7 @@
 import { fmtCurrency, fmtPct } from './PnlFormat';
 
 // KPI card — one of four at the top of the System P&L page.
-// Matches prototypes/system-costs-page.html line ~370 styling.
+// Matches _archive/prototypes/system-costs-page.html line ~370 styling.
 
 type ChangeDirection = 'up' | 'down' | 'flat';
 

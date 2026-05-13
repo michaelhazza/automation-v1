@@ -197,3 +197,27 @@ before being passed to the LLM.
 - **ADRs:** `docs/decisions/`
 - **Knowledge patterns:** `KNOWLEDGE.md`
 - **Architectural rules:** `architecture.md`
+
+---
+
+## Deferred from spec-conformance review — fleet-and-codebase-health (Branch 2 codebase-health) (2026-05-13)
+
+**Captured:** 2026-05-13T01-17-33Z
+**Source log:** `tasks/review-logs/spec-conformance-log-fleet-and-codebase-health-branch-2-2026-05-13T01-17-33Z.md`
+**Spec:** `tasks/builds/fleet-and-codebase-health/spec.md`
+**Plan:** `tasks/builds/fleet-and-codebase-health/plan.md`
+
+- [ ] REQ-FCH-B1-gate-red — `verify-no-db-in-routes.sh` is RED on branch tip; 2 violations from upstream merge
+  - Spec section: §4.B1 + §9 (final acceptance: "GREEN on the branch tip with all 9 violators migrated")
+  - Gap: After the operator-backend merge (`c2c7adca`), two new route files entered the branch with direct `db` imports: `server/routes/operatorSessions.ts:18` and `server/routes/operatorTasks.ts:35`. They are not in the spec's original 9-violator list (came in after Chunk 1 ran). Spec §9 still requires the gate exits 0 at branch tip.
+  - Suggested approach: Either (a) migrate both routes per the same T2 pattern used for the original 9 (likely a new pass extending whichever services own those operator domains), or (b) document a guard-ignore with a new ADR if the routes have a legitimate exception parallel to `workspaceInboundWebhook.ts`. Operator decision required — these routes are part of the active operator-backend feature so a service migration is the expected path.
+
+- [ ] REQ-FCH-C2-knowledge-over-target — KNOWLEDGE.md is 3,846 lines, spec target ≤2,500
+  - Spec section: §5.C2 + §9 (final acceptance: "KNOWLEDGE.md ≤2,500 lines")
+  - Gap: Chunk 12 sweep reduced KNOWLEDGE.md from 3,785 → 3,692 lines (per `06eb8d05` commit message). The post-origin/main-merge file is 3,846 lines, well above the spec target. The sweep was applied but did not converge on the target.
+  - Suggested approach: Either (a) accept the current 3,846-line state as "sweep done, further trimming deferred" and amend the spec's ≤2,500 target as aspirational rather than mandatory, or (b) run a follow-up compression pass to hit the target. The non-deletion rule (§5.C2) limits how aggressive a second pass can be — the next round must rely on more ADR promotions and/or duplicate-group compression. Operator decision required.
+
+- [ ] REQ-FCH-C4-new-prototypes — three new top-level `prototypes/` dirs landed post-merge from active builds
+  - Spec section: §5.C4 (archive convention)
+  - Gap: After Chunk 3 ran, the operator-backend / personal-assistant-v1 / memory-improvements merges introduced new top-level `prototypes/{operator-backend, personal-assistant-v1, memory-improvements}/` directories that are referenced by their owning specs in `docs/superpowers/specs/`. The spec's intent (visual separation of historical artefacts) is partly defeated — top-level `prototypes/` now has both archived material via the rename trail and new live material. Both can be true simultaneously.
+  - Suggested approach: Either (a) the `_archive/` convention applies only to PAST artefacts and new builds may freely use top-level `prototypes/` (current de-facto behaviour — needs documenting in `_archive/README.md` and CLAUDE.md), or (b) extend the archive convention to ALL prototypes regardless of vintage and re-locate the three new dirs. (a) is the lower-cost outcome. Operator decision required.

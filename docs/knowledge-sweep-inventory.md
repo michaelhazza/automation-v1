@@ -2,7 +2,7 @@
 
 **Source file:** `KNOWLEDGE.md` (3,785 lines, ~384 entries across both `### YYYY-MM-DD …` and `## Pattern …` heading styles).
 **Sweep target:** ≤2,500 lines post-apply (per spec §5.C2 and plan §17).
-**ADR cap:** ≤5 new ADRs (per plan §17). Next sequential ADR number: **0012** (existing run ends at `0011-workspace-inbound-webhook-db-exception.md`).
+**ADR cap:** ≤5 new ADRs (per plan §17). Next sequential ADR number: **0012** (post-codebase-health renumber: the workspace-inbound-webhook ADR moved to `0022-workspace-inbound-webhook-db-exception.md` to resolve a collision with the operator-backend chain-resume ADR at slot 0011).
 **Builder verdict:** `INVENTORY_READY` — operator reviews this inventory and commits, then dispatches Chunk 12.B.
 
 ---
@@ -495,7 +495,7 @@ Memory blocks, retrieval rankers, embedding pipeline, document promotion, retrie
 
 Hard cap = 5. Promotion criteria per plan §17: cited ≥3 times in specs/review-logs/other-knowledge-entries, OR so fundamental that future architectural decisions depend on them. Each candidate below is selected because it both (a) meets the citation threshold and (b) represents a durable cross-cutting choice rather than a one-off observation.
 
-The next sequential ADR number is **0012**. Existing ADRs end at `0011-workspace-inbound-webhook-db-exception.md`. Numbers assigned below are sequential.
+The next sequential ADR number is **0012**. Existing ADRs end at `0011-operator-backend-chain-resume-model.md`. Numbers assigned below are sequential. (Note: a pre-merge draft of this inventory used `0011-workspace-inbound-webhook-db-exception.md` as the anchor; that ADR was renumbered to `0022-workspace-inbound-webhook-db-exception.md` during spec-conformance to resolve the collision with the operator-backend chain-resume ADR.)
 
 ### ADR 0012 — Tagged-log-as-metric is the project's metrics convention
 

@@ -1,4 +1,4 @@
-# ADR-0011: Direct DB access in workspaceInboundWebhook route
+# ADR-0022: Direct DB access in workspaceInboundWebhook route
 
 **Status:** accepted
 **Date:** 2026-05-12
