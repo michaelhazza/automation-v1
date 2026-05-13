@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  IEE Browser on e2b — Round 1
+  IEE Browser on e2b — Round 2
   ─────────────────────────────────────────────────────────────────────────────
   Existing surface extended:
     client/src/pages/AdminSubaccountDetailPage.tsx
@@ -12,18 +12,16 @@
   "Session limits" and "Task limits" sections.
 
   Build slug: iee-browser-on-e2b
-  Brief sections: §3.3 GC retention, §3.4 warm pool, §3.5 launch flag, §3.7 cost guardrails
-  Locked decision §4.10: no customer-facing UI — admin only.
+  Brief: §3.3 GC retention, §3.4 warm pool (hardcoded, no UI knob), §3.5 launch flag,
+         §3.7 cost guardrails (dollars only, no minutes ceiling)
+  Locked decision §4.10 (v3): 4 fields only — Status, Profile retention, Per-task ceiling ($), Daily ceiling ($).
 
-  New fields added (all within the existing Operator tab):
-    - IEE browser section header
-    - Launch flag: per-subaccount on/off toggle
-    - Warm pool size: 0–5, default 1
-    - Profile retention: 7–90 days, default 30
-    - Cost guardrails (per-task ceiling: max minutes + max cents; per-day ceiling: max cents/day)
-
-  Spend widget: omitted. Settings screen primary task = configure, not monitor.
-  Month-to-date spend belongs on Usage & Costs tab, not here.
+  Round 2 changes vs Round 1:
+    - Warm-pool size field removed (hardcoded to 1 in V1, §3.4 / §4 item 5)
+    - Minutes ceiling removed; replaced with single dollar-denominated cost ceiling per alarm
+    - Incident event-name chips removed; plain-English help text only
+    - Launch flag relabelled: "Status" (On/Off), help text = support escalation kill switch
+    - Currency inputs: $-prefix on left, value stored/displayed as dollars with 2 decimals
 -->
 <html lang="en">
 <head>
@@ -33,7 +31,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-/* ── Reset & base ─────────────────────────────────────────────────────────── */
+/* ── Reset and base ───────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: #0f172a; font-size: 14px; line-height: 1.5; }
 
@@ -142,7 +140,8 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
 .settings-section-title { font-size: 14px; font-weight: 700; color: #0f172a; }
 .settings-section-body { padding: 4px 0; }
 
-/* ── Field row — number inputs ────────────────────────────────────────────── */
+/* ── Field row: number inputs ─────────────────────────────────────────────── */
+/*   grid-cols-[1fr_160px] matches _fields.tsx NumberField exactly             */
 .field-row {
   display: grid; grid-template-columns: 1fr 160px;
   align-items: start; gap: 16px;
@@ -152,28 +151,32 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
 .field-label { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
 .field-help  { font-size: 12px; color: #64748b; line-height: 1.55; }
 .field-input-wrap { display: flex; align-items: center; gap: 7px; justify-content: flex-end; }
+
+/* number input — matches _fields.tsx inputCls */
 .field-input {
-  width: 90px; padding: 7px 10px;
-  border: 1px solid #d1d5db; border-radius: 7px;
+  width: 90px; padding: 6px 10px;
+  border: 1px solid #cbd5e1; border-radius: 7px;
   font-size: 13px; color: #0f172a; background: white;
-  font-family: inherit; text-align: right;
+  font-family: 'Menlo', 'Courier New', monospace; text-align: right;
   outline: none; transition: border-color 0.12s, box-shadow 0.12s;
 }
 .field-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
 .field-unit { font-size: 12px; color: #64748b; white-space: nowrap; }
 
-/* ── Field row — toggle ───────────────────────────────────────────────────── */
+/* ── Field row: toggle (Status) ───────────────────────────────────────────── */
+/*   Same left-column label/help layout; right column holds toggle + label     */
 .field-row-toggle {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  display: grid; grid-template-columns: 1fr 160px;
+  align-items: start; gap: 16px;
   padding: 14px 20px; border-bottom: 1px solid #f8fafc;
 }
 .field-row-toggle:last-child { border-bottom: none; }
 
 /* ── Toggle switch ────────────────────────────────────────────────────────── */
-.toggle-wrap { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.toggle-wrap { display: flex; align-items: center; gap: 9px; justify-content: flex-end; }
 .toggle {
   position: relative; display: inline-block;
-  width: 42px; height: 24px;
+  width: 42px; height: 24px; flex-shrink: 0;
 }
 .toggle input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
@@ -191,42 +194,40 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
 }
 .toggle input:checked + .toggle-slider { background: #4f46e5; }
 .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
-.toggle-label { font-size: 13px; font-weight: 500; color: #0f172a; }
+.toggle-label {
+  font-size: 13px; font-weight: 600; color: #0f172a;
+  min-width: 22px; /* keeps layout stable between On/Off */
+}
 
-/* ── Cost guardrail sub-group ─────────────────────────────────────────────── */
-.guardrail-group {
-  padding: 14px 20px; border-bottom: 1px solid #f8fafc;
+/* ── Field row: currency input ────────────────────────────────────────────── */
+/*   Variant of NumberField: $ prefix on the left of the input box             */
+.currency-wrap {
+  display: flex; align-items: center; gap: 0; justify-content: flex-end;
 }
-.guardrail-group:last-child { border-bottom: none; }
-.guardrail-group-label {
-  font-size: 12px; font-weight: 700; color: #64748b;
-  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
+.currency-prefix {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1; border-right: none;
+  border-radius: 7px 0 0 7px;
+  font-size: 13px; font-weight: 600; color: #475569;
+  background: #f8fafc; line-height: 1;
+  /* vertically matches the input */
+  display: flex; align-items: center;
 }
-.guardrail-fields { display: flex; flex-direction: column; gap: 10px; }
-.guardrail-field {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-}
-.guardrail-field-label { font-size: 13px; font-weight: 600; color: #0f172a; flex: 1; }
-.guardrail-field-sub   { font-size: 12px; color: #64748b; }
-.guardrail-field-right { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
-.guardrail-input {
-  width: 80px; padding: 6px 9px;
-  border: 1px solid #d1d5db; border-radius: 7px;
+.currency-input {
+  width: 80px; padding: 6px 8px;
+  border: 1px solid #cbd5e1; border-left: none;
+  border-radius: 0 7px 7px 0;
   font-size: 13px; color: #0f172a; background: white;
-  font-family: inherit; text-align: right;
+  font-family: 'Menlo', 'Courier New', monospace; text-align: right;
   outline: none; transition: border-color 0.12s, box-shadow 0.12s;
 }
-.guardrail-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
-.guardrail-unit { font-size: 12px; color: #64748b; white-space: nowrap; }
-.guardrail-group-help { font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
-
-/* ── Incident label chip ──────────────────────────────────────────────────── */
-.incident-chip {
-  display: inline-flex; align-items: center;
-  font-size: 10.5px; font-weight: 600; color: #b45309;
-  background: #fffbeb; border: 1px solid #fde68a;
-  padding: 2px 7px; border-radius: 4px; letter-spacing: 0.02em;
-  margin-top: 6px;
+.currency-input:focus {
+  border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+  outline: none;
+}
+/* when focused, also restyle the prefix border so it matches */
+.currency-wrap:focus-within .currency-prefix {
+  border-color: #6366f1;
 }
 
 /* ── Save footer ──────────────────────────────────────────────────────────── */
@@ -281,9 +282,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
   <main class="main">
     <div class="topbar">
       <div class="topbar-spacer"></div>
-      <div class="topbar-right">
-        <div class="topbar-avatar">AO</div>
-      </div>
+      <div class="topbar-avatar">AO</div>
     </div>
 
     <div class="main-scroll">
@@ -302,6 +301,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           <button class="tab-btn" onclick="switchTab(event)">Categories</button>
           <button class="tab-btn" onclick="switchTab(event)">Tags</button>
           <button class="tab-btn" onclick="switchTab(event)">Board Config</button>
+          <!-- Operator tab (org_admin only) -->
           <button class="tab-btn active" onclick="switchTab(event)">
             Operator
             <span class="admin-only-pill">Org admin</span>
@@ -315,7 +315,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
       <!-- Operator tab body -->
       <div class="tab-body">
 
-        <!-- ── Section: Session limits (unchanged from r13) ─────────────── -->
+        <!-- ── Section: Session limits (unchanged from r13 / OperatorSettingsTab.tsx) -->
         <div class="settings-section">
           <div class="settings-section-head">
             <span class="settings-section-title">Session limits</span>
@@ -354,7 +354,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           </div>
         </div>
 
-        <!-- ── Section: Task limits (unchanged from r13) ───────────────── -->
+        <!-- ── Section: Task limits (unchanged from r13 / OperatorSettingsTab.tsx) -->
         <div class="settings-section">
           <div class="settings-section-head">
             <span class="settings-section-title">Task limits</span>
@@ -393,7 +393,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           </div>
         </div>
 
-        <!-- ── Section: IEE browser (NEW) ─────────────────────────────── -->
+        <!-- ── Section: IEE browser (NEW — Round 2) ───────────────────────── -->
         <div class="settings-section">
           <div class="settings-section-head">
             <span class="settings-section-title">IEE browser</span>
@@ -401,38 +401,36 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           </div>
           <div class="settings-section-body">
 
-            <!-- Field: Launch flag -->
+            <!-- Field 1: Status (kill switch) -->
+            <!--
+              Toggle: On = browser tasks are allowed for this subaccount.
+              Off = support escalation kill switch; no tasks dispatch.
+              Default: On (checked).
+            -->
             <div class="field-row-toggle">
               <div>
-                <div class="field-label">Enable IEE browser tasks</div>
-                <div class="field-help">When off, browser tasks for this subaccount are not dispatched. Turn off to pause browser automation without affecting other task types.</div>
+                <div class="field-label">Status</div>
+                <div class="field-help">When off, this subaccount cannot run any IEE browser tasks. Use to disable for support escalations.</div>
               </div>
               <div class="toggle-wrap">
-                <label class="toggle" title="Enable IEE browser tasks">
-                  <input type="checkbox" id="iee-enabled" checked onchange="updateToggleLabel()">
+                <label class="toggle" title="IEE browser status">
+                  <input type="checkbox" id="iee-status" checked onchange="updateToggleLabel()">
                   <span class="toggle-slider"></span>
                 </label>
                 <span class="toggle-label" id="toggle-label-text">On</span>
               </div>
             </div>
 
-            <!-- Field: Warm pool size -->
-            <div class="field-row">
-              <div>
-                <div class="field-label">Warm pool size</div>
-                <div class="field-help">Sandboxes kept pre-warmed to avoid cold-start delays on human-triggered tasks. Set to 0 for low-volume subaccounts that can tolerate a short wait.</div>
-              </div>
-              <div class="field-input-wrap">
-                <input class="field-input" type="number" value="1" min="0" max="5" id="warm-pool-size">
-                <span class="field-unit">sandboxes</span>
-              </div>
-            </div>
-
-            <!-- Field: Browser profile retention -->
+            <!-- Field 2: Browser profile retention -->
+            <!--
+              A "browser profile" = the saved state of a Chromium browser:
+              cookies, login sessions, MFA tokens. Unused profiles are GC'd
+              after this many days (range 7-90, default 30, per §3.3).
+            -->
             <div class="field-row">
               <div>
                 <div class="field-label">Browser profile retention</div>
-                <div class="field-help">A browser profile holds saved login state: cookies, session tokens, MFA. Unused profiles are deleted after this many days to save storage. Active profiles are never deleted.</div>
+                <div class="field-help">A profile is the saved browser state for this subaccount: cookies, logins, MFA tokens. Unused profiles are deleted after this many days to save storage.</div>
               </div>
               <div class="field-input-wrap">
                 <input class="field-input" type="number" value="30" min="7" max="90" id="profile-retention">
@@ -440,51 +438,48 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
               </div>
             </div>
 
-            <!-- Field group: Cost guardrails -->
-            <div class="guardrail-group">
-              <div class="guardrail-group-label">Cost guardrails</div>
-              <div class="guardrail-fields">
-
-                <!-- Per-task ceiling -->
-                <div class="guardrail-field">
-                  <div>
-                    <div class="guardrail-field-label">Per-task ceiling</div>
-                    <div class="guardrail-field-sub">Tasks exceeding either limit trigger an incident.</div>
-                    <div class="incident-chip">fires iee_browser.task_cost_anomaly</div>
-                  </div>
-                  <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-                    <div class="guardrail-field-right">
-                      <input class="guardrail-input" type="number" value="30" min="1" max="180" id="task-ceil-minutes">
-                      <span class="guardrail-unit">minutes max</span>
-                    </div>
-                    <div class="guardrail-field-right">
-                      <input class="guardrail-input" type="number" value="100" min="1" max="10000" id="task-ceil-cents">
-                      <span class="guardrail-unit">cents max</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Per-day ceiling -->
-                <div class="guardrail-field" style="margin-top:12px; padding-top:12px; border-top:1px solid #f1f5f9;">
-                  <div>
-                    <div class="guardrail-field-label">Per-subaccount daily ceiling</div>
-                    <div class="guardrail-field-sub">Across all browser tasks for this subaccount per day.</div>
-                    <div class="incident-chip">fires iee_browser.subaccount_cost_anomaly</div>
-                  </div>
-                  <div class="guardrail-field-right">
-                    <input class="guardrail-input" type="number" value="500" min="100" max="100000" id="day-ceil-cents">
-                    <span class="guardrail-unit">cents/day max</span>
-                  </div>
-                </div>
-
+            <!-- Field 3: Per-task cost ceiling -->
+            <!--
+              Default $1.00 (= 100 cents internally). Fires iee_browser.task_cost_anomaly
+              incident when a single task exceeds this. Event name stays in backend only.
+              UI shows dollars with 2 decimal places.
+            -->
+            <div class="field-row">
+              <div>
+                <div class="field-label">Per-task cost ceiling</div>
+                <div class="field-help">Alerts you when a single task costs more than this.</div>
               </div>
-              <div class="guardrail-group-help">Incidents appear in the run log. No tasks are cancelled automatically; the alarm is advisory.</div>
+              <div class="field-input-wrap">
+                <div class="currency-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input class="currency-input" type="number" value="1.00" min="0.01" max="100.00" step="0.01" id="task-ceil-dollars">
+                </div>
+              </div>
+            </div>
+
+            <!-- Field 4: Per-subaccount daily cost ceiling -->
+            <!--
+              Default $5.00 (= 500 cents internally). Fires iee_browser.subaccount_cost_anomaly
+              incident when total daily browser-task spend for this subaccount exceeds this.
+              Event name stays in backend only.
+            -->
+            <div class="field-row">
+              <div>
+                <div class="field-label">Per-subaccount daily cost ceiling</div>
+                <div class="field-help">Alerts you when this subaccount's total daily browser-task cost goes over this.</div>
+              </div>
+              <div class="field-input-wrap">
+                <div class="currency-wrap">
+                  <span class="currency-prefix">$</span>
+                  <input class="currency-input" type="number" value="5.00" min="0.01" max="1000.00" step="0.01" id="day-ceil-dollars">
+                </div>
+              </div>
             </div>
 
           </div><!-- .settings-section-body -->
         </div><!-- .settings-section IEE browser -->
 
-        <!-- Save footer -->
+        <!-- Save footer — copy matches OperatorSettingsTab.tsx exactly -->
         <div class="save-footer">
           <span class="save-note">Changes apply to new sessions only. In-progress sessions are not affected.</span>
           <button class="save-btn" onclick="save()">Save settings</button>
@@ -500,10 +495,14 @@ function switchTab(e) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   e.currentTarget.classList.add('active');
 }
+
 function updateToggleLabel() {
-  const cb = document.getElementById('iee-enabled');
-  document.getElementById('toggle-label-text').textContent = cb.checked ? 'On' : 'Off';
+  const cb = document.getElementById('iee-status');
+  const label = document.getElementById('toggle-label-text');
+  label.textContent = cb.checked ? 'On' : 'Off';
+  label.style.color = cb.checked ? '#0f172a' : '#94a3b8';
 }
+
 function save() {
   const btn = document.querySelector('.save-btn');
   btn.textContent = 'Saved';
