@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  IEE Browser on e2b — Round 2
+  IEE Browser on e2b — Round 3
   ─────────────────────────────────────────────────────────────────────────────
   Existing surface extended:
     client/src/pages/AdminSubaccountDetailPage.tsx
@@ -16,12 +16,14 @@
          §3.7 cost guardrails (dollars only, no minutes ceiling)
   Locked decision §4.10 (v3): 4 fields only — Status, Profile retention, Per-task ceiling ($), Daily ceiling ($).
 
-  Round 2 changes vs Round 1:
-    - Warm-pool size field removed (hardcoded to 1 in V1, §3.4 / §4 item 5)
-    - Minutes ceiling removed; replaced with single dollar-denominated cost ceiling per alarm
-    - Incident event-name chips removed; plain-English help text only
-    - Launch flag relabelled: "Status" (On/Off), help text = support escalation kill switch
-    - Currency inputs: $-prefix on left, value stored/displayed as dollars with 2 decimals
+  Round 3 changes vs Round 2:
+    - Auto-extend grace field removed from Session limits (backend hardcodes to 30 min)
+    - Max chain length field removed from Task limits (backend hardcodes to 100 sessions)
+    - Max wall-clock per task field removed from Task limits (backend hardcodes to 30 days)
+    - "Org admin" pill removed from IEE browser section header (v5 reframe: permissions
+      are now uniform across the tab; route-level gate enforces visibility)
+    - Task limits section kept as single-field section (Per-task budget cap is conceptually
+      distinct from session-level limits — collapsing into Session limits would misframe it)
 -->
 <html lang="en">
 <head>
@@ -333,16 +335,6 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
             </div>
             <div class="field-row">
               <div>
-                <div class="field-label">Auto-extend grace</div>
-                <div class="field-help">If the operator is mid-step when the soft cap hits, it gets this extra time to finish the current step before stopping.</div>
-              </div>
-              <div class="field-input-wrap">
-                <input class="field-input" type="number" value="30" min="0" max="60">
-                <span class="field-unit">minutes</span>
-              </div>
-            </div>
-            <div class="field-row">
-              <div>
                 <div class="field-label">Concurrent operator sessions</div>
                 <div class="field-help">How many operator runs can be active at the same time across this subaccount. Lowering this protects compute budget.</div>
               </div>
@@ -362,26 +354,6 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           <div class="settings-section-body">
             <div class="field-row">
               <div>
-                <div class="field-label">Max chain length</div>
-                <div class="field-help">A long task may run across multiple chained sessions. This caps how many sessions can chain before the task pauses for a human check-in.</div>
-              </div>
-              <div class="field-input-wrap">
-                <input class="field-input" type="number" value="50" min="1" max="500">
-                <span class="field-unit">sessions</span>
-              </div>
-            </div>
-            <div class="field-row">
-              <div>
-                <div class="field-label">Max wall-clock per task</div>
-                <div class="field-help">A task running longer than this (including pauses) will pause for review, even if it has not used its session budget.</div>
-              </div>
-              <div class="field-input-wrap">
-                <input class="field-input" type="number" value="30" min="1" max="365">
-                <span class="field-unit">days</span>
-              </div>
-            </div>
-            <div class="field-row">
-              <div>
                 <div class="field-label">Per-task budget cap</div>
                 <div class="field-help">Tasks pause for review when they use this many operator session minutes in total.</div>
               </div>
@@ -393,11 +365,10 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           </div>
         </div>
 
-        <!-- ── Section: IEE browser (NEW — Round 2) ───────────────────────── -->
+        <!-- ── Section: IEE browser (Round 3: section-header pill removed) ── -->
         <div class="settings-section">
           <div class="settings-section-head">
             <span class="settings-section-title">IEE browser</span>
-            <span class="admin-only-pill">Org admin</span>
           </div>
           <div class="settings-section-body">
 

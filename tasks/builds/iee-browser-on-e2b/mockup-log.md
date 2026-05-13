@@ -202,3 +202,91 @@ New dedicated pages proposed: none. All additions extend the existing Operator t
 - Per-subaccount daily ceiling field label: "Per-subaccount daily cost ceiling" is the longest label on the tab. Acceptable, or shorten to "Daily cost ceiling"?
 - Toggle Off-state dimming: is the visual change sufficient to signal "this is disabled", or is it too subtle?
 - Profile retention help text: "cookies, logins, MFA tokens" — acceptable level of detail for an admin audience, or still too technical?
+
+---
+
+## Round 3 — 2026-05-13
+
+**Operator feedback:** Three discrete changes: (1) cut Auto-extend grace, Max chain length, and Max wall-clock per task fields (backend hardcodes all three); (2) remove the "Org admin" pill from the IEE browser section header (v5 reframe: permissions uniform across tab); (3) IEE browser section fields stay visually identical to round 2.
+
+---
+
+**Codebase grounding (Step 0a) — PER SCREEN (mandatory):**
+
+- **iee-browser-on-e2b.html (single screen, Operator tab):**
+  extends `client/src/pages/AdminSubaccountDetailPage.tsx`
+  extends `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx`
+  extends `client/src/pages/govern/operatorSettings/_fields.tsx`
+  prior prototype round: `prototypes/iee-browser-on-e2b.html` (round 2, commit `be22af4`)
+
+---
+
+**Codebase grounding — round-wide:**
+
+Files read this round:
+- `docs/frontend-design-principles.md`
+- `tasks/builds/iee-browser-on-e2b/brief.md` (v4 and v5 reframe blocks)
+- `tasks/builds/iee-browser-on-e2b/mockup-log.md` (round 1 and 2 entries)
+- `prototypes/iee-browser-on-e2b.html` (round 2 committed at `be22af4` + working tree round 3)
+- `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx`
+- `client/src/pages/govern/operatorSettings/_fields.tsx`
+
+Vocabulary and conventions inherited (quoted from codebase):
+- `grid grid-cols-[1fr_160px] items-start gap-4 py-3.5 px-5 border-b border-slate-50 last:border-b-0` — NumberField row grid from `_fields.tsx`
+- `w-[90px] px-2.5 py-1.5 border border-slate-300 rounded-lg text-[13px] text-slate-800 bg-white text-right font-mono` — number input class from `_fields.tsx`
+- `bg-white border border-slate-200 rounded-xl mb-5 overflow-hidden shadow-sm` — section card from `OperatorSettingsTab.tsx`
+- `px-5 py-3.5 border-b border-slate-100` — section header from `OperatorSettingsTab.tsx`
+- `text-[14px] font-bold text-slate-800` — section title from `OperatorSettingsTab.tsx`
+- Section names quoted: `"Session limits"`, `"Task limits"` from `OperatorSettingsTab.tsx`
+- Field labels quoted from `OperatorSettingsTab.tsx`: `"Soft session cap"`, `"Auto-extend grace"`, `"Concurrent operator sessions"`, `"Max chain length"`, `"Max wall-clock per task"`, `"Per-task budget cap"`
+- Save footer copy: `"Changes apply to new sessions only. In-progress sessions are not affected."` from `OperatorSettingsTab.tsx`
+- `btn btn-primary` — save button class from `OperatorSettingsTab.tsx`
+
+New dedicated pages proposed: none. All extensions remain inside the existing Operator tab.
+
+---
+
+**Changes made:**
+
+1. Removed `Auto-extend grace` field row from Session limits section (backend hardcodes to 30 min; no operator value in exposing a constant).
+2. Removed `Max chain length` field row from Task limits section (backend hardcodes to 100 sessions).
+3. Removed `Max wall-clock per task` field row from Task limits section (backend hardcodes to 30 days).
+4. Removed `<span class="admin-only-pill">Org admin</span>` from the IEE browser section header (v5 reframe: permissions are now uniform across the tab; `subaccount_admin`, `org_admin`, and `system_admin` can all edit; `manager` is read-only; route-level gate enforces visibility so users without access never see the tab).
+5. Updated HTML comment block to say "Round 3" and document the changes.
+
+IEE browser section (4 fields: Status, Browser profile retention, Per-task cost ceiling, Per-subaccount daily cost ceiling) is visually and structurally identical to round 2. No copy changes, no layout changes.
+
+---
+
+**Design choices made (this round):**
+
+**Task limits section with one field.** The brief offered three options: keep the single-field section, merge into Session limits, or rename the combined section. Decision: keep "Task limits" as its own section with just "Per-task budget cap". Rationale: per-task budget is a fundamentally different concept from session-level limits (sessions are individual runtime slices; tasks span many sessions and can run for days). Collapsing them under "Session limits" would imply per-task budget is a session constraint, which misframes it for the admin reader. A single-field section looks slightly spare but is accurate. The alternative label "Limits" for a merged section would be too vague given both concerns live there. Keeping the existing section name preserves the codebase vocabulary (`"Task limits"` in `OperatorSettingsTab.tsx`) and avoids scope creep into the production component naming.
+
+**No tab-level "Admin only" indicator added.** The brief noted the round 1/2 pill implied the IEE browser section had stricter permissions than the rest of the tab, which was wrong after the v5 reframe. With the pill removed, the tab now has no per-field or per-section access indicators. The tab button itself carries the "Org admin" pill (sourced from `AdminSubaccountDetailPage.tsx`), which already signals the tab requires elevation. Users who cannot access the tab never see it. Adding any replacement indicator on the tab body would be redundant and would reinstate the misleading implication.
+
+---
+
+**Frontend-design-principles checks:**
+
+- Start with primary task: YES. 7 fields across 3 sections, all configuration. No monitoring, no observability.
+- Default to hidden: YES. Three backend-hardcoded constants (auto-extend grace, max chain length, max wall-clock) are now hidden rather than shown as editable fields. This is the right call: editable UI for constants is noise that erodes trust in the settings page.
+- One primary action: YES. Single "Save settings" button, unchanged.
+- Inline state: YES. Toggle state (On/Off) is inline next to the control. No status panel.
+- Re-check passed: YES. Non-technical admin sees 3 sections, 7 fields, all with plain-English labels and one-sentence help text. The per-task budget cap is alone in its section but the label is self-explanatory.
+- Extends existing surface: YES. Still the existing Operator tab, no new pages, no new nav.
+
+**Rule violations flagged:** none.
+
+---
+
+**Files modified:**
+- `prototypes/iee-browser-on-e2b.html` (overwritten with round 3)
+- `tasks/builds/iee-browser-on-e2b/mockup-log.md` (this entry appended)
+
+---
+
+**What to look at in operator review:**
+
+- Single-field "Task limits" section: does the lone "Per-task budget cap" field look right in its own section, or does the sparseness feel unfinished? (Merging into Session limits is still on the table if the operator prefers.)
+- Session limits section now has exactly 2 fields ("Soft session cap" and "Concurrent operator sessions"). Does this feel complete, or does losing "Auto-extend grace" leave a visible gap?
+- IEE browser section: pill removed; section header now just shows "IEE browser" with no access indicator. Does this feel appropriately neutral, or is there a reason to add any indicator back?
