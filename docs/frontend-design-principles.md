@@ -139,7 +139,7 @@ Pick the lowest-weight pattern that works. Do not mix three patterns on one scre
 
 ## Recurring UI patterns
 
-Concrete, copy-once-paste-often patterns that came out of the auto-knowledge-retrieval mockup pass (May 2026). When designing a new screen, default to these unless you have a clear reason not to. Mockup references in `prototypes/auto-knowledge-retrieval/`.
+Concrete, copy-once-paste-often patterns that came out of the auto-knowledge-retrieval mockup pass (May 2026). When designing a new screen, default to these unless you have a clear reason not to. Mockup references in `_archive/prototypes/auto-knowledge-retrieval/`.
 
 ### Three-dot (⋮) context menus on rows
 
@@ -148,7 +148,7 @@ Concrete, copy-once-paste-often patterns that came out of the auto-knowledge-ret
 - **Never show "Open" and "Edit" as two separate items.** Row-click opens the detail modal (which is both view and edit). The three-dots menu has *Edit* xor *Open*, never both.
 - **Reserve danger actions to the bottom**, separated by a divider, in red.
 
-Reference: `prototypes/auto-knowledge-retrieval/agent-data-sources.html`, `knowledge-documents-tab.html`.
+Reference: `_archive/prototypes/auto-knowledge-retrieval/agent-data-sources.html`, `knowledge-documents-tab.html`.
 
 ### Source / origin / provenance badges
 

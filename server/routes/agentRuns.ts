@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
@@ -9,17 +9,12 @@ import { agentRunCancelService } from '../services/agentRunCancelService.js';
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { agentRuns, agentRunSnapshots, agentExecutionEvents, agents } from '../db/schema/index.js';
-import { eq, and, gte, sql, inArray, count, asc, or } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
 import { ControllerStyleNotAllowedForAgentError } from '../services/controllerStyleResolver.js';
 import { logger } from '../lib/logger.js';
 import { runTraceService, InvalidRunTraceCursorError } from '../services/runTraceService.js';
 import type { RunTraceEventType } from '../../shared/types/runTraceEvent.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   resolveAgentRunVisibility,
   type AgentRunVisibilityRun,
@@ -205,17 +200,7 @@ router.get(
         res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
         return;
       }
-      const [run] = await db
-        .select({
-          id: agentRuns.id,
-          status: agentRuns.status,
-          startedAt: agentRuns.startedAt,
-          completedAt: agentRuns.completedAt,
-          summary: agentRuns.summary,
-        })
-        .from(agentRuns)
-        .where(and(eq(agentRuns.id, req.params.id), eq(agentRuns.organisationId, req.orgId!)))
-        .limit(1);
+      const run = await agentActivityService.getRunForTestShape(req.params.id, req.orgId!);
       if (!run) {
         res.status(404).json({ error: 'Run not found' });
         return;
@@ -241,25 +226,14 @@ router.get(
   asyncHandler(async (req, res) => {
     // Verify run exists and belongs to this org before serving trace data.
     const runId = req.params.id;
-    const [runRow] = await db
-      .select({ id: agentRuns.id, organisationId: agentRuns.organisationId })
-      .from(agentRuns)
-      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, req.orgId!)))
-      .limit(1);
+    const { run: runRow, toolCallsLog: rawToolCallsLog, skillEvents } =
+      await agentActivityService.getTraceEventsData(runId, req.orgId!);
     if (!runRow) {
       res.status(404).json({ error: 'Run not found' });
       return;
     }
 
-    // Read toolCallsLog from the snapshot table (H-5 blob extraction).
-    // RLS on agent_run_snapshots forbids cross-org reads (backed by run_id FK → agent_runs).
-    const [snap] = await db
-      .select({ toolCallsLog: agentRunSnapshots.toolCallsLog })
-      .from(agentRunSnapshots)
-      .where(eq(agentRunSnapshots.runId, runId))
-      .limit(1);
-
-    const toolCallsLog = (Array.isArray(snap?.toolCallsLog) ? snap.toolCallsLog : []) as Array<{
+    const toolCallsLog = (Array.isArray(rawToolCallsLog) ? rawToolCallsLog : []) as Array<{
       tool?: string;
       name?: string;
       input?: Record<string, unknown>;
@@ -268,34 +242,8 @@ router.get(
       iteration?: number;
     }>;
 
-    // Trust & Verification Layer §9 cross-entity guard — look up canonical
-    // agent_execution_events.id per tool-call so the Run-trace UI can pass a
-    // real eventId to the corrections route. The toolCallsLog blob in the
-    // snapshot does not carry event UUIDs; we match by (skillSlug, ordinal-
-    // within-slug). The agent loop does NOT emit skill.invoked / skill.completed
-    // for every tool call — those are emitted by special paths only — so
-    // tool calls that don't have matching events resolve to eventId: null
-    // and the UI hides the Correct affordance.
-    const eventRows = await db
-      .select({
-        id: agentExecutionEvents.id,
-        eventType: agentExecutionEvents.eventType,
-        payload: agentExecutionEvents.payload,
-      })
-      .from(agentExecutionEvents)
-      .where(
-        and(
-          eq(agentExecutionEvents.runId, runId),
-          or(
-            eq(agentExecutionEvents.eventType, 'skill.invoked'),
-            eq(agentExecutionEvents.eventType, 'skill.completed'),
-          ),
-        ),
-      )
-      .orderBy(asc(agentExecutionEvents.sequenceNumber));
-
     // Narrow payload's runtime shape to the field linkToolCallsToEventIds reads.
-    const eventRowsForLink = eventRows.map((r) => ({
+    const eventRowsForLink = skillEvents.map((r) => ({
       id: r.id,
       eventType: r.eventType,
       payload:
@@ -482,17 +430,8 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
-    const [result] = await db
-      .select({ count: count() })
-      .from(agentRuns)
-      .where(and(
-        eq(agentRuns.organisationId, req.orgId!),
-        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
-        eq(agentRuns.isSubAgent, false),
-        eq(agentRuns.isTestRun, false),
-      ));
-
-    res.json({ runningAgents: Number(result?.count ?? 0) });
+    const liveCount = await agentActivityService.getLiveRunCount(req.orgId!);
+    res.json({ runningAgents: liveCount });
   })
 );
 
@@ -525,39 +464,11 @@ router.get(
     const { subaccountId, sinceDays } = req.query;
     const days = Math.min(Number(sinceDays ?? 14), 90);
 
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-
-    const conditions = [
-      gte(agentRuns.createdAt, since),
-      eq(agentRuns.organisationId, req.orgId!),
-    ] as ReturnType<typeof eq>[];
-    if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId as string));
-
-    const rows = await db
-      .select({
-        date: sql<string>`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`,
-        completed: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
-        failed: sql<number>`count(*) filter (where ${agentRuns.status} = 'failed')::int`,
-        timeout: sql<number>`count(*) filter (where ${agentRuns.status} = 'timeout' or ${agentRuns.status} = 'budget_exceeded')::int`,
-        other: sql<number>`count(*) filter (where ${agentRuns.status} not in ('completed','failed','timeout','budget_exceeded'))::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(agentRuns)
-      .where(and(...conditions))
-      .groupBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`)
-      .orderBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`);
-
-    // Fill in missing days with zeros
-    const result: Array<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }> = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const found = rows.find(r => r.date === dateStr);
-      result.push(found ?? { date: dateStr, completed: 0, failed: 0, timeout: 0, other: 0, total: 0 });
-    }
-
+    const result = await agentActivityService.getDailyActivity(
+      req.orgId!,
+      days,
+      subaccountId as string | undefined,
+    );
     res.json(result);
   })
 );
@@ -673,37 +584,18 @@ router.get(
     const { runId } = req.params;
     const orgId = req.orgId!;
 
-    const scopedDb = getOrgScopedDb('agentRuns.artifactsList');
-    const [runRow] = await scopedDb
-      .select({
-        id: agentRuns.id,
-        organisationId: agentRuns.organisationId,
-        subaccountId: agentRuns.subaccountId,
-        agentId: agentRuns.agentId,
-        executionScope: agentRuns.executionScope,
-      })
-      .from(agentRuns)
-      .where(eq(agentRuns.id, runId))
-      .limit(1);
+    const runRow = await agentActivityService.getRunWithAgentInfo(runId);
 
     if (!runRow) {
       res.status(404).json({ error: 'Run not found' });
       return;
     }
 
-    // System-managed agents have a non-null `agents.system_agent_id` FK to
-    // `system_agents` — same pattern as runArtifacts.ts:106-114.
-    const [agentRow] = await scopedDb
-      .select({ systemAgentId: agents.systemAgentId })
-      .from(agents)
-      .where(eq(agents.id, runRow.agentId))
-      .limit(1);
-
     const visibilityRun: AgentRunVisibilityRun = {
       organisationId: runRow.organisationId,
       subaccountId: runRow.subaccountId,
       executionScope: runRow.executionScope,
-      isSystemRun: Boolean(agentRow?.systemAgentId),
+      isSystemRun: Boolean(runRow.systemAgentId),
     };
 
     const userCtx = await buildUserContextForRun(req, {

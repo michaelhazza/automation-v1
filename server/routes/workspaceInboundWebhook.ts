@@ -21,7 +21,7 @@
 import { Router, raw } from 'express';
 import crypto from 'crypto';
 import { eq, sql } from 'drizzle-orm';
-import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D19 deferred — email→identity bootstrap lookup; withAdminConnection wrap tracked in tasks/todo.md"
+import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="D19 deferred — email→identity bootstrap lookup; withAdminConnection wrap tracked in tasks/todo.md" // guard-ignore no-db-in-routes: 0011-workspace-inbound-webhook-db-exception unauthenticated webhook; identity-bootstrap lookup precedes org resolution
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { withOrgTx } from '../instrumentation.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';

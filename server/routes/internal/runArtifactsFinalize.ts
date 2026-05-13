@@ -7,11 +7,7 @@
 
 import { Router, type Request } from 'express';
 import { timingSafeEqual } from 'node:crypto';
-import { sql } from 'drizzle-orm';
-import { db } from '../../db/index.js'; // guard-ignore: rls-contract-compliance reason="internal finalize route opens an org-scoped tx with set_config GUC using the organisationId from the authenticated worker payload — no HTTP auth context exists for getOrgScopedDb on this worker-facing endpoint"
 import { asyncHandler } from '../../lib/asyncHandler.js';
-import { withOrgTx } from '../../instrumentation.js';
-import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import * as fileDeliveryService from '../../services/fileDeliveryService.js';
 import { logger } from '../../lib/logger.js';
 import type { RunArtifact } from '../../../shared/types/runArtifact.js';
@@ -29,41 +25,6 @@ function verifyWorkerSecret(req: Request): boolean {
   // the secret length, which is fixed and not secret.
   if (supplied.length !== secret.length) return false;
   return timingSafeEqual(Buffer.from(supplied), Buffer.from(secret));
-}
-
-/**
- * Verifies the supplied agentRunId belongs to the supplied organisationId.
- * The worker payload's organisationId is otherwise untrusted; without this
- * cross-check, a compromised worker could attribute any tenant's run to any
- * other tenant's organisation. The lookup uses an admin connection because
- * we cannot scope to the claimed organisationId until we have verified it.
- */
-async function verifyRunBelongsToOrg(
-  agentRunId: string,
-  organisationId: string,
-): Promise<boolean> {
-  return withAdminConnection(
-    {
-      source: 'internal:run-artifacts:finalize:verifyRunBelongsToOrg',
-      reason: 'Verify worker-supplied organisationId owns the run before opening org-scoped tx',
-    },
-    async (tx) => {
-      // Elevate to admin_role so this cross-org SELECT bypasses agent_runs' FORCE RLS.
-      // The worker-supplied organisationId is what we are validating here, so the
-      // GUC-based RLS policy cannot apply — without admin_role the policy filters
-      // every row and every legitimate upload would be rejected as tenant_mismatch.
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-
-      const result = await tx.execute<{ organisation_id: string }>(
-        sql`SELECT organisation_id FROM agent_runs WHERE id = ${agentRunId}::uuid LIMIT 1`,
-      );
-      const rows = Array.isArray(result)
-        ? result
-        : ((result as { rows?: unknown[] }).rows ?? []);
-      const row = rows[0] as { organisation_id?: string } | undefined;
-      return row?.organisation_id === organisationId;
-    },
-  );
 }
 
 interface FinalizeBody {
@@ -159,50 +120,16 @@ router.post(
       });
     }
 
-    // Tenant-isolation cross-check: the worker payload's organisationId is
-    // untrusted. Verify it actually owns the supplied agentRunId before opening
-    // the org-scoped tx with that GUC. A compromised or misconfigured worker
-    // can otherwise attribute any tenant's run to any other tenant's org.
-    const runOwnedByOrg = await verifyRunBelongsToOrg(body.agentRunId, body.organisationId);
-    if (!runOwnedByOrg) {
-      logger.warn('internal.run_artifacts.finalize.tenant_mismatch', {
-        suppliedOrganisationId: body.organisationId,
-        agentRunId: body.agentRunId,
-      });
-      return res.status(403).json({ error: { code: 'tenant_mismatch', message: 'agentRunId does not belong to organisationId' } });
-    }
-
-    let result: Awaited<ReturnType<typeof fileDeliveryService.upload>> | undefined;
-
-    // guard-ignore-next-line: rls-contract-compliance reason="internal finalize route opens an org-scoped tx with set_config GUC using the organisationId from the authenticated worker payload — no HTTP auth context exists for getOrgScopedDb on this worker-facing endpoint"
-    await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT set_config('app.organisation_id', ${body.organisationId}, true)`,
-      );
-      await withOrgTx(
-        {
-          tx,
-          organisationId: body.organisationId,
-          source: 'internal:run-artifacts:finalize',
-        },
-        async () => {
-          result = await fileDeliveryService.upload({
-            organisationId: body.organisationId,
-            agentRunId: body.agentRunId,
-            ieeRunId: body.ieeRunId,
-            artifactKind: body.artifactKind as RunArtifact['artifactKind'],
-            displayName: body.displayName,
-            mimeType: body.mimeType,
-            contentBuffer,
-            retainUntil,
-          });
-        },
-      );
+    const result = await fileDeliveryService.finalizeWorkerUpload({
+      organisationId: body.organisationId,
+      agentRunId: body.agentRunId,
+      ieeRunId: body.ieeRunId,
+      artifactKind: body.artifactKind as RunArtifact['artifactKind'],
+      displayName: body.displayName,
+      mimeType: body.mimeType,
+      contentBuffer,
+      retainUntil,
     });
-
-    if (!result) {
-      return res.status(500).json({ error: { code: 'internal_error', message: 'Upload did not complete' } });
-    }
 
     logger.info('internal.run_artifacts.finalize', {
       organisationId: body.organisationId,

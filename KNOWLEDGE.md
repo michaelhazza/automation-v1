@@ -1,5 +1,7 @@
 # Project Knowledge Base
 
+## 2026-05 quarterly trim — see docs/knowledge-sweep-inventory.md for the full inventory and docs/decisions/ for promoted patterns.
+
 Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
 Read this at the start of every session. Never edit or remove existing entries — only append.
 
@@ -114,7 +116,7 @@ When a rebase involves merge conflicts in a heavily-edited file, the resolved fi
 
 ### 2026-04-17 Correction — Verify reviewer feedback against the PR diff perspective, not just the local file
 
-During the MCP tool invocations PR, a reviewer flagged a `const durationMs` shadowing bug multiple rounds. Each time, reading the local file and `git show origin/...` showed clean code, so the feedback was dismissed. The actual issue was that intermediate rebase states had introduced the bug into the PR's cumulative diff, even though current HEAD was clean. Rule: if a reviewer repeatedly flags the same issue and the local file looks correct, run `git diff main...HEAD -- <file>` before dismissing. If the cumulative diff is also clean, the reviewer is misreading diff format markers — confirm and explain.
+[compressed 2026-05] ChatGPT/LLM diff misreading — see ADR 0015 and originating entries at L111 / L119.
 
 ### 2026-04-17 Gotcha — GitHub unified diff format is commonly misread as "both lines present"
 
@@ -301,7 +303,7 @@ Applies beyond Universal Brief: next up are approval dispatch (`BriefApprovalCar
 
 ### 2026-04-23 Correction — UI mockups surfaced every backend capability as a dashboard instead of designing for the user task
 
-Generated five mockups for the cached-context feature that were information-rich enterprise-grade monitoring dashboards — radial utilization rings per model tier, 7-day run-history calendars, prefix-hash identity panels with components JSON, "is caching making us money?" Usage Explorer with trend charts, bundle ranking, cost-split donut, per-tenant financial breakdown. User pushback: "way too complicated for what this app's supposed to be: easy to use. There's just way too much information being surfaced here." The actual need was simple attachment UX — how the user attaches document bundles to agents / tasks / scheduled tasks. Every dashboard screen was a data-model-first trap: the spec exposes `bundle_utilization`, `prefix_hash`, `cache_creation_tokens`, per-tenant rollups, so I surfaced all of it as UI. Rule going forward: **start with the user's primary task, not the capability surface.** Before any UI artifact, answer (a) who is the primary user, (b) what single task are they here to complete, (c) what's the minimum information needed, and default every metric dashboard / diagnostic panel / aggregated-cost view to HIDDEN or deferred. See [`CLAUDE.md` § Frontend Design Principles](CLAUDE.md) + [`docs/frontend-design-principles.md`](docs/frontend-design-principles.md) for the durable rule set. Backend specs stay comprehensive; frontend surfaces stay minimal — those are two different decisions. Generalises to every future UI artifact in this repo: mockups, components, pages, empty states, admin-only views.
+Promoted to ADR 0016 on 2026-05.
 
 ### 2026-04-23 Pattern — Spec review arc converges on additive invariants after structural work lands
 
@@ -337,11 +339,7 @@ Applies to any implementation-readiness spec review: API contracts, primitive ro
 
 ### 2026-04-23 Pattern — ChatGPT PR-review re-raises previously-adjudicated items under variant framing in follow-up rounds
 
-During PR #183 (cached-context-infrastructure) the ChatGPT review loop went two rounds. Round 1 produced 6 findings: 1 implemented, 4 rejected, 1 deferred (with a documented spec-doc follow-up task). Round 2 produced 4 findings — and 3 of the 4 were the Round 1 rejections re-raised under slightly different framing (subaccount-isolation variant, concurrency-guarantee variant, retention-lifecycle variant). The fourth was a low-severity scope-creep suggestion outside the PR's stated phase. Net new signal in Round 2: zero. The user's correct posture was to reject all four. 
-
-The failure mode: ChatGPT appears to pattern-match on the Round 1 discussion surface (the areas where it previously engaged) rather than re-reading the PR diff / spec state *post*-Round-1 fixes. The model re-opens discussions that were already closed with a recorded architectural rationale, hoping the variant phrasing will change the outcome. 
-
-**Rules for future `chatgpt-pr-review` sessions:**
+Promoted to ADR 0015 on 2026-05.
 
 ### 2026-05-03 Pattern — GHL agency-level OAuth uses a dual-table token architecture (seen 1 time)
 
@@ -354,13 +352,6 @@ For GHL (and any agency-initiated OAuth install flow), the state parameter passe
 ### 2026-05-03 Gotcha — Webhook event dedupe row MUST commit AFTER side effects, not before (seen 1 time)
 
 The GHL webhook dedupe row (keyed on `gohighlevel_webhook_id`) must be written only after all side effects for the event have committed successfully. If the dedupe key is written before side effects, a partial failure (side effect fails after the dedupe commits) silently drops the event — GHL's retry sees a committed dedupe key and treats the event as durably processed. Correct ordering: run side effects → commit dedupe row atomically. Any code path that exits before completing side effects must leave the dedupe key absent. The `xmax = 0` upsert guard on `subaccounts` makes side effects idempotent under replay, so re-delivery is safe. Before shipping Phase 5: verify `ghlWebhookMutationsService.ts` commits in this order; if it commits before side effects, reverse the ordering — it is a hard spec invariant, not a "check during implementation".
-
-1. **After Round 1, expect Round 2 to re-raise the Round 1 rejects.** Budget it mentally — don't be surprised. The correct response to a re-raise is `reject` with rationale "already adjudicated in round 1 — no new information", not a fresh analysis as if the item were new.
-2. **A round that produces only variant-reframings of prior rejections is a convergence signal, not a new round of signal.** Finalize after that round. Additional rounds will produce diminishing returns, not insight.
-3. **In the Recommendations and Decisions table for a re-raise, explicitly reference the Round 1 item number in the rationale.** E.g. "Re-raise of R1 #2 under variant framing — spec §4.2 already pins `bundle_version`; no new information." This makes the regression pattern visible in the log and short-circuits future reviewers trying to evaluate the re-raise on its merits.
-4. **Record the round-over-round regression count as a top-theme in the session log** so pattern frequency across PRs is grep-able. Theme vocabulary: `regression` (a re-raise of a prior round's rejected item), distinct from `scope` (new speculative polish) or architecture (a genuinely new structural concern).
-
-This pattern is specific to `chatgpt-pr-review` (interactive PR loop). `spec-reviewer` (Codex, walk-away) shows a different shape — iterations genuinely converge on additive invariants as documented in the 2026-04-23 spec-review-arc entry above. The difference is that Codex is running over the *current* file state on each iteration; ChatGPT is threading a conversation and carries prior-round context forward as soft state.
 
 ### 2026-04-23 Pattern — Architecturally-sound PRs often need only one round of external PR review; stop at zero-new-signal
 
@@ -472,6 +463,8 @@ When a reviewer flags a bug in a feature that has two functionally-equivalent co
 **How to apply:** When the first bug finding in a feature is "path A works, path B doesn't," don't just fix path B. Read both paths, find the shared primitive (the thing they're both computing), lift it to a pure helper, route both callers through it. Run tests, commit together. If the larger consolidation risks scope creep (validation pipeline on retry, etc.), fix the immediate divergence and file the remaining consolidation as a tagged todo — but always do the immediate consolidation, not a one-path patch.
 
 ### 2026-04-24 Gotcha — `node --watch` restart silently kills in-flight long-running LLM jobs
+
+[cross-reference 2026-05] See also the 2026-04-21 entry `Windows node --watch kills the dev server abruptly, SIGTERM handlers never fire` above — same root cause, different consequence (LLM-job loss here, port-stuck-in-TIME_WAIT there).
 
 `node --watch` drops all open TCP connections when it restarts (triggered by any file save on a watched path). In-flight Anthropic API calls are recorded by Anthropic as 499 "Client disconnected" and exit immediately. The pg-boss job entry stays in `active` state because the error handler in the worker never ran (process was killed mid-execution). This produces two symptoms: (1) the UI shows skills stuck mid-classification indefinitely; (2) the Resume button never appears because the DB job is still `classifying`, not `failed`. Production fix: don't run long-running classification jobs under `node --watch` — always use a stable process (e.g. `node dist/server.js`) for any batch that takes >30 seconds.
 
@@ -665,27 +658,7 @@ const visible = allProposals
 
 ### 2026-04-24 Gotcha — ChatGPT reviewers hallucinate "duplicate line" bugs by reading unified diffs as final state (seen 2 times in this review)
 
-**Signature pattern.** ChatGPT (and similar LLM reviewers) cite what looks like two adjacent JSX / code lines in HEAD, both keyed identically, with *slightly different attributes*. When you verify against the actual file, only one line is present — the other is the `-` side of a unified diff for an edit that replaced the first with the second. The reviewer read both sides of a diff hunk as coexisting in the final file.
-
-**Example (PR #187, ChatGPT review rounds 1 and 3 against the SAME file `SignalPanel.tsx`, same branch, within hours):**
-```
-Round 1 claim: "broken <li> — stray <span> duplicated outside structure"
-Round 3 claim: "duplicated <li> opening — className 'flex items-center justify-between text-[13px]' and className 'text-[13px]' both present in HEAD"
-```
-Current file: exactly one `<li>` at one line, with `className="text-[13px]"`. The other className was the pre-edit value; both appear in the PR's cumulative diff as `-` / `+` lines, not both in HEAD.
-
-**Why this matters here and not for a human reviewer.** A human reading `git diff main...HEAD` reads the `-`/`+` markers correctly; an LLM reviewer fed the diff as raw text can miss the markers when the two lines differ by only a few words and the surrounding context repeats the same key (`key={s.slug}`). The failure mode is *visual similarity without syntactic markers*.
-
-**Review-agent response.** When ChatGPT flags "duplicated line" or "two versions coexist" in a file, **always verify directly against HEAD with `Read`** before taking action:
-1. Read the specific lines called out.
-2. Grep for *both* cited strings in the file (if only one is present, the other is a diff artefact).
-3. Include the verbatim file excerpt in the Round block as rejection evidence — reviewers that hallucinate don't back down on hearsay.
-
-**Same-session recurrence.** When the same hallucination pattern surfaces a second time in the same session on the same file, that is signal: the reviewer is anchored on the diff, not HEAD. No further rounds will recover signal from that anchor. Finalise the session rather than opening another round.
-
-**Prior entries on this pattern:** 2026-04-17 Gotcha (rebase with merge conflicts), 2026-04-17 Correction (verify against PR diff perspective), 2026-04-17 Gotcha (GitHub unified diff commonly misread). PR #226 (system-monitoring-coverage, 2026-04-28) added two more on the same round: (a) reviewer claimed `SkillAnalyzerExecuteStep.tsx` had two `import RestoreBackupControl` lines — file actually has one; (b) reviewer suggested "improving" `useAsync = opts?.forceSync === true ? false : isAsyncMode()` to a snippet byte-identical to the existing line, plus a comment that already existed verbatim. Both were claimed at high (🔴) severity and verified false in under 30 seconds with `Read`. This is now **6 occurrences across 3 PRs** — a structural failure mode of LLM PR review, not a one-off. The right mitigation is in the review-agent contract (always verify with `Read` before acting), not in the codebase.
-
-**Variant — "improvement" identical to existing code.** A second false-positive subclass: the reviewer's proposed "fix" is the same code already in the file, sometimes word-for-word, sometimes wrapping the existing line in a comment block that already exists. Detection: paste the reviewer's "after" snippet next to HEAD; if no token differs, reject with the diff as evidence. High severity claims by a reviewer do NOT prove the underlying issue is serious — the severity reflects how the reviewer felt about a pattern they think they saw, not whether the pattern exists. Verify the finding's substance before letting the severity claim drive escalation weight.
+Promoted to ADR 0015 on 2026-05.
 
 ### 2026-04-24 Convention — Don't spot-fix a string if a deferred refactor already replaces the pathway
 
@@ -760,25 +733,7 @@ The two `WHERE` predicates are literally identical — same column, same operato
 
 ### 2026-04-25 Convention — Tagged-log-as-metric is the project's metrics convention; resist adding new metric infrastructure without a scaling driver
 
-The codebase deliberately treats `logger.error('event_name', { ...payload })` and `logger.warn('event_name', { ...payload })` as the metrics surface. The log pipeline (downstream sink — PostHog / Datadog / similar) counts occurrences of each `event_name` tag and builds rate / count / latency series from them. There is no in-process counter library, no `metrics.increment(...)` API, and no Prometheus registry — by design.
-
-**Anchors in the codebase:**
-- `server/services/delegationOutcomeService.ts` — `delegation_outcome_write_failed` tag is the metric for delegation-outcome write failures.
-- `server/services/incidentNotifyService.ts` — `incident_notify_enqueue_failed` is the metric for notification-pipeline drops.
-- `architecture.md` notification/delegation section documents the convention.
-
-**Rule for review agents and contributors:** when a reviewer recommends "add a counter metric `foo_failures_total` + a 1-retry on best-effort path", check whether the relevant `logger.error` / `logger.warn` tag already exists. If it does, the metric is already wired via the log pipeline — adding a parallel counter creates two sources of truth and contradicts the codebase convention. The right action is to reject the metric suggestion and reference this convention.
-
-**When to actually add metric infra.** When any of the following becomes true:
-1. A specific scaling driver requires sub-log-pipeline latency (e.g. circuit-breaker decisions inside a hot loop where the log roundtrip is too slow).
-2. A push-channel or external-alert surface needs a counter primitive that isn't satisfied by tagged logs (Phase 0.75+).
-3. The log volume itself becomes a cost driver and downsampling is needed at the source.
-
-Until one of those is on the roadmap, every "add a counter" suggestion gets rejected with a pointer to the existing tagged log.
-
-**Why this looks like a hack but isn't.** Metric libraries solve cardinality, aggregation, and retention. The log sink already solves all three for tagged-event payloads — adding a separate counter library would mean reproducing the aggregation in two places and reconciling them. Single-source-of-truth wins.
-
-**Applied to:** PR #188 ChatGPT round 1 finding 7 — rejected `incident_notify_failures_total` counter + retry suggestion because `logger.error('incident_notify_enqueue_failed', ...)` already IS the metric, and the "best effort" contract on the notify path explicitly excludes retry. Session log: `tasks/review-logs/chatgpt-pr-review-claude-system-monitoring-agent-PXNGy-2026-04-24T21-39-06Z.md`.
+Promoted to ADR 0012 on 2026-05.
 
 
 ### [2026-04-25] Correction — Audit framework cited wrong file paths (RLS plumbing, client entry, scheduling/briefing services)
@@ -1093,47 +1048,7 @@ When a reviewer iteration produces a Round 1 finding that is reasonable to defer
 
 ### [2026-04-28] Pattern — "Suppression is success" under single-writer invariants
 
-A single-writer event emitter (one process / one row / one path is authoritative for a given fact at a given time) sometimes loses a coordination race — another writer got there first, or a stamped-newer payload made this write redundant. The losing path must NOT return `success: false`. It must return `success: true, suppressed: true` (with a `reason` if useful).
-
-**Why.** `success: false` is "this thing didn't happen and is broken." Suppression is "this thing didn't happen because it didn't need to — the invariant is intact." Returning failure on a coordination loser triggers four downstream regressions:
-
-1. **Retry storms.** Caller retries on `success: false`; every retry re-loses the coordination race and amplifies the storm.
-2. **False incident signals.** Alerting fires on the failure rate; oncall sees an "outage" that is the system working as designed.
-3. **Broken metrics.** "Write success rate" drops; the chart is meaningless because half the failures are healthy suppressions.
-4. **Alert fatigue.** Operators learn to ignore the alert. The next time it fires for a real reason, they ignore it too.
-
-**Pattern shape.**
-
-```ts
-// Coordination loser path:
-if (existingTimestamp >= incomingTimestamp) {
-  return { success: true, suppressed: true, reason: 'stale_payload' };
-}
-
-// Or:
-if (alreadyClaimedBy(otherWriter)) {
-  return { success: true, suppressed: true, reason: 'lost_claim' };
-}
-```
-
-The shape `{ success: true, suppressed: true, reason }` lets callers distinguish "wrote new state" from "no-op'd safely" without treating the latter as failure. Metrics that care about throughput should bucket suppressed separately; metrics that care about correctness should treat suppressed as success.
-
-**Where it applies.** Any single-writer emitter that can lose a coordination race:
-- Diagnosis writers (system-monitoring `writeDiagnosis` — already enforces this; PR #218).
-- Status-transition writers under last-write-wins ordering (terminal status reached via a different path).
-- Cache populators where a fresher value already landed.
-- Idempotent webhook receivers where the same event-id was processed by a sibling pod.
-- Notification dedup paths where the same digest was sent N seconds ago.
-
-**Where it does NOT apply.** Multi-writer or non-coordinated paths where `success: false` genuinely means "broken": database connection lost, malformed payload, permission denied, downstream API 5xx. The pattern is specifically for the class where "another writer beat me" is a healthy outcome.
-
-**Architectural anchor.** `architecture.md § Home dashboard live reactivity` (line 1515) — names the pattern at the point where it's first enforced. Any new single-writer emitter should cite that anchor or extend it.
-
-**Applied to:** PR #218 — `writeDiagnosis` in the system-monitoring agent emits `{ success: true, suppressed: true }` on coordination losers; the home-dashboard reactivity client treats suppressed-success identically to fresh-success for metric and freshness purposes (no retry, no error toast). Forward-looking codebase-wide enforcement (reusable utility + lint/grep guard) routed to `tasks/todo.md § PR Review deferred items / PR #218`.
-
-**Detection heuristic.** When reviewing a single-writer emitter, grep the diff for `success: false` returns. Each hit must be either: (a) a genuine failure mode (DB / network / permission / malformed input), or (b) a coordination loser that should be flipped to `success: true, suppressed: true`. The grep pattern + a follow-up lint guard are the path from "well understood" to "impossible to violate quietly".
-
-**ChatGPT review framing.** Both PR #218 review rounds reinforced this — Round 1 flagged the pattern as forward-looking standardisation; Round 2's optional follow-up explicitly named "codify suppression = success as a reusable utility or invariant check + add a lightweight lint or grep-based guard to prevent regressions" as the highest-leverage next step. The review rounds form the canonical citation for why the pattern matters at the codebase level, not just the system-monitoring level.
+Promoted to ADR 0013 on 2026-05.
 
 ---
 
@@ -1609,13 +1524,7 @@ The leftmost sidebar already implements a persistent org/subaccount context swit
 
 ### [2026-04-29] Correction — ChatGPT (and likely other LLMs) frequently misread unified diff format in PR review
 
-ChatGPT routinely treats both `-` (removed) and `+` (added) lines in a unified diff as if both are present in the final source. When ChatGPT claims a "double join", "duplicate assignment", "redundant innerJoin + leftJoin", or any other "two near-identical statements coexist" pattern in code review of a diff, **verify by reading the actual file (or `git show origin/<branch>:file`) before accepting the finding**. The `-` line was removed; only the `+` line exists in HEAD.
-
-Both Round 1 and Round 2 of the `fix-logical-deletes` ChatGPT review (PR #232, 2026-04-29) made this exact error on the same code (`server/services/delegationGraphService.ts` lines 50 and 98 — single `.leftJoin` per query, no `.innerJoin`). Round 1 framed it as "Critical — incorrect join structure"; Round 2 framed it as "Double-join pattern (minor observation)" and "Normalize join pattern for soft-deleted relations" follow-up. Same hallucination, different severity framing. Reviewer-self-correction does not happen across rounds — the agent did not recognise it had already raised the same false claim.
-
-Operational rule: when an LLM reviewer cites a diff hunk verbatim and reasons about both `-` and `+` lines as if both ship, treat the finding as suspect-by-default. Read the file. The shorter the cited hunk and the closer the two lines are textually, the higher the prior on misread. Builds on the 2026-04-17 entry "GitHub unified diff format is commonly misread as 'both lines present'" — that earlier entry was about human reviewers; this one extends the pattern to LLM reviewers (seen 2 times in PR #232 review alone). Session log: `tasks/review-logs/chatgpt-pr-review-fix-logical-deletes-2026-04-29T00-29-56Z.md`.
-
-**PR #234 additional occurrences (2026-04-29, seen 3 more times):** ChatGPT Round 1 raised F1 ("duplicate brief_created response shapes"), F3 ("login rate limit runs before validation"), and F4 ("file.buffer and createReadStream both set") as blockers. All three were false positives — the current code had already unified the type, already ordered validateBody before the asyncHandler, and already removed file.buffer. ChatGPT was reading the `-` (deleted) sides of those diff hunks as still-present code. Verification in each case: single `Read` of the file confirmed the `-` line did not exist. This brings the total to **5 false positives of this type across PRs #232 and #234** — treat any diff-citing "still present" claim as suspect-by-default.
+Promoted to ADR 0015 on 2026-05.
 
 ### [2026-04-29] Pattern — Server-authoritative context updates: id is source of truth, name falls back to stored value
 
@@ -1753,7 +1662,7 @@ In `agentResumeService.ts`, the first resume call cleared `integration_resume_to
 
 ### [2026-05-01] Gotcha — local `main` ref is stale; always use `origin/main` for PR diffs
 
-The local `main` branch pointer only updates when you check out that branch or run `git fetch`. If you've been on a feature branch for a while, `git diff main...HEAD` uses a stale commit as the base, producing an inflated diff (e.g. 588 files instead of the real 20). `origin/main` is always fresh after `git fetch`. **Rule:** every review agent that generates a diff must (1) run `git fetch origin main` first, and (2) use `git diff origin/main...HEAD` — never the local `main` ref. Both `chatgpt-pr-review` and `chatgpt-spec-review` were updated to enforce this. Discovered during PR #246 lint-typecheck-baseline session where the code-only diff was 4.4MB/501 files vs. the correct 100KB/19 files.
+[compressed 2026-05] Duplicate of the 2026-05-01 `chatgpt-pr-review diff must use origin/main` entry above — same rule, 20 lines apart.
 
 ### [2026-05-01] Pattern — Subaccount scope guards must use null-safe checks to preserve org-level connection validity
 
@@ -1817,7 +1726,7 @@ When a finalisation gate enforces "for each X, declare yes/no/n/a" (doc-sync swe
 
 ### [2026-05-01] Pattern — ChatGPT PR-review diff misreading: treat "" claims as needing grep verification
 
-ChatGPT-web reviewing a PR diff frequently treats `-foo` (removed line) and `+bar` (added line) as both present in the current file, producing "duplicate code" findings that do not exist on disk. In PR #249 (lint-typecheck-post-merge-tasks), 3 of 17 findings across 3 rounds were diff-misreadings — HelpHint double toggle (R1 F2 / R2 F1 / R3 F1), duplicate `onClick` in McpServersPage (R2 F2 / R3 F2), duplicate try/catch — each resolved to one line in the file. **Rule:** when ChatGPT claims a "duplicate" pattern in code, verify with `grep -c <pattern> <file>` or read the file before acting. If grep returns 1, the claim is a diff misreading; auto-reject and document. If grep returns ≥ 2, the duplicate is real. Cost of grep is ~1 sec; cost of "fixing" a hallucinated duplicate is unwinding it later. Source: `tasks/review-logs/chatgpt-pr-review-lint-typecheck-post-merge-tasks-2026-05-01T08-50-17Z.md`.
+[compressed 2026-05] ChatGPT/LLM diff misreading — see ADR 0015 and originating entries at L111 / L119.
 
 ### [2026-05-01] Pattern — Post-increment on the last use of a local is a no-op; `no-useless-assignment` correctly removes it
 
@@ -1911,7 +1820,7 @@ Applied in: runOptimiserScan + skillLatency query (stream-2-optimiser-finish, in
 
 ### [2026-05-03] Pattern — ChatGPT diff-misreading: grep-verify every cited line before triaging
 
-When ChatGPT reviews a diff (especially a large one) and produces "critical" findings citing specific lines or symbols (e.g. `(updated as unknown as Record<string, string>).accessToken returns encrypted token`), do NOT pre-accept the verdict — grep the cited symbol against HEAD before triaging. Pattern observed on chatgpt-pr-review PR #254 round 1: 3 of 4 "critical" findings cited code that did not exist in the branch (hallucinated casts, false retry-policy claims, false ordering invariants), and the verified TRUE finding was already covered by an existing spec deferral. Net code-change-required from a "4 critical / 4 high-impact" review: 0 in round 1, 1 surgical observability commit in round 2 after a re-prompt asking for operational checks rather than line citations. **Rule:** every ChatGPT finding that names a file, line, symbol, or invariant gets a `grep` (or `Read`) verification round before going on the triage table. Mark verdicts FALSE and reject them when grep returns zero matches; mark verdicts TRUE and triage normally when the cited code actually exists. Without this gate the review loop wastes time chasing ghosts; with it, ChatGPT becomes a cheap second pair of eyes for behavioural review while you maintain code-truth as the source of truth. Source: chatgpt-pr-review PR #254 ghl-module-c-oauth round 1 (3-of-4 critical findings hallucinated against HEAD).
+[compressed 2026-05] ChatGPT/LLM diff misreading — see ADR 0015 and originating entries at L111 / L119.
 
 ### [2026-05-03] Pattern — Observability-as-leverage: cross-provider filter field + lifecycle boundary log emits
 
@@ -2095,6 +2004,8 @@ Either layer alone is correctness-sufficient. Together they survive (a) reducer 
 
 ### 2026-05-04 Gotcha — Cleanup jobs on FORCE-RLS tables MUST use withAdminConnection
 
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` below for the broader "what goes wrong" family.
+
 A pg-boss handler that runs `db.delete(...)` directly on a FORCE-RLS table silently affects 0 rows on every tick. Background handlers run outside `withOrgTx` context — `current_setting('app.organisation_id', true)` returns an empty string — and the RLS policy's `<> ''` predicate evaluates false, making every row invisible. The DELETE succeeds with rowcount 0; nothing logs an error.
 
 Pattern: cross-org maintenance sweeps MUST use `withAdminConnection({source, reason}, async tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Every other cleanup job (`agentRunCleanupJob`, etc.) follows this. The original `workflowDraftsCleanupJob` shipped without it and was caught by adversarial-reviewer; fixed in commit `28fb2e25`.
@@ -2213,6 +2124,8 @@ Rule: when a fire-and-forget enqueue is wrapped in a swallow-catch, the catch bl
 Wider rule: utility functions whose contract is "throw on failure" require their callers to either propagate the throw or log+swallow with full context. A bare `catch {}` on such a function is a silent-failure regression. Audit when introducing a new "thin wrapper around external system" function: the wrapper either logs internally and never throws, or it throws and forces every caller to choose. Mixed contracts ("sometimes I log, sometimes I throw") are the worst — callers can't reason about coverage.
 
 ### 2026-05-05 Gotcha — `withOrgTx({ tx: db })` in unauthenticated callbacks fakes ALS context without setting a GUC
+
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` above for the broader "what goes wrong" family.
 
 **Date:** 2026-05-05
 **Source:** finalisation-coordinator finalisation pass on PR #261 (slug: pre-launch-hardening), adversarial-reviewer AR-3.1 worth-confirming (deferred).
@@ -2876,18 +2789,7 @@ Always cross-check against the consolidating branch's App.tsx (`git show origin/
 
 ### [2026-05-08] Pattern — Coordinators run INLINE in the main session, never dispatched as sub-agents
 
-**Date:** 2026-05-08
-**Source:** Phase 2 launch attempt for `trust-verification-layer` build. Operator typed `launch feature coordinator`; main session called `Agent({subagent_type: "feature-coordinator", ...})`; the dispatched coordinator immediately hit `No such tool available: Task. Task is not available inside subagents.` when it tried to invoke `architect` at Step 3. Same constraint applies to `spec-coordinator` (mockup-designer + spec-reviewer + chatgpt-spec-review dispatches) and `finalisation-coordinator` (chatgpt-pr-review + builder dispatches).
-
-**Pattern:** the three coordinators (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`) and `audit-runner` run INLINE in the main Claude Code session. The operator's entry phrase (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `audit-runner: <mode>`) signals the main session to ADOPT the playbook — read the agent file at `.claude/agents/<name>.md` and execute its steps directly. It does NOT mean call `Agent({subagent_type: "<coordinator>"})`.
-
-**Why this matters:** the Claude Code runtime returns a hard error when a dispatched sub-agent attempts to dispatch a further sub-agent. The coordinator playbooks are built around sub-agent dispatch (architect, builder, the four reviewers, mockup-designer, chatgpt-pr-review, chatgpt-spec-review). Nesting a coordinator inside an `Agent` call breaks the pipeline at its first dispatch step. The main session has top-level `Agent` access — that's where the dispatches must issue from.
-
-**Two valid entry paths:**
-1. Fresh session: open a new Claude Code session, type the entry phrase as the first message, the main session adopts the playbook.
-2. In-flight adoption: operator types the entry phrase mid-session, the current main session reads the agent file and follows it directly. Same outcome.
-
-The agent definitions at `.claude/agents/feature-coordinator.md`, `.claude/agents/spec-coordinator.md`, and `.claude/agents/finalisation-coordinator.md` each carry an `## Invocation` section with this rule. CLAUDE.md's "Common invocations" section codifies the constraint for all four (three coordinators + audit-runner).
+Promoted to ADR 0014 on 2026-05.
 
 ### [2026-05-08] Pattern — Cross-tenant source-pill compression rule
 
@@ -2952,6 +2854,8 @@ Subaccount-scoped routes that carry both `:subaccountId` and `:agentId` in the U
 **Rule:** for any subaccount-scoped route that carries both `:subaccountId` AND a target-resource id (`:agentId`, `:templateId`, etc.), add an explicit application-layer assertion that the resource has an active link to the named subaccount via `subaccount_agents` (or the relevant join table). Fail-403 not 404 — 404 leaks the resource's existence in another subaccount; 403 is the standard cross-tenant rejection envelope. Pure verdict-shaping helper (`assertAgentSubaccountMembership`) keeps the route → HTTP mapping testable.
 
 ### [2026-05-08] Pattern — Workers that opt out of `createWorker` auto-org-tx must wrap FORCE-RLS reads in a short org-scoped tx before any external I/O
+
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` above for the broader "what goes wrong" family.
 
 **Date:** 2026-05-08
 **Source:** finalisation-coordinator finalisation pass on PR #274 (slug: auto-knowledge-retrieval); dual-reviewer iter 1 (3 P1 fixes in `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`).
@@ -3318,6 +3222,8 @@ A patch to one ingest path is incomplete unless the symmetric paths are patched 
 
 
 ### [2026-05-09] Pattern — cross-tenant boot scans against FORCE-RLS tables silently no-op without admin role
+
+[cross-reference 2026-05] See also the 2026-05-05 canonical entry `db.transaction() opened from module-level pool runs WITHOUT GUC` above for the broader "what goes wrong" family.
 
 **Date:** 2026-05-09
 **Source:** pr-reviewer round 3 B2 on `support-desk-canonical` Phase 2. `supportDispatchBootRecovery.ts` imported raw `db` and ran a `SELECT ... FROM canonical_ticket_drafts WHERE status = 'dispatching'` at server boot. Intended behaviour: scan all orgs for stranded drafts and re-enqueue. Actual behaviour: the FORCE-RLS policy on `canonical_ticket_drafts` requires `current_setting('app.organisation_id', true) IS NOT NULL`. At boot, no session var is set; the policy fails closed; the SELECT returns ZERO rows even when stranded drafts exist. **The R5 mitigation is silently a no-op** — every restart leaks dispatching drafts.
@@ -3690,11 +3596,7 @@ server/config/actionRegistry/
 
 ## Pattern: Migration-number collision after S2 sync requires renumbering forward, not backward
 
-**Context.** Pre-test-hardening S2 merge (2026-05-11) — main had advanced to migrations 0313 (run_artifacts + execution_backend_columns, two distinct migrations sharing the number) / 0314 (support_agent_install) / 0315 (support_eval_runs) / 0316 / 0317 via PR #281 + PR #283. Pre-test-hardening reserved 0313-0315 (webhook_replay_nonces / connector_configs_webhook_token / connections_status_check). Resolution: renumber the feature branch's migrations FORWARD (to 0318/0319/0320), not backward. Forward-renumbering is safe because (a) no other branch can claim numbers we just took, (b) the migrations have not run anywhere in production yet, (c) update is mechanical (filenames + a small set of code references). Backward-renumbering would conflict with main's already-deployed sequence.
-
-**Rule.** After S2 sync, if both sides claimed the same migration number, the feature branch renumbers to the next free slot AFTER main's highest. Never renumber main's migrations and never reuse a number main has already deployed. Update: (1) the `.sql` + `.down.sql` filenames, (2) `RLS_PROTECTED_TABLES` `policyMigration` field, (3) any inline RAISE EXCEPTION messages that quote the migration number, (4) test files that name the migration in skip-reasons or assertions, (5) build artefacts (spec.md, plan.md, progress.md). Review-log files (frozen historical record) are left untouched. Confirm with `npx tsc --noEmit -p server/tsconfig.json` clean after the rename.
-
-**Detection heuristic.** Before opening a PR, run `git ls-tree -r origin/main migrations/ | grep -E "${RANGE}"` to confirm the feature branch's migration range is still free on main. Re-run after every `git pull origin main` or S2 sync. The check costs nothing; the alternative is a migration sequence break in CI that requires forced operator intervention.
+[compressed 2026-05] Duplicate of the 2026-05-08 `Migration-number collision after S2 sync requires renaming on the feature branch` entry above — same rule, different wording. Forward-renumbering (not reuse) is the canonical action.
 
 ### [2026-05-10] Correction — apply defence-in-depth patterns consistently across siblings; cross-check Drizzle schema against the migration
 
@@ -3729,6 +3631,8 @@ Three corrections from `chatgpt-pr-review` Round 3 on PR #284 pre-test-hardening
 **Generalises to:** any route handler in `server/routes/*` that gates row visibility or write access via a permission helper. The same trap exists in reverse (passing an `ORG_PERMISSIONS.*` constant into `hasSubaccountPermission`). A future linting rule could enforce: the `<TIER>_` prefix of the constant must match the tier embedded in the helper name, statically. Until that exists, code review catches it via the pattern above.
 
 ### [2026-05-11] Gotcha — DB-time bucket queries must fail closed; never fall back to `Date.now()` for ordering / dedupe keys
+
+[cross-reference 2026-05] See also the 2026-04-29 entry `DB-canonical now_epoch must be threaded through any time-delta computation derived from a rate-limit check` above — same DB-canonical-time principle, different application surface.
 
 `server/jobs/operatorSessionRefreshJob.ts:runOperatorSessionRefreshSweep` (PR #286) computed a 5-minute bucket via `SELECT floor(extract(epoch from transaction_timestamp()) / 300)::bigint AS bucket` to dedupe sweep ticks across pods, and computed `expiryThreshold = Date.now() + REFRESH_WINDOW_MINUTES * 60_000` to filter sessions that needed refreshing. Two regressions snuck in during chunk-level implementation:
 
@@ -3767,6 +3671,9 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **Why it matters:** PR #287 originally swept `pending → harvesting` transitions in both `sandboxCeilingMonitorJob.markForHarvest` and `sandboxHarvestReconciliationJob.reconcileExecution` — a pending row would have NULL `provider_sandbox_id` and the harvesting flip would violate the CHECK. The fix is `classifyCeilingTransition(status, providerSandboxId, ceilingType): CeilingTransition` in `sandboxCeilingMonitorPure.ts` with four outcomes (`harvesting`, `start_failed`, `noop:already_harvesting`, `noop:unexpected_state`). Both call sites consult the classifier; the pure-test matrix encodes every (status, providerSandboxId) cell. The race-safe `status=` WHERE predicate on the UPDATE backs it up. This pattern generalises to any table where a CHECK constraint involves a conditional on >1 column.
 
 ## DB-anchored elapsed time in correctness-sensitive paths (ceiling monitor)
+
+[cross-reference 2026-05] See also the 2026-04-29 entry `DB-canonical now_epoch must be threaded through any time-delta computation derived from a rate-limit check` above — same DB-canonical-time principle, different application surface.
+
 **Date:** 2026-05-11
 **Source:** finalisation-coordinator finalisation pass on PR #287 (slug: sandbox-isolation), Round 2 R2-T1.
 **Pattern:** When a path enforces a quantitative invariant (timeout, cost ceiling, rate limit, billing window) by comparing elapsed time against a threshold, BOTH endpoints of the comparison MUST come from the same time source. Compute the elapsed value inside the SQL that loads the row: `(EXTRACT(EPOCH FROM (NOW() - {column})) * 1000)::bigint`. Never compute elapsed in Node code by combining DB-stored `started_at` with `Date.now()` — that mixes DB clock with Node wall-clock, and cross-instance clock skew (NTP drift, container clock drift) silently changes the outcome.
@@ -3783,3 +3690,11 @@ The chunk-size posture rule has an OR clause: a chunk that exceeds 5 files is st
 **Source:** finalisation-coordinator finalisation pass on PR #287 (slug: sandbox-isolation), Round 2 R2-T2 follow-on.
 **Pattern:** A CI gate whose strict mode hard-fails on "non-`local-dev-*` version with no matching publish tag" creates a chicken-and-egg problem for the FIRST publish: the PR that introduces the template cannot push the tag before merge (no commit hash to tag), and cannot rely on the tag existing after merge (the tag is the operator's post-merge work). The convention that resolves this: pre-first-publish `CURRENT_VERSION.version` MUST use a `local-dev-*` prefix (e.g. `local-dev-v1.0.0`). The operator flips the prefix off at first-publish time as step 0 of the runbook. The gate's `local-dev-*` exemption is the "we know this isn't tagged yet, it's not supposed to be" signal.
 **Why it matters:** PR #287's initial `CURRENT_VERSION.version=v1.0.0` would have blocked its own `ready-to-merge` label firing (strict gate fails because no `sandbox-template/synthetos-sandbox/v1.0.0` tag exists). Flipping to `local-dev-v1.0.0` keeps the strict gate green during V1 ship while accurately signalling pre-first-publish state. The operator's SANDBOX-F1 step 0 flips back to `v1.0.0` at first-publish. This pattern applies to any "production release fingerprint" file where a CI gate enforces post-publish coherence: the pre-first-publish state needs an explicit "not yet published" sentinel that the gate exempts.
+
+### 2026-05-13 Pattern — "Suppression is success" for single-writer event emitters _(promoted from tasks/todo.md)_
+
+When a single-writer event emitter loses a coordination race (another writer already produced the canonical event), the emitter MUST return `{ success: true, suppressed: true, reason }` rather than `{ success: false, ... }`. Returning failure triggers retries, false incident signals, and broken metrics — the metaphor is "we agreed not to write, that IS success." ADR-0013 formalises the rule; `architecture.md § Home dashboard live reactivity` documents the canonical implementation; `system-monitoring writeDiagnosis` enforces it; this KNOWLEDGE entry captures the pattern in retrievable form. When introducing a new single-writer emitter, name a helper (e.g. `suppressedSuccess(reason)`) that returns the shape above rather than hand-rolling it at the call site.
+
+### 2026-05-13 Pattern — Closed-enum service-boundary error mapping _(promoted from tasks/todo.md)_
+
+When a service throws typed errors with a `code` discriminator, the route MUST map the code to its HTTP envelope via a closed `switch` (every branch enumerated, `default: throw`). Open-ended string-comparison mapping (`if (err.code === 'foo') ...` cascades) is a blocking review finding — new codes silently fall through with the wrong HTTP status and the wrong envelope shape. The canonical pattern: define the error-code union at the service boundary (`shared/types/...` if shared across routes), import it into both the service and the route, and let TypeScript's exhaustiveness checking enforce the mapping. Surfaced repeatedly during consolidation-govern (CONSOL-GOV-DEF-9) and audit-remediation reviews; promoted because the pattern is reusable across every service that throws typed errors. Cross-link: `architecture.md § Service Layer` now references this entry directly.
