@@ -8,7 +8,7 @@
 // ETag conflict (409): expectedVersion !== currentVersion.
 // Lazy-create race (23505 PK unique_violation): caught → re-read → 409.
 
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountIeeBrowserSettings, auditEvents } from '../db/schema/index.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
@@ -61,7 +61,7 @@ export const subaccountIeeBrowserSettingsService = {
       const [row] = await tx
         .select()
         .from(subaccountIeeBrowserSettings)
-        .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId))
+        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId), eq(subaccountIeeBrowserSettings.organisationId, orgId)))
         .limit(1);
 
       if (!row) {
@@ -94,7 +94,7 @@ export const subaccountIeeBrowserSettingsService = {
       const [existing] = await tx
         .select()
         .from(subaccountIeeBrowserSettings)
-        .where(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId))
+        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
         .limit(1);
 
       const rowExists = existing !== undefined;
@@ -125,14 +125,14 @@ export const subaccountIeeBrowserSettingsService = {
             const [raceRow] = await tx
               .select()
               .from(subaccountIeeBrowserSettings)
-              .where(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId))
+              .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
               .limit(1);
 
             throw {
               statusCode: 409,
               message: 'Settings version conflict — another request already created this row',
               errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-              settingsVersion: raceRow?.settingsVersion ?? 1,
+              currentEtag: String(raceRow?.settingsVersion ?? 1),
             };
           }
           throw err;
@@ -146,7 +146,7 @@ export const subaccountIeeBrowserSettingsService = {
           statusCode: 409,
           message: 'Settings version conflict — reload and retry',
           errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-          settingsVersion: currentVersion,
+          currentEtag: String(currentVersion),
         };
       }
 
@@ -165,7 +165,7 @@ export const subaccountIeeBrowserSettingsService = {
         .update(subaccountIeeBrowserSettings)
         .set(patchCols)
         .where(
-          eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId),
+          and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
         )
         .returning();
 
@@ -192,7 +192,7 @@ export const subaccountIeeBrowserSettingsService = {
       const [existing] = await tx
         .select()
         .from(subaccountIeeBrowserSettings)
-        .where(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId))
+        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
         .limit(1);
 
       const rowExists = existing !== undefined;
@@ -233,14 +233,14 @@ export const subaccountIeeBrowserSettingsService = {
             const [raceRow] = await tx
               .select()
               .from(subaccountIeeBrowserSettings)
-              .where(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId))
+              .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
               .limit(1);
 
             throw {
               statusCode: 409,
               message: 'Settings version conflict — another request already created this row',
               errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-              settingsVersion: raceRow?.settingsVersion ?? 1,
+              currentEtag: String(raceRow?.settingsVersion ?? 1),
             };
           }
           throw err;
@@ -254,7 +254,7 @@ export const subaccountIeeBrowserSettingsService = {
           statusCode: 409,
           message: 'Settings version conflict — reload and retry',
           errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-          settingsVersion: currentVersion,
+          currentEtag: String(currentVersion),
         };
       }
 
@@ -268,7 +268,7 @@ export const subaccountIeeBrowserSettingsService = {
           updatedByUserId: params.actorUserId,
         })
         .where(
-          eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId),
+          and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
         )
         .returning();
 

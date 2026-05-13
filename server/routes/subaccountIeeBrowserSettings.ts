@@ -20,13 +20,13 @@ import { patchBodySchema } from '../services/subaccountIeeBrowserSettingsService
 
 const router = Router();
 
-// GET /api/subaccounts/:id/iee-browser-settings
+// GET /api/subaccounts/:subaccountId/iee-browser-settings
 router.get(
-  '/api/subaccounts/:id/iee-browser-settings',
+  '/api/subaccounts/:subaccountId/iee-browser-settings',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
-    const subaccountId = req.params.id;
+    const subaccountId = req.params.subaccountId;
     const orgId = req.orgId!;
 
     await resolveSubaccount(subaccountId, orgId);
@@ -49,13 +49,13 @@ router.get(
   }),
 );
 
-// PATCH /api/subaccounts/:id/iee-browser-settings
+// PATCH /api/subaccounts/:subaccountId/iee-browser-settings
 router.patch(
-  '/api/subaccounts/:id/iee-browser-settings',
+  '/api/subaccounts/:subaccountId/iee-browser-settings',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.OPERATOR_SETTINGS_WRITE),
   asyncHandler(async (req, res) => {
-    const subaccountId = req.params.id;
+    const subaccountId = req.params.subaccountId;
     const orgId = req.orgId!;
     const actorUserId = req.user!.id;
 

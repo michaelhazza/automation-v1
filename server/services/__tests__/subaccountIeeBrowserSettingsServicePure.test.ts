@@ -155,13 +155,11 @@ describe('patchBodySchema', () => {
   it('rejects rolloutApproved (not accepted in this schema)', () => {
     // rolloutApproved is not in the schema — strict mode would reject it,
     // but Zod passthrough ignores it. Verify it is not in the parsed output.
-    const result = patchBodySchema.safeParse({
-      rolloutApproved: true,
-      expectedSettingsVersion: 1,
-    });
-    if (result.success) {
-      expect((result.data as Record<string, unknown>).rolloutApproved).toBeUndefined();
-    }
+    const body = { status: 'on', expectedSettingsVersion: 1, rolloutApproved: true };
+    const result = patchBodySchema.safeParse(body);
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('parse failed'); // type-narrowing only
+    expect((result.data as Record<string, unknown>).rolloutApproved).toBeUndefined();
   });
 
   it('requires expectedSettingsVersion', () => {

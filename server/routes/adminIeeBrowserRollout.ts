@@ -10,7 +10,7 @@
 // 409 on ETag conflict or lazy-create PK race (23505).
 
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { subaccountIeeBrowserSettingsService } from '../services/subaccountIeeBrowserSettingsService.js';
@@ -22,7 +22,7 @@ const router = Router();
 router.post(
   '/api/admin/iee-browser/rollout-approval/:subaccountId',
   authenticate,
-  requireRole('system_admin'),
+  requireSystemAdmin,
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const orgId = req.orgId!;
@@ -49,6 +49,7 @@ router.post(
       actorUserId,
     });
 
+    res.setHeader('ETag', `"${updated.settingsVersion}"`);
     res.json({
       subaccountId: updated.subaccountId,
       organisationId: updated.organisationId,
