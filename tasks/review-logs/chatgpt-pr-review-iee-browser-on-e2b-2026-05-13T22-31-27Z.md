@@ -81,6 +81,27 @@ Round 1 applies 9 of 11 fixes inline (F1, F2, F3, F4, F6, F7, T1, T2, T3). F5 an
 
 ### Round 3
 
+**Diff sent:** `.chatgpt-diffs/pr297-round3-code-diff.diff` (250K, 71 files).
+
+**ChatGPT verdict:** Still do not merge — 4 blockers (F15-F18) + 2 should-fix (T8-T9).
+
+| ID | Severity | Description | Verified | Action |
+|---|---|---|---|---|
+| F15 | Blocking | Warm-pool lease's `sandboxId` not threaded to e2bSandbox; createSandbox called even for warm dispatch | YES — _ieeShared.ts had warmSessionCheckoutId only | Added `leasedProviderSandboxId` field to SandboxRunTaskInput + e2bSandbox skip-createSandbox path |
+| F16 | Blocking | browserPublishedVersionPath always loaded; placeholder digest fails synthetos provider construction | YES — registerSandboxProvider always set it | Gated behind `E2B_BROWSER_TEMPLATE_ENABLED=true` env flag |
+| F17 | Blocking | evictStale / refillIfEligible / gcSweep still exported; RLS-bypass risk | YES — all three reachable | All three now throw `sandbox_provider_unavailable` at runtime — fail-loud scaffold |
+| F18 | Blocking | E2B serialization gate test trivially passes with E2B_E2E=true | YES — placeholder expect(true).toBe(true) | Honest scaffold language; queued IEE-DEF-8 |
+| T8 | Should-fix | Test still asserted rolloutApproved silently stripped (old passthrough behaviour) | YES — line 155-163 | Updated to assert success===false + `code: unrecognized_keys` with `keys: ['rolloutApproved']` |
+| T9 | Should-fix | server/db/schema/index.ts line 346 says "migrations 0345–0349" | YES | Updated to "0346–0350" |
+
+### Round 3 commit
+
+`f2341dfb` — fix(iee-browser): chatgpt-pr-review Round 3 — 6 findings applied
+
+9 files / +147 -166 (net -19 — RLS-unsafe scaffolds collapsed to throw bodies). G3: lint 0 errors, typecheck clean. Targeted vitest: 50/50 passing.
+
+### Round 4
+
 Pending operator paste of next ChatGPT-web response.
 
-Round 3 diff: `.chatgpt-diffs/pr297-round3-code-diff.diff` (regenerated post-commit).
+Round 4 diff: `.chatgpt-diffs/pr297-round4-code-diff.diff` (regenerated post-commit).
