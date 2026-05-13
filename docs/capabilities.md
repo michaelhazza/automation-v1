@@ -58,6 +58,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Pages & Content Builder](#pages--content-builder)
   - [Integration Framework](#integration-framework)
   - [Execution Infrastructure](#execution-infrastructure)
+  - [Personal Assistant](#personal-assistant)
   - [Sandboxed Runtime (IEE)](#sandboxed-runtime-iee)
   - [Persistent Agent Workspace](#persistent-agent-workspace)
 - [Replaces / Consolidates](#replaces--consolidates)
@@ -533,6 +534,19 @@ Production-grade reliability — agents run consistently, recover from failures,
 - Infinite loop detection, automatic crash recovery, and full execution tracing for debugging
 - **Working time accounting:** billable compute time tracked per run and surfaced in the Usage Explorer — the working-time chart in each agent's workspace is the same number on the invoice.
 
+### Personal Assistant
+
+A dedicated AI assistant for individual users — monitors your calendar and inbox, handles scheduling, drafts Slack messages for your review, and keeps you briefed on what matters today.
+
+- **Calendar management** — reads your calendar to find free slots, creates and updates events, responds to invitations, and surfaces scheduling conflicts before they become problems. All calendar writes require your explicit approval before they take effect.
+- **Slack communication** — reads channel history, summarises threads, and drafts messages or DMs for your review. Nothing is posted to Slack without your sign-off — every outbound message routes through an approval step.
+- **Daily briefing** — surfaces what needs attention today: upcoming meetings, unread threads flagged as high-priority, and outstanding requests the assistant identified in your inbox.
+- **Inbox triage** — scans incoming email for action items, deadlines, and follow-up requests; surfaces them as a prioritised review queue rather than leaving you to excavate each message yourself.
+- **Meeting prep** — compiles relevant context for upcoming meetings: prior notes, related tasks, and open items from previous conversations with the same attendees.
+- **Voice and tone** — learns your communication style and applies it when drafting replies and messages, so output sounds like you rather than a generic assistant.
+- **Personal connection privacy** — the assistant uses your personal connected accounts (calendar, email, Slack) exclusively. No other user or agent can access these credentials.
+- **One-time setup** — connects to your accounts in a guided first-run wizard; your personal assistant is available immediately once connections are established.
+
 ### Sandboxed Runtime (IEE)
 
 Agents that need to do real work on systems without APIs — filling forms, navigating websites, downloading files, scraping paywalled content — get an on-demand isolated environment provisioned just for that task. When the task completes, the environment is released; nothing persists between runs.
@@ -914,6 +928,25 @@ Complete list of all 117 skills.
 | `score_lead` | Score an inbound or outbound lead against configured qualification criteria | LLM | — |
 | `trigger_account_intervention` | Propose intervention action (check-in, pause, alert) | LLM | HITL |
 | `update_crm` | Write contact/deal updates to CRM | Deterministic | HITL |
+
+### Calendar & Personal Productivity
+
+User-scoped calendar and Slack skills available to the Personal Assistant. All write operations route through the review queue — nothing executes without the owner's approval.
+
+| Skill | Description | Type | Gate |
+|-------|-------------|------|------|
+| `calendar.list_events` | List calendar events in a date range for the connected user | Deterministic | — |
+| `calendar.get_event` | Retrieve full detail for a specific calendar event | Deterministic | — |
+| `calendar.find_free_slot` | Find available meeting slots across a date range, respecting existing commitments | Deterministic | — |
+| `calendar.create_event` | Propose a new calendar event for review before it is created | LLM | HITL |
+| `calendar.update_event` | Propose changes to an existing calendar event for review before they are applied | LLM | HITL |
+| `calendar.respond_to_invite` | Draft an accept, decline, or tentative response to a calendar invitation for review | LLM | HITL |
+| `slack.list_channels` | List Slack channels the connected user is a member of | Deterministic | — |
+| `slack.read_channel` | Read recent messages from a Slack channel | Deterministic | — |
+| `slack.search_messages` | Search across Slack workspace messages (requires paid Slack plan) | Deterministic | — |
+| `slack.summarise_thread` | Summarise a Slack thread into key points and action items | LLM | — |
+| `slack.post_message` | Draft a message to a Slack channel for review before posting | LLM | HITL |
+| `slack.post_dm` | Draft a Slack direct message for review before sending | LLM | HITL |
 
 ### Email & Communication
 

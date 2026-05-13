@@ -258,6 +258,20 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'support.find_customer_history',
   // Added in phase-1-showcase-mvps (PR #283)
   'support.classify_ticket',
+  // Added in personal-assistant-v1 (PR #291) — Calendar action handlers
+  'calendar.list_events',
+  'calendar.get_event',
+  'calendar.find_free_slot',
+  'calendar.create_event',
+  'calendar.update_event',
+  'calendar.respond_to_invite',
+  // Added in personal-assistant-v1 (PR #291) — Slack action handlers
+  'slack.list_channels',
+  'slack.read_channel',
+  'slack.search_messages',
+  'slack.summarise_thread',
+  'slack.post_message',
+  'slack.post_dm',
 ];
 
 // ---------------------------------------------------------------------------
@@ -293,11 +307,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 204 keys', () => {
+test('SKILL_HANDLERS has exactly 216 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 204) {
+  if (count !== 216) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 204. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 216. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

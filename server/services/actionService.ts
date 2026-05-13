@@ -281,6 +281,20 @@ export const actionService = {
 
     const eventType = (eventMap[newStatus] ?? newStatus) as typeof actionEvents.eventType._.data;
     await this.emitEvent(actionId, organisationId, eventType, actorId, metadata);
+
+    // Proposal commit hook — invoked exactly once on approved transition.
+    // Spec: 2026-05-12-personal-assistant-v1-spec.md §11 + §24.2. When the
+    // action backs an EA draft (metadata.kind === 'ea_draft'), routes to
+    // the kind-appropriate handler. The handler owns the optimistic claim
+    // + mark-sent / mark-failed lifecycle on ea_drafts.sendState; errors
+    // are logged but do not undo the approval (stall-reset job recovers
+    // any draft stuck in 'sending').
+    if (newStatus === 'approved') {
+      const { eaDraftDispatchService } = await import('./eaDrafts/eaDraftDispatchService.js');
+      if (await eaDraftDispatchService.isEADraftAction(actionId, organisationId)) {
+        await eaDraftDispatchService.dispatchAfterApproval(actionId, organisationId);
+      }
+    }
   },
 
   /**

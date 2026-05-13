@@ -1259,6 +1259,27 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
     rationale: 'Redacted per-line stdout/stderr log rows from harvested sandbox executions. Cross-tenant leak exposes customer-derived script output and potentially PII or secrets that survived redaction.',
   },
+  // 0328 — Personal Assistant V1: voice profile derivation + opt-out state
+  {
+    tableName: 'voice_profiles',
+    schemaFile: 'voiceProfiles.ts',
+    policyMigration: '0328_voice_profiles.sql',
+    rationale: 'Per-owner derived voice style features used to personalise agent output — contains writing-style signals extracted from sent emails and documents. Three-axis scoping (user / subaccount / org); cross-tenant leak exposes personal communication patterns and PII.',
+  },
+  // 0329 — Personal Assistant V1: EA draft post-approval send state
+  {
+    tableName: 'ea_drafts',
+    schemaFile: 'eaDrafts.ts',
+    policyMigration: '0329_ea_drafts.sql',
+    rationale: 'Per-owner EA draft payloads with send-state machine — body and target_ref may contain email content, calendar details, or Slack messages. Owner-scoped visibility with admin read-through; cross-tenant leak exposes personal communications and PII.',
+  },
+  // 0330 — Personal Assistant V1: external-source trigger dedup ledger
+  {
+    tableName: 'external_trigger_dedup',
+    schemaFile: 'externalTriggerDedup.ts',
+    policyMigration: '0330_external_source_triggers.sql',
+    rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
