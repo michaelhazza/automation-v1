@@ -346,7 +346,7 @@ async function parseAddressToken(
   organisationId: string,
   subaccountId: string | null,
 ): Promise<ParsedAddress> {
-  const match = intentText.match(/@([\w'.\s]+)/);
+  const match = intentText.match(/@([\w'.]+)/);
   if (!match) return null;
 
   const raw = match[1].trim();
@@ -435,6 +435,9 @@ export async function executeCheckCapabilityGap(
   const connections = 'connections' in connectionResult ? connectionResult.connections : [];
 
   const agentMaps = await listAgentCapabilityMaps(orgId, subaccountId);
+  const uniqueAgentMaps = agentMaps.filter(
+    (a, idx, arr) => arr.findIndex((b) => b.agentId === a.agentId) === idx,
+  );
 
   // Security: discard any client-supplied target_owner_user_id (spec §5.4 untrusted-client invariant)
   if ((typed as unknown as Record<string, unknown>).target_owner_user_id !== undefined) {
@@ -444,9 +447,18 @@ export async function executeCheckCapabilityGap(
   }
 
   const rawIntentText = typeof typed.raw_intent_text === 'string' ? typed.raw_intent_text : '';
-  const parsed = rawIntentText
-    ? await parseAddressToken(rawIntentText, context.userId ?? '', orgId, subaccountId)
-    : null;
+  let parsed: Awaited<ReturnType<typeof parseAddressToken>> = null;
+  if (rawIntentText) {
+    try {
+      parsed = await parseAddressToken(rawIntentText, context.userId ?? '', orgId, subaccountId);
+    } catch (err) {
+      logger.warn('capability_query.address_parse.db_error', {
+        runId: context.runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // parsed stays null — routing proceeds without address context
+    }
+  }
 
   let addressedAgent: RoutingContextV2['addressed_agent'] = null;
   let addressParseResult: RoutingContextV2['address_parse_result'] = 'not_found';
@@ -472,7 +484,7 @@ export async function executeCheckCapabilityGap(
   };
 
   // Apply two-axis ownership filter + address boost (spec §5.2–§5.3)
-  const matchedCandidates = matchCapability(routingContext, agentMaps);
+  const matchedCandidates = matchCapability(routingContext, uniqueAgentMaps);
   const matchedAgentIds = new Set(matchedCandidates.map((m) => m.candidate.agentId));
 
   // 3. Evaluate per-capability availability
@@ -571,7 +583,7 @@ export async function executeCheckCapabilityGap(
     primitive: normalised.filter((n) => n.kind === 'primitive').map((n) => n.canonical_slug),
   };
 
-  function matchedByAgent(map: NonNullable<(typeof agentMaps)[number]['capabilityMap']>): { matched: string[]; missing: string[] } {
+  function matchedByAgent(map: NonNullable<(typeof uniqueAgentMaps)[number]['capabilityMap']>): { matched: string[]; missing: string[] } {
     const matched: string[] = [];
     const missing: string[] = [];
     const check = (kind: CapabilityKind, required: string[], have: string[]) => {
@@ -620,7 +632,7 @@ export async function executeCheckCapabilityGap(
 
   const candidateAgents: CandidateAgent[] = [];
 
-  for (const agent of agentMaps) {
+  for (const agent of uniqueAgentMaps) {
     if (!matchedAgentIds.has(agent.agentId)) continue; // ownership axis filter
     if (!agent.capabilityMap) continue;
     const { matched, missing } = matchedByAgent(agent.capabilityMap);
@@ -677,7 +689,7 @@ export async function executeCheckCapabilityGap(
     if (candidate.coverage !== 'full') continue;
 
     // Look up the source map for this candidate and reject if it's stale.
-    const agentRow = agentMaps.find((a) => a.agentId === candidate.agent_id);
+    const agentRow = uniqueAgentMaps.find((a) => a.agentId === candidate.agent_id);
     if (!agentRow?.capabilityMap) continue;
     if (isMapStaleVsReference(agentRow.capabilityMap)) continue;
     // Derive integration list from the candidate's matched list (those with 'integration:' prefix)
