@@ -1,4 +1,4 @@
-**Status:** DRAFT (2026-05-13) — operator decisions ratified; awaiting spec authoring
+**Status:** DRAFT (2026-05-13) — all decisions ratified; awaiting spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `personal-assistant-v2-operator`
@@ -45,7 +45,7 @@ Recorded in the chat transcript on branch `claude/personal-assistant-post-merge-
 
 1. **V2 scope: include BOTH operator-mode controller AND cross-ownership delegation.** Either alone is insufficient: operator-mode without delegation is a feature in search of a use case (most direct PA work is short-burst native); delegation without operator-mode leaves the PA unable to handle adaptive multi-step work even when explicitly asked. Together they fulfil the master brief §16.1 "standing autonomous operator" framing.
 2. **Universal OpenTaskView invariant.** Every agent run in every controller mode surfaces through the same OpenTaskView + run-trace primitives. Operator mode runs longer and may carry chain-link metadata, but the user-facing surface is identical. This rule is platform-level and belongs in `architecture.md` and the master brief — V2 documents it in §3.1 for context but does not own the canonical statement.
-3. **Routing must be declarative.** The orchestrator does NOT get hard-coded "if intent mentions calendar → route to PA" logic. Routing emerges from declarative capability declarations plus requester identity plus capability scope. The extension is one new axis on `capability_map`: an `owner_user_id` scope that matches only when the requester is the owner.
+3. **Routing must be declarative.** The orchestrator does NOT get hard-coded "if intent mentions calendar → route to PA" logic. Routing emerges from declarative capability declarations plus two identity axes: `requester_user_id` (who initiated) and `target_owner_user_id` (whose resource is needed). The `capability_map` gains one field: `owner_user_id`, matched against `target_owner_user_id` for cross-ownership delegation, or against `requester_user_id` when `target_owner_user_id` is absent (direct self-service).
 4. **`@`-addressing is a soft hint, not a bypass.** `@PA` / `@MyAssistant` / `@<DisplayName>` resolve to the requester's user-owned PA via one lookup; the orchestrator still does capability matching to validate the route. UI autocomplete in GlobalAskBar is **deferred** — plain text recognition by the orchestrator's intent parser is sufficient for V2.
 5. **Approval routing follows the owner, not the initiator.** When a cross-ownership sub-step writes to user-owned data (Tier 4+), the owner approves — not the parent task's initiator. Same approval mechanism as today; routed to the owner's approval queue.
 6. **Zero new mockups.** V2 surfaces reuse OpenTaskView, the existing GlobalAskBar (`client/src/components/global-ask-bar/GlobalAskBar.tsx`), the operator-backend run-trace renderer (extended via event-type variants, no new visual surface), and the operator-backend prototypes `r1-r17`. No new pages authored. This is intentional product discipline ("don't want to be creating any UI").
@@ -66,7 +66,7 @@ V2 is the second consumer of the `user-owned-agents` foundation primitive that s
 ### What V2 IS
 
 - A controller-style upgrade on an existing agent (the EA gets `controllerStyle: 'operator'` as a second allowed style alongside native).
-- A capability-routing primitive (`owner_user_id` scope on capabilities → matched against `requester_user_id`).
+- A capability-routing primitive (`owner_user_id` scope on capabilities → matched against `target_owner_user_id` for cross-ownership delegation, or `requester_user_id` for direct self-service).
 - A cross-ownership delegation pattern (parent agent of any owner type can delegate sub-steps to a user-owned PA, with credentials and approval routed to the owner).
 - An extension to operator-backend's event emission (live file events, not just step boundaries).
 
@@ -76,7 +76,14 @@ The user-owned-agents primitive earns its keep when at least two consumers exist
 
 > The orchestrator's routing logic, capability matcher, and approval-router MUST work identically for any future user-owned agent (Dev Agent in Phase 3, future personal research / financial / writing agents). V2 is allowed to add EA-specific helpers under `server/services/eaDrafts/` and `server/services/voiceProfile/` for things that are genuinely EA-product behaviour, but the routing-and-delegation primitives in §3.3–§3.7 MUST stay agent-template-neutral.
 
-Spec-time check: pick a stub second user-owned agent template (Dev Agent placeholder is fine) and walk through the same flows; if any flow needs EA-specific branching, the primitive design is wrong.
+Spec-time acceptance test: a stub Dev Agent configured with `owner_user_id` and an equivalent `capability_map` (same capability slugs as the EA) MUST pass the same routing fixtures as the EA:
+
+1. Direct-owner request ("check my calendar") routes to the stub Dev Agent when the requester is its owner.
+2. Cross-ownership delegation request routes to the stub Dev Agent when `target_owner_user_id` matches.
+3. Approval-owner rule routes approval to the stub Dev Agent's owner, not the initiator.
+4. Ambiguous routing (no explicit owner reference, non-owner requester) fails closed with a clarifying question.
+
+If any of the four fixtures requires an `executive-assistant` slug check in the matcher, approval router, or delegation path, the primitive design is wrong and must be reworked before spec is finalised.
 
 ## 1. Purpose
 
@@ -137,7 +144,9 @@ Doc-sync edits required when V2 ships:
 
 Single behavioural change to the EA agent's allowed-controllers set. Three small steps:
 
-1. **Update seed migration default.** The EA seed (`migrations/0332_executive_assistant_seed.sql`) currently sets `controllerStyleAllowed: 'native_only'`. V2 ships a follow-on migration that flips this to `'native_and_operator'` for the EA system-agent template AND for all existing user-owned EA instances. Idempotent: only flips rows where `system_agent_slug = 'executive-assistant'` and `controller_style_allowed = 'native_only'`.
+**Naming note:** the DB column is `controller_style_allowed` (snake_case); the TypeScript / JSONB field is `controllerStyleAllowed` (camelCase). Both refer to the same value. Spec must use both forms correctly — grepping one will miss the other.
+
+1. **Update seed migration default.** The EA seed (`migrations/0332_executive_assistant_seed.sql`) currently sets `controllerStyleAllowed: 'native_only'` (TS/JSON). V2 ships a follow-on migration that flips this to `'native_and_operator'` for the EA system-agent template AND for all existing user-owned EA instances. Idempotent: only flips rows where `system_agent_slug = 'executive-assistant'` and `controller_style_allowed = 'native_only'` (SQL column name).
 
 2. **Operator-mode routing via `controllerStyleResolver`.** The existing resolver (`server/services/controllerStyleResolver.ts`) already handles the four cases (explicit override, subaccount default, mode default, constraint downgrade). V2 verifies that EA runs with `'native_and_operator'` resolve to operator when the orchestrator's routing decision asks for it; no resolver code change expected.
 
@@ -174,7 +183,13 @@ V2 adds one optional field at the top level:
 
 `computeCapabilityMapPure(skills, integrationReference, agentRow)` extends to include `owner_user_id` in the output when `agentRow.owner_user_id` is non-null. The implementation is a one-line copy from the agent row to the map. Recompute triggers (skill-link changes, integration-reference refresh) are unchanged.
 
-CI gate: `verify-capability-map-shape.sh` (new) confirms every persisted capability map either has `owner_user_id: null` (or absent) when the agent is subaccount-owned, OR has `owner_user_id` matching `agents.owner_user_id` when set. No drift permitted.
+CI gate: `verify-capability-map-shape.sh` (new) confirms every persisted capability map satisfies all of the following. No drift permitted.
+
+- Subaccount-owned agents: `owner_user_id` is absent or null.
+- User-owned agents: `owner_user_id` exactly matches `agents.owner_user_id`.
+- Soft-deleted agents: excluded from the gate scan (or explicitly flagged as archived — must not have `owner_user_id` pointing at a live user).
+- `owner_user_id` must not reference a deleted or non-member user (join to `users` table; fail if no active row).
+- Recompute path: when `agents.owner_user_id` changes, the capability map is updated in the same transaction — gate verifies no stale `owner_user_id` survives a re-seeding run.
 
 ### 3.4 Orchestrator routing context carries `requester_user_id`
 
@@ -184,18 +199,26 @@ The orchestrator's Path A capability matcher (`check_capability_gap` skill + dow
 RoutingContext {
   organisationId: string,
   subaccountId: string,
-  requester_user_id: string,  // NEW — the user who initiated the request
+  requester_user_id: string,         // NEW — the human who initiated the request
+  target_owner_user_id?: string,     // NEW — whose user-owned resource is being accessed; absent = self-service
   requested_capabilities: string[],
   intent: string,
   ...
 }
 ```
 
-The matcher gains one rule:
+The matcher gains one rule using two axes:
 
-> A capability_map with `owner_user_id: X` is a match candidate for a task only when `routingContext.requester_user_id == X`. For requesters other than the owner, the user-owned agent is filtered out of the candidate set.
+> A capability_map with `owner_user_id` is owner-scoped. It matches when:
+> - `target_owner_user_id` is set → `owner_user_id == target_owner_user_id` (cross-ownership delegation to a specific owner's agent)
+> - `target_owner_user_id` is absent → `owner_user_id == requester_user_id` (direct self-service: "check my calendar")
+>
+> For all other cases the owner-scoped agent is filtered out of the candidate set.
 
-This is the entire routing extension. No special-casing for "PA" or "calendar" or any specific agent / capability. The rule is generic: owner-scoped capabilities match the owner's requests.
+**Why two axes?** `requester_user_id` is the human who initiated the parent task; `target_owner_user_id` is whose user-owned resource the sub-task needs. In direct self-service (Sarah asking about her own calendar) they are the same user. In cross-ownership delegation (Sarah's task needing Michael's calendar) they differ — without the second axis the matcher would incorrectly filter Michael's PA out of the candidate set because `requester_user_id` (Sarah) != `owner_user_id` (Michael).
+
+- For direct requests ("check my calendar"): the orchestrator sets `target_owner_user_id = requester_user_id`.
+- For cross-ownership delegation ("check Michael's calendar"): `target_owner_user_id` is resolved from the explicit resource-owner reference in the parent task intent or the delegating agent's tool-call parameters. If it cannot be resolved, the delegation fails closed with a clarifying question (§3.6 authorisation invariant).
 
 Subaccount-owned agents (capability_map without `owner_user_id` set) match any requester in the subaccount — current behaviour, unchanged.
 
@@ -216,6 +239,12 @@ When an address resolves:
 1. The matched agent gets a **score boost** in capability matching — it's tried first, but capability matching still validates the route. If the addressed agent doesn't have the capabilities the task needs, orchestrator surfaces the mismatch ("your Personal Assistant doesn't handle CRM work; Riley does — hand off?") via the existing disambiguation flow.
 2. If no agent matches the address (typo, no such agent, deleted), the address is stripped from the intent text and routing proceeds without the hint.
 3. Address parsing is text-only — no autocomplete UI in GlobalAskBar in V2. (Autocomplete is a Phase 1.5 / V2.5 UX polish item.)
+4. Address parsing preserves original text for audit and debug. `RoutingContext` carries:
+   - `raw_intent_text` — the unmodified input string
+   - `normalised_intent_text` — after address extraction and stripping
+   - `address_parse_result: 'matched' | 'not_found' | 'collision' | 'unsupported_cross_owner'` — 'collision' when two agents share a display name; 'unsupported_cross_owner' when a `@<User>'s PA` form is detected (deferred syntax) so the run trace can surface "why did @Jarvis not route?" diagnostics.
+
+**@\<DisplayName\> collision rule (ratified):** when two agents in the org share the same display name, no score boost is applied and pure capability matching proceeds. The `address_parse_result` is set to `'collision'`. Spec encodes this as a static fixture; no further operator input needed.
 
 Implementation surface: orchestrator intent parser (small parser extension), `RoutingContext` carries `addressed_agent: { id, score_boost } | null`, capability matcher honours the boost.
 
@@ -235,11 +264,29 @@ The `user-owned-agents` brief §3.8 designed the schema for cross-ownership dele
 4. **Credentials follow the executor.** When the orchestrator delegates a calendar-check to Michael's PA, the PA uses MICHAEL'S calendar credentials (broker resolution per `user-owned-agents` §3.3 with `ownerUserId: michael`), not the parent task's credentials. The broker invariant ensures Sarah's parent task cannot accidentally read Michael's calendar via Sarah's credentials.
 5. **Run-trace shows the chain.** The existing chain-link renderer (operator-backend r17) shows the delegation: "Sarah-the-Analyst → Michael's Personal Assistant → calendar.find_free_slot → result". Owner identity is part of the chain-link label; the existing event renderer extends to display owner principal where applicable.
 
-**Authorisation invariant (new):**
+**Run-trace privacy invariant (cross-owner delegation):**
 
-> A parent agent may delegate to a user-owned agent ONLY when (a) the parent task's intent references the owner's resources explicitly (intent contains "Michael's calendar" / "Michael's inbox" / etc.), OR (b) the parent task was initiated by the owner themselves (the requester IS the owner). Cross-ownership delegations to user-owned agents without one of these signals fail closed — the orchestrator surfaces a clarifying question instead of guessing.
+> Cross-owner run trace may show that a delegated step occurred and its approval/status/result summary, but MUST NOT expose the owner's private source data — raw calendar availability, inbox snippets, draft contents, credential-derived metadata — to the initiating user unless explicitly authorised. The chain-link divider marks the delegation boundary; the owner's private data is visible in the owner's task view only, not in the initiating user's run trace.
 
-This prevents accidental cross-ownership delegation in ambiguous cases ("schedule a meeting" without specifying whose calendar). Spec confirms the exact signal-detection rules; the principle is: delegate to a user-owned agent only when the user-scope is explicit.
+Projection rule (spec must encode as a static fixture):
+
+| Viewer | Sees |
+|---|---|
+| Owner (Michael) | Full delegated sub-run trace, raw source data, approval detail, result |
+| Initiator (Sarah) | Delegation status (running / approved / rejected / timed out), typed result summary, no raw owner data |
+| Shared parent run trace | Sub-run outcome only — no raw calendar slots, inbox snippets, draft bodies, attachment names, or credential-derived metadata from the target owner |
+
+The spec must include a run-trace projection test or static fixture that asserts the boundary. Violations are security bugs, not UX issues.
+
+**Authorisation invariant (ratified — two-layer rule):**
+
+> Cross-owner delegation requires one of two explicit signals:
+> - **Layer 1 (user-facing):** the user intent contains a named-owner or resource reference ("Michael's calendar", "Michael's inbox", possessives that resolve to a known user in the subaccount).
+> - **Layer 2 (agent-internal):** a trusted parent-agent tool call explicitly emits an owner-scoped capability request identifying the target owner.
+>
+> If neither signal is present, delegation fails closed — the orchestrator surfaces a clarifying question instead of guessing. No implicit or fuzzy cross-ownership delegation.
+
+This prevents accidental cross-ownership in ambiguous cases ("schedule a meeting" without specifying whose calendar). Text parsing covers Layer 1; structured capability signals cover Layer 2. Spec encodes both detection paths.
 
 ### 3.7 Approval-owner routing rule
 
@@ -258,7 +305,16 @@ Example: Sarah's task delegates "schedule a meeting in Michael's calendar at the
 1. The approval row (already in `actions.status` pattern) gains an `approver_user_id` field defaulting to the executor's `owner_user_id` when set, else the task's initiator.
 2. The approval queue UI (existing per V1) filters by the current user's approval rows — Michael sees his own approvals, including those that originated from other users' tasks. The cross-owner case displays the requesting context ("Sarah's task is asking your assistant to schedule a meeting; here's the proposed event").
 3. The parent task pause / resume mechanism (existing) uses the typed reason `awaiting_cross_owner_approval` so it's distinguishable from same-owner approval waits in observability.
-4. Approval timeout: V1 already has the 24-hour stall job (`workflowGateStallNotifyJob.ts`). Cross-owner approvals use the same stall threshold. When stalled, the parent task is notified; the parent task can choose to proceed without the cross-owner sub-step (degraded execution) or fail.
+4. Approval timeout: V1 already has the 24-hour stall job (`workflowGateStallNotifyJob.ts`). Cross-owner approvals use the same stall threshold. **Timeout behaviour is deterministic per delegation, governed by a `CrossOwnerApprovalTimeoutPolicy` field on the delegation record:**
+
+   ```
+   CrossOwnerApprovalTimeoutPolicy =
+     | 'fail_parent'               // default — parent task fails
+     | 'continue_without_substep'  // opt-in; only for sub-steps explicitly marked optional
+     | 'ask_initiator'             // surface the decision to the parent task's initiator
+   ```
+
+   **Default: `fail_parent`.** A sub-step writing to another user's calendar or inbox is not safely skippable without the owner's approval — "proceed without Michael's calendar" could produce low-quality or misleading automation. Optional sub-steps (metadata-only reads, non-blocking lookups) may be declared `continue_without_substep` in the delegation schema; spec confirms which use cases qualify.
 
 ### 3.8 Operator-mode use cases for the EA
 
@@ -268,9 +324,7 @@ The spec picks 2–3 operator-mode use cases for the EA that justify the runtime
 2. **Multi-source research with synthesis.** Example: "Compile a summary of all client correspondence I've sent this quarter, flag any commitments I made that I haven't followed through on." Long-running, adaptive (filters and re-queries based on intermediate findings).
 3. **Calendar-aware multi-person orchestration.** Example: "I need to schedule three back-to-back 30-minute interviews with our top three candidates next Tuesday afternoon. Find slots that work for everyone and propose options." Cross-references multiple calendars, may delegate to other PAs (cross-ownership), runs over minutes to find optimal combinations.
 
-V2 ships use cases #1 and #2 as the dogfood baseline. Use case #3 lands when V2 has at least one other PA provisioned (a second human in the dogfood subaccount) — until then the cross-ownership delegation path can't be exercised end-to-end.
-
-Spec confirms whether all three ship in V2 or if #3 is V2.1.
+**V2 ships use cases #1 and #2 only (ratified).** Use case #3 is V2.1 — deferred until a second PA-provisioned user exists in the dogfood subaccount so the cross-ownership delegation path can be exercised end-to-end. The core routing, credentials, and privacy primitives must be proven in the simpler single-user operator-mode cases before multi-person scheduling complexity is added.
 
 **What V2 does NOT add as operator-mode use cases:**
 
@@ -288,7 +342,7 @@ V1 of operator-backend (Spec D §3.13) designed end-of-session artefact harvest.
    - Upload file content to R2 (key: `runs/{agentRunId}/{relativePath}`)
    - Emit a typed event `file.created` (first write to that path) or `file.modified` (subsequent writes) into the pg-boss `operator-session-progressed` channel
    - Bridge to the existing WebSocket `agent-run` channel that OpenTaskView's FilesTab subscribes to
-   - Event payload includes: R2 key, signed-read URL, size, MIME type, agentRunId, owner_user_id, file path within the workspace
+   - Event payload: `{ storageKey, path, size, mimeType, agentRunId, ownerUserId, version, contentSha256 }`. **Signed-read URLs are NOT included in event payloads** — they expire in 60–300s and would be stale in replayed run traces. The client requests a fresh signed URL from the server when the user opens the file.
 
 2. **Filesystem watcher inside the sandbox (mandatory).** A small process inside the sandbox watches a designated artefacts directory (e.g., `/workspace/artefacts/` and `~/Downloads/`). Catches files written by side effects the tool registry doesn't see (browser downloads, script outputs, generated docs). Emits the same `file.*` event shape.
 
@@ -308,7 +362,7 @@ The codebase's existing `FILE_STORAGE_BACKEND` switch (`server/lib/env.ts:9`) + 
 2. Pattern (2) — sandbox-side `chokidar` (or equivalent) watcher process; configured per the operator-session sandbox template (`infra/sandbox-templates/operator-session/`).
 3. Pattern (3) — design note + interface placeholder; not implemented in V2.
 4. FilesTab on OpenTaskView already renders file lists from event-driven state (V1 pattern from `ea_drafts`); confirms that the existing client code subscribes to `file.*` events on the `agent-run` channel and that the rendering matches the live use case.
-5. Integration test: long-running operator task writes 5 files at different chain-link boundaries; FilesTab updates during the run (assert files appear in the list before terminal event; assert sizes update on subsequent writes).
+5. Acceptance criterion (CI/e2e or operator-verified dogfood run): a long-running operator task writes 5 files at different chain-link boundaries; `file.created` / `file.modified` events are observed in the WebSocket stream before the terminal completion event; FilesTab shows the files updating live. Not a local unit test — requires a live operator-backend session or a stub that replays the event stream.
 
 ### 3.10 Memory + Voice Profile available to operator-mode runs
 
@@ -339,15 +393,16 @@ Spec confirms the exact serialisation format of the initial-context bundle and t
 
 The operator-backend (Spec D) ships per-subaccount settings for operator-mode duration / concurrency caps. The EA inherits those defaults unless the spec specifies EA-specific overrides.
 
-**Spec D defaults (from operator-backend brief §4):**
+**Spec D defaults (from operator-backend brief §3.14, v2 lock 2026-05-12):**
 
-- Session duration cap: 120 minutes per chain link (with chain-resume across multiple chain links)
-- Concurrent operator sessions per subaccount: 3
+- Soft session cap: 120 minutes per chain link, auto-extend grace 30 minutes, hard stop at 150 minutes (configurable 30–240 min)
+- Concurrent operator sessions per subaccount: **5** (Spec D v1 was 3; v2 raised to 5 — this is the shipped value)
+- Max chain length per task: 50 chain links (configurable 1–500)
 - Auto-extend per task: configurable per subaccount, default off
 
 **V2 recommendation: EA inherits Spec D defaults.** No EA-specific overrides in V2. Reasons:
 
-- The Spec D defaults are conservative — 120 min × N chain links is plenty for the use cases in §3.8
+- The Spec D defaults are conservative — 120-min soft cap × N chain links is plenty for the use cases in §3.8
 - Per-user EA concurrency caps would require a new schema field; not justified for V2 dogfood (single-user)
 - If real-world EA usage shows the defaults are wrong, V2.5 adjusts per-EA defaults via existing per-subaccount-settings extension points
 
@@ -355,29 +410,34 @@ The operator-backend (Spec D) ships per-subaccount settings for operator-mode du
 
 - Tier 0–3: auto-allowed (same as V1 native)
 - Tier 4–5: review-gated (same as V1 native — Calendar writes, etc.)
-- Tier 6: review-gated (same as V1 native — send_email, third-party Slack posts)
-- **Operator mode does NOT relax approval requirements.** The controller style is orthogonal to risk tier; review gates apply regardless of whether the action ran under native or operator controller.
-- Per V1 §4 q3, the EA's risk-tier ceiling is Tier 5 hard. V2 inherits — operator-mode runs cannot exceed Tier 5 either.
+- Tier 6: **NOT available to the EA.** The EA's risk-tier ceiling is Tier 5 hard (per V1 §4 q3); V2 inherits. Actions requiring Tier 6 authority (send_email with unreviewed content, third-party Slack posts) are outside the EA's authority. Such requests fail closed — the owner is notified and must act manually, or route the action to an agent/template with explicit Tier 6 authority.
+- **Operator mode does NOT raise the EA's risk ceiling.** Controller style is orthogonal to risk tier; the Tier 5 ceiling applies regardless of whether the action ran under native or operator controller.
 
 Spec confirms whether any operator-mode-specific approval rules apply (e.g., should adaptive multi-step plans require operator approval at the PLAN level before execution? — open question for the spec author, recommendation: no, plans run under existing per-action approval rules to keep the model simple).
 
-## 4. Open architectural questions
+## 4. Spec-time decisions
 
-Most architectural questions resolved in the design discussion. Spec-time confirmations needed:
+### 4.A — Ratified constraints (spec must encode; no further operator input needed)
 
-1. **Cross-ownership delegation authorisation signal (§3.6).** How exactly does the orchestrator detect "this task needs the owner's resources"? Recommendation: text-based intent parsing on possessives + named-user references + resource-keyword presence (`my calendar`, `Michael's inbox`, etc.) plus an explicit signal when the parent agent's tool call requires an owner-scoped capability. Spec defines the precise detection rules + a fail-closed clarifying-question path.
+These are resolved. The spec author encodes them as invariants, not as open questions.
 
-2. **Use case shortlist for V2 (§3.8).** Recommendation: ship #1 (complex client investigation) and #2 (multi-source synthesis) at V2 launch; defer #3 (multi-person calendar orchestration) to V2.1 because cross-ownership delegation requires a second PA-provisioned user in the dogfood subaccount. Spec confirms.
+1. **Mid-session memory updates (§3.10).** Apply at chain-link boundaries, not mid-link. The operator-runtime's `update_memory_block` tool call waits for the next chain-link boundary before hot-reloading in-context memory.
 
-3. **Mid-session memory updates (§3.10).** Recommendation: apply at chain-link boundaries, not mid-link. Spec confirms whether the operator-runtime's `update_memory_block` tool call should hot-reload the agent's in-context memory (additional turn-boundary refresh) or wait for the next chain-link.
+2. **Initial-context bundle size budget (§3.10).** 4 KB hard cap for memory + voice profile combined. Priority when budget is exceeded: voice profile features > most-recent memory blocks > older memory blocks. Spec defines the exact serialisation and trimming algorithm.
 
-4. **Initial-context bundle size budget (§3.10).** Recommendation: 4 KB hard cap for memory + voice profile combined. If a user's memory exceeds budget, prioritise: voice profile features > most-recent memory blocks > older memory blocks. Spec confirms the exact bundling algorithm.
+3. **Operator-mode planning approval (§3.11).** Per-action approval only — no plan-level gate before execution begins. Adaptive operators cannot produce a final plan upfront; pre-execution plan approval blocks the use case.
 
-5. **Operator-mode planning approval (§3.11).** Should an adaptive multi-step plan require approval at the PLAN level before execution begins, or only at the per-action level once execution starts? Recommendation: per-action only — adaptive operators by definition cannot produce a final plan upfront; pre-execution plan approval would block the use case. Spec confirms.
+4. **@\<DisplayName\> collision (§3.5).** When two agents share a display name, no score boost is applied and pure capability matching proceeds (`address_parse_result = 'collision'`). Already encoded in §3.5.
 
-6. **`@<DisplayName>` collision handling (§3.5).** Two agents with the same display name in the same org — how resolved? Recommendation: if both match, addressing fails (no boost applied) and the matcher uses pure capability matching. Spec confirms the exact behaviour.
+5. **CI gate naming (§3.3).** `scripts/verify-capability-map-shape.sh`, integrated with the existing `verify-*` gate convention.
 
-7. **CI gate name for capability-map shape (§3.3).** Recommendation: `scripts/verify-capability-map-shape.sh`. Spec confirms naming + integrates with the existing `verify-*` gate convention.
+6. **Delegation authorisation signal (§3.6).** Cross-owner delegation requires one of two explicit signals: (a) a named-owner or resource reference in the user intent ("Michael's calendar", "Michael's inbox", possessives that resolve to a known user in the subaccount), OR (b) an explicit owner-scoped capability request emitted by a trusted parent-agent tool call. If neither signal is present, delegation fails closed with a clarifying question — no fuzzy implicit delegation. Text parsing covers user-facing requests; the structured capability signal covers agent-internal delegation. Spec encodes both detection paths and the fail-closed clarifying-question response.
+
+7. **Use case shortlist (§3.8).** V2 ships use cases #1 (complex client investigation) and #2 (multi-source synthesis) only. Use case #3 (calendar-aware multi-person orchestration) is V2.1, deferred until a second PA-provisioned user exists in the dogfood subaccount to exercise cross-ownership delegation end-to-end. Rationale: routing, credentials, and the privacy invariants must be proven with the simpler single-user operator-mode cases before multi-person scheduling complexity is added.
+
+### 4.B — All decisions resolved
+
+No open items remain. Spec authoring may proceed.
 
 ## 5. Out of scope (explicit non-goals)
 
@@ -411,7 +471,7 @@ Most architectural questions resolved in the design discussion. Spec-time confir
 
 - Operator-mode tasks render in `OpenTaskView` (existing, unchanged) with the existing `r1-r17` operator-backend prototypes covering running / completed / failed / cancelled / fallback / chain-link / budget-exceeded states
 - Run-trace events get new event types but render via the existing `RunTraceEventRenderer` (event-type variants, not new visual chrome)
-- Settings toggle for "Allow operator mode" — single form field in the existing EA settings page
+- Operator mode status indicator in EA settings — a read-only field showing that operator mode is enabled (no toggle in V2; the migration enables it unconditionally for all EA instances per §3.2)
 - Live file events update the existing FilesTab on OpenTaskView (no FilesTab redesign)
 - Approval queue for cross-owner approvals — existing approval queue UI, displays new typed context for cross-owner items
 - GlobalAskBar — orchestrator-side `@` parsing only; no UI changes
@@ -421,7 +481,7 @@ If during spec authoring a genuinely new visual surface emerges, surface it expl
 
 **Build sequencing:**
 
-1. Operator reviews this brief, ratifies §4 spec-time decisions (7 items).
+1. Operator reviews this brief. All decisions are ratified (§4.A items 1–7; §4.B closed). Brief is ready for spec authoring.
 2. Operator spawns a new Claude Code session, branch `claude/personal-assistant-v2-operator-{nonce}` off post-#291 main.
 3. Session adopts `spec-coordinator`: brief intake (this doc) → spec authoring → `spec-reviewer` (Codex loop) → `chatgpt-spec-review` (manual rounds) → handoff to `feature-coordinator`.
 4. Build session ships:
@@ -453,8 +513,5 @@ Estimated effort: ~2 weeks for the build session. The headline work is the cross
 No further predecessor work required. V2 is ready to build the moment the brief is ratified.
 
 **Branch:** `claude/personal-assistant-v2-operator-{nonce}` off post-#291 main.
-
-## End of brief
-
 
 ## End of brief
