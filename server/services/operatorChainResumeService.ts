@@ -6,10 +6,11 @@
 // decrypts the checkpoint from the parent chain link, and delegates composition
 // to the pure helper.
 
-import { eq, and, asc, isNull } from 'drizzle-orm';
+import { eq, and, asc, isNull, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { operatorRuns } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { operatorRuns, agentRuns } from '../db/schema/index.js';
+import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
+import { decideFreshProfileRestartAllowed } from '../routes/freshProfileRestartPredicatePure.js';
 import {
   composeResumePayload,
   type ResumePayload,
@@ -92,6 +93,113 @@ export const operatorChainResumeService = {
         checkpoint,
         attemptNumber: currentAttemptNumber,
       });
+    });
+  },
+
+  async readAgentRunForTask(agentRunId: string, orgId: string) {
+    const [run] = await db
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        organisationId: agentRuns.organisationId,
+        subaccountId: agentRuns.subaccountId,
+        assignedUserId: agentRuns.assignedUserId,
+        operatorChainFailureCount: agentRuns.operatorChainFailureCount,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
+      .limit(1);
+    return run ?? null;
+  },
+
+  async resetChainFailureCount(agentRunId: string, orgId: string): Promise<{ updated: boolean }> {
+    const result = await db
+      .update(agentRuns)
+      .set({ operatorChainFailureCount: 0 })
+      .where(
+        and(
+          eq(agentRuns.id, agentRunId),
+          eq(agentRuns.organisationId, orgId),
+          eq(agentRuns.status, 'paused_chain_failure'),
+        ),
+      )
+      .returning({ id: agentRuns.id });
+    return { updated: result.length > 0 };
+  },
+
+  async accumulateBudgetExtension(
+    agentRunId: string,
+    orgId: string,
+    extensionMinutes: number,
+  ): Promise<{ updated: boolean }> {
+    const result = await db.transaction(async (tx) => {
+      await setOrgGUC(tx, orgId);
+      return tx
+        .update(agentRuns)
+        .set({
+          perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(agentRuns.id, agentRunId),
+            eq(agentRuns.organisationId, orgId),
+            eq(agentRuns.status, 'paused_budget_exceeded'),
+          ),
+        )
+        .returning({ id: agentRuns.id });
+    });
+    return { updated: result.length > 0 };
+  },
+
+  async executeFreshProfileRestart(
+    agentRunId: string,
+    orgId: string,
+    subaccountId: string,
+    taskStatus: string,
+  ): Promise<{
+    priorAttemptNumber: number;
+    newAttemptNumber: number;
+    priorChainSeqCount: number;
+    predicate: ReturnType<typeof decideFreshProfileRestartAllowed>;
+  }> {
+    return db.transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
+
+      const [latestChainLink] = await tx
+        .select({
+          failureReason: operatorRuns.failureReason,
+          failedMidStep: operatorRuns.failedMidStep,
+          attemptNumber: operatorRuns.attemptNumber,
+          chainSeq: operatorRuns.chainSeq,
+        })
+        .from(operatorRuns)
+        .where(and(eq(operatorRuns.agentRunId, agentRunId), isNull(operatorRuns.supersededByAttempt)))
+        .orderBy(desc(operatorRuns.chainSeq))
+        .limit(1);
+
+      const predicate = decideFreshProfileRestartAllowed({
+        taskStatus,
+        latestChainLinkFailureClass: null,
+        latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
+      });
+
+      const priorAttempt = latestChainLink?.attemptNumber ?? 1;
+      const newAttempt = priorAttempt + 1;
+
+      if (predicate.allowed) {
+        await tx
+          .update(operatorRuns)
+          .set({ supersededByAttempt: newAttempt })
+          .where(and(eq(operatorRuns.agentRunId, agentRunId), isNull(operatorRuns.supersededByAttempt)));
+      }
+
+      return {
+        priorAttemptNumber: priorAttempt,
+        newAttemptNumber: newAttempt,
+        priorChainSeqCount: latestChainLink?.chainSeq ?? 0,
+        predicate,
+      };
     });
   },
 };

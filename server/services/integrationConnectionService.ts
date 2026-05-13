@@ -714,6 +714,25 @@ export const integrationConnectionService = {
     }
     return null;
   },
+
+  async findActiveOperatorSessionConnection(
+    orgId: string,
+    subaccountId: string,
+  ): Promise<{ id: string } | null> {
+    const [conn] = await db
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, orgId),
+          eq(integrationConnections.subaccountId, subaccountId),
+          eq(integrationConnections.authType, 'operator_session' as IntegrationConnection['authType']),
+          eq(integrationConnections.connectionStatus, 'active'),
+        ),
+      )
+      .limit(1);
+    return conn ?? null;
+  },
 };
 
 // ---------------------------------------------------------------------------
