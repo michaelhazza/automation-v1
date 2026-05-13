@@ -199,3 +199,68 @@ The only one I'd definitely fix before handoff is #3, because it is a real schem
 
 ChatGPT verdict NEEDS_MINOR_TIGHTENING → all 7 findings tightened. R2-F3 (the only one ChatGPT flagged as "definitely fix before handoff") closed by adding the warm_session_id column + migration 0347. R2-F4 also closed. Spec is build-ready; no remaining mechanical or directional gaps surfaced.
 
+### Round 3 — 2026-05-13T09:00:00Z
+
+**Verdict:** APPROVED WITH MINOR EDITS (continued improvement trajectory: CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → APPROVED WITH MINOR EDITS)
+**Findings:** 6 (1 medium + 5 low — no highs)
+**Sections amended:** TOC (§10.3 listing), §7.1 (FK action), §7.2 (0345 + 0347 rewrites; null-safe CHECK), §8.6 (idle-duration formula), §10.3 (deletion contract), §13.1 (FK action note), §16 (stale deferred item removed), §18 (round 3 reconciliation), frontmatter
+
+#### ChatGPT Feedback (raw)
+
+```
+Migration 0345 description still contains contradictory alternatives
+Severity: low / Category: style
+Brief: The migration row first says 0345 adds warm_session_id with an FK, then later says the preferred path is to split the FK into 0347. The final intent is clear, but the 0345 row should be rewritten to remove the abandoned "FK in 0345" wording.
+
+llm_requests CHECK constraint may mishandle NULL with <>
+Severity: medium / Category: bug
+Brief: The proposed CHECK uses subtype <> 'warm_pool', but SQL three-valued logic can make NULL cases tricky. Make the second CHECK null-safe: CHECK ((subtype = 'warm_pool' AND warm_session_id IS NOT NULL) OR (subtype IS DISTINCT FROM 'warm_pool' AND warm_session_id IS NULL)).
+
+ON DELETE SET NULL conflicts with the warm-pool idempotency story
+Severity: low / Category: architecture
+Brief: The spec says browser_warm_sessions rows are never deleted, so ON DELETE SET NULL is not expected to fire. But if it ever does, it destroys the idempotency link. Consider ON DELETE RESTRICT instead.
+
+Deferred item for Part 10 is now stale
+Severity: low / Category: style
+Brief: §7.8 now correctly says Part 10 disposition is decided. But §16 still has a deferred item for "Part 10 disposition." Remove that deferred item.
+
+Table of contents does not list §10.3
+Severity: low / Category: style
+Brief: The body has §10.3 browser_warm_sessions, but the TOC only lists §10.1 and §10.2.
+
+Warm-session cost attribution needs one extra column or a clear derivation
+Severity: low / Category: improvement
+Brief: Add a sentence that idle duration is terminated_at - created_at, with leased_at retained for lifecycle diagnostics.
+
+Overall verdict: APPROVED WITH MINOR EDITS
+The remaining items are editorial or small SQL-hardening issues. I'd clean up #1, #2, #4, and #5 before final lock, but the spec is now implementation-ready.
+```
+
+#### Recommendations and Decisions
+
+| ID | Title | Severity | Triage | My recommendation | Final decision |
+|---|---|---|---|---|---|
+| R3-F1 | 0345 contradictory FK wording | low | technical | apply | auto (apply) |
+| R3-F2 | CHECK uses null-unsafe `<>` | medium | technical | apply | auto (apply) |
+| R3-F3 | `ON DELETE SET NULL` vs "never deleted" contract | low | technical | apply | auto (apply) |
+| R3-F4 | §16 has stale Part 10 deferred | low | technical | apply | auto (apply) |
+| R3-F5 | TOC missing §10.3 | low | technical | apply | auto (apply) |
+| R3-F6 | Idle-duration formula needs clarification | low | technical | apply | auto (apply) |
+
+**User approval input:** none required (no high/critical severity findings; all auto-applied per agent §3a rules). Operator reviewed triage table; proceeded.
+
+#### Actions taken in spec
+
+- R3-F1: §7.2 0345 row rewritten — no in-line FK reference; 0345 adds nullable `subtype` + nullable `warm_session_id` column (no FK) + 2 null-safe CHECK constraints; FK + partial-unique index land in 0347 after 0346 creates the target table.
+- R3-F2: Both CHECK constraints now use `IS DISTINCT FROM` instead of `<>` for null-safe comparison. Explanation of three-valued-logic gap inlined for builders.
+- R3-F3: `ON DELETE SET NULL` → `ON DELETE RESTRICT` on the `llm_requests.warm_session_id → browser_warm_sessions(id)` FK. New "deletion contract" subsection in §10.3 explicitly states rows are never deleted; FK action is defensive only and surfaces any accidental DELETE as a constraint violation.
+- R3-F4: §16 stale "Part 10 disposition" deferred item removed; pointer to §7.8 + §17 Q2 (DECIDED — split).
+- R3-F5: TOC now lists §10.3 alongside §10.1 and §10.2.
+- R3-F6: §8.6 producer note for warm-pool subtype rows specifies idle-duration formula as `terminated_at - created_at`. `leased_at` retained on the row for lifecycle diagnostics (capacity-planning analysis) but explicitly NOT used in billing calc; builders MUST NOT split the interval.
+
+§18 self-consistency pass extended with round 3 reconciliation block. Frontmatter status updated: "rounds 1 + 2 + 3 complete — 25 findings applied".
+
+#### Build-readiness verdict after round 3
+
+ChatGPT verdict APPROVED WITH MINOR EDITS → all 6 findings tightened. The only medium-severity item (R3-F2 null-safe CHECK) closed. R3-F3 (architecture) closed by aligning FK action with the explicit "never deleted" service contract. Spec remains implementation-ready; round 4 is operator-driven (one more pass for final polish, per 2026-05-13 operator decision).
+
