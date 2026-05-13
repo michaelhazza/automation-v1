@@ -85,6 +85,13 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 - [ ] **OAuth state security audit trail** — `auth.login.failure` / `auth.login.success` / OAuth state events / abuse events now live in `security_audit_events` (migration 0281). Architecture.md §Layer 4 documents the stream split. Operator action: confirm dashboards in Grafana / Mission Control surface the new stream before deprecating the legacy `audit_events` records.
 
+## From builder — 2026-05-13
+
+- **PA-V2-C4-1** — `cross_owner.ask_initiator_decision` action type is not registered in `server/config/actionRegistry/`. The `crossOwnerApprovalTimeoutSweep` ask_initiator branch wraps the `proposeAction` call in a try-catch and logs a warning if it fails. A registry entry is needed for the initiator-decision action to actually land in the approval queue. Suggest adding to `server/config/actionRegistry/agents.ts` or a new `crossOwner.ts` file.
+- **PA-V2-C4-2** — `server/services/agentExecutionEventServicePure.ts` has no validator cases for `cross_owner_substep.awaiting_initiator_decision` or `cross_owner_substep.completed`. The `validateEventPayload` switch hits `default: never` and returns `{ ok: false }`, silently dropping these events. Needs two new case branches added to the switch statement.
+- **PA-V2-C4-3** — `server/services/actionService.ts` line 2: `createHash` imported from `'crypto'` but unused — pre-existing dead import, not introduced by this chunk.
+- **PA-V2-C4-4** — `listPendingApprovalsForUser` spec says apply `isActive(actions)` but the `actions` table has no `deletedAt` column so the filter was not applied. Spec note is incorrect — actions are not soft-deletable in the current schema.
+
 ---
 
 ## Known un-built / low-priority
@@ -114,7 +121,25 @@ From `spec-reviewer` iteration 1 against `docs/superpowers/specs/2026-05-13-pers
 
 - [ ] **PA-V2-OP-INFO-2** — During spec authoring §13 listed an open authoring question: whether `runTraceProjectionForViewer` deserves a dedicated `*Pure.ts` split. Defers to the implementer's judgement on test surface during Chunk 3. No action needed pre-implementation.
 
+## From builder — 2026-05-13
+
+- **PA-V2-OP-C3-NOTE-1** — `GET /api/agent-runs/:id/trace-events` was not modified by Chunk 3. The spec says to apply `runTraceProjectionForViewer` to both `trace-events` and `trace` endpoints, but `trace-events` returns a `toolCallsLog` (LLM tool call objects without an `eventType` field — already role-projected via `projectForRole`). Applying the viewer projection to this endpoint would require either a different projection strategy or a new endpoint-specific filter. The `trace` endpoint was modified as specified. The `trace-events` gap should be reviewed when the full privacy model for LLM payload drilldown is defined (spec §5.4 may need a supplementary clause for tool-call payloads).
+- **PA-V2-OP-C3-NOTE-2** — `authorise()` in `executeCheckCapabilityGap` returns `fail_closed` (with `clarifying_question`) whenever no cross-owner signal is detected (no possessive pattern AND no trusted tool-call payload). This means every `check_capability_gap` call with intent text that doesn't include a possessive name reference will receive a `cross_owner_clarification_required` error. If this proves too aggressive in production (false-positive clarification prompts for ordinary tasks), the fix is to make `authorise` return a fourth outcome (`{ authorised: false, clarifying_question: null }`) when no cross-owner intent was detected, and only surface the question when a pattern was detected but couldn't be resolved. Needs spec amendment.
+
 ---
+
+## Cross-owner approver wiring (adversarial finding, post-V2-build)
+
+`server/services/actionServicePure.ts:14` — `deriveApproverUserId` is exported and tested but never called from production code. The spec (§5.5) requires cross-owner action proposals to set `approver_user_id = executor_agent.owner_user_id`. The wiring requires:
+1. Adding `executorOwnerUserId?: string | null` to `MiddlewareContext` in `server/services/middleware/types.ts`
+2. Populating it in the agent execution loop when the run has `agentRuns.ownerUserId` set AND the run is a cross-owner sub-run (detected via `agentRuns.parentRunId` + `delegation_outcomes.substep_status = 'awaiting_cross_owner_approval'`)
+3. Calling `deriveApproverUserId({ isCrossOwner: ..., executorOwnerUserId: ctx.executorOwnerUserId })` in `proposeActionMiddleware.ts` and passing the result as `approverUserId` to `actionService.proposeAction`
+
+Risk: without this wiring, cross-owner EA actions default to `approver_user_id = NULL` (initiator-defaulted path), meaning any org user with REVIEW_APPROVE can approve them rather than exclusively the executor's owner.
+
+Workaround: Fix 5 (approveItem gate in reviewService) partially mitigates this by blocking wrong approvers, but only after an explicit approver is set. When approverUserId is NULL, Fix 5 is a no-op (the `!== null` guard doesn't fire).
+
+Discovered by: adversarial-reviewer, 2026-05-14.
 
 ## Blockers
 

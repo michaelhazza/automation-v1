@@ -12,7 +12,6 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const crypto = require('crypto');
 const chokidar = require('chokidar');
 
 // ---------------------------------------------------------------------------
@@ -29,6 +28,7 @@ const WATCHED_ROOTS = [
 // ---------------------------------------------------------------------------
 
 const UNSAFE_PATTERNS = [
+  /(?:^|\/)\.\.(\/|$)/,  // path traversal: reject any segment that is '..'
   /(?:^|\/)\.env(?:\.|$)/,
   /\.pem$/i,
   /\.key$/i,
@@ -143,14 +143,24 @@ function handleFileEvent(eventPath) {
     return;
   }
 
-  // Step (f): compute sha256
-  const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+  // Strip watched-root prefix so the IPC path is relative (e.g. 'foo.txt')
+  // and the host bridge produces a clean storage key: runs/<runId>/foo.txt
+  let relativePath = resolvedPath;
+  for (const root of WATCHED_ROOTS) {
+    if (resolvedPath === root + '/' || resolvedPath.startsWith(root + '/')) {
+      relativePath = resolvedPath.slice(root.length + 1); // +1 for the separator
+      break;
+    }
+  }
 
-  // Step (g): send via IPC
+  // Step (g): send via IPC — existingContentSha256 is null because the watcher
+  // does not know the DB-stored sha256; the host runtime fetches it before calling
+  // handleWatcherEvent. shouldWatcherSkip returns false on null, so the event
+  // always proceeds to the canonical UPSERT.
   sendIpc({
     type: 'file_event',
-    path: resolvedPath,
-    existingContentSha256: sha256,
+    path: relativePath,
+    existingContentSha256: null,
     sizeBytes: content.length,
     emittedBy: 'watcher',
   });

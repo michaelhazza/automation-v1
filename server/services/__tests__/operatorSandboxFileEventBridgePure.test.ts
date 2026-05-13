@@ -95,4 +95,38 @@ describe('isPathSafe', () => {
   test('empty string is rejected', () => {
     expect(isPathSafe('')).toBe(false);
   });
+
+  test('.envrc (safe — no boundary match) is allowed', () => {
+    expect(isPathSafe('.envrc')).toBe(true);
+  });
+
+  test('safe/.env.production (mid-path .env.) is rejected', () => {
+    expect(isPathSafe('safe/.env.production')).toBe(false);
+  });
+
+  test('notes.env.md (no segment-boundary .env) is allowed', () => {
+    expect(isPathSafe('notes.env.md')).toBe(true);
+  });
+
+  test('safe/.ssh/keys (mid-path .ssh/) is rejected', () => {
+    expect(isPathSafe('safe/.ssh/keys')).toBe(false);
+  });
+
+  test('KEY.PEM (uppercase) is rejected', () => {
+    expect(isPathSafe('KEY.PEM')).toBe(false);
+  });
+
+  test('../ traversal sequence is rejected', () => {
+    expect(isPathSafe('../etc/shadow')).toBe(false);
+  });
+
+  test('nested ../traversal is rejected', () => {
+    expect(isPathSafe('foo/../../etc/shadow')).toBe(false);
+  });
+});
+
+describe('detectMimeType — case-insensitive extension', () => {
+  test('UPPER.JSON -> application/json', () => {
+    expect(detectMimeType('UPPER.JSON')).toBe('application/json');
+  });
 });

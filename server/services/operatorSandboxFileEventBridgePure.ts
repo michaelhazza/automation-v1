@@ -39,6 +39,7 @@ export function detectMimeType(path: string): string {
 }
 
 const UNSAFE_PATTERNS: RegExp[] = [
+  /(?:^|\/)\.\.(\/|$)/,  // path traversal: reject any segment that is '..'
   /(?:^|\/)\.env(?:\.|$)/,
   /\.pem$/i,
   /\.key$/i,

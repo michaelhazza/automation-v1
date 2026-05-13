@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS operator_run_files (
   content_sha256   TEXT        NOT NULL,
   mime_type        TEXT        NOT NULL,
   storage_key      TEXT        NOT NULL,
+  owner_user_id    UUID        REFERENCES users(id) ON DELETE SET NULL,
+  subaccount_id    UUID        REFERENCES subaccounts(id) ON DELETE CASCADE,
   emitted_by       TEXT        NOT NULL,
   emitted_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
