@@ -4244,8 +4244,11 @@ Key invariants:
 - **Run-trace privacy projection** — `runTraceProjectionForViewer` is applied at both service and route layers. Initiator-side views receive status + typed summary only; owner-side source data is private by default. Two-layer enforcement is deliberate: a future direct consumer of `agentExecutionEventService` still gets the projection.
 - **`target_owner_user_id` is server-side-only** — HTTP-supplied values are discarded before `RoutingContext` is built. Never accepted from client/FE input.
 - **Single terminal event per `(parent_run_id, substep_id)`** — `delegation_outcomes` UPDATE predicate is `WHERE id = $2 AND terminal_at IS NULL`; 0 rows updated means already-terminal, and no event is emitted.
+- **Cross-org service-layer fail-closed** — `agentExecutionEventService.streamEvents` and `streamEventsByTask` scope the owner lookup by `opts.forUser.organisationId`; a cross-org or missing runId fails closed (empty page) rather than coercing the projection to "subaccount-owned, all visible".
 
 State machine columns added in migration 0347: `substep_status` (ten-value union), `terminal_at`, `cross_owner_approval_timeout_policy` (three-value union). Partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` supports the status query.
+
+Timeout-sweep durability columns added in migrations 0349-0351: `substep_status_updated_at` (auto-bumped by trigger on real status transitions; used by sweep cutoff filter), `awaiting_initiator_event_claim_at` + `awaiting_initiator_event_emitted_at`, `terminal_event_claim_at` + `terminal_event_emitted_at`. The pattern is atomic-claim-then-emit with a 5-minute stale-claim TTL: every emit attempt claims via `UPDATE *_event_claim_at = NOW() WHERE *_event_emitted_at IS NULL AND (claim_at IS NULL OR claim_at < NOW() - 5min) RETURNING id`; only the claim winner appends the event; on success the matching `_event_emitted_at` is set. `crossOwnerApprovalTimeoutSweep` runs a retry pass at the start of every sweep to re-emit stranded terminal events.
 
 ---
 

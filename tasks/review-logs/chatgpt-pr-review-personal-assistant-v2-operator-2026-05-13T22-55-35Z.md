@@ -294,3 +294,76 @@ edit:    server/jobs/workflowGateStallNotifyJob.ts (retryStrandedTerminalEmits �
 ### Round-5 diff prep
 
 After commit, regenerate `.chatgpt-diffs/pr299-round5-code-diff.diff` for the operator to paste into ChatGPT for Round 5.
+
+## Round 5 — 2026-05-14T09:46Z
+
+### ChatGPT Verdict
+APPROVED — merge-ready.
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| F12 | resolved | — | confirmed closed (Round 4 fix) | — | resolved |
+| T6 | resolved | — | confirmed closed (Round 4 fix) | — | resolved |
+| Residual | informational | technical | event-idempotency edge case | already backlogged | acknowledged |
+
+### Decisions log
+
+ChatGPT confirmed Round 4 fixes close F12 and T6 cleanly. The only outstanding item is the previously documented residual edge case (crash after `appendEvent` succeeds but before `*_event_emitted_at` updates → duplicate event after stale-claim window), which ChatGPT explicitly agrees is out of scope for this PR. Tracked as backlog item `PA-V2-EVENT-IDEMPOTENCY` (added in Round 3).
+
+No new findings. No new fixes. No new diff regeneration needed — the branch HEAD at `7f622e99` is the merge candidate.
+
+## Final Summary
+
+- **Verdict:** APPROVED
+- **Rounds:** 5
+- **Findings applied:** 11 (F1, F2, F3, F4, F5, T1, F6, F7, F8, T3, T4, F9, F10, F11, T5, F12, T6 — F2 and T2 partially deferred per their nature)
+- **Findings rejected:** 0
+- **Findings deferred:** 4 (`PA-V2-WATCHER-HOST-BRIDGE`, `PA-V2-LIST-APPROVALS-V1-ARM`, `PA-V2-OPERATOR-TEMPLATE-PROMOTION`, `PA-V2-EVENT-IDEMPOTENCY` — all routed to `tasks/todo.md` with full remediation plans)
+- **KNOWLEDGE.md updated:** yes (4 patterns added during Phase 2 — Phase 3 cross-check below)
+- **architecture.md updated:** no — `n/a` (no service-boundary / route-pattern / agent-fleet / RLS-schema / run-continuity change introduced by the chatgpt-pr-review fixes; the V2 cross-ownership delegation pattern + capability-map V2 axis + universal-controller invariant are already documented from Phase 2)
+- **capabilities.md updated:** no — `n/a` (no capability/skill/integration add/remove/rename; the PA standing-autonomous-operator bullet was added in Phase 2)
+- **integration-reference.md updated:** no — `n/a` (no integration scope / status / OAuth provider / MCP preset change)
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — `n/a` (no build-discipline / agent-fleet / locked-rule change)
+- **spec-context.md updated:** `n/a` (this is a PR review, not a spec review)
+- **frontend-design-principles.md updated:** no — `n/a` (no UI pattern / hard rule / worked example introduced)
+
+### Files changed across all 5 rounds (Round 1 baseline → Round 4 final)
+
+```
+new:     migrations/0349_delegation_outcomes_substep_status_updated_at.sql / .down.sql
+new:     migrations/0350_delegation_outcomes_substep_status_trigger.sql / .down.sql
+new:     migrations/0351_delegation_outcomes_event_emit_audit.sql / .down.sql
+deleted: migrations/0349_operator_run_files_missing_columns.sql / .down.sql (stale + unsafe per F2)
+
+edit:    server/db/schema/delegationOutcomes.ts (3 new columns + trigger doc)
+edit:    server/jobs/workflowGateStallNotifyJob.ts (major restructure — claim+emit pattern,
+                                                    retry pass, F4/F8/F10/F11 fixes)
+edit:    server/services/actionService.ts (F5 — Arm 2 removed)
+edit:    server/services/agentExecutionEventService.ts (F9 + F12 — org-scoped fail-closed
+                                                        on both stream functions)
+edit:    server/services/runTracePure.ts (T3 docstring update)
+edit:    server/services/__tests__/runTracePure.viewerProjection.test.ts (T1 — full allow-list)
+edit:    server/routes/agentRuns.ts (F6 — three-state owner lookup + 404 fail-closed)
+edit:    server/routes/taskEventStream.ts (F6 — three-state owner lookup + empty-page fail-closed)
+edit:    infra/sandbox-templates/operator-session/file-watcher.js (F1 — statSync + contract comment)
+edit:    infra/sandbox-templates/operator-session/README.md (T4 — DO NOT IMPORT warning)
+edit:    tasks/review-logs/spec-conformance-log-personal-assistant-v2-operator-chunk-4-*.md
+         (F5 deviation + F3 + F4 conformance notes)
+edit:    tasks/todo.md (4 backlog items added)
+```
+
+### Verification at merge candidate (HEAD `7f622e99`)
+
+- `npm run lint`: 0 errors, 896 warnings (all pre-existing — zero new lint errors introduced across 5 rounds).
+- `npm run typecheck`: clean for all touched files; only the 2 pre-existing `@react-pdf/renderer` errors persist (acknowledged in the Phase 2 handoff).
+- `npx vitest run server/services/__tests__/runTracePure.viewerProjection.test.ts server/services/__tests__/workflowGateStallNotifyJobPure.timeoutPolicyDecisionTree.test.ts`: 9/9 PASS.
+
+### Open items at merge
+
+All routed to `tasks/todo.md` with full remediation plans:
+- `PA-V2-LIST-APPROVALS-V1-ARM` (F5)
+- `PA-V2-WATCHER-HOST-BRIDGE` (F1)
+- `PA-V2-OPERATOR-TEMPLATE-PROMOTION` (T2)
+- `PA-V2-EVENT-IDEMPOTENCY` (F10/F11 residual)
