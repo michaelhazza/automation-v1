@@ -84,3 +84,18 @@ When Phase 2 starts, verify:
 If any of those are missing, the auto-commit failed and Phase 2 should not proceed.
 
 ## End of handoff
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #297
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-iee-browser-on-e2b-2026-05-13T22-31-27Z.md (4 rounds, final APPROVED)
+**spec_deviations reviewed:** n/a (none recorded in Phase 2 progress)
+**Doc-sync sweep verdicts:** see review log § Final Summary. KNOWLEDGE.md yes (4 entries); architecture.md yes (Worker service section, R1); all others n/a per investigation procedure (grep terms checked, scope not touched).
+**KNOWLEDGE.md entries added:** 4 — RUNTIME-DISABLED scaffold pattern; Placeholder-digest rejection at construction; Warm-pool lease must thread provider identity; .strict() Zod for admin-controlled fields.
+**tasks/todo.md items removed:** 0 (no pre-existing items closed by this build). 9 new entries added: IEE-DEF-1 through IEE-DEF-9 tracking forward-looking gaps to wire when e2b SDK lands.
+**S2 sync conflicts:** 3 — KNOWLEDGE.md (union), tasks/current-focus.md (ours), server/config/rlsProtectedTables.ts (union-with-ordering by migration number).
+**Migration renumber:** IEE migrations 0345-0349 → 0346-0350 (pre-merge fix-up commit `e0ea1447`) to clear collision with main's 0345_memory_utility_30d from PR #298.
+**chatgpt-pr-review rounds + commit shas:** R1 `8259da5c` (9 of 11 findings F1-F7+T1-T3); R2 `10e20212` (10 findings F8-F14+T5-T7); R3 `f2341dfb` (6 findings F15-F18+T8-T9); R4 `cd8db625` (3 findings T10-T12 + close).
+**ready-to-merge label applied at:** 2026-05-13T23:25:46Z

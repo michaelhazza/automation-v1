@@ -1253,3 +1253,53 @@ Routes that read from materialised views (e.g., `mv_memory_utility_30d`) MUST ca
 Source: plan Chunk 2 review.
 
 `memory_block_version_sources` has a FK to `memory_block_versions`. If auto-synthesis writes a `memoryBlocks` row (insert), it MUST also call `writeVersionRow` to produce a `memory_block_versions` row in the same operation, or the FK constraint for source links will fail. Previously this was implicit; it is now explicit. `writeVersionRow` returns `null` for consecutive identical content (dedup); callers skip `writeLineageRowsForVersion` in that case. The correct call order is always: `insertMemoryBlock` → `writeVersionRow` → `writeLineageRowsForVersion` (if version row was created).
+
+### [2026-05-14] Pattern — RUNTIME-DISABLED scaffold for partially-wired features _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 3 F17.
+
+When a service exports methods that the rest of the codebase will eventually call but whose dependencies are not yet wired (cross-tenant sweeps awaiting `withAdminConnection`, provisioning paths awaiting an external SDK install), the unsafe method body MUST be replaced with a runtime throw rather than left as a partially-correct implementation. The throw carries a specific `FailureReason` code from the existing enum (here: `sandbox_provider_unavailable`), a clear message naming the dependency that must land first, and a pointer to the tracking entry in `tasks/todo.md` (IEE-DEF-N). The reference implementation that the future caller will need lives in git history, not in the running tree. This forces any future operator who wires the feature to (a) confront the dependency before re-enabling, (b) read the prior implementation deliberately, (c) re-author the safer version.
+
+Why this beats keeping the broken implementation: silent RLS bypass risk if anyone accidentally wires a caller (the partial implementation would have run without admin connection); visibility (a grep "RUNTIME-DISABLED scaffold" instantly enumerates unsafe methods); doesn't pollute the type system or import graph (the export shape stays the same).
+
+Detection: any function with a stale `TODO: <something> — deferred` comment that still has a working body. Convert to throw with the pattern above and queue the wiring TODO with a stable id.
+
+Cross-link: `server/services/sandbox/browserWarmPool.ts::evictStale` + `refillIfEligible`, `server/services/sandbox/ieeBrowserProfileManager.ts::gcSweep`. Tracked as IEE-DEF-1, IEE-DEF-2, IEE-DEF-3.
+
+### [2026-05-14] Pattern — Placeholder-digest rejection at construction, not at run-time _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 1 F4 + Round 3 F16.
+
+When a service depends on a content-addressed identifier (sha256 digest, immutable image alias, content hash) read from a file at construction time, the parser MUST reject explicit placeholder values (`sha256:0000...`, `1970-01-01T00:00:00Z`, etc.) before the value is handed to downstream code. Two reasons: (1) fail at construction not at runtime — a placeholder digest that passes local validation then hits the external API and fails there is harder to diagnose, costs a network round-trip, and may leak placeholder state into provider-side state; (2) decouple from environment — the rejection is a property of the value itself, not of NODE_ENV.
+
+Companion pattern: env-flag gating for partially-wired template paths. When the rest of the system needs to construct without the placeholder-bearing path, gate that path behind a dedicated env flag (here: `E2B_BROWSER_TEMPLATE_ENABLED=true`). The flag defaults to off; CI flips it to on when the real digest publishes. Cleaner than per-path try/catch.
+
+Detection: any `assertNotPlaceholderX` / `validateNotStub` pattern that only checks one specific stub form. Audit for missed forms: literal all-zero hashes, well-known placeholder values, any string that survives a `[a-z0-9_-]{6,}` regex without distinguishing from a real value.
+
+Cross-link: `server/services/sandbox/e2bSandboxPure.ts::assertNotLatestTemplateVersion`, `server/services/sandbox/e2bSandbox.ts::registerSandboxProvider` (gates browserPublishedVersionPath behind `E2B_BROWSER_TEMPLATE_ENABLED`).
+
+### [2026-05-14] Pattern — Warm-pool lease MUST thread provider identity to the executor _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 3 F15.
+
+When a warm-pool service hands out a pre-provisioned resource, the executor MUST adopt the provider-side identity (sandbox id, container id, connection id) — not create a fresh one and treat the warm-pool row as accounting metadata. Otherwise the warm-pool row becomes a phantom (created, leased, terminated) while every actual execution starts cold. Symptoms: cost ledger shows warm-pool charges but execution latency never improves; warm sessions accumulate in 'available' state but rotation reveals nothing was reused.
+
+The thread-through pattern: warm-pool `checkout()` returns both bookkeeping id (`warmSessionId`) AND provider id (`sandboxId`); dispatcher derives `leasedProviderSandboxId` from the decision when warm_leased; the executor input carries an optional `leasedProviderSandboxId?: string`; the provider's `runTask` adopts the leased id via an if/else around `createSandbox`.
+
+The fix is small but easy to miss: a code review that focuses only on "is the warm-pool row tracked?" misses the question "is the warm-pool sandbox actually executed?" Always ask both. A targeted unit test ("warm-leased dispatch does not call createSandbox") is the cheapest reviewer-facing proof.
+
+Detection: any warm-pool / connection-pool / session-pool service whose `checkout()` returns a provider identity AND whose call site has a "createX" path. Verify the createX path is gated on absence of the leased identity.
+
+Cross-link: `shared/types/sandbox.ts::SandboxRunTaskInput.leasedProviderSandboxId`, `server/services/sandbox/e2bSandbox.ts::E2bSandbox.runTask` (createSandbox skip path), `server/services/executionBackends/_ieeShared.ts::ieeDispatchBrowser`.
+
+### [2026-05-14] Pattern — `.strict()` Zod schemas for admin-controlled fields _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 2 F13.
+
+When a body schema accepts non-admin patches but the underlying table has an admin-only field (here: `rolloutApproved`), the non-admin schema MUST use `.strict()` so unknown keys return a 400, not silently strip. Silent-strip is dangerous because the client receives a 200 with `rolloutApproved` in their patch body absent from the response — they think it took effect when it didn't. The dedicated admin route is the only path that can mutate the admin-only field; `.strict()` is the receipt that non-admin callers got the right error.
+
+Companion: the matching test must assert the rejection shape. Zod's strict-mode error uses `code: 'unrecognized_keys'` with the offending key list in `keys: string[]`. A test that only asserts `result.success === false` is shallow — also assert `result.error.errors.some(e => e.code === 'unrecognized_keys' && e.keys.includes('forbiddenField'))`. This catches future schema author errors where `.strict()` gets removed and the schema reverts to passthrough.
+
+Detection: any schema where a field is documented as "not accepted here — admin-only" but the schema is plain `z.object({...})` without `.strict()`. The doc comment claims the contract; `.strict()` enforces it.
+
+Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBodySchema`, `server/services/__tests__/subaccountIeeBrowserSettingsServicePure.test.ts` (the unrecognized_keys assertion).

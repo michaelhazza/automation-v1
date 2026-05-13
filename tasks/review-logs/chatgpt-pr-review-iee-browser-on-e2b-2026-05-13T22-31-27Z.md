@@ -134,3 +134,27 @@ Outstanding deferred items (queued in tasks/todo.md):
 - IEE-DEF-9: Template identity validation in browserWarmPool.checkout
 
 All gated behind SDK-not-installed factory + placeholder-digest rejection — production cannot reach any of these code paths today.
+
+---
+
+## Final Summary
+
+### Doc-sync sweep (Phase 3 Step 6)
+
+Each registered doc per `docs/doc-sync.md` table verified via grep against the branch change-set. Candidate-stale-reference set: iee-browser-on-e2b slug, iee_browser_session_profiles / subaccount_iee_browser_settings / browser_warm_sessions tables, llmRequests.subtype + warm_session_id columns, browserWarmPool / ieeBrowserProfileManager / e2bSandbox services, migrations 0346-0350, DigitalOcean retirement, E2B_BROWSER_TEMPLATE_ENABLED + E2B_E2E env vars, IEE_BROWSER_EVENT_* constants, IEE-DEF-1..9 deferred items, callSite 'iee-browser-warm-pool', patchBodySchema strict mode, OperatorSettingsTab Per-task budget cap + rollout banner.
+
+- KNOWLEDGE.md updated: yes (4 entries — see Step 7)
+- architecture.md updated: yes (sections Worker service) — updated in Round 1 commit `8259da5c`; no further deltas in subsequent rounds
+- capabilities.md updated: n/a — no product capability / agency capability / skill / integration add/remove/rename. The existing "Browser automation mode" entry under Sandboxed Runtime (IEE) is vendor-neutral and remains accurate; the substrate change (DigitalOcean → e2b) is an internal infrastructure swap with no user-facing capability delta
+- integration-reference.md updated: n/a — e2b SDK is not yet user-facing (deferred per SANDBOX-DEF-EGRESS-MECH); no integration slug change
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no build-discipline / convention / agent-fleet / locked-rule changes in this PR
+- CONTRIBUTING.md updated: n/a — no lint-suppression / contributor convention changes
+- frontend-design-principles.md updated: n/a — rollout-approval read-only banner is a standard pending-state pattern, not a new hard rule worthy of inclusion. Grep confirms no existing operator-settings or IEE-browser worked-example references that need updating
+- spec-context.md updated: n/a — spec-review sessions only
+- docs/decisions/ updated: n/a — no durable architectural choice locked beyond what IEE-DEF-1..9 in tasks/todo.md already captures. The RUNTIME-DISABLED scaffold pattern is captured as a KNOWLEDGE.md entry (broader rule); the specific decisions for warm-pool / profile-manager / template-build are operational, not architectural
+- context-packs/ updated: n/a — no architecture.md section header changes; anchors resolve unchanged
+- references/test-gate-policy.md updated: n/a — no test-gate posture changes
+- references/spec-review-directional-signals.md updated: n/a
+- incident-response.md updated: n/a
+- testing-transition-plan.md updated: n/a
+- .claude/FRAMEWORK_VERSION + CHANGELOG.md updated: n/a — no framework-layer changes
