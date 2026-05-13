@@ -1,4 +1,4 @@
-**Status:** DRAFT v5 (2026-05-13) — awaiting operator ratification before spec authoring
+**Status:** DRAFT v6 (2026-05-13) — awaiting operator ratification before spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `iee-browser-on-e2b`
@@ -65,6 +65,14 @@ Permissions table after this build:
 | `manager` / `org_manager` | yes (read-only) | no |
 | `subaccount_admin` | **yes (their own subaccount only)** | **yes (their own subaccount only)** |
 | `subaccount_member` | no | no |
+
+## v6 reframe (tab-button pill relabel)
+
+During round 3 review the operator noticed the Operator tab button itself carries an "Org admin" pill (visible in r13 and both round 2 / round 3 mockups). With subaccount_admin now able to access the tab, the "Org admin" label is inaccurate. Operator decision: relabel the pill to "Admin" (generic). Rationale: keep the visual signal that the tab is gated, but drop the specific role name.
+
+v6 changes:
+- **Tab-button pill text:** "Org admin" → "Admin". Same `admin-only-pill` styling, same placement, only the text changes.
+- **Scope:** applies wherever the pill appears. In this build's mockup (`prototypes/iee-browser-on-e2b.html`) and the operator-backend predecessor mockup (`prototypes/operator-backend/r13-subaccount-operator-settings-tab.html`) the label is corrected in the same commit as the v6 brief change. In the live code, this build's PR adds the pill (it's mockup-only today) and so the "Admin" label lands at the same time the pill becomes visible — no separate operator-backend cleanup required.
 
 # IEE Browser on e2b — Build Brief
 

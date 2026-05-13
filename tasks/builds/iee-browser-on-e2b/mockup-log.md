@@ -290,3 +290,19 @@ IEE browser section (4 fields: Status, Browser profile retention, Per-task cost 
 - Single-field "Task limits" section: does the lone "Per-task budget cap" field look right in its own section, or does the sparseness feel unfinished? (Merging into Session limits is still on the table if the operator prefers.)
 - Session limits section now has exactly 2 fields ("Soft session cap" and "Concurrent operator sessions"). Does this feel complete, or does losing "Auto-extend grace" leave a visible gap?
 - IEE browser section: pill removed; section header now just shows "IEE browser" with no access indicator. Does this feel appropriately neutral, or is there a reason to add any indicator back?
+
+## Round 3.1 — 2026-05-13 (cosmetic patch: pill relabel)
+
+**Operator feedback:** "Org admin" pill on the Operator tab button is inaccurate now that subaccount_admin can access the tab. Relabel to generic "Admin".
+
+**Changes:**
+- `prototypes/iee-browser-on-e2b.html` line 309: `Org admin` → `Admin`
+- `prototypes/operator-backend/r13-subaccount-operator-settings-tab.html` line 184: `Org admin` → `Admin` (consistency)
+- Both files: CSS section comment renamed `Org admin pill` → `Admin pill`
+- HTML comments updated to list all admin roles that can access the tab
+
+No structural / layout / behaviour changes. Direct Edit, no mockup-designer round.
+
+**Files modified:**
+- `prototypes/iee-browser-on-e2b.html`
+- `prototypes/operator-backend/r13-subaccount-operator-settings-tab.html`
