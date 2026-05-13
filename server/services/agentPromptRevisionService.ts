@@ -89,7 +89,7 @@ export const agentPromptRevisionService = {
           additionalPrompt: targetRevision.additionalPrompt,
           updatedAt: new Date(),
         })
-        .where(eq(agents.id, agentId));
+        .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
 
       return newRevision;
     });

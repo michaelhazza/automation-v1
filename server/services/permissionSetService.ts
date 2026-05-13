@@ -222,7 +222,7 @@ export const permissionSetService = {
     const [updated] = await db
       .update(permissionSets)
       .set(updateValues)
-      .where(eq(permissionSets.id, ps.id))
+      .where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)))
       .returning();
 
     return updated;
@@ -271,7 +271,7 @@ export const permissionSetService = {
     await db
       .update(permissionSets)
       .set({ deletedAt: now, updatedAt: now })
-      .where(eq(permissionSets.id, ps.id));
+      .where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)));
 
     return { found: true, inUse: false };
   },
@@ -310,7 +310,7 @@ export const permissionSetService = {
       );
     }
 
-    await db.update(permissionSets).set({ updatedAt: new Date() }).where(eq(permissionSets.id, ps.id));
+    await db.update(permissionSets).set({ updatedAt: new Date() }).where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)));
 
     return { id: ps.id, permissionKeys };
   },

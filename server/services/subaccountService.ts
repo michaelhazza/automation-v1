@@ -50,26 +50,28 @@ export async function createSubaccount(
 
 export async function updateSubaccount(
   subaccountId: string,
+  organisationId: string,
   update: Record<string, unknown>,
 ) {
   const [updated] = await db
     .update(subaccounts)
     .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-    .where(eq(subaccounts.id, subaccountId))
+    .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
     .returning();
   return updated;
 }
 
-export async function softDeleteSubaccount(subaccountId: string) {
+export async function softDeleteSubaccount(subaccountId: string, organisationId: string) {
   const now = new Date();
-  await db.update(subaccounts).set({ deletedAt: now, updatedAt: now }).where(eq(subaccounts.id, subaccountId));
+  await db.update(subaccounts).set({ deletedAt: now, updatedAt: now }).where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
 }
 
 export async function updateSubaccountSettings(
   subaccountId: string,
+  organisationId: string,
   settings: Record<string, unknown>,
 ) {
-  await db.update(subaccounts).set({ settings, updatedAt: new Date() }).where(eq(subaccounts.id, subaccountId));
+  await db.update(subaccounts).set({ settings, updatedAt: new Date() }).where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
 }
 
 // ─── Subaccount Categories ────────────────────────────────────────────────────

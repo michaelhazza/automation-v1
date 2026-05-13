@@ -232,7 +232,7 @@ router.patch(
       update.runRetentionDays = runRetentionDays;
     }
 
-    const updated = await updateSubaccount(sa.id, update);
+    const updated = await updateSubaccount(sa.id, req.orgId!, update);
     res.json(updated);
   })
 );
@@ -253,7 +253,7 @@ router.delete(
       return;
     }
 
-    await softDeleteSubaccount(sa.id);
+    await softDeleteSubaccount(sa.id, req.orgId!);
     res.json({ message: 'Subaccount deleted' });
   })
 );
@@ -289,7 +289,7 @@ router.put(
     const currentSettings = (sa.settings ?? {}) as Record<string, unknown>;
     const newSettings = { ...currentSettings, devContext };
 
-    await updateSubaccountSettings(sa.id, newSettings);
+    await updateSubaccountSettings(sa.id, req.orgId!, newSettings);
     res.json({ devContext });
   })
 );

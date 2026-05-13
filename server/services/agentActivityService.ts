@@ -511,7 +511,7 @@ export const agentActivityService = {
     const [agentRow] = await db
       .select({ systemAgentId: agents.systemAgentId })
       .from(agents)
-      .where(eq(agents.id, runRow.agentId))
+      .where(and(eq(agents.id, runRow.agentId), eq(agents.organisationId, runRow.organisationId)))
       .limit(1);
 
     return {

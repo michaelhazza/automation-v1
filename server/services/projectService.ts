@@ -145,7 +145,7 @@ export const projectService = {
 
     if (!existing) throw { statusCode: 404, message: 'Project not found' };
 
-    await db.update(projects).set({ deletedAt: new Date() }).where(eq(projects.id, projectId));
+    await db.update(projects).set({ deletedAt: new Date() }).where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId)));
 
     return { success: true };
   },
