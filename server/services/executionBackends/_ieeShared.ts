@@ -25,6 +25,7 @@
  *       § 9.2, § 13.1.1.
  */
 
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 
@@ -32,6 +33,10 @@ import { db } from '../../db/index.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
+import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
+import { ieeBrowserProfileManager } from '../sandbox/ieeBrowserProfileManager.js';
+import { browserWarmPool } from '../sandbox/browserWarmPool.js';
+import { runTask as sandboxRunTask } from '../sandboxExecutionService.js';
 import { emitAgentRunUpdate, emitOrgUpdate, emitSubaccountUpdate } from '../../websocket/emitters.js';
 import { logger } from '../../lib/logger.js';
 import { assertValidTransition } from '../../../shared/stateMachineGuards.js';
@@ -42,6 +47,7 @@ import {
 } from '../agentRunFinalizationServicePure.js';
 import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
+import { FailureError, failure } from '../../../shared/iee/failure.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -55,6 +61,8 @@ import {
   BackendOptionsMismatch,
   ParentRunNotDispatchable,
 } from './types.js';
+import type { LoopResult } from '../agentExecutionTypes.js';
+import type { SandboxPolicy } from '../../../shared/types/sandbox.js';
 
 type IeeRunRow = typeof ieeRuns.$inferSelect;
 type IeeType = 'browser' | 'dev';
@@ -95,6 +103,162 @@ export const IEE_COMPLETED_QUEUE = 'iee-run-completed' as const;
 export const IEE_TERMINAL_STATE_TABLE = 'iee_runs' as const;
 
 // ---------------------------------------------------------------------------
+// Browser-dispatch pure helpers (exported for unit testing).
+// ---------------------------------------------------------------------------
+
+type BrowserSettingsRow = {
+  status: string;
+  rolloutApproved: boolean;
+  perTaskCostCeilingCents: number;
+};
+
+type WarmCheckoutResult = { warmSessionId: string; sandboxId: string } | null;
+
+export type BrowserDispatchDecision =
+  | { kind: 'launch_disabled' }
+  | { kind: 'warm_leased'; warmSessionId: string; sandboxId: string }
+  | { kind: 'cold_start' };
+
+/**
+ * Pure: resolve the browser dispatch decision given settings + warm checkout result.
+ * Exported for unit testing only; callers use ieeDispatchBrowser.
+ */
+export function resolveBrowserDispatch(
+  settings: BrowserSettingsRow | null,
+  warmCheckout: WarmCheckoutResult,
+): BrowserDispatchDecision {
+  if (!settings || settings.status !== 'on' || !settings.rolloutApproved) {
+    return { kind: 'launch_disabled' };
+  }
+  if (warmCheckout) {
+    return { kind: 'warm_leased', warmSessionId: warmCheckout.warmSessionId, sandboxId: warmCheckout.sandboxId };
+  }
+  return { kind: 'cold_start' };
+}
+
+/**
+ * Pure: derive the browser profile session key from the task payload.
+ * Uses skillId if available; falls back to 'default' (spec §14 path (b)).
+ */
+export function deriveSessionKey(taskPayload: { skillId?: string }): string {
+  const raw = taskPayload.skillId ?? 'default';
+  const sanitised = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+  return sanitised.length > 0 ? sanitised : 'default';
+}
+
+// ---------------------------------------------------------------------------
+// ieeDispatchBrowser — inline sandbox dispatch for browser tasks.
+// ---------------------------------------------------------------------------
+
+async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatchResult> {
+  const { input } = args;
+  const { subaccountId, organisationId, runId, agentId } = input;
+
+  if (!subaccountId) {
+    throw new FailureError(failure('iee_browser_launch_disabled', 'Browser tasks require a subaccount context'));
+  }
+
+  // 1. Read launch flag
+  const [settings] = await db.select().from(subaccountIeeBrowserSettings)
+    .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
+
+  const warmCheckout = settings?.status === 'on' && settings?.rolloutApproved
+    ? await browserWarmPool.checkout({ organisationId, subaccountId })
+    : null;
+
+  const decision = resolveBrowserDispatch(settings ?? null, warmCheckout);
+
+  if (decision.kind === 'launch_disabled') {
+    throw new FailureError(failure('iee_browser_launch_disabled', 'IEE browser feature is disabled for this subaccount'));
+  }
+
+  // 2. Derive session key and resolve profile
+  const opts = input.backendOptions;
+  const ieeTask = (opts as { ieeTask?: { skillId?: string } }).ieeTask;
+  const sessionKey = deriveSessionKey(ieeTask ?? {});
+
+  const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
+  const mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
+
+  // 3. Build policy (V1: deny-all network, standard ceilings)
+  const costCents = settings?.perTaskCostCeilingCents ?? 100;
+  const policy: SandboxPolicy = {
+    network: { mode: 'none' },
+    filesystem: { writableRoot: '/workspace' },
+    ceilings: {
+      wallClockMs: 300_000, // 5 min default for browser tasks
+      costCents,
+      monitorIntervalMs: 5_000,
+    },
+    artefactLimits: { perArtefactBytes: 10_485_760, totalBytes: 104_857_600 },
+    allowRuntimeInstall: false,
+    inputLimits: { maxBytes: 26_214_400, allowedMimes: [] },
+    providerThresholds: { startTimeoutMs: 30_000 },
+  };
+
+  const sandboxExecutionId = randomUUID();
+  const warmSessionCheckoutId = decision.kind === 'warm_leased' ? decision.warmSessionId : null;
+
+  let sandboxOutput;
+  try {
+    sandboxOutput = await sandboxRunTask({
+      sandboxExecutionId,
+      organisationId,
+      subaccountId,
+      runId,
+      agentId,
+      taskId: runId, // browser tasks use runId as taskId
+      templateName: 'iee-browser',
+      templateVersion: 'local-dev-v1.0.0', // resolved from CURRENT_VERSION at runtime by provider
+      policy,
+      inputBytes: 0,
+      inputFiles: [],
+      credentialIssuanceContext: { aliases: [] },
+      outputSchemaRef: 'generic',
+      profileMount: mounted,
+      warmSessionCheckoutId,
+    });
+  } finally {
+    // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects.
+    // Cost attribution is owned by browserWarmPool.terminate (chunk 10).
+    if (decision.kind === 'warm_leased') {
+      await browserWarmPool.terminate({ warmSessionId: decision.warmSessionId, reason: 'post_lease' }).catch((err) => {
+        logger.error('iee_browser.dispatch.warm_terminate_failed', {
+          warmSessionId: decision.warmSessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+    await ieeBrowserProfileManager.unmount(mounted).catch((err) => {
+      logger.warn('iee_browser.dispatch.profile_unmount_failed', {
+        profileId: mounted.sessionProfileId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  const loopResult: LoopResult = {
+    summary: `IEE browser task completed via e2b sandbox (${sandboxOutput?.terminalState ?? 'unknown'})`,
+    toolCallsLog: [],
+    totalToolCalls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    tasksCreated: 0,
+    tasksUpdated: 0,
+    deliverablesCreated: 0,
+    finalStatus: sandboxOutput?.terminalState === 'completed' ? 'completed' : 'failed',
+  };
+
+  return {
+    lifecycle: 'in_process',
+    backendTaskId: null,
+    loopResult,
+    deduplicated: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // dispatch() — orphan-cleanup-aware delegated dispatch (§ 13.1.1).
 // ---------------------------------------------------------------------------
 
@@ -118,6 +282,10 @@ interface IeeDispatchArgs {
  *      `ParentRunNotDispatchable`.
  */
 export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatchResult> {
+  if (args.type === 'browser') {
+    return ieeDispatchBrowser(args);
+  }
+
   const { type, adapterId, input } = args;
   const opts = input.backendOptions;
 
