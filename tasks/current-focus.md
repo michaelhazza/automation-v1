@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-13
-last_merge_ready_pr: #298
-last_merge_ready_slug: memory-improvements
-last_merge_ready_branch: claude/add-memvid-integration-ehAOr
-last_merged_pr: #294
-last_merged_slug: fleet-and-codebase-health
-last_merged_branch: codebase-health
-last_merged_at: 2026-05-13T13:34:22Z
-last_merged_commit: effe82ac
+last_merged_pr: #298
+last_merged_slug: memory-improvements
+last_merged_branch: claude/add-memvid-integration-ehAOr
+last_merged_at: 2026-05-13T10:11:16Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -29,9 +26,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-13T09:55:58Z for PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) (`memory-improvements`, branch `claude/add-memvid-integration-ehAOr`). All 5 Phase 2 reviewers ran (no REVIEW_GAP); chatgpt-pr-review ran 2 rounds, 11 findings all auto-applied (R1: 4 blockers + 4 tightenings, R2: 1 blocker + 2 tightenings); doc-sync sweep clean across all 15 registered docs. 6 env-gated operational items deferred to pre-enablement (AKR ranker flag). ready-to-merge label applied — awaiting CI green for auto-merge.
+**Status:** **NONE**
 
-**Last merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
+**Just merged:** PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) — `memory-improvements` (squash-commit `pending-squash`, 2026-05-13T10:11:16Z). Shipped 3 capabilities: synthesis lineage (`memory_block_version_sources` migration 0333, sources route + UI tab), citation-rate utility (migrations 0334 + 0345, materialised view with nightly 16:00 UTC refresh, dashboard tab), env-flagged AKR semantic ranker. 5 Phase 2 reviewers + chatgpt-pr-review (2 rounds, 11 findings auto-applied) + 1 CI fix-loop iteration (RLS-contract org-filter on tasks lookup); no REVIEW_GAP. 6 env-gated operational items deferred to pre-enablement before flipping AKR ranker flag.
+
+**Previously merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
