@@ -11,6 +11,12 @@ import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.
 
 import type { RetrievalResult } from './retrieval.js';
 import type { ObservationType } from './agentObservations.js';
+import type {
+  FileCreatedPayload,
+  FileModifiedPayload,
+  CrossOwnerSubstepAwaitingPayload,
+  CrossOwnerSubstepCompletedPayload,
+} from './operatorEvents.js';
 
 /**
  * Typed-observation payload embedded in run-step terminal events (spec §847).
@@ -399,7 +405,11 @@ export type AgentExecutionEventPayload =
       critical: false;
       runId: string;
       error: string;
-    };
+    }
+  | (FileCreatedPayload & { critical: false })
+  | (FileModifiedPayload & { critical: false })
+  | (CrossOwnerSubstepAwaitingPayload & { critical: true })
+  | (CrossOwnerSubstepCompletedPayload & { critical: true });
 
 // ---------------------------------------------------------------------------
 // Critical-event registry — single source of truth for the retry tier

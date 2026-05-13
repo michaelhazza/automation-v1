@@ -24,6 +24,8 @@ export interface FileCreatedPayload {
   contentSha256: string;
   storageKey: string;
   emittedBy: 'tool_call' | 'watcher';
+  /** Executor's owner; null for subaccount-owned agents. Spec §9.4. */
+  ownerUserId: string | null;
 }
 
 export interface FileModifiedPayload {
@@ -37,18 +39,27 @@ export interface FileModifiedPayload {
   contentSha256: string;
   storageKey: string;
   emittedBy: 'tool_call' | 'watcher';
+  /** Executor's owner; null for subaccount-owned agents. Spec §9.4. */
+  ownerUserId: string | null;
 }
 
 export interface CrossOwnerSubstepAwaitingPayload {
   eventType: 'cross_owner_substep.awaiting_initiator_decision';
-  delegationOutcomeId: string;
+  /** Run that owns the cross-owner delegation. */
+  parent_run_id: string;
+  /** delegation_outcomes.id for this sub-step. */
+  substep_id: string;
   initiatorUserId: string;
   reason: 'cross_owner_approval_timeout';
 }
 
 export interface CrossOwnerSubstepCompletedPayload {
   eventType: 'cross_owner_substep.completed';
-  delegationOutcomeId: string;
-  status: 'failed' | 'partial';
-  reason: 'cross_owner_approval_timeout' | 'cross_owner_approval_timed_out_optional';
+  /** Run that owns the cross-owner delegation. */
+  parent_run_id: string;
+  /** delegation_outcomes.id for this sub-step. */
+  substep_id: string;
+  status: 'success' | 'partial' | 'failed';
+  /** Optional typed reason for non-success outcomes. */
+  reason?: string;
 }

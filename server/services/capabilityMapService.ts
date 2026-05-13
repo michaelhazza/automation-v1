@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, type Transaction } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import {
@@ -224,11 +224,17 @@ export async function listAgentCapabilityMaps(
  * Recompute and persist the capability map for a single subaccount_agent row,
  * including the owning agent's owner_user_id in the output (spec §6.4 invariant).
  *
- * Run this in the same Drizzle transaction as any agents.owner_user_id update to
- * keep the capability_map.owner_user_id field in sync.
+ * Pass `tx` to run inside the caller's Drizzle transaction — required when this
+ * is called in the same transaction as an agents.owner_user_id update so that
+ * capability_map.owner_user_id stays in sync atomically (spec §6.4).
  */
-export async function recomputeCapabilityMapWithOwner(subaccountAgentId: string): Promise<CapabilityMap | null> {
-  const [row] = await db
+export async function recomputeCapabilityMapWithOwner(
+  subaccountAgentId: string,
+  tx?: Transaction,
+): Promise<CapabilityMap | null> {
+  const client = tx ?? db;
+
+  const [row] = await client
     .select({
       id: subaccountAgents.id,
       skillSlugs: subaccountAgents.skillSlugs,
@@ -255,7 +261,7 @@ export async function recomputeCapabilityMapWithOwner(subaccountAgentId: string)
     { owner_user_id: row.ownerUserId },
   );
 
-  await db
+  await client
     .update(subaccountAgents)
     .set({ capabilityMap: map, updatedAt: new Date() })
     .where(eq(subaccountAgents.id, subaccountAgentId));

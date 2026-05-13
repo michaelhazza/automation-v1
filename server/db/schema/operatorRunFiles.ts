@@ -1,6 +1,8 @@
 import { pgTable, uuid, text, integer, bigint, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { agentRuns } from './agentRuns';
+import { users } from './users.js';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // operator_run_files — per-run operator file artefact pointers
@@ -61,6 +63,12 @@ export const operatorRunFiles = pgTable(
 
     // R2 storage key — opaque pointer into the object store
     storageKey: text('storage_key').notNull(),
+
+    // Owner of the executor agent — null for subaccount-owned agents (spec §4.1, §9.4)
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+
+    // Subaccount the operator run belongs to (spec §4.1)
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id, { onDelete: 'cascade' }),
 
     // Origin of the write event
     emittedBy: text('emitted_by').notNull().$type<'tool_call' | 'watcher'>(),
