@@ -6,13 +6,14 @@ import { externalTriggerDedup } from '../../db/schema/externalTriggerDedup.js';
 import { triggerService } from '../triggerService.js';
 import { MAX_EXTERNAL_TRIGGERED_RUNS_PER_MINUTE_PER_OWNER } from '../../config/limits.js';
 import { deriveDedupKey } from './externalSourceTriggersPure.js';
+import { logger } from '../../lib/logger.js';
 import type { ExternalSourceTriggerEvent } from '../../../shared/types/externalSourceTrigger.js';
 
 // ---------------------------------------------------------------------------
 // External-source trigger dispatch
 // ---------------------------------------------------------------------------
 
-export type DispatchOutcome = 'fired' | 'dedup_hit' | 'rate_capped' | 'owner_unresolved' | 'owner_mismatch';
+export type DispatchOutcome = 'fired' | 'dedup_hit' | 'rate_capped' | 'owner_unresolved';
 
 export interface DispatchResult {
   outcome: DispatchOutcome;
@@ -35,7 +36,10 @@ export async function dispatch(
   const provider = providerForEventType(event.eventType);
   const dedupKey = deriveDedupKey(event);
 
-  // 1. Owner resolution — look up integration connection to derive subaccount + verify owner
+  // 1. Owner resolution — look up integration connection to derive subaccount + verify owner.
+  //    Must be scoped by organisationId so a cross-org connection (same Slack/
+  //    Google user ID across two SynthetOS orgs) cannot be matched into the
+  //    wrong tenant's run context.
   const [connection] = await db
     .select({
       id: integrationConnections.id,
@@ -45,6 +49,7 @@ export async function dispatch(
     .from(integrationConnections)
     .where(
       and(
+        eq(integrationConnections.organisationId, ctx.organisationId),
         eq(integrationConnections.ownerUserId, event.ownerUserId),
         eq(integrationConnections.providerType, provider),
         eq(integrationConnections.connectionStatus, 'active')
@@ -53,12 +58,24 @@ export async function dispatch(
     .limit(1);
 
   if (!connection) {
+    // Observability — `owner_unresolved` is silent at the data layer (no row
+    // is written), so emit a structured log here so monitoring can alert when
+    // a tenant's external events systematically fail to route (e.g. after a
+    // connection is revoked or deleted).
+    logger.info('external_trigger_dispatch.owner_unresolved', {
+      provider,
+      organisationId: ctx.organisationId,
+      ownerUserId: event.ownerUserId,
+      eventType: event.eventType,
+    });
     return { outcome: 'owner_unresolved' };
   }
 
-  if (connection.ownerUserId && connection.ownerUserId !== event.ownerUserId) {
-    return { outcome: 'owner_mismatch' };
-  }
+  // Note: a defensive `connection.ownerUserId !== event.ownerUserId` mismatch
+  // branch is intentionally NOT present — the WHERE clause above already pins
+  // `ownerUserId = event.ownerUserId`, so a returned row cannot fail that
+  // equality. Re-introducing the branch would mask a real regression if the
+  // `eq(integrationConnections.ownerUserId, ...)` predicate were ever dropped.
 
   const subaccountId = ctx.subaccountId ?? connection.subaccountId;
   if (!subaccountId) {
@@ -85,11 +102,15 @@ export async function dispatch(
     },
     async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      // Scope rate-cap window per (organisation_id, owner_user_id) so a user
+      // present in multiple orgs is rate-limited per-org, not globally — and
+      // so cross-org noise cannot starve a victim org's rate-cap budget.
       const [{ total }] = await tx
         .select({ total: sql<number>`count(*)::int` })
         .from(externalTriggerDedup)
         .where(
           and(
+            eq(externalTriggerDedup.organisationId, ctx.organisationId),
             eq(externalTriggerDedup.ownerUserId, event.ownerUserId),
             gte(externalTriggerDedup.firedAt, since),
           ),
