@@ -91,9 +91,14 @@ for adapter in "${SANDBOX_REQUIRED_ADAPTERS[@]}"; do
   fi
 
   # (b) Actual invocation in the body — strip import lines and comments before grepping.
+  # Accept either:
+  #   - sandboxExecutionService.runTask( / runTask(  — the canonical entry
+  #   - sandboxExecutionService.adoptOrStart( / adoptOrStart(  — the idempotent
+  #     adoption seam (spec §7.1) which wraps runTask internally for adapters
+  #     that need crash-recovery (operator-backend).
   body_lines=$(grep -vE "^[[:space:]]*(import|\\*|//|/\\*)" "$adapter_file" || true)
-  if ! echo "$body_lines" | grep -qE "sandboxExecutionService\.runTask\(|\\brunTask\("; then
-    echo "[FAIL] $adapter declares sandboxRequirement but does not invoke runTask() in its body"
+  if ! echo "$body_lines" | grep -qE "sandboxExecutionService\.runTask\(|\\brunTask\(|sandboxExecutionService\.adoptOrStart\(|\\badoptOrStart\("; then
+    echo "[FAIL] $adapter declares sandboxRequirement but does not invoke runTask() or adoptOrStart() in its body"
     FAIL=1
   fi
 done
