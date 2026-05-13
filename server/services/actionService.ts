@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db, type Transaction } from '../db/index.js';
 import { actions, actionEvents, tasks, flowRuns } from '../db/schema/index.js';
@@ -107,6 +107,8 @@ export interface ProposeActionInput {
    * (max_risk_tier block, require_approval_at_tier upgrade) can be applied.
    */
   subaccountAgentId?: string | null;
+  /** Cross-owner proposals set this to executor_agent.owner_user_id. NULL = V1 initiator-defaulted path. */
+  approverUserId?: string;
 }
 
 export interface ProposeActionResult {
@@ -197,6 +199,7 @@ export const actionService = {
         maxRetries: definition.retryPolicy.maxRetries,
         estimatedCostMinor: input.estimatedCostMinor ?? null,
         subaccountScope: input.subaccountScope ?? 'single',
+        approverUserId: input.approverUserId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -646,6 +649,68 @@ export const actionService = {
     });
   },
 };
+
+// ---------------------------------------------------------------------------
+// listPendingApprovalsForUser — cross-owner approval queue reader
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all pending-approval actions the given userId is expected to review.
+ * Two arms:
+ *   - Arm 1: approver_user_id = userId (explicit cross-owner approvals)
+ *   - Arm 2: approver_user_id IS NULL (V1 initiator-defaulted path)
+ * Both arms filter by organisationId and status = 'pending_approval'.
+ * Subaccount filter applies to Arm 2 when subaccountId is non-null.
+ * MUST filter by organisationId per DEVELOPMENT_GUIDELINES §1.
+ */
+export async function listPendingApprovalsForUser(
+  userId: string,
+  organisationId: string,
+  subaccountId: string | null,
+): Promise<Array<{ actionId: string; actionType: string; status: string; approverUserId: string | null; createdAt: Date }>> {
+  const baseConditions = [
+    eq(actions.organisationId, organisationId),
+    eq(actions.status, 'pending_approval'),
+  ];
+
+  // Arm 1: explicit cross-owner approvals routed to this user
+  const arm1Rows = await db
+    .select({
+      actionId: actions.id,
+      actionType: actions.actionType,
+      status: actions.status,
+      approverUserId: actions.approverUserId,
+      createdAt: actions.createdAt,
+    })
+    .from(actions)
+    .where(and(...baseConditions, eq(actions.approverUserId, userId)));
+
+  // Arm 2: V1 initiator-defaulted path (no explicit approver set)
+  const arm2Conditions = [...baseConditions, isNull(actions.approverUserId)];
+  if (subaccountId !== null) {
+    arm2Conditions.push(eq(actions.subaccountId, subaccountId));
+  }
+
+  const arm2Rows = await db
+    .select({
+      actionId: actions.id,
+      actionType: actions.actionType,
+      status: actions.status,
+      approverUserId: actions.approverUserId,
+      createdAt: actions.createdAt,
+    })
+    .from(actions)
+    .where(and(...arm2Conditions));
+
+  const merged = [...arm1Rows, ...arm2Rows];
+  // Sort newest-first; stable secondary sort on id prevents non-determinism
+  // when multiple actions share the same createdAt (DEVELOPMENT_GUIDELINES §8.34).
+  merged.sort((a, b) => {
+    const diff = b.createdAt.getTime() - a.createdAt.getTime();
+    return diff !== 0 ? diff : b.actionId.localeCompare(a.actionId);
+  });
+  return merged;
+}
 
 // ---------------------------------------------------------------------------
 // Gate Level Resolution — multi-source, highest restriction wins

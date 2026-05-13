@@ -786,7 +786,7 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const pgboss = await getPgBoss();
-      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler, crossOwnerApprovalTimeoutSweep } = await import('./jobs/workflowGateStallNotifyJob.js');
       const { createWorker } = await import('./lib/createWorker.js');
       await createWorker({
         queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
@@ -794,6 +794,7 @@ async function start() {
         handler: async (job) => {
           await workflowGateStallNotifyHandler(job as import('pg-boss').Job<import('./jobs/workflowGateStallNotifyJob.js').WorkflowGateStallNotifyPayload>);
           await eaDraftStallResetHandler();
+          await crossOwnerApprovalTimeoutSweep();
         },
       });
     } catch (err) {

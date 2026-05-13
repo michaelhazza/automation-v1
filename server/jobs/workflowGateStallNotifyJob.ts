@@ -1,10 +1,14 @@
 import type PgBoss from 'pg-boss';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lt, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowStepGates } from '../db/schema/index.js';
+import { workflowStepGates, delegationOutcomes, subaccountAgents, agents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { isStallFireStale } from '../services/workflowGateStallNotifyServicePure.js';
 import { eaDraftService } from '../services/eaDrafts/eaDraftService.js';
+import { decideTimeoutPolicyAction } from '../services/actionServicePure.js';
+import { actionService } from '../services/actionService.js';
+import { appendEvent } from '../services/agentExecutionEventService.js';
+import type { CrossOwnerSubstepCompletedPayload, CrossOwnerSubstepAwaitingPayload } from '../../shared/types/operatorEvents.js';
 
 // ---------------------------------------------------------------------------
 // Queue name — exported so both the registrar (index.ts) and the service
@@ -110,5 +114,184 @@ export async function eaDraftStallResetHandler(): Promise<void> {
       reason: 'expired_after_7d',
       systemExpired: true,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-owner approval timeout sweep
+//
+// Detects delegation_outcomes rows in 'awaiting_cross_owner_approval' status
+// for more than 24 hours and applies the configured timeout policy.
+// Called by the same cron worker as eaDraftStallResetHandler.
+// ---------------------------------------------------------------------------
+
+export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // Fetch open sub-steps past the 24h window, joining to derive initiatorUserId
+  // from the caller agent's ownerUserId (callerAgentId → subaccountAgents → agents).
+  const stalledRows = await db
+    .select({
+      id: delegationOutcomes.id,
+      runId: delegationOutcomes.runId,
+      organisationId: delegationOutcomes.organisationId,
+      subaccountId: delegationOutcomes.subaccountId,
+      crossOwnerApprovalTimeoutPolicy: delegationOutcomes.crossOwnerApprovalTimeoutPolicy,
+      substepStatus: delegationOutcomes.substepStatus,
+      initiatorUserId: agents.ownerUserId,
+    })
+    .from(delegationOutcomes)
+    .leftJoin(subaccountAgents, eq(subaccountAgents.id, delegationOutcomes.callerAgentId))
+    .leftJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .where(
+      and(
+        eq(delegationOutcomes.substepStatus, 'awaiting_cross_owner_approval'),
+        lt(delegationOutcomes.createdAt, cutoff),
+        isNull(delegationOutcomes.terminalAt),
+      ),
+    );
+
+  for (const row of stalledRows) {
+    const policy = row.crossOwnerApprovalTimeoutPolicy;
+    if (!policy) continue;
+
+    const decision = decideTimeoutPolicyAction(policy);
+
+    if (decision.action === 'fail_parent') {
+      const updated = await db
+        .update(delegationOutcomes)
+        .set({ substepStatus: 'failed', terminalAt: new Date() })
+        .where(
+          and(
+            eq(delegationOutcomes.id, row.id),
+            eq(delegationOutcomes.organisationId, row.organisationId),
+            isNull(delegationOutcomes.terminalAt),
+          ),
+        )
+        .returning({ id: delegationOutcomes.id });
+
+      if (updated.length === 0) {
+        logger.info('workflow_gate_stall.cross_owner_timeout.already_terminal', { runId: row.runId, policy });
+        continue;
+      }
+
+      const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {
+        eventType: 'cross_owner_substep.completed',
+        parent_run_id: row.runId,
+        substep_id: row.id,
+        status: decision.eventStatus,
+        reason: decision.eventReason,
+        critical: true,
+      };
+      await appendEvent({
+        runId: row.runId,
+        organisationId: row.organisationId,
+        subaccountId: row.subaccountId,
+        payload: completedPayload,
+        sourceService: 'workflowGateStallNotifyJob',
+      });
+      logger.info('workflow_gate_stall.cross_owner_timeout.fail_parent', { runId: row.runId });
+
+    } else if (decision.action === 'continue_without_substep') {
+      const updated = await db
+        .update(delegationOutcomes)
+        .set({ substepStatus: 'partial', terminalAt: new Date() })
+        .where(
+          and(
+            eq(delegationOutcomes.id, row.id),
+            eq(delegationOutcomes.organisationId, row.organisationId),
+            isNull(delegationOutcomes.terminalAt),
+          ),
+        )
+        .returning({ id: delegationOutcomes.id });
+
+      if (updated.length === 0) {
+        logger.info('workflow_gate_stall.cross_owner_timeout.already_terminal', { runId: row.runId, policy });
+        continue;
+      }
+
+      const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {
+        eventType: 'cross_owner_substep.completed',
+        parent_run_id: row.runId,
+        substep_id: row.id,
+        status: decision.eventStatus,
+        reason: decision.eventReason,
+        critical: true,
+      };
+      await appendEvent({
+        runId: row.runId,
+        organisationId: row.organisationId,
+        subaccountId: row.subaccountId,
+        payload: completedPayload,
+        sourceService: 'workflowGateStallNotifyJob',
+      });
+      logger.info('workflow_gate_stall.cross_owner_timeout.continue', { runId: row.runId });
+
+    } else {
+      // ask_initiator — sub-step is NOT terminal; keep terminalAt = NULL.
+      // No-op SET used as a race-claim guard: atomically confirms the row is
+      // still open before emitting the event. terminalAt stays NULL by design.
+      const updated = await db
+        .update(delegationOutcomes)
+        .set({ substepStatus: 'awaiting_cross_owner_approval' })
+        .where(
+          and(
+            eq(delegationOutcomes.id, row.id),
+            eq(delegationOutcomes.organisationId, row.organisationId),
+            isNull(delegationOutcomes.terminalAt),
+          ),
+        )
+        .returning({ id: delegationOutcomes.id });
+
+      if (updated.length === 0) {
+        logger.info('workflow_gate_stall.cross_owner_timeout.already_terminal', { runId: row.runId, policy });
+        continue;
+      }
+
+      const initiatorUserId = row.initiatorUserId ?? null;
+
+      if (initiatorUserId) {
+        const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
+          eventType: 'cross_owner_substep.awaiting_initiator_decision',
+          parent_run_id: row.runId,
+          substep_id: row.id,
+          initiatorUserId,
+          reason: 'cross_owner_approval_timeout',
+          critical: true,
+        };
+        await appendEvent({
+          runId: row.runId,
+          organisationId: row.organisationId,
+          subaccountId: row.subaccountId,
+          payload: awaitingPayload,
+          sourceService: 'workflowGateStallNotifyJob',
+        });
+
+        try {
+          // Keyed on the delegation_outcomes row only — no sweep-varying timestamp
+          // so re-sweeps while the substep is still open produce the same key
+          // and the DB unique constraint deduplicates the approval row.
+          const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
+          await actionService.proposeAction({
+            organisationId: row.organisationId,
+            subaccountId: row.subaccountId,
+            agentId: null,
+            agentRunId: row.runId,
+            actionType: 'cross_owner.ask_initiator_decision',
+            idempotencyKey,
+            payload: { substepId: row.id, parentRunId: row.runId },
+            approverUserId: initiatorUserId,
+          });
+        } catch (err) {
+          logger.warn('workflow_gate_stall.cross_owner_timeout.propose_action_failed', {
+            runId: row.runId,
+            substepId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator', { runId: row.runId });
+    }
   }
 }
