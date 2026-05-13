@@ -141,6 +141,52 @@ Workaround: Fix 5 (approveItem gate in reviewService) partially mitigates this b
 
 Discovered by: adversarial-reviewer, 2026-05-14.
 
+## Deferred from spec-conformance review — personal-assistant-v2-operator (2026-05-13)
+
+**Captured:** 2026-05-13T20:55:39Z
+**Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v2-operator-full-2026-05-13T20-55-39Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md`
+
+- [ ] **PA-V2-CONFORMANCE-1** — `operator_run_files.subaccount_id` nullability divergence
+  - Spec section: §4.1 (migration 0348 column list)
+  - Gap: Spec specifies `subaccount_id UUID NOT NULL`. Migrations 0348 + 0349 add the column as NULL (and Drizzle schema `server/db/schema/operatorRunFiles.ts` mirrors this without `.notNull()`). Spec inventory is explicit about NOT NULL.
+  - Suggested approach: Author migration 0350 to backfill any NULL `subaccount_id` from `agent_runs.subaccount_id`, then add `SET NOT NULL`. Update Drizzle schema in the same PR. Alternative: amend spec §4.1 if the operator decides the looser constraint is correct (a backfill via FK may surface migration-time pain that the spec did not anticipate).
+
+- [ ] **PA-V2-CONFORMANCE-2** — Initial-context bundler reads timezone from `subaccount_agents.scheduleTimezone`, not `users` table
+  - Spec section: §5.8 (`owner_identity.timezone`), §4.2 bundler row ("Reads ... `users WHERE id = ea.owner_user_id` for timezone + working hours")
+  - Gap: `server/services/operatorSessionInitialContextBundler.ts:115-128` reads `subaccount_agents.scheduleTimezone`. Spec said to read `users` for timezone. `working_hours` and `recent_activity_summary` are hard-coded to null/omitted (spec said to populate them from `users` table and the existing summary store).
+  - Suggested approach: confirm which is the canonical timezone source for the EA's owner (the spec was written before this implementation choice was finalised; if `users` doesn't carry a timezone field today, amend spec to point at `subaccount_agents` and add a note in §5.8 about the data source). Working-hours/recent-activity-summary are explicitly deferred — call this out in the spec or in the bundler comment, not silently.
+
+- [ ] **PA-V2-CONFORMANCE-3** — `operatorSessionLifecycleService.startSession` has zero production callers
+  - Spec section: §4.3 ("At session start (`operator_runs` insert path), call `operatorSessionInitialContextBundler` for EA-templated operator sessions; serialise into the operator runtime's start payload.")
+  - Gap: `startSession` exists in `server/services/operatorSessionLifecycleService.ts:117-125` and delegates to the bundler, but no code in `server/` invokes it. The "operator_runs insert path" never reads the bundle.
+  - Suggested approach: Wire `startSession` into the operator-run insertion path (likely `operatorSessionService.ts` or `operatorChainResumeService.ts`). If the operator runtime is infra-managed and runtime integration is genuinely out of scope for V1 CI, document the deferral explicitly in `tasks/builds/personal-assistant-v2-operator/handoff.md` and amend spec §4.3 to mark the row "deferred to runtime integration."
+
+- [ ] **PA-V2-CONFORMANCE-4** — `operatorSessionService.handleFileWriteToolCall` has zero production callers
+  - Spec section: §4.3 ("Wire the file-event bridge into the operator-session tool-registry handler so file-write tool calls trigger `operatorSandboxFileEventBridge.handle*` before returning to the runtime.")
+  - Gap: `handleFileWriteToolCall` exists in `server/services/operatorSessionService.ts:625-637` and routes to the bridge, but no code path invokes it. The operator-runtime tool-registry does not call back into this handler.
+  - Suggested approach: same as PA-V2-CONFORMANCE-3 — runtime tool-registry wiring is the missing piece. Either ship the wiring (likely in operatorSessionService at the runtime ↔ host bridge boundary) or document the deferral in handoff.md and spec §4.3.
+
+- [ ] **PA-V2-CONFORMANCE-5** — File event payload shape diverges from spec §5.7 sketch
+  - Spec section: §5.7 (`OperatorFileEvent` type)
+  - Gap: Code in `shared/types/operatorEvents.ts` uses `eventType` (spec: `type`), `sizeBytes` (spec: `size`), and OMITS `emittedAt` entirely. The `eventType`/`sizeBytes` renames bring the payload into convention with the rest of `AGENT_EXECUTION_EVENT_CRITICALITY` (enforced by `verify-operator-event-registry.sh`) — likely deliberate convergence. `emittedAt` absence is harder to justify: spec lists it as a required field.
+  - Suggested approach: amend spec §5.7 contract to use the registry-conventional field names (`eventType`, `sizeBytes`); decide whether `emittedAt` should be added to the payload (it's somewhat redundant with the row-level `eventTimestamp` set by `appendEvent`, but the spec said the FE consumes it). Two cleanest paths: (a) add `emittedAt: new Date().toISOString()` inside the `appendEvent` payload in `operatorSandboxFileEventBridge.ts` to satisfy spec; (b) amend spec to drop `emittedAt` from the payload contract and document `eventTimestamp` as the canonical source.
+
+- [ ] **PA-V2-CONFORMANCE-6** — `runTraceProjectionForViewer` does not strip per-state timestamps from cross-owner substep rows
+  - Spec section: §5.4 ("Initiator-visible lifecycle timing invariant")
+  - Gap: The projection helper at `server/services/runTracePure.ts:26-42` filters only by event-type prefix. The spec requires an allow-list of timestamp fields when projecting cross-owner sub-step ROWS (not events) to the initiator (`authorised_at`, `routed_at`, `executing_started_at` and any other lifecycle-state timing field on `delegation_outcomes` must be owner-private by default).
+  - Suggested approach: extend the projection helper with a substep-row projection mode that takes a `delegation_outcomes` row and returns a redacted shape with only coarse status visible. Apply it in `agentExecutionEventService` whenever a cross-owner sub-step row is serialised on the read path. Add a pure-function test exercising the allow-list. Open question for the implementer: do any read paths surface `delegation_outcomes` rows directly to the initiator today? If not, this can be deferred until a consumer is added — capture as a precondition note in `architecture.md` so the next consumer wires it.
+
+- [ ] **PA-V2-CONFORMANCE-7** — `recomputeCapabilityMapWithOwner(tx?)` is not invoked from any `agents.ownerUserId` write path
+  - Spec section: §6.4 ("When `agents.owner_user_id` is changed (rare — typically only on re-seeding or user reassignment), `capability_map.owner_user_id` MUST be recomputed in the same transaction.")
+  - Gap: The function exists with a `tx` parameter, but `agents.ownerUserId` has no current mutation surface in production code, so the invariant is unenforced. If a future surface lands without invoking the recompute, the capability map will silently drift. The `verify-capability-map-shape.sh` gate would catch the drift after the fact, but not at write time.
+  - Suggested approach: add an architecture.md note + an `architecture-rules` test that asserts any future `agents.ownerUserId` write site calls `recomputeCapabilityMapWithOwner(subaccountAgentId, tx)` inside the same transaction. Or accept the gate-only enforcement and document.
+
+- [ ] **PA-V2-CONFORMANCE-8** — Sandbox file-watcher IPC will not deliver events
+  - Spec section: §4.5 (sandbox-template change)
+  - Gap: `infra/sandbox-templates/operator-session/entrypoint.sh:9` launches `node /workspace/file-watcher.js &` as a backgrounded shell process. `process.send` requires `child_process.fork()`, so the watcher's `sendIpc` calls fall through to the "IPC not available" branch and the events are dropped.
+  - Suggested approach: the sandbox-template is explicitly infra-managed (Dockerfile header: "PLACEHOLDER: not built by V1 CI. Real build and publish is managed by the Operator Backend infra pipeline."). Either replace the entrypoint with a Node parent process that forks the watcher and bridges IPC over the runtime ↔ host channel, or document the runtime-side contract the infra pipeline must satisfy. Tracked here so future infra work doesn't ship the watcher in a non-functional state.
+
 ## Blockers
 
 _None active._
