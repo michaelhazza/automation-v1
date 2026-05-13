@@ -385,7 +385,7 @@ Once all items pass, append the Phase 2 section to the existing `tasks/builds/{s
 **G1 attempts (per chunk):** [chunk-name: attempts]
 **G2 attempts:** N
 **spec-conformance verdict:** {verdict} ({log path})
-**adversarial-reviewer verdict:** {verdict or "skipped (no auto-trigger surface match)"} ({log path or n/a})
+**adversarial-reviewer verdict:** {verdict or "skipped — diff does not match §5.1.2 security surface (per GRADED policy)"} ({log path or n/a})
 **pr-reviewer verdict:** {verdict} ({log path})
 **reality-checker verdict:** {verdict or "skipped (task class Trivial/Standard)"} ({log path or n/a})
 **Fix-loop iterations:** N

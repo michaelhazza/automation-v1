@@ -296,8 +296,10 @@ The review pipeline uses a **GRADED posture**: reviewer requirements scale with 
 **`REVIEW_GAP` artifact format:**
 
 ```
-REVIEW_GAP: <reviewer-name> | task-class: <Trivial|Standard|Significant|Major> | reason: <one-line> | operator-override: <yes-<ISO-timestamp>|no> | remediation: <TODO-link|accept>
+REVIEW_GAP: <reviewer-name> | task-class: <Trivial|Standard|Significant|Major> | reason: <one-line> | operator-override: <yes-<ISO-timestamp>|no> | remediation: <one-line remediation>
 ```
+
+`remediation` is a one-line free-text field. Recommended values, in order of preference: a `tasks/todo.md`-style backlog link, the literal `accept` (we are taking the coverage hit), or a short prose plan (e.g. `run dual-reviewer manually if Codex becomes available before merge`). Prose remediation is supported; pure `<TODO-link|accept>` is not the only valid form.
 
 Write this line to `tasks/builds/{slug}/progress.md` whenever a required reviewer is skipped.
 

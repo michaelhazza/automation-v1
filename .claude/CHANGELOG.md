@@ -66,7 +66,7 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ## 2.2.0 — 2026-05-12
 
-**Highlights:** adds `reality-checker` agent — a post-pr-reviewer evidence-demanding verifier that classifies the implementer's claimed success criteria against supplied evidence before a build is approved. Wires into `feature-coordinator`'s branch-level review pass (§8.4) between `pr-reviewer` and `dual-reviewer` for Significant/Major tasks.
+**Highlights:** adds `reality-checker` agent — a post-pr-reviewer evidence-demanding verifier that classifies the implementer's claimed success criteria against supplied evidence before a build is approved. Wires into `feature-coordinator`'s branch-level review pass (§8.4), Phase 2 branch-level sequence position is: `spec-conformance` → `adversarial-reviewer` (if §5.1.2 surface) → `pr-reviewer` → **`reality-checker`** → `dual-reviewer`. Mandatory for Significant/Major tasks.
 
 **Added:**
 - `.claude/agents/reality-checker.md` — read-only (Read, Glob, Grep) evidence verifier. Verdict enum: `READY` / `NEEDS_WORK` / `NEEDS_DISCUSSION`. Logs to `tasks/review-logs/reality-check-log-{slug}-{timestamp}.md`.

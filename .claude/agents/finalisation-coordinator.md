@@ -624,13 +624,15 @@ If branch protection on `main` requires PRs (no direct push allowed):
 
 ## Step 13 — End-of-phase prompt (merged)
 
-**REVIEW_GAP check:** if the handoff `REVIEW_GAP entries:` field is non-empty, or the `dual-reviewer verdict:` field contains any `REVIEW_GAP:` token (legacy format), prepend for each gap where `operator-override` is `no`:
+**REVIEW_GAP check:** if any non-overridden `REVIEW_GAP` entry exists in the handoff (any line in `REVIEW_GAP entries:` where `operator-override` is `no`, or any `REVIEW_GAP:` token in the legacy `dual-reviewer verdict:` field), prepend ONE consolidated warning block listing each gap:
 
 > ⚠ **Review coverage gap for this build.** The following required reviewer(s) were skipped:
 >
 > {each REVIEW_GAP line, one per bullet}
 >
 > If any gap remains unresolved (remediation not `accept`), consider running the reviewer retrospectively against the squash-commit.
+
+Only one warning block is printed per session regardless of how many gaps it contains.
 
 On finalisation, emit / refresh the `REVIEW_GAP` entries from the handoff as a top-level artefact record in `tasks/current-focus.md` under `## Paused build / artefact record` (or the existing artefact prose section), so future sessions can see which coverage gaps were carried to merge.
 

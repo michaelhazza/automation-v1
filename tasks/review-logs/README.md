@@ -121,7 +121,7 @@ Read-only. Emits its complete review inside a fenced markdown block tagged `adve
 - `likely-hole` findings → route to the same backlog with the agent's "what would confirm" note attached.
 - `worth-confirming` findings → keep in the log only; do not propagate to the backlog unless the user escalates.
 
-Manually invoked only — the user must explicitly ask. Phase 1 advisory; non-blocking.
+Manual invocation is supported (the operator can ask for an ad-hoc adversarial pass on a changed-file set). `feature-coordinator` also auto-invokes `adversarial-reviewer` during the Phase 2 branch-level review pass when the branch diff matches the §5.1.2 security surface (`server/db/schema`, `server/routes`, auth/permission services, middleware, RLS migrations, webhook handlers — see `.claude/agents/feature-coordinator.md` §8.2 for the canonical pathspec). Phase 1 advisory; non-blocking.
 
 ### `reality-checker`
 

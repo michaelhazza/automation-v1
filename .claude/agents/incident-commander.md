@@ -115,5 +115,5 @@ See [`references/test-gate-policy.md`](../../references/test-gate-policy.md). Th
 
 - Never auto-commits. Never amends a commit. Never uses `--no-verify`.
 - Never dispatches another coordinator. Routes fix work by printing instructions to the operator.
-- Confirms SEV classification with the operator before opening the incident folder.
+- Opens the incident folder immediately with the proposed SEV; appends operator confirmation, upgrade, or downgrade as a later timeline entry. Never blocks early chronology capture on confirmation.
 - Timeline entries are append-only. Never edits or deletes existing entries.

@@ -71,9 +71,38 @@ ChatGPT's opening phrase "I'll treat this as the next PR review pass and check w
 
 **G3 status after fixes:** lint 0 errors / 902 warnings (all pre-existing); typecheck clean.
 
-### Round 2 — pending operator action
+### Round 2 — outcome
 
-Next diff: `.chatgpt-diffs/pr293-round2-code-diff.diff` (regenerated below with `tasks/review-logs/README.md` exclusion narrowed to log files only, not the README).
+**Diff pasted:** `.chatgpt-diffs/pr293-round2-code-diff.diff` (1215 lines, 18 files; now includes `.claude/FRAMEWORK_VERSION` and `tasks/review-logs/README.md`).
 
-**Awaiting:** operator paste of fresh ChatGPT response on the round-2 diff, or `done` signal.
+**Verdict received:** CHANGES_REQUESTED ("much closer"). Blocking: 1 / Should-fix: 4 / Consider: 2.
+
+#### Per-finding triage
+
+| # | Severity | Finding (summary) | Triage | Recommendation | Action |
+|---|---|---|---|---|---|
+| R2-B1 | 🔴 | incident-commander Hard rules section still says "Confirms SEV before opening folder" — contradicts the Step 2 fix from round 1 | technical | apply | replaced rule with "Opens the incident folder immediately with proposed SEV; appends operator confirmation, upgrade, or downgrade as a later timeline entry. Never blocks early chronology capture on confirmation." |
+| R2-S1 | 🟡 | review-logs/README.md says adversarial-reviewer is "Manually invoked only" but CLAUDE.md and feature-coordinator define auto-invocation when diff matches §5.1.2 surface | technical | apply | updated README L124 to state both: manual invocation is supported, feature-coordinator auto-invokes for Significant/Major when security-surface grep matches. Pointer to §8.2 for canonical pathspec. |
+| R2-S2 | 🟡 | finalisation-coordinator Step 13 still uses old "prepend for each gap" wording even though Step 0 was fixed in round 1 | technical | apply | reworded Step 13 to match Step 0: "If any non-overridden REVIEW_GAP exists, prepend ONE consolidated warning block" + explicit one-block-per-session |
+| R2-S3 | 🟡 | feature-coordinator handoff template skip-note placeholder doesn't match the new GRADED wording in §8.2 | technical | apply | updated template placeholder to: `skipped — diff does not match §5.1.2 security surface (per GRADED policy)` |
+| R2-S4 | 🟡 | reality-checker treats screenshot-path-exists as verified evidence even though it can't interpret content | technical | apply | tightened classification rule: screenshot path REQUIRES a caller-supplied textual assertion of what it proves; record as "screenshot supplied with caller-asserted claim: '<assertion>'; content not programmatically verified — operator must visually confirm assertion before treating criterion as fully verified". No-assertion screenshots reclassify to `unverified — screenshot supplied without textual claim of what it proves`. |
+| R2-C1 | 💭 | REVIEW_GAP `remediation: <TODO-link\|accept>` schema doesn't match prose examples used elsewhere | technical | apply | widened schema to `remediation: <one-line remediation>`; added an explanatory paragraph naming the three recommended forms (backlog link, literal `accept`, or short prose plan) with precedence |
+| R2-C2 | 💭 | CHANGELOG 2.2.0 reality-checker description omits adversarial-reviewer ordering context | technical | apply | rewrote highlights line to spell out full Phase 2 branch-level sequence: `spec-conformance → adversarial-reviewer (if §5.1.2 surface) → pr-reviewer → reality-checker → dual-reviewer` |
+
+**Files modified by round 2 fixes:**
+- `.claude/agents/incident-commander.md` (R2-B1)
+- `tasks/review-logs/README.md` (R2-S1)
+- `.claude/agents/finalisation-coordinator.md` (R2-S2)
+- `.claude/agents/feature-coordinator.md` (R2-S3)
+- `.claude/agents/reality-checker.md` (R2-S4)
+- `CLAUDE.md` (R2-C1)
+- `.claude/CHANGELOG.md` (R2-C2)
+
+**G3 status after fixes:** typecheck clean. Lint not re-run (no .ts/.tsx files changed; all 7 files are markdown/text).
+
+### Round 3 — pending operator action
+
+Next diff: `.chatgpt-diffs/pr293-round3-code-diff.diff` (regenerated after this commit lands).
+
+**Awaiting:** operator paste of round-3 ChatGPT response, or `done` signal.
 
