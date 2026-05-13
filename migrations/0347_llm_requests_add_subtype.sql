@@ -8,10 +8,22 @@
 -- created in migration 0348. FK + unique partial index land in migration 0349.
 --
 -- CHECK constraints use IS DISTINCT FROM (not =) for null-safe three-valued-logic.
--- Existing rows have NULL for both columns — constraints hold trivially.
+-- Existing rows with source_type='sandbox_compute' are backfilled to subtype='task'
+-- (they were written by sandboxHarvestService prior to this migration); rows of
+-- any other source_type retain NULL subtype.
 
 ALTER TABLE llm_requests ADD COLUMN subtype TEXT;
 ALTER TABLE llm_requests ADD COLUMN warm_session_id UUID;
+
+-- Backfill: every pre-existing 'sandbox_compute' row originated from the
+-- per-task harvest pipeline (sandboxHarvestService). The 'warm_pool' subtype
+-- is introduced in this PR via browserWarmPool.terminate and cannot have
+-- been written before migration 0347 lands. Backfill before enforcing the
+-- CHECK constraint so the ALTER does not fail on populated databases.
+UPDATE llm_requests
+  SET subtype = 'task'
+  WHERE source_type = 'sandbox_compute'
+    AND subtype IS NULL;
 
 -- CHECK 1: subtype enum gate (null-safe)
 -- When source_type = 'sandbox_compute', subtype must be 'task' or 'warm_pool'.

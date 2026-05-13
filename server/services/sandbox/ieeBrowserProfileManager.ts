@@ -53,39 +53,37 @@ async function resolve({
   const volumeId = randomUUID();
   return db.transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
-    try {
-      const [inserted] = await tx
-        .insert(ieeBrowserSessionProfiles)
-        .values({
-          organisationId,
-          subaccountId,
-          sessionKey,
-          volumeId,
-          status: 'active',
-          sizeBytes: 0,
-          sizeCapBytes: 524288000,
-        })
-        .returning();
-      return inserted;
-    } catch (err) {
-      // 23505 = unique_violation — another caller won the race; SELECT the winner row.
-      if ((err as any).code === '23505') {
-        const [existing] = await tx
-          .select()
-          .from(ieeBrowserSessionProfiles)
-          .where(
-            and(
-              eq(ieeBrowserSessionProfiles.organisationId, organisationId),
-              eq(ieeBrowserSessionProfiles.subaccountId, subaccountId),
-              eq(ieeBrowserSessionProfiles.sessionKey, sessionKey),
-            ),
-          )
-          .limit(1);
-        if (!existing) throw new EnvironmentError('profile_disappeared_after_race');
-        return existing;
-      }
-      throw err;
-    }
+    // INSERT ... ON CONFLICT DO UPDATE returns the row in both branches and
+    // does NOT abort the transaction on a unique_violation race (unlike a
+    // bare INSERT + catch 23505, where the surrounding transaction enters
+    // 'aborted' state and any follow-up SELECT fails with
+    // "current transaction is aborted"). The conflict target matches the
+    // (organisation_id, subaccount_id, session_key) UNIQUE index from
+    // migration 0345. On conflict we touch updated_at to surface the
+    // serialised re-resolve and return the winning row's volume_id —
+    // never the new randomUUID candidate.
+    const [row] = await tx
+      .insert(ieeBrowserSessionProfiles)
+      .values({
+        organisationId,
+        subaccountId,
+        sessionKey,
+        volumeId,
+        status: 'active',
+        sizeBytes: 0,
+        sizeCapBytes: 524288000,
+      })
+      .onConflictDoUpdate({
+        target: [
+          ieeBrowserSessionProfiles.organisationId,
+          ieeBrowserSessionProfiles.subaccountId,
+          ieeBrowserSessionProfiles.sessionKey,
+        ],
+        set: { updatedAt: sql`NOW()` },
+      })
+      .returning();
+    if (!row) throw new EnvironmentError('profile_resolve_returned_no_row');
+    return row;
   });
 }
 

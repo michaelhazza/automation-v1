@@ -178,42 +178,50 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   const decision = resolveBrowserDispatch(settings!, warmCheckout);
   // (decision will be warm_leased or cold_start — never launch_disabled here)
 
-  if (decision.kind === 'cold_start') {
-    logger.info(IEE_BROWSER_EVENT_WARM_POOL_MISS, {
-      subaccountId,
-      reason: 'no_warm_session_available',
-    });
-  }
-
-  // 2. Derive session key and resolve profile
-  const opts = input.backendOptions;
-  const ieeTask = (opts as { ieeTask?: { skillId?: string } }).ieeTask;
-  const sessionKey = deriveSessionKey(ieeTask ?? {});
-
-  const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
-  const mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
-
-  // 3. Build policy (V1: deny-all network, standard ceilings)
-  const costCents = settings?.perTaskCostCeilingCents ?? 100;
-  const policy: SandboxPolicy = {
-    network: { mode: 'none' },
-    filesystem: { writableRoot: '/workspace' },
-    ceilings: {
-      wallClockMs: 300_000, // 5 min default for browser tasks
-      costCents,
-      monitorIntervalMs: 5_000,
-    },
-    artefactLimits: { perArtefactBytes: 10_485_760, totalBytes: 104_857_600 },
-    allowRuntimeInstall: false,
-    inputLimits: { maxBytes: 26_214_400, allowedMimes: [] },
-    providerThresholds: { startTimeoutMs: 30_000 },
-  };
-
-  const sandboxExecutionId = randomUUID();
-  const warmSessionCheckoutId = decision.kind === 'warm_leased' ? decision.warmSessionId : null;
-
+  // From this point onward a warm session may be leased. Every exit path
+  // (including failures in profile resolve/mount, policy build, runTask, etc.)
+  // must terminate that lease — otherwise the warm_sessions row is stuck in
+  // 'leased' forever and cost attribution never closes. We hold the
+  // mounted-profile handle in a closure-scoped var so the finally block can
+  // unmount it iff resolve+mount succeeded; null means setup failed before
+  // mount, so there is nothing to unmount.
+  let mounted: import('../sandbox/ieeBrowserProfileManager.js').MountedProfile | null = null;
   let sandboxOutput;
   try {
+    if (decision.kind === 'cold_start') {
+      logger.info(IEE_BROWSER_EVENT_WARM_POOL_MISS, {
+        subaccountId,
+        reason: 'no_warm_session_available',
+      });
+    }
+
+    // 2. Derive session key and resolve profile
+    const opts = input.backendOptions;
+    const ieeTask = (opts as { ieeTask?: { skillId?: string } }).ieeTask;
+    const sessionKey = deriveSessionKey(ieeTask ?? {});
+
+    const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
+    mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
+
+    // 3. Build policy (V1: deny-all network, standard ceilings)
+    const costCents = settings?.perTaskCostCeilingCents ?? 100;
+    const policy: SandboxPolicy = {
+      network: { mode: 'none' },
+      filesystem: { writableRoot: '/workspace' },
+      ceilings: {
+        wallClockMs: 300_000, // 5 min default for browser tasks
+        costCents,
+        monitorIntervalMs: 5_000,
+      },
+      artefactLimits: { perArtefactBytes: 10_485_760, totalBytes: 104_857_600 },
+      allowRuntimeInstall: false,
+      inputLimits: { maxBytes: 26_214_400, allowedMimes: [] },
+      providerThresholds: { startTimeoutMs: 30_000 },
+    };
+
+    const sandboxExecutionId = randomUUID();
+    const warmSessionCheckoutId = decision.kind === 'warm_leased' ? decision.warmSessionId : null;
+
     sandboxOutput = await sandboxRunTask({
       sandboxExecutionId,
       organisationId,
@@ -232,7 +240,8 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       warmSessionCheckoutId,
     });
   } finally {
-    // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects.
+    // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects,
+    // AND covers earlier failures (profile resolve/mount, policy build).
     // Cost attribution is owned by browserWarmPool.terminate (chunk 10).
     if (decision.kind === 'warm_leased') {
       await browserWarmPool.terminate({ warmSessionId: decision.warmSessionId, reason: 'post_lease', organisationId, subaccountId }).catch((err) => {
@@ -242,12 +251,14 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
         });
       });
     }
-    await ieeBrowserProfileManager.unmount(mounted, { organisationId, subaccountId }).catch((err) => {
-      logger.warn('iee_browser.dispatch.profile_unmount_failed', {
-        profileId: mounted.sessionProfileId,
-        error: err instanceof Error ? err.message : String(err),
+    if (mounted) {
+      await ieeBrowserProfileManager.unmount(mounted, { organisationId, subaccountId }).catch((err) => {
+        logger.warn('iee_browser.dispatch.profile_unmount_failed', {
+          profileId: mounted!.sessionProfileId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
   }
 
   const loopResult: LoopResult = {
