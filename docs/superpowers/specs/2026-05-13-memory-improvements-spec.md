@@ -1,8 +1,8 @@
 # Memory Improvements — Spec
 
-**Status:** reviewing
+**Status:** accepted (locked 2026-05-13 after ChatGPT spec-review Round 2 APPROVED)
 **Spec date:** 2026-05-13
-**Last updated:** 2026-05-13 (spec-reviewer iteration 1 + open-question resolutions)
+**Last updated:** 2026-05-13 (spec-reviewer iter 1 + open-question resolutions + ChatGPT spec-review Round 1 F1/F2/F3/T1/T2/T3/T4 + wording + Round 2 T1 banner + T2 test)
 **Author:** spec-coordinator (inline)
 **Build slug:** `memory-improvements`
 **Source brief:** [`tasks/builds/memory-improvements/brief.md`](../../../tasks/builds/memory-improvements/brief.md) (Rev 6.3, LOCKED 2026-05-12)
@@ -88,7 +88,7 @@ Lineage rows must remain audit-useful even after source loss. Required snapshot 
 
 - `source_entry_id_hash` (hex digest, deterministic from source UUID)
 - `content_hash` (SHA-256 of the source entry content at capture time)
-- `source_type` (text — e.g. `'workspace_memory'`, `'agent_belief'`, `'correction'`)
+- `source_type` (text — **v1 only emits `'workspace_memory'`**; other values like `'agent_belief'` / `'correction'` are reserved for future source tables and must not be emitted until their FK/enrichment paths exist — per ChatGPT spec-review T3)
 - `captured_at` (timestamptz)
 - `quality_score_at_capture` (numeric — value of the source's quality score at synthesis time)
 - `contribution_rank` (integer — rank within the cluster at synthesis time)
@@ -189,7 +189,9 @@ CREATE INDEX idx_mbvs_source_entry_hash ON memory_block_version_sources(source_e
 CREATE INDEX idx_mbvs_source_run ON memory_block_version_sources(source_run_id);
 ```
 
-**Write site:** `server/services/memoryBlockSynthesisService.ts:195-206` (verified anchor). Inside the loop that inserts a synthesised memory block, also insert one `memory_block_version_sources` row per cluster entry. Cluster entries (`cluster: WorkspaceMemoryEntry[]`) and quality scores (`avgQuality`, plus per-entry quality from upstream cluster scoring) are in scope at that line.
+**Write site:** `server/services/memoryBlockSynthesisService.ts:195-206` (verified anchor). Inside the loop that inserts a synthesised memory block, also insert one `memory_block_version_sources` row per cluster entry. Cluster entries (`cluster: WorkspaceMemoryEntry[]`) and quality scores (`avgQuality`, plus per-entry quality from upstream cluster scoring) are in scope at that line. The insert uses **`onConflictDoNothing` on `(block_version_id, source_entry_id_hash)`** and runs inside the same transaction as the block-version insert. Idempotency is scoped to a committed block version, not to the whole synthesis run — if the synthesis job retries and creates a new block version row, that new version gets its own lineage rows (not deduped against the prior version's). The producer-level dedupe boundary remains the synthesis job's existing block-version creation semantics. (Added per ChatGPT spec-review T1.)
+
+**Source-run provenance population (T2 — build-phase verification):** the write site must verify whether `WorkspaceMemoryEntry` exposes a stable `originatingRunId` field (or equivalent) before populating `source_run_id`. If no stable field exists in the current schema, the lineage row writes `source_run_id = NULL`, `source_run_id_hash = NULL`, `source_run_label_at_capture = NULL`; the build phase MUST NOT infer the originating run from surrounding synthesis context (e.g. the synthesis-job run-id is the *job's* run, not the cluster entry's source run, and inferring would produce misleading provenance). If a stable field is added later, the lineage row is regenerated on next synthesis — no retroactive backfill.
 
 **Read site:** new admin route `GET /api/memory-blocks/:id/sources?version=<n>`. Joins `memory_block_version_sources` → `workspace_memory_entries` (LEFT JOIN, may be NULL) and `agent_runs` (LEFT JOIN, may be NULL). Falls back to captured columns when the FK target is NULL. Returns the payload defined in §6.1.
 
@@ -296,15 +298,24 @@ function assembleKnowledgeForRun(runId):
 **UI only.** New "Memory Utility" tab on `client/src/pages/UsagePage.tsx` per the mockup `prototypes/memory-improvements/citation-utility-dashboard.html`.
 
 **Surfaces:**
-- Two canvas-drawn line charts: entry utility (30d rolling), block utility (30d rolling).
+- Two canvas-drawn line charts: entry utility (per-day buckets, last 30 days), block utility (per-day buckets, last 30 days). Each chart plots one point per UTC day.
 - Per-agent breakdown table with inline utility bars, percentage labels, `<10 runs` suppression.
-- One-sentence dismissable banner: *"Runs predating the entry-manifest migration are excluded from utility calculations. Citation detection is heuristic — figures are directional, not absolute."*
+- Dismissable banner (per ChatGPT spec-review Round 2 T1, disclosing the table/chart refresh split so support doesn't field false bugs when the two surfaces differ slightly): *"Runs predating the entry-manifest migration are excluded from entry utility calculations. Agent table refreshes nightly; charts reflect live run data. Citation detection is heuristic, so figures are directional."*
 
-**Read path:** new admin route `GET /api/orgs/:orgId/usage/memory-utility` behind `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW)`. Pattern verified against `server/routes/llmUsage.ts:27-30` (`/api/orgs/:orgId/usage/summary` uses this exact guard pair). Organisation comes from the URL path segment, not a query param, to stay consistent with neighbouring usage routes.
+**Two read shapes** (per ChatGPT spec-review Round 1 F1):
+
+1. **Per-agent aggregate (table data).** Reads `mv_memory_utility_30d` directly. One row per `(organisation_id, subaccount_id, agent_id)`. Fast — covered by the unique index.
+2. **Daily time series (chart data).** Computed on-demand from raw `agent_runs` rows (no separate materialised view). Groups by `date_trunc('day', r.created_at AT TIME ZONE 'UTC')` over the last 30 days, with the same numerator/denominator + `measured` discriminator as the aggregate view. Days with zero measured runs return `NULL` for the utility ratio (rendered as a gap in the line, not as a zero).
+
+The daily series is intentionally not materialised: 30 daily buckets × ~10–100 agents × a handful of workspaces is a cheap aggregation over an indexed `agent_runs.created_at` column, and avoiding a second materialised view simplifies refresh-job sequencing and migration shape.
+
+**Read path:** new admin route `GET /api/orgs/:orgId/usage/memory-utility` behind `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW)`. Pattern verified against `server/routes/llmUsage.ts:27-30` (`/api/orgs/:orgId/usage/summary` uses this exact guard pair). Organisation comes from the URL path segment, not a query param, to stay consistent with neighbouring usage routes. The route MUST reject `:orgId` values that do not match the authenticated session organisation with HTTP 403 before any query executes (cross-tenant leak class — see §7.3).
+
+The response body contains both shapes — `agents: <per-agent aggregate>` and `dailySeries: <30-bucket entry+block utility>` — so the UI can render the table and both charts from a single fetch.
 
 **No new chart components.** Reuse the canvas-chart pattern from `prototypes/auto-knowledge-retrieval/agent-data-sources.html` and the `.data-table` convention from `prototypes/consolidation-2026-05-06/_shared.css`. Confirmed in mockup-log Round 1.
 
-**Scope (LOC):** ~120 LOC. One route, one query helper, one tab component, one table + two chart sub-components.
+**Scope (LOC):** ~140 LOC. One route, two query helpers (aggregate + daily), one tab component, one table + two chart sub-components.
 
 ### Opportunistic cleanup (§9 of brief)
 
@@ -339,7 +350,9 @@ Every file the build phase touches. Cascade-edited from this section; prose-leve
 | 3 | `server/services/__tests__/retrievalQueryEmbedderPure.test.ts` | Pure-function tests for the scoring + fallback |
 | 4 | `client/src/pages/MemoryUtilityTab.tsx` | New tab inside `UsagePage` |
 | 4 | `server/routes/memoryUtility.ts` | `GET /api/orgs/:orgId/usage/memory-utility` (matches `llmUsage.ts` convention) |
-| 4 | `server/services/memoryUtilityQueryService.ts` | Org-scoped read against the materialised view |
+| 4 | `server/services/memoryUtilityQueryService.ts` | Org-scoped read; exposes two query shapes — per-agent aggregate (reads `mv_memory_utility_30d`) and daily time series (reads raw `agent_runs` directly, computed on-demand per ChatGPT-spec-review F1) |
+| 4 | `server/services/memoryUtilityDailySeriesPure.ts` | Pure helper for the daily-bucket math: UTC day boundaries, measured-vs-unmeasured partition, NULL-on-no-measured-runs ratio |
+| 4 | `server/services/__tests__/memoryUtilityDailySeriesPure.test.ts` | Pure-function tests for the daily-bucket math |
 
 ### 5.2 Modified files
 
@@ -413,7 +426,9 @@ type MemoryBlockSourcesPayload = {
   capturedAt: string; // ISO timestamp
   sources: Array<{
     rowId: string;
-    sourceType: 'workspace_memory' | 'agent_belief' | 'correction' | string;
+    sourceType: 'workspace_memory'; // v1 only; see note below
+    // Future v2+ values (`'agent_belief' | 'correction' | ...`) are reserved
+    // and MUST NOT be emitted until their FK/enrichment paths exist.
     contributionRank: number;
     capturedAt: string;
     qualityScoreAtCapture: number | null;
@@ -542,6 +557,51 @@ NULL                       -- pre-migration run, excluded
 
 **Consumer:** `retrievalObservabilityService` (which surfaces degraded reasons on the run trace).
 
+### 6.6 `MemoryUtilityPayload` (B2 admin route response — added per ChatGPT spec-review F1)
+
+**Type:** JSON. Combined response containing both the per-agent aggregate (table) and the daily time series (charts).
+
+**Producer:** `memoryUtilityQueryService.getMemoryUtilityForOrg(sessionOrgId, options?)`.
+
+**Consumer:** `client/src/pages/MemoryUtilityTab.tsx`.
+
+**Shape:**
+
+```typescript
+type MemoryUtilityPayload = {
+  organisationId: string;
+  generatedAt: string; // ISO timestamp of the read
+  windowDays: 30;
+
+  agents: Array<{
+    subaccountId: string | null;
+    agentId: string;
+    runsMeasuredEntries: number;
+    runsUnmeasuredEntries: number;
+    totalInjectedEntries: number;
+    totalCitedEntries: number;
+    totalInjectedBlocks: number;
+    totalCitedBlocks: number;
+    entryUtility30d: number | null;
+    blockUtility30d: number | null;
+  }>;
+
+  dailySeries: Array<{
+    bucketDate: string;            // ISO date 'YYYY-MM-DD' in UTC
+    runsMeasuredEntries: number;   // runs with non-null injected_entry_ids in this bucket
+    entryUtility: number | null;   // null when runsMeasuredEntries == 0 (gap in chart)
+    blockUtility: number | null;   // null when total_injected_blocks_in_bucket == 0
+  }>;
+};
+```
+
+**Nullability:** `entryUtility30d`, `blockUtility30d`, `entryUtility`, `blockUtility` are `null` when the denominator is zero (no measured runs / no injected blocks in the window or bucket). UI renders nulls as gaps, not zeros.
+
+**Source-of-truth precedence:**
+- `agents[]` rows are projections of `mv_memory_utility_30d` filtered by session organisation.
+- `dailySeries[]` rows are computed on-demand from raw `agent_runs` rows filtered by session organisation and `created_at > now() - interval '30 days'`. Bucket key is `date_trunc('day', created_at AT TIME ZONE 'UTC')`.
+- The view and the daily series can drift by up to one nightly-refresh cycle (the view aggregates lag the daily series). The B2 UI treats them as independent — the per-agent table reflects the materialised snapshot; the line charts reflect live data. Operators reading both side-by-side may notice a small discrepancy after recent run activity; this is expected.
+
 ---
 
 ## 7. Permissions / RLS checklist
@@ -573,13 +633,15 @@ The policy uses the canonical three-layer pattern: `current_setting('app.organis
 | RLS posture | **Materialised views do not enforce RLS by themselves.** The read service `memoryUtilityQueryService.ts` MUST filter rows by `current_setting('app.organisation_id')` in the WHERE clause, or call the view via `withAdminConnection` only from server-side aggregations that are not user-facing. The B2 admin route filters by org before returning. |
 | Manifest entry | The view is added to a new `RLS_EXCLUDED_VIEWS` registry if one exists; if not, the convention is `rlsExclusions` in `server/middleware/orgScoping.ts` (per `mv_optimiser_peer_medians` precedent — migration 0277). |
 | Route guard | ✓ `GET /api/orgs/:orgId/usage/memory-utility` behind `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW)` (verified pattern in `server/routes/llmUsage.ts:27-30`). |
+| Path-org / session-org invariant (added per ChatGPT spec-review F3) | The route MUST reject any request where the path `:orgId` does not match the authenticated session organisation, with HTTP **403 before any query executes**. The MV read query (and the §6.6 daily-series query) then filter by the session organisation, not the raw path parameter. Materialised views bypass RLS, so this route-layer guard is the canonical defence against cross-tenant leak via path manipulation. |
 | Refresh-job posture | The refresh job runs in `withAdminConnection` (multi-tenant refresh in a single transaction). |
 
 ### 7.4 Cross-tenant leak class — explicit risks and mitigations
 
 - **Lineage row exposure across organisations.** `memory_block_version_sources.organisation_id` is the RLS predicate. Migrations verify `FORCE RLS`. The route resolves `organisation_id` from the authenticated user's session, not from path params, before joining.
-- **Materialised view cross-tenant rows.** The view aggregates per `(organisation_id, subaccount_id, agent_id)`. The read query filters by the session's `organisation_id`. The view itself is not RLS-protected — protection is at the read service.
+- **Materialised view cross-tenant rows.** The view aggregates per `(organisation_id, subaccount_id, agent_id)`. The read query filters by the session's `organisation_id`. The view itself is not RLS-protected — protection is at the read service AND at the route layer (path-org vs session-org check, §7.3).
 - **Injected entry IDs across organisations.** `injected_entry_ids` is a column on `agent_runs`, which is already RLS-protected. No new exposure.
+- **Daily-series cross-tenant leak via :orgId path manipulation.** The §6.6 daily-series query reads raw `agent_runs` under RLS, so the underlying query is safe. The route-layer 403 in §7.3 is defence-in-depth — it ensures a malicious `:orgId` value can never reach the query layer, even via a future code path that uses `withAdminConnection`.
 
 ---
 
@@ -685,6 +747,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 - **Pure-function vitest tests** for:
   - `memoryBlockSourcesServicePure.test.ts` — payload assembler. Test cases: source entry present, source entry soft-deleted (`isDeleted: true`), source entry hard-deleted (`sourceEntry: null` with captured metadata), source run present, source run absent, both absent, reverse-lineage map population.
   - `memoryUtilityAggregatorPure.test.ts` — ratio math, denominator-zero handling (returns null), measured-vs-unmeasured run partition, edge case of all-pre-migration runs (returns null + non-zero `runs_unmeasured_entries`).
+  - `memoryUtilityDailySeriesPure.test.ts` (added per ChatGPT spec-review Round 2 T2) — UTC bucket boundaries (midnight UTC transitions; runs at 23:59:59.999 UTC fall in the prior day's bucket), zero-measured-run buckets returning `null` (gap rendering in chart), entry-side measured/unmeasured partition (mixed bucket with some NULL `injected_entry_ids` and some `[...]`), block-side denominator-zero handling (bucket with zero `applied_memory_block_ids` total returns `blockUtility: null`), 30-bucket shape (response always has exactly 30 entries; missing days appear as `{bucketDate, runsMeasuredEntries: 0, entryUtility: null, blockUtility: null}`).
   - `retrievalQueryEmbedderPure.test.ts` — cosine math against fixed test vectors, threshold filter at boundary values (exact match, just below, just above), empty-after-semantic predicate (non-empty pool → empty filtered set), embedding-null fallback, mixed-category fallback (chunks empty → fallback, blocks non-empty → keep).
 
 ### 12.2 What does NOT get tested
@@ -710,10 +773,10 @@ Per `docs/spec-authoring-checklist.md` §10. Every new write path must declare i
 ### 13.1 Phase 1 — lineage row insert
 
 - **Operation:** insert one row into `memory_block_version_sources` per source entry, alongside the `memory_block_versions` insert in `memoryBlockSynthesisService.ts:195-206`.
-- **Idempotency posture:** **key-based.** Unique constraint `(block_version_id, source_entry_id_hash)` enforces exactly-once. Hash is deterministic from the source entry UUID.
-- **Retry classification:** **guarded.** Synthesis job is the only producer; retries of the same synthesis run for the same block-version would trip the unique constraint.
-- **Concurrency guard:** unique constraint at the DB level catches `23505`. Mapped to **HTTP 200 idempotent hit** on the producer side (no caller — synthesis is internal). If the job itself retries after a partial commit, the second attempt inserts no new rows.
-- **Unique constraint → HTTP mapping:** n/a (no external caller path). Internally logged at INFO level: `synthesis.lineage_row_already_exists`.
+- **Idempotency posture:** **key-based, scoped to committed block version.** Unique constraint `(block_version_id, source_entry_id_hash)` enforces exactly-once per `block_version_id`. The insert uses `onConflictDoNothing` so a retry against the same block-version inserts no new rows. The hash is deterministic from the source entry UUID. (Tightened per ChatGPT spec-review T1: previously the spec claimed broader exactly-once semantics; the actual contract is **per committed block version**, not per synthesis run.)
+- **Retry classification:** **guarded.** Synthesis job is the only producer; retries against the same `block_version_id` are deduped by the unique constraint + `onConflictDoNothing`. A retry that creates a *new* `block_version_id` is a different version with its own lineage rows — not deduped against the prior version, by design.
+- **Concurrency guard:** unique constraint at the DB level + `onConflictDoNothing` clause. Two concurrent inserts of the same `(block_version_id, source_entry_id_hash)` resolve to one row + one no-op; neither raises `23505`.
+- **Unique constraint → HTTP mapping:** n/a (no external caller path; producer is internal). Internally logged at INFO level: `synthesis.lineage_row_already_exists` is emitted only if the build phase chooses to count `onConflictDoNothing` no-ops; otherwise the no-op is silent.
 
 ### 13.2 Phase 1 — GET /api/memory-blocks/:id/sources
 
@@ -741,7 +804,7 @@ Per `docs/spec-authoring-checklist.md` §10. Every new write path must declare i
 - **Idempotency posture:** **safe** — embedding is stateless and deterministic per input.
 - **Retry classification:** **safe.** Network retries inside the OpenAI client are bounded; outer fallback path emits `retrieval.embedding_failed` on terminal failure.
 - **Concurrency guard:** n/a — each run is independent.
-- **Terminal event:** retrieval observability emits exactly one of `retrieval.embedding_failed` OR `retrieval.empty_after_semantic` OR (when all goes well) no degraded reason. They are not mutually exclusive: an embedding failure precludes the semantic-empty case for that run.
+- **Terminal event:** per run, embedding failure emits **at most one `retrieval.embedding_failed`**. When semantic scoring succeeds, `retrieval.empty_after_semantic` may emit **once per affected category** (chunks, blocks) — i.e. up to two times per run if both categories are filtered to zero. An embedding failure precludes any `retrieval.empty_after_semantic` events for that run (no scoring happened). (Wording clarified per ChatGPT spec-review.)
 - **No-silent-partial-success rule:** when one category (chunks) returns empty after semantic filtering and falls back, but the other category (blocks) returns a non-empty filtered set, the run completes successfully and emits `retrieval.empty_after_semantic` with a `category: 'chunks'` field. The result is NOT marked failed; the fallback is the success path.
 
 ### 13.6 Phase 3 — `retrievalService.ts` cosine score wiring
@@ -789,7 +852,7 @@ UI surfaces are advisory at this spec stage. The build phase finalises exact sha
 **Components:**
 - Two canvas-drawn line charts (entry utility, block utility, 30-day rolling). Canvas pattern reused from `prototypes/auto-knowledge-retrieval/agent-data-sources.html`.
 - Per-agent breakdown table with inline utility bars, percentage labels, `<10 runs` suppression note.
-- One-sentence dismissable banner combining the two caveats: "Runs predating the entry-manifest migration are excluded from utility calculations. Citation detection is heuristic — figures are directional, not absolute."
+- Dismissable banner (final copy per ChatGPT spec-review Round 2 T1): "Runs predating the entry-manifest migration are excluded from entry utility calculations. Agent table refreshes nightly; charts reflect live run data. Citation detection is heuristic, so figures are directional."
 
 **No new chart library, no new table primitive, no new canvas component.** Confirmed in mockup-log.
 
@@ -810,9 +873,9 @@ The retired mockup `prototypes/memory-improvements/akr-ranker-settings.html` (re
 All seven questions raised in the initial draft were resolved during spec-coordinator Phase 1. **No questions remain open at spec-lock.** This section records each resolution so the build phase has a single decision log.
 
 1. **Query definition for D — RESOLVED.** Lock to **"task description only"** in v1. Rationale: task description captures intent for this specific run; master prompt is identical across all runs of an agent and would pull every query toward the same centroid; conversation history adds noise and per-run summarisation cost. The D-Recall fallback (§3.7) protects against any "query too narrow" failure mode. B1's utility metric will reveal within ~2 weeks of D enablement whether the choice was wrong; broader-context alternatives may be reconsidered then via a follow-up spec amendment, not now.
-2. **Threshold starting value for D — RESOLVED.** Default `AKR_RETRIEVAL_THRESHOLD = 0.30`. Build phase MUST spot-check ~10 representative dev-environment runs before any enablement; if the spot-check shows aggressive filtering (>50% of recall-relevant chunks rejected), adjust to `0.25` before the first enablement and record the adjustment + evidence in the implementation plan. The flag stays off by default; no production exposure to a wrong default.
+2. **Threshold starting value for D — RESOLVED (per ChatGPT spec-review T4).** Spec contract: default `AKR_RETRIEVAL_THRESHOLD = 0.30`; any pre-enablement threshold change must be recorded in the implementation plan with evidence. The "spot-check ~10 dev runs" protocol is enablement procedure, not spec contract — see the handoff's build-phase acceptance checklist for the procedure. The flag stays off by default; no production exposure to a wrong default.
 3. **Exact `injected_entry_ids` write site in `agentExecutionService.ts` — RESOLVED at spec-review iteration 1.** `server/services/agentExecutionService.ts:1349-1356` (immediately after `memoryWithTracking.injectedEntries` is bound). Build phase confirms the file has not drifted before committing the change. No re-spec needed.
 4. **Exact permission key for the Sources route — RESOLVED at spec-review iteration 1.** `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`, matching the pattern at `server/routes/memoryBlocks.ts:46-49`. No build-phase action.
 5. **Materialised-view refresh window — RESOLVED.** Nightly at **16:00 UTC** (AU 02:00 AEST / 03:00 AEDT). Rationale: the initial customer base is Australian; 03:00 UTC defaults common in this codebase fall mid-business-day for AU operators (UTC 03:00 = AU 13:00–14:00). 16:00 UTC puts the refresh in AU overnight, avoids the existing 03:00 UTC `mv_optimiser_peer_medians` refresh slot, and completes well before AU morning operator login. Build phase confirms no other 16:00 UTC job collisions exist before commit.
-6. **Reverse-lineage payload performance — RESOLVED at spec-review iteration 1.** Migration `0333` indexes `source_entry_id_hash` via `idx_mbvs_source_entry_hash` so the reverse query (`COUNT(*) GROUP BY source_entry_id_hash`) is index-covered. Build phase confirms via EXPLAIN against a sample dataset and ships `?include_reverse=true` enabled by default; falls back to a per-row "Expand" affordance only if EXPLAIN cost is materially worse than expected.
+6. **Reverse-lineage payload — RESOLVED (default-off contract, per ChatGPT spec-review F2).** The Sources tab does NOT request `?include_reverse=true` by default. The UI sends the flag only when the operator expands a per-row bidirectional-lineage affordance. Migration `0333` indexes `source_entry_id_hash` via `idx_mbvs_source_entry_hash` so the reverse query is index-covered when requested. Build phase MAY promote default-on after EXPLAIN confirms acceptable cost in a follow-up PR, but the v1 contract is **default-off; opt-in on expand**. (This walks back the earlier "ship enabled by default" wording, which contradicted both §6.1 and the UI section.)
 7. **Coverage metric (AKR-spec §11 item) — RESOLVED, deferred.** Out of scope for this spec. Coverage answers a different operator question ("which documents are being loaded?") than utility ("how much of what's loaded is used?") and belongs as a follow-up extension of `retrievalObservabilityService`, not as a second reader of `mv_memory_utility_30d`. Added to §10 deferred items.

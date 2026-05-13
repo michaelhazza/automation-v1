@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: pending
-active_plan: pending
+active_spec: docs/superpowers/specs/2026-05-13-memory-improvements-spec.md
+active_plan: tasks/builds/memory-improvements/plan.md
 build_slug: memory-improvements
 branch: claude/add-memvid-integration-ehAOr
-status: PLANNING
+status: BUILDING
 last_updated: 2026-05-13
 last_merge_ready_pr: none
 last_merge_ready_slug: none
@@ -27,11 +27,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE** — PR [#291](https://github.com/michaelhazza/automation-v1/pull/291) merged 2026-05-12T23:41:06Z as squash-commit `9002174e`. Pick next from `tasks/todo.md`.
+**Active spec:** [`docs/superpowers/specs/2026-05-13-memory-improvements-spec.md`](../docs/superpowers/specs/2026-05-13-memory-improvements-spec.md) (Status: accepted, locked 2026-05-13)
+**Active plan:** `tasks/builds/memory-improvements/plan.md` (pending — feature-coordinator writes this in Phase 2)
+**Active build slug:** `memory-improvements`
+**Branch:** `claude/add-memvid-integration-ehAOr`
+**Status:** **BUILDING** — Phase 1 (SPEC) complete 2026-05-13. Three-proposal memory-system spec locked: A synthesis lineage (`memory_block_version_sources`), B1+B2 citation-rate utility (substrate + dashboard), D semantic ranker for AKR (env-flagged, no UI). Spec-reviewer iter 1 REVIEW_GAP (Codex unavailable) + 12 mechanical fixes; ChatGPT spec-review 2 rounds APPROVED (8 findings + wording all auto-applied). Operator-approved decisions: D query = task description, D threshold = 0.30, MV refresh = 16:00 UTC (AU overnight), coverage metric deferred, banner copy locked. Phase 1 handoff: `tasks/builds/memory-improvements/handoff.md`. Next session: run `feature-coordinator` to begin Phase 2 (BUILD).
 
 **Just merged:** PR #291 — `personal-assistant-v1` (squash-commit `9002174e`, 2026-05-12T23:41:06Z). Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion. Post-MERGE_READY CI fix-loop: 4 iterations (`39fe1a59` migration down idempotency + B.2 console gate; `6f113a79` ON CONFLICT requires partial-index predicate; `c66b2e73` manifest fixture + critical-event-set drift; `139596e0` action-registry snapshot + RLS contract + integration-reference drift). Phase 1 spec context: ~2000-line spec, 27 sections, spec-reviewer 5 iterations (cap, 52 mechanical fixes), 3 directional decisions ratified (Calendar push → 1-min lookahead scan; Slack auto-send → fixed policy; risk-tier ceiling 5→6), chatgpt-spec-review 2 rounds APPROVED.
 

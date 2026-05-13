@@ -59,3 +59,19 @@ Source brief: `tasks/builds/memory-improvements/brief.md` (Rev 6.3, LOCKED 2026-
 Q3, Q4, Q6 were resolved by spec-reviewer iteration 1 (see above).
 
 **No open questions remain at spec-lock.** Spec is technically ready for chatgpt-spec-review (Step 8).
+
+**ChatGPT spec-review Round 1 (CHANGES_REQUESTED → auto-applied):**
+- F1: B2 dashboard time-series — added §6.6 contract with `agents[]` + `dailySeries[]`; new `memoryUtilityDailySeriesPure.ts` in inventory.
+- F2: Reverse-lineage default-off (corrected §15 Q6 against §6.1).
+- F3: Path-org / session-org 403-before-query rule in §7.3 + §7.4.
+- T1: `onConflictDoNothing` clause + per-block-version idempotency scoping.
+- T2: Source-run provenance verification step.
+- T3: `source_type` narrowed to `'workspace_memory'` for v1.
+- T4: Threshold spot-check moved from spec to handoff acceptance checklist.
+- W1: §13.5 terminal-event wording tightened.
+
+**ChatGPT spec-review Round 2 (APPROVED — spec locked):**
+- R2-T1 (banner copy): operator-approved.
+- R2-T2: daily-series test added to §12.1.
+
+Spec frontmatter: `Status: reviewing → accepted`. Phase 1 complete.
