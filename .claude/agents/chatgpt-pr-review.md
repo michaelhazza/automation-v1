@@ -232,6 +232,15 @@ For each round:
 
 1a. **Duplicate detection (rounds 2+).** Before triage, check whether each finding is a substantive duplicate of a decided finding from a prior round in this session. Substantive duplicate = same `finding_type` AND same file/code area (or same global concern), no new evidence — even when rephrased with stronger language ("must-fix", "not optional", "blocking"). For duplicates: auto-apply the prior round's decision regardless of triage; log as `auto (<prior decision>) — duplicate of Round X / F<id>`. Do NOT proceed to step 2 (triage) and do NOT escalate to step 3b for this finding even when severity / defer / user-facing carveouts would normally trigger escalation. The carveouts protect the FIRST decision; once the user has actually made it, repetition adds zero judgment value. Source: KNOWLEDGE.md `[2026-05-01] Correction — chatgpt-pr-review duplicate findings auto-apply per prior decision`.
 
+1b. **Verify finding against live file (pre-triage diff-misread guard).** Before triaging any finding that claims "duplicate code", "regression", "two `navigate()` calls", "still missing X", or any other concrete claim about current file state, verify against the live file — not the diff. ChatGPT routinely confuses `-`/`+` diff lines with present state, and that confusion produced ~30% of findings in some lint-typecheck and workflows-v1 rounds. For each finding that names a specific file + symbol + count, run:
+
+```bash
+grep -nE "<pattern>" <file>           # current state
+git show HEAD:<file> | grep -cE "..." # post-commit state if needed
+```
+
+If the live file disproves the finding, mark it `reject — diff-misread (verified against <file> at <line>)` and skip step 3a auto-execute; do not consume a step 3b user slot. Log the verification command in the rationale so the audit trail shows the check, not just the verdict. Findings that don't make concrete file-level claims (architectural / framing / generic) skip this step.
+
 2. Triage each finding into one of two buckets:
 
    - **`user-facing`** — the finding changes something an end-user, customer, or
