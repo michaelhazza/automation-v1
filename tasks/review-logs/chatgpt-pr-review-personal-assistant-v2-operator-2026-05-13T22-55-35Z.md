@@ -245,3 +245,52 @@ edit:    tasks/todo.md (new backlog: PA-V2-EVENT-IDEMPOTENCY)
 ### Round-4 diff prep
 
 After commit, regenerate `.chatgpt-diffs/pr299-round4-code-diff.diff` for the operator to paste into ChatGPT for Round 4.
+
+## Round 4 — 2026-05-14T09:37Z
+
+### ChatGPT Verdict
+CHANGES_REQUESTED — 1 blocker (F12) + 1 should-fix (T6).
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| F12 | blocker | technical | service-layer owner lookup not org-scoped | IMPLEMENT — scope by `opts.forUser.organisationId` | applied |
+| T6 | should-fix | technical | retry pass fallback cast emits synthetic event for unsupported statuses | IMPLEMENT — tighten WHERE clause; drop fallback cast | applied |
+
+### Decisions log
+
+**F12 — Service-layer owner lookup not org-scoped**
+- Triaged technical (cross-org tenancy boundary).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - `server/services/agentExecutionEventService.ts:streamEvents` — owner lookup WHERE clause changed to `and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, opts.forUser.organisationId))`. A cross-org runId now produces the same empty-result fail-closed path as a missing run.
+  - `streamEventsByTask` — same fix for the deferred owner lookup. Task-scoped reads with events from another org's run produce an empty projected page.
+  - No caller changes needed: `opts.forUser.organisationId` is already required on `PermissionMaskUserContext`, which both call-sites already construct from the authenticated user.
+- Rationale: prior fix relied on RLS / session context being set correctly on the underlying `db` handle. That's an implicit assumption; the explicit org filter is the contract. Now a direct service caller can pass any runId from any org without leaking — the org filter at the projection-lookup layer ensures only same-org runs hit the projection.
+
+**T6 — Retry pass fallback cast emits synthetic event for unsupported statuses**
+- Triaged technical (defensive-emit correctness).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - `retryStrandedTerminalEmits()` WHERE clause tightened: `inArray(substepStatus, ['failed', 'partial'])` AND `inArray(crossOwnerApprovalTimeoutPolicy, ['fail_parent', 'continue_without_substep'])`.
+  - The status-mapping switch now has an explicit defensive `else` that logs `terminal_retry_unexpected_status` and `continue`s — no synthetic event is emitted for unknown statuses (e.g. `rejected`, which the prior fallback cast would have emitted as `cross_owner_approval_timeout_retry`).
+  - The `cross_owner_substep.completed` event payload's `status` field is the validator-allowed `'failed' | 'partial'` union (the prior `'success'` cast variant is now removed because no timeout-driven row ever transitions to `'success'` in this code path).
+- Rationale: a synthetic event with `cross_owner_approval_timeout_retry` reason and an unsupported status would pass the type system but fail the `validateEventPayload` runtime check — and even if the validator accepted it, the audit trail would contain a misleading event. Tightening the WHERE clause makes the retry pass mirror the forward path's policy/status invariants exactly.
+
+### Verification (G3 — round-4 fix bundle)
+
+- `npm run lint`: 0 errors, 896 warnings (unchanged).
+- `npm run typecheck`: clean for touched files; only the 2 pre-existing `@react-pdf/renderer` errors persist.
+- `npx vitest run server/services/__tests__/runTracePure.viewerProjection.test.ts server/services/__tests__/workflowGateStallNotifyJobPure.timeoutPolicyDecisionTree.test.ts`: 9/9 PASS.
+
+### Files changed in Round 4
+
+```
+edit:    server/services/agentExecutionEventService.ts (streamEvents + streamEventsByTask org-scoped owner lookup)
+edit:    server/jobs/workflowGateStallNotifyJob.ts (retryStrandedTerminalEmits — tightened WHERE clause + defensive switch)
+```
+
+### Round-5 diff prep
+
+After commit, regenerate `.chatgpt-diffs/pr299-round5-code-diff.diff` for the operator to paste into ChatGPT for Round 5.

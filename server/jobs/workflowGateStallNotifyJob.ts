@@ -1,5 +1,5 @@
 import type PgBoss from 'pg-boss';
-import { eq, and, or, lt, isNull, isNotNull } from 'drizzle-orm';
+import { eq, and, or, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workflowStepGates, delegationOutcomes, subaccountAgents, agents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
@@ -215,9 +215,18 @@ interface TerminalRetryRow {
 /**
  * Retry pass for terminal events whose emit crashed (F10).
  *
- * Picks up rows that have transitioned to terminal (terminalAt IS NOT NULL)
- * but never recorded an emitted_at. Re-derives the event payload from the
- * row's substep_status + timeout policy and re-emits.
+ * Picks up rows that the timeout sweep transitioned to a terminal state
+ * (substep_status IN ('failed','partial')) for a sweep-owned timeout policy
+ * (cross_owner_approval_timeout_policy IN ('fail_parent','continue_without_substep'))
+ * but where the cross_owner_substep.completed event never recorded its
+ * emitted_at timestamp. Re-derives the event payload from substep_status
+ * and re-emits via the same claim+emit helper.
+ *
+ * Scope is intentionally tight (Round 4 T6): only timeout-sweep-owned
+ * terminal rows. Rows that became terminal via other paths (initiator
+ * decision, child run completed, manual rejection) emit their terminal
+ * events through different code paths and own their own emit-audit columns
+ * if needed.
  */
 async function retryStrandedTerminalEmits(): Promise<void> {
   const strandedRows: TerminalRetryRow[] = await db
@@ -234,11 +243,17 @@ async function retryStrandedTerminalEmits(): Promise<void> {
       and(
         isNotNull(delegationOutcomes.terminalAt),
         isNull(delegationOutcomes.terminalEventEmittedAt),
-        // Only retry rows where the timeout-sweep was the terminal writer.
-        // Rows that became terminal via the normal path (initiator decision,
-        // child run completed) emit their terminal event through other code
-        // paths that already write terminalEventEmittedAt at the same time.
-        isNotNull(delegationOutcomes.crossOwnerApprovalTimeoutPolicy),
+        // Only retry timeout-sweep-owned terminal rows. Both axes are tight:
+        // substep_status must be one of the two states the sweep itself
+        // writes, AND the policy must be one of the two terminal-emitting
+        // policies. ask_initiator policy rows that somehow reached terminal
+        // (a state-machine bug) are excluded — the sweep's terminal-event
+        // emit only fires for fail_parent / continue_without_substep.
+        inArray(delegationOutcomes.substepStatus, ['failed', 'partial']),
+        inArray(delegationOutcomes.crossOwnerApprovalTimeoutPolicy, [
+          'fail_parent',
+          'continue_without_substep',
+        ]),
       ),
     );
 
@@ -251,9 +266,11 @@ async function retryStrandedTerminalEmits(): Promise<void> {
       continue;
     }
 
-    // Derive the event payload from the row's terminal substepStatus.
-    // Maps directly to the original decideTimeoutPolicyAction output.
-    let status: 'failed' | 'partial' | 'success';
+    // Map substep_status → event payload. With the tightened WHERE clause
+    // above, only 'failed' and 'partial' are reachable here; the switch
+    // surfaces a hard skip on anything unexpected so a future state-machine
+    // change doesn't silently emit a synthetic event.
+    let status: 'failed' | 'partial';
     let reason: string;
     if (row.substepStatus === 'failed') {
       status = 'failed';
@@ -262,10 +279,14 @@ async function retryStrandedTerminalEmits(): Promise<void> {
       status = 'partial';
       reason = 'cross_owner_approval_timed_out_optional';
     } else {
-      // 'success' or other terminal states — should not happen for timeout-driven
-      // rows but emit a best-effort completed event so the audit trail isn't lost.
-      status = (row.substepStatus as 'failed' | 'partial' | 'success');
-      reason = 'cross_owner_approval_timeout_retry';
+      // Defensive — should be unreachable given the WHERE clause. Log + skip
+      // rather than emit a synthetic event with an unsupported status value.
+      logger.warn('workflow_gate_stall.cross_owner_timeout.terminal_retry_unexpected_status', {
+        runId: row.runId,
+        substepId: row.id,
+        substepStatus: row.substepStatus,
+      });
+      continue;
     }
 
     const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {

@@ -667,18 +667,30 @@ export async function streamEvents(
 
   // Fetch the run's ownerUserId for the viewer projection (spec §5.4).
   //
-  // Three-state result, MUST distinguish (Round 3 F9 — service layer):
-  //   - runRows.length === 0 → run not found (or filtered by RLS for another org).
-  //     Fail closed: return an empty page. Do NOT coerce missing-row → null,
-  //     which would put the projection on the "subaccount-owned, return all"
-  //     branch. The route-layer guard (agentRuns.ts F6 fix) prevents this for
-  //     HTTP callers but a direct service consumer must also be safe.
-  //   - runRows[0].ownerUserId === null → subaccount-owned run, all events visible.
+  // Three-state result, MUST distinguish (Round 3 F9 + Round 4 F12):
+  //   - runRows.length === 0 → run not found, OR run belongs to a different
+  //     organisation. The lookup is org-scoped on `agent_runs.organisation_id`
+  //     so a caller passing a runId from another org sees the same empty
+  //     result as a missing run. Fail closed: return an empty page. Do NOT
+  //     coerce missing-row → null, which would put the projection on the
+  //     "subaccount-owned, return all" branch.
+  //   - runRows[0].ownerUserId === null → subaccount-owned run within THIS org,
+  //     all events visible to anyone with the org-scoped permission.
   //   - runRows[0].ownerUserId === string → owner-owned run, projection applies.
+  //
+  // The org-scope (Round 4 F12) replaces relying on RLS / session context —
+  // service callers must not assume the underlying `db` handle is the right
+  // org-scoped one. The opts.forUser.organisationId is the authoritative org
+  // for this call.
   const runRows = await db
     .select({ ownerUserId: agentRuns.ownerUserId })
     .from(agentRuns)
-    .where(eq(agentRuns.id, runId))
+    .where(
+      and(
+        eq(agentRuns.id, runId),
+        eq(agentRuns.organisationId, opts.forUser.organisationId),
+      ),
+    )
     .limit(1);
 
   if (runRows.length === 0) {
@@ -880,14 +892,22 @@ export async function streamEventsByTask(
   // Apply viewer projection (spec §5.4 — service layer). Fetch ownerUserId from
   // the run referenced by the first event; task-scoped events share the same run.
   //
-  // Same three-state distinction as streamEvents (Round 3 F9): a missing run
-  // row must fail closed, not coerce to "subaccount-owned, return all events".
+  // Same three-state distinction as streamEvents (Round 3 F9 + Round 4 F12):
+  //   - missing run row → fail closed (return empty projected page).
+  //   - cross-org runId → org-scoped lookup returns empty → same fail-closed.
+  //   - ownerUserId IS NULL (within this org) → subaccount-owned, all visible.
+  //   - ownerUserId IS string → owner-owned, projection applies.
   let ownerUserId: string | null = null;
   if (events.length > 0) {
     const runRows = await db
       .select({ ownerUserId: agentRuns.ownerUserId })
       .from(agentRuns)
-      .where(eq(agentRuns.id, events[0].runId))
+      .where(
+        and(
+          eq(agentRuns.id, events[0].runId),
+          eq(agentRuns.organisationId, opts.forUser.organisationId),
+        ),
+      )
       .limit(1);
     if (runRows.length === 0) {
       // Event rows exist but the run is gone (or RLS-filtered for another org).
