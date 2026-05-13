@@ -20,4 +20,9 @@ trap cleanup TERM INT
 # PLACEHOLDER: start the operator runtime.
 # Infra replaces this with the actual binary invocation, e.g.:
 #   exec /usr/local/bin/operator-runtime "$@"
-exec "$@"
+if [ $# -gt 0 ]; then
+  exec "$@"
+else
+  # Placeholder mode: no runtime binary provided. Wait for the watcher.
+  wait "$WATCHER_PID"
+fi

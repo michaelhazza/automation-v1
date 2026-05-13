@@ -37,6 +37,7 @@ const UNSAFE_PATTERNS = [
 ];
 
 function isPathSafe(absPath) {
+  if (!absPath) return false;
   for (const pattern of UNSAFE_PATTERNS) {
     if (pattern.test(absPath)) return false;
   }
@@ -62,8 +63,8 @@ function redactPath(absPath, watchedRoots) {
 
 function isContainedInRoot(absPath, watchedRoots) {
   for (const root of watchedRoots) {
-    // Use root + separator to prevent /workspace/artefacts2 matching /workspace/artefacts
-    if (absPath === root || absPath.startsWith(root + path.sep) || absPath.startsWith(root + '/')) {
+    // Strict prefix: prevents /workspace/artefacts2 from matching /workspace/artefacts
+    if (absPath === root || absPath.startsWith(root + '/')) {
       return true;
     }
   }
@@ -85,8 +86,14 @@ function sendIpcWithRetry(payload, attempt) {
   try {
     process.send(payload);
   } catch (err) {
-    console.warn('[file-watcher] IPC send failed, retrying', { attempt, message: err && err.message });
-    setTimeout(() => sendIpcWithRetry(payload, attempt + 1), IPC_RETRY_DELAYS_MS[attempt + 1] || 500);
+    const nextAttempt = attempt + 1;
+    if (nextAttempt >= IPC_MAX_ATTEMPTS) {
+      console.warn('[file-watcher] IPC send failed after max attempts — dropped', { maxAttempts: IPC_MAX_ATTEMPTS });
+      return;
+    }
+    const delay = IPC_RETRY_DELAYS_MS[nextAttempt] !== undefined ? IPC_RETRY_DELAYS_MS[nextAttempt] : 500;
+    console.warn('[file-watcher] IPC send failed, retrying', { attempt, nextAttempt, delay, message: err && err.message });
+    setTimeout(() => sendIpcWithRetry(payload, nextAttempt), delay);
   }
 }
 
