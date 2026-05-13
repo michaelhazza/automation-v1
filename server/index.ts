@@ -884,6 +884,15 @@ async function start() {
       console.error('[boot] failed to register support-eval-daily worker', err);
     }
   }
+  // IEE browser — daily cost rollup (Chunk 15B)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerIeeBrowserDailyRollupJob } = await import('./jobs/ieeBrowserDailyRollupJob.js');
+      await registerIeeBrowserDailyRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register iee-browser daily rollup job', err);
+    }
+  }
   // operator-session-identity chunk 6 — token refresh worker
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
