@@ -142,7 +142,7 @@ The log MUST include a summary count line immediately before the `**Verdict:**` 
 Verified: N / Unverified: N
 ```
 
-**Scope:** Significant and Major tasks only. Skipped for Trivial/Standard — `feature-coordinator` records `reality-checker: skipped — task class is Trivial/Standard` in `progress.md`.
+**Scope:** Significant and Major tasks only. Skipped for Trivial/Standard — `feature-coordinator` records `reality-checker: skipped — task class Trivial/Standard (per GRADED policy)` in `progress.md`.
 
 **Mission Control regex:** same as all other agents — `^\*\*Verdict:\*\*\s+([A-Z_]+)\b`. Enum values `READY`, `NEEDS_WORK`, `NEEDS_DISCUSSION` are all uppercase-underscore and pass the regex.
 

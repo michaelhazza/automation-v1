@@ -100,9 +100,50 @@ ChatGPT's opening phrase "I'll treat this as the next PR review pass and check w
 
 **G3 status after fixes:** typecheck clean. Lint not re-run (no .ts/.tsx files changed; all 7 files are markdown/text).
 
-### Round 3 — pending operator action
+### Round 3 — outcome
 
-Next diff: `.chatgpt-diffs/pr293-round3-code-diff.diff` (regenerated after this commit lands).
+**Diff pasted:** `.chatgpt-diffs/pr293-round3-code-diff.diff` (1224 lines, 18 files).
 
-**Awaiting:** operator paste of round-3 ChatGPT response, or `done` signal.
+**Verdict received:** **APPROVED**. Blocking: 0 / Should-fix: 0 / Consider: 2.
+
+#### Per-finding triage
+
+| # | Severity | Finding (summary) | Triage | Recommendation | Action |
+|---|---|---|---|---|---|
+| R3-C1 | 💭 | reality-checker resolution rule still says "verified if classified as one of the first four categories" while the screenshot category requires operator visual confirmation — slight semantic mismatch with READY | technical | apply | rewrote the Resolution rule: criterion is verified for `passing test output`, `log excerpt`, or `deterministic check`; screenshot-path is verified only when caller supplied a textual assertion AND operator accepted screenshot evidence for the criterion — otherwise remains unverified pending operator visual confirmation, and the agent flags this in verdict notes |
+| R3-C2 | 💭 | README skip note string drift — README says "task class is Trivial/Standard", feature-coordinator says "task class Trivial/Standard (per GRADED policy)" | technical | apply | aligned README to feature-coordinator wording |
+
+**Files modified by round 3 fixes:**
+- `.claude/agents/reality-checker.md` (R3-C1)
+- `tasks/review-logs/README.md` (R3-C2)
+
+**G3 status after fixes:** docs-only changes, no typecheck or lint re-run needed.
+
+---
+
+## Final Summary
+
+**PR #293** (`fleet-and-process` branch) chatgpt-pr-review pass — APPROVED after 3 rounds.
+
+| Round | Verdict | Findings | Outcome |
+|---|---|---|---|
+| 1 | CHANGES_REQUESTED | 5 🔴 / 4 🟡 / 2 💭 (11 total) | 9 applied, 1 rejected as invalid (file was in PR but excluded from pasted diff), 1 deferred (intentional design) |
+| 2 | CHANGES_REQUESTED ("much closer") | 1 🔴 / 4 🟡 / 2 💭 (7 total) | All 7 applied |
+| 3 | **APPROVED** | 0 / 0 / 2 (2 total) | Both applied |
+
+**Net effect:** PR #293 is review-complete. The build's process-contract gaps (Phase 2 vs Phase 3 ownership of chatgpt-pr-review, reality-checker re-invocation contract, REVIEW_GAP wording consistency, doc-sync between CLAUDE.md and feature-coordinator, screenshot evidence rigour, incident-commander early chronology capture, etc.) are all closed.
+
+**Commits on branch from this review pass:**
+- `34b08aa8` — Round 1 fixes (9 findings applied)
+- `d712223f` — Round 2 fixes (7 findings applied)
+- Round 3 fixes commit (this one) — 2 considers applied
+
+**Decisions logged:**
+- B2 round 1: REJECTED. tasks/review-logs/README.md was in the PR diff; ChatGPT did not see it because the round-1 diff exclusion was too aggressive. Fixed by narrowing exclusion list for round-2 diff.
+- C1 round 1: DEFERRED. pr-reviewer verdict-near-top placement is intentional for parser stability — kept as designed.
+
+**KNOWLEDGE.md pattern extraction:** none from this build that aren't already documented in the build itself (the build IS the GRADED posture introduction, so its conventions live in CLAUDE.md / agents / docs, not in KNOWLEDGE.md as a learned-after-the-fact pattern).
+
+**Session closed:** 2026-05-13.
+
 
