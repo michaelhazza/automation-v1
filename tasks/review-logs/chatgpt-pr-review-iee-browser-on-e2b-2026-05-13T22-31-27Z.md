@@ -36,4 +36,26 @@ Round 1 applies 9 of 11 fixes inline (F1, F2, F3, F4, F6, F7, T1, T2, T3). F5 an
 
 ### Round 1 commit
 
-(Will be filled in after commit.)
+`8259da5c` — fix(iee-browser): chatgpt-pr-review Round 1 — 9 findings applied
+
+17 files / +171 -25. G3: lint 0 errors, typecheck clean.
+
+### Round 1 outcome
+
+- F1: doc-only fix (Dockerfile + README + tasks/todo.md IEE-DEF-4)
+- F2: defensive — entrypoint.sh wait-loop
+- F3: defensive — harness fail-loud
+- F4: tightened — `assertNotLatestTemplateVersion` rejects all-zero sha256
+- F5: re-affirmed pr-reviewer/reality-checker deferral; IEE-DEF-1, IEE-DEF-3 in todo
+- F6: regression fix — Per-task budget cap restored
+- F7: rewrite — Worker service section in architecture.md
+- T1: header comments aligned to filenames
+- T2: `void recordIncident` → `await recordIncident`
+- T3: CurrencyField 2 decimals + step 0.01
+- T4: re-affirmed deferral; IEE-DEF-2 in todo
+
+### Round 2
+
+Pending operator paste of next ChatGPT-web response.
+
+Round 2 diff: `.chatgpt-diffs/pr297-round2-code-diff.diff` (regenerated post-commit).
