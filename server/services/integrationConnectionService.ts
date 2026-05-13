@@ -459,6 +459,195 @@ export const integrationConnectionService = {
     }
   },
 
+  // ── Subaccount-level connection CRUD ─────────────────────────────────────
+
+  async listSubaccountConnections(subaccountId: string, organisationId: string) {
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return rows.map(sanitizeConnection);
+  },
+
+  async getSubaccountConnection(id: string, subaccountId: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return conn ? sanitizeConnection(conn) : null;
+  },
+
+  // Returns raw row including encrypted tokens — used when decryption is needed (e.g. Slack channels).
+  async getSubaccountConnectionWithToken(id: string, subaccountId: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return conn ?? null;
+  },
+
+  async createSubaccountConnection(subaccountId: string, organisationId: string, data: {
+    providerType: string;
+    authType: string;
+    label?: string | null;
+    displayName?: string | null;
+    configJson?: Record<string, unknown> | null;
+    accessToken?: string | null;
+    refreshToken?: string | null;
+    tokenExpiresAt?: string | null;
+    secretsRef?: string | null;
+  }) {
+    const encryptedAccess = data.accessToken ? connectionTokenService.encryptToken(data.accessToken) : null;
+    const encryptedRefresh = data.refreshToken ? connectionTokenService.encryptToken(data.refreshToken) : null;
+    const encryptedSecret = data.secretsRef ? connectionTokenService.encryptToken(data.secretsRef) : null;
+
+    const [connection] = await db.insert(integrationConnections).values({
+      organisationId,
+      subaccountId,
+      providerType: data.providerType as IntegrationConnection['providerType'],
+      authType: data.authType as IntegrationConnection['authType'],
+      label: data.label ?? null,
+      displayName: data.displayName ?? null,
+      configJson: data.configJson ?? null,
+      accessToken: encryptedAccess,
+      refreshToken: encryptedRefresh,
+      tokenExpiresAt: data.tokenExpiresAt ? new Date(data.tokenExpiresAt) : null,
+      secretsRef: encryptedSecret,
+      connectionStatus: 'active',
+    }).returning();
+
+    return sanitizeConnection(connection);
+  },
+
+  async updateSubaccountConnection(id: string, subaccountId: string, organisationId: string, data: Record<string, unknown>) {
+    const [existing] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    if (!existing) return null;
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (data.label !== undefined) updates.label = data.label;
+    if (data.displayName !== undefined) updates.displayName = data.displayName;
+    if (data.connectionStatus !== undefined) updates.connectionStatus = data.connectionStatus;
+    if (data.configJson !== undefined) updates.configJson = data.configJson;
+    if (data.accessToken) updates.accessToken = connectionTokenService.encryptToken(data.accessToken as string);
+    if (data.refreshToken) updates.refreshToken = connectionTokenService.encryptToken(data.refreshToken as string);
+    if (data.tokenExpiresAt) updates.tokenExpiresAt = new Date(data.tokenExpiresAt as string);
+    if (data.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(data.secretsRef as string);
+
+    const [updated] = await db.update(integrationConnections)
+      .set(updates)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.subaccountId, subaccountId),
+        eq(integrationConnections.organisationId, organisationId),
+      ))
+      .returning();
+    return updated ? sanitizeConnection(updated) : null;
+  },
+
+  /**
+   * Verify that a subaccount belongs to the given org.
+   * Returns the subaccount id if found, null otherwise.
+   */
+  async verifySubaccountOwnership(subaccountId: string, organisationId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ id: subaccounts.id })
+      .from(subaccounts)
+      .where(and(
+        eq(subaccounts.id, subaccountId),
+        eq(subaccounts.organisationId, organisationId),
+      ))
+      .limit(1);
+    return row?.id ?? null;
+  },
+
+  /**
+   * Upsert a GitHub App installation connection.
+   * Uses conflict-on (subaccountId, providerType, label) to handle reinstalls.
+   */
+  async upsertGitHubAppConnection(params: {
+    subaccountId: string;
+    organisationId: string;
+    installationId: number;
+    setupAction: string | undefined;
+    accountLogin: string | null;
+    accountType: string | null;
+    repositorySelection: string | null;
+    displayName: string;
+    label: string | null;
+  }): Promise<void> {
+    const configJson = {
+      installationId: params.installationId,
+      setupAction: params.setupAction,
+      accountLogin: params.accountLogin,
+      accountType: params.accountType,
+      repositorySelection: params.repositorySelection,
+    };
+    await db
+      .insert(integrationConnections)
+      .values({
+        subaccountId: params.subaccountId,
+        organisationId: params.organisationId,
+        providerType: 'github',
+        authType: 'github_app',
+        connectionStatus: 'active',
+        label: params.label,
+        displayName: params.displayName,
+        configJson,
+        oauthStatus: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          integrationConnections.subaccountId,
+          integrationConnections.providerType,
+          integrationConnections.label,
+        ],
+        set: {
+          connectionStatus: 'active',
+          displayName: params.displayName,
+          configJson,
+          oauthStatus: 'active',
+          updatedAt: new Date(),
+        },
+      });
+  },
+
+  /**
+   * Get an active GitHub App connection by id scoped to an org.
+   * Returns the raw row (including configJson with installationId).
+   */
+  async getActiveGitHubConnection(connectionId: string, organisationId: string): Promise<IntegrationConnection | null> {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.organisationId, organisationId),
+        eq(integrationConnections.providerType, 'github'),
+        eq(integrationConnections.connectionStatus, 'active'),
+      ))
+      .limit(1);
+    return conn ?? null;
+  },
+
   /**
    * Returns the first active connection for the given provider in this
    * org/subaccount scope. Returns null (never throws) if none exists.
@@ -499,6 +688,49 @@ export const integrationConnectionService = {
       )
       .limit(1);
 
+    return conn ?? null;
+  },
+
+  /** Resolve the subaccount that installed a GitHub App by its installation_id.
+   * Scans all github connections and matches on configJson.installationId.
+   * Returns null when no connection matches (unknown installation). */
+  async resolveSubaccountFromGitHubInstallation(
+    installationId: number,
+  ): Promise<{ subaccountId: string; organisationId: string } | null> {
+    const connections = await db
+      .select({
+        subaccountId: integrationConnections.subaccountId,
+        organisationId: integrationConnections.organisationId,
+        configJson: integrationConnections.configJson,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.providerType, 'github'));
+
+    for (const conn of connections) {
+      const cfg = conn.configJson as { installationId?: number } | null;
+      if (cfg?.installationId === installationId) {
+        return { subaccountId: conn.subaccountId!, organisationId: conn.organisationId };
+      }
+    }
+    return null;
+  },
+
+  async findActiveOperatorSessionConnection(
+    orgId: string,
+    subaccountId: string,
+  ): Promise<{ id: string } | null> {
+    const [conn] = await db
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.organisationId, orgId),
+          eq(integrationConnections.subaccountId, subaccountId),
+          eq(integrationConnections.authType, 'operator_session'),
+          eq(integrationConnections.connectionStatus, 'active'),
+        ),
+      )
+      .limit(1);
     return conn ?? null;
   },
 };

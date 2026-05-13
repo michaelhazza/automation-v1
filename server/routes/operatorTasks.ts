@@ -28,24 +28,21 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, isNull, desc, sql } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { db } from '../db/index.js';
-import { agentRuns, integrationConnections, operatorRuns } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { auditService } from '../services/auditService.js';
 import { operatorTaskProfileService } from '../services/operatorTaskProfileService.js';
 import { credentialBrokerService } from '../services/credentialBrokerService.js';
+import { operatorChainResumeService } from '../services/operatorChainResumeService.js';
+import { integrationConnectionService } from '../services/integrationConnectionService.js';
 import { OperatorBackendConflictError } from '../services/operatorBackendErrors.js';
 import { OPERATOR_DISPATCH_NEXT_CHAIN_LINK_QUEUE } from '../jobs/operatorSessionDispatchNextChainLinkHandler.js';
 import {
   evaluateRouteActorRule,
   type ActorRoleLevel,
 } from './operatorRouteActorRulePure.js';
-import { decideFreshProfileRestartAllowed } from './freshProfileRestartPredicatePure.js';
 
 const router = Router();
 
@@ -60,19 +57,7 @@ function resolveActorRole(role: string): ActorRoleLevel {
 }
 
 async function readAgentRunOrThrow(agentRunId: string, orgId: string) {
-  const [run] = await db
-    .select({
-      id: agentRuns.id,
-      status: agentRuns.status,
-      organisationId: agentRuns.organisationId,
-      subaccountId: agentRuns.subaccountId,
-      assignedUserId: agentRuns.assignedUserId,
-      operatorChainFailureCount: agentRuns.operatorChainFailureCount,
-    })
-    .from(agentRuns)
-    .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
-    .limit(1);
-
+  const run = await operatorChainResumeService.readAgentRunForTask(agentRunId, orgId);
   if (!run) {
     throw { statusCode: 404, message: 'agent_run not found', errorCode: 'AGENT_RUN_NOT_FOUND' };
   }
@@ -117,22 +102,9 @@ router.post(
     }
 
     // Reset failure counter (enqueue-only: no status transition).
-    // Optimistic predicate guards against a concurrent path transitioning the
-    // task between the read above and this UPDATE: organisation_id pins tenancy,
-    // status='paused_chain_failure' is the only state where a retry is valid.
-    const resetResult = await db
-      .update(agentRuns)
-      .set({ operatorChainFailureCount: 0 })
-      .where(
-        and(
-          eq(agentRuns.id, agentRunId),
-          eq(agentRuns.organisationId, orgId),
-          eq(agentRuns.status, 'paused_chain_failure'),
-        ),
-      )
-      .returning({ id: agentRuns.id });
+    const { updated: resetOk } = await operatorChainResumeService.resetChainFailureCount(agentRunId, orgId);
 
-    if (resetResult.length === 0) {
+    if (!resetOk) {
       throw new OperatorBackendConflictError({
         kind: 'TASK_ALREADY_TERMINAL',
         currentState: { status: run.status },
@@ -215,35 +187,15 @@ router.post(
 
     const { extensionMinutes } = parsed.data;
 
-    // Accumulate the extension on agent_runs.per_task_budget_extension_minutes
-    // (per-task column, never resets). The dispatcher composes the effective
-    // per_task_budget_cap_minutes as:
-    //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
-    // so this extension applies only to this task and never mutates the
-    // subaccount-wide subaccount_operator_settings row. Spec §3.17.4.
-    //
-    // Optimistic predicate (id + organisationId + status='paused_budget_exceeded')
-    // guards the read-then-write race: another path could transition the task
-    // between the read at line ~154 and the UPDATE below.
-    const updateResult = await db.transaction(async (tx) => {
-      await setOrgGUC(tx, orgId);
-      return tx
-        .update(agentRuns)
-        .set({
-          perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(agentRuns.id, agentRunId),
-            eq(agentRuns.organisationId, orgId),
-            eq(agentRuns.status, 'paused_budget_exceeded'),
-          ),
-        )
-        .returning({ id: agentRuns.id });
-    });
+    // Accumulate the extension on agent_runs.per_task_budget_extension_minutes.
+    // Spec §3.17.4: per-task additive, never touches subaccount-wide settings row.
+    const { updated: extendOk } = await operatorChainResumeService.accumulateBudgetExtension(
+      agentRunId,
+      orgId,
+      extensionMinutes,
+    );
 
-    if (updateResult.length === 0) {
+    if (!extendOk) {
       throw new OperatorBackendConflictError({
         kind: 'TASK_ALREADY_TERMINAL',
         currentState: { status: run.status },
@@ -319,63 +271,13 @@ router.post(
       throw { statusCode: 400, message: 'Task has no subaccount context', errorCode: 'NO_SUBACCOUNT' };
     }
 
-    // Read and write operator_runs inside a single dual-GUC transaction so
-    // RLS on operator_runs (keyed on both org + subaccount) returns rows.
     const { priorAttemptNumber, newAttemptNumber, priorChainSeqCount, predicate } =
-      await db.transaction(async (tx) => {
-        await setOrgAndSubaccountGUC(tx, orgId, run.subaccountId!);
-
-        // Select the LATEST non-superseded chain link. isNull(supersededByAttempt)
-        // already filters to the current attempt; within that attempt, the
-        // highest chain_seq is the most recent — DESC order is mandatory.
-        // ASC would return the earliest chain link and the predicate would
-        // always fail to see the latest failure_reason.
-        const [latestChainLink] = await tx
-          .select({
-            failureReason: operatorRuns.failureReason,
-            failedMidStep: operatorRuns.failedMidStep,
-            attemptNumber: operatorRuns.attemptNumber,
-            chainSeq: operatorRuns.chainSeq,
-          })
-          .from(operatorRuns)
-          .where(
-            and(
-              eq(operatorRuns.agentRunId, agentRunId),
-              isNull(operatorRuns.supersededByAttempt),
-            ),
-          )
-          .orderBy(desc(operatorRuns.chainSeq))
-          .limit(1);
-
-        const pred = decideFreshProfileRestartAllowed({
-          taskStatus: run.status,
-          latestChainLinkFailureClass: null,
-          latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
-        });
-
-        const priorAttempt = latestChainLink?.attemptNumber ?? 1;
-        const newAttempt = priorAttempt + 1;
-
-        if (pred.allowed) {
-          // Mark prior chain links superseded while we still hold the GUC.
-          await tx
-            .update(operatorRuns)
-            .set({ supersededByAttempt: newAttempt })
-            .where(
-              and(
-                eq(operatorRuns.agentRunId, agentRunId),
-                isNull(operatorRuns.supersededByAttempt),
-              ),
-            );
-        }
-
-        return {
-          priorAttemptNumber: priorAttempt,
-          newAttemptNumber: newAttempt,
-          priorChainSeqCount: latestChainLink?.chainSeq ?? 0,
-          predicate: pred,
-        };
-      });
+      await operatorChainResumeService.executeFreshProfileRestart(
+        agentRunId,
+        orgId,
+        run.subaccountId!,
+        run.status,
+      );
 
     if (!predicate.allowed) {
       throw new OperatorBackendConflictError({
@@ -446,21 +348,10 @@ router.post(
     }
 
     // Resolve the active operator_session connection for this run's subaccount.
-    // The connectionId is required so the lifecycle event payload is tied back
-    // to the actual credential (spec §3.7 item 6). Emitting with a blank id
-    // produces an unauditable event.
-    const [conn] = await db
-      .select({ id: integrationConnections.id })
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.organisationId, orgId),
-          eq(integrationConnections.subaccountId, run.subaccountId),
-          eq(integrationConnections.authType, 'operator_session'),
-          eq(integrationConnections.connectionStatus, 'active'),
-        ),
-      )
-      .limit(1);
+    const conn = await integrationConnectionService.findActiveOperatorSessionConnection(
+      orgId,
+      run.subaccountId!,
+    );
 
     if (!conn) {
       throw {

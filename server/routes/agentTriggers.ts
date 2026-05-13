@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { triggerService } from '../services/triggerService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
-import { subaccountAgents } from '../db/schema/index.js';
-import { and, eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -50,20 +48,7 @@ router.post(
     await resolveSubaccount(subaccountId, req.orgId!);
 
     // Validate subaccountAgentId belongs to this subaccount
-    const [saLink] = await db
-      .select({ id: subaccountAgents.id })
-      .from(subaccountAgents)
-      .where(
-        and(
-          eq(subaccountAgents.id, subaccountAgentId),
-          eq(subaccountAgents.subaccountId, subaccountId)
-        )
-      )
-      .limit(1);
-    if (!saLink) {
-      res.status(404).json({ error: 'Subaccount agent not found in this subaccount' });
-      return;
-    }
+    await subaccountAgentService.assertBelongsToSubaccount(subaccountAgentId, subaccountId);
 
     const trigger = await triggerService.createTrigger({
       organisationId: req.orgId!,

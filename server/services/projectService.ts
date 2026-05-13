@@ -1,6 +1,7 @@
 import { db } from '../db/index.js';
-import { projects, agents } from '../db/schema/index.js';
-import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { projects, agents, agentRuns } from '../db/schema/index.js';
+import { eq, and, isNull, inArray, count, desc } from 'drizzle-orm';
+import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
 
 export interface ApiProject {
   id: string;
@@ -36,6 +37,18 @@ export interface ProjectPatch {
   githubConnectionId?: string | null;
   goalId?: string | null;
   budgetCents?: number | null;
+}
+
+export interface CreateProjectInput {
+  name?: string;
+  description?: string;
+  color?: string;
+  repoUrl?: string;
+  githubConnectionId?: string;
+  targetDate?: string;
+  budgetCents?: number;
+  budgetWarningPercent?: number;
+  goalId?: string;
 }
 
 export function toApiProject(row: typeof projects.$inferSelect): ApiProject {
@@ -90,6 +103,63 @@ export const projectService = {
       .where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId), isNull(projects.deletedAt)));
     if (!row) throw { statusCode: 404, message: 'Project not found', errorCode: 'PROJECT_NOT_FOUND' };
     return toApiProject(row);
+  },
+
+  async list(orgId: string, subaccountId: string): Promise<ApiProject[]> {
+    const rows = await db
+      .select()
+      .from(projects)
+      .where(and(
+        eq(projects.subaccountId, subaccountId),
+        isNull(projects.deletedAt),
+      ))
+      .orderBy(desc(projects.createdAt));
+    return rows.map(toApiProject);
+  },
+
+  async create(orgId: string, subaccountId: string, data: CreateProjectInput, createdBy: string | null): Promise<ApiProject> {
+    if (!data.name?.trim()) throw { statusCode: 400, message: 'name is required' };
+
+    const [row] = await db.insert(projects).values({
+      organisationId: orgId,
+      subaccountId,
+      name: data.name.trim(),
+      description: data.description?.trim() || null,
+      color: data.color || '#6366f1',
+      repoUrl: data.repoUrl?.trim() || null,
+      githubConnectionId: data.githubConnectionId || null,
+      targetDate: data.targetDate ? new Date(data.targetDate) : null,
+      budgetCents: data.budgetCents ?? null,
+      budgetWarningPercent: data.budgetWarningPercent ?? 75,
+      goalId: data.goalId || null,
+      createdBy,
+    }).returning();
+    return toApiProject(row);
+  },
+
+  async softDelete(orgId: string, subaccountId: string, projectId: string): Promise<{ success: true }> {
+    const [existing] = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.subaccountId, subaccountId), isNull(projects.deletedAt)));
+
+    if (!existing) throw { statusCode: 404, message: 'Project not found' };
+
+    await db.update(projects).set({ deletedAt: new Date() }).where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId)));
+
+    return { success: true };
+  },
+
+  async getInFlightRunCount(orgId: string, subaccountId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(agentRuns)
+      .where(and(
+        eq(agentRuns.subaccountId, subaccountId),
+        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
+        eq(agentRuns.isSubAgent, false),
+      ));
+    return Number(result?.count ?? 0);
   },
 
   async patch(orgId: string, projectId: string, body: ProjectPatch): Promise<ApiProject> {

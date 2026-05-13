@@ -3,7 +3,7 @@
 _Date: 2026-05-02_
 _Status: pre-implementation. Implements `docs/workflows-dev-brief.md` v2._
 _Branch: `claude/workflows-brainstorm-LSdMm`_
-_Mockups: [`prototypes/workflows/`](../prototypes/workflows/index.html)_
+_Mockups: [`_archive/prototypes/workflows/`](../_archive/prototypes/workflows/index.html)_
 
 ---
 
@@ -76,7 +76,7 @@ The implementation contract for the Workflows V1 build defined in [`docs/workflo
 | Document | Purpose | Relationship to this spec |
 |---|---|---|
 | [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md) | Design intent (v2) | This spec implements every committed item in the brief. |
-| [`prototypes/workflows/`](../prototypes/workflows/index.html) | Mockup index | Each UI section below references the relevant mockup file. |
+| [`_archive/prototypes/workflows/`](../_archive/prototypes/workflows/index.html) | Mockup index | Each UI section below references the relevant mockup file. |
 | [`docs/frontend-design-principles.md`](./frontend-design-principles.md) | Consumer-simple UI principles | All UI surfaces in this spec must conform; copy passes apply (no em-dashes in app-facing text, plain-language labels, no engineering jargon in operator-visible strings). |
 | [`docs/spec-authoring-checklist.md`](./spec-authoring-checklist.md) | Spec authoring rigour | This spec is reviewed against the checklist before `architect` decomposes. |
 | [`KNOWLEDGE.md`](../KNOWLEDGE.md) | Project corrections + patterns | Two recent corrections apply directly: activity-ordering is "events flow top-down with auto-scroll" (not `flex-col justify-end`); timestamps use `Xs ago` format. |
@@ -129,12 +129,12 @@ Branching is **not** a step type. It's an output property of any step that produ
 
 | Mockup | Spec sections that reference it |
 |---|---|
-| [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) | §10 (Studio four A's inspectors), §5 (`isCritical` author toggle), §6 (confidence preview, audit fields) |
-| [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) | §10 (Studio canvas), §5 (Critical pill on a step), §10 (publish-notes modal) |
-| [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) | §9 (open task view layout), §8 (real-time coordination), §11 (form-card placement) |
-| [`prototypes/workflows/08-task-progression-states.html`](../prototypes/workflows/08-task-progression-states.html) | §9 (5 progression states), §13 (orchestrator narrative milestones) |
-| [`prototypes/workflows/09-ask-step-authoring.html`](../prototypes/workflows/09-ask-step-authoring.html) | §10 (Ask inspector), §11 (form schema), §14 (submitter picker) |
-| [`prototypes/workflows/10-ask-step-runtime.html`](../prototypes/workflows/10-ask-step-runtime.html) | §11 (form-card runtime, validation, submitted receipt, routing) |
+| [`_archive/prototypes/workflows/04-four-as-step-types.html`](../_archive/prototypes/workflows/04-four-as-step-types.html) | §10 (Studio four A's inspectors), §5 (`isCritical` author toggle), §6 (confidence preview, audit fields) |
+| [`_archive/prototypes/workflows/05-studio-route-editor.html`](../_archive/prototypes/workflows/05-studio-route-editor.html) | §10 (Studio canvas), §5 (Critical pill on a step), §10 (publish-notes modal) |
+| [`_archive/prototypes/workflows/07-open-task-three-panel.html`](../_archive/prototypes/workflows/07-open-task-three-panel.html) | §9 (open task view layout), §8 (real-time coordination), §11 (form-card placement) |
+| [`_archive/prototypes/workflows/08-task-progression-states.html`](../_archive/prototypes/workflows/08-task-progression-states.html) | §9 (5 progression states), §13 (orchestrator narrative milestones) |
+| [`_archive/prototypes/workflows/09-ask-step-authoring.html`](../_archive/prototypes/workflows/09-ask-step-authoring.html) | §10 (Ask inspector), §11 (form schema), §14 (submitter picker) |
+| [`_archive/prototypes/workflows/10-ask-step-runtime.html`](../_archive/prototypes/workflows/10-ask-step-runtime.html) | §11 (form-card runtime, validation, submitted receipt, routing) |
 
 ### 2.4 Cross-references to brief sections
 
@@ -762,7 +762,7 @@ End-to-end target: **sub-200ms from engine event emit to all three panes rendere
 
 ## 9. Open task view UI
 
-(Mockups: [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html), [`prototypes/workflows/08-task-progression-states.html`](../prototypes/workflows/08-task-progression-states.html). Brief §6.)
+(Mockups: [`_archive/prototypes/workflows/07-open-task-three-panel.html`](../_archive/prototypes/workflows/07-open-task-three-panel.html), [`_archive/prototypes/workflows/08-task-progression-states.html`](../_archive/prototypes/workflows/08-task-progression-states.html). Brief §6.)
 
 ### 9.1 Layout
 
@@ -872,7 +872,7 @@ Above the three panes, a thin header with:
 
 ## 10. Studio UI
 
-(Mockups: [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html), [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html), [`prototypes/workflows/09-ask-step-authoring.html`](../prototypes/workflows/09-ask-step-authoring.html). Brief §7.)
+(Mockups: [`_archive/prototypes/workflows/04-four-as-step-types.html`](../_archive/prototypes/workflows/04-four-as-step-types.html), [`_archive/prototypes/workflows/05-studio-route-editor.html`](../_archive/prototypes/workflows/05-studio-route-editor.html), [`_archive/prototypes/workflows/09-ask-step-authoring.html`](../_archive/prototypes/workflows/09-ask-step-authoring.html). Brief §7.)
 
 ### 10.1 Where it lives
 
@@ -965,7 +965,7 @@ Without this, "describe intent → see plan → tweak in Studio" becomes "descri
 
 ## 11. Ask form runtime
 
-(Mockup: [`prototypes/workflows/10-ask-step-runtime.html`](../prototypes/workflows/10-ask-step-runtime.html). Brief §7.3.)
+(Mockup: [`_archive/prototypes/workflows/10-ask-step-runtime.html`](../_archive/prototypes/workflows/10-ask-step-runtime.html). Brief §7.3.)
 
 ### 11.1 The form-card primitive
 
@@ -1813,6 +1813,6 @@ After spec-review settles, `architect` decomposes into implementation chunks, th
 
 ---
 
-_End of spec. Brief: [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md). Mockups: [`prototypes/workflows/index.html`](../prototypes/workflows/index.html)._
+_End of spec. Brief: [`docs/workflows-dev-brief.md`](./workflows-dev-brief.md). Mockups: [`_archive/prototypes/workflows/index.html`](../_archive/prototypes/workflows/index.html)._
 
 ---

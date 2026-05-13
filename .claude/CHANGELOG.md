@@ -51,6 +51,33 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ---
 
+## 2.3.0 — 2026-05-12
+
+**Highlights:** adds `incident-commander` coordinator agent and companion `docs/incident-response.md`. Provides a dedicated inline playbook for production incident coordination (SEV classification, scribe duties, post-mortem) that is distinct from `hotfix`, which focuses on shipping the fix.
+
+**Added:**
+- `.claude/agents/incident-commander.md` — production incident coordinator (inline playbook). Handles SEV classification, scribe duties (timestamped timeline under `tasks/incidents/<YYYY-MM-DD-slug>/`), hotfix handoff, and post-mortem drive. Distinct from `hotfix`: incident-commander coordinates the response; hotfix fixes the fire.
+- `docs/incident-response.md` — SEV matrix (four levels), on-call expectations, timeline-log format, and post-mortem template.
+
+**Changed:**
+- `CLAUDE.md` — added `incident-commander` row to agent fleet table; added `"incident-commander: prod is on fire"` invocation example.
+
+---
+
+## 2.2.0 — 2026-05-12
+
+**Highlights:** adds `reality-checker` agent — a post-pr-reviewer evidence-demanding verifier that classifies the implementer's claimed success criteria against supplied evidence before a build is approved. Wires into `feature-coordinator`'s branch-level review pass (§8.4), Phase 2 branch-level sequence position is: `spec-conformance` → `adversarial-reviewer` (if §5.1.2 surface) → `pr-reviewer` → **`reality-checker`** → `dual-reviewer`. Mandatory for Significant/Major tasks.
+
+**Added:**
+- `.claude/agents/reality-checker.md` — read-only (Read, Glob, Grep) evidence verifier. Verdict enum: `READY` / `NEEDS_WORK` / `NEEDS_DISCUSSION`. Logs to `tasks/review-logs/reality-check-log-{slug}-{timestamp}.md`.
+
+**Changed:**
+- `.claude/agents/feature-coordinator.md` — inserted §8.4 `reality-checker` step in branch-level review pass; renumbered old §8.4 fix-loop to §8.5 and old §8.5 dual-reviewer to §8.6; updated handoff template with `reality-checker verdict:` line; updated TodoWrite expansion line.
+- `CLAUDE.md` — added `reality-checker` row to agent fleet table; added invocation example; updated Review pipeline section to number reality-checker as step 3 (after pr-reviewer, before dual-reviewer).
+- `tasks/review-logs/README.md` — added `reality-check` agent slug, `reality-checker` verdict enum table row, and caller-contract section.
+
+---
+
 ## 2.1.0 — 2026-05-04
 
 **Highlights:** adds in-repo portable bundle infrastructure so the framework can be reproducibly exported to other repos. Adds the SessionStart hook for self-healing code-intelligence cache. Adds the `validate-setup` agent for ongoing framework health checks.

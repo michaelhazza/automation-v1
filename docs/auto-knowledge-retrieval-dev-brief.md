@@ -7,15 +7,15 @@
 > **Posture:** Product / strategic, not technical. Engineering detail belongs in the spec that follows.
 > **Relationship to other work:** This is **Phase 1** of the broader agent workspace strategy described in `docs/agent-cloud-compute-dev-brief.md`. It ships before agent workspace (Phase 2) because the workspace UI depends on this knowledge retrieval foundation working correctly. This brief stands on its own; auto knowledge retrieval is valuable independently of the agent workspace work.
 >
-> **Mockups attached** (in `prototypes/auto-knowledge-retrieval/`):
-> - [Index of all mockups](../prototypes/auto-knowledge-retrieval/index.html)
-> - **Mockup 1:** [Knowledge: Files tab (new)](../prototypes/auto-knowledge-retrieval/knowledge-files-tab.html)
-> - **Mockup 2:** [Add to Knowledge modal](../prototypes/auto-knowledge-retrieval/add-to-knowledge-modal.html)
-> - **Mockup 3:** [Agent edit: Data Sources tab](../prototypes/auto-knowledge-retrieval/agent-data-sources.html)
-> - **Mockup 4:** [Knowledge: Documents tab refreshed](../prototypes/auto-knowledge-retrieval/knowledge-documents-tab.html)
-> - **Mockup 5:** [Document Detail modal](../prototypes/auto-knowledge-retrieval/document-detail-modal.html)
-> - **Mockup 6:** [Knowledge: Bundles sub-tab](../prototypes/auto-knowledge-retrieval/knowledge-bundles-tab.html)
-> - **Mockup 7:** [Bundle Edit modal](../prototypes/auto-knowledge-retrieval/bundle-edit-modal.html)
+> **Mockups attached** (in `_archive/prototypes/auto-knowledge-retrieval/`):
+> - [Index of all mockups](../_archive/prototypes/auto-knowledge-retrieval/index.html)
+> - **Mockup 1:** [Knowledge: Files tab (new)](../_archive/prototypes/auto-knowledge-retrieval/knowledge-files-tab.html)
+> - **Mockup 2:** [Add to Knowledge modal](../_archive/prototypes/auto-knowledge-retrieval/add-to-knowledge-modal.html)
+> - **Mockup 3:** [Agent edit: Data Sources tab](../_archive/prototypes/auto-knowledge-retrieval/agent-data-sources.html)
+> - **Mockup 4:** [Knowledge: Documents tab refreshed](../_archive/prototypes/auto-knowledge-retrieval/knowledge-documents-tab.html)
+> - **Mockup 5:** [Document Detail modal](../_archive/prototypes/auto-knowledge-retrieval/document-detail-modal.html)
+> - **Mockup 6:** [Knowledge: Bundles sub-tab](../_archive/prototypes/auto-knowledge-retrieval/knowledge-bundles-tab.html)
+> - **Mockup 7:** [Bundle Edit modal](../_archive/prototypes/auto-knowledge-retrieval/bundle-edit-modal.html)
 >
 > **What's new in Rev 3:** Incorporates a thorough reviewer pass. Adds explicit retrieval ordering formula and invariants (§3), chunking model (§8), three new engineering-invariant sections (§9 retrieval observability, §10 tenant isolation, §11 lifecycle and re-embedding), elevates token-budget philosophy to a platform principle, strengthens bundle framing, reserves space for system-generated documents, and adds a §14 spec-risk areas section so the spec author knows where the booby-traps are.
 >

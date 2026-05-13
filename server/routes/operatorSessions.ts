@@ -10,14 +10,11 @@
 // 404 on row-not-found (consistent with IEE pattern; not 403 to avoid leaking existence).
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
-import { operatorRuns } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { operatorSessionService } from '../services/operatorSessionService.js';
 
 const router = Router();
 
@@ -37,29 +34,7 @@ router.get(
 
     await resolveSubaccount(subaccountId, orgId);
 
-    const row = await db.transaction(async (tx) => {
-      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
-
-      const [found] = await tx
-        .select({
-          id: operatorRuns.id,
-          chainSeq: operatorRuns.chainSeq,
-          status: operatorRuns.status,
-          lastProgressAt: operatorRuns.lastProgressAt,
-          stepCount: operatorRuns.stepCount,
-          failureReason: operatorRuns.failureReason,
-        })
-        .from(operatorRuns)
-        .where(
-          and(
-            eq(operatorRuns.id, operatorRunId),
-            eq(operatorRuns.subaccountId, subaccountId),
-          ),
-        )
-        .limit(1);
-
-      return found ?? null;
-    });
+    const row = await operatorSessionService.getRunProgress({ operatorRunId, subaccountId, orgId });
 
     if (!row) {
       throw { statusCode: 404, message: 'operator_run not found', errorCode: 'OPERATOR_RUN_NOT_FOUND' };

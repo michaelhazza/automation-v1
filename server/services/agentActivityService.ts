@@ -1,7 +1,9 @@
-import { eq, and, desc, gte, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { eq, and, desc, gte, sql, inArray, isNotNull, isNull, count, asc, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations, agentExecutionEvents } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations, agentExecutionEvents, agentRunSnapshots } from '../db/schema/index.js';
 import { coerceEventCount } from './agentActivityServicePure.js';
+import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
+import type { AgentRun } from '../db/schema/agentRuns.js';
 
 const MAX_CHAIN_NODES = 50;
 
@@ -405,5 +407,185 @@ export const agentActivityService = {
     });
 
     return { success: true, runId };
+  },
+
+  /**
+   * Fetch a run's test-result fields (id, status, timestamps, summary)
+   * scoped to the given org. Returns null if not found.
+   */
+  async getRunForTestShape(
+    runId: string,
+    orgId: string,
+  ): Promise<Pick<AgentRun, 'id' | 'status' | 'startedAt' | 'completedAt' | 'summary'> | null> {
+    const [run] = await db
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        summary: agentRuns.summary,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))
+      .limit(1);
+    return run ?? null;
+  },
+
+  /**
+   * Count in-flight (non-sub-agent, non-test) runs for an org.
+   */
+  async getLiveRunCount(orgId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(agentRuns)
+      .where(and(
+        eq(agentRuns.organisationId, orgId),
+        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
+        eq(agentRuns.isSubAgent, false),
+        eq(agentRuns.isTestRun, false),
+      ));
+    return Number(result?.count ?? 0);
+  },
+
+  /**
+   * Daily run activity breakdown with zero-filled gaps for the last `days` days.
+   */
+  async getDailyActivity(
+    orgId: string,
+    days: number,
+    subaccountId?: string,
+  ): Promise<Array<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }>> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const conditions = [
+      gte(agentRuns.createdAt, since),
+      eq(agentRuns.organisationId, orgId),
+    ] as ReturnType<typeof eq>[];
+    if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId));
+
+    const rows = await db
+      .select({
+        date: sql<string>`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`,
+        completed: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
+        failed: sql<number>`count(*) filter (where ${agentRuns.status} = 'failed')::int`,
+        timeout: sql<number>`count(*) filter (where ${agentRuns.status} = 'timeout' or ${agentRuns.status} = 'budget_exceeded')::int`,
+        other: sql<number>`count(*) filter (where ${agentRuns.status} not in ('completed','failed','timeout','budget_exceeded'))::int`,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(agentRuns)
+      .where(and(...conditions))
+      .groupBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`)
+      .orderBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`);
+
+    const result: Array<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }> = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const found = rows.find(r => r.date === dateStr);
+      result.push(found ?? { date: dateStr, completed: 0, failed: 0, timeout: 0, other: 0, total: 0 });
+    }
+    return result;
+  },
+
+  /**
+   * Fetch run visibility fields plus the agent's systemAgentId for artifact
+   * permission checks.
+   */
+  async getRunWithAgentInfo(runId: string): Promise<(Pick<AgentRun, 'id' | 'organisationId' | 'subaccountId' | 'agentId' | 'executionScope'> & { systemAgentId: string | null }) | null> {
+    const [runRow] = await db
+      .select({
+        id: agentRuns.id,
+        organisationId: agentRuns.organisationId,
+        subaccountId: agentRuns.subaccountId,
+        agentId: agentRuns.agentId,
+        executionScope: agentRuns.executionScope,
+      })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+
+    if (!runRow) return null;
+
+    const [agentRow] = await db
+      .select({ systemAgentId: agents.systemAgentId })
+      .from(agents)
+      .where(and(eq(agents.id, runRow.agentId), eq(agents.organisationId, runRow.organisationId)))
+      .limit(1);
+
+    return {
+      ...runRow,
+      systemAgentId: agentRow?.systemAgentId ?? null,
+    };
+  },
+
+  /**
+   * Fetch all data needed to render the run trace-events endpoint:
+   * - Run existence check (org-scoped)
+   * - Snapshot toolCallsLog
+   * - Skill invoked/completed events ordered by sequence number
+   *
+   * Returns null for `run` when the run does not exist in the org.
+   */
+  async getTraceEventsData(
+    runId: string,
+    orgId: string,
+  ): Promise<{
+    run: { id: string; organisationId: string } | null;
+    toolCallsLog: unknown;
+    skillEvents: Array<{ id: string; eventType: string; payload: unknown }>;
+  }> {
+    const [runRow] = await db
+      .select({ id: agentRuns.id, organisationId: agentRuns.organisationId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))
+      .limit(1);
+
+    if (!runRow) {
+      return { run: null, toolCallsLog: [], skillEvents: [] };
+    }
+
+    const [snap] = await db
+      .select({ toolCallsLog: agentRunSnapshots.toolCallsLog })
+      .from(agentRunSnapshots)
+      .where(eq(agentRunSnapshots.runId, runId))
+      .limit(1);
+
+    const skillEvents = await db
+      .select({
+        id: agentExecutionEvents.id,
+        eventType: agentExecutionEvents.eventType,
+        payload: agentExecutionEvents.payload,
+      })
+      .from(agentExecutionEvents)
+      .where(
+        and(
+          eq(agentExecutionEvents.runId, runId),
+          or(
+            eq(agentExecutionEvents.eventType, 'skill.invoked'),
+            eq(agentExecutionEvents.eventType, 'skill.completed'),
+          ),
+        ),
+      )
+      .orderBy(asc(agentExecutionEvents.sequenceNumber));
+
+    return { run: runRow, toolCallsLog: snap?.toolCallsLog ?? [], skillEvents };
+  },
+
+  async listRunsByAgentId(params: { agentId: string; orgId: string; limit: number }) {
+    return db
+      .select({
+        id: agentRuns.id,
+        agentId: agentRuns.agentId,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        ownerUserId: agentRuns.ownerUserId,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.agentId, params.agentId), eq(agentRuns.organisationId, params.orgId)))
+      .orderBy(sql`${agentRuns.startedAt} DESC`)
+      .limit(params.limit);
   },
 };
