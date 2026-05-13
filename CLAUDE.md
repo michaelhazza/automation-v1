@@ -240,7 +240,7 @@ Classify every task before starting:
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
 | **Standard** | 2–4 files, clear approach, no new patterns | Implement, then `spec-conformance` (if spec-driven), then `pr-reviewer` |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then apply the full GRADED review posture (§ *Review pipeline* below): `spec-conformance` if spec-driven → `pr-reviewer` → `reality-checker` → `adversarial-reviewer` if §5.1.2 surface → `dual-reviewer` + `chatgpt-pr-review` (mandatory — skippable with `REVIEW_GAP`). |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then apply the full GRADED review posture (§ *Review pipeline* below). Canonical Phase 2 order: `spec-conformance` if spec-driven → `adversarial-reviewer` if §5.1.2 surface → `pr-reviewer` → `reality-checker` → `dual-reviewer` (mandatory — skippable with `REVIEW_GAP`). `chatgpt-pr-review` is enforced separately at Phase 3 by `finalisation-coordinator`. |
 | **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → full GRADED review posture). `feature-coordinator` auto-invokes each review tier. See § *Review pipeline* below. |
 
 ### Common invocations
@@ -263,7 +263,7 @@ Classify every task before starting:
 "incident-commander: prod is on fire"              # coordinate incident response, timeline, post-mortem
 ```
 
-**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, and `audit-runner`.
+**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `incident-commander`, and `audit-runner`.
 
 For the three coordinators, this is a hard requirement, not a preference. The runtime does not allow dispatched sub-agents to dispatch further sub-agents (the platform error is `No such tool available: Task. Task is not available inside subagents.`). Each coordinator playbook dispatches multiple sub-agents (architect, builder, mockup-designer, the reviewers, chatgpt-pr-review, etc.) — nesting a coordinator as a sub-agent breaks the entire pipeline at its first dispatch step. The main session has top-level `Agent` access; the coordinator's dispatches must issue from there.
 
@@ -284,14 +284,14 @@ The review pipeline uses a **GRADED posture**: reviewer requirements scale with 
 | `reality-checker` | skip | skip | **mandatory** |
 | `adversarial-reviewer` | skip | skip | mandatory if diff matches §5.1.2 security surface |
 | `dual-reviewer` | skip | skip | mandatory — skippable with `REVIEW_GAP` |
-| `chatgpt-pr-review` | skip | skip | mandatory — skippable with `REVIEW_GAP` |
+| `chatgpt-pr-review` | skip | skip | **mandatory at Phase 3** (enforced by `finalisation-coordinator`, not `feature-coordinator`) — skippable with `REVIEW_GAP` |
 
 **Reviewer notes:**
 - `spec-conformance`: if it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
 - `reality-checker`: auto-invoked by `feature-coordinator` (§8.4). Caller must supply the implementer's stated criteria and evidence; without evidence it returns `NEEDS_WORK` immediately.
 - `adversarial-reviewer`: auto-invoked when diff matches §5.1.2 security surface. Phase 1 advisory; non-blocking.
 - `dual-reviewer`: auto-invoked when Codex is available; write `REVIEW_GAP` when unavailable.
-- `chatgpt-pr-review` and `dual-reviewer` are independent; their order does not affect correctness.
+- `chatgpt-pr-review`: enforced in Phase 3 by `finalisation-coordinator`, not in Phase 2. `feature-coordinator` does not invoke it; it neither needs nor records a `REVIEW_GAP` for it. Finalisation handles the manual ChatGPT-web loop.
 
 **`REVIEW_GAP` artifact format:**
 

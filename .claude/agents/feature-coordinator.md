@@ -284,8 +284,16 @@ Extract the `reality-check-log` fenced block verbatim and write it to `tasks/rev
 
 Verdict handling:
 - `READY` → proceed to dual-reviewer (§8.6)
-- `NEEDS_WORK` → send the unverified criteria back to a fresh `builder` invocation to supply missing evidence or fix failing criteria. Cap at 2 fix rounds. On the third: escalate per failure paths.
+- `NEEDS_WORK` → send the unverified criteria back to a fresh `builder` invocation to supply missing evidence or fix failing criteria. After the builder returns, **re-invoke `reality-checker`** on the updated evidence; do not proceed until the verdict becomes `READY`. Cap at 2 fix rounds. On the third: escalate per failure paths.
 - `NEEDS_DISCUSSION` → escalate per failure paths; do not enter fix loop without operator direction.
+
+**Re-review check (only when the reality-checker remediation builder pass applied code edits):** if the builder pass triggered by a `NEEDS_WORK` verdict modified files (i.e. the builder verdict's `files-changed` list is non-empty and goes beyond appending evidence to logs/screenshots), the post-remediation diff is no longer the diff that `pr-reviewer` approved in §8.3. Re-invoke `pr-reviewer` on the updated branch diff so the final state has reviewer coverage. Treat the re-review verdict per the existing §8.3 / §8.5 handling:
+
+- `APPROVED` → continue
+- `CHANGES_REQUESTED` → enter the §8.5 fix-loop on the new findings (the original 3-round cap applies to this re-review pass independently)
+- `NEEDS_DISCUSSION` → escalate per failure paths
+
+If the builder pass only appended evidence (no source-file edits), skip the re-review — pr-reviewer's earlier APPROVED still covers the final code state.
 
 ### 8.5 — Fix-loop with G3
 

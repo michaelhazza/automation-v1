@@ -154,6 +154,12 @@ The following are also explicitly out of scope for this transition plan:
 - End-to-end (Playwright) or API-level (Supertest) tests. Those belong in a later phase once the unit and integration layer is stable.
 - Load, performance, or chaos testing.
 
+## Maintenance
+
+This doc is both a planning artifact (sequencing toward the testing-posture flip) and a policy artifact (suite inventory referenced by `DEVELOPMENT_GUIDELINES.md §7`). The two roles age at different rates — file paths and service names drift faster than the sequencing rationale.
+
+Review quarterly OR whenever a service split / rename lands. Update the suite inventory, the obese-services list, and the file paths to reflect current state. The sequencing / effort / out-of-scope sections rarely need touching outside a major architecture shift.
+
 ## Cross-references
 
 - **`DEVELOPMENT_GUIDELINES.md` §7** — current testing posture (`static_gates_primary`). States that new runtime tests are added only for pure functions until `docs/spec-context.md` flips `testing_posture`. Includes the instruction: "When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture."

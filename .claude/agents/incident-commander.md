@@ -41,9 +41,13 @@ Classify the incident using the matrix in `docs/incident-response.md`. Ask the o
 - How many users are affected? (all / subset / unknown)
 - Is data integrity at risk? (yes / no / unknown)
 
-Print the proposed SEV level and its justification from the matrix. **Confirm with the operator before proceeding.** If the operator disagrees, update the classification and note the reasoning.
+Print the proposed SEV level and its justification from the matrix.
 
-Create the incident folder, `timeline.md` skeleton, and the first timeline entry (incident opened, SEV level, classification timestamp) immediately after confirmation. Use the template from `docs/incident-response.md § Timeline-log format`.
+**Create the incident folder and `timeline.md` immediately with the PROPOSED SEV** — do NOT wait for operator confirmation. The first timeline entry records "incident opened, proposed SEV = <level>, classification timestamp". For SEV-1/SEV-2 events the early chronology is the most valuable signal and is easily lost while waiting for confirmation.
+
+Then ask the operator to confirm the proposed SEV. Their response (confirm / upgrade / downgrade) is appended as the next timeline entry. If the classification changes, the change is recorded as an append-only correction; the original proposed-SEV entry is never edited or removed.
+
+Use the template from `docs/incident-response.md § Timeline-log format`.
 
 ```
 tasks/incidents/<YYYY-MM-DD-slug>/

@@ -45,13 +45,15 @@ REVIEW_GAP: <reviewer-name> | task-class: ... | reason: ... | operator-override:
 ```
 Also check `dual-reviewer verdict:` for any legacy short-form `REVIEW_GAP: ...` (for handoffs written before the GRADED-posture upgrade).
 
-For each `REVIEW_GAP` found where `operator-override` is `no` (or for any legacy short-form entry), print immediately before any other output:
+**If any non-overridden `REVIEW_GAP` exists** (any entry where `operator-override` is `no`, or any legacy short-form entry), prepend ONE consolidated warning block listing each gap. Print immediately before any other output:
 
 > ⚠ **Review coverage gap detected in Phase 2.** The following required reviewer(s) were skipped:
 >
 > {each REVIEW_GAP line, one per bullet}
 >
 > `chatgpt-pr-review` in step 5 will be the primary second-opinion pass for any skipped dual-reviewer. For other gaps, review the remediation field and act before merge.
+
+Only one warning block is printed per session regardless of how many gaps it contains.
 
 **Spec-deviations check:** check `spec_deviations:` in the handoff. If present, note them — they will be included in the chatgpt-pr-review kickoff context in step 5.
 
