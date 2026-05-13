@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-11 (Sandbox Isolation: Tier 4 isolated code execution capability added — external compute provider-backed, default-deny network, schema-validated output, cost-ceiling enforcement, insert-only cost ledger)
+> **Last updated:** 2026-05-12 (Subscription-Driven Long-Task Execution: subscription-mediated session management, automatic chain-resume across sessions, persistent browser context per task, graceful fallback to direct billing, per-subaccount session limits)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -61,6 +61,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Personal Assistant](#personal-assistant)
   - [Sandboxed Runtime (IEE)](#sandboxed-runtime-iee)
   - [Persistent Agent Workspace](#persistent-agent-workspace)
+  - [Subscription-Driven Long-Task Execution](#subscription-driven-long-task-execution)
 - [Replaces / Consolidates](#replaces--consolidates)
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
@@ -568,6 +569,17 @@ Every agent has a named, persistent workspace that operators can open at any tim
 - **Files produced** — every file the agent delivered appears in the workspace with a direct link. No hunting through run logs to find what the agent generated.
 - **Working time** — billable compute time is tracked automatically and shown as a working-time chart inside the workspace. The chart is the invoice line — what the agent was actively running, not idle time.
 - **Fleet view at a glance** — the Home page shows all agents at a glance, sectioned by what they're doing: Waiting on you, Working now, Failing, Scheduled next, Idle. One screen replaces the need to check each agent individually.
+
+### Subscription-Driven Long-Task Execution
+
+Agents that need to run multi-hour or multi-day tasks — where per-token API spend would be prohibitive — can instead run inside a subscription-mediated session that dramatically reduces cost. The platform handles the full lifecycle: session credential management, session-to-session continuity, fallback to direct billing if the session becomes unavailable, and per-task cost tracking in the usage explorer.
+
+- **Long-form tasks without a time ceiling** — a single task can span multiple automated sessions, each picking up exactly where the last left off. The user sees one task progressing, not a series of separate attempts.
+- **Automatic session continuity** — when a session approaches its limit, the agent self-checkpoints and the platform automatically starts the next session with the agent's state fully restored. No user action required.
+- **Persistent browser context** — each task maintains its own browser identity across sessions, so authenticated sites and in-progress workflows stay live for the duration of the task.
+- **Graceful fallback** — if a subscription session becomes unavailable mid-task, the platform detects it, optionally continues on direct billing, and pauses the task with a clear notification rather than failing silently.
+- **Subscription-mediated cost attribution** — the usage explorer tracks both subscription and direct-billing costs separately per task, so agencies see the true cost of delivery for each execution mode.
+- **Per-subaccount limits** — operators set concurrency caps, per-task session budgets, and retry policies per subaccount from the Connections page settings. Changes take effect on the next session.
 
 ---
 
@@ -1189,6 +1201,7 @@ _Skill authoring is now accessed via the agent edit surface (Skills tab). The `s
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-12 | Subscription-Driven Long-Task Execution: add product capability section covering subscription-mediated long-form tasks, automatic session continuity (chain-resume), persistent browser context per task, graceful session-unavailability fallback to direct billing, subscription-mediated cost attribution, and per-subaccount session limits. Vendor-neutral; reflects the Operator Backend build (operator-backend branch). | — |
 | 2026-05-07 | Consolidation Build: retire 9 legacy admin pages (AdminAgentsPage, AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage, SystemAgentsPage, ScheduledTasksPage, GoalsPage) into 4 consolidated Build-stream pages (AgentsListPage, AgentEditPage, RecurringTasksPage, ProjectEditPage). Skill authoring now accessed via AgentEditPage > Skills tab. Goals migrated to ProjectEditPage. Skills Reference section "Skill Studio" renamed "Skill Authoring" to reflect consolidated entry point. See ADR 0007. | — |
 | 2026-05-04 | F1 Sub-Account Baseline Artefacts (migration 0277): sub-accounts now capture six baseline artefacts at onboarding via the baseline-artefacts-capture workflow. Brand identity and voice/tone (tier 1) are prepended to every client-touching agent run system prompt in hash-stable order for prefix caching. Offer positioning and audience profile (tier 2) are injected when the agent role matches the artefact domain. Operating constraints and proof library (tier 3) are stored in workspace memory and retrieved on demand. Artefact capture status is tracked per sub-account in a versioned JSONB field. The onboarding wizard includes a dedicated capture step; captured artefacts are editable from the sub-account Knowledge page. | — |
 | 2026-05-04 | Agent Spending: ship the agent spending primitive — operator-defined Spending Budgets per sub-account with hard ceiling, daily and monthly caps, and a kill switch that pauses all charges immediately and is re-checked at execute time. Each budget carries a Spending Policy with per-transaction limits, merchant allowlists, approval thresholds, and category rules; policies start in shadow mode (full decision logic, no money moved) and require an explicit approval to promote to live. Per-charge approval gates pause high-risk charges before execution; expired approvals re-queue rather than executing late. Multi-channel approval routing supports per-sub-account and shared agency-level channels. Five payment skills (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`) all route through one charge router for uniform policy decisions, idempotency, and ledger writes. Immutable spend ledger as append-only audit trail with database-level lifecycle guards; settled-vs-in-flight visibility distinguishes money moved from money committed. Refunds preserve the original charge record by writing a new inbound-refund ledger entry. Tenant-isolated at the database level for budgets, policies, channels, and ledger rows. Compute Budget rename (formerly "Budget") clears the namespace for the new spending primitive — vocabulary lock: no bare "Budget" in the product. | — |

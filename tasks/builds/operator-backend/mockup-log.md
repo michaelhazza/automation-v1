@@ -1,0 +1,302 @@
+# Mockup log: Operator Backend (Phase D)
+
+## Round 1 — 2026-05-12 (initial draft)
+
+**Operator feedback:** Initial draft. No prior rounds.
+
+**Changes made:**
+- Created `prototypes/operator-backend/` multi-screen directory (directory already existed with `_shared.css` and `brief.md`)
+- Built 12 prototype screens plus `index.html` (13 files total)
+- C1: `c1-agent-edit-model-access-live.html` — refreshed Phase C screen 08, converting "Available soon" placeholder to live. Adds enabled toggle (Org admin only), duration cap (120 min), concurrency limit (3), AI Subscription allowlist (read-only), fallback key status with CTA if not configured. Two state variants on page: fallback configured vs not configured
+- C2: `c2-run-trace-timeline.html` — complete Run Trace timeline for an operator run with all Phase D event types: session start, credential injected (auth type: subscription, plan tier, token redacted), steps 1-4 (subscription), fallback engaged at step 5 (rate_limited), steps 5-8 (API key), artefact harvest, completed. Collapsible event details. Sidebar: session info, credentials used, cost breakdown ($0.00 subscription + $0.18 API key fallback + $0.24 sandbox = $0.42), artefact downloads
+- D1: `d1-session-in-progress.html` — live runtime view with animated running pill, time strip (elapsed/remaining/steps), progress strip (current activity), recent steps log. Primary action: Cancel run with confirm modal. Secondary: Snapshot artefacts. State variant B: approaching 120 min cap (amber styling, 15 min remaining warning, Extend CTA)
+- D2: `d2-session-completed.html` — completed state with summary stats, cost breakdown (subscription/fallback/sandbox), artefact list with downloads, re-run CTA, view trace link
+- D3: `d3-session-failed.html` — failed state (OPERATOR_RUNTIME_CRASH), plain-English explanation, expandable "what does this mean?" section explaining no-auto-restart policy, action cards (retry/trace/report), partial artefacts
+- D4: `d4-session-cancelled.html` — cancelled state with who/when notice, run summary, partial artefacts
+- D5: `d5-fallback-engaged-banner.html` — fallback engaged amber banner component on in-progress layout. "Why?" opens popover. Running dot changes to amber. Non-dismissable.
+- D6: `d6-error-operator-session-unavailable.html` — error screen "This run can't start". Primary CTA: Add fallback API key. "What does this mean?" expander. Subscription status + fallback status inline cards
+- D7: `d7-error-concurrency-limit-exceeded.html` — concurrency limit error (3/3 slots used). 3 active session cards with Cancel per row. Cancel opens confirm modal. Footer Org admin gating note
+- D8: `d8-active-sessions-list.html` — autonomous runs list page with sidebar nav entry and badge. 2 active cards, slot indicator (2/3), collapsible recent runs. Empty state variant
+- D9: `d9-duration-override-modal.html` — duration override modal (Org admin only). Context strip, slider+number input (default 60, max 120), computed new cap and cost estimate, policy note. Once-per-run policy
+- D10: `d10-provider-account-suspended.html` — provider revocation screen (ChatGPT Plus). Factual tone. What happened, disclosure record link, action cards (reconnect/fallback/support), CS comms template expander with copyable message
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — each screen is oriented around one operator action (monitor run, download artefact, add fallback, cancel, etc.), not the data model
+- Default to hidden: yes — cost breakdown is a section users expand/scroll to; run IDs and internal event types are in expandable details or footers; advanced metrics (vCPU, wall clock) only appear in cost breakdown note. Dashboard tiles are avoided
+- One primary action: yes — D1: Cancel run; D2: Download (artefacts); D3: Retry; D4: Start new run; D6: Add fallback API key; D7: Cancel one active run; D8: (monitor); D9: Extend run; D10: Reconnect
+- Inline state: yes — status pills, countdown timers, animated running dots, slot indicators, fallback badges all communicate state inline without separate dashboard screens
+- Re-check passed: yes — non-technical operator landing on D1 sees "Running / 23 min / Step 3 / Reading invoice PDF" and Cancel button. D6 says "This run can't start" with one CTA. D7 shows the 3 runs and a Cancel button per row
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/operator-backend/c1-agent-edit-model-access-live.html` (created)
+- `prototypes/operator-backend/c2-run-trace-timeline.html` (created)
+- `prototypes/operator-backend/d1-session-in-progress.html` (created)
+- `prototypes/operator-backend/d2-session-completed.html` (created)
+- `prototypes/operator-backend/d3-session-failed.html` (created)
+- `prototypes/operator-backend/d4-session-cancelled.html` (created)
+- `prototypes/operator-backend/d5-fallback-engaged-banner.html` (created)
+- `prototypes/operator-backend/d6-error-operator-session-unavailable.html` (created)
+- `prototypes/operator-backend/d7-error-concurrency-limit-exceeded.html` (created)
+- `prototypes/operator-backend/d8-active-sessions-list.html` (created)
+- `prototypes/operator-backend/d9-duration-override-modal.html` (created)
+- `prototypes/operator-backend/d10-provider-account-suspended.html` (created)
+- `prototypes/operator-backend/index.html` (created)
+- `tasks/builds/operator-backend/mockup-log.md` (created, this file)
+
+---
+
+## Round 2 — 2026-05-12
+
+**Operator feedback:** Round 1 mockups had the wrong shape — they treated operator runs as a parallel "autonomous runs" UI universe with its own pages (D1-D8, D10). The operator review redirected: operator runs must INTEGRATE into the existing task management UI (OpenTaskView), not replace it. Round 2 reworks all screens against the actual codebase.
+
+**Changes made:**
+
+Codebase read before drafting:
+- `client/src/pages/OpenTaskView.tsx`: `flex flex-col h-screen bg-white` shell. ChatPane (left 26%), ActivityPane (middle 22%), RightPaneTabs (flex-1 right).
+- `client/src/components/openTask/TaskHeader.tsx`: status badges mapped `running | paused | paused_cost | paused_wall_clock | stopped -> Active`. badgeColor: green for running, amber for paused, red for stopped.
+- `client/src/components/openTask/ChatPane.tsx`: chatMessages (user: bg-indigo-600/white, agent: bg-slate-100/text-slate-800), MilestoneCard, ApprovalCard, ThinkingBox.
+- `client/src/components/openTask/ActivityPane.tsx`: activityEvents with timestamp + summary. "Activity" header. Collapsible (minus button). "N new events" float button.
+- `client/src/components/openTask/RightPaneTabs.tsx`: tabs `now | plan | files`, default active = `plan`. Tab strip: `border-b-2 border-indigo-600` for active.
+- `client/src/components/openTask/NowTab.tsx`: steps filtered to `running | awaiting_approval`. Running dot: `bg-green-400 animate-pulse`.
+- `client/src/components/openTask/PlanTab.tsx`: numbered step list. Status dots: pending=slate-300, running=green-400/animate-pulse, completed=green-500, failed=red-400, awaiting=amber-400.
+- `client/src/components/openTask/FilesTab.tsx`: group tabs `outputs | references | versions` (rounded-full pills, indigo when active). Sort dropdown. Thumbnail strip. FileReader pane.
+- `client/src/pages/operate/RunTracePage.tsx`: PageShell, header `Run Trace + RunIdDisplay`, chainInfo, ieePanel (indigo-50, animate-pulse), RunTraceHeadline, RuntimeCheckSummaryStrip, RunTraceEventRenderer, RunTraceArtifactsPanel.
+- `client/src/pages/operate/components/RunTraceEventRenderer.tsx`: ToolCallEventCard (border rounded-xl, iteration badge indigo-50, expand chevron). SystemEventRow for system events. Sections: "System events (N)" uppercase label, "Tool calls (N)" uppercase label.
+- `client/src/components/run-trace/RunTraceHeadline.tsx`: flex items-center gap-2 flex-wrap badge row: controller pill (BADGE_NEUTRAL), approval status pill, duration pill (BADGE_SLATE), cost pill.
+- `client/src/components/run-trace/RunTraceArtifactsPanel.tsx`: "Artifacts (N)" uppercase label, ArtifactRow with kind pill (report=indigo, transcript=slate, media=violet, attachment=amber, log=slate), display name, Preview/Download/Copy link buttons.
+- `client/src/components/TaskCard.tsx`: px-3 py-2.5 bg-white border border-slate-200 rounded-lg. Row 1: priority dot + title. Row 2: agent pills + due date.
+- `client/src/pages/AgentRunHistoryPage.tsx`: SessionLogCardList with status filter dropdown (All, Completed, Failed, Timeout, Cancelled). Breadcrumb, title, pagination.
+
+**Files deleted (wrong-shape round 1 D-screens):**
+- `prototypes/operator-backend/d1-session-in-progress.html`
+- `prototypes/operator-backend/d2-session-completed.html`
+- `prototypes/operator-backend/d3-session-failed.html`
+- `prototypes/operator-backend/d4-session-cancelled.html`
+- `prototypes/operator-backend/d5-fallback-engaged-banner.html`
+- `prototypes/operator-backend/d6-error-operator-session-unavailable.html`
+- `prototypes/operator-backend/d7-error-concurrency-limit-exceeded.html`
+- `prototypes/operator-backend/d8-active-sessions-list.html`
+- `prototypes/operator-backend/d10-provider-account-suspended.html`
+
+**Files kept from round 1:**
+- `prototypes/operator-backend/c1-agent-edit-model-access-live.html` — correct shape, no changes
+- `prototypes/operator-backend/_shared.css` — kept, used by all screens
+
+**Files updated from round 1:**
+- `prototypes/operator-backend/c2-run-trace-timeline.html` — already had round 2 framing header (done in earlier commit); breadcrumbs and sidebar links fixed to point to r3/r10 (removed dead d8/d2 links)
+- `prototypes/operator-backend/d9-duration-override-modal.html` — updated header comment to clarify modal launched from TaskHeader "Extend duration" button. Background replaced with actual TaskHeader approaching-limit state. Footer note added linking to R2. All links updated from d1 to r2.
+
+**Files created (R1-R11):**
+- `prototypes/operator-backend/r1-opentaskview-operator-running.html` — Full OpenTaskView, operator run live (23 min elapsed, 97 min left). Status pill "Operator running" (green). Snapshot now + Cancel buttons. ChatPane: operator system messages. ActivityPane: step boundary events. Now tab: current step + progress bar. Files: 2 partial artefacts.
+- `prototypes/operator-backend/r2-opentaskview-operator-running-approaching-limit.html` — Same task, 105 min elapsed. Amber pill, "15 min left" amber badge. ActivityPane amber inline notice. "Extend duration" CTA (Org admin only) in TaskHeader linking to D9.
+- `prototypes/operator-backend/r3-opentaskview-operator-completed.html` — Terminal completed. "Completed" indigo pill. Final summary in ChatPane. Full timeline with terminal event in ActivityPane. Inline cost summary (3 lines, not a dashboard). Files tab auto-switched active. All artefacts with Preview/Download/Copy link.
+- `prototypes/operator-backend/r4-opentaskview-operator-failed.html` — Terminal failed ("Token budget exhausted"). Red pill with reason sub-label. Plain-English failure in ChatPane. Failure event highlighted in ActivityPane. Partial artefacts + Retry CTA.
+- `prototypes/operator-backend/r5-opentaskview-operator-cancelled.html` — Terminal cancelled. Slate pill with who/when. "You cancelled this run." message. Partial timeline. Partial artefacts + Retry.
+- `prototypes/operator-backend/r6-opentaskview-fallback-engaged.html` — Mid-run, fallback engaged. Same layout as R1. Amber system message in ChatPane. Amber inline event row in ActivityPane with collapsible "Why?". TaskHeader "API fallback" sub-tag. Status pill stays green. No separate page.
+- `prototypes/operator-backend/r7-taskheader-operator-controls.html` — Component spec: TaskHeader across states (a) Idle, (b) Operator running, (b) variant with API fallback, (c) Approaching limit with Org admin Extend CTA, (d) Terminal completed, (d) variant Failed. Exact vocabulary and layout from TaskHeader.tsx.
+- `prototypes/operator-backend/r8-modal-concurrency-limit.html` — Concurrency limit modal (3 of 3). 3 active session cards with task links + Cancel per row. Footer: Org admin settings link. Primary: Close. Shown over faded tasks list. Replaces D7.
+- `prototypes/operator-backend/r9-modal-operator-unavailable.html` — "This run can't start" modal. Two status cards (no subscription, no fallback). Primary: "Add fallback API key". Secondary: "Connect a subscription". Shown over faded TaskHeader. Replaces D6.
+- `prototypes/operator-backend/r10-tasks-list-operator-filter.html` — Existing tasks list + new "All tasks | Operator runs only" filter chip. Operator runs show status pill and elapsed/remaining inline on task cards. Empty state if no runs. Slot indicator shows 3/3 capacity. Replaces D8.
+- `prototypes/operator-backend/r11-connections-suspended-state.html` — Phase C connections page (AI Subscriptions tab) with suspended row. "Suspended by OpenAI" red pill. Reconnect button + "View affected tasks" link. Collapsed "What this means" expander with copyable CS comms snippet + disclosure record link. Replaces D10.
+
+**Index rewritten:**
+- 3 sections: "Existing surfaces extended" (C1, C2, R10, R11) | "Operator-run states inside OpenTaskView" (R1-R6) | "Components and modals" (R7, R8, R9, D9)
+- Top banner explaining Round 2 design rationale
+- Vocabulary reference footer with exact codebase class names and tab labels
+
+**Phase C visual continuity confirmed:** All files link to `../consolidation-2026-05-06/_shared.css` + `../operator-session-identity/_shared.css` + `_shared.css`, matching Phase C style conventions.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — operator runs are just runs, surfaced in the existing place users look for tasks. Each screen is oriented around one moment in the user's workflow (monitoring a run, seeing results, handling failure). Not the data model.
+- Default to hidden: yes — no new top-level nav entries. Operator-mode affordances appear inline in the existing task UI. Cost summary is 3 lines in ActivityPane (not a dashboard). Duration override is a modal. Run trace is a link, not the primary surface.
+- One primary action: yes — R1: Cancel run. R2: Extend duration (or Cancel). R3: Download (via Files tab). R4/R5: Retry. R6: no new primary action (run continuing). R7: component spec (no primary action). R8: Close. R9: Add fallback API key. R10: navigate to a task. R11: Reconnect.
+- Inline state: yes — operator status appears in TaskHeader pill. Fallback engaged appears inline in ActivityPane and ChatPane. Duration warning appears inline in ActivityPane. Cost appears inline at bottom of ActivityPane terminal state.
+- Re-check passed: yes — a non-technical operator finds an operator run by going to Tasks, opening the task, and seeing "Operator running" in the header with elapsed time and a Cancel button. No new pages to discover. The design is the existing task flow with operator affordances added inline.
+
+**Rule violations flagged:** none
+
+**Files modified:**
+- `prototypes/operator-backend/c2-run-trace-timeline.html` (links updated)
+- `prototypes/operator-backend/d9-duration-override-modal.html` (footer note + background updated)
+- `prototypes/operator-backend/r1-opentaskview-operator-running.html` (created)
+- `prototypes/operator-backend/r2-opentaskview-operator-running-approaching-limit.html` (created)
+- `prototypes/operator-backend/r3-opentaskview-operator-completed.html` (created)
+- `prototypes/operator-backend/r4-opentaskview-operator-failed.html` (created)
+- `prototypes/operator-backend/r5-opentaskview-operator-cancelled.html` (created)
+- `prototypes/operator-backend/r6-opentaskview-fallback-engaged.html` (created)
+- `prototypes/operator-backend/r7-taskheader-operator-controls.html` (created)
+- `prototypes/operator-backend/r8-modal-concurrency-limit.html` (created)
+- `prototypes/operator-backend/r9-modal-operator-unavailable.html` (created)
+- `prototypes/operator-backend/r10-tasks-list-operator-filter.html` (created)
+- `prototypes/operator-backend/r11-connections-suspended-state.html` (created)
+- `prototypes/operator-backend/index.html` (rewritten)
+- `tasks/builds/operator-backend/mockup-log.md` (this update)
+
+---
+
+## Round 3 — 2026-05-12
+
+**Operator feedback:** Round 2 had two issues: (1) R10 drew a generic tasks-list page that does not exist — the kanban surface is `WorkspaceBoardPage.tsx` at `/admin/subaccounts/:id/workspace`. (2) The codebase grounding pass failed to enumerate exact filenames per screen. Both fixed this round.
+
+**Codebase grounding (Step 0a):**
+
+- **R12 (WorkspaceBoardPage):**
+  - Files read: `client/src/pages/WorkspaceBoardPage.tsx`, `client/src/components/TaskCard.tsx`
+  - Layout: `div.h-full.flex.flex-col` shell. Header: h1 `text-2xl font-bold text-slate-800` + task count sub-label + `+ New Task` button. Board: `flex gap-3 flex-1 overflow-x-auto`. Each column: `flex-1 min-w-[240px] flex flex-col bg-slate-50 rounded-xl border border-slate-200`. Column header: `px-3.5 py-2.5`, `border-bottom: 3px solid ${col.colour}`, label + count badge. Cards: `flex-1 p-2 flex flex-col gap-2 overflow-y-auto`.
+  - TaskCard.tsx: `px-3 py-2.5 bg-white border border-slate-200 rounded-lg cursor-pointer shadow-[0_1px_2px...]`. Top row: priority dot (`w-2 h-2 rounded-full`) + title (`text-[13px] font-semibold text-slate-800`). Bottom row: agent chips (`bg-slate-100 px-1.5 py-px rounded text-slate-600`) + due date.
+  - Vocabulary inherited: `priorityBg` map: `urgent=bg-red-500 high=bg-amber-500 normal=bg-indigo-500 low=bg-slate-400`. `isDragging` shadow. `overflow=+N`. `Unassigned` italic.
+
+- **R13 (AdminSubaccountDetailPage):**
+  - Files read: `client/src/pages/AdminSubaccountDetailPage.tsx`
+  - `type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace'`
+  - `TAB_LABELS`: `{ board: 'Board Config', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace' }`
+  - `visibleTabs` (admin mode): `['onboarding','engines','workflows','agents','beliefs','categories','tags','board','usage','workspace','admin']`
+  - `inputCls`: `'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500'`
+  - Tab rendering: flex row, active tab: `border-b-2 border-indigo-500 text-indigo-600`
+  - New tab 'operator' inserted between 'board' and 'usage', org_admin only, labelled "Operator".
+
+- **R14 / R15 (TaskHeader):**
+  - Files read: `client/src/components/openTask/TaskHeader.tsx`
+  - Outer: `flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white`
+  - Left: `flex items-center gap-3`. title: `text-[15px] font-semibold text-slate-900 truncate max-w-[320px]`
+  - Status badge: `px-2 py-0.5 rounded-full text-[11px] font-medium`. Colors: `bg-green-100 text-green-700` (running), `bg-amber-100 text-amber-700` (paused), `bg-red-100 text-red-700` (stopped).
+  - `statusBadge` text map: `{ paused: 'Paused', paused_cost: 'Paused', paused_wall_clock: 'Paused', stopped: 'Stopped', running: 'Running' }`, fallback `'Active'`.
+  - isDegraded: optional `bg-orange-100 text-orange-700` badge.
+  - Right: pause + stop buttons when `canPauseStop`.
+
+- **R16 (modal pattern):**
+  - Pattern reference: `prototypes/operator-backend/r8-modal-concurrency-limit.html`, `r9-modal-operator-unavailable.html`
+  - Uses `modal-overlay`, `modal-box`, `modal-head`, `modal-head-title`, `modal-body`, `modal-foot` from `_shared.css`.
+  - Background: faded OpenTaskView (same pattern as R8/R9).
+
+- **R17 (RunTracePage):**
+  - Files read: `client/src/pages/operate/RunTracePage.tsx`
+  - Shell: `PageShell` with header (workspace badge + `Run Trace` text + `RunIdDisplay` plain mono).
+  - Existing `chainInfo` block: `"Part of a chain — {chainRuns.length} runs total."` already renders when `chainRuns.length > 1`.
+  - `ieePanel`: indigo-50 border, animated pulse dot, "Delegated to IEE worker" text.
+  - `RunTraceHeadline`, `RuntimeCheckSummaryStrip`, `RunTraceEventRenderer`, `RunTraceArtifactsPanel`.
+  - Chain-link divider: new `tl-chain-row` element inserted between events belonging to different sessions. Renders inside `RunTraceEventRenderer`'s event list.
+  - Also references `prototypes/operator-backend/c2-run-trace-timeline.html` for visual continuity.
+
+- **New dedicated pages proposed:** None. All 6 screens extend existing surfaces.
+
+**Changes made:**
+- Deleted `r10-tasks-list-operator-filter.html` (wrong surface — generic task list that does not exist)
+- Created `r12-workspace-board-operator-filter.html` — redraws R10 against WorkspaceBoardPage.tsx. Filter chip row above kanban columns (interactive, JS-powered). Operator-badge (12px monochrome robot icon, top-right of TaskCard, hover tooltip). Matches exact WorkspaceBoardPage layout: h-full flex-col, board columns with flex-1 min-w-240, bg-slate-50 rounded-xl, 3px colour border-bottom, TaskCard exact visual match.
+- Created `r13-subaccount-operator-settings-tab.html` — new "Operator" tab in AdminSubaccountDetailPage.tsx between Board Config and Usage & Costs. Two sections: "Session limits" (soft cap 120 min, auto-extend grace 30 min) and "Task limits" (max chain length 50 sessions, max wall-clock 30 days, per-task budget cap 6000 min, concurrent sessions 5/max 25). Plain-English help text under each field. Org admin only pill on tab label. Save footer notes changes apply to new sessions only.
+- Created `r14-taskheader-chain-link-status.html` — component spec showing 3 TaskHeader variants for chain-resumed tasks: (A) known estimate "link 3 of ~12", (B) unknown estimate "link 3 of --" with tooltip "Estimate available after the first chain handoff completes", (C) terminal "6 sessions, 12h 4m total". Chain indicator added inline to existing left flex row, after the status badge. Dashed underline signals hover tooltip.
+- Created `r15-taskheader-auto-extending.html` — component spec for auto-extend inline state. Two variants: (A) amber TaskHeader background with "Finishing current step, 22 min left to stop cleanly", (B) deeper amber with "3 min to hard stop" countdown. No modal. Pause button hidden (not appropriate during wind-down). Stop button stays for manual override.
+- Created `r16-modal-budget-exceeded-autopause.html` — budget-cap modal. Plain-English body: "This task has used its budget of 6,000 minutes. The task is paused." Two option panels: Extend budget +1,000 min (primary), Cancel task (destructive). Footer link to R13 Operator settings tab. Follows R8/R9 modal pattern exactly.
+- Created `r17-runtrace-chain-link-divider.html` — full 3-link chain run trace with two chain dividers. Divider: thin `div.tl-chain-row` with `flex-1 height:1px background:#e2e8f0` line on each side and greyed-out label "chain link N starts -- HH:MM UTC" (10.5px, #94a3b8). Minimal visual weight. Events from each session grouped visually under their boundary.
+- Updated `index.html`: added Round 3 section at top (6 cards for R12-R17), removed R10 card (replaced with tombstone comment), added Round 3 banner, retained all Round 2 sections.
+- Updated `_shared.css`: added `.filter-chip-row`, `.filter-chip`, `.tl-chain-row`, `.tl-chain-divider-line`, `.tl-chain-divider-label`, `.chain-link-indicator`, `.chain-link-sep`, `.chain-link-text`, `.settings-field-row` and related classes.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — R12: operator finding which tasks are running autonomously (filter, not a separate page). R13: org admin configuring limits (plain-English settings form). R14/R15: operator monitoring a chain-resumed run (inline status, no new panel). R16: operator deciding what to do when budget hit (clear two-option decision). R17: operator reviewing what happened across a multi-session run (timeline with visual grouping).
+- Default to hidden: yes — chain metadata is inline and subtle (12px, greyed). Budget cap modal is launched on event, not proactively displayed. Auto-extend is inline text, not a modal. Operator badge is 12px monochrome, opacity 0.55 — visible but not distracting.
+- One primary action: yes — R12: no primary action (filter is navigation). R13: Save settings. R14: Stop (when running). R15: Stop now. R16: Extend budget. R17: no action (review only).
+- Inline state: yes — all new status signals (chain link indicator, auto-extend amber, operator badge on cards) are inline on existing surfaces. No new dashboards.
+- Re-check passed: yes — non-technical org admin lands on Operator settings tab and sees two grouped sections with plain-English help text. Non-technical operator sees "Finishing current step, 22 min left" and understands the run is winding down. Budget modal title "Task paused: budget cap reached" with two clear options.
+- Extends existing surface: yes — all 6 screens extend WorkspaceBoardPage.tsx, AdminSubaccountDetailPage.tsx, TaskHeader.tsx, or RunTracePage.tsx. No new routes or nav entries.
+
+**Rule violations flagged:** None
+
+**Files modified:**
+- `prototypes/operator-backend/r10-tasks-list-operator-filter.html` (deleted)
+- `prototypes/operator-backend/r12-workspace-board-operator-filter.html` (created)
+- `prototypes/operator-backend/r13-subaccount-operator-settings-tab.html` (created)
+- `prototypes/operator-backend/r14-taskheader-chain-link-status.html` (created)
+- `prototypes/operator-backend/r15-taskheader-auto-extending.html` (created)
+- `prototypes/operator-backend/r16-modal-budget-exceeded-autopause.html` (created)
+- `prototypes/operator-backend/r17-runtrace-chain-link-divider.html` (created)
+- `prototypes/operator-backend/index.html` (updated)
+- `prototypes/operator-backend/_shared.css` (updated)
+- `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
+
+## Round 3.1 — 2026-05-12 (R12 filter pattern amendment)
+
+**Operator feedback:** "Agents only" label on R12's tri-state filter is ambiguous because operator runs ARE agent runs (executed via a different backend). The chip taxonomy front-loads execution-backend jargon the user doesn't ask for at the board level.
+
+**Codebase grounding (Step 0a) — PER SCREEN:**
+- r12-workspace-board-operator-filter: extends `client/src/pages/WorkspaceBoardPage.tsx` (no change in surface, just R12-internal pattern swap)
+
+**Codebase grounding — round-wide:**
+- Files read: none new (R12 only edit)
+- Vocabulary inherited: existing chip pattern from Round 3
+- New dedicated pages proposed: none
+
+**Changes made:**
+- R12 filter row swapped from tri-state chips (All / Agents only / Operator runs only) to a single binary toggle (Operator runs only, default off).
+- Rationale: operator runs ARE agent runs — "Agents only" mentally parsed as "everything with an agent" which is the entire board. Binary toggle generalises better for future backends, aligns with "default to hidden" principle.
+- Visual: pill-shaped toggle button with embedded switch indicator; indigo when active, default white border.
+- Behaviour: off (default) shows all cards; on shows only `data-type="operator"` cards. 12px operator badge on TaskCard handles the at-a-glance distinction in mixed view.
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — board task remains primary; toggle is one secondary control.
+- Default to hidden: yes — execution-backend taxonomy hidden behind one optional toggle, not pre-loaded as 3-state.
+- One primary action: yes — column drag-and-drop is the primary; filter is a passive secondary.
+- Inline state: yes — toggle state is the inline state, no separate panel.
+- Re-check passed: yes — non-technical operator can ignore the toggle entirely and use the board normally.
+- Extends existing surface: yes — minimal addition to WorkspaceBoardPage.
+
+**Rule violations flagged:** none.
+
+**Files modified:**
+- `prototypes/operator-backend/r12-workspace-board-operator-filter.html` (filter row swap + script rewrite)
+- `tasks/builds/operator-backend/mockup-log.md` (this file, appended)
+
+## Round 3.2 — 2026-05-12 (brief v2/v2.2 alignment sync)
+
+**Operator feedback:** technical review found stale copy in mockups from earlier brief versions: "3 concurrent" (now 5), "120 min per run" (now per chain link), "Extend duration" CTA (brief v2 removed manual extension in favour of automatic chain-link handoff + auto-extend grace), R13 field min/max ranges mismatched against brief v2.1 §3.14 table, event namespace inconsistency in C2, R16 missing custom-amount extension input, R17 needed attempt-group note for v2.2 fresh-profile restart.
+
+**Codebase grounding (Step 0a) — PER SCREEN:** (this round is mockup-internal sync only; no new screens drawn — all edits are to existing round-2/round-3 mockups to match the locked brief)
+- r2: extends `client/src/pages/OpenTaskView.tsx` (unchanged grounding; copy + control removal)
+- r7: extends `client/src/components/openTask/TaskHeader.tsx` (unchanged grounding; copy + control removal)
+- r8: extends task-create / "Run with operator" flow (unchanged grounding; cap + copy + card count update)
+- r13: extends `client/src/pages/AdminSubaccountDetailPage.tsx` (unchanged grounding; range constraints corrected)
+- r16: standalone modal pattern (unchanged grounding; primary action restructured)
+- r17: extends `client/src/pages/operate/RunTracePage.tsx` (unchanged grounding; attempt-group note added to docblock)
+- c1: extends `client/src/pages/build/AgentEditPage.tsx` (unchanged grounding; copy + cross-link repair)
+- c2: extends `client/src/pages/operate/RunTracePage.tsx` (unchanged grounding; event namespace fix + dead link repair)
+- index.html: prototype navigation only (no app surface)
+
+**Codebase grounding — round-wide:**
+- Files read: none new (this round is a sync pass against the brief, not new grounding work)
+- Vocabulary inherited: "chain link" / "soft cap" / "auto-extend grace" / "subaccount" / "operator runs" from brief v2.x — all already established
+- New dedicated pages proposed: none. D9 duration-override modal **deleted** because brief v2 removed manual per-run extension entirely.
+
+**Changes made:**
+1. **Concurrency default 3 → 5, data-driven phrasing** — C1, R8 modal title and body, index.html copy: now read "Up to 5 running at once" / "your subaccount limit of 5 active autonomous runs" with explicit "Per subaccount" qualifier. R8 modal cards expanded from 3 to 5 to match.
+2. **Per-run duration → per-chain-link semantics** — C1 "Duration cap" renamed to "Session cap", value "120 min per chain link" with "Auto-extends 30 min if mid-step" qualifier. R2 docblock + amber chat warning + ActivityPane inline alert all rewritten to explain automatic chain-link handoff. R7 state (c) renamed "Approaching chain-link cap" and "Extend duration" CTA removed. R7 docblock updated.
+3. **D9 duration-override modal deleted** — concept removed by brief v2. Inbound references cleaned up across R2 and index.html.
+4. **R13 input min/max constraints corrected to match brief §3.14** — soft cap 30–240 (was 10–480), auto-extend grace 0–60 (was 0–120), per-task budget cap 60–60000 (was 60–100000). Defaults unchanged.
+5. **C2 event namespace standardised** — payload preview `event: "operator_session.fallback_engaged"` corrected to `"operator-session.fallback_engaged"` to match the hyphenated lifecycle namespace used throughout C2 and the brief. `operator.*` reserved for incident/audit/system-monitoring events only.
+6. **R16 extension action restructured** — primary action now offers three paths: quick +1,000 min, quick +3,000 min, and a custom-amount input (60–60,000 min, 60-min increments per brief). All three flow through the same audit event with the chosen minutes.
+7. **R17 attempt-group note added** — docblock now references v2.2 §3.13 item 7 fresh-profile restart semantics: when `attempt_number > 1`, Run Trace renders attempt groups above the chain-link structure with superseded attempts collapsed by default.
+8. **Link rot repair across all surfaces** — `d8-active-sessions-list.html` (deleted r2) and `r10-tasks-list-operator-filter.html` (deleted r3) references replaced with `r12-workspace-board-operator-filter.html` everywhere they appeared (C1, C2, R11, R8 modal close + cancel handlers).
+
+**Frontend-design-principles checks:**
+- Start with primary task: yes — no change in primary-task framing; the brief alignment doesn't shift the surface.
+- Default to hidden: yes — removed the per-run extend CTA (one less control); auto-extend is invisible default behaviour.
+- One primary action: yes — R16 still has one primary action (extend) with three input forms, plus cancel as secondary.
+- Inline state: yes — R2 ActivityPane amber alert is the primary signal; no modal added.
+- Re-check passed: yes — non-technical user reads "next chain link picks up automatically" and doesn't need to do anything.
+- Extends existing surface: yes — every changed mockup still extends its grounded surface; no new surfaces introduced.
+
+**Rule violations flagged:** none.
+
+**Files modified:**
+- `prototypes/operator-backend/c1-agent-edit-model-access-live.html` (policy rows + sidebar link)
+- `prototypes/operator-backend/c2-run-trace-timeline.html` (event namespace + sidebar links)
+- `prototypes/operator-backend/r2-opentaskview-operator-running-approaching-limit.html` (header controls, chat/activity copy, NowTab box, docblock, bottom legend)
+- `prototypes/operator-backend/r7-taskheader-operator-controls.html` (state (c) controls + docblock)
+- `prototypes/operator-backend/r8-modal-concurrency-limit.html` (title, copy, 5 cards, close/cancel handlers, footer link, docblock)
+- `prototypes/operator-backend/r13-subaccount-operator-settings-tab.html` (3 input min/max corrections)
+- `prototypes/operator-backend/r16-modal-budget-exceeded-autopause.html` (primary action restructured + script + docblock)
+- `prototypes/operator-backend/r17-runtrace-chain-link-divider.html` (docblock attempt-group note)
+- `prototypes/operator-backend/r11-connections-suspended-state.html` (dead link repair, 3 instances)
+- `prototypes/operator-backend/index.html` (R2 copy + R7 copy + R8 copy + D9 card removal)
+- `prototypes/operator-backend/d9-duration-override-modal.html` (**deleted** — concept removed by brief v2)
+- `tasks/builds/operator-backend/mockup-log.md` (this file, appended)

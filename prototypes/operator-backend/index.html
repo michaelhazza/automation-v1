@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operator Backend (Phase D) — Round 2 Prototype Index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+body { padding: 40px 48px; max-width: 980px; margin: 0 auto; font-family: 'Inter', sans-serif; }
+.proto-index-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.02em; }
+.proto-index-sub { font-size: 14px; color: #64748b; margin-bottom: 8px; line-height: 1.65; max-width: 720px; }
+
+/* Round 2 banner */
+.round2-banner {
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
+  padding: 14px 18px; margin-bottom: 32px;
+  font-size: 13px; color: #3730a3; line-height: 1.6;
+}
+.round2-banner strong { color: #1e1b4b; }
+
+.screen-list { display: flex; flex-direction: column; gap: 8px; }
+.screen-item {
+  display: flex; align-items: center; gap: 14px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 14px 18px; text-decoration: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.screen-item:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+.screen-num {
+  width: 38px; height: 38px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0; letter-spacing: -0.02em;
+}
+.num-c { background: #e0f2fe; color: #0369a1; }
+.num-r { background: #eef2ff; color: #4338ca; }
+.num-r-running { background: #ecfdf5; color: #047857; }
+.num-r-amber  { background: #fffbeb; color: #b45309; }
+.num-r-fail   { background: #fef2f2; color: #b91c1c; }
+.num-r-cancel { background: #f8fafc; color: #475569; }
+.num-r-comp   { background: #eef2ff; color: #4338ca; }
+.num-modal    { background: #fef3c7; color: #92400e; }
+.num-d        { background: #fef2f2; color: #b91c1c; }
+.screen-info { flex: 1; }
+.screen-title { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.screen-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+.screen-arrow { color: #94a3b8; font-size: 18px; }
+
+/* Badges */
+.badge {
+  font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+}
+.badge-r2  { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-ext { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.badge-mod { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.badge-comp { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.badge-kept { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
+/* Section headers */
+.section-header {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #4338ca; margin: 32px 0 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-header::before { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.section-header::after  { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.section-note { font-size: 12px; color: #64748b; margin: -4px 0 10px; line-height: 1.55; }
+</style>
+</head>
+<body>
+
+<div class="proto-index-title">Operator Backend — Phase D Prototypes</div>
+<div class="proto-index-sub">Spec D: Operator backend adapter, session lifecycle, credential injection, fallback, progress visibility, cancellation, Run Trace integration.</div>
+
+<!-- Round 3 banner -->
+<div class="round2-banner" style="background:#f0fdf4;border-color:#a7f3d0;color:#065f46;">
+  <strong>Round 3</strong> — chain-resume and per-subaccount operator settings. R10 deleted and redrawn as R12 against <strong>WorkspaceBoardPage.tsx</strong> (kanban board). Six new screens: workspace board filter, operator settings tab, TaskHeader chain-link status, auto-extend inline state, budget-exceeded modal, and Run Trace chain divider. All extend existing surfaces; no new pages or routes.
+</div>
+
+<!-- Round 2 banner (kept for reference) -->
+<div class="round2-banner">
+  <strong>Round 2</strong> — rebuilt against the existing task management UI. Operator runs surface inside the <strong>OpenTaskView</strong> the same way other runs do (TaskHeader + ChatPane + ActivityPane + RightPaneTabs with Now / Plan / Files tabs). There is no parallel "autonomous runs" UI. The 9 round 1 D-screens that invented a separate UI world have been deleted. R1-R11 extend the existing surfaces inline.
+</div>
+
+<!-- ===================================================== -->
+<!-- ROUND 3 SECTION -->
+<!-- ===================================================== -->
+<div class="section-header" style="color:#047857;">Round 3 — Chain-resume and per-subaccount settings</div>
+<div class="section-note">Six new screens. R12 replaces the wrong-shape R10. All extend existing surfaces (WorkspaceBoardPage.tsx, AdminSubaccountDetailPage.tsx, TaskHeader.tsx, RunTracePage.tsx). No new routes.</div>
+<div class="screen-list">
+
+  <a href="r12-workspace-board-operator-filter.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R12</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Workspace Board — Operator filter chip + badge
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">WorkspaceBoardPage.tsx</span>
+      </div>
+      <div class="screen-desc">Kanban board (drag-and-drop columns, TaskCard components) with filter chip row above columns: [All] [Agents only] [Operator runs only]. Operator-driven TaskCards get a 12px monochrome badge top-right. Filter is interactive. Replaces the wrong-shape R10.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r13-subaccount-operator-settings-tab.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R13</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Subaccount: Operator settings tab (org admin only)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">AdminSubaccountDetailPage.tsx</span>
+      </div>
+      <div class="screen-desc">New "Operator" tab inserted between Board Config and Usage &amp; Costs. Two field groups: Session limits (soft cap, auto-extend grace) and Task limits (chain length, wall-clock cap, budget cap, concurrent sessions). Plain-English help text. Save footer with note that changes apply to new sessions only.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r14-taskheader-chain-link-status.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R14</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        TaskHeader: Chain-link status (3 variants)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-comp">Component spec</span>
+        <span class="badge badge-ext">TaskHeader.tsx</span>
+      </div>
+      <div class="screen-desc">Inline chain-link indicator added to the left flex row of TaskHeader. Three variants: (A) known estimate "link 3 of ~12", (B) unknown estimate "link 3 of --" with tooltip, (C) completed "6 sessions, 12h 4m total". Tooltip on hover. No new row, no panel.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r15-taskheader-auto-extending.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R15</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        TaskHeader: Auto-extend inline state
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-comp">Component spec</span>
+        <span class="badge badge-ext">TaskHeader.tsx</span>
+      </div>
+      <div class="screen-desc">When operator is past soft cap and within auto-extend grace, TaskHeader background goes amber and the status row shows "Finishing current step (N min left to stop cleanly)". No modal. Two variants: grace active, and final-minutes countdown. Stop button stays visible.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r16-modal-budget-exceeded-autopause.html" class="screen-item">
+    <div class="screen-num" style="background:#fef3c7;color:#92400e;">R16</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Modal: Budget cap reached (task auto-paused)
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-mod">Modal</span>
+      </div>
+      <div class="screen-desc">Launched when a task hits its per-task budget cap (default 6,000 min). Plain-English body: what happened, what the cap was, what to do. Two options: "Extend budget +1,000 min" (primary) or "Cancel task" (destructive secondary). Footer link to Operator settings tab (R13).</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r17-runtrace-chain-link-divider.html" class="screen-item">
+    <div class="screen-num" style="background:#ecfdf5;color:#047857;">R17</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Run Trace: Chain-link dividers in event timeline
+        <span class="badge badge-r2">R3 New</span>
+        <span class="badge badge-ext">RunTracePage.tsx + RunTraceEventRenderer</span>
+      </div>
+      <div class="screen-desc">Full 3-link chain trace with two boundary dividers: thin horizontal rule with greyed-out label "chain link N starts -- HH:MM UTC". Events from each session are visually grouped. Minimal space, no heavy chrome. Extends the existing SystemEventRow pattern.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- ===================================================== -->
+<!-- ROUND 2 SECTIONS (kept, R10 card removed) -->
+<!-- ===================================================== -->
+
+<!-- Section 1: Existing surfaces extended -->
+<div class="section-header">Existing surfaces extended</div>
+<div class="section-note">These mockups show new affordances added to existing pages. No new routes or navigation entries.</div>
+<div class="screen-list">
+
+  <a href="c1-agent-edit-model-access-live.html" class="screen-item">
+    <div class="screen-num num-c">C1</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Agent Config: Model Access (live)
+        <span class="badge badge-ext">Existing page extended</span>
+        <span class="badge badge-kept">From round 1</span>
+      </div>
+      <div class="screen-desc">Agent settings page with Operator Backend section live. Duration cap, concurrency limit, fallback key status. Org admin only controls.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="c2-run-trace-timeline.html" class="screen-item">
+    <div class="screen-num num-c">C2</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Run Trace — Operator session events
+        <span class="badge badge-ext">Existing RunTracePage extended</span>
+        <span class="badge badge-r2">Updated R2</span>
+      </div>
+      <div class="screen-desc">The existing RunTracePage.tsx with new Phase D system event types: session started, credential injected, step boundaries, fallback engaged, artefact harvest, terminal. Uses existing RunTraceEventRenderer SystemEventRow pattern.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <!-- R10 deleted (wrong surface — was a generic tasks list, not the kanban board). Replaced by R12 above. -->
+
+  <a href="r11-connections-suspended-state.html" class="screen-item">
+    <div class="screen-num num-r">R11</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Connections — Suspended subscription state
+        <span class="badge badge-ext">Phase C connections surface</span>
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">AI Subscriptions tab with one row in "Suspended by OpenAI" state. Inline Reconnect CTA, "View affected tasks" link, collapsible "What this means" expander with copyable CS comms snippet and disclosure record link. Replaces round 1 D10.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Section 2: Operator-run states inside OpenTaskView -->
+<div class="section-header">Operator-run states inside OpenTaskView</div>
+<div class="section-note">All R1-R6 show the same task in different states. Layout mirrors OpenTaskView.tsx exactly: TaskHeader top, ChatPane (left 26%), ActivityPane (middle 22%), RightPaneTabs (right flex-1). No new page — operator runs appear in the existing task view.</div>
+<div class="screen-list">
+
+  <a href="r1-opentaskview-operator-running.html" class="screen-item">
+    <div class="screen-num num-r-running">R1</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Operator running (23 min elapsed)
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">TaskHeader: "Operator running" (green pill), "97 min left" badge, Snapshot now + Cancel buttons. ChatPane: operator system messages + current thinking. ActivityPane: step-boundary events. Now tab: current step + progress bar. Files tab: 2 partial artefacts.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r2-opentaskview-operator-running-approaching-limit.html" class="screen-item">
+    <div class="screen-num num-r-amber">R2</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Approaching chain-link cap (15 min left)
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">Same layout, same task. Status pill amber. "15 min left" badge amber. ActivityPane amber inline notice. No manual extend CTA — the next chain link auto-dispatches on handoff; the R15 auto-extend grace state covers mid-step cases.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r3-opentaskview-operator-completed.html" class="screen-item">
+    <div class="screen-num num-r-comp">R3</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Completed
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">TaskHeader: "Completed" (indigo), elapsed time, "View full Run Trace" link. ChatPane: final summary. ActivityPane: full timeline with terminal event + inline cost summary. Files tab auto-switches active on terminal — all artefacts with download CTAs.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r4-opentaskview-operator-failed.html" class="screen-item">
+    <div class="screen-num num-r-fail">R4</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Failed (token budget exhausted)
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">TaskHeader: "Failed" (red) with reason summary sub-label. ChatPane: plain-English failure message. ActivityPane: failure event highlighted. Files tab: partial artefacts from steps 1-4. Retry CTA in TaskHeader and in Files tab.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r5-opentaskview-operator-cancelled.html" class="screen-item">
+    <div class="screen-num num-r-cancel">R5</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Cancelled
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">TaskHeader: "Cancelled" (slate) with who/when. ChatPane: "You cancelled this run." system message. ActivityPane: partial timeline ending at cancel. Files tab: partial artefacts, retry CTA.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r6-opentaskview-fallback-engaged.html" class="screen-item">
+    <div class="screen-num num-r-amber">R6</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        OpenTaskView — Fallback engaged (mid-run)
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">Same layout as R1. Fallback NOT a separate page. Inline in existing view: ChatPane amber system message, ActivityPane amber event row at swap point with collapsible "Why?", TaskHeader "API fallback" sub-tag. Status pill stays green — run continues.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Section 3: Components and modals -->
+<div class="section-header">Components and modals</div>
+<div class="section-note">Isolated component views and modals. R7 is a component spec; R8, R9, D9 are modals shown in context over their launch surfaces.</div>
+<div class="screen-list">
+
+  <a href="r7-taskheader-operator-controls.html" class="screen-item">
+    <div class="screen-num num-r">R7</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        TaskHeader: Operator controls — 4-state spec
+        <span class="badge badge-comp">Component spec</span>
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">Close-up of TaskHeader.tsx across: (a) Idle, (b) Operator running, (b) variant with API fallback, (c) Approaching chain-link cap (no manual extend CTA per brief v2), (d) Terminal. Shows exact pill vocabulary and button layout.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r8-modal-concurrency-limit.html" class="screen-item">
+    <div class="screen-num num-modal">R8</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Modal: Concurrency limit (subaccount cap reached)
+        <span class="badge badge-mod">Modal</span>
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">Launched from "Run with operator" when the subaccount is at its concurrent-operator-sessions cap (default 5, configurable 1-25 in R13). Active session cards with task links and per-row Cancel CTAs. Footer: link to R13 subaccount settings. Primary action: Close only. Shown over faded board background. In-flight chain continuations queue FIFO and do NOT trigger this modal — it's for new user-requested runs only.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="r9-modal-operator-unavailable.html" class="screen-item">
+    <div class="screen-num num-modal">R9</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Modal: Operator unavailable (no credential, no fallback)
+        <span class="badge badge-mod">Modal</span>
+        <span class="badge badge-r2">New R2</span>
+      </div>
+      <div class="screen-desc">Launched when user tries to start a run but has neither a subscription nor a fallback API key. Two status cards (what's missing). Primary: "Add fallback API key". Secondary: "Connect a subscription". Shown over faded TaskHeader context. Replaces round 1 D6.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<div style="margin-top:32px;padding:14px 18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#64748b;line-height:1.7;">
+  <strong style="color:#334155;">Vocabulary from codebase (TaskHeader.tsx / OpenTaskView.tsx):</strong><br>
+  Status pills: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">running | paused | paused_cost | paused_wall_clock | stopped</code> (existing) + <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">Operator running</code> (new, operator_managed adapter).<br>
+  Panes: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">ChatPane</code> (left 26%), <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">ActivityPane</code> (middle 22%), <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">RightPaneTabs</code> (flex-1 right).<br>
+  Tab labels: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">Now | Plan | Files</code>. Activity events: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">activityEvents[].summary</code> with timestamps.<br>
+  Files tab groups: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">outputs | references | versions</code>. Sort: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">recent | oldest | type | author</code>.<br>
+  Run Trace: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">RunTraceEventRenderer</code> SystemEventRow pattern for new operator-session.* event types.
+</div>
+
+</body>
+</html>

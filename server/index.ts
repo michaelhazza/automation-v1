@@ -122,6 +122,10 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+import operatorSessionsRouter from './routes/operatorSessions.js';
+import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
 import skillStudioRouter from './routes/skillStudio.js';
@@ -427,6 +431,10 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+app.use(operatorSessionsRouter);
+app.use(subaccountOperatorSettingsRouter);
+app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
 app.use(pulseRouter);
@@ -516,12 +524,22 @@ app.use('/api', (req, res) => {
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
 import { ZodError } from 'zod';
+import { mapOperatorBackendErrorToHttp } from './services/operatorBackendErrors.js';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
+  let extraBody: Record<string, unknown> | null = null;
 
-  if (err instanceof ZodError) {
+  // Operator backend typed errors — checked before generic Error branch so
+  // the richer body (kind, current_state / cap, current, subaccount_id) is used.
+  const operatorMapped = mapOperatorBackendErrorToHttp(err);
+  if (operatorMapped) {
+    statusCode = operatorMapped.statusCode;
+    errorCode = operatorMapped.errorCode;
+    message = err instanceof Error ? err.message : String(err);
+    extraBody = operatorMapped.body;
+  } else if (err instanceof ZodError) {
     statusCode = 400;
     errorCode = 'validation_error';
     message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -569,6 +587,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     error: {
       code: errorCode,
       message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+      ...(extraBody ?? {}),
     },
     correlationId,
   });
@@ -697,14 +716,54 @@ async function start() {
     const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
     const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
     const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { operatorManagedBackend } = await import('./services/executionBackends/operatorManagedBackend.js');
     executionBackendRegistry.register(apiBackend);
     executionBackendRegistry.register(headlessBackend);
     executionBackendRegistry.register(claudeCodeBackend);
     executionBackendRegistry.register(ieeBrowserBackend);
     executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(operatorManagedBackend);
   } catch (err) {
     console.error('[boot] failed to register execution backends', err);
     throw err;
+  }
+
+  // Operator Backend pg-boss handlers (Spec D — operator_managed adapter)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionCompletedHandler } = await import('./jobs/operatorSessionCompletedHandler.js');
+      await registerOperatorSessionCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-completed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionDispatchNextChainLinkHandler } = await import('./jobs/operatorSessionDispatchNextChainLinkHandler.js');
+      await registerOperatorSessionDispatchNextChainLinkHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-dispatch-next-chain-link handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionProgressedHandler } = await import('./jobs/operatorSessionProgressedHandler.js');
+      await registerOperatorSessionProgressedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-progressed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorTaskProfileGcHandler } = await import('./jobs/operatorTaskProfileGcHandler.js');
+      await registerOperatorTaskProfileGcHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-task-profile-gc handler', err);
+    }
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
