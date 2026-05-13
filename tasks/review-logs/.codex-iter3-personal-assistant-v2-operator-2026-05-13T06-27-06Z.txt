@@ -1,3 +1,55 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e2004-efdd-77e1-8546-0ef81313e682
+--------
+user
+You are reviewing iteration 3 of a draft specification document. Iterations 1 and 2 fixed 23 mechanical defects. The remaining open item is `PA-V2-OP-S1` in `tasks/todo.md` — the schema strategy for `execution_files` vs a new `operator_run_files` table — already routed to operator. Do NOT re-raise it.
+
+This iteration is a final consistency pass. Look for:
+
+1. **Stale or vague language introduced by iterations 1 and 2.** Phrases like "§13 #1 backing-store table" were added to make the spec strategy-neutral. Do those phrases survive scrutiny? Are there any references that should have been neutralised but weren't?
+
+2. **Internal contradictions across the spec.** Same concept described two different ways. Specifically check:
+   - The `cross_owner_substep.awaiting_initiator_decision` event is now described in §4.6 (shared types), §5.6 (stall job), §9.4 (terminal-event guarantee), and §10 (event-registry gate). Are all four descriptions consistent?
+   - The `CROSS_OWNER_DELEGATION_REQUEST` producer is now `crossOwnerDelegationRequestAssembler.build(...)`. Are all producer/consumer descriptions consistent?
+   - The `runTraceProjectionForViewer` is now wired into `agentExecutionEventService.ts`, `server/routes/taskEventStream.ts`, and `server/routes/agentRuns.ts`. Are these consistent with §5.4 + §6.5?
+
+3. **File-inventory drift.** §4.8 was added in iteration 1 and expanded in iteration 2 with paths from §1, §13, Appendix A. Are there any remaining prose mentions of files/paths/columns not in §4?
+
+4. **Sequencing-ordering bugs.** Iteration 2 moved the assembler to Chunk 3. Does Chunk 4 (approval-owner routing) now depend on Chunk 3 outputs correctly?
+
+5. **Load-bearing claims without mechanism.** Iteration 1 fixed many; iterations may have left some. Re-scan.
+
+6. **Self-consistency pass §11.** Does §11 still accurately summarise the spec given iterations 1 + 2 edits?
+
+Project context (do NOT re-derive):
+
+- Pre-production codebase. No live users. No staged rollouts. No feature flags for migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, new abstractions duplicating existing primitives.
+- The `execution_files` schema decision (PA-V2-OP-S1) — already operator-routed.
+
+For each finding, give:
+1. Short title.
+2. Section heading or line range.
+3. Defect (what's wrong).
+4. Minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say so explicitly. Do not invent findings.
+
+The spec is:
+
 **Status:** draft
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
@@ -169,7 +221,6 @@ No new RLS policies expected. If strategy (a) is chosen, `operator_run_files` is
 | `shared/types/capabilityMap.ts` (new if absent) | Add optional `owner_user_id?: string` on the JSONB shape; type-narrows when `agentRow.owner_user_id` is non-null. |
 | `shared/types/operatorEvents.ts` (extend existing operator-event types) | Add four new event variants: `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`. `file.*` payload shape per §5.7; `cross_owner_substep.completed` payload per §9.4 (carries `parent_run_id`, `substep_id`, `status: 'success' | 'partial' | 'failed'`, optional typed `reason`); `cross_owner_substep.awaiting_initiator_decision` payload carries `parent_run_id`, `substep_id`, and the typed decision request shape (see §5.6 `ask_initiator` branch). Each variant must be registered with criticality in the `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) so `verify-operator-event-registry.sh` passes. Other sub-step lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked on `delegation_outcomes.status` and do NOT surface as run-trace events (per §9.4). |
 | `shared/types/crossOwnerApproval.ts` (new) | `CrossOwnerApprovalTimeoutPolicy` literal union; two pause-reason constants: `awaiting_cross_owner_approval` (V1 same-owner approval path, V2 cross-owner approval path) and `awaiting_initiator_decision_after_cross_owner_timeout` (emitted only when `cross_owner_approval_timeout_policy = 'ask_initiator'` fires per §5.6). |
-| `shared/types/agentExecutionLog.ts` (extend existing) | Add four new entries to the `AGENT_EXECUTION_EVENT_CRITICALITY` registry — one per V2-added event variant declared in `shared/types/operatorEvents.ts` (above). Criticality tier per existing convention (file events: warning-tier; cross-owner-substep events: critical-tier). Edited in Chunk 1 alongside the new types. |
 
 ### 4.7 Doc-sync (mandatory at finalisation)
 
@@ -187,7 +238,7 @@ Files and gates that this spec cites in §6, §8, §9, §10, and Appendix B but 
 | Path | Why cited |
 |---|---|
 | `server/config/rlsProtectedTables.ts` | §6.1: confirms no new tenant tables. V2's column-adds on existing tables inherit existing manifest entries. |
-| `scripts/gates/verify-rls-coverage.sh` | §10: re-runs to confirm any new tenant tables added (per §13 #1 resolution) are registered, and that no UNREGISTERED new tables slipped past. |
+| `scripts/gates/verify-rls-coverage.sh` | §10: re-runs to confirm no new tables slipped past. |
 | `scripts/gates/verify-rls-contract-compliance.sh` | §6.5, §10: confirms no direct-DB-access patterns introduced by `runTraceProjectionForViewer` / `actionService` changes. |
 | `scripts/gates/verify-operator-event-registry.sh` | §10: extended check that `file.created`, `file.modified`, and `cross_owner_substep.completed` are registered in `AGENT_EXECUTION_EVENT_CRITICALITY`. Existing gate; no code change to the gate itself, but the registry it scans gains new entries (§4.6). |
 | `docs/doc-sync.md` | §8 Chunk 9, Appendix B: canonical checklist for finalisation doc updates. No edit required. |
@@ -198,14 +249,6 @@ Files and gates that this spec cites in §6, §8, §9, §10, and Appendix B but 
 | `client/src/components/global-ask-bar/GlobalAskBar.tsx` | §1 non-goals: orchestrator entry; `@`-parsing is server-side, the FE component is unchanged. |
 | `server/db/schema/executionFiles.ts` | §13 open question #1, §4.1 migration 0346: existing schema definition referenced when evaluating the strategy-(b) extension path. |
 | `server/services/__tests__/capabilityMapServicePure.routing.test.ts` (CREATED in Chunk 2) | Appendix A: concrete test fixtures for the four routing fixtures. New file; the path is locked here even though the file lands in Chunk 2 — see §4.2/§4.3 for the implementation files those tests cover. |
-| `server/services/eaDrafts/` | §1 non-goals: existing EA-specific helper directory; V2 does NOT extend it. Cited so the "no EA branching in orchestrator" claim survives audit. |
-| `server/services/voiceProfile/` | §1 non-goals: existing EA-specific helper directory; V2 does NOT extend it. Same survival rationale as `eaDrafts/`. |
-| `docs/spec-context.md` | §1 framing assumptions, §3 ranked-source #5. The agent-facing framing-ground-truth file; consulted by `spec-reviewer` and by the implementer to confirm framing assumptions are still current. No edit by this build (operator-maintained). |
-| `tasks/builds/user-owned-agents/brief.md` | §3 ranked-source #3, §5.4 broker invariant citation. No edit (already merged). |
-| `tasks/builds/operator-backend/brief.md` | §3 ranked-source #3, §1 universal-OpenTaskView invariant citation, §7 prompt-cache contract. No edit (already merged as Spec D / PR #288). |
-| `tasks/builds/personal-assistant-v1/brief.md` | §3 ranked-source #3, §5.8 voice-profile + memory-block contract citation. No edit (already merged). |
-| `tasks/todo.md` | §13 open questions #1 and #2 route to this file as `PA-V2-OP-S1` and `PA-V2-OP-S2`. Operator-facing deferred-decision queue; edited by this review iteration to add the deferred items. |
-| `server/lib/storage.ts` | §4.2 `operatorSandboxFileEventBridge.ts` and §8 Chunk 7: provides existing `getS3Client()` / `getBucketName()` helpers; no edit. |
 
 ## 5. Domain model + contracts
 
@@ -358,7 +401,7 @@ type CrossOwnerDelegationRequest = {
 | Viewer | Sees |
 |---|---|
 | Owner (executor's owner) | Full delegated sub-run trace, raw source data, approval detail, result |
-| Initiator (parent run's initiator) | At any point: the current `delegation_outcomes.status` value (read-model projection of the underlying state machine — `proposed` / `authorised` / `routed` / `executing` / `awaiting_cross_owner_approval` / `approved` / `rejected`) read on demand via the existing run-trace HTTP endpoint, plus the run-trace event stream of emitted events: at most one `cross_owner_substep.awaiting_initiator_decision` event (only on `ask_initiator` timeout path) and exactly one terminal `cross_owner_substep.completed` event with `status: 'success' | 'partial' | 'failed'` plus typed result summary. No raw owner data is included on either path. Intermediate lifecycle states are READ-MODEL ONLY: they are visible to the initiator because the existing run-trace endpoint reads `delegation_outcomes` (filtered by `runTraceProjectionForViewer` to hide owner-private payload fields) — they are NOT emitted as separate `cross_owner_substep.*` event variants (see §4.6, §9.4). The closed terminal-event vocabulary remains `success | partial | failed` per §9.4. |
+| Initiator (parent run's initiator) | In-flight lifecycle status (`proposed` → `authorised` → `routed` → `executing` → `awaiting_cross_owner_approval` → `approved`/`rejected`) and the final terminal status from the `cross_owner_substep.completed` event (`success` / `partial` / `failed`) plus typed result summary. No raw owner data. The intermediate approval statuses (`approved` / `rejected`) appear in this view as transient lifecycle states; the closed terminal vocabulary for the sub-run is the `success | partial | failed` set defined in §9.4. |
 | Shared parent run trace | Sub-run outcome only — no raw calendar slots, inbox snippets, draft bodies, attachment names, or credential-derived metadata from the target owner |
 
 The projection is enforced at READ time by `runTraceProjectionForViewer(viewerUserId, run)` (new pure helper in `server/services/runTracePure.ts`), not by per-event filtering. The owner's events stay in the database; the projection chooses what to send over the wire to the initiator. Violations are security bugs.
@@ -441,7 +484,7 @@ Example:
 
 **Critical:** signed-read URLs are NOT included in event payloads. They expire (60–300s per existing `deriveSignedUrlExpiry()`) and would be stale in replayed run traces. The client requests a fresh signed URL via the existing `GET /api/runs/:runId/files/:storageKey/url` route when the user clicks to open the file.
 
-**Source-of-truth precedence for files:** the R2 storage key is canonical content. The §13 #1 backing-store row (either `operator_run_files` per strategy (a) or extended `execution_files` per strategy (b)) is a metadata index. Event stream is a derived projection — replay of events MUST be idempotent against the row + storage key.
+**Source-of-truth precedence for files:** the R2 storage key is canonical content. `execution_files` table row is a metadata index. Event stream is a derived projection — replay of events MUST be idempotent against the row + storage key.
 
 **Tool-call interceptor vs watcher precedence:** tool-call interceptor wins on `version` allocation. The watcher only emits events for paths it didn't see come through the tool registry. Deduplication: the watcher checks the §13 #1 backing-store table (whichever strategy is chosen) `WHERE agent_run_id = $1 AND path = $2 AND content_sha256 = $3` and skips emit if the row already exists with the same hash.
 
@@ -628,7 +671,7 @@ Every cross-owner sub-run emits exactly one terminal event:
 
 - `cross_owner_substep.completed` with `status: 'success' | 'partial' | 'failed'`
 
-The terminal-event correlation key is `(parent_run_id, substep_id)`, where `substep_id` is the canonical sub-step identifier carried on every `cross_owner_substep.*` event. The `substep_id` value is sourced from the sub-step state-machine row whose schema strategy is the subject of §13 open question #2 — see that question for the row-level write-time guard contract (UPDATE-with-terminal-predicate) that enforces the "exactly one terminal event per `(parent_run_id, substep_id)`" guarantee. The existing `agentExecutionEventService` registers and validates the new event types per §4.6; the uniqueness guarantee itself is at the row level, not the event-stream level. Implementation acceptance criterion (Chunk 3): a pure-function test verifies the write-time predicate so that a second `cross_owner_substep.completed` emit for the same `(parent_run_id, substep_id)` is a 0-row update + no-op event emit.
+The terminal-event correlation key is `(parent_run_id, substep_id)`, where `substep_id` is the `delegation_outcomes.id` row primary key (the canonical sub-step identifier carried on every `cross_owner_substep.*` event). Post-terminal prohibition: no further events with the same `(parent_run_id, substep_id)` after the terminal. Enforced by `agentExecutionEventService` (existing) — V2 adds the new event types to the registry only.
 
 Multi-path termination (closed set — adding a status requires a spec amendment):
 
@@ -680,7 +723,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 - **Static gates** as the primary safety net:
   - `verify-capability-map-shape.sh` (new) — guards capability-map invariants.
   - `verify-operator-event-registry.sh` (existing) — extended check that all four V2-added variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) are registered with criticality in `AGENT_EXECUTION_EVENT_CRITICALITY` per §4.6.
-  - `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` (existing) — for the three known tables touched (`subaccount_agents`, `actions`, `delegation_outcomes`) the gates confirm the new columns don't introduce direct-DB-access patterns. If §13 #1 resolves to strategy (a) (new `operator_run_files` table), the same gates confirm the new table is registered in `rlsProtectedTables.ts` and has a working policy (per the migration; verified on fresh DB). If strategy (b) (extend `execution_files`), the gates confirm no new tables slipped past.
+  - `verify-rls-coverage.sh` + `verify-rls-contract-compliance.sh` (existing) — no new tables, so just confirm the new columns don't introduce direct-DB-access patterns.
 - **CI typecheck + lint** — load-bearing for shape correctness across the new contracts.
 
 **Out of scope (per `convention_rejections`):**
@@ -738,15 +781,9 @@ One architectural question requires operator input BEFORE Chunk 7 (live-file eve
    
    Routed to `tasks/todo.md` under `## Deferred spec decisions — personal-assistant-v2-operator` for operator/architect review. Chunk 7 cannot ship until this is resolved. Self-resolving decision criterion: if the architect says "extend `execution_files`," update migration 0346's row in §4.1 and re-validate §5.7 + §9.3 contract references; if the architect says "new table `operator_run_files`," update migration 0346 to create the table + RLS policy and re-validate §6.
 
-2. **`delegation_outcomes` state-machine column gap (BLOCKS CHUNK 3).** The §5.4 state machine (`proposed → authorised → routed → executing → success | partial | failed`) and the §9.4 terminal-event uniqueness guard (UPDATE-with-`terminal_at IS NULL` predicate) assume `delegation_outcomes` has a state-machine `status` column and a `terminal_at` timestamp. The actual `delegation_outcomes` schema (`server/db/schema/delegationOutcomes.ts`) has only `outcome ('accepted'|'rejected')`, `delegationScope`, `delegationDirection`, and `createdAt`. There is no state-machine column and no terminal-marker column. Two candidate strategies for the gap:
-   - **(a) Extend `delegation_outcomes`** — add `substep_status TEXT NOT NULL DEFAULT 'proposed' CHECK (substep_status IN (...))`, `terminal_at TIMESTAMPTZ NULL`, plus an index on `(run_id, substep_status)`. Fold the migration into 0345 (which already touches the table for the timeout-policy column). Honours "prefer existing primitives" because `delegation_outcomes` is conceptually a delegation ledger.
-   - **(b) New table `cross_owner_substep_state`** — keyed on `(parent_run_id, delegation_outcomes_id)`, with the state-machine `status` column, `terminal_at`, and the timeout-policy column moved from `delegation_outcomes` to here. Cleaner — separates per-decision ledger entries (existing `delegation_outcomes`) from the cross-owner state-machine concept.
-   
-   Spec-reviewer's reading is that strategy (a) is the conservative default (extends one table; matches the existing ledger concept). Strategy (b) is a larger refactor that may not be warranted for the V2 use case. Routed to `tasks/todo.md` as `PA-V2-OP-S2`. Chunk 3 depends on this; it cannot ship until §13 #2 resolves. Self-resolving decision criterion: if strategy (a), update migration 0345 in §4.1 to add the new columns + index, and update §9.4 + §5.4 to reference the actual column names; if strategy (b), add a new migration 0346b (numbered after the file-events migration) and update §4.1/§5.4/§9.4 accordingly.
+2. The exact path of the orchestrator routing module that owns the intent parser — resolved in this iteration to `server/tools/capabilities/capabilityDiscoveryHandlers.ts` (§4.3). Routed to `tasks/todo.md` as informational only.
 
-3. The exact path of the orchestrator routing module that owns the intent parser — resolved in this iteration to `server/tools/capabilities/capabilityDiscoveryHandlers.ts` (§4.3). Routed to `tasks/todo.md` as informational only.
-
-4. Whether `runTraceProjectionForViewer` deserves a dedicated `*Pure.ts` split — surfaces during chunk 3 implementation; defers to the implementer's judgement on test surface.
+3. Whether `runTraceProjectionForViewer` deserves a dedicated `*Pure.ts` split — surfaces during chunk 3 implementation; defers to the implementer's judgement on test surface.
 
 No HITL checkpoint required.
 
@@ -777,3 +814,79 @@ Per `docs/doc-sync.md`:
 - [ ] `docs/decisions/` — consider ADR for "approval follows executor's owner, not initiator" (durable policy decision)
 
 ## End of spec
+
+codex
+Reviewing the spec as a consistency audit rather than re-planning the design. I’m cross-checking the event contract, producer wiring, sequencing, and the §4 inventory lock against the pasted draft only.
+codex
+1. **Unneutralised backing-store language**
+Section: §5.7 “Source-of-truth precedence for files”; §10 “Static gates” bullet
+
+Defect: iteration 1/2 made the file-events backing store strategy-neutral, but these sections still hardcode one branch. §5.7 says “`execution_files` table row is a metadata index,” and §10 says “no new tables,” both of which are only true if the unresolved strategy extends `execution_files`. That undercuts the newer neutral wording elsewhere.
+
+Minimum fix: replace those references with neutral language such as “the §13 #1 backing-store row/table,” and make the §10 gate text conditional on the eventual strategy rather than asserting “no new tables.”
+
+Severity: important
+
+2. **Initiator-visible lifecycle states are promised without a surfaced mechanism**
+Section: §5.4 “Run-trace privacy projection”; §4.6 “Shared types”; §9.4 “Terminal event guarantee”
+
+Defect: §5.4 says the initiator sees in-flight lifecycle status `proposed → authorised → routed → executing → awaiting_cross_owner_approval → approved/rejected`. But §4.6 and §9.4 explicitly say those lifecycle states do not surface as `cross_owner_substep.*` run-trace events, with only `.awaiting_initiator_decision` and `.completed` emitted. The spec never names a read-model/projection mechanism that would synthesize those intermediate states for the initiator view.
+
+Minimum fix: either narrow §5.4 to the statuses actually surfaced, or specify the mechanism that derives and exposes those intermediate states from `delegation_outcomes` on read.
+
+Severity: important
+
+3. **Exact-one terminal-event claim lacks an enforcement mechanism for the new key**
+Section: §9.4 “Terminal event guarantee”; reflected in §11 “Every load-bearing claim has a named mechanism”
+
+Defect: §9.4 introduces a new terminal-event uniqueness rule keyed by `(parent_run_id, substep_id)` and says post-terminal emission is prohibited, but then says enforcement comes from `agentExecutionEventService` and that V2 “adds the new event types to the registry only.” Registry registration does not explain how duplicate `.completed` events for the same substep are prevented.
+
+Minimum fix: name the concrete write-time/state-transition guard that enforces one terminal `cross_owner_substep.completed` per `(parent_run_id, substep_id)`, or relax the guarantee so it matches the actual mechanism described.
+
+Severity: important
+
+4. **§4 inventory lock still misses referenced paths**
+Section: §1, §3, §4.2, §4.6, §10, §13
+
+Defect: despite §4.8, the draft still references paths not inventoried in §4, which violates its own lock rule. Examples include `server/services/eaDrafts/`, `server/services/voiceProfile/`, `docs/spec-context.md`, `tasks/builds/user-owned-agents/brief.md`, `tasks/builds/operator-backend/brief.md`, `tasks/todo.md`, `server/lib/storage.ts`, and `shared/types/agentExecutionLog.ts`.
+
+Minimum fix: add the missing references to §4.8 or the relevant §4 table, or rewrite those mentions so they no longer cite explicit paths.
+
+Severity: important
+tokens used
+45,921
+1. **Unneutralised backing-store language**
+Section: §5.7 “Source-of-truth precedence for files”; §10 “Static gates” bullet
+
+Defect: iteration 1/2 made the file-events backing store strategy-neutral, but these sections still hardcode one branch. §5.7 says “`execution_files` table row is a metadata index,” and §10 says “no new tables,” both of which are only true if the unresolved strategy extends `execution_files`. That undercuts the newer neutral wording elsewhere.
+
+Minimum fix: replace those references with neutral language such as “the §13 #1 backing-store row/table,” and make the §10 gate text conditional on the eventual strategy rather than asserting “no new tables.”
+
+Severity: important
+
+2. **Initiator-visible lifecycle states are promised without a surfaced mechanism**
+Section: §5.4 “Run-trace privacy projection”; §4.6 “Shared types”; §9.4 “Terminal event guarantee”
+
+Defect: §5.4 says the initiator sees in-flight lifecycle status `proposed → authorised → routed → executing → awaiting_cross_owner_approval → approved/rejected`. But §4.6 and §9.4 explicitly say those lifecycle states do not surface as `cross_owner_substep.*` run-trace events, with only `.awaiting_initiator_decision` and `.completed` emitted. The spec never names a read-model/projection mechanism that would synthesize those intermediate states for the initiator view.
+
+Minimum fix: either narrow §5.4 to the statuses actually surfaced, or specify the mechanism that derives and exposes those intermediate states from `delegation_outcomes` on read.
+
+Severity: important
+
+3. **Exact-one terminal-event claim lacks an enforcement mechanism for the new key**
+Section: §9.4 “Terminal event guarantee”; reflected in §11 “Every load-bearing claim has a named mechanism”
+
+Defect: §9.4 introduces a new terminal-event uniqueness rule keyed by `(parent_run_id, substep_id)` and says post-terminal emission is prohibited, but then says enforcement comes from `agentExecutionEventService` and that V2 “adds the new event types to the registry only.” Registry registration does not explain how duplicate `.completed` events for the same substep are prevented.
+
+Minimum fix: name the concrete write-time/state-transition guard that enforces one terminal `cross_owner_substep.completed` per `(parent_run_id, substep_id)`, or relax the guarantee so it matches the actual mechanism described.
+
+Severity: important
+
+4. **§4 inventory lock still misses referenced paths**
+Section: §1, §3, §4.2, §4.6, §10, §13
+
+Defect: despite §4.8, the draft still references paths not inventoried in §4, which violates its own lock rule. Examples include `server/services/eaDrafts/`, `server/services/voiceProfile/`, `docs/spec-context.md`, `tasks/builds/user-owned-agents/brief.md`, `tasks/builds/operator-backend/brief.md`, `tasks/todo.md`, `server/lib/storage.ts`, and `shared/types/agentExecutionLog.ts`.
+
+Minimum fix: add the missing references to §4.8 or the relevant §4 table, or rewrite those mentions so they no longer cite explicit paths.
+
+Severity: important

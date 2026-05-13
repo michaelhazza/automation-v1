@@ -113,6 +113,28 @@ These are noted to prevent re-discovery — none are urgent.
 
 ---
 
+## Deferred spec decisions — personal-assistant-v2-operator
+
+From `spec-reviewer` iteration 1 against `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (2026-05-13). Routed here per AUTO-DECIDED criteria (Step 7 priority 3 — most conservative option is to surface to operator).
+
+- [ ] **PA-V2-OP-S1 (BLOCKS CHUNK 7)** — Choose the file-events backing-store schema strategy for the §5.7 file-event contract. The contract assumes a table with columns `(agent_run_id, path, version, content_sha256, storage_key, mime_type, size_bytes, emitted_by, emitted_at)` and a UNIQUE `(agent_run_id, path)` constraint. The existing `execution_files` table (`server/db/schema/executionFiles.ts`) is keyed on `executionId → executions.id`, has `file_name` / `file_type` / `storage_path` / `expires_at`, and lacks every column the contract assumes. Two candidates:
+   - **(a) New table `operator_run_files`** keyed on `agent_run_id → agent_runs.id`. Cleanest semantically; adds one tenant-scoped table; gets a new RLS entry.
+   - **(b) Extend `execution_files`** with the new columns + parallel `agent_run_id` FK + the UNIQUE constraint. Honours "prefer existing primitives" IF the architect determines this is the right abstraction level.
+   
+   The spec encodes this as §13 open question #1 and as a placeholder migration row (`migrations/0346_*`) in §4.1. The decision is required BEFORE Chunk 7 (live-file events: tool-call interceptor) can ship — Chunks 1–6 and 8–9 can proceed regardless. Architect input needed; this is not a mechanical fix. Spec-reviewer cannot pick the strategy autonomously because it changes the §6 RLS claim and the §4.1 migration shape.
+
+- [ ] **PA-V2-OP-S2 (BLOCKS CHUNK 3)** — Choose the `delegation_outcomes` state-machine schema strategy. The §5.4 state machine and §9.4 terminal-event uniqueness guard assume a `status` column and `terminal_at` timestamp on `delegation_outcomes`. The current schema (`server/db/schema/delegationOutcomes.ts`) has only `outcome ('accepted'|'rejected')`, `delegationScope`, `delegationDirection`, and `createdAt`. Two candidates:
+   - **(a) Extend `delegation_outcomes`** in migration 0345 — add `substep_status TEXT` + `terminal_at TIMESTAMPTZ NULL` + index. Conservative default; matches existing ledger concept.
+   - **(b) New table `cross_owner_substep_state`** — separate state-machine table; refactor of the existing ledger.
+   
+   Spec-reviewer (iteration 3) recommends strategy (a). Operator/architect input needed; spec encodes both options in §13 open question #2.
+
+- [ ] **PA-V2-OP-INFO-1** — The orchestrator routing module path was previously TBD in §4.3. Spec-reviewer resolved it to `server/tools/capabilities/capabilityDiscoveryHandlers.ts` (entry point: `executeCheckCapabilityGap`, dispatched by `server/services/skillExecutor.ts:1767-1770`). Informational only; recorded here so the next implementer/audit can confirm the path before Chunk 2 begins.
+
+- [ ] **PA-V2-OP-INFO-2** — During spec authoring §13 listed an open authoring question: whether `runTraceProjectionForViewer` deserves a dedicated `*Pure.ts` split. Defers to the implementer's judgement on test surface during Chunk 3. No action needed pre-implementation.
+
+---
+
 ## Blockers
 
 _None active._
