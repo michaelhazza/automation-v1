@@ -239,47 +239,64 @@ export const eaDraftService = {
   },
 
   /**
-   * 7-day proposal expiry for EA-linked drafts (spec §5.2 entry for
-   * `workflowGateStallNotifyJob`, §11.4 / §22.2). Scans `actions` rows that:
+   * 7-day proposal sweep for EA-linked drafts (spec §5.1 entry for
+   * `workflowGateStallNotifyJob`, §20.4 / §22.2). Scans `actions` rows that:
    *   - are still `pending_approval`,
    *   - carry `metadata_json.kind = 'ea_draft'`,
-   *   - have `created_at < NOW() - 7 days`,
-   * and transitions them to `rejected` with
-   * `metadata_json.expired_after_7d = true` plus a `proposal.expired` event.
+   *   - have `created_at < NOW() - INTERVAL '7 days'` (DB-time predicate so
+   *     the cutoff matches the same clock that wrote `created_at`),
+   * and transitions them to `rejected` with `metadata_json.expired_after_7d =
+   * true` + `metadata_json.systemExpired = true` plus a `rejected` event row
+   * carrying `actorId: null` and `metadata { reason: 'expired_after_7d',
+   * systemExpired: true }`.
+   *
+   * **Naming note (REVIEW-F1, 2026-05-13).** The `actions` primitive does NOT
+   * carry an `expired` status — its enum is `proposed | pending_approval |
+   * approved | executing | completed | failed | rejected | blocked | skipped`.
+   * The `action_events` event_type enum likewise has no `expired` value. The
+   * spec previously described the terminal state as "the proposal row
+   * transitions to `expired`" / "emits `proposal.expired`"; the as-built
+   * primitive collapses both system-expiry and user-rejection onto the same
+   * `rejected` status + `rejected` event. The honest framing is:
+   * **system-rejected due to expiry**, distinguishable from operator
+   * rejection by `metadata_json.systemExpired = true` + `actorId IS NULL` on
+   * the event row. Callers that need to surface "expired" to the operator
+   * UI must read the metadata flag, not assume a separate enum value.
    *
    * The linked `ea_drafts.send_state` stays `idle` per spec (approval-state is
-   * owned by the proposal primitive; expiry hides the draft from the
+   * owned by the proposal primitive; sweep hides the draft from the
    * Workspace tab but does NOT touch the draft row itself).
    *
-   * Returns the list of expired action IDs (cross-org). Cross-org sweep so
+   * Returns the list of swept action IDs (cross-org). Cross-org sweep so
    * uses `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS).
-   * Pre-2026-05-13 the expiry path did not exist — this closes REQ-M9.
+   * Pre-2026-05-13 the sweep path did not exist — this closes REQ-M9.
    */
   async expireOldEADraftProposals(): Promise<string[]> {
-    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
     return withAdminConnection(
       {
         source: 'eaDraftService.expireOldEADraftProposals',
-        reason: 'cross-org 7-day proposal expiry for EA-linked drafts',
+        reason: 'cross-org 7-day proposal sweep for EA-linked drafts',
       },
       async (tx) => {
         await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
         // Single UPDATE with COALESCE-merge on metadata_json — preserves any
         // existing metadata keys (riskTier, gateLevelSource, kind=ea_draft).
+        // Cutoff uses DB-time `NOW() - INTERVAL '7 days'` so the predicate
+        // compares against the same wall clock that wrote `created_at`.
         const expired = await tx.execute(sql`
           UPDATE actions
              SET status = 'rejected',
                  metadata_json = COALESCE(metadata_json, '{}'::jsonb)
                                  || jsonb_build_object(
                                       'expired_after_7d', true,
+                                      'systemExpired', true,
                                       'expired_at', to_jsonb(NOW())
                                     ),
                  updated_at = NOW()
            WHERE status = 'pending_approval'
              AND metadata_json->>'kind' = 'ea_draft'
-             AND created_at < ${cutoff}
+             AND created_at < NOW() - INTERVAL '7 days'
            RETURNING id, organisation_id
         `);
 
@@ -292,7 +309,7 @@ export const eaDraftService = {
             actionId: row.id,
             eventType: 'rejected',
             actorId: null,
-            metadataJson: { reason: 'expired_after_7d' },
+            metadataJson: { reason: 'expired_after_7d', systemExpired: true },
             createdAt: new Date(),
           });
         }
