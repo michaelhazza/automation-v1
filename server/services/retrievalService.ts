@@ -69,20 +69,28 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   // Spec §4 Phase 3 / §13.5. Flag default off; embedding only when flag is on.
   const config = getRetrievalConfig();
   let queryEmbedding: number[] | null = null;
-  let anyFallbackApplied = false;
+  // Per-category fallback flags (spec §13.5; ChatGPT R1 F2).
+  // Tracked independently so one category's fallback does not disable
+  // thresholding for the other category.
+  let chunksFallbackApplied = false;
+  let blocksFallbackApplied = false;
   let pendingDegradedReason: 'retrieval.embedding_failed' | 'retrieval.empty_after_semantic' | null = null;
 
   if (config.semanticEnabled) {
     try {
+      // Embed the run's task DESCRIPTION ONLY per spec §10 + handoff Q1
+      // resolution. Concatenating title+description was a Phase-2 drift; reverted
+      // per ChatGPT R1 T4. Title-as-search-key may be revisited post-enablement
+      // if B1 utility numbers show recall is missing relevant chunks.
       let taskText: string | null = null;
       if (run.taskId) {
         const [taskRow] = await db
-          .select({ title: tasks.title, description: tasks.description })
+          .select({ description: tasks.description })
           .from(tasks)
           .where(eq(tasks.id, run.taskId))
           .limit(1);
-        if (taskRow) {
-          taskText = `${taskRow.title}${taskRow.description ? ' ' + taskRow.description : ''}`;
+        if (taskRow?.description) {
+          taskText = taskRow.description;
         }
       }
       if (taskText) {
@@ -252,11 +260,11 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
             return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
           });
 
-        // Per-category recall fallback for chunks (spec §13.5)
+        // Per-category recall fallback for chunks (spec §13.5; ChatGPT R1 F2)
         if (queryEmbedding && chunkCandidates.length > 0) {
           const aboveThreshold = chunkCandidates.filter(c => c.finalScore >= config.threshold).length;
           if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: chunkCandidates.length })) {
-            anyFallbackApplied = true;
+            chunksFallbackApplied = true;
             logger.warn('retrieval.empty_after_semantic', { runId, category: 'chunks' });
             pendingDegradedReason = 'retrieval.empty_after_semantic';
             chunkCandidates = chunkCandidates.map(c => ({ ...c, finalScore: 0 }));
@@ -346,11 +354,11 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
       };
     });
 
-    // Per-category recall fallback for memory blocks (spec §13.5)
+    // Per-category recall fallback for memory blocks (spec §13.5; ChatGPT R1 F2)
     if (queryEmbedding && memoryBlockCandidates.length > 0) {
       const aboveThreshold = memoryBlockCandidates.filter(c => c.finalScore >= config.threshold).length;
       if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: memoryBlockCandidates.length })) {
-        anyFallbackApplied = true;
+        blocksFallbackApplied = true;
         logger.warn('retrieval.empty_after_semantic', { runId, category: 'blocks' });
         pendingDegradedReason = 'retrieval.empty_after_semantic';
         memoryBlockCandidates = memoryBlockCandidates.map(c => ({ ...c, finalScore: 0 }));
@@ -366,14 +374,35 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   }
 
   // ── Step 4: Combine candidates (chunks first, then memory blocks) ───────────
+  // Per-category threshold filtering before merge (spec §13.5; ChatGPT R1 F1+F2):
+  //   - With flag OFF (queryEmbedding === null): finalScore is 0 for all
+  //     candidates by construction; filtering against config.threshold would
+  //     drop the entire pool. Skip category filtering entirely; rankCandidates
+  //     receives threshold 0 (effective legacy behaviour).
+  //   - With flag ON and category did NOT fall back: filter that category to
+  //     finalScore >= config.threshold (genuine semantic acceptance).
+  //   - With flag ON and category DID fall back: keep all candidates (already
+  //     reset to finalScore 0 in the fallback branch above); they bypass the
+  //     threshold via the rankCandidates threshold-0 pass below.
+  if (queryEmbedding !== null) {
+    if (!chunksFallbackApplied) {
+      chunkCandidates = chunkCandidates.filter(c => c.finalScore >= config.threshold);
+    }
+    if (!blocksFallbackApplied) {
+      memoryBlockCandidates = memoryBlockCandidates.filter(c => c.finalScore >= config.threshold);
+    }
+  }
+
   const allCandidates: RetrievalCandidate[] = [...chunkCandidates, ...memoryBlockCandidates];
 
   // ── Step 5: Rank ────────────────────────────────────────────────────────────
+  // Category-level filtering is already complete above. rankCandidates uses
+  // threshold 0 so it does not re-filter fallback or legacy (flag-off) pools.
   let ranked: RetrievalResult;
   try {
     ranked = rankCandidates({
       candidates: allCandidates,
-      threshold: anyFallbackApplied ? 0 : config.threshold,
+      threshold: 0,
       budgetTokens: DEFAULT_BUDGET_TOKENS,
       nowMs: Date.now(),
       orgId: organisationId,

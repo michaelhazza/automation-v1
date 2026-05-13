@@ -97,7 +97,10 @@ export async function writeLineageRowsForVersion(
       }
     }
 
-    await tx
+    // Use returning() so rowsWritten reflects ACTUAL inserts, not attempts.
+    // onConflictDoNothing() returns 0 rows on conflict (idempotent skip).
+    // (ChatGPT R1 T2)
+    const inserted = await tx
       .insert(memoryBlockVersionSources)
       .values({
         organisationId,
@@ -114,9 +117,10 @@ export async function writeLineageRowsForVersion(
         sourceRunIdHash,
         sourceRunLabelAtCapture,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: memoryBlockVersionSources.id });
 
-    rowsWritten += 1;
+    rowsWritten += inserted.length;
   }
 
   return { rowsWritten };

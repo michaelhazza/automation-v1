@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   memoryBlockVersionSources,
@@ -24,11 +24,17 @@ export async function getSourcesForBlock(
 ): Promise<MemoryBlockSourcesPayload> {
   const db = getOrgScopedDb('memoryBlockSourcesService');
 
-  // Resolve the block
+  // Resolve the block (excluding soft-deleted blocks — ChatGPT R1 T1)
   const [blockRow] = await db
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
-    .where(and(eq(memoryBlocks.id, blockId), eq(memoryBlocks.organisationId, organisationId)));
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, organisationId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
 
   if (!blockRow) {
     throw { statusCode: 404, message: 'Block not found', errorCode: 'BLOCK_NOT_FOUND' };
@@ -127,17 +133,30 @@ export async function getSourcesForBlock(
     runLabel: null, // agent_runs has no label column; captured label is the display value
   }));
 
-  // Optionally compute reverse-lineage counts (index-covered via idx_mbvs_source_entry_hash)
+  // Optionally compute reverse-lineage counts (index-covered via idx_mbvs_source_entry_hash).
+  // The UI label is "Used in N other blocks" — count distinct memory_block_id
+  // (NOT distinct block_version_id, which over-counts when one block has
+  // multiple versions citing the same entry) and exclude the current block
+  // (ChatGPT R1 F4).
   let reverseCounts: Map<string, number> | undefined;
   if (opts.includeReverse && typedRows.length > 0) {
     const hashes = [...new Set(typedRows.map((r) => r.sourceEntryIdHash))];
     const reverseRows = await db
       .select({
         sourceEntryIdHash: memoryBlockVersionSources.sourceEntryIdHash,
-        count: sql<number>`COUNT(DISTINCT ${memoryBlockVersionSources.blockVersionId})::int`,
+        count: sql<number>`COUNT(DISTINCT ${memoryBlockVersions.memoryBlockId})::int`,
       })
       .from(memoryBlockVersionSources)
-      .where(inArray(memoryBlockVersionSources.sourceEntryIdHash, hashes))
+      .innerJoin(
+        memoryBlockVersions,
+        eq(memoryBlockVersionSources.blockVersionId, memoryBlockVersions.id),
+      )
+      .where(
+        and(
+          inArray(memoryBlockVersionSources.sourceEntryIdHash, hashes),
+          ne(memoryBlockVersions.memoryBlockId, blockId),
+        ),
+      )
       .groupBy(memoryBlockVersionSources.sourceEntryIdHash);
 
     reverseCounts = new Map(reverseRows.map((r) => [r.sourceEntryIdHash, r.count]));

@@ -51,7 +51,14 @@ export async function getMemoryUtilityForOrg(
     for (const a of agentRows) agentNameMap.set(a.id, a.name);
   }
 
-  // Raw agent_runs for daily bucketing — uses DB-anchored now so SQL window
+  // DB-anchored "now" — queried independently so the empty-runs path still
+  // uses DB time rather than the app clock (spec R2 F7; ChatGPT R1 F3).
+  const dbNowRows = await db.execute<{ db_now: Date }>(sql`
+    SELECT transaction_timestamp() AS db_now
+  `);
+  const dbNow: Date = new Date(dbNowRows[0].db_now);
+
+  // Raw agent_runs for daily bucketing — same DB-anchored window so SQL filter
   // and JS bucket boundaries share one clock (spec R2 F7).
   const runRows = await db.execute<{
     id: string;
@@ -60,10 +67,8 @@ export async function getMemoryUtilityForOrg(
     cited_entry_ids: string[];
     applied_memory_block_ids: string[];
     applied_memory_block_citations: unknown[];
-    db_now: Date;
   }>(sql`
     SELECT
-      transaction_timestamp() AS db_now,
       id,
       created_at,
       injected_entry_ids,
@@ -75,7 +80,6 @@ export async function getMemoryUtilityForOrg(
       AND created_at > transaction_timestamp() - interval '30 days'
   `);
 
-  const dbNow: Date = runRows[0]?.db_now ?? new Date();
   const forBucketing: RunForBucketing[] = runRows.map((r) => ({
     id: r.id,
     createdAt: new Date(r.created_at),
