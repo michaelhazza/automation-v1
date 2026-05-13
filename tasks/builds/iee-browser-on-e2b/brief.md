@@ -1,4 +1,4 @@
-**Status:** DRAFT v2 (2026-05-13) — awaiting operator ratification before spec authoring
+**Status:** DRAFT v3 (2026-05-13) — awaiting operator ratification before spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `iee-browser-on-e2b`
@@ -16,6 +16,20 @@ v2 changes:
 - §3.7 Renamed "Cost-tracking plan" (was "Cost forecast"). No DO baseline exists. Cost is observed from day one of production e2b traffic; alarms fire on per-task or per-subaccount cost drift.
 - §4 locked decisions: items 6, 7, 8 (parallel-run mandate, cutover threshold, decommission soak) are removed. Items 5 (warm pool), 9 (one-vendor risk), 10 (no customer UI changes) stand.
 - §3.3 GC inactivity window default raised from 14 days to **30 days** pending operator confirmation (see §3.3 explainer).
+
+## v3 reframe (post-mockup-round-1 simplification)
+
+Round 1 mockup landed (`prototypes/iee-browser-on-e2b.html`, commit `f00e285`). Operator review surfaced a simplification mandate: the Operator settings tab was carrying too many knobs, and several of the proposed IEE-browser fields would either confuse a non-technical org admin or duplicate concerns better handled by a single sensible default.
+
+v3 changes:
+- **Warm-pool size: no longer user-configurable.** Hardcoded to 1 globally in V1. The warm-pool service still exists (mandatory per §3.4) but the per-subaccount UI knob is dropped. If real production usage shows starvation patterns, a future spec adds the knob back.
+- **Per-task cost ceiling: cents only, no minutes ceiling.** The earlier dual-threshold ("alert if either minutes-cap OR cents-cap exceeded") is replaced by a single cents ceiling. Money is the operator's mental model; the dual knob added confusion without product value.
+- **Incident event names hidden from the admin UI.** Event names like `iee_browser.task_cost_anomaly` continue to exist in the incident schema and run logs, but the settings tab uses plain-English help text ("Alerts you when a single task costs more than this") and no event-name chips.
+- **Launch flag re-framed as a kill switch (Status: On / Off).** Same control as in round 1, but the language and placement signal "support escalation off-switch", not "per-subaccount opt-in." Default On.
+- **No spend widget on the settings tab.** Month-to-date sandbox-compute spend belongs on Usage & Costs, not duplicated on a config screen.
+- **Out of scope, routed to triage:** the existing operator-backend settings tab (Spec D §3.14) carries three fields (`auto-extend grace`, `max chain length`, `max wall-clock per task`) that are admin-confusing edge-case safety rails. Operator decision: cut them from the UI and hardcode (grace=30 min, chain=100, wall-clock=30 days). This work is a follow-up to the operator-backend build, NOT part of this build. See `tasks/todo.md` for the triage entry.
+
+Net effect on this build's UI surface: 3 new controls on the existing Operator settings tab — Status (On/Off), Browser profile retention (days), Per-task cost ceiling ($), Per-subaccount daily cost ceiling ($). Four total fields counting the cost-ceiling pair.
 
 # IEE Browser on e2b — Build Brief
 
@@ -127,12 +141,12 @@ Cold-start latency on e2b sandboxes is ~10-30s. Existing IEE browser workflows f
 
 Spec MUST define:
 
-1. **Warm-pool sizing.** Per-subaccount setting on the same surface as the operator-backend per-subaccount settings (Spec D §3.14). Default 1; range 0-5; spec author confirms upper bound against e2b cost model. Setting of 0 disables the warm pool for that subaccount (cold-start every time, accepted trade-off for low-volume subaccounts).
+1. **Warm-pool sizing.** Hardcoded to **1 per subaccount** in V1. Not user-configurable. If real production usage shows starvation, a future spec adds the per-subaccount knob back. The reasoning: a single sensible default removes a confusing knob from the admin UI; size=1 covers the human-triggered single-task case (which is what creates the cold-start UX problem) without overspending on idle compute.
 2. **Warm-pool lifecycle.** A separate service (likely `server/services/sandbox/browserWarmPool.ts`) maintains a per-subaccount queue of pre-started sandbox sessions with no profile mounted. Sessions are checked out at task dispatch (profile mount happens at check-out, not at warm-up), checked back in if the task completes quickly enough that the session is still healthy, or torn down otherwise. Default check-in policy: tear down after first use (simpler; spec author may upgrade to reuse-with-reset if profile-mount-at-dispatch makes reuse safe).
 3. **Warm-pool eviction.** Sessions older than M minutes are torn down and replaced — protects against drift between the warm session and the latest template version (per Spec B's `assertNotLatestTemplateVersion` guard). Default M = 30 min; range left to spec author.
 4. **Warm-pool starvation behaviour.** When a task arrives and no warm session is available, fall through to a cold start. NOT an error; emits a warm-pool-miss metric for capacity planning.
 5. **Cost attribution.** Warm sessions waiting on a task DO consume sandbox compute. The cost ledger records this as `source_type: 'sandbox_compute'` with a `subtype` discriminator (`warm_pool` vs `task`) so finance can see the cost separately. Spec author confirms the existing `source_type` schema supports this without a migration, or designs the minimum migration.
-6. **Per-subaccount on/off in the settings UI.** New "Warm pool size" field on the existing operator-settings tab from Spec D §3.14, OR a sibling "IEE Browser" tab if the field set grows past 1-2 items. Spec author's call.
+6. **No UI knob.** The warm-pool size is NOT exposed on the operator settings tab. Status (kill switch) controls whether the IEE browser path is enabled at all for the subaccount; that is the only warm-pool-adjacent control admins see.
 
 ### 3.5 Launch validation
 
@@ -179,8 +193,8 @@ Spec MUST define:
 2. **Warm-pool cost discriminator.** Warm sessions consume sandbox compute while idle. Spec confirms the `sandbox_compute` row carries a `subtype` field (`task` vs `warm_pool`) so finance can see warm-pool overhead separately from task compute. If the schema doesn't already support `subtype`, spec author designs the minimum migration.
 3. **Per-subaccount cost summary view.** Existing usage views already aggregate `sandbox_compute` rows by subaccount. Spec confirms IEE browser rows roll up correctly alongside `iee_dev` and `operator_managed` rows. No new dashboard required for V1.
 4. **Alarm thresholds.** Spec defines two simple alarms wired into the existing `incidentIngestor`:
-   - **Per-task alarm:** any single task that exceeds X minutes wall-clock OR Y cents of sandbox compute. Default X = 30 min, Y = 100 cents (operator confirms these once first dogfood data lands). Fires `iee_browser.task_cost_anomaly` incident.
-   - **Per-subaccount per-day alarm:** subaccount sandbox compute spend exceeds Z cents/day across all IEE browser tasks. Default Z = $5/day (500 cents) per subaccount during dogfood; tightened or relaxed once real usage data lands. Fires `iee_browser.subaccount_cost_anomaly` incident.
+   - **Per-task alarm:** any single task that exceeds Y cents of sandbox compute. Default Y = 100 cents ($1.00). Fires `iee_browser.task_cost_anomaly` incident. Per-subaccount configurable on the operator settings tab as "Per-task cost ceiling"; help text reads "Alerts you when a single task costs more than this." (Earlier v2 dual-threshold design with a minutes ceiling is dropped per v3 reframe — money is the only mental model the admin needs.)
+   - **Per-subaccount per-day alarm:** subaccount sandbox compute spend exceeds Z cents/day across all IEE browser tasks. Default Z = 500 cents ($5.00) per subaccount during dogfood; tightened or relaxed once real usage data lands. Fires `iee_browser.subaccount_cost_anomaly` incident. Per-subaccount configurable on the operator settings tab as "Per-subaccount daily cost ceiling"; help text reads "Alerts you when this subaccount's total daily browser-task cost goes over this." Event names are hidden from the admin UI; they live in the incident schema and the run log only.
 5. **First-month cost-report artefact.** 30 days after first production traffic, the spec deliverable includes a one-pager at `tasks/builds/iee-browser-on-e2b/cost-report-month-1.md` summarising: total sandbox compute spend, per-subaccount breakdown, per-skill breakdown, warm-pool overhead as % of total, alarm events fired, recommendations for tuning the warm-pool defaults and the alarm thresholds. This is a build deliverable, not a follow-up.
 
 Spec author does NOT attempt a forecast against an imaginary DO baseline. The cost data lands when real traffic lands; thresholds are tuned from observation, not estimation.
@@ -205,12 +219,12 @@ Resolved 2026-05-13 by operator post-merge audit §4 + operator clarification (p
 2. **Substrate redirect before first launch, not migration.** No DO production traffic exists. Playwright code in `worker/src/browser/` stays; the runner harness changes. New code surface is constrained to the template image, the harness entrypoint, the warm-pool service, the launch-flag primitive, the profile-key extension, and the cost-alarm wiring. The action vocabulary, contract-enforced page, login flow, artefact validator, streaming-video capture, execution loop, failure classification, and step history are NOT touched in this build.
 3. **Persistent browser profile reuses Spec D §3.13.** No parallel profile-persistence scheme. The only delta is the profile-scoping key shape (per §3.3). If a delta beyond key shape becomes necessary mid-spec, return to the operator before introducing it.
 4. **Default integration surface: extend `SandboxExecutionService` (Option A in §3.2).** Spec author may justify Option B but the bar is high; reuse beats parallel infrastructure.
-5. **Warm pool is mandatory; default size is 1 per subaccount.** Cold-start latency is unacceptable for human-triggered tasks; the warm pool exists to mask it. Range 0-5; per-subaccount configurable.
+5. **Warm pool is mandatory; size is fixed at 1 per subaccount in V1.** Cold-start latency is unacceptable for human-triggered tasks; the warm pool exists to mask it. Not user-configurable in V1 (simpler admin UI, sensible default avoids the knob). If real usage shows starvation, a future spec adds the per-subaccount knob.
 6. **First-launch criteria are operator-gated, not metric-gated.** Dogfood subaccount runs first; non-dogfood subaccounts opt in on operator approval after the §3.5 first-launch criteria are met (staging fixtures pass + dogfood soak + cost alarms within thresholds). No shadow window or success-rate cutover threshold (no DO baseline to compare to).
 7. **DO code paths come out of the repo in the same PR as the e2b harness lands.** Not a follow-up. The doc-sync gate enforces it.
 8. **Cost is observation-driven, not forecast-driven.** Per-task and per-subaccount cost rows + two alarm thresholds (§3.7) provide the visibility. A 30-day cost-report artefact is a build deliverable, not a follow-up. Thresholds are tuned from real usage data, not estimated upfront.
 9. **One-vendor risk is acknowledged and accepted.** The `SandboxExecutionService` provider abstraction is the mitigation. If e2b becomes unavailable, the provider contract supports a future second provider; that work is out of scope here.
-10. **No customer-facing UI changes in V1.** The substrate is invisible to customers. Internal admin surfaces (per-subaccount settings additions on the existing Spec D §3.14 tab, the launch flag toggle, the warm-pool size field, the GC retention field) are the only UI additions, all admin-scoped.
+10. **No customer-facing UI changes in V1.** The substrate is invisible to customers. Internal admin surfaces (additions to the existing Spec D §3.14 operator settings tab) are the only UI changes, all admin-scoped: **Status** (kill switch, On/Off, default On), **Browser profile retention** (days, default 30, range 7-90), **Per-task cost ceiling** ($, default $1.00), **Per-subaccount daily cost ceiling** ($, default $5.00). No warm-pool knob. No minutes ceiling. No event-name chips. No spend widget. Plain-English help text on every field.
 
 ## 5. Out of scope (explicit non-goals)
 
@@ -241,7 +255,7 @@ Resolved 2026-05-13 by operator post-merge audit §4 + operator clarification (p
 
 Recommended order:
 
-1. **Operator reviews this brief, locks scope.** One open question: confirm the 30-day GC retention default (or pick a different value in the 7-90 day range — see §3.3 explainer). All other open items from v1 are resolved: no cost forecast required (no DO baseline exists), warm-pool default 1 per subaccount stands.
+1. **Operator reviews this brief, locks scope.** GC retention default confirmed at 30 days (range 7-90, per-subaccount configurable). Warm-pool size fixed at 1 in V1 (not user-configurable). All other open items from v1/v2 resolved.
 2. Spawn a new Claude Code session for the build slug; the session adopts `spec-coordinator`.
 3. Session runs: brief intake (this doc) → spec authoring → `spec-reviewer` (Codex loop) → `chatgpt-spec-review` (manual rounds) → handoff to `feature-coordinator`.
 4. Build session ships: the `infra/sandbox-templates/iee-browser/` template, the sandbox-harness entrypoint, the `SandboxExecutionService` browser-class extension (or Option B `BrowserExecutionService`), the warm-pool service, the launch-flag primitive + per-subaccount settings additions (warm-pool size, GC retention window), the profile-key extension on the Spec D primitive, the cost-alarm wiring (per-task + per-subaccount), the 30-day cost-report artefact, the DO code-path deletions, and the doc-sync updates.
