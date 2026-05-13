@@ -57,6 +57,22 @@ router.get(
   })
 );
 
+// ─── Get a single memory block ──────────────────────────────────────────────
+
+router.get(
+  '/api/memory-blocks/:id',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const block = await memoryBlockService.getBlockById(req.params.id, req.orgId!);
+    if (!block) {
+      res.status(404).json({ error: 'Memory block not found' });
+      return;
+    }
+    res.json(block);
+  }),
+);
+
 // ─── Create a memory block ──────────────────────────────────────────────────
 // Guard: name must not be in PROTECTED_BLOCK_NAMES — reserves the name so a
 // user-authored block cannot squat it before the seeder runs.
