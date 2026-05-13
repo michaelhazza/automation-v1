@@ -108,8 +108,103 @@ None — banner copy is locked, route shape locked, scope unchanged.
 
 **Verdict:** APPROVED_AFTER_FIXES (all 8 findings closed in-plan; no operator approval needed for any individual fix). Plan re-reviewable at `tasks/builds/memory-improvements/plan.md`.
 
-**Round count:** 1 / 3 cap. Operator may request Round 2 if additional concerns surface during plan-gate review.
+**Round count:** 1 / 3 cap. Operator requested Round 2 — see below.
 
-**Next step:** plan-gate — operator approves (`proceed`) or revises (`revise` with feedback).
+**Auto-commit:** see commit `331ee9cc` `docs(memory-improvements): chatgpt-plan-review R1 — apply 2 blockers + 6 tightenings`.
 
-**Auto-commit:** see commit message `docs(memory-improvements): chatgpt-plan-review R1 — apply 2 blockers + 6 tightenings`.
+---
+
+## Round 2 — response received + triage applied 2026-05-13
+
+**Operator pasted ChatGPT-web R2 response.** Continuation inline in the main session (SendMessage tool unavailable; agent contract permits inline triage).
+
+**Verdict:** CHANGES_REQUESTED → APPROVED_AFTER_FIXES — 3 BLOCKERs + 4 TIGHTENINGs (plus 1 optional polish). All TECHNICAL, auto-applied. ChatGPT also confirmed all 8 R1 fixes were adequate (no R1-followup findings).
+
+### F1 (R2) — BLOCKER (TECHNICAL, AUTO-APPLIED) — MV aggregate SUMs may return NULL
+
+**Issue:** PostgreSQL `SUM(... FILTER (WHERE measured_entries))` returns NULL when the filtered set is empty, not 0. That blurs the semantic distinction: NULL ratio should mean "denominator unknown / unavailable", 0 count should mean "measured count exists but total is zero". Without COALESCE, `total_injected_entries` etc. become nullable in the Drizzle declaration and the UI must defensively handle both nulls and zeros for the same conceptual state.
+
+**Fix applied:** Migration 0343 restructured into two CTEs:
+1. `per_run` — unchanged guarded array-length per row.
+2. `per_agent_sums` — wraps every `SUM(...)` in `COALESCE(..., 0)` so totals are never null.
+The outer SELECT computes ratios from the COALESCEd totals using `CASE WHEN total > 0 THEN ... ELSE NULL`. Drizzle MV declaration in Chunk 6 updated: totals declared `.notNull()`, ratios remain nullable.
+
+### F2 (R2) — BLOCKER (TECHNICAL, AUTO-APPLIED) — jsonb_array_length can throw on malformed data
+
+**Issue:** `jsonb_array_length()` throws if the argument is not a JSON array (e.g. legacy row with `{}`, malformed shape, or any non-array JSONB value). One bad historical row would brick the nightly refresh.
+
+**Fix applied:** Every `jsonb_array_length` call wrapped in a `CASE WHEN jsonb_typeof(...) = 'array' THEN jsonb_array_length(...) ELSE 0` guard. NULL injected_entry_ids continues to map to NULL (load-bearing for measured/unmeasured discrimination). Other arrays (cited, applied, citations) treat non-array JSONB as 0.
+
+### F3 (R2) — BLOCKER (TECHNICAL, AUTO-APPLIED) — cosineSimilarity/scoreCandidates contract ambiguity
+
+**Issue:** Chunk 9 contract said `cosineSimilarity` throws on length mismatch, then error-handling said length mismatch is treated as candidate-level skip. Real ambiguity: does `scoreCandidates` catch the throw, or does it propagate? Without explicit boundary, one bad embedding could fail the whole ranker.
+
+**Fix applied:** Contract now explicit:
+- `cosineSimilarity` may throw on length mismatch, NaN element, or empty vector.
+- `scoreCandidates` is the per-candidate boundary that catches the throw, excludes the malformed candidate from the filtered result, and continues scoring the rest. No global fallback. No degraded reason emitted at this granularity.
+- New Chunk 9 test case added: "Per-candidate vector-error skip — one malformed candidate in a pool of N does NOT fail the whole `scoreCandidates` call."
+
+### T1 (R2) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — writeVersionRow null acceptance documented
+
+**Issue:** Chunk 2 said `writeVersionRow` returning null (consecutive identical content) causes a skip, but didn't state whether the resulting "Sources tab shows nothing for this block" is acceptable.
+
+**Fix applied:** Chunk 2 now carries an explicit "Acceptance" note: when `writeVersionRow` returns null, lineage rows are deliberately not written — consistent with the lineage contract being "per committed block version". Log line changed from WARN to INFO (`synthesis.lineage_skipped_unchanged_content`) to reflect "intentional, not an error" status.
+
+### T2 (R2) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — 403 check needs UUID canonicalisation
+
+**Issue:** `req.params.orgId !== req.orgId` raw-string compare is brittle if casing differs (path params are user-controlled). Plan said the 403-before-query rule was the canonical cross-tenant defence on the MV route — that defence is undermined by string-comparison fragility.
+
+**Fix applied:** Architecture-notes 403 snippet now reads:
+```typescript
+const pathOrgId = req.params.orgId?.toLowerCase();
+const sessionOrgId = req.orgId?.toLowerCase();
+if (!sessionOrgId || pathOrgId !== sessionOrgId) {
+  return res.status(403).json({ error: 'Forbidden' });
+}
+```
+
+### T3 (R2) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — Admin-bypass clarification
+
+**Issue:** Chunk 5 said the MV is "queryable via withAdminConnection() or via the route's getOrgScopedDb() + WHERE filter." That wording accidentally blessed admin reads outside the refresh path.
+
+**Fix applied:** Chunk 5 access-shape contract narrowed:
+- `withAdminConnection()` permitted ONLY in `refreshMemoryUtility30dJob.ts` for `REFRESH MATERIALIZED VIEW CONCURRENTLY`.
+- All product reads must filter by `organisation_id` in SQL after the route-level 403 check.
+- No unfiltered MV SELECT exists in any request path.
+- Reviewer-grep target: `mvMemoryUtility30d` references outside the refresh job must all carry a `.where(eq(mvMemoryUtility30d.organisationId, ...))` filter.
+
+### T4 (R2) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — DB-anchored time for daily-series window
+
+**Issue:** Chunk 7 helper signature took `now: Date` and Chunk 6 passed `new Date()`. App-server clock drift could shift the 30-day window vs the JS bucket boundaries, leading to "which runs are in window" disagreeing with "which UTC days the buckets represent."
+
+**Fix applied:** Chunk 6 route service now reads `transaction_timestamp()` from the same SQL query that fetches the agent_runs rows, and passes it to `bucketDailySeries(rows, db_now)`. Chunk 7 helper signature comment updated to require DB-derived time, not `new Date()`. Both clocks anchored to the DB.
+
+### Polish (R2) — Optional EXPLAIN target pinned
+
+**Fix applied:** Phase 4 acceptance checklist now lists the suggested EXPLAIN ANALYZE query (`EXPLAIN ANALYZE SELECT transaction_timestamp() AS db_now, ... FROM agent_runs WHERE organisation_id = $1 AND created_at > transaction_timestamp() - interval '30 days';`) and the expected index target (`agent_runs (organisation_id, created_at)`).
+
+### Out-of-scope findings
+
+None. Every R2 finding was TECHNICAL.
+
+### User-facing findings
+
+None. Banner copy, route shape, scope all unchanged.
+
+### Round 1 fix verification
+
+ChatGPT R2 confirmed all 8 Round 1 fixes (F1, F2, T1, T2, T3, T4, T5, T6) are adequate. No R1-followup findings raised.
+
+---
+
+## Outcome — APPROVED, plan locked
+
+**Verdict:** APPROVED. ChatGPT R2 close: *"After F1/F2/F3 are patched [in R2], this plan is strong enough to build."* All three patched.
+
+**Plan header updated:** Status changed from `plan-gate (ready for operator review before execution)` → `LOCKED — ready for Phase 2 execution (Sonnet session, new conversation)`.
+
+**Round count:** 2 / 3 cap consumed. No further plan rounds planned.
+
+**Next step:** Operator launches Phase 2 execution in a fresh Sonnet session (per CLAUDE.md model-guidance — execution is token-intensive and Sonnet handles a clear plan equally well at lower cost). The locked plan at `tasks/builds/memory-improvements/plan.md` is the input.
+
+**Auto-commit:** see commit message `docs(memory-improvements): chatgpt-plan-review R2 — apply 3 blockers + 4 tightenings, lock plan`.

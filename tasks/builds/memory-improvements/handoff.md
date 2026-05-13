@@ -115,3 +115,56 @@ These are spec-derived acceptance criteria the build phase must satisfy. They ar
 ## Phase 1 status: complete
 
 Spec is locked at `Status: accepted`. Phase 2 may begin.
+
+---
+
+## Phase 2 (BUILD) — plan locked 2026-05-13, awaiting Sonnet execution session
+
+**Plan path:** [`tasks/builds/memory-improvements/plan.md`](./plan.md) (LOCKED, 11 chunks)
+**Plan-review:** chatgpt-plan-review 2 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs, R2 closed 3 BLOCKERs + 4 TIGHTENINGs + 1 polish. All 15 findings TECHNICAL, auto-applied. R2 verdict APPROVED. Session log: [`tasks/review-logs/chatgpt-plan-review-memory-improvements-2026-05-13T02-35-47Z.md`](../../review-logs/chatgpt-plan-review-memory-improvements-2026-05-13T02-35-47Z.md)
+**S1 sync:** absorbed PR #287 sandbox-isolation, PR #286 operator-session-identity, PR #288 operator-backend (commit `4a7da3d4`); absorbed PR #292 tracking-files cleanup (commit `7d64cc9e`).
+**Environment fixes applied (durable, will inherit in Sonnet session):**
+- `git config --global http.sslBackend schannel` (Windows native cert store for git)
+- `npm config set cafile "C:\Users\Michael\.npmrc-ca-bundle.pem"` (270 Windows root certs extracted via PowerShell — file at `C:\Users\Michael\.npmrc-ca-bundle.pem`)
+- `npm install` now works; `npm run typecheck` PASSES clean on the integrated branch state.
+
+### Resume contract for Sonnet session
+
+Per CLAUDE.md model-guidance: execution is token-intensive and Sonnet handles a clear plan equally well at lower cost. The Opus session locked the plan; Sonnet runs the per-chunk loop.
+
+**Recommended entry pattern (one of the two):**
+
+1. **Direct execution skill (cleanest):** Open a new Claude Code session on Sonnet, run:
+   ```
+   /superpowers:subagent-driven-development tasks/builds/memory-improvements/plan.md
+   ```
+   The skill reads the plan, dispatches one builder sub-agent per chunk, enforces G1 per chunk. After all 11 chunks land, manually invoke the branch-level review pass:
+   - `spec-conformance: verify the current branch against its spec`
+   - `pr-reviewer: review the full branch diff`
+   - `dual-reviewer: ...` (will REVIEW_GAP — Codex CLI unavailable on this host)
+   - `adversarial-reviewer: ...` (auto-trigger on RLS/migration/route diff per §5.1.2)
+   - Doc-sync sweep + handoff write + current-focus → REVIEWING
+
+2. **Resume feature-coordinator (full automation, but watch for re-architect risk):** `launch feature coordinator` on Sonnet. The playbook detects status: BUILDING, reads the handoff. **Pre-empt this hazard:** the playbook Step 3 unconditionally re-invokes architect to write `plan.md` — if you take this path, manually instruct the coordinator to SKIP Steps 2-5 (S1 sync, architect, chatgpt-plan-review, plan-gate) because they're complete. Start at Step 6 (per-chunk loop).
+
+**Plan-time findings to keep in mind during build:**
+- **R4 / Chunk 2 — `writeVersionRow` at auto-synthesis:** the synthesis service does NOT currently write `memory_block_versions` rows. Chunk 2 must wire `writeVersionRow({changeSource: 'auto_synthesis'})` inside the block-insert transaction, then write lineage rows against the returned version id. Operator-approved.
+- **F1 / Chunk 5 — migration 0343, not appended to 0334:** MV + null-stable unique index + initial refresh land in new file `migrations/0343_memory_utility_30d.sql` (after main's 0335-0342). 0334 stays single-purpose (column only). Don't append.
+- **F2 / Chunk 5 — null-stable unique index:** `COALESCE(subaccount_id, '00000000-0000-0000-0000-000000000000'::uuid)` so REFRESH CONCURRENTLY works. Two acceptance checks listed in §9 Phase 2 of the plan.
+- **F1 R2 / Chunk 5 — MV aggregates COALESCEd to 0:** totals are NOT NULL in Drizzle declaration; ratios remain nullable. Two-CTE shape in the migration.
+- **F2 R2 / Chunk 5 — `jsonb_typeof` guards on every `jsonb_array_length`:** legacy rows with non-array JSONB do not brick the nightly refresh.
+- **F3 R2 / Chunk 9 — `scoreCandidates` is the per-candidate boundary:** catches `cosineSimilarity` throws, skips the malformed candidate, continues scoring the rest. No global fallback. Test case added.
+- **T4 R2 / Chunks 6+7 — DB-anchored time:** route reads `transaction_timestamp()` from the same SQL query and passes it to `bucketDailySeries`. Never `new Date()`.
+- **T2 R2 / Chunks 3+6 — UUID canonicalisation:** 403-before-query compares `req.params.orgId?.toLowerCase()` to `req.orgId?.toLowerCase()`.
+
+**Pre-flight verifications recorded in the plan that the build must reconfirm:**
+- `agentExecutionService.ts:1349-1356` line anchors still valid (Chunk 4).
+- `memoryBlockSynthesisService.ts:195-206` line anchors still valid (Chunk 2).
+- 16:00 UTC cron slot still free (Chunk 5 — grep `agentScheduleService.ts` for `'16'`).
+- No 0343 migration-number collision with main (re-fetch + check before commit).
+
+**Phase 2 review-pass posture:**
+- `spec-conformance` MUST run on the full branch diff after all chunks land.
+- `pr-reviewer` MUST run after spec-conformance.
+- `dual-reviewer` will auto-skip with `REVIEW_GAP: Codex CLI unavailable` per handoff Phase 1 notes — chatgpt-pr-review in Phase 3 covers second-opinion.
+- `adversarial-reviewer` will auto-trigger (migration 0333 RLS table; migration 0343 MV with RLS-exclusion; two new orgId-scoped routes; `agentExecutionService` change touches request-path code).

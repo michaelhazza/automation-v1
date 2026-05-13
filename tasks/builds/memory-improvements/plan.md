@@ -1,12 +1,13 @@
 # Plan — memory-improvements
 
-**Status:** plan-gate (ready for operator review before execution)
+**Status:** LOCKED — ready for Phase 2 execution (Sonnet session, new conversation)
 **Spec:** [`docs/superpowers/specs/2026-05-13-memory-improvements-spec.md`](../../../docs/superpowers/specs/2026-05-13-memory-improvements-spec.md) (Status: accepted, locked 2026-05-13)
 **Handoff:** [`tasks/builds/memory-improvements/handoff.md`](./handoff.md)
 **Build slug:** `memory-improvements`
 **Branch:** `claude/add-memvid-integration-ehAOr`
 **Authored by:** architect (Opus, inline)
 **Date:** 2026-05-13
+**Plan-review:** chatgpt-plan-review 2 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs, R2 closed 3 BLOCKERs + 4 TIGHTENINGs. All 15 findings TECHNICAL, auto-applied. APPROVED post-R2.
 
 ---
 
@@ -122,10 +123,12 @@ If S2 sync at finalisation discovers a number collision (someone lands 0333, 033
 - **`GET /api/orgs/:orgId/memory-blocks/:blockId/sources`** — `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`. Pattern matches `server/routes/memoryBlocks.ts:46-49`.
 - **`GET /api/orgs/:orgId/usage/memory-utility`** — `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW)`. Pattern matches `server/routes/llmUsage.ts:27-30`.
 
-**`requireOrgPermission` does NOT automatically reject path-org / session-org mismatch.** Both routes must perform the explicit 403-before-query check inside the handler:
+**`requireOrgPermission` does NOT automatically reject path-org / session-org mismatch.** Both routes must perform the explicit 403-before-query check inside the handler. **UUID canonicalisation is required (R2 F5)** because path params are user-controlled and casing could differ — without canonicalisation, a request with `/api/orgs/ABC.../...` against a session orgId stored lower-case would mismatch even when both refer to the same org:
 
 ```typescript
-if (req.params.orgId !== req.orgId) {
+const pathOrgId = req.params.orgId?.toLowerCase();
+const sessionOrgId = req.orgId?.toLowerCase();
+if (!sessionOrgId || pathOrgId !== sessionOrgId) {
   return res.status(403).json({ error: 'Forbidden' });
 }
 ```
@@ -307,9 +310,11 @@ D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail op
 - Insert uses `onConflictDoNothing()` keyed on the unique constraint `(block_version_id, source_entry_id_hash)`.
 - Entire chunk runs inside a single transaction with the block insert — atomicity per §13.1.
 
+**Acceptance — writeVersionRow null is intentional, not a gap (R2 F4):** When `writeVersionRow()` returns `null` (consecutive identical content → no new `memory_block_versions` row committed), lineage rows are deliberately not written. The Sources UI may render "No lineage data available" for that block/version. This is consistent with the lineage contract being **per committed block version**, not per synthesis attempt — if no new version was committed, there is no version row to FK against, and writing lineage rows against a stale version would mis-attribute the sources.
+
 **Error handling:**
 - Hash derivation: pure synchronous SHA-256, no error path.
-- `writeVersionRow` may return `null` for consecutive identical content (existing behaviour). If null, log warn and skip lineage write — lineage rows without a block version row are invalid.
+- `writeVersionRow` may return `null` for consecutive identical content (existing behaviour). If null, log INFO `synthesis.lineage_skipped_unchanged_content` and skip lineage write — see Acceptance note above. NOT an error, NOT a warning.
 - Database insert failures propagate (transaction rolls back, no orphan rows).
 - **Agent-name JOIN — separate the two failure modes** (a query error inside an open Postgres transaction leaves the transaction aborted, so swallowing it and continuing would silently fail every subsequent insert in the same `tx`):
   - **No row found** (JOIN returns 0 rows because the run was hard-deleted or the agent row is missing): treat as expected. Write the lineage row with `source_run_id = entry.agentRunId`, `source_run_id_hash = sha256(entry.agentRunId)`, `source_run_label_at_capture = null`. Log `synthesis.run_label_unresolved` at INFO. The FK + hash carry forward; the label can be re-derived later. NO try/catch — the SELECT just returned no rows, that's not an error.
@@ -455,8 +460,12 @@ ALTER TABLE agent_runs
 **spec_sections:** 4 Phase 2, 5.1, 5.2, 6.3, 7.3, 8.1, 13.4
 
 **Module shape:**
-- *Public interface this chunk exposes:* the `mv_memory_utility_30d` materialised view (Postgres surface), plus one new pg-boss job (`refresh_memory_utility_30d` queue) on a nightly cron `'0 16 * * *'` UTC. The view is queryable from any read service via `withAdminConnection()` or via the route's `getOrgScopedDb()` + WHERE filter.
-- *What stays hidden:* the `WITH per_run` CTE shape, the `CASE WHEN ... measured_entries` discriminator logic, the `REFRESH MATERIALIZED VIEW CONCURRENTLY` plumbing, advisory-lock semantics inside the refresh path, pg-boss schedule registration in `agentScheduleService.ts`.
+- *Public interface this chunk exposes:* the `mv_memory_utility_30d` materialised view (Postgres surface), plus one new pg-boss job (`refresh_memory_utility_30d` queue) on a nightly cron `'0 16 * * *'` UTC.
+- *Access-shape contract (R2 F6 — narrowed to prevent admin bypass on product reads):*
+  - **`withAdminConnection()` is permitted ONLY for `REFRESH MATERIALIZED VIEW CONCURRENTLY`** — i.e. exclusively inside the refresh job at `server/jobs/refreshMemoryUtility30dJob.ts`.
+  - **All product reads MUST filter by `organisation_id` in SQL** after the route-level path/session 403 canonicalisation check has passed (see Chunk 6 route handler).
+  - **No unfiltered MV SELECT exists in any request path.** Reviewer-grep target: `mvMemoryUtility30d` references outside `refreshMemoryUtility30dJob.ts` must all be inside a query that includes `.where(eq(mvMemoryUtility30d.organisationId, ...))` or equivalent.
+- *What stays hidden:* the `WITH per_run` CTE shape, the COALESCE-guarded aggregate logic, the `jsonb_typeof` array-type guards, the `REFRESH MATERIALIZED VIEW CONCURRENTLY` plumbing, advisory-lock semantics inside the refresh path, pg-boss schedule registration in `agentScheduleService.ts`.
 
 **Files created:**
 - `migrations/0343_memory_utility_30d.sql` — materialised view definition + null-stable unique index + initial refresh.
@@ -484,32 +493,63 @@ CREATE MATERIALIZED VIEW mv_memory_utility_30d AS
       r.subaccount_id,
       r.agent_id,
       r.created_at,
-      CASE WHEN r.injected_entry_ids IS NULL THEN NULL
-           ELSE jsonb_array_length(r.injected_entry_ids) END AS injected_entry_count,
-      jsonb_array_length(r.cited_entry_ids) AS cited_entry_count,
-      jsonb_array_length(r.applied_memory_block_ids) AS injected_block_count,
-      jsonb_array_length(r.applied_memory_block_citations) AS cited_block_count,
+      -- Guarded jsonb_array_length: legacy or malformed rows (non-array
+      -- JSONB values) would otherwise throw and brick the nightly refresh.
+      -- Per ChatGPT plan-review R2 F2.
+      CASE
+        WHEN r.injected_entry_ids IS NULL THEN NULL
+        WHEN jsonb_typeof(r.injected_entry_ids) = 'array' THEN jsonb_array_length(r.injected_entry_ids)
+        ELSE 0
+      END AS injected_entry_count,
+      CASE
+        WHEN jsonb_typeof(r.cited_entry_ids) = 'array' THEN jsonb_array_length(r.cited_entry_ids)
+        ELSE 0
+      END AS cited_entry_count,
+      CASE
+        WHEN jsonb_typeof(r.applied_memory_block_ids) = 'array' THEN jsonb_array_length(r.applied_memory_block_ids)
+        ELSE 0
+      END AS injected_block_count,
+      CASE
+        WHEN jsonb_typeof(r.applied_memory_block_citations) = 'array' THEN jsonb_array_length(r.applied_memory_block_citations)
+        ELSE 0
+      END AS cited_block_count,
       (r.injected_entry_ids IS NOT NULL) AS measured_entries
     FROM agent_runs r
     WHERE r.created_at > now() - interval '30 days'
+  ),
+  -- Aggregate sums, COALESCEd to 0 to preserve the count vs ratio semantic
+  -- distinction: a NULL aggregate from SUM-on-empty-filter would blur "no
+  -- measured runs" (which should be 0 count + NULL ratio) with "no data
+  -- whatsoever". Per ChatGPT plan-review R2 F1.
+  per_agent_sums AS (
+    SELECT
+      organisation_id, subaccount_id, agent_id,
+      COUNT(*) FILTER (WHERE measured_entries) AS runs_measured_entries,
+      COUNT(*) FILTER (WHERE NOT measured_entries) AS runs_unmeasured_entries,
+      COALESCE(SUM(injected_entry_count) FILTER (WHERE measured_entries), 0) AS total_injected_entries,
+      COALESCE(SUM(cited_entry_count) FILTER (WHERE measured_entries), 0) AS total_cited_entries,
+      COALESCE(SUM(injected_block_count), 0) AS total_injected_blocks,
+      COALESCE(SUM(cited_block_count), 0) AS total_cited_blocks
+    FROM per_run
+    GROUP BY organisation_id, subaccount_id, agent_id
   )
   SELECT
     organisation_id, subaccount_id, agent_id,
-    COUNT(*) FILTER (WHERE measured_entries) AS runs_measured_entries,
-    COUNT(*) FILTER (WHERE NOT measured_entries) AS runs_unmeasured_entries,
-    SUM(injected_entry_count) FILTER (WHERE measured_entries) AS total_injected_entries,
-    SUM(cited_entry_count) FILTER (WHERE measured_entries) AS total_cited_entries,
-    SUM(injected_block_count) AS total_injected_blocks,
-    SUM(cited_block_count) AS total_cited_blocks,
-    CASE WHEN SUM(injected_entry_count) FILTER (WHERE measured_entries) > 0
-         THEN SUM(cited_entry_count) FILTER (WHERE measured_entries)::numeric
-              / SUM(injected_entry_count) FILTER (WHERE measured_entries)
+    runs_measured_entries,
+    runs_unmeasured_entries,
+    total_injected_entries,
+    total_cited_entries,
+    total_injected_blocks,
+    total_cited_blocks,
+    -- Ratios stay NULL when their denominator is zero — UI renders gaps,
+    -- never zeros. Per spec §6.6 NULL-vs-zero convention.
+    CASE WHEN total_injected_entries > 0
+         THEN total_cited_entries::numeric / total_injected_entries
          ELSE NULL END AS entry_utility_30d,
-    CASE WHEN SUM(injected_block_count) > 0
-         THEN SUM(cited_block_count)::numeric / SUM(injected_block_count)
+    CASE WHEN total_injected_blocks > 0
+         THEN total_cited_blocks::numeric / total_injected_blocks
          ELSE NULL END AS block_utility_30d
-  FROM per_run
-  GROUP BY organisation_id, subaccount_id, agent_id;
+  FROM per_agent_sums;
 
 -- Null-stable unique index for REFRESH MATERIALIZED VIEW CONCURRENTLY.
 -- PostgreSQL treats NULL ≠ NULL in plain unique indexes, so two rows with
@@ -586,7 +626,7 @@ REFRESH MATERIALIZED VIEW mv_memory_utility_30d;
 - Service signature: `memoryUtilityQueryService.getMemoryUtilityForOrg(organisationId: string) → Promise<MemoryUtilityPayload>`.
 - Internal split:
   - `agents[]` is fetched via `db.select().from(mvMemoryUtility30d).where(eq(mvMemoryUtility30d.organisationId, orgId))`.
-  - `dailySeries[]` is computed by (a) fetching raw `agent_runs` rows for the last 30 days filtered by `eq(agentRuns.organisationId, orgId)` AND `gt(agentRuns.createdAt, sql\`now() - interval '30 days'\`)`, (b) passing them to the pure helper `bucketDailySeries()` from Chunk 7.
+  - `dailySeries[]` is computed by (a) fetching raw `agent_runs` rows for the last 30 days **and a DB-anchored `now` timestamp in the same query** — `SELECT transaction_timestamp() AS db_now, ... FROM agent_runs WHERE organisation_id = $1 AND created_at > transaction_timestamp() - interval '30 days'`. (b) Pass both the rows and `db_now` to the pure helper `bucketDailySeries(rows, db_now)`. **Per R2 F7:** never pass `new Date()` from the app server — the 30-day SQL window and the JS bucket boundaries must share one clock to avoid drift between which runs are "in window" and which UTC days the buckets represent.
 - Response: exactly per spec §6.6 `MemoryUtilityPayload`.
 - HTTP errors:
   - `403` for path-org mismatch (before query).
@@ -599,14 +639,16 @@ import { pgMaterializedView, uuid, integer, numeric } from 'drizzle-orm/pg-core'
 
 export const mvMemoryUtility30d = pgMaterializedView('mv_memory_utility_30d', {
   organisationId: uuid('organisation_id').notNull(),
-  subaccountId: uuid('subaccount_id'),
+  subaccountId: uuid('subaccount_id'),                              // nullable: NULL = subaccount-less agent (e.g. system agent)
   agentId: uuid('agent_id').notNull(),
   runsMeasuredEntries: integer('runs_measured_entries').notNull(),
   runsUnmeasuredEntries: integer('runs_unmeasured_entries').notNull(),
-  totalInjectedEntries: integer('total_injected_entries'),
-  totalCitedEntries: integer('total_cited_entries'),
-  totalInjectedBlocks: integer('total_injected_blocks'),
-  totalCitedBlocks: integer('total_cited_blocks'),
+  // Totals are COALESCE'd to 0 in the SELECT (per R2 F1); declare NOT NULL.
+  totalInjectedEntries: integer('total_injected_entries').notNull(),
+  totalCitedEntries: integer('total_cited_entries').notNull(),
+  totalInjectedBlocks: integer('total_injected_blocks').notNull(),
+  totalCitedBlocks: integer('total_cited_blocks').notNull(),
+  // Ratios remain nullable: NULL = denominator zero = "no signal", never 0.
   entryUtility30d: numeric('entry_utility_30d'),
   blockUtility30d: numeric('block_utility_30d'),
 }).existing();
@@ -662,7 +704,11 @@ export type DailyBucket = {
 
 export function bucketDailySeries(
   rows: RunForBucketing[],
-  now: Date                    // injected for testability — caller passes new Date()
+  now: Date                    // R2 F7: caller passes DB-derived transaction_timestamp(),
+                               // NOT new Date(). Pure helper does not care which clock —
+                               // the contract is that the same clock anchors both the
+                               // 30-day window (SQL side) and the bucket boundaries (JS side).
+                               // Tests inject deterministic fixtures.
 ): DailyBucket[];               // always exactly 30 entries, ordered oldest → newest
 ```
 
@@ -799,10 +845,19 @@ function getRetrievalConfig(): { semanticEnabled: boolean; threshold: number } {
 
 // Pure helpers (zero DB imports):
 
-// Cosine over two equal-length vectors. Throws on length mismatch.
+// Cosine over two equal-length vectors. Throws on length mismatch or invalid
+// vector shape (NaN element, empty vector). Caller MUST handle the throw —
+// per R2 F3, scoreCandidates is the boundary that catches per-candidate
+// vector errors so one bad embedding does not crash the whole ranker.
 export function cosineSimilarity(a: number[], b: number[]): number;
 
 // Returns candidates with finalScore set, filtered to threshold.
+// Per-candidate boundary: if cosineSimilarity throws for any candidate
+// (e.g. mismatched embedding dimensions, NaN, empty vector), that candidate
+// is silently excluded from the filtered result and does NOT trigger global
+// fallback. The rest of the candidate pool continues to score normally.
+// No degraded reason emitted at this granularity — global fallback only
+// fires via recallFallbackPredicate when the filtered count is zero.
 export function scoreCandidates<T extends { embedding: number[] }>(opts: {
   candidates: T[];
   queryEmbedding: number[];
@@ -824,7 +879,7 @@ export function recallFallbackPredicate(opts: {
 **Error handling:**
 - Embedding call wrapped in try/catch. Caught error → emit + fall back. Never rethrow.
 - Catch is scoped to the embedding fetch only — not the whole `assembleKnowledgeForRun` (the existing `buildDegradedResult('pool_query_failed')` paths cover other failures).
-- Length mismatch in `cosineSimilarity` (e.g. dim 1536 vs dim 0 because a chunk had no embedding): treat as a candidate-level skip (don't score it; default `finalScore = 0`; do not emit a degraded reason since other candidates may still score).
+- Length mismatch in `cosineSimilarity` (e.g. dim 1536 vs dim 0 because a chunk had no embedding), NaN elements, or any other vector-shape error: `cosineSimilarity` throws; `scoreCandidates` catches the throw per-candidate, excludes that candidate from the filtered result, and continues scoring the rest of the pool. NO global fallback. NO degraded reason emitted — degraded reasons fire only via `recallFallbackPredicate` when the entire filtered set is empty.
 
 **Test cases (per spec §12.1):**
 - Cosine math against fixed test vectors (orthogonal → 0, identical → 1.0, anti-parallel → -1.0).
@@ -832,6 +887,7 @@ export function recallFallbackPredicate(opts: {
 - Empty-after-semantic predicate: `{filteredCount: 0, originalCount: 5}` → true; `{filteredCount: 0, originalCount: 0}` → false; `{filteredCount: 2, originalCount: 5}` → false.
 - Embedding-null fallback: confirmed by the recall-fallback predicate handling category-level zero state.
 - Mixed-category fallback: chunks filtered to zero AND blocks keep non-empty → only chunks emit `retrieval.empty_after_semantic`. (Observability-side assertion exercised in Chunk 10's wiring; the pure helper here only owns the predicate.)
+- **Per-candidate vector-error skip (R2 F3):** one malformed candidate in a pool of N (length-mismatch embedding, NaN element, empty vector) does NOT fail the whole `scoreCandidates` call. Expected: the malformed candidate is excluded from the filtered result; the remaining N-1 candidates score normally. NO global fallback triggered.
 - Determinism: shuffled input candidate order produces identical (per-key) scored output (§8.21).
 
 **Verification commands:**
@@ -994,7 +1050,7 @@ Copied verbatim from [`handoff.md` § Build-phase acceptance checklist](./handof
 
 ### Phase 4 (B2 — Dashboard)
 
-- [ ] EXPLAIN the daily-series query against a sample dataset. Confirm it's index-covered or fast enough to ship as a live read.
+- [ ] EXPLAIN the daily-series query against a sample dataset. Confirm it's index-covered or fast enough to ship as a live read. Suggested EXPLAIN target (per R2 polish): `EXPLAIN ANALYZE SELECT transaction_timestamp() AS db_now, id, created_at, injected_entry_ids, cited_entry_ids, applied_memory_block_ids, applied_memory_block_citations FROM agent_runs WHERE organisation_id = $1 AND created_at > transaction_timestamp() - interval '30 days';`. Pin the expected index shape on `agent_runs (organisation_id, created_at)` — this route is live-read and could become hot if Usage is checked frequently.
 - [ ] EXPLAIN the reverse-lineage query (`COUNT(*) GROUP BY source_entry_id_hash`) — if cost is materially worse than expected, default the UI to per-row "Expand" affordance instead of any always-on default.
 - [ ] Verify the dashboard banner text matches the operator-approved copy: *"Runs predating the entry-manifest migration are excluded from entry utility calculations. Agent table refreshes nightly; charts reflect live run data. Citation detection is heuristic, so figures are directional."*
 - [ ] Route `GET /api/orgs/:orgId/usage/memory-utility` returns HTTP 403 (not 404, not 500) when `:orgId` does not match the authenticated session organisation.
