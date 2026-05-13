@@ -44,7 +44,7 @@ import {
   AUTO_EXTEND_GRACE_MINUTES,
   MAX_CHAIN_LENGTH,
   MAX_WALL_CLOCK_PER_TASK_DAYS,
-} from '../operatorSettingsDefaults.js';
+} from '../operatorBackend/operatorSettingsDefaults.js';
 import {
   decideChainResumeOutcome,
 } from './operatorManagedBackendPure.js';
