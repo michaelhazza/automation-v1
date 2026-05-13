@@ -7,6 +7,7 @@ import { agentRuns } from './agentRuns';
 import { executions } from './executions';
 import { ieeRuns } from './ieeRuns';
 import { operatorRuns } from './operatorRuns';
+import { browserWarmSessions } from './browserWarmSessions';
 
 // ---------------------------------------------------------------------------
 // llm_requests — append-only financial ledger
@@ -171,7 +172,7 @@ export const llmRequests = pgTable(
     // Values: 'task' (written by sandboxHarvestService) | 'warm_pool' (written by browserWarmPool.terminate).
     // FK warm_session_id → browser_warm_sessions(id) lands in migration 0349 (after 0348 creates the target).
     subtype:        text('subtype'),
-    warmSessionId:  uuid('warm_session_id'),
+    warmSessionId:  uuid('warm_session_id').references(() => browserWarmSessions.id, { onDelete: 'restrict' }),
   },
   (table) => ({
     orgMonthIdx:          index('llm_requests_org_month_idx').on(table.organisationId, table.billingMonth),
@@ -216,6 +217,11 @@ export const llmRequests = pgTable(
     operatorRunSourceBoundaryUniqueIdx: uniqueIndex('llm_requests_operator_run_source_boundary_unique_idx')
       .on(table.operatorRunId, table.sourceType, table.boundary)
       .where(sql`${table.operatorRunId} IS NOT NULL AND ${table.boundary} IS NOT NULL`),
+    // IEE Browser idle-cost-row idempotency — one cost row per warm session (migration 0349).
+    // Re-runs of warm-session teardown hit 23505 and treat it as "already written" no-op.
+    warmSessionIdUniqueIdx: uniqueIndex('llm_requests_warm_session_id_unique_idx')
+      .on(table.warmSessionId)
+      .where(sql`${table.subtype} = 'warm_pool'`),
   }),
 );
 
