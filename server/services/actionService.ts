@@ -237,6 +237,20 @@ export const actionService = {
     // (`createDraftWithProposal` forces `gateOverride: 'review'`), but the
     // propagation here keeps the contract self-consistent if a future
     // caller passes `opts.tx` to a non-review path.
+    //
+    // **Invariant pin (REVIEW-T1-followup, 2026-05-13).** As of this commit,
+    // NO production call site invokes `proposeAction({ tx })` for an
+    // EA-draft-like action that resolves to the `auto` gate. The only
+    // tx-backed caller is `eaDraftService.createDraftWithProposal`, which
+    // hard-codes `gateOverride: 'review'` — so the gate resolution in
+    // `resolveGateLevel` cannot land on `auto` for that path. The
+    // `transitionState` runtime assertion above (line ~285) catches the
+    // failure mode if a future caller passes `opts.tx` to a non-review
+    // path without acknowledging `skipDispatch: true`. If you change this
+    // invariant — e.g. add a tx-backed auto-approved path for a new draft
+    // kind — you MUST also wire a post-commit dispatch callback (the
+    // assert covers the missing acknowledgement, but not the missing
+    // dispatch itself).
     await this.transitionState(
       action.id,
       input.organisationId,

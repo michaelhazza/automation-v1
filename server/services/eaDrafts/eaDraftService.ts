@@ -1,9 +1,11 @@
 import { eq, and, lt, sql } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import { db } from '../../db/index.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions, actionEvents } from '../../db/schema/index.js';
 import { actionService } from '../actionService.js';
+import { canonicaliseJson } from '../../lib/canonicalJsonPure.js';
 import type { EADraftKind } from '../../../shared/types/eaDraft.js';
 import { redactDraftForViewer, type EADraftViewer } from './eaDraftServicePure.js';
 
@@ -53,13 +55,45 @@ export const eaDraftService = {
    * a failure on the draft insert rolls back the action row (no orphaned
    * pending_approval action). See actionService.proposeAction doc-comment for
    * the atomicity contract.
+   *
+   * **Idempotency-key shape (REVIEW-F2 from ChatGPT PR #296 round 2 review,
+   * 2026-05-13).** The key includes a stable per-call discriminator:
+   * `targetRef` when supplied, otherwise a SHA-1 of the canonical-JSON of
+   * `{ kind, body }`. Two drafts of the same kind from the same agent run +
+   * owner produce DIFFERENT keys when their target or body differ — e.g. an
+   * agent that legitimately drafts a Slack post to channel A and a follow-up
+   * Slack post to channel B in the same run no longer collapses onto a
+   * single `actions` row. The pre-amendment shape was
+   * `ea_draft:${agentRunId}:${kind}:${ownerUserId}`, which silently reused
+   * the first proposal action id and left the second draft permanently
+   * stuck in `idle` (per `EA-V1-FOLLOWUP-1` in `tasks/todo.md`). The retry
+   * vs replay contract on `actionService.buildActionIdempotencyKey` is
+   * preserved: a same-attempt retry (same run, same target, same body)
+   * still resolves to the same key, so `actionService.proposeAction` still
+   * returns `isNew: false` and re-uses the existing row. Defence-in-depth:
+   * migration 0344 adds `UNIQUE(proposal_action_id)` on `ea_drafts` so any
+   * future collision (e.g. a caller adds a new field to `body` but forgets
+   * to include it in the hash) becomes a loud DB error instead of a silent
+   * stuck draft.
    */
   async createDraftWithProposal(
     input: CreateDraftInput,
     ctx: { organisationId: string },
   ): Promise<CreateDraftResult> {
     const actionType = KIND_TO_ACTION_TYPE[input.kind];
-    const idempotencyKey = `ea_draft:${input.agentRunId}:${input.kind}:${input.ownerUserId}`;
+    // Stable per-call discriminator. Prefer the caller's `targetRef` when
+    // supplied (most call sites: Gmail thread id, Calendar event id, Slack
+    // channel id + thread ts). Fall back to a hash of the canonical-JSON of
+    // `{ kind, body }` so even purely-generative draft kinds (e.g. a brand-new
+    // Slack DM where targetRef is omitted) get a unique key per logically
+    // distinct draft.
+    const draftDiscriminator =
+      input.targetRef ??
+      createHash('sha1')
+        .update(canonicaliseJson({ kind: input.kind, body: input.body }))
+        .digest('hex')
+        .slice(0, 12);
+    const idempotencyKey = `ea_draft:${input.agentRunId}:${input.kind}:${input.ownerUserId}:${draftDiscriminator}`;
 
     return db.transaction(async (tx) => {
       const proposalResult = await actionService.proposeAction(

@@ -56,7 +56,7 @@ All originally-tracked deferred items closed by the 2026-05-13 deferred-sweep PR
 
 #### Follow-up surfaced during the 2026-05-13 sweep
 
-- [ ] **EA-V1-FOLLOWUP-1** (likely-hole; surfaced by adversarial-reviewer 2026-05-13) — `eaDraftService.createDraftWithProposal` builds the action idempotency key from `(agentRunId, kind, ownerUserId)` only (`server/services/eaDrafts/eaDraftService.ts:62`). A single agent run that legitimately drafts twice for the same kind + owner (e.g. two `slack_post`s to different channels) collides on the key: the second `proposeAction` call returns `isNew: false` with the FIRST action's id; the second `ea_drafts` row is then inserted sharing that `proposal_action_id`. On approval, `eaDraftDispatchService.dispatchAfterApproval` only dispatches one of the two drafts (via `.limit(1)`), so the second is permanently stuck in `idle`. Fix: include `targetRef` (or a stable per-call discriminator) in the idempotency key, and/or add a unique constraint on `ea_drafts.proposal_action_id`. Pre-existing from PR #291 — surfaced but not fixed in the deferred-sweep PR to keep the PR scoped to the originally-tracked items.
+_(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIEW-F2) made the substantive scope-reassessment that multiple drafts of the same kind per run is a real product flow. Idempotency key now carries a stable per-call discriminator (`targetRef` or hashed `{ kind, body }`); migration 0344 adds `UNIQUE(proposal_action_id)` on `ea_drafts` as defence-in-depth. Spec §7.5 + eighth-pass amendment block. See `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2.)_
 
 ---
 
