@@ -44,8 +44,7 @@ export function runTraceProjectionForViewer(
     'review_requested',
     'review_decided',
     'run_started',
-    'run_finished',
-    'run_failed',
+    'run_terminated',
   ]);
   const filteredEvents = run.events.filter((e) =>
     e.eventType.startsWith('cross_owner_substep.') || NON_OWNER_ALLOWED_TYPES.has(e.eventType),
