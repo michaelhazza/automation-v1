@@ -1,3 +1,35 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e200e-acaa-7c01-ba14-75ebc04edf71
+--------
+user
+You are reviewing iteration 5 — the FINAL pass — of a draft specification document. Iterations 1-4 fixed 30 mechanical defects. Two AUTO-DECIDED items are routed to `tasks/todo.md`:
+
+- `PA-V2-OP-S1` (BLOCKS CHUNK 7) — file-events backing-store schema strategy. §13 #1.
+- `PA-V2-OP-S2` (BLOCKS CHUNK 3) — `delegation_outcomes` state-machine column gap. §13 #2.
+
+Do NOT re-raise either.
+
+This iteration is the convergence check. If the spec is now mechanically clean, say so explicitly: "no new findings, the spec is mechanically clean." If you find genuine NEW mechanical defects (not re-raises of resolved items, not directional/posture findings, not the two routed schema decisions), surface them with the standard finding shape.
+
+Project context (do NOT re-derive):
+- Pre-production. No staged rollouts. No feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives. No new abstractions duplicating existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, predictive cost modelling, new abstractions duplicating existing primitives.
+- PA-V2-OP-S1 and PA-V2-OP-S2 (already operator-routed).
+
+The spec is:
+
 **Status:** draft
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
@@ -189,7 +221,7 @@ Files and gates that this spec cites in §6, §8, §9, §10, and Appendix B but 
 | `server/config/rlsProtectedTables.ts` | §6.1: confirms no new tenant tables. V2's column-adds on existing tables inherit existing manifest entries. |
 | `scripts/gates/verify-rls-coverage.sh` | §10: re-runs to confirm any new tenant tables added (per §13 #1 resolution) are registered, and that no UNREGISTERED new tables slipped past. |
 | `scripts/gates/verify-rls-contract-compliance.sh` | §6.5, §10: confirms no direct-DB-access patterns introduced by `runTraceProjectionForViewer` / `actionService` changes. |
-| `scripts/gates/verify-operator-event-registry.sh` | §10: extended check that all four V2-added variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) are registered in `AGENT_EXECUTION_EVENT_CRITICALITY`. Existing gate; no code change to the gate itself, but the registry it scans gains new entries (§4.6). |
+| `scripts/gates/verify-operator-event-registry.sh` | §10: extended check that `file.created`, `file.modified`, and `cross_owner_substep.completed` are registered in `AGENT_EXECUTION_EVENT_CRITICALITY`. Existing gate; no code change to the gate itself, but the registry it scans gains new entries (§4.6). |
 | `docs/doc-sync.md` | §8 Chunk 9, Appendix B: canonical checklist for finalisation doc updates. No edit required. |
 | `references/test-gate-policy.md` | Appendix B: confirm `verify-capability-map-shape.sh` is listed. No edit required unless the gate is missing. |
 | `docs/spec-authoring-checklist.md` | §5 intro: anatomy reference for contract rigour. No edit required. |
@@ -266,7 +298,7 @@ Example (subaccount-owned generic agent):
 **Name:** `ROUTING_CONTEXT_V2`
 **Type:** TypeScript interface, in-memory only (not persisted)
 **Producer:** orchestrator request-intake (intent parser + auth resolver)
-**Consumer:** `matchCapability` (capability matching), delegation router (`crossOwnerDelegationAuthorisation` + `crossOwnerDelegationRequestAssembler`). Not a consumer of `runTraceProjectionForViewer` — that helper takes `(viewerUserId, run)` per §4.2, not a `RoutingContextV2`.
+**Consumer:** `matchCapability`, delegation router, run-trace projection
 
 ```ts
 interface RoutingContextV2 {
@@ -657,27 +689,19 @@ No new HTTP-exposed unique constraints.
 
 ### 9.7 State machine closure
 
-**Cross-owner sub-step state machine** (new). The canonical status enum on the §13 #2 state record is:
+**Cross-owner sub-step state machine** (new):
 
 ```
-proposed → authorised → routed → executing
-                                     │
-                                     ├──→ awaiting_cross_owner_approval ──→ approved ──→ executing (loops until no pending approvals)
-                                     │                                  ╲
-                                     │                                   ╲──→ rejected ──→ failed
-                                     │
-                                     └──→ [success | partial | failed]   (terminal — no further transitions)
+proposed → authorised → routed → executing → [success | partial | failed]
+                                                    │
+                                            (no further transitions)
 ```
-
-The full status vocabulary the state record may hold at any moment is:
-`'proposed' | 'authorised' | 'routed' | 'executing' | 'awaiting_cross_owner_approval' | 'approved' | 'rejected' | 'success' | 'partial' | 'failed'`. The terminal subset (no further transitions) is `'success' | 'partial' | 'failed'`. The other seven values are in-flight states. §5.4's initiator-visible list and the diagram above MUST stay aligned — adding or removing a status requires a spec amendment.
 
 Forbidden transitions:
 
 - `authorised → routed` requires successful credential broker resolution under `target_owner_user_id`. If broker fails, transition to `failed` (never bypass into `routed`).
-- `executing → success` requires either no Tier 4+ writes OR every Tier 4+ write approved by `approver_user_id`. Approval timeout transitions to terminal per timeout policy (§5.6).
-- `awaiting_cross_owner_approval → approved` resumes executing; `awaiting_cross_owner_approval → rejected` transitions to `failed`.
-- No backward transitions other than the explicit `approved → executing` resume edge. No transitions out of terminal states.
+- `routed → success` requires either no Tier 4+ writes OR every Tier 4+ write approved by `approver_user_id`. Approval timeout transitions to terminal per timeout policy.
+- No backward transitions. No transitions out of terminal states.
 
 Status set is closed: adding a new sub-step status requires a spec amendment.
 
@@ -752,7 +776,7 @@ One architectural question requires operator input BEFORE Chunk 7 (live-file eve
    Routed to `tasks/todo.md` under `## Deferred spec decisions — personal-assistant-v2-operator` for operator/architect review. Chunk 7 cannot ship until this is resolved. Self-resolving decision criterion: if the architect says "extend `execution_files`," update migration 0346's row in §4.1 and re-validate §5.7 + §9.3 contract references; if the architect says "new table `operator_run_files`," update migration 0346 to create the table + RLS policy and re-validate §6.
 
 2. **`delegation_outcomes` state-machine column gap (BLOCKS CHUNK 3).** The §5.4 state machine (`proposed → authorised → routed → executing → success | partial | failed`) and the §9.4 terminal-event uniqueness guard (UPDATE-with-`terminal_at IS NULL` predicate) assume `delegation_outcomes` has a state-machine `status` column and a `terminal_at` timestamp. The actual `delegation_outcomes` schema (`server/db/schema/delegationOutcomes.ts`) has only `outcome ('accepted'|'rejected')`, `delegationScope`, `delegationDirection`, and `createdAt`. There is no state-machine column and no terminal-marker column. Two candidate strategies for the gap:
-   - **(a) Extend `delegation_outcomes`** — add `substep_status TEXT NOT NULL DEFAULT 'proposed' CHECK (substep_status IN ('proposed', 'authorised', 'routed', 'executing', 'awaiting_cross_owner_approval', 'approved', 'rejected', 'success', 'partial', 'failed'))` (the canonical status vocabulary from §9.7), `terminal_at TIMESTAMPTZ NULL`, plus an index on `(run_id, substep_status)`. Fold the migration into 0345 (which already touches the table for the timeout-policy column). Honours "prefer existing primitives" because `delegation_outcomes` is conceptually a delegation ledger.
+   - **(a) Extend `delegation_outcomes`** — add `substep_status TEXT NOT NULL DEFAULT 'proposed' CHECK (substep_status IN (...))`, `terminal_at TIMESTAMPTZ NULL`, plus an index on `(run_id, substep_status)`. Fold the migration into 0345 (which already touches the table for the timeout-policy column). Honours "prefer existing primitives" because `delegation_outcomes` is conceptually a delegation ledger.
    - **(b) New table `cross_owner_substep_state`** — keyed on `(parent_run_id, delegation_outcomes_id)`, with the state-machine `status` column, `terminal_at`, and the timeout-policy column moved from `delegation_outcomes` to here. Cleaner — separates per-decision ledger entries (existing `delegation_outcomes`) from the cross-owner state-machine concept.
    
    Spec-reviewer's reading is that strategy (a) is the conservative default (extends one table; matches the existing ledger concept). Strategy (b) is a larger refactor that may not be warranted for the V2 use case. Routed to `tasks/todo.md` as `PA-V2-OP-S2`. Chunk 3 depends on this; it cannot ship until §13 #2 resolves. Self-resolving decision criterion: if strategy (a), update migration 0345 in §4.1 to add the new columns + index, and update §9.4 + §5.4 to reference the actual column names; if strategy (b), add a new migration 0346b (numbered after the file-events migration) and update §4.1/§5.4/§9.4 accordingly.
@@ -790,3 +814,17 @@ Per `docs/doc-sync.md`:
 - [ ] `docs/decisions/` — consider ADR for "approval follows executor's owner, not initiator" (durable policy decision)
 
 ## End of spec
+
+codex
+1. Medium — §5.4 and §9.7 define different cross-owner sub-step state vocabularies. §5.4 says the initiator can read `proposed / authorised / routed / executing / awaiting_cross_owner_approval / approved / rejected`, but §9.7 closes the state machine to `proposed → authorised → routed → executing → [success | partial | failed]`. As written, the spec has no single canonical status set for the state record, so implementation and tests could encode incompatible enums.
+
+2. Low — §4.8’s `verify-operator-event-registry.sh` note is missing one of the four declared V2 event variants. §4.6 and §10 correctly say the registry must cover `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`, but §4.8 only names three and omits `cross_owner_substep.awaiting_initiator_decision`. That leaves the inventory text internally inconsistent.
+
+3. Low — §5.2 names `run-trace projection` as a consumer of `RoutingContextV2`, but the spec’s declared helper is `runTraceProjectionForViewer(viewerUserId, run)` in §4.2/§4.3 and does not consume `RoutingContext`. This is a contract-level mismatch in the producer/consumer table that should be reconciled.
+tokens used
+46,058
+1. Medium — §5.4 and §9.7 define different cross-owner sub-step state vocabularies. §5.4 says the initiator can read `proposed / authorised / routed / executing / awaiting_cross_owner_approval / approved / rejected`, but §9.7 closes the state machine to `proposed → authorised → routed → executing → [success | partial | failed]`. As written, the spec has no single canonical status set for the state record, so implementation and tests could encode incompatible enums.
+
+2. Low — §4.8’s `verify-operator-event-registry.sh` note is missing one of the four declared V2 event variants. §4.6 and §10 correctly say the registry must cover `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`, but §4.8 only names three and omits `cross_owner_substep.awaiting_initiator_decision`. That leaves the inventory text internally inconsistent.
+
+3. Low — §5.2 names `run-trace projection` as a consumer of `RoutingContextV2`, but the spec’s declared helper is `runTraceProjectionForViewer(viewerUserId, run)` in §4.2/§4.3 and does not consume `RoutingContext`. This is a contract-level mismatch in the producer/consumer table that should be reconciled.
