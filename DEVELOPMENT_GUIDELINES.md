@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-10 (§8.32 cycle-prevention assertions must cover all files in the import chain — execution-backend-adapter-contract)
+**Last updated:** 2026-05-13 (§8.34-8.37 + §9 viewer discriminator — derived from ChatGPT PR/spec review log audit)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -254,6 +254,22 @@ A `suppressedSuccess(reason)` helper at the call site is preferred over hand-rol
 
 Reference: ADR-0013 (canonical), `architecture.md § Home dashboard live reactivity`, and the 2026-05-13 KNOWLEDGE.md entry "Pattern — 'Suppression is success' for single-writer event emitters".
 
+### 8.34 Paginated and list-returning queries ship a deterministic ORDER BY with a stable tiebreaker
+
+Every list query exposed to a UI or paginated API uses `ORDER BY <primary>, <stable secondary>` where the secondary is an immutable key (`id`, or `created_at, id`); cursor encoding includes both keys. Primary-only sorts reorder under equal primary values and break pagination silently.
+
+### 8.35 State-changing UPDATEs filter by org, status, and assert single-row effect
+
+Every UPDATE that transitions a row to a new state filters by `organisationId` AND the expected current `status` (`WHERE organisation_id = ? AND status IN (...)`), asserts `rowCount === 1`, and returns 409 `invalid_state_transition` otherwise. Bare `eq(id, x)` on a state row is a blocking review finding.
+
+### 8.36 Empty `.catch(() => {})` is banned
+
+No silent catch. Every caught promise rejection routes through `logger.warn({scope, ids, error})`, `logger.error(...)`, or `logAndSwallow` — never an empty arrow. Silent catches strip every signal needed to debug production incidents.
+
+### 8.37 React `useEffect` async loads carry a cancellation guard
+
+Every `useEffect` that awaits a fetch and then calls `setState` carries a `cancelled` boolean or generation-counter ref, checked before the `setState`. Bare `setState` after `await` causes stale-state writes when inputs change mid-flight.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)
@@ -269,6 +285,7 @@ Before any PR that touches tenant data merges, answer YES to all nine:
 - [ ] **Log-and-swallow services keep `getOrgScopedDb` inside `try`.** No resolution above the catch boundary.
 - [ ] **Cross-entity ID verified.** Server-side handlers that take a parent ID in the URL and a client-supplied child ID in the body verify the child belongs to the parent before any write.
 - [ ] **Dual-GUC tables use `setOrgAndSubaccountGUC`.** Any new table whose RLS policy checks both `app.organisation_id` and `app.subaccount_id` (dual-GUC) calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` — never bare `db.select()`/`db.update()` and never plain `setOrgGUC` — as the first statement inside every `db.transaction(...)` that touches it. See architecture.md "Dual-GUC pattern".
+- [ ] **Owner-only reads pass a viewer discriminator.** Any table where RLS allows admin reads but the spec requires content redaction for non-owners ships a serialiser that accepts `viewer = { userId, role, organisationId }` and returns the redacted shape when `viewer.userId !== row.ownerUserId`. Sharing one serialiser across roles without a viewer argument is a blocking review finding.
 
 ---
 
