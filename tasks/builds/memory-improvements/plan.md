@@ -22,7 +22,7 @@
    - Chunk 2 — A: Lineage write at synthesis (+ memory_block_versions write)
    - Chunk 3 — A: Sources route + UI tab
    - Chunk 4 — B1: Migration 0334 column + agentExecutionService write
-   - Chunk 5 — B1: Materialised view + nightly refresh job at 16:00 UTC
+   - Chunk 5 — B1: Materialised view (migration 0343) + nightly refresh job at 16:00 UTC
    - Chunk 6 — B2: Memory Utility API route
    - Chunk 7 — B2: Daily-series pure helper + tests
    - Chunk 8 — B2: Dashboard UI tab
@@ -84,19 +84,25 @@ Chunk 11 (doc-sync — architecture.md per spec §5.3, KNOWLEDGE.md note)
 
 A and B are independent of each other; the integration branch may interleave Chunks 1-3 with Chunks 4-8. D (9-10) depends *operationally* on B1 (chunks 4-5) — there is no code import dependency, but the flag must remain off until B1 numbers are observable. Doc-sync (Chunk 11) runs last as it summarises all four phases.
 
-### Migrations 0333 and 0334 — collision verification
+### Migrations 0333, 0334, 0343 — collision verification
 
-Per `Glob migrations/033*.sql` at plan time, taken slots are `0330_external_source_triggers`, `0331_system_agents_home_widget`, `0332_executive_assistant_seed`. Next free numbers are `0333` and `0334`, matching the spec.
+Per `Glob migrations/033*.sql` at plan time, taken slots are `0330_external_source_triggers`, `0331_system_agents_home_widget`, `0332_executive_assistant_seed`. Main's recent PR #288 (operator-backend) landed migrations `0335`-`0342`. Free slots between 0332 and 0335 are `0333` and `0334`; first free slot after `0342` is `0343`.
 
-Main's recent PR #288 (operator-backend) landed migrations `0335`-`0339` plus `0340`-`0342`. Of those, three touch `agent_runs`:
+Three new migrations from this build:
 
-- **0338** — adds `agent_runs.operator_chain_failure_count integer NOT NULL DEFAULT 0` and extends the status CHECK constraint (does not touch `injected_entry_ids`).
+- **0333** — `memory_block_version_sources` table + RLS + indexes (Chunk 1).
+- **0334** — `agent_runs.injected_entry_ids` column (Chunk 4). Single-purpose, no MV.
+- **0343** — `mv_memory_utility_30d` materialised view + null-stable unique index + initial refresh (Chunk 5). Numbered 0343 (after main's 0335-0342) instead of appended to 0334 so each migration file applies independently and re-running is safe (once a migration file has been applied in any environment, appending more SQL to it is silently skipped — ChatGPT plan-review R1 F1 fix).
+
+Main's three `agent_runs`-touching migrations don't collide with `injected_entry_ids`:
+
+- **0338** — adds `agent_runs.operator_chain_failure_count integer NOT NULL DEFAULT 0` and extends the status CHECK constraint.
 - **0341** — adds `agent_runs.per_task_budget_extension_minutes integer NOT NULL DEFAULT 0`.
 - **0342** — adds `agent_runs.assigned_user_id uuid REFERENCES users(id) ON DELETE SET NULL`.
 
-**No collision with `injected_entry_ids`.** Our migration 0334 is correctly ordered before main's 0335-0342 (lower number = runs first). The schema layer (`server/db/schema/agentRuns.ts`) gains one new field; the build phase confirms no field-name collision on the Drizzle side before commit.
+Our 0334 (`injected_entry_ids`) lands before main's 0335-0342 because the migration runner orders by numeric prefix. The schema layer (`server/db/schema/agentRuns.ts`) gains one new field; the build phase confirms no field-name collision on the Drizzle side before commit.
 
-If S2 sync at finalisation discovers a number collision (someone lands 0333/0334 on main before our PR), use the existing renumber playbook (recent precedent: pre-test-hardening 0313-0315 → 0318-0320; trust-verification-layer 0288-0297 → 0295-0304). The handoff calls this out explicitly.
+If S2 sync at finalisation discovers a number collision (someone lands 0333, 0334, or 0343 on main before our PR), use the existing renumber playbook (recent precedent: pre-test-hardening 0313-0315 → 0318-0320; trust-verification-layer 0288-0297 → 0295-0304). The handoff calls this out explicitly.
 
 ### Three RLS-protected additions
 
@@ -205,7 +211,7 @@ After migration 0334 lands but before any `agent_runs` rows accumulate with non-
 
 ### R11 — Phase 3 fail-open behaviour must not block agent execution
 
-D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail open to legacy retrieval** and emit `retrieval.embedding_failed`. The risk is wrapping the embed call in a try/catch that accidentally rethrows on a non-OpenAI error class (e.g. a logger crash inside the catch). **Mitigation:** Chunk 9 uses the existing `buildDegradedResult('embedding_failed')` pattern from `retrievalObservabilityServicePure.ts` (precedent: line 16 of `retrievalService.ts` imports `buildDegradedResult`). The catch block emits + falls back; it never rethrows.
+D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail open to legacy retrieval** and emit `retrieval.embedding_failed`. The risk is wrapping the embed call in a try/catch that accidentally rethrows on a non-OpenAI error class (e.g. a logger crash inside the catch). **Mitigation:** Chunk 9 uses the existing `buildDegradedResult` pattern from `retrievalObservabilityServicePure.ts` with the **fully qualified** reason name — `buildDegradedResult('retrieval.embedding_failed')` (precedent: line 16 of `retrievalService.ts` imports `buildDegradedResult`). The reason string is canonical — same value in the `RetrievalDegradedReason` union, in the `buildDegradedResult` call, and in the emitted event/log line. The catch block emits + falls back; it never rethrows.
 
 ## 5. Chunk breakdown
 
@@ -217,7 +223,7 @@ D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail op
 | 2 | A — Lineage write at synthesis (+ memory_block_versions write) | 3.1, 3.2, 3.3, 4 Phase 1, 5.2, 13.1 |
 | 3 | A — Sources route + UI tab | 4 Phase 1, 5.1, 5.2, 6.1, 7.1, 7.4, 14.1, 15 Q6 |
 | 4 | B1 — Migration 0334 column + agentExecutionService write | 3.5, 3.6, 4 Phase 2, 5.1, 5.2, 6.2, 13.3 |
-| 5 | B1 — Materialised view + nightly refresh job at 16:00 UTC | 4 Phase 2, 5.1, 5.2, 6.3, 7.3, 8.1, 13.4 |
+| 5 | B1 — Materialised view (migration 0343) + nightly refresh job at 16:00 UTC | 4 Phase 2, 5.1, 5.2, 6.3, 7.3, 8.1, 13.4 |
 | 6 | B2 — Memory Utility API route | 4 Phase 4, 5.1, 5.2, 6.6, 7.3, 7.4 |
 | 7 | B2 — Daily-series pure helper + tests | 4 Phase 4, 5.1, 6.6, 12.1 |
 | 8 | B2 — Dashboard UI tab | 4 Phase 4, 5.1, 5.2, 14.2 |
@@ -305,7 +311,9 @@ D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail op
 - Hash derivation: pure synchronous SHA-256, no error path.
 - `writeVersionRow` may return `null` for consecutive identical content (existing behaviour). If null, log warn and skip lineage write — lineage rows without a block version row are invalid.
 - Database insert failures propagate (transaction rolls back, no orphan rows).
-- Agent-name JOIN failure: catch, log `synthesis.run_label_resolve_failed`, write the lineage row with `source_run_id = entry.agentRunId` + `source_run_id_hash = sha256(...)` + `source_run_label_at_capture = null` (so future expansion can re-derive label from FK).
+- **Agent-name JOIN — separate the two failure modes** (a query error inside an open Postgres transaction leaves the transaction aborted, so swallowing it and continuing would silently fail every subsequent insert in the same `tx`):
+  - **No row found** (JOIN returns 0 rows because the run was hard-deleted or the agent row is missing): treat as expected. Write the lineage row with `source_run_id = entry.agentRunId`, `source_run_id_hash = sha256(entry.agentRunId)`, `source_run_label_at_capture = null`. Log `synthesis.run_label_unresolved` at INFO. The FK + hash carry forward; the label can be re-derived later. NO try/catch — the SELECT just returned no rows, that's not an error.
+  - **Query error** (DB connection broken, syntax error, permission failure): do NOT catch. Let it propagate so the surrounding `tx` rolls back cleanly. The whole synthesis attempt fails atomically; pg-boss retries the synthesis job per its existing policy.
 
 **Test considerations:**
 - No new vitest test file in this chunk — lineage writes are DB-side and tested by the gate suite (RLS, manifest, schema) in CI.
@@ -394,14 +402,15 @@ Test file uses `import { describe, test, expect } from 'vitest'`. NO `node:test`
 - *What stays hidden:* fire-and-forget retry semantics (best-effort, mirrors `appliedMemoryBlockIds` at line 1238), the field's null-discriminator semantics (NULL = pre-migration / unwired; `[]` = measured empty; `[uuid...]` = measured with entries).
 
 **Files created:**
-- `migrations/0334_injected_entry_manifest.sql` (just the ALTER TABLE in this chunk; matview lands in Chunk 5).
+- `migrations/0334_injected_entry_manifest.sql` — ALTER TABLE only. Materialised view + index + initial refresh land in a SEPARATE migration (`0343_memory_utility_30d.sql`) per Chunk 5, so this column migration can be applied independently without stranding the MV (fixes split-migration foot-gun: once a migration is applied in any environment, appending more SQL to the same file is silently skipped).
 - `migrations/0334_injected_entry_manifest.down.sql`.
 
-**Migration shape — Chunk 4 portion:**
+**Migration shape — full file:**
 
 ```sql
--- Migration 0334 Part 1: agent_runs.injected_entry_ids column.
--- Materialised view + index land in the same migration file in Chunk 5.
+-- Migration 0334: agent_runs.injected_entry_ids column.
+-- Materialised view + index land in 0343 (after main's 0335-0342) to keep
+-- migration files single-purpose and re-runnable independently.
 
 ALTER TABLE agent_runs
   ADD COLUMN IF NOT EXISTS injected_entry_ids jsonb;
@@ -437,11 +446,11 @@ ALTER TABLE agent_runs
 - `npm run typecheck`
 - `npm run build:server`
 
-**Dependencies:** none structurally. Sequencing relative to Chunk 5 is "must land in the same migration file 0334" — see Chunk 5 for the materialised view portion.
+**Dependencies:** none structurally. Chunk 5 (the MV migration 0343) depends on this chunk's column landing first.
 
 ---
 
-### Chunk 5 — B1: Materialised view + nightly refresh job at 16:00 UTC
+### Chunk 5 — B1: Materialised view (migration 0343) + nightly refresh job at 16:00 UTC
 
 **spec_sections:** 4 Phase 2, 5.1, 5.2, 6.3, 7.3, 8.1, 13.4
 
@@ -450,19 +459,21 @@ ALTER TABLE agent_runs
 - *What stays hidden:* the `WITH per_run` CTE shape, the `CASE WHEN ... measured_entries` discriminator logic, the `REFRESH MATERIALIZED VIEW CONCURRENTLY` plumbing, advisory-lock semantics inside the refresh path, pg-boss schedule registration in `agentScheduleService.ts`.
 
 **Files created:**
+- `migrations/0343_memory_utility_30d.sql` — materialised view definition + null-stable unique index + initial refresh.
+- `migrations/0343_memory_utility_30d.down.sql` — `DROP MATERIALIZED VIEW IF EXISTS mv_memory_utility_30d CASCADE;`
 - `server/jobs/refreshMemoryUtility30dJob.ts` — pg-boss job entry (mirrors `refreshOptimiserPeerMedians.ts`). If the refresh logic is more than `REFRESH MATERIALIZED VIEW CONCURRENTLY` inside a `withAdminConnection`, factor a service module `server/services/memoryUtilityRefreshService.ts`; otherwise inline in the job file matching the optimiser precedent.
 
 **Files modified:**
-- `migrations/0334_injected_entry_manifest.sql` — append the materialised view definition + unique index per spec §4 Phase 2.
-- `migrations/0334_injected_entry_manifest.down.sql` — append matching DROP MATERIALIZED VIEW.
 - `server/services/agentScheduleService.ts` — register the schedule (mirrors lines 197-204 for peer-medians): worker `pgboss.work(MEMORY_UTILITY_QUEUE, { teamSize: 1, teamConcurrency: 1 }, ...)` + `pgboss.schedule(MEMORY_UTILITY_QUEUE, '0 16 * * *', null, { tz: 'UTC' })`.
 - `server/db/rlsExclusions.ts` — append entry for `mv_memory_utility_30d` with rationale citing route-layer protection.
 
-**Migration shape — Chunk 5 portion (appended to 0334):**
+**Migration shape — `migrations/0343_memory_utility_30d.sql` (full file):**
 
 ```sql
--- Migration 0334 Part 2: 30-day memory-utility materialised view + nightly refresh
--- target. Spec §4 Phase 2. Multi-tenant by design; protected at the route layer
+-- Migration 0343: 30-day memory-utility materialised view + null-stable unique
+-- index + initial refresh. Numbered 0343 (after main's 0335-0342 from PR #288)
+-- so the file is single-purpose and applies independently from migration 0334.
+-- Spec §4 Phase 2. MV is multi-tenant by design; defended at the route layer
 -- in server/routes/memoryUtility.ts (path-org / session-org 403 check).
 
 CREATE MATERIALIZED VIEW mv_memory_utility_30d AS
@@ -500,28 +511,48 @@ CREATE MATERIALIZED VIEW mv_memory_utility_30d AS
   FROM per_run
   GROUP BY organisation_id, subaccount_id, agent_id;
 
+-- Null-stable unique index for REFRESH MATERIALIZED VIEW CONCURRENTLY.
+-- PostgreSQL treats NULL ≠ NULL in plain unique indexes, so two rows with
+-- the same (org, agent) but NULL subaccount_id would collide on uniqueness
+-- at refresh-time. COALESCE collapses NULL to a deterministic sentinel
+-- (UUID nil) so every row in the MV has a unique key. The CASE expressions
+-- in the SELECT mean every aggregate group is independent of NULL-handling
+-- in the index.
 CREATE UNIQUE INDEX idx_mv_memory_utility_30d
-  ON mv_memory_utility_30d (organisation_id, subaccount_id, agent_id);
+  ON mv_memory_utility_30d (
+    organisation_id,
+    COALESCE(subaccount_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    agent_id
+  );
 
--- Initial population (likely 0 rows on a fresh DB; expected per spec R10)
+-- Initial population (likely 0 rows on a fresh DB; expected per spec R10).
+-- Plain REFRESH (not CONCURRENTLY) on first run is required — CONCURRENTLY
+-- needs at least one prior population.
 REFRESH MATERIALIZED VIEW mv_memory_utility_30d;
 ```
 
 **Pre-flight verification (build phase, before Chunk 5 commit):**
 - Grep `agentScheduleService.ts` for `'16'` in cron strings to confirm no collision. **Plan-time verification confirms clear.**
 - Confirm `mv_memory_utility_30d` does NOT collide with any existing view or table name.
+- Confirm 0343 does not collide with any migration that may have landed on main between plan and build.
+- **Post-migration acceptance check:** run `SELECT organisation_id, subaccount_id, agent_id, COUNT(*) FROM mv_memory_utility_30d GROUP BY 1,2,3 HAVING COUNT(*) > 1;` against the dev DB. Empty result confirms the null-stable unique index correctly enforces uniqueness even when `subaccount_id IS NULL` for some rows.
+- **Post-migration acceptance check:** run `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_memory_utility_30d;` against the dev DB. Successful execution (after the initial non-CONCURRENTLY population in the migration) confirms the unique index is valid for concurrent refresh.
 
 **Contracts:**
 - Materialised view shape: exactly per spec §4 Phase 2 / §6.3.
 - Refresh job: pg-boss queue `refresh_memory_utility_30d`, cron `0 16 * * *` UTC, idempotent (per §13.4), `REFRESH MATERIALIZED VIEW CONCURRENTLY` inside `withAdminConnection()`.
-- Terminal events per §13.4: `memory_utility.refresh.completed` (success) and `memory_utility.refresh.failed` (terminal failure). Exactly one terminal event per scheduled invocation. Log lines emit at INFO level via `logger`.
+- Event contract (split per-attempt vs terminal, per ChatGPT plan-review R1 T5):
+  - `memory_utility.refresh.completed` — emitted exactly once per successful refresh.
+  - `memory_utility.refresh.attempt_failed` — emitted on each failed retry attempt (one per attempt; pg-boss may retry multiple times before exhaustion).
+  - `memory_utility.refresh.failed` — emitted only on terminal exhaustion if the pg-boss API surfaces it cleanly. If pg-boss does not expose final-exhaustion state, this event is omitted and the DLQ landing acts as the exhaustion signal (the existing `dlq-not-drained` synthetic check fires on DLQ growth — precedent: peer-medians).
+- Log lines emit at INFO (`completed`), WARN (`attempt_failed`), ERROR (`failed`) levels via `logger`.
 
 **Error handling:**
-- Refresh failure: caught inside the job, logged as `memory_utility.refresh.failed` with error string, rethrown so pg-boss retries per its default policy. After exhaustion the job lands in the DLQ and the existing `dlq-not-drained` synthetic check fires (precedent: peer-medians).
-- `REFRESH CONCURRENTLY` requires the unique index — present in the same migration.
+- Refresh failure: caught inside the job, logged as `memory_utility.refresh.attempt_failed` with error string, rethrown so pg-boss retries per its default policy. On terminal exhaustion (if observable), emit `memory_utility.refresh.failed`; otherwise the DLQ landing is the exhaustion signal (existing `dlq-not-drained` check covers it).
+- `REFRESH CONCURRENTLY` requires the unique index — present in migration 0343.
 
 **Test considerations:**
-- No new unit test in this chunk — `REFRESH MATERIALIZED VIEW` is a Postgres-side operation. Reviewer checks: migration has the unique index, refresh job uses `withAdminConnection`, schedule registered with `tz: 'UTC'`, queue name matches between worker and `pgboss.schedule`, terminal events emit, RLS exclusion entry appended.
+- No new unit test in this chunk — `REFRESH MATERIALIZED VIEW` is a Postgres-side operation. Reviewer checks: migration has the null-stable unique index (COALESCE on subaccount_id), refresh job uses `withAdminConnection`, schedule registered with `tz: 'UTC'`, queue name matches between worker and `pgboss.schedule`, three-event contract present (`completed` / `attempt_failed` / `failed` or DLQ exhaustion), RLS exclusion entry appended.
 
 **Verification commands:**
 - `npm run lint`
@@ -637,7 +668,7 @@ export function bucketDailySeries(
 
 **Behaviour:**
 - Bucket key: `createdAt` floored to UTC midnight, formatted `YYYY-MM-DD`.
-- 30-bucket gap-fill: produce exactly 30 buckets, one per UTC day from `floor(now - 30 days)` through `floor(now)` inclusive — missing days appear with `runsMeasuredEntries: 0`, `entryUtility: null`, `blockUtility: null`.
+- 30-bucket gap-fill: produce exactly 30 buckets, one per UTC day from `floor(now) - 29 days` through `floor(now)`, inclusive (29 day-offsets + today = 30 buckets total). Missing days appear with `runsMeasuredEntries: 0`, `entryUtility: null`, `blockUtility: null`.
 - Per bucket:
   - `runsMeasuredEntries` = count of rows in bucket where `injectedEntryIds !== null`.
   - `entryUtility` = if `runsMeasuredEntries === 0` → `null`. Else `sum(citedEntryIds.length over measured rows) / sum(injectedEntryIds.length over measured rows)` (also null if sum-of-injected is 0).
@@ -742,9 +773,27 @@ Test file uses `import { describe, test, expect } from 'vitest'`. Filename ends 
 
 ```typescript
 function getRetrievalConfig(): { semanticEnabled: boolean; threshold: number } {
+  const rawThreshold = process.env.AKR_RETRIEVAL_THRESHOLD ?? '0.30';
+  const parsed = Number(rawThreshold);
+  // NaN / out-of-range protection: fall back to 0.30 and log a warning.
+  // Cosine similarity is in [-1, 1], but our threshold semantics require
+  // [0, 1] (negative correlations should always be rejected). An out-of-range
+  // env value silently filtering everything (NaN comparison) or filtering
+  // nothing (>1) would be undetectable in production — fail loud at boot.
+  const threshold = Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
+    ? parsed
+    : 0.30;
+  if (threshold !== parsed) {
+    logger.warn({
+      event: 'retrieval.threshold.env_invalid',
+      rawThreshold,
+      parsed,
+      fallback: 0.30,
+    }, 'AKR_RETRIEVAL_THRESHOLD invalid; falling back to 0.30');
+  }
   return {
     semanticEnabled: process.env.AKR_SEMANTIC_RANKER_ENABLED === 'true',
-    threshold: Number(process.env.AKR_RETRIEVAL_THRESHOLD ?? '0.30'),
+    threshold,
   };
 }
 
@@ -929,7 +978,10 @@ Copied verbatim from [`handoff.md` § Build-phase acceptance checklist](./handof
 ### Phase 2 (B1 — Measurement substrate)
 
 - [ ] Confirm `agentExecutionService.ts:1349-1356` has not drifted from spec anchor before committing the write-site change.
-- [ ] Migration 0334 adds `injected_entry_ids jsonb` (nullable, no DEFAULT) to `agent_runs`.
+- [ ] Migration 0334 adds `injected_entry_ids jsonb` (nullable, no DEFAULT) to `agent_runs`. Single-purpose file — no MV appended.
+- [ ] Migration 0343 creates `mv_memory_utility_30d` + null-stable unique index + initial (non-CONCURRENTLY) refresh. Numbered after main's 0335-0342 from PR #288.
+- [ ] **MV uniqueness acceptance check** (per ChatGPT plan-review R1 F2): `SELECT organisation_id, subaccount_id, agent_id, COUNT(*) FROM mv_memory_utility_30d GROUP BY 1,2,3 HAVING COUNT(*) > 1;` returns 0 rows.
+- [ ] **REFRESH CONCURRENTLY check** (per ChatGPT plan-review R1 F2): run `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_memory_utility_30d;` against dev DB after migration 0343. Must succeed (the null-stable unique index satisfies CONCURRENTLY's uniqueness requirement).
 - [ ] Confirm no other job at 16:00 UTC collides with the materialised-view refresh — grep `server/jobs/index.ts` for `0 16 * * *` and equivalent cron strings. *(Plan-time grep confirms clear; build phase reconfirms before commit.)*
 - [ ] First refresh of `mv_memory_utility_30d` after migration confirms the aggregates match a spot-check SQL against raw `agent_runs`.
 
@@ -952,19 +1004,21 @@ Copied verbatim from [`handoff.md` § Build-phase acceptance checklist](./handof
 - [ ] No new tests in forbidden categories (supertest, playwright, frontend unit tests) per `references/test-gate-policy.md`.
 - [ ] All new pure-function tests use vitest's `expect()` API (no `node:test` / `node:assert`).
 - [ ] Doc-sync: `architecture.md` updated per §5.3 of the spec.
-- [ ] If S2 sync at finalisation surfaces a migration-number collision on 0333 or 0334, follow the existing renumber playbook (recent precedent: pre-test-hardening 0313-0315 → 0318-0320; trust-verification-layer 0288-0297 → 0295-0304).
+- [ ] If S2 sync at finalisation surfaces a migration-number collision on 0333, 0334, or 0343, follow the existing renumber playbook (recent precedent: pre-test-hardening 0313-0315 → 0318-0320; trust-verification-layer 0288-0297 → 0295-0304).
 
 ## 10. Open questions / assumptions for operator review
 
-1. **Synthesis writes a `memory_block_versions` row in Chunk 2 (plan-time finding R4).** The spec FKs lineage to `memory_block_versions(id)` but the current synthesis path doesn't create that row. Chunk 2 includes a `writeVersionRow({ changeSource: 'auto_synthesis' })` call inside the block-insert transaction. **Operator confirmation requested:** this code-shape change above and beyond the spec text — was this expected? (My read: yes, because the spec assumes the FK target exists; the build phase is the right place to make it real.)
+### Resolved before plan-gate
 
-2. **Route path matches architect prompt, not spec §4 Phase 1 literal.** Spec §4 Phase 1 says `GET /api/memory-blocks/:id/sources`; the architect prompt says `GET /api/orgs/:orgId/memory-blocks/:blockId/sources`. The plan uses the architect-prompt path because (a) it makes the path-org / session-org 403 rule unambiguous, (b) it aligns with `/api/orgs/:orgId/usage/memory-utility`, (c) it's the operator's stated intent. **Operator confirmation requested if the spec-literal `/api/memory-blocks/:id/sources` is preferred** — the 403-before-query rule can still apply by using `req.orgId` directly instead of comparing to a path param.
+- **Q1 — `writeVersionRow` at auto-synthesis: APPROVED** (operator, 2026-05-13). Chunk 2 wires `writeVersionRow({ changeSource: 'auto_synthesis' })` inside the same transaction as the `memoryBlocks` insert so the lineage FK has a target. Spec §13.1 already implies this ("alongside the `memory_block_versions` insert"); the build phase makes it real.
+- **Q2 — Sources route path: APPROVED as `/api/orgs/:orgId/memory-blocks/:blockId/sources`** (operator, 2026-05-13). Plan intentionally uses the org-scoped path instead of the spec-literal `/api/memory-blocks/:id/sources` so the path-org / session-org 403-before-query rule has an explicit param to compare against, identical pattern to `/api/orgs/:orgId/usage/memory-utility`. Spec deviation documented here.
 
-3. **`buildDegradedResult('embedding_failed')` reuse.** Spec §3.8 / §13.5 says the D-Embedding-failure path emits `retrieval.embedding_failed`. The existing `buildDegradedResult` helper in `retrievalObservabilityServicePure.ts` takes a `RetrievalDegradedReason` argument. Chunk 10 extends the union with the two new values. **Assumption:** `buildDegradedResult` (or its existing equivalent) is the right vehicle to emit these reasons — no new helper required. Build phase confirms by reading the helper signature before Chunk 9 commits.
+### Assumptions (build-phase confirms)
 
-4. **Capability registry update in Chunk 11.** `docs/capabilities.md` editorial rules require vendor-neutral, model-agnostic phrasing. The operator-facing utility-metric description must avoid "OpenAI", "embedding", and "cosine" in customer-visible copy. **Plan provisionally defers** the capability entry to a follow-up if the build phase can't draft compliant copy in scope. The spec §5.3 lists it as conditional ("if it's currently catalogued").
+- **`buildDegradedResult` reuse.** Spec §3.8 / §13.5 says the D-Embedding-failure path emits `retrieval.embedding_failed` (canonical fully-qualified form per ChatGPT plan-review R1 T2 — see §4 R11 and Chunk 9 contracts). The existing `buildDegradedResult` helper in `retrievalObservabilityServicePure.ts` takes a `RetrievalDegradedReason` argument. Chunk 10 extends the union with the two new values. **Assumption:** `buildDegradedResult` (or its existing equivalent) is the right vehicle to emit these reasons — no new helper required. Build phase confirms by reading the helper signature before Chunk 9 commits.
+- **Capability registry update in Chunk 11.** `docs/capabilities.md` editorial rules require vendor-neutral, model-agnostic phrasing. The operator-facing utility-metric description must avoid "OpenAI", "embedding", and "cosine" in customer-visible copy. **Plan provisionally defers** the capability entry to a follow-up if the build phase can't draft compliant copy in scope. The spec §5.3 lists it as conditional ("if it's currently catalogued").
 
-No other open questions remain — all spec open questions (Q1-Q7) were resolved in Phase 1 per handoff.
+No spec open questions remain — Q1-Q7 were all resolved in Phase 1 per handoff. No plan open questions remain post-ChatGPT R1.
 
 ## 11. Self-consistency pass
 
@@ -974,7 +1028,7 @@ No other open questions remain — all spec open questions (Q1-Q7) were resolved
 - **Load-bearing "must" claims have named mechanisms.** D-Recall → `recallFallbackPredicate` in Chunk 9; D-Embedding-failure → try/catch wrap in Chunk 9; A-Deletion + A-Run-provenance → captured columns in Chunk 1 schema; B1 NULL discriminator → no DEFAULT on Chunk 4's ALTER + CASE WHEN in Chunk 5's MV.
 - **Banner copy is exact.** Chunk 8 stores the operator-approved string verbatim, no em-dashes.
 - **Test scope matches posture.** Three pure-function tests, vitest only, no supertest / playwright / frontend tests. Matches `references/test-gate-policy.md`.
-- **Migration discipline.** 0333 and 0334 are next free numbers; both have `.down.sql` siblings; both include RLS policy (0333) or RLS-exclusion registry entry (0334's MV); both append-only.
+- **Migration discipline.** 0333 (lineage table), 0334 (`injected_entry_ids` column), and 0343 (MV + null-stable unique index) are the three free numbers used. Each has a `.down.sql` sibling. 0333 ships full RLS policy; 0343's MV ships an RLS-exclusion registry entry with route-layer protection rationale. All three migrations are single-purpose and re-runnable independently (per ChatGPT plan-review R1 F1, the MV is in its own file rather than appended to 0334).
 - **Surgical changes.** No drive-by cleanup. The plan-time finding (R4 — missing `memory_block_versions` write) is in scope because it's load-bearing for the lineage FK; it is not a drive-by.
 
 No internal contradictions identified.
