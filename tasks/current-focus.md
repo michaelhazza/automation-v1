@@ -1,11 +1,10 @@
 <!-- mission-control
-active_spec: tasks/builds/fleet-and-codebase-health/spec.md
-active_plan: tasks/builds/fleet-and-codebase-health/plan.md
-build_slug: fleet-and-codebase-health
-branch: codebase-health
-branch_role: branch-2-of-2
-status: REVIEWING
-last_updated: 2026-05-13T02:55:00Z
+active_spec: tasks/builds/iee-browser-on-e2b/spec.md
+active_plan: tasks/builds/iee-browser-on-e2b/plan.md
+build_slug: iee-browser-on-e2b
+branch: claude/migrate-browser-e2b-snI99
+status: BUILDING
+last_updated: 2026-05-13T00:00:00Z
 last_merged_pr: #288
 last_merged_slug: operator-backend
 last_merged_branch: claude/sandbox-execution-provider-DLfjn
@@ -23,15 +22,17 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** `tasks/builds/fleet-and-codebase-health/spec.md`
-**Active plan:** `tasks/builds/fleet-and-codebase-health/plan.md`
-**Active build slug:** `fleet-and-codebase-health`
-**Branch:** `codebase-health` (Branch 2 of 2)
-**Status:** **REVIEWING**
+**Active spec:** `tasks/builds/iee-browser-on-e2b/spec.md` (accepted 2026-05-13)
+**Active plan:** `tasks/builds/iee-browser-on-e2b/plan.md` (Phase 2 — to be authored by `architect`)
+**Active build slug:** `iee-browser-on-e2b`
+**Branch:** `claude/migrate-browser-e2b-snI99`
+**Status:** **BUILDING**
 
-Branch 2 of the fleet-and-codebase-health build (gate fix + 9 route service-layer migrations + archive moves + KNOWLEDGE/todo sweeps). Phase 2 complete after deferred-item closure; reconstructed handoff at `tasks/builds/fleet-and-codebase-health/handoff-branch-2.md`, progress at `progress-branch-2.md`. Spec-conformance NON_CONFORMANT verdict (committed) with two of three deferred items now closed by post-conformance commits; one open (REQ-FCH-C4 new prototypes dirs). pr-reviewer findings addressed in commit `79fc01db`. Sibling Branch 1 (`fleet-and-process` / PR #293) is APPROVED after chatgpt-pr-review and lands first per plan §2.
+Phase 1 (SPEC) complete. Brief LOCKED v7. Mockups locked at round 3.1. Spec accepted with both REVIEW_GAPs logged (`spec-reviewer` Codex CLI version mismatch; `chatgpt-spec-review` operator-deferred). Handoff at `tasks/builds/iee-browser-on-e2b/handoff.md`. Next: open a new Claude Code session and run `launch feature coordinator`.
 
 **Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
+
+**Paused build (concurrent, different branch):** `fleet-and-codebase-health` on `codebase-health` branch (Branch 2 of 2). Status was REVIEWING when this iee-browser session was launched. Handoff: `tasks/builds/fleet-and-codebase-health/handoff-branch-2.md`. Progress: `progress-branch-2.md`. Sibling Branch 1 (`fleet-and-process` / PR #293) is APPROVED. To resume: switch to `codebase-health` branch and restore this pointer to `active_spec: tasks/builds/fleet-and-codebase-health/spec.md` / `build_slug: fleet-and-codebase-health` / `status: REVIEWING`.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
