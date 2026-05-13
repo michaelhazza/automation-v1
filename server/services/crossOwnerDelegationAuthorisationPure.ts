@@ -11,7 +11,7 @@ export type AuthorisationResult =
 //   "my colleague Jane's inbox"         → { candidateName: 'Jane' }
 //   "John's assistant"                  → { candidateName: 'John' }
 // Returns null when no pattern found.
-const POSSESSIVE_RE = /(?:my colleague\s+)?(\b[A-Za-z][-A-Za-z’]+\b)[‘’’]s\s+\w/;
+const POSSESSIVE_RE = /(?:my colleague\s+)?(\b[A-Za-z]+(?:[-\u0027\u2018\u2019][A-Za-z]+)*)[\u0027\u2018\u2019]s\s+\w/;
 
 /**
  * Layer 1: detect possessive named-owner references in normalised intent text.

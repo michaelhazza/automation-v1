@@ -133,7 +133,7 @@ export const reviewService = {
       .from(actions)
       .where(and(eq(actions.id, preCheck.actionId), eq(actions.organisationId, organisationId)));
 
-    if (actionRow?.approverUserId !== null && actionRow?.approverUserId !== undefined && actionRow.approverUserId !== userId) {
+    if (isWrongApprover(actionRow?.approverUserId, userId)) {
       throw Object.assign(
         new Error('This action is designated for a different approver'),
         { statusCode: 403, errorCode: 'WRONG_APPROVER' },
