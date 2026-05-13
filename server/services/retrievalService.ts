@@ -87,7 +87,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
         const [taskRow] = await db
           .select({ description: tasks.description })
           .from(tasks)
-          .where(eq(tasks.id, run.taskId))
+          .where(and(eq(tasks.id, run.taskId), eq(tasks.organisationId, organisationId)))
           .limit(1);
         if (taskRow?.description) {
           taskText = taskRow.description;
