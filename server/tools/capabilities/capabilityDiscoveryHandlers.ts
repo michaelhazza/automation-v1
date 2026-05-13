@@ -15,6 +15,11 @@ import { listAgentCapabilityMaps, matchCapability } from '../../services/capabil
 import { systemSettingsService, SETTING_KEYS } from '../../services/systemSettingsService.js';
 import { logger } from '../../lib/logger.js';
 import type { RoutingContextV2, AddressParseKind } from '../../../shared/types/routingContext.js';
+import { authorise } from '../../services/crossOwnerDelegationAuthorisation.js';
+import {
+  detectNamedOwnerReference,
+  extractTrustedToolCallOwner,
+} from '../../services/crossOwnerDelegationAuthorisationPure.js';
 
 // ---------------------------------------------------------------------------
 // Per-run budget enforcement for capability-discovery skills
@@ -405,7 +410,7 @@ async function parseAddressToken(
 export async function executeCheckCapabilityGap(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-): Promise<CheckCapabilityGapOutput | { success: false; error: string } | ReturnType<typeof budgetExhaustedResponse>> {
+): Promise<CheckCapabilityGapOutput | { success: false; error: string; clarifying_question?: string } | ReturnType<typeof budgetExhaustedResponse>> {
   const budgetCheck = await incrementBudget(context, 'check_capability_gap');
   if (budgetCheck.exhausted) return budgetExhaustedResponse('check_capability_gap', budgetCheck.budget, budgetCheck.used);
 
@@ -472,7 +477,7 @@ export async function executeCheckCapabilityGap(
     }
   }
 
-  const routingContext: RoutingContextV2 = {
+  let routingContext: RoutingContextV2 = {
     organisationId: orgId,
     subaccountId: subaccountId ?? '',
     requester_user_id: context.userId ?? '',
@@ -482,6 +487,34 @@ export async function executeCheckCapabilityGap(
     addressed_agent: addressedAgent,
     address_parse_result: addressParseResult,
   };
+
+  // Chunk 3: derive target_owner_user_id via two-layer authorisation (spec §5.4).
+  // Only attempt cross-owner auth when there is evidence of cross-owner intent.
+  // Layer 1: possessive pattern in intent text. Layer 2: explicit target in tool-call payload.
+  const hasCrossOwnerSignal =
+    (rawIntentText ? detectNamedOwnerReference(rawIntentText) !== null : false) ||
+    extractTrustedToolCallOwner(typed as unknown as Record<string, unknown>) !== null;
+
+  if (hasCrossOwnerSignal) {
+    const delegationAuth = await authorise(routingContext, typed as unknown as Record<string, unknown>).catch(
+      () => ({
+        authorised: false as const,
+        clarifying_question: 'An error occurred. Please specify whose data this needs access to.',
+      }),
+    );
+
+    if (delegationAuth.authorised) {
+      routingContext = { ...routingContext, target_owner_user_id: delegationAuth.target_owner_user_id };
+    } else if ('clarifying_question' in delegationAuth) {
+      // Cross-owner intent detected but couldn't be resolved → surface clarifying question
+      return {
+        success: false as const,
+        error: 'cross_owner_clarification_required',
+        clarifying_question: delegationAuth.clarifying_question,
+      };
+    }
+  }
+  // If no cross-owner signal: proceed with routing, target_owner_user_id stays undefined
 
   // Apply two-axis ownership filter + address boost (spec §5.2–§5.3)
   const matchedCandidates = matchCapability(routingContext, uniqueAgentMaps);
