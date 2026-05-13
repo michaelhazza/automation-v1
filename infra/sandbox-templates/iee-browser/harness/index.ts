@@ -44,21 +44,27 @@ async function main(): Promise<void> {
   const userDataDir = input.profileMount.userDataDirInSandbox ?? '/workspace/profile';
   const artefactsDir = input.artefactsDir ?? '/workspace/artefacts';
 
-  // Ensure directories exist
+  // Ensure directories exist (verifies write access and shape).
   await fs.mkdir(userDataDir, { recursive: true, mode: 0o700 });
   await fs.mkdir(artefactsDir, { recursive: true });
 
-  // NOTE: Browser task execution is implemented in the compiled worker bundle
-  // that is included in the Docker image build. The harness delegates to the
-  // bundled executor. This placeholder structure is replaced by the full
-  // implementation when the image is built by the CI template pipeline.
-  // The interface contract (HarnessInput shape, exit codes) is stable.
-
-  // V1: Write a structured output so harvest knows the harness ran.
-  // Full executor integration is wired in the CI build.
-  const output: HarnessOutput = { status: 'completed' };
+  // V1 stub: the real Playwright executor is wired by the CI template pipeline
+  // once the e2b SDK is installed and the template image is built. Until then
+  // this stub fails LOUDLY — never writes status:'completed' — so any
+  // accidentally-deployed-without-real-executor sandbox surfaces as an obvious
+  // failure rather than masking as silent success.
+  // The interface contract (HarnessInput shape, exit codes) is stable; wiring
+  // the executor swaps the failure below for the real execution loop.
+  const output: HarnessOutput = {
+    status: 'failed',
+    reason:
+      'harness: executor not yet wired. This is the V1 stub harness; the real ' +
+      'Playwright executor is integrated by the CI template build pipeline when ' +
+      'the e2b SDK is installed. See server/services/sandbox/e2bSandbox.ts for ' +
+      'the SANDBOX-DEF-EGRESS-MECH decision context.',
+  };
   await fs.writeFile(OUTPUT_PATH, JSON.stringify(output));
-  process.exit(0);
+  process.exit(1);
 }
 
 main().catch((err) => {

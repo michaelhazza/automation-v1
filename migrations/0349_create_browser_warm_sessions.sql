@@ -1,4 +1,4 @@
--- Migration 0348: Create browser_warm_sessions table
+-- Migration 0349: Create browser_warm_sessions table
 --
 -- Per-subaccount warm-pool session rows. Rows transition available → leased →
 -- terminated and are NEVER deleted (audit / cost-attribution trail).

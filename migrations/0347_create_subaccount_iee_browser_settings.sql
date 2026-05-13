@@ -1,4 +1,4 @@
--- Migration 0346: Create subaccount_iee_browser_settings table
+-- Migration 0347: Create subaccount_iee_browser_settings table
 --
 -- Per-subaccount IEE browser configuration. One row per subaccount
 -- (PRIMARY KEY subaccount_id). Created lazily on first write; absent row

@@ -1,4 +1,4 @@
--- Migration 0347: Add subtype + warm_session_id columns to llm_requests
+-- Migration 0348: Add subtype + warm_session_id columns to llm_requests
 --
 -- These columns support the IEE-browser cost-row discriminator (spec §8.6).
 -- subtype: 'task' | 'warm_pool' when source_type = 'sandbox_compute'; NULL otherwise.

@@ -128,6 +128,19 @@ When you hit a stuck-detection condition (per CLAUDE.md §1), append a Blocker s
 
 ---
 
+## iee-browser-on-e2b — deferred TODOs to wire when paths become live
+
+These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-checker + chatgpt-pr-review Round 1 (PR #297). They are listed here so they don't get lost when the relevant code paths get wired up.
+
+- [ ] **IEE-DEF-1** — `server/services/sandbox/browserWarmPool.ts::evictStale` outer FOR UPDATE SKIP LOCKED needs `withAdminConnection` for cross-tenant sweep. Currently dead code (zero callers); wire when warm-pool eviction is scheduled.
+- [ ] **IEE-DEF-2** — `server/services/sandbox/browserWarmPool.ts::refillIfEligible` needs `organisationId` on its context and `setOrgAndSubaccountGUC` wrapping; currently inserts stub sandbox IDs (`stub-${randomUUID()}`). Wire when warm-pool refill is wired to a caller (today: dead code, zero callers).
+- [ ] **IEE-DEF-3** — `server/services/sandbox/ieeBrowserProfileManager.ts::gcSweep` cross-tenant sweep needs `withAdminConnection`. Currently dead code; wire when profile GC is scheduled.
+- [ ] **IEE-DEF-4** — `infra/sandbox-templates/iee-browser/` template is not yet buildable. Add CI sandbox-template-build pipeline when the e2b SDK is installed (SANDBOX-DEF-EGRESS-MECH). Pipeline: bundle `harness/index.ts` to `harness/dist/index.js`, publish image, write real digest into `PUBLISHED_VERSION`. Until then `assertNotLatestTemplateVersion` rejects the all-zero placeholder so production cannot accidentally use this template.
+- [ ] **IEE-DEF-5** — Wire real Playwright executor into `infra/sandbox-templates/iee-browser/harness/index.ts`. Today the stub writes `status:'failed'` so any accidental deploy fails visibly. Pull the reference implementation from `worker/src/browser/executor.ts` when bundling.
+- [ ] **IEE-DEF-6** — Pre-existing host-disk profiles (`BROWSER_SESSION_DIR`) migration decision was deferred during Phase 2 chunk 5 as no-op given dogfood-first launch. Revisit if production traffic shows profile-data continuity is needed across the substrate switch.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`

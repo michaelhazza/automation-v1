@@ -133,6 +133,17 @@ export function assertNotLatestTemplateVersion(
         'pin to the immutable digest from PUBLISHED_VERSION.image_digest (spec §15.3)',
     );
   }
+  // Reject the literal all-zero sha256 placeholder — it is never a real digest.
+  // The 'local-dev-*' marker is allowed (used by the in-tree template files until
+  // CI publishes a real digest); the production factory guards on NODE_ENV
+  // separately (see registerSandboxProvider in e2bSandbox.ts).
+  if (templateVersion === 'sha256:0000000000000000000000000000000000000000000000000000000000000000') {
+    throw new Error(
+      `${context}: templateVersion is the all-zero sha256 placeholder — ` +
+        'PUBLISHED_VERSION must carry a real CI-published digest before the sandbox ' +
+        'provider can construct (spec §15.3).',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

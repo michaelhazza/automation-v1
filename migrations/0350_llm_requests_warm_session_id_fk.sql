@@ -1,4 +1,4 @@
--- Migration 0349: Add FK warm_session_id → browser_warm_sessions(id) ON DELETE RESTRICT
+-- Migration 0350: Add FK warm_session_id → browser_warm_sessions(id) ON DELETE RESTRICT
 -- and unique partial index for idle-cost-row idempotency.
 --
 -- FK action: ON DELETE RESTRICT (not SET NULL). Rationale: browser_warm_sessions rows

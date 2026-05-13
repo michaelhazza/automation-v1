@@ -1,4 +1,4 @@
--- Migration 0345: Create iee_browser_session_profiles table
+-- Migration 0346: Create iee_browser_session_profiles table
 --
 -- Per-subaccount browser profile volumes for the IEE Browser on e2b feature.
 -- One row per (organisation_id, subaccount_id, session_key). The volume persists

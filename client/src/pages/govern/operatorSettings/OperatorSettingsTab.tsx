@@ -20,6 +20,7 @@ interface Draft {
   sessionSoftCapMinutes: number;
   autoExtendGraceMinutes: number;
   concurrentOperatorSessionsCap: number;
+  perTaskBudgetCapMinutes: number;
 }
 
 interface IeeDraft {
@@ -34,6 +35,7 @@ function toDraft(s: OperatorSettings): Draft {
     sessionSoftCapMinutes: s.sessionSoftCapMinutes,
     autoExtendGraceMinutes: s.autoExtendGraceMinutes,
     concurrentOperatorSessionsCap: s.concurrentOperatorSessionsCap,
+    perTaskBudgetCapMinutes: s.perTaskBudgetCapMinutes,
   };
 }
 
@@ -171,6 +173,25 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
             max={25}
             disabled={!canEdit}
             onChange={set('concurrentOperatorSessionsCap')}
+          />
+        </div>
+      </div>
+
+      {/* Section: Task limits */}
+      <div className="bg-white border border-slate-200 rounded-xl mb-5 overflow-hidden shadow-sm">
+        <div className="px-5 py-3.5 border-b border-slate-100">
+          <span className="text-[14px] font-bold text-slate-800">Task limits</span>
+        </div>
+        <div>
+          <NumberField
+            label="Per-task budget cap"
+            helpText="Tasks pause for review when they use this many operator session minutes in total."
+            unit="minutes"
+            value={draft.perTaskBudgetCapMinutes}
+            min={60}
+            max={60000}
+            disabled={!canEdit}
+            onChange={set('perTaskBudgetCapMinutes')}
           />
         </div>
       </div>

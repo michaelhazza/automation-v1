@@ -73,10 +73,10 @@ export function CurrencyField({
         <input
           type="number"
           className={`${inputCls} ${invalid ? 'border-red-400 focus:ring-red-400' : ''}`}
-          value={dollars.toFixed(1)}
+          value={dollars.toFixed(2)}
           min={minDollars}
           max={maxDollars}
-          step={0.1}
+          step={0.01}
           disabled={disabled}
           onChange={handleChange}
           aria-label={label}

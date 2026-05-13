@@ -105,7 +105,7 @@ export async function runIeeBrowserDailyRollup(): Promise<{
       // Emit incident if threshold breached
       if (result.fire === true) {
         const idempotencyKey = `${IEE_BROWSER_EVENT_SUBACCOUNT_COST_ANOMALY}:${setting.subaccount_id}:${yesterday}:${result.payload.ceilingCents}`;
-        void recordIncident({
+        await recordIncident({
           source: 'job',
           summary: `iee_browser subaccount daily cost anomaly: subaccount=${setting.subaccount_id} dayUTC=${yesterday} spendCents=${result.payload.spendCents} ceiling=${result.payload.ceilingCents}`,
           errorCode: IEE_BROWSER_EVENT_SUBACCOUNT_COST_ANOMALY,
