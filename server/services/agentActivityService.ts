@@ -572,4 +572,20 @@ export const agentActivityService = {
 
     return { run: runRow, toolCallsLog: snap?.toolCallsLog ?? [], skillEvents };
   },
+
+  async listRunsByAgentId(params: { agentId: string; orgId: string; limit: number }) {
+    return db
+      .select({
+        id: agentRuns.id,
+        agentId: agentRuns.agentId,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        ownerUserId: agentRuns.ownerUserId,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.agentId, params.agentId), eq(agentRuns.organisationId, params.orgId)))
+      .orderBy(sql`${agentRuns.startedAt} DESC`)
+      .limit(params.limit);
+  },
 };

@@ -212,24 +212,11 @@ router.get(
       res.status(400).json({ error: 'agentId query parameter is required' });
       return;
     }
-    const rows = await db
-      .select({
-        id: agentRuns.id,
-        agentId: agentRuns.agentId,
-        status: agentRuns.status,
-        startedAt: agentRuns.startedAt,
-        completedAt: agentRuns.completedAt,
-        ownerUserId: agentRuns.ownerUserId,
-      })
-      .from(agentRuns)
-      .where(
-        and(
-          eq(agentRuns.agentId, agentId),
-          eq(agentRuns.organisationId, req.orgId!),
-        ),
-      )
-      .orderBy(sql`${agentRuns.startedAt} DESC`)
-      .limit(limit);
+    const rows = await agentActivityService.listRunsByAgentId({
+      agentId,
+      orgId: req.orgId!,
+      limit,
+    });
 
     const role = req.user?.role ?? 'user';
     const isAdmin = role === 'system_admin' || role === 'org_admin';
