@@ -425,7 +425,7 @@ Before invoking `spec-reviewer` on a draft spec, answer yes to all of the follow
 - [ ] Every data shape crossing a boundary has a Contracts entry with an example
 - [ ] Every contract that writes to multiple representations declares the source-of-truth precedence
 - [ ] Every new tenant-scoped table has RLS policy + manifest entry + route guard + principal-scoped context (or a documented reason for opting out)
-- [ ] RLS posture stated using the canonical sentence ("RLS enforces the organisation boundary; subaccount filtering is service-layer"), or dual-GUC explicitly declared
+- [ ] RLS posture stated using the canonical sentence ("RLS enforces the organisation boundary; subaccount filtering is service-layer"), or dual-GUC explicitly declared with the exact GUCs (`app.organisation_id`, `app.subaccount_id`), policy expectation, and transaction helper (`setOrgAndSubaccountGUC`) named
 - [ ] Execution model (sync/async, inline/queued, cached/dynamic) is picked explicitly and the prose + inventory + goals all agree
 - [ ] Phase dependency graph has no backward references, no orphaned deferrals, no phase-boundary contradictions
 - [ ] `## Deferred Items` section exists (even if "None.")
