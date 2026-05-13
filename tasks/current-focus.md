@@ -9,7 +9,7 @@ last_merged_pr: #298
 last_merged_slug: memory-improvements
 last_merged_branch: claude/add-memvid-integration-ehAOr
 last_merged_at: 2026-05-13T10:11:16Z
-last_merged_commit: pending-squash
+last_merged_commit: 2bd3d6d3
 -->
 
 # Current Focus
@@ -28,7 +28,7 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Branch:** none
 **Status:** **NONE**
 
-**Just merged:** PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) — `memory-improvements` (squash-commit `pending-squash`, 2026-05-13T10:11:16Z). Shipped 3 capabilities: synthesis lineage (`memory_block_version_sources` migration 0333, sources route + UI tab), citation-rate utility (migrations 0334 + 0345, materialised view with nightly 16:00 UTC refresh, dashboard tab), env-flagged AKR semantic ranker. 5 Phase 2 reviewers + chatgpt-pr-review (2 rounds, 11 findings auto-applied) + 1 CI fix-loop iteration (RLS-contract org-filter on tasks lookup); no REVIEW_GAP. 6 env-gated operational items deferred to pre-enablement before flipping AKR ranker flag.
+**Just merged:** PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) — `memory-improvements` (squash-commit `2bd3d6d3`, 2026-05-13T10:11:16Z). Shipped 3 capabilities: synthesis lineage (`memory_block_version_sources` migration 0333, sources route + UI tab), citation-rate utility (migrations 0334 + 0345, materialised view with nightly 16:00 UTC refresh, dashboard tab), env-flagged AKR semantic ranker. 5 Phase 2 reviewers + chatgpt-pr-review (2 rounds, 11 findings auto-applied) + 1 CI fix-loop iteration (RLS-contract org-filter on tasks lookup); no REVIEW_GAP. 6 env-gated operational items deferred to pre-enablement before flipping AKR ranker flag.
 
 **Previously merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
 
