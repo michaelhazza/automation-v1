@@ -9,6 +9,7 @@ import { llmRequests } from '../../db/schema/llmRequests.js';
 import { parseCurrentVersion } from './templateVersionParserPure.js';
 import { isRefillEligible, computeIdleCostCents } from './browserWarmPoolPure.js';
 import { logger } from '../../lib/logger.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 
 const BROWSER_TEMPLATE_NAME = 'iee-browser';
 
@@ -29,80 +30,71 @@ try {
 async function _terminateAndWriteCostRow(
   warmSessionId: string,
   reason: 'post_lease' | 'evict_stale' | 'feature_disabled',
+  organisationId: string,
+  subaccountId: string,
 ): Promise<void> {
-  // 1. Read session row
-  const [session] = await db.select().from(browserWarmSessions)
-    .where(eq(browserWarmSessions.id, warmSessionId));
-  if (!session) {
-    logger.debug('iee_browser.warm_pool.terminate_not_found', { warmSessionId });
-    return;
-  }
-  if (session.status === 'terminated') {
-    logger.debug('iee_browser.warm_pool.terminate_idempotent', { warmSessionId });
-    return;
-  }
-
-  // 2. Compute cost
-  const terminatedAt = new Date();
-  const idleCostCents = computeIdleCostCents(
-    session.createdAt.getTime(), terminatedAt.getTime(), warmPoolRatePerSecond,
-  );
-
-  // 3. UPDATE status=terminated (accepts both 'available' and 'leased' — idempotent)
-  const updated = await db.update(browserWarmSessions)
-    .set({
-      status: 'terminated',
-      terminatedAt,
-      idleCostCentsAttributed: idleCostCents,
-    })
-    .where(and(
-      eq(browserWarmSessions.id, warmSessionId),
-      sql`${browserWarmSessions.status} IN ('leased', 'available')`,
-    ))
-    .returning({ id: browserWarmSessions.id });
-
-  if (updated.length === 0) {
-    logger.debug('iee_browser.warm_pool.terminate_race_lost', { warmSessionId });
-    return;
-  }
-
-  // 4. Write idle cost row to llm_requests (unique partial index makes this idempotent)
-  const now = new Date();
-  const billingMonth = now.toISOString().slice(0, 7);  // YYYY-MM
-  const billingDay = now.toISOString().slice(0, 10);   // YYYY-MM-DD
-  const costCentsStr = (idleCostCents / 100).toFixed(8);
-
-  try {
-    await db.insert(llmRequests).values({
-      idempotencyKey: `warm_pool:${warmSessionId}`,
-      organisationId: session.organisationId,
-      subaccountId: session.subaccountId,
-      sourceType: 'sandbox_compute',
-      subtype: 'warm_pool',
-      warmSessionId,
-      featureTag: 'iee-browser-warm-pool',
-      callSite: 'worker',
-      provider: 'e2b',
-      model: `sandbox:${BROWSER_TEMPLATE_NAME}`,
-      costRaw: costCentsStr,
-      costWithMargin: costCentsStr,
-      costWithMarginCents: idleCostCents,
-      billingMonth,
-      billingDay,
-      sandboxProvider: 'e2b',
-      sandboxTemplateVersion: session.templateVersion,
-      status: 'success',
-    });
-  } catch (err: unknown) {
-    if ((err as { code?: string }).code === '23505') {
-      // Idempotent — cost row already written; no-op
-      logger.debug('iee_browser.warm_pool.cost_row_already_exists', { warmSessionId });
+  await db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
+    // 1. Read session row
+    const [session] = await tx.select().from(browserWarmSessions)
+      .where(eq(browserWarmSessions.id, warmSessionId));
+    if (!session) {
+      logger.debug('iee_browser.warm_pool.terminate_not_found', { warmSessionId });
       return;
     }
-    throw err;
-  }
-
-  logger.info('iee_browser.warm_pool.terminated', { warmSessionId, reason, idleCostCents });
+    if (session.status === 'terminated') {
+      logger.debug('iee_browser.warm_pool.terminate_idempotent', { warmSessionId });
+      return;
+    }
+    const terminatedAt = new Date();
+    const idleCostCents = computeIdleCostCents(
+      session.createdAt.getTime(), terminatedAt.getTime(), warmPoolRatePerSecond,
+    );
+    const updated = await tx.update(browserWarmSessions)
+      .set({ status: 'terminated', terminatedAt, idleCostCentsAttributed: idleCostCents })
+      .where(and(
+        eq(browserWarmSessions.id, warmSessionId),
+        sql`${browserWarmSessions.status} IN ('leased', 'available')`,
+      ))
+      .returning({ id: browserWarmSessions.id });
+    if (updated.length === 0) {
+      logger.debug('iee_browser.warm_pool.terminate_race_lost', { warmSessionId });
+      return;
+    }
+    const now = new Date();
+    const billingMonth = now.toISOString().slice(0, 7);
+    const billingDay = now.toISOString().slice(0, 10);
+    const costCentsStr = (idleCostCents / 100).toFixed(8);
+    try {
+      await tx.insert(llmRequests).values({
+        idempotencyKey: `warm_pool:${warmSessionId}`,
+        organisationId: session.organisationId,
+        subaccountId: session.subaccountId,
+        sourceType: 'sandbox_compute',
+        subtype: 'warm_pool',
+        warmSessionId,
+        featureTag: 'iee-browser-warm-pool',
+        callSite: 'worker',
+        provider: 'e2b',
+        model: `sandbox:${BROWSER_TEMPLATE_NAME}`,
+        costRaw: costCentsStr,
+        costWithMargin: costCentsStr,
+        costWithMarginCents: idleCostCents,
+        billingMonth,
+        billingDay,
+        sandboxProvider: 'e2b',
+        sandboxTemplateVersion: session.templateVersion,
+        status: 'success',
+      });
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === '23505') {
+        logger.debug('iee_browser.warm_pool.cost_row_already_exists', { warmSessionId });
+        return;
+      }
+      throw err;
+    }
+    logger.info('iee_browser.warm_pool.terminated', { warmSessionId, reason, idleCostCents });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -114,72 +106,68 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
   sandboxId: string;
   leaseToken: string;
 } | null> {
-  // Load settings
-  const [settings] = await db.select().from(subaccountIeeBrowserSettings)
-    .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
-
-  if (!isRefillEligible(settings ?? null)) {
-    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'feature_disabled' });
-    return null;
-  }
-
-  // Find an available warm session
-  const [available] = await db.select().from(browserWarmSessions)
-    .where(and(
-      eq(browserWarmSessions.subaccountId, ctx.subaccountId),
-      eq(browserWarmSessions.status, 'available'),
-    ));
-
-  if (!available) {
-    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
-    return null;
-  }
-
-  // Atomic lease: only succeeds if still available (concurrent checkout loses)
-  const leased = await db.update(browserWarmSessions)
-    .set({ status: 'leased', leasedAt: new Date() })
-    .where(and(
-      eq(browserWarmSessions.id, available.id),
-      eq(browserWarmSessions.status, 'available'),
-    ))
-    .returning({ id: browserWarmSessions.id, sandboxId: browserWarmSessions.sandboxId });
-
-  if (leased.length === 0) {
-    // Race lost
-    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
-    return null;
-  }
-
-  return { warmSessionId: leased[0].id, sandboxId: leased[0].sandboxId, leaseToken: leased[0].id };
+  return db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
+    const [settings] = await tx.select().from(subaccountIeeBrowserSettings)
+      .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
+    if (!isRefillEligible(settings ?? null)) {
+      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'feature_disabled' });
+      return null;
+    }
+    const [available] = await tx.select().from(browserWarmSessions)
+      .where(and(
+        eq(browserWarmSessions.subaccountId, ctx.subaccountId),
+        eq(browserWarmSessions.status, 'available'),
+      ));
+    if (!available) {
+      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
+      return null;
+    }
+    const leased = await tx.update(browserWarmSessions)
+      .set({ status: 'leased', leasedAt: new Date() })
+      .where(and(
+        eq(browserWarmSessions.id, available.id),
+        eq(browserWarmSessions.status, 'available'),
+      ))
+      .returning({ id: browserWarmSessions.id, sandboxId: browserWarmSessions.sandboxId });
+    if (leased.length === 0) {
+      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
+      return null;
+    }
+    return { warmSessionId: leased[0].id, sandboxId: leased[0].sandboxId, leaseToken: leased[0].id };
+  });
 }
 
 async function terminate(input: {
   warmSessionId: string;
   reason: 'post_lease' | 'evict_stale' | 'feature_disabled';
+  organisationId: string;
+  subaccountId: string;
 }): Promise<void> {
-  await _terminateAndWriteCostRow(input.warmSessionId, input.reason);
+  await _terminateAndWriteCostRow(input.warmSessionId, input.reason, input.organisationId, input.subaccountId);
 }
 
+// TODO: cross-tenant sweep needs withAdminConnection — deferred
 async function evictStale(): Promise<{ evicted: number }> {
   // Claim stale sessions inside a transaction so FOR UPDATE SKIP LOCKED
   // holds locks until we've read the IDs — preventing concurrent workers
   // from picking the same rows.
-  const ids = await db.transaction(async (tx) => {
+  const rows = await db.transaction(async (tx) => {
     const staleRows = await tx.execute(sql`
-      SELECT id FROM browser_warm_sessions
+      SELECT id, organisation_id, subaccount_id FROM browser_warm_sessions
       WHERE status = 'available'
         AND created_at < NOW() - INTERVAL '30 minutes'
       LIMIT 20
       FOR UPDATE SKIP LOCKED
     `);
-    return (staleRows as unknown as { rows: Array<{ id: string }> }).rows.map((r) => r.id);
+    return (staleRows as unknown as { rows: Array<{ id: string; organisation_id: string; subaccount_id: string }> }).rows;
   });
 
-  if (ids.length === 0) return { evicted: 0 };
+  if (rows.length === 0) return { evicted: 0 };
 
   let evicted = 0;
-  for (const id of ids) {
-    await _terminateAndWriteCostRow(id, 'evict_stale');
+  for (const row of rows) {
+    await _terminateAndWriteCostRow(row.id, 'evict_stale', row.organisation_id, row.subaccount_id);
     evicted++;
   }
 
@@ -187,6 +175,7 @@ async function evictStale(): Promise<{ evicted: number }> {
   return { evicted };
 }
 
+// TODO: cross-tenant sweep needs withAdminConnection — deferred
 async function refillIfEligible(ctx: { subaccountId: string }): Promise<void> {
   const [settings] = await db.select().from(subaccountIeeBrowserSettings)
     .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));

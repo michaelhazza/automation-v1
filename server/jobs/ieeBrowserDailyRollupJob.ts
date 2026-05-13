@@ -10,7 +10,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js'; // guard-ignore: rls-contract-compliance reason="end-of-day rollup job reads across all enabled subaccounts; runs as a scheduled job outside any request ALS context"
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
@@ -25,6 +25,7 @@ const SCHEDULE_CRON = '0 0 * * *'; // midnight UTC
 
 interface SubaccountSettings {
   subaccount_id: string;
+  organisation_id: string;
   per_subaccount_daily_cost_ceiling_cents: number;
 }
 
@@ -51,26 +52,38 @@ export async function runIeeBrowserDailyRollup(): Promise<{
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
   // Query enabled subaccounts
-  const settingsRows = (await db.execute(sql`
-    SELECT ss.subaccount_id, ss.per_subaccount_daily_cost_ceiling_cents
-    FROM subaccount_iee_browser_settings ss
-    WHERE ss.status = 'on' AND ss.rollout_approved = true
-    ORDER BY ss.subaccount_id
-  `)) as unknown as Array<SubaccountSettings> | { rows?: Array<SubaccountSettings> };
+  const settingsRows = await withAdminConnection(
+    { source: 'jobs.ieeBrowserDailyRollup', reason: 'cross-tenant scan of enabled IEE browser subaccounts; end-of-day rollup job' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.execute(sql`
+        SELECT ss.subaccount_id, ss.organisation_id, ss.per_subaccount_daily_cost_ceiling_cents
+        FROM subaccount_iee_browser_settings ss
+        WHERE ss.status = 'on' AND ss.rollout_approved = true
+        ORDER BY ss.subaccount_id
+      `);
+    },
+  ) as unknown as Array<SubaccountSettings> | { rows?: Array<SubaccountSettings> };
 
   const settings = (Array.isArray(settingsRows) ? settingsRows : settingsRows.rows ?? []);
 
   for (const setting of settings) {
     try {
       // Query spend for yesterday
-      const spendRows = (await db.execute(sql`
-        SELECT COALESCE(SUM(cost_with_margin_cents), 0) AS spend_cents
-        FROM llm_requests
-        WHERE subaccount_id = ${setting.subaccount_id}
-          AND source_type = 'sandbox_compute'
-          AND subtype IN ('task', 'warm_pool')
-          AND billing_day = ${yesterday}
-      `)) as unknown as Array<SpendRow> | { rows?: Array<SpendRow> };
+      const spendRows = await withAdminConnection(
+        { source: 'jobs.ieeBrowserDailyRollup', reason: 'cross-org spend aggregation for IEE browser daily alarm' },
+        async (tx) => {
+          await tx.execute(sql`SET LOCAL ROLE admin_role`);
+          return tx.execute(sql`
+            SELECT COALESCE(SUM(cost_with_margin_cents), 0) AS spend_cents
+            FROM llm_requests
+            WHERE subaccount_id = ${setting.subaccount_id}
+              AND source_type = 'sandbox_compute'
+              AND subtype IN ('task', 'warm_pool')
+              AND billing_day = ${yesterday}
+          `);
+        },
+      ) as unknown as Array<SpendRow> | { rows?: Array<SpendRow> };
 
       const spendData = (Array.isArray(spendRows) ? spendRows : spendRows.rows ?? [])[0];
       const spendCents = spendData?.spend_cents ?? 0;
@@ -99,6 +112,7 @@ export async function runIeeBrowserDailyRollup(): Promise<{
           idempotencyKey,
           errorDetail: result.payload as unknown as Record<string, unknown>,
           subaccountId: setting.subaccount_id,
+          organisationId: setting.organisation_id,
         });
         incidentsEmitted += 1;
       }

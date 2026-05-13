@@ -7,6 +7,7 @@
 **Scope:** all 18 implementation chunks (chunks 1–18 from `plan.md`)
 **Changed-code set:** 73 files across 24 chunk commits
 **Run at:** 2026-05-13T13:16:18Z
+**Commit at finish:** `e7271991`
 
 ---
 

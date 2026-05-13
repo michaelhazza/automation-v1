@@ -16,6 +16,7 @@ import { db } from '../../db/index.js';
 import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
 import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
 import { eq, and, sql, inArray } from 'drizzle-orm';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import {
   assertSameTenant,
   resolveRetentionDays,
@@ -50,40 +51,42 @@ async function resolve({
   sessionKey: string;
 }): Promise<ProfileRow> {
   const volumeId = randomUUID();
-
-  try {
-    const [inserted] = await db
-      .insert(ieeBrowserSessionProfiles)
-      .values({
-        organisationId,
-        subaccountId,
-        sessionKey,
-        volumeId,
-        status: 'active',
-        sizeBytes: 0,
-        sizeCapBytes: 524288000,
-      })
-      .returning();
-    return inserted;
-  } catch (err) {
-    // 23505 = unique_violation — another caller won the race; SELECT the winner row.
-    if ((err as any).code === '23505') {
-      const [existing] = await db
-        .select()
-        .from(ieeBrowserSessionProfiles)
-        .where(
-          and(
-            eq(ieeBrowserSessionProfiles.organisationId, organisationId),
-            eq(ieeBrowserSessionProfiles.subaccountId, subaccountId),
-            eq(ieeBrowserSessionProfiles.sessionKey, sessionKey),
-          ),
-        )
-        .limit(1);
-      if (!existing) throw new EnvironmentError('profile_disappeared_after_race');
-      return existing;
+  return db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
+    try {
+      const [inserted] = await tx
+        .insert(ieeBrowserSessionProfiles)
+        .values({
+          organisationId,
+          subaccountId,
+          sessionKey,
+          volumeId,
+          status: 'active',
+          sizeBytes: 0,
+          sizeCapBytes: 524288000,
+        })
+        .returning();
+      return inserted;
+    } catch (err) {
+      // 23505 = unique_violation — another caller won the race; SELECT the winner row.
+      if ((err as any).code === '23505') {
+        const [existing] = await tx
+          .select()
+          .from(ieeBrowserSessionProfiles)
+          .where(
+            and(
+              eq(ieeBrowserSessionProfiles.organisationId, organisationId),
+              eq(ieeBrowserSessionProfiles.subaccountId, subaccountId),
+              eq(ieeBrowserSessionProfiles.sessionKey, sessionKey),
+            ),
+          )
+          .limit(1);
+        if (!existing) throw new EnvironmentError('profile_disappeared_after_race');
+        return existing;
+      }
+      throw err;
     }
-    throw err;
-  }
+  });
 }
 
 async function mount(
@@ -92,33 +95,31 @@ async function mount(
 ): Promise<MountedProfile> {
   assertSameTenant(profile, ctx);
 
-  const updated = await db
-    .update(ieeBrowserSessionProfiles)
-    .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
-    .where(
-      and(
-        eq(ieeBrowserSessionProfiles.id, profile.id),
-        eq(ieeBrowserSessionProfiles.status, 'active'),
-      ),
-    )
-    .returning({ id: ieeBrowserSessionProfiles.id, volumeId: ieeBrowserSessionProfiles.volumeId });
-
-  if (updated.length === 0) {
-    // Profile exists but was not in 'active' status — check why.
-    const [current] = await db
-      .select({ status: ieeBrowserSessionProfiles.status })
-      .from(ieeBrowserSessionProfiles)
-      .where(eq(ieeBrowserSessionProfiles.id, profile.id))
-      .limit(1);
-
-    if (
-      current?.status === 'scheduled_gc' ||
-      current?.status === 'gc_in_progress'
-    ) {
-      throw new EnvironmentError('profile_locked_for_gc');
+  const updated = await db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
+    const rows = await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+      .where(
+        and(
+          eq(ieeBrowserSessionProfiles.id, profile.id),
+          eq(ieeBrowserSessionProfiles.status, 'active'),
+        ),
+      )
+      .returning({ id: ieeBrowserSessionProfiles.id, volumeId: ieeBrowserSessionProfiles.volumeId });
+    if (rows.length === 0) {
+      const [current] = await tx
+        .select({ status: ieeBrowserSessionProfiles.status })
+        .from(ieeBrowserSessionProfiles)
+        .where(eq(ieeBrowserSessionProfiles.id, profile.id))
+        .limit(1);
+      if (current?.status === 'scheduled_gc' || current?.status === 'gc_in_progress') {
+        throw new EnvironmentError('profile_locked_for_gc');
+      }
+      throw new EnvironmentError('profile_not_active');
     }
-    throw new EnvironmentError('profile_not_active');
-  }
+    return rows;
+  });
 
   const [updatedRow] = updated;
 
@@ -136,17 +137,23 @@ async function mount(
   };
 }
 
-async function unmount(mountedProfile: MountedProfile): Promise<void> {
-  await db
-    .update(ieeBrowserSessionProfiles)
-    .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
-    .where(eq(ieeBrowserSessionProfiles.id, mountedProfile.sessionProfileId));
-
+async function unmount(
+  mountedProfile: MountedProfile,
+  ctx: { organisationId: string; subaccountId: string },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
+    await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+      .where(eq(ieeBrowserSessionProfiles.id, mountedProfile.sessionProfileId));
+  });
   logger.info('iee.browser_profile.unmounted', {
     profileId: mountedProfile.sessionProfileId,
   });
 }
 
+// TODO: cross-tenant sweep needs withAdminConnection — deferred
 async function gcSweep(): Promise<{ scheduled: number; completed: number }> {
   // Step 1: schedule eligible 'active' rows whose lastUsedAt is older than
   // their effective retention window.
@@ -212,15 +219,17 @@ async function recoverCorruption(
   profile: ProfileRow,
   reason: string,
 ): Promise<void> {
-  await db
-    .update(ieeBrowserSessionProfiles)
-    .set({
-      status: 'scheduled_gc',
-      scheduledGcAt: sql`NOW()`,
-      updatedAt: sql`NOW()`,
-    })
-    .where(eq(ieeBrowserSessionProfiles.id, profile.id));
-
+  await db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, profile.organisationId, profile.subaccountId);
+    await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({
+        status: 'scheduled_gc',
+        scheduledGcAt: sql`NOW()`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(eq(ieeBrowserSessionProfiles.id, profile.id));
+  });
   logger.warn('iee.browser_profile.corruption_recovered', {
     profileId: profile.id,
     reason,

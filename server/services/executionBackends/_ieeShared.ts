@@ -49,6 +49,7 @@ import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -160,8 +161,11 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   }
 
   // 1. Read launch flag and check FIRST — throw before touching warm pool
-  const [settings] = await db.select().from(subaccountIeeBrowserSettings)
-    .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
+  const [settings] = await db.transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
+    return tx.select().from(subaccountIeeBrowserSettings)
+      .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
+  });
 
   // Step 1: Check launch flag FIRST — throw before touching warm pool
   const launchOnlyDecision = resolveBrowserDispatch(settings ?? null, null);
@@ -231,14 +235,14 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects.
     // Cost attribution is owned by browserWarmPool.terminate (chunk 10).
     if (decision.kind === 'warm_leased') {
-      await browserWarmPool.terminate({ warmSessionId: decision.warmSessionId, reason: 'post_lease' }).catch((err) => {
+      await browserWarmPool.terminate({ warmSessionId: decision.warmSessionId, reason: 'post_lease', organisationId, subaccountId }).catch((err) => {
         logger.error('iee_browser.dispatch.warm_terminate_failed', {
           warmSessionId: decision.warmSessionId,
           error: err instanceof Error ? err.message : String(err),
         });
       });
     }
-    await ieeBrowserProfileManager.unmount(mounted).catch((err) => {
+    await ieeBrowserProfileManager.unmount(mounted, { organisationId, subaccountId }).catch((err) => {
       logger.warn('iee_browser.dispatch.profile_unmount_failed', {
         profileId: mounted.sessionProfileId,
         error: err instanceof Error ? err.message : String(err),
