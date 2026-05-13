@@ -57,7 +57,7 @@
 .tab-btn:hover { color: #334155; }
 .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
 
-/* ── Org admin only pill ── */
+/* ── Admin pill ── */
 .admin-only-pill {
   display: inline-flex; align-items: center;
   font-size: 10px; font-weight: 700; color: #4338ca;
@@ -178,10 +178,10 @@
         <button class="tab-btn" onclick="switchTab(event)">Categories</button>
         <button class="tab-btn" onclick="switchTab(event)">Tags</button>
         <button class="tab-btn" onclick="switchTab(event)">Board Config</button>
-        <!-- NEW TAB: Operator (org_admin only) -->
+        <!-- NEW TAB: Operator (admin-only; org_admin / subaccount_admin / system_admin) -->
         <button class="tab-btn active" onclick="switchTab(event)">
           Operator
-          <span class="admin-only-pill">Org admin</span>
+          <span class="admin-only-pill">Admin</span>
         </button>
         <button class="tab-btn" onclick="switchTab(event)">Usage &amp; Costs</button>
         <button class="tab-btn" onclick="switchTab(event)">Admin</button>

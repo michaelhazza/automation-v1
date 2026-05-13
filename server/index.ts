@@ -125,6 +125,8 @@ import ieeRouter from './routes/iee.js';
 // Operator Backend — progress polling, settings, task actions (Chunk 7)
 import operatorSessionsRouter from './routes/operatorSessions.js';
 import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import subaccountIeeBrowserSettingsRouter from './routes/subaccountIeeBrowserSettings.js';
+import adminIeeBrowserRolloutRouter from './routes/adminIeeBrowserRollout.js';
 import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
@@ -440,6 +442,8 @@ app.use(ieeRouter);
 // Operator Backend — progress polling, settings, task actions (Chunk 7)
 app.use(operatorSessionsRouter);
 app.use(subaccountOperatorSettingsRouter);
+app.use(subaccountIeeBrowserSettingsRouter);
+app.use(adminIeeBrowserRolloutRouter);
 app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
@@ -884,6 +888,15 @@ async function start() {
       registerSupportEvalDailyJob(boss);
     } catch (err) {
       console.error('[boot] failed to register support-eval-daily worker', err);
+    }
+  }
+  // IEE browser — daily cost rollup (Chunk 15B)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerIeeBrowserDailyRollupJob } = await import('./jobs/ieeBrowserDailyRollupJob.js');
+      await registerIeeBrowserDailyRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register iee-browser daily rollup job', err);
     }
   }
   // operator-session-identity chunk 6 — token refresh worker

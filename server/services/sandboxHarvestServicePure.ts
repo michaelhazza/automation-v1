@@ -348,3 +348,20 @@ export function pickHarvestStepFromError(kind: HarvestErrorKind): number {
       return 0;
   }
 }
+
+// ---------------------------------------------------------------------------
+// § 6: resolveHarvestSubtype
+//
+// Resolve the llm_requests subtype for a harvest-pipeline cost row.
+// Post-task cost rows are always 'task'. The 'warm_pool' subtype is
+// exclusively written by browserWarmPool.terminate (spec §8.6).
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the llm_requests subtype for a harvest-pipeline cost row.
+ * Post-task cost rows are always 'task'. The 'warm_pool' subtype is
+ * exclusively written by browserWarmPool.terminate (spec §8.6).
+ */
+export function resolveHarvestSubtype(): 'task' {
+  return 'task';
+}

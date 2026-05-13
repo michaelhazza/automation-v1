@@ -204,6 +204,38 @@ export interface SandboxRunTaskInput {
    * In V1 this is a string key resolved by the harvest service to a registered schema.
    */
   outputSchemaRef: string;
+  /**
+   * Browser profile volume mount descriptor (IEE-browser, spec §8.1 extension).
+   * Non-null only when templateName = 'iee-browser'. Non-browser tasks leave this absent;
+   * the sandbox harness ignores it. sessionProfileId authorises the mount; volumeId and
+   * userDataDirInSandbox are the physical parameters.
+   */
+  profileMount?: {
+    sessionProfileId: string;       // uuid of the iee_browser_session_profiles row
+    volumeId: string;
+    userDataDirInSandbox: string;   // '/workspace/profile'
+  };
+  /**
+   * Warm-session checkout ID (IEE-browser, spec §8.1 extension).
+   * UUID of the browser_warm_sessions row leased for this task, or null for cold-start.
+   * Non-browser tasks leave this absent.
+   */
+  warmSessionCheckoutId?: string | null;
+  /**
+   * Browser task envelope (IEE-browser, spec §8.1 extension).
+   * The actual task instructions (URL, actions, contract, etc.) threaded from
+   * `backendOptions.ieeTask` to the in-sandbox harness via /workspace/input.json.
+   * Non-browser tasks leave this absent. Shape is provider-opaque (the harness
+   * validates the envelope it expects).
+   */
+  browserTaskPayload?: unknown;
+  /**
+   * Provider-assigned sandbox ID of a pre-warmed sandbox (warm-pool dispatch).
+   * When set, the provider MUST skip createSandbox() and adopt this sandbox
+   * instead — semantically the warm-pool lease's whole point. Non-warm-pool
+   * dispatches leave this absent and the provider creates a fresh sandbox.
+   */
+  leasedProviderSandboxId?: string;
 }
 
 /**
