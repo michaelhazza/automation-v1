@@ -230,8 +230,21 @@ export const actionService = {
       return { actionId: action.id, status: 'pending_approval', isNew: true };
     }
 
-    // auto gate — move to approved immediately
-    await this.transitionState(action.id, input.organisationId, 'approved', undefined, undefined, opts);
+    // auto gate — move to approved immediately. When the caller passed
+    // `opts.tx`, also propagate `skipDispatch: true` — the dispatch hook
+    // cannot safely run inside an uncommitted tx (see transitionState
+    // doc-comment). Today no production caller hits this combination
+    // (`createDraftWithProposal` forces `gateOverride: 'review'`), but the
+    // propagation here keeps the contract self-consistent if a future
+    // caller passes `opts.tx` to a non-review path.
+    await this.transitionState(
+      action.id,
+      input.organisationId,
+      'approved',
+      undefined,
+      undefined,
+      opts.tx ? { tx: opts.tx, skipDispatch: true } : opts,
+    );
     return { actionId: action.id, status: 'approved', isNew: true };
   },
 
@@ -240,6 +253,17 @@ export const actionService = {
    *
    * Pass `opts.tx` to enrol the select / update / emit-event writes in a
    * caller-owned transaction (see `proposeAction` doc-comment for context).
+   *
+   * **Tx + approval-dispatch contract.** When `opts.tx` is passed AND
+   * `newStatus === 'approved'`, the caller MUST also pass
+   * `opts.skipDispatch = true` to acknowledge that the EA-draft dispatch
+   * hook is being skipped (the hook does network I/O against post-commit
+   * state and cannot safely run inside the caller's tx). The caller is
+   * then responsible for invoking
+   * `eaDraftDispatchService.dispatchAfterApproval` AFTER their tx commits.
+   * The runtime assertion below enforces this — a future approval path
+   * that atomically transitions to approved without providing the
+   * acknowledgement will throw rather than silently failing to dispatch.
    */
   async transitionState(
     actionId: string,
@@ -247,8 +271,28 @@ export const actionService = {
     newStatus: ActionStatus,
     actorId?: string,
     metadata?: Record<string, unknown>,
-    opts: { tx?: Transaction } = {},
+    opts: { tx?: Transaction; skipDispatch?: boolean } = {},
   ): Promise<void> {
+    // Tx-contract guard: when a caller passes `opts.tx` and transitions to
+    // `approved`, the EA-draft dispatch hook below is skipped (the hook does
+    // network I/O against post-commit state and cannot safely run inside the
+    // caller's tx — see comment block lower down). The caller MUST
+    // acknowledge that contract by passing `skipDispatch: true` and is
+    // responsible for invoking
+    // `eaDraftDispatchService.dispatchAfterApproval` themselves AFTER their
+    // tx commits. Without this assert a future approval path could
+    // atomically transition to approved and silently never dispatch.
+    if (opts.tx && newStatus === 'approved' && !opts.skipDispatch) {
+      throw Object.assign(
+        new Error(
+          'actionService.transitionState: callers passing opts.tx for an ' +
+            "'approved' transition MUST set opts.skipDispatch=true and call " +
+            'eaDraftDispatchService.dispatchAfterApproval after their tx ' +
+            'commits. See actionService.transitionState doc-comment.',
+        ),
+        { statusCode: 500 },
+      );
+    }
     const exec = opts.tx ?? db;
     const [action] = await exec
       .select({ status: actions.status })
