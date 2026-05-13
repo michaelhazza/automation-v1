@@ -726,7 +726,7 @@ export const integrationConnectionService = {
         and(
           eq(integrationConnections.organisationId, orgId),
           eq(integrationConnections.subaccountId, subaccountId),
-          eq(integrationConnections.authType, 'operator_session' as IntegrationConnection['authType']),
+          eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
         ),
       )

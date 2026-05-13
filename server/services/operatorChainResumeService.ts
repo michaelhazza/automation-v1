@@ -10,7 +10,7 @@ import { eq, and, asc, isNull, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { operatorRuns, agentRuns } from '../db/schema/index.js';
 import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
-import { decideFreshProfileRestartAllowed } from '../routes/freshProfileRestartPredicatePure.js';
+import { decideFreshProfileRestartAllowed } from './freshProfileRestartPredicatePure.js';
 import {
   composeResumePayload,
   type ResumePayload,
@@ -97,33 +97,39 @@ export const operatorChainResumeService = {
   },
 
   async readAgentRunForTask(agentRunId: string, orgId: string) {
-    const [run] = await db
-      .select({
-        id: agentRuns.id,
-        status: agentRuns.status,
-        organisationId: agentRuns.organisationId,
-        subaccountId: agentRuns.subaccountId,
-        assignedUserId: agentRuns.assignedUserId,
-        operatorChainFailureCount: agentRuns.operatorChainFailureCount,
-      })
-      .from(agentRuns)
-      .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
-      .limit(1);
-    return run ?? null;
+    return db.transaction(async (tx) => {
+      await setOrgGUC(tx, orgId);
+      const [run] = await tx
+        .select({
+          id: agentRuns.id,
+          status: agentRuns.status,
+          organisationId: agentRuns.organisationId,
+          subaccountId: agentRuns.subaccountId,
+          assignedUserId: agentRuns.assignedUserId,
+          operatorChainFailureCount: agentRuns.operatorChainFailureCount,
+        })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
+        .limit(1);
+      return run ?? null;
+    });
   },
 
   async resetChainFailureCount(agentRunId: string, orgId: string): Promise<{ updated: boolean }> {
-    const result = await db
-      .update(agentRuns)
-      .set({ operatorChainFailureCount: 0 })
-      .where(
-        and(
-          eq(agentRuns.id, agentRunId),
-          eq(agentRuns.organisationId, orgId),
-          eq(agentRuns.status, 'paused_chain_failure'),
-        ),
-      )
-      .returning({ id: agentRuns.id });
+    const result = await db.transaction(async (tx) => {
+      await setOrgGUC(tx, orgId);
+      return tx
+        .update(agentRuns)
+        .set({ operatorChainFailureCount: 0 })
+        .where(
+          and(
+            eq(agentRuns.id, agentRunId),
+            eq(agentRuns.organisationId, orgId),
+            eq(agentRuns.status, 'paused_chain_failure'),
+          ),
+        )
+        .returning({ id: agentRuns.id });
+    });
     return { updated: result.length > 0 };
   },
 
@@ -174,7 +180,7 @@ export const operatorChainResumeService = {
           chainSeq: operatorRuns.chainSeq,
         })
         .from(operatorRuns)
-        .where(and(eq(operatorRuns.agentRunId, agentRunId), isNull(operatorRuns.supersededByAttempt)))
+        .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)))
         .orderBy(desc(operatorRuns.chainSeq))
         .limit(1);
 
@@ -191,7 +197,7 @@ export const operatorChainResumeService = {
         await tx
           .update(operatorRuns)
           .set({ supersededByAttempt: newAttempt })
-          .where(and(eq(operatorRuns.agentRunId, agentRunId), isNull(operatorRuns.supersededByAttempt)));
+          .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)));
       }
 
       return {
