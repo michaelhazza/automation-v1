@@ -7,7 +7,7 @@
 **Branch:** `claude/add-memvid-integration-ehAOr`
 **Authored by:** architect (Opus, inline)
 **Date:** 2026-05-13
-**Plan-review:** chatgpt-plan-review 2 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs, R2 closed 3 BLOCKERs + 4 TIGHTENINGs. All 15 findings TECHNICAL, auto-applied. APPROVED post-R2.
+**Plan-review:** chatgpt-plan-review 3 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs, R2 closed 3 BLOCKERs + 4 TIGHTENINGs + 1 polish, R3 closed 3 TIGHTENINGs. All 19 findings TECHNICAL, auto-applied. R3 verdict APPROVED with no further blockers.
 
 ---
 
@@ -354,7 +354,15 @@ D-Embedding-failure invariant (spec §3.8) requires OpenAI failures to **fail op
 
 **Contracts:**
 - Route signature: `GET /api/orgs/:orgId/memory-blocks/:blockId/sources?version=<number>&include_reverse=true`.
-- Middleware: `authenticate`, `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`, then **inline 403-before-query**: `if (req.params.orgId !== req.orgId) return res.status(403).json({ error: 'Forbidden' })`.
+- Middleware: `authenticate`, `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`, then **inline 403-before-query using the UUID-canonicalised pattern from §3 Route guards** (per R3 T1 — do NOT copy the older raw-string compare):
+
+  ```typescript
+  const pathOrgId = req.params.orgId?.toLowerCase();
+  const sessionOrgId = req.orgId?.toLowerCase();
+  if (!sessionOrgId || pathOrgId !== sessionOrgId) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  ```
 - Service signature: `memoryBlockSourcesService.getSourcesForBlock(blockId, organisationId, opts?: { version?: number; includeReverse?: boolean }) → Promise<MemoryBlockSourcesPayload>`.
 - Pure helper signature: `assembleSourcesPayload(rows, reverseCounts?) → MemoryBlockSourcesPayload`. Zero DB imports.
 - Response shape: exactly per spec §6.1. `reverseLineageByEntry` is present only when `?include_reverse=true`.
@@ -513,7 +521,13 @@ CREATE MATERIALIZED VIEW mv_memory_utility_30d AS
         WHEN jsonb_typeof(r.applied_memory_block_citations) = 'array' THEN jsonb_array_length(r.applied_memory_block_citations)
         ELSE 0
       END AS cited_block_count,
-      (r.injected_entry_ids IS NOT NULL) AS measured_entries
+      -- Per R3 T2: only true JSONB arrays count as "measured". NULL or any
+      -- malformed non-array value falls into the unmeasured bucket so the
+      -- semantic distinction stays clean:
+      --   NULL / malformed  = unmeasured / not trustworthy
+      --   []                = measured empty
+      --   [ids...]          = measured with entries
+      (jsonb_typeof(r.injected_entry_ids) = 'array') AS measured_entries
     FROM agent_runs r
     WHERE r.created_at > now() - interval '30 days'
   ),
@@ -1012,7 +1026,7 @@ Three new vitest pure-function test files. Filenames end `*Pure.test.ts` per DEV
 |---|---|---|
 | `server/services/__tests__/memoryBlockSourcesServicePure.test.ts` | 3 | Source-entry present / soft-deleted / hard-deleted; source-run present / absent / both absent; reverse-lineage map population; empty input. |
 | `server/services/__tests__/memoryUtilityDailySeriesPure.test.ts` | 7 | UTC bucket boundaries at midnight; zero-measured-run bucket returns null; mixed measured/unmeasured partition; block-side denominator-zero; 30-bucket gap-fill shape; denominator-zero protection within measured runs; determinism under input reordering. |
-| `server/services/__tests__/retrievalQueryEmbedderPure.test.ts` | 9 | Cosine math (orthogonal, identical, anti-parallel); threshold filter boundary values; empty-after-semantic predicate (non-empty pool → empty filtered set); embedding-null path; mixed-category fallback; determinism. |
+| `server/services/__tests__/retrievalQueryEmbedderPure.test.ts` | 9 | Cosine math (orthogonal, identical, anti-parallel); threshold filter boundary values; empty-after-semantic predicate (non-empty pool → empty filtered set); embedding-null path; mixed-category fallback; **per-candidate vector-error skip** (one malformed candidate in a pool of N does not fail the whole `scoreCandidates` call — exclude the bad one, keep the rest, no global fallback) per R2 F3; determinism. |
 
 Confirmed posture (per `references/test-gate-policy.md` and `docs/testing-conventions.md`):
 - All tests use `import { describe, test, expect } from 'vitest'`. No `node:test`, no `node:assert`, no `tsx`-runnable harnesses.

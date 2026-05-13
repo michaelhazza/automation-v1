@@ -203,8 +203,57 @@ ChatGPT R2 confirmed all 8 Round 1 fixes (F1, F2, T1, T2, T3, T4, T5, T6) are ad
 
 **Plan header updated:** Status changed from `plan-gate (ready for operator review before execution)` → `LOCKED — ready for Phase 2 execution (Sonnet session, new conversation)`.
 
-**Round count:** 2 / 3 cap consumed. No further plan rounds planned.
+**Round count:** 2 / 3 cap consumed. Operator requested one more pass — see Round 3 below.
 
-**Next step:** Operator launches Phase 2 execution in a fresh Sonnet session (per CLAUDE.md model-guidance — execution is token-intensive and Sonnet handles a clear plan equally well at lower cost). The locked plan at `tasks/builds/memory-improvements/plan.md` is the input.
+**Auto-commit:** commit `a5b27331` `docs(memory-improvements): chatgpt-plan-review R2 — apply 3 blockers + 4 tightenings, lock plan`.
 
-**Auto-commit:** see commit message `docs(memory-improvements): chatgpt-plan-review R2 — apply 3 blockers + 4 tightenings, lock plan`.
+---
+
+## Round 3 — response received + triage applied 2026-05-13
+
+**Operator pasted ChatGPT-web R3 response.** Final cleanup pass. ChatGPT confirmed R1+R2 fixes adequate, no remaining blockers — 3 TIGHTENINGs.
+
+**Verdict:** APPROVED — *"No further blockers from me."*
+
+### T1 (R3) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — Chunk 3 had stale raw-string 403 compare
+
+**Issue:** §3 Architecture notes "Route guards" section was updated in R2 T2 to use UUID-canonicalised lowercase compare, but Chunk 3's Contracts section still showed `if (req.params.orgId !== req.orgId) return res.status(403)` — the old raw pattern. Executor copying from Chunk 3 would reintroduce the case-sensitivity fragility.
+
+**Fix applied:** Chunk 3 Contracts middleware bullet now embeds the canonicalised snippet inline and references §3 Route guards as the source of truth. Explicit "do NOT copy the older raw-string compare" warning.
+
+### T2 (R3) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — measured_entries needs array-shape guard
+
+**Issue:** MV defined `(r.injected_entry_ids IS NOT NULL) AS measured_entries`. With the R2 F2 `jsonb_typeof` guards on the array-length expressions, a malformed JSONB value (`{}`, scalar, etc.) would now produce `injected_entry_count = 0` AND `measured_entries = true` — i.e. "measured empty." That's the wrong semantic — malformed data is untrustworthy, not measured-empty.
+
+**Fix applied:** Definition tightened to `(jsonb_typeof(r.injected_entry_ids) = 'array') AS measured_entries` with inline comment documenting the three-way semantic:
+- `NULL` / malformed → unmeasured / not trustworthy
+- `[]` → measured empty
+- `[ids...]` → measured with entries
+
+### T3 (R3) — TIGHTENING (TECHNICAL, AUTO-APPLIED) — Test inventory missing malformed-candidate test
+
+**Issue:** R2 F3 added a "per-candidate vector-error skip" test case to Chunk 9's test list, but the §8 summary test-inventory table for `retrievalQueryEmbedderPure.test.ts` still listed only the original cases. Reviewers cross-checking the inventory against Chunk 9 would miss the new case.
+
+**Fix applied:** §8 inventory row for `retrievalQueryEmbedderPure.test.ts` now explicitly includes the per-candidate-vector-error-skip case in the test-cases summary.
+
+### Out-of-scope findings
+
+None.
+
+### User-facing findings
+
+None.
+
+---
+
+## Outcome — APPROVED, plan LOCKED
+
+**Verdict:** APPROVED — *"After that, I would move to execution."*
+
+**Round count:** 3 / 3 cap consumed. No further plan rounds.
+
+**Plan header:** Status remains LOCKED (no transition needed). Plan-review history updated from "2 rounds, 15 findings" to "3 rounds, 19 findings, all TECHNICAL, all auto-applied."
+
+**Next step:** Operator opens fresh Claude Code session on Sonnet and runs `tasks/builds/memory-improvements/plan.md` per the Phase 2 resume contract documented in `tasks/builds/memory-improvements/handoff.md`.
+
+**Auto-commit:** see commit message `docs(memory-improvements): chatgpt-plan-review R3 — final 3 tightenings, plan APPROVED + LOCKED`.
