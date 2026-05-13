@@ -56,6 +56,31 @@ Round 1 applies 9 of 11 fixes inline (F1, F2, F3, F4, F6, F7, T1, T2, T3). F5 an
 
 ### Round 2
 
+**Diff sent:** `.chatgpt-diffs/pr297-round2-code-diff.diff` (244K, 71 files).
+
+**ChatGPT verdict:** Still do not merge — 7 new blockers (F8-F14) + 3 should-fix (T5-T7).
+
+| ID | Severity | Description | Verified | Action |
+|---|---|---|---|---|
+| F8 | Blocking | `resolveBrowserDispatch(settings!, warmCheckout)` uses TS non-null assertion; race risk if settings changed | YES — _ieeShared.ts:178 | Use `settings ?? null`; if launch_disabled mid-dispatch, release warm session, throw |
+| F9 | Blocking | Cold-start doesn't create browser_warm_sessions row → rollout doc smoke criteria wrong | YES — only warm_leased path writes | Doc-only fix to rollout doc; behaviour is by design |
+| F10 | Blocking | inputFiles:[] means harness gets empty taskPayload | YES — _ieeShared.ts:236, e2bSandbox.ts:297 | Add browserTaskPayload to SandboxRunTaskInput; thread ieeTask through |
+| F11 | Blocking | network.mode='none' incompatible with browser tasks | YES — _ieeShared.ts:220 | Annotate as V1 stub; track IEE-DEF-7; guarded today by SDK-not-installed + placeholder-digest rejection |
+| F12 | Blocking | UI can set status='on' without seeing that rolloutApproved=false blocks dispatch | YES — UI exposes status but not rollout state | Read-only banner showing rollout state (pending/approved) |
+| F13 | Blocking | patchBodySchema silently strips rolloutApproved | YES — z.object without .strict() | Make schema .strict() so unknown keys return 400 |
+| F14 | Blocking | Named CI gate test is describe.skip | YES — ieeBrowserProfileManager.serialization.test.ts:7 | Replace with `describeIfE2E` env-gated pattern |
+| T5 | Should-fix | callSite:'worker' stale after substrate retirement | YES | Extend enum to include 'iee-browser-warm-pool'; update warm-pool cost row to use new tag |
+| T6 | Should-fix | Daily rollup filters only by subaccount_id | YES — ieeBrowserDailyRollupJob.ts:80 | Add `AND organisation_id = ${setting.organisation_id}` |
+| T7 | Should-fix | 3 schema-export comments still reference old migration numbers | YES — llmRequests.ts:170,173,220 | Aligned 0347→0348 + 0349→0350 (×2) |
+
+### Round 2 commit
+
+`10e20212` — fix(iee-browser): chatgpt-pr-review Round 2 — 10 findings applied
+
+12 files / +101 -22. G3: lint 0 errors, typecheck clean.
+
+### Round 3
+
 Pending operator paste of next ChatGPT-web response.
 
-Round 2 diff: `.chatgpt-diffs/pr297-round2-code-diff.diff` (regenerated post-commit).
+Round 3 diff: `.chatgpt-diffs/pr297-round3-code-diff.diff` (regenerated post-commit).
