@@ -32,7 +32,9 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   buildResumeContext,
   computeRunResultStatus,
+  assembleVoiceBlock,
 } from './agentExecutionServicePure.js';
+import * as voiceProfileService from './voiceProfile/voiceProfileService.js';
 import {
   streamMessages as streamAgentRunMessages,
 } from './agentRunMessageService.js';
@@ -250,6 +252,10 @@ function buildBackendOptionsForMode(
         backendId: 'iee_dev',
         ieeTask: request.ieeTask as never,
       };
+    case 'operator_managed':
+      // operator_managed runs are dispatched by the operator backend service,
+      // not through this function. Reaching here is a programming error.
+      throw new Error(`buildBackendOptionsForMode: 'operator_managed' runs must be dispatched via operatorRunService, not agentExecutionService`);
     default: {
       const _exhaustive: never = mode;
       void _exhaustive;
@@ -1249,6 +1255,24 @@ export const agentExecutionService = {
       const teamRoster = await buildTeamRoster(request.subaccountId!, request.agentId);
       if (teamRoster) {
         systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
+      }
+
+      // Personal Assistant V1 §12.4, §22.3 — voice block injection.
+      // SOT: memory_block named 'ea.voice_profile_id' carries the profile UUID.
+      try {
+        const voiceProfileIdBlock = composedBlocks.find((b) => b.name === 'ea.voice_profile_id');
+        if (voiceProfileIdBlock?.content) {
+          const voiceProfile = await voiceProfileService.getProfile(
+            { profileId: voiceProfileIdBlock.content.trim() },
+            { organisationId: request.organisationId },
+          );
+          const voiceBlock = assembleVoiceBlock(voiceProfile);
+          if (voiceBlock) {
+            systemPromptParts.push(`\n\n---\n${voiceBlock}`);
+          }
+        }
+      } catch {
+        // Non-fatal — agent runs without voice block if profile is unavailable
       }
 
       // ── Stable/dynamic split for multi-breakpoint prompt caching (Phase 0C) ──

@@ -92,6 +92,9 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Modules & subscriptions | `modules.ts` |
 | GEO audits | `geoAudits.ts` |
 | Onboarding | `onboarding.ts` |
+| EA drafts | `eaDrafts.ts` |
+| Personal setup | `personal.ts` (POST /api/personal/setup) |
+| Agent home widgets | `agentHomeWidgets.ts` (GET /api/agent-home-widgets) |
 
 ### Shared route helpers
 
@@ -182,6 +185,15 @@ Subaccount Agent (subaccountAgents table)
   — Has parentSubaccountAgentId for subaccount-level hierarchy
 ```
 
+### User-owned agents (Personal Assistant pattern)
+
+A fourth variant of the org-tier agent: `agents.owner_user_id` is set to a specific user's ID. This is the personal assistant / executive-assistant pattern where the agent operates on behalf of exactly one user — not the org, not a subaccount.
+
+- `owner_user_id` is immutable post-creation. Skills that access user-scoped OAuth tokens (calendar, Slack) resolve the owner via `resolveAgentOwner(agentId, orgId, db)` in `skillExecutor.ts` and never from LLM input.
+- `agents.slug = 'executive-assistant'` is the reserved slug for the personal assistant agent. One per user maximum.
+- Home widgets (`home_widget` JSONB column on `system_agents`) are the per-user dashboard surface for the personal assistant.
+- RLS: `ea_drafts`, `voice_profiles` are FORCE RLS tables scoped to `owner_user_id`. Background jobs that scan them require `withAdminConnection` + `SET LOCAL ROLE admin_role`. See KNOWLEDGE.md [2026-05-13] cross-org job pattern.
+
 ### Key agent fields
 
 | Field | Where | Meaning |
@@ -194,6 +206,7 @@ Subaccount Agent (subaccountAgents table)
 | `agentRole` | agents, subaccountAgents | Role in hierarchy (orchestrator, specialist, etc.) |
 | `parentAgentId` | agents | Org-level hierarchy parent |
 | `parentSubaccountAgentId` | subaccountAgents | Subaccount-level hierarchy parent |
+| `owner_user_id` | agents | When set, agent is user-owned (personal assistant). Scopes all user-credential resolution. |
 
 ### Subaccount agent link overrides
 
@@ -762,6 +775,8 @@ Skills are defined as Markdown files in `server/skills/*.md`. Built-in system sk
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 | Output (operator-facing) | `output.recommend` (write to `agent_recommendations` via single-writer service — see §Agent Recommendations Surface) |
+| Calendar (user-scoped) | `calendar.list_events`, `calendar.get_event`, `calendar.find_free_slot`, `calendar.create_event`, `calendar.update_event`, `calendar.respond_to_invite` — user-scoped Google Calendar skills; write skills route through EA draft + approval gate |
+| Slack (user-scoped) | `slack.list_channels`, `slack.read_channel`, `slack.search_messages`, `slack.summarise_thread`, `slack.post_message`, `slack.post_dm` — user-scoped Slack skills; post skills route through EA draft + approval gate |
 
 `send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
@@ -1731,6 +1746,19 @@ CREATE POLICY <table>_org_isolation ON <table>
 ```
 
 Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR. `policyMigration` in that manifest must point at the migration that physically runs `CREATE POLICY ... ON <table>` — when a corrective migration's header NOTE explicitly excludes a table, the manifest still references the original. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm.
+
+#### Dual-GUC pattern (subaccount-scoped tables)
+
+Some tables are scoped to a specific subaccount, not just an org. Their RLS policy checks BOTH `app.organisation_id` AND `app.subaccount_id`. Setting only `app.organisation_id` (the org-scoped helper `setOrgGUC`) leaves `app.subaccount_id` unset; FORCE RLS then returns 0 rows silently.
+
+Use `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` from `server/lib/orgScoping.ts` for ALL reads and writes against these tables:
+- `operator_runs`
+- `operator_task_profiles`
+- `subaccount_operator_settings`
+
+Call it as the **first statement** inside `db.transaction(async (tx) => { ... })`. Never make bare `db.select()`/`db.update()` calls against dual-GUC tables outside a transaction — the pool picks a fresh connection with no GUC set and the query silently returns nothing.
+
+`setOrgGUC` (single GUC) remains correct for org-scoped-only tables such as `agent_runs`, `iee_runs`, and existing org-tenant tables.
 
 #### Corrective migrations (when RLS is broken or missing)
 
@@ -3834,6 +3862,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Modify the Operator Backend (chain-link dispatch, chain-resume, cost writer, settings) | `server/services/executionBackends/operatorManagedBackend.ts` (adapter) + `server/services/operatorChainResumeService.ts` (resume payload) + `server/services/operatorTaskProfileService.ts` (browser profile) + `server/services/subaccountOperatorSettingsService.ts` (per-subaccount settings) + `server/services/operatorCostWriter.ts` (cost rows) + `server/services/operatorChainSchedulerService.ts` (FIFO dispatch). See §Operator Backend (operator-backend, 2026-05) for full file inventory. |
 | Modify operator_session connections (CRUD) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
 | Modify the credential broker | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + provider registry at `server/config/operatorSessionProviders.ts` |
 | Add a new operator_session provider | `server/config/operatorSessionProviders.ts` — extend the registry; bump `OPERATOR_SESSION_DISCLOSURE_VERSION` if disclosure copy changed |
@@ -3923,6 +3952,29 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
 | Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
 
+#### Personal Assistant / Executive Assistant (personal-assistant-v1, 2026-05)
+
+| Concern | Files |
+|---|---|
+| EA draft CRUD routes | `server/routes/eaDrafts.ts` — `GET/POST /api/ea-drafts`, `POST /api/ea-drafts/:id/approve` |
+| EA draft service | `server/services/eaDrafts/eaDraftService.ts` |
+| EA provisioning (personal setup) | `server/services/eaDrafts/eaProvisioningService.ts` + `POST /api/personal/setup` route |
+| Voice profile service | `server/services/calendar/voiceProfileService.ts` + `GET/POST /api/voice-profiles` route |
+| Calendar action service | `server/services/calendar/calendarActionService.ts` — executes `calendar.*` skill handlers |
+| Slack action service | `server/services/slack/slackActionService.ts` — executes `slack.*` skill handlers |
+| Home widget service | `server/services/homeWidgetService.ts` + `GET /api/agent-home-widgets` route |
+| External source triggers | `server/services/triggers/` — Gmail inbox poll, calendar lookahead, external_trigger_dedup dedup table |
+| Action registry — calendar skills | `server/config/actionRegistry/calendar.ts` |
+| Action registry — Slack user skills | `server/config/actionRegistry/slack.ts` |
+| Background jobs | `server/jobs/voiceProfileRefreshJob.ts`, `server/jobs/gmailInboxPollJob.ts`, `server/jobs/calendarLookaheadJob.ts` |
+| Schema | `server/db/schema/eaDrafts.ts`, `server/db/schema/voiceProfiles.ts`, `server/db/schema/externalTriggerDedup.ts` |
+| Client — first-run wizard | `client/src/components/EAFirstRunWizard.tsx` |
+| Client — personal assistant page | `client/src/pages/PersonalAssistantPage.tsx` |
+| Client hooks | `client/src/hooks/useEADrafts.ts`, `client/src/hooks/useHomeWidgets.ts`, `client/src/hooks/useVoiceProfile.ts`, `client/src/hooks/useUserOwnedAgents.ts` |
+| Permissions | `VOICE_PROFILE_READ`, `VOICE_PROFILE_WRITE`, `EA_DRAFT_READ`, `EA_DRAFT_DECIDE`, `HOME_WIDGET_READ`, `EA_PROVISION` |
+| Skill definitions | `server/skills/calendar-*.md` (6 files), `server/skills/slack-*.md` (6 files) |
+| EA draft F2 invariant | `ea_drafts.send_state` is NEVER `approved`; approval is on `actions.status`. See KNOWLEDGE.md [2026-05-13] entry. |
+
 #### Trust & Verification Layer (trust-verification-layer, 2026-05)
 
 Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evaluation (Stage 2), operator correction memory (Stage 3). Spec: `tasks/builds/trust-verification-layer/spec.md`.
@@ -3962,6 +4014,77 @@ Six new permission keys (migration 0297):
 | `scorecard:judge:forced` | Event-driven (enqueued on correction) | teamSize 4, teamConcurrency 1 | Forced judgement triggered by operator correction |
 | `bench:execute` | Event-driven (enqueued by POST /bench-runs/:id/run) | teamSize 2, teamConcurrency 1 | Execute a bench run against all bench items |
 | `correction:pattern-detect` | Daily 05:00 UTC | teamSize 1, teamConcurrency 1 | Cluster operator corrections; promote patterns to pending_review memory blocks |
+
+#### Operator Backend (operator-backend, 2026-05)
+
+New `operator_managed` execution adapter. Drives long-form autonomous tasks across sequential 120-minute chain links using an operator-session subscription or API-key fallback. Parallel to IEE (`iee_runs`) with chain-link state in `operator_runs`. See ADR `docs/decisions/0011-operator-backend-chain-resume-model.md` for the D8+D11 scope-lock rationale.
+
+**Key files per domain:**
+
+| Concern | Files |
+|---------|-------|
+| Adapter registration + lifecycle | `server/services/executionBackends/operatorManagedBackend.ts` — implements `dispatch`, `loadTerminalState`, `finalise`, `reconcile`, `cancel`; registered at `server/index.ts` alongside the five existing adapters |
+| Pure helpers (failure classifier, finaliser decision, stickiness) | `server/services/executionBackends/operatorManagedBackendPure.ts` |
+| Chain-resume payload composer | `server/services/operatorChainResumeService.ts` + `server/services/operatorChainResumeServicePure.ts` (K=5 conversation-history window) |
+| Per-task browser profile lifecycle | `server/services/operatorTaskProfileService.ts` + `server/services/operatorTaskProfileServicePure.ts` (retention-window math, GC scheduling) |
+| Per-subaccount operator settings | `server/services/subaccountOperatorSettingsService.ts` + `server/services/subaccountOperatorSettingsServicePure.ts` (range validation; ETag = `String(settings_version)` — integer column, R2-F3) |
+| Cost writer (subscription_mediated + sandbox_compute rows) | `server/services/operatorCostWriter.ts` + `server/services/operatorCostWriterPure.ts` (idempotency key: `(operator_run_id, source_type, boundary)`) |
+| Chain-link FIFO scheduler + concurrency-cap accounting | `server/services/operatorChainSchedulerService.ts` + `server/services/operatorChainSchedulerServicePure.ts` |
+| Suspension CS notification | `server/services/operatorSessionSuspensionNotifier.ts` — emits `cs.operator_session.suspended_detected` |
+| Typed error classes | `server/services/operatorBackendErrors.ts` — `OperatorBackendConflictError` (409), `OperatorSessionLimitExceededError` (429) |
+| Runtime error classifier | `server/services/operatorRuntimeErrors.ts` — closed set; maps HTTP/broker signals to `session_unavailable` etc. |
+| Task-action routes | `server/routes/operatorTasks.ts` — retry-chain-failure, extend-budget, fresh-profile-restart, cancel |
+| Per-subaccount settings routes | `server/routes/subaccountOperatorSettings.ts` — `GET / PATCH` under `/api/admin/subaccounts/:id/operator-settings` |
+| Progress poll route | `server/routes/operatorSessions.ts` — `GET /api/subaccounts/:subaccountId/operator-sessions/:operatorRunId/progress` |
+| pg-boss handlers | `server/jobs/operatorSessionCompletedHandler.ts`, `server/jobs/operatorSessionDispatchNextChainLinkHandler.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/jobs/operatorTaskProfileGcHandler.ts` |
+| Encryption helper | `server/services/agentRunPayloadEncryptionService.ts` — wraps pgcrypto for `checkpoint_payload` at rest |
+| Schema — chain-link rows | `server/db/schema/operatorRuns.ts` (parallel to `iee_runs`; `operator_runs` table) |
+| Schema — persistent browser profiles | `server/db/schema/operatorTaskProfiles.ts` |
+| Schema — per-subaccount settings | `server/db/schema/subaccountOperatorSettings.ts` (mirrors `subaccount_optimiser_settings`; includes `settings_version` integer for ETag) |
+| Shared types | `shared/types/operatorRuns.ts`, `shared/types/checkpointPayload.ts` (`CheckpointPayloadSchemaV1`), `shared/types/operatorConversationArtefact.ts` (`OperatorConversationLinkArtefact`, MIME constant), `shared/types/operatorBackendEvents.ts` (single source of truth for `operator-session.*` event-name literals) |
+| Settings UI tab | `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx` + `_fields.tsx` — "Operator" tab on `AdminSubaccountDetailPage`, between Board Config and Usage |
+| Run Trace integration | `client/src/components/run-trace/ChainLinkDivider.tsx`, `client/src/components/run-trace/AttemptGroup.tsx` |
+| Task-view operator UI | `client/src/components/openTask/OperatorChainLinkIndicator.tsx`, `client/src/components/openTask/OperatorAutoExtendBanner.tsx` |
+| Operator modals + badge + filter | `client/src/components/operator/OperatorBadge.tsx`, `OperatorFilterToggle.tsx`, `OperatorConcurrencyLimitModal.tsx`, `OperatorUnavailableModal.tsx`, `OperatorBudgetExceededModal.tsx` |
+| Client API helpers | `client/src/lib/api/operatorTasks.ts` |
+| Migrations | `migrations/0335–0339` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions: `operator_chain_failure_count`, llm_requests extensions), `0340` (sandbox_executions: `sandbox_start_key`), `0341` (agent_runs: `per_task_budget_extension_minutes` — per-task accumulator for extend-budget route), `0342` (agent_runs: `assigned_user_id` — data source for the route actor-rule "assigned user OR manager+") |
+| CS runbook | `docs/runbooks/operator-session-account-suspension.md` + comms templates in `docs/runbooks/templates/` |
+
+**Sandbox primitive extension (additive, Spec B unchanged for non-operator callers):**
+`SandboxRunTaskInput` (`shared/types/sandbox.ts`) gains optional `sandboxStartKey?: string`. `sandboxExecutionService` gains `adoptOrStart(input)` for dispatch-crash recovery. Non-operator callers compile unchanged (field is optional; existing `runTask` path is byte-identical).
+
+**Chain-resume model (ADR-0011):**
+One agent run = 1..N chain links. Each chain link is an `operator_runs` row. When the soft session cap approaches, the operator checkpoints and exits; the `operator-session-dispatch-next-chain-link` queue triggers the next link. Chain links communicate via `operator_runs.checkpoint_payload` (encrypted at rest) and the persistent browser profile (`operator_task_profiles`). The `paused_for_chain_continuation` task state holds the task between links. Dispatcher predicate excludes `'cancelled'` — cancellation-vs-dispatch race is safe.
+
+**Per-subaccount operator settings:**
+`subaccount_operator_settings` table with dual-GUC RLS (`app.organisation_id` AND `app.subaccount_id`). Every read/write calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` (`server/lib/orgScoping.ts`) before touching the table. ETag is `String(settings_version)` (integer column incremented on every PATCH — collision-free even for same-second writes).
+
+**Four new pg-boss queues:**
+
+| Queue name | Purpose |
+|------------|---------|
+| `operator-session-completed` | Terminal chain-link finalisation (triggers `finaliseAgentRunFromBackend`) |
+| `operator-session-dispatch-next-chain-link` | FIFO chain-continuation dispatch |
+| `operator-session-progressed` | Mid-run progress updates (step_count, last_progress_at) |
+| `operator-task-profile-gc` | Deferred browser-profile garbage collection |
+
+**Vendor codename discipline:** the vendor operator runtime codename appears only in `infra/sandbox-templates/operator-session/Dockerfile` and env-manifest entries. It does not appear in code, schema, UI, telemetry, customer copy, or this document.
+
+**Permissions:**
+
+| Permission slug | Guard location | Grants |
+|----------------|---------------|--------|
+| `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` | `server/routes/subaccountOperatorSettings.ts` PATCH route | Allows PATCH to `subaccount_operator_settings` for the requesting subaccount |
+
+The PATCH route also requires `AGENTS_EDIT` (general). `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` is the fine-grained gate layered on top — org_admin-only in practice per the route actor-rule.
+
+**ExecutionCapability literals (operator-backend additions):**
+
+`'long_running'` — signals that the adapter can handle tasks whose total wall-clock duration exceeds a single session cap by checkpointing and continuing across chain links. Dispatcher must honour `settings_snapshot.max_wall_clock_per_task_days`.
+
+`'session_identity'` — signals that the adapter maintains a persistent browser profile (`operator_task_profiles`) between chain links within a task attempt. Retry path must preserve the profile row; fresh-profile-restart bumps `attempt_number` and supersedes prior chain links.
+
+Both literals are defined at `server/services/executionBackends/types.ts` (single source of truth). The CI gate `scripts/gates/verify-execution-capability-references.sh` enforces that `'long_running'` and `'session_identity'` strings appear only in the canonical types file, adapter declarations, test fixtures, and documentation.
 
 ---
 

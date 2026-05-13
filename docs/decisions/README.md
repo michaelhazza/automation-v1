@@ -57,5 +57,6 @@ Update when adding ADRs.
 | [0007](./0007-consolidation-build-page-retirement.md) | Consolidation build page retirement | accepted | UI consolidation |
 | [0008](./0008-sse-stream-token-auth.md) | SSE auth via short-lived signed stream-token (not long-lived JWT in URL) | accepted | auth |
 | [0009](./0009-support-desk-canonical-not-conversations.md) | Support tickets use dedicated canonical tables, not `canonical_conversations` | accepted | support desk, data model |
+| [0011](./0011-operator-backend-chain-resume-model.md) | Operator Backend — chain-resume and persistent profile required in V1 | accepted | operator backend, execution infrastructure |
 
 ADRs 0001-0005 were extracted from KNOWLEDGE.md historical "Decision" entries on 2026-05-03. The remaining 6 historical Decision entries stay in KNOWLEDGE.md as observations — they're either implementation patterns (not durable choices) or research notes (no decision to defend). Promote them to ADRs only if they keep being cited.

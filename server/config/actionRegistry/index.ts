@@ -9,6 +9,8 @@ import { configurationActions } from './configuration.js';
 import { clientpulseActions } from './clientpulse.js';
 import { commerceActions } from './commerce.js';
 import { supportActions } from './support.js';
+import { calendarActions } from './calendar.js';
+import { slackActions } from './slack.js';
 import { UNIVERSAL_SKILL_NAMES } from '../universalSkills.js';
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -20,6 +22,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   ...clientpulseActions,
   ...commerceActions,
   ...supportActions,
+  ...calendarActions,
+  ...slackActions,
 };
 
 // ─── Trust & Verification Layer §6.1 — runtime-check coverage backfill ────────

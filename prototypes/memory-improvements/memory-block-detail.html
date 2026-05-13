@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<!--
+  Memory Improvements — Surface 1: Memory Block Detail with Sources section
+  Extends: client/src/pages/MemoryBlockDetailPage.tsx
+  Cross-reference: trust-verification-layer pill (Source: Auto | Manual | Correction)
+  Proposal A — Synthesis lineage on memory-block versions
+
+  New in this mockup:
+    1. A third tab "Sources" on MemoryBlockDetailPage, visible when source = 'auto_synthesised'.
+       The "Auto" source pill in the page header links to this tab.
+    2. Sources tab lists the workspace memory entries that produced this block version.
+       Each entry shows: content excerpt, agent run link, captured-at timestamp, quality score.
+    3. Secondary affordance: "used in N other blocks" — one link per source entry,
+       deferred behind a collapsed expander (bidirectional lineage, per brief §A reviewer note).
+
+  Design decisions:
+    - Extends the existing tab-based layout of MemoryBlockDetailPage (Version History / Diff vs Canonical).
+      New "Sources" tab added alongside. The tab is hidden for manual/correction-sourced blocks.
+    - Source pill in page header is the "Auto" pill from Trust Verification Layer plan.
+      Clicking it activates the Sources tab (cross-nav).
+    - Each source row: excerpt (truncated to ~120 chars), "From run" link (→ AgentRunLivePage),
+      timestamp, quality-score dot. Keep to 4 columns per complexity budget.
+    - Bidirectional lineage (which OTHER blocks this entry contributed to) is one collapsed
+      expander per row, not a separate page. Shows max 3 sibling blocks before "+ N more".
+    - No raw UUIDs in default view. Run links use agent name + date, not UUID.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Block Detail — Sources | Memory Improvements</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+  /* Sidebar mini items */
+  .sidebar-item { padding: 8px 20px; color: rgba(255,255,255,0.62); font-size: 13px; cursor: pointer; }
+  .sidebar-item.active { background: rgba(99,102,241,0.16); color: white; border-left: 3px solid var(--indigo-400); padding-left: 17px; }
+
+  /* Page layout */
+  .page-content { padding: 28px 32px; max-width: 900px; }
+  .page-h1 { font-size: 20px; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; margin-bottom: 4px; }
+
+  /* Block meta row */
+  .block-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .block-meta-text { font-size: 12.5px; color: var(--slate-500); }
+
+  /* Source pill — matches trust-verification-layer pill design */
+  .source-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    border-radius: 20px; padding: 2px 9px;
+    background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200);
+    cursor: pointer; text-decoration: none; transition: all 0.1s;
+  }
+  .source-pill:hover { background: var(--indigo-100); border-color: var(--indigo-400); }
+  .source-pill svg { flex-shrink: 0; }
+
+  /* Tab strip — same style as AKR/TVL prototypes */
+  .tab-strip { display: flex; gap: 0; border-bottom: 1px solid var(--slate-200); margin-bottom: 22px; }
+  .tab-btn {
+    background: none; border: none; padding: 10px 16px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; gap: 7px; transition: color 0.12s;
+  }
+  .tab-btn:hover { color: var(--slate-700); }
+  .tab-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-600); font-weight: 600; }
+  .tab-count { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--slate-100); color: var(--slate-500); }
+  .tab-btn.active .tab-count { background: var(--indigo-100); color: var(--indigo-700); }
+
+  /* Tab panel */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Version history tab content */
+  .version-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border: 1px solid var(--slate-200); border-radius: 8px;
+    margin-bottom: 6px; cursor: pointer; transition: background 0.1s; background: white;
+  }
+  .version-row:hover { background: var(--slate-50); border-color: var(--slate-300); }
+  .version-num { font-size: 12.5px; font-weight: 700; color: var(--slate-700); width: 32px; flex-shrink: 0; }
+  .version-source-chip {
+    font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 5px;
+    background: var(--slate-100); color: var(--slate-500); border: 1px solid var(--slate-200);
+  }
+  .version-notes { font-size: 12px; color: var(--slate-600); flex: 1; }
+  .version-time { font-size: 11px; color: var(--slate-400); white-space: nowrap; }
+
+  /* Sources section */
+  .sources-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .sources-title { font-size: 13px; font-weight: 700; color: var(--slate-700); }
+  .sources-sub { font-size: 12px; color: var(--slate-500); }
+  .version-selector {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate-600);
+  }
+  .version-selector select {
+    padding: 4px 8px; border: 1px solid var(--slate-200); border-radius: 6px;
+    font-size: 12px; color: var(--slate-700); background: white; cursor: pointer;
+  }
+
+  /* Source entry row */
+  .source-entry {
+    border: 1px solid var(--slate-200); border-radius: 10px;
+    background: white; margin-bottom: 8px; overflow: hidden;
+    transition: border-color 0.1s;
+  }
+  .source-entry:hover { border-color: var(--slate-300); }
+
+  .source-entry-main {
+    padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px;
+  }
+
+  .score-dot-wrap { padding-top: 2px; flex-shrink: 0; }
+  .score-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+  }
+  .score-dot.high   { background: var(--emerald-500); }
+  .score-dot.medium { background: var(--amber-500); }
+  .score-dot.low    { background: var(--red-400); }
+
+  .source-entry-body { flex: 1; min-width: 0; }
+  .source-excerpt {
+    font-size: 13px; color: var(--slate-700); line-height: 1.5;
+    margin-bottom: 6px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .source-entry-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .source-run-link {
+    font-size: 11.5px; color: var(--indigo-600); font-weight: 500;
+    text-decoration: none; display: flex; align-items: center; gap: 4px;
+    transition: color 0.1s;
+  }
+  .source-run-link:hover { color: var(--indigo-700); text-decoration: underline; }
+  .source-meta-item { font-size: 11.5px; color: var(--slate-400); display: flex; align-items: center; gap: 4px; }
+
+  /* Score label */
+  .score-label {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 4px;
+  }
+  .score-label.high   { background: #ecfdf5; color: var(--emerald-600); border: 1px solid #a7f3d0; }
+  .score-label.medium { background: var(--amber-50); color: var(--amber-600); border: 1px solid #fde68a; }
+  .score-label.low    { background: var(--red-50); color: var(--red-500); border: 1px solid #fecaca; }
+
+  /* Bidirectional lineage expander */
+  .lineage-expander {
+    border-top: 1px solid var(--slate-100);
+    padding: 0;
+    background: var(--slate-50);
+  }
+  .lineage-toggle {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px; font-size: 11.5px; font-weight: 500;
+    color: var(--slate-500); cursor: pointer;
+    border: none; background: transparent; width: 100%; text-align: left;
+    transition: color 0.1s;
+  }
+  .lineage-toggle:hover { color: var(--slate-700); }
+  .lineage-toggle svg { transition: transform 0.15s; }
+  .lineage-toggle.open svg { transform: rotate(90deg); }
+  .lineage-content {
+    display: none; padding: 0 16px 10px; border-top: 1px solid var(--slate-100);
+  }
+  .lineage-content.open { display: block; }
+  .lineage-block-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11.5px; color: var(--indigo-600); text-decoration: none;
+    margin-right: 10px; transition: color 0.1s;
+  }
+  .lineage-block-link:hover { color: var(--indigo-700); text-decoration: underline; }
+  .lineage-note { font-size: 11px; color: var(--slate-400); margin-top: 4px; }
+
+  /* Empty state for non-auto blocks */
+  .sources-empty {
+    padding: 32px 20px; text-align: center; color: var(--slate-400);
+    background: var(--slate-50); border: 1px dashed var(--slate-200); border-radius: 10px;
+  }
+  .sources-empty p { font-size: 13px; }
+
+  /* Info banner */
+  .info-banner {
+    display: flex; align-items: flex-start; gap: 9px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-200); border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 18px; font-size: 12.5px; color: var(--indigo-700);
+    line-height: 1.5;
+  }
+  .info-banner svg { flex-shrink: 0; margin-top: 1px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path fill="white" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <div class="sidebar-item">Agents</div>
+      <div class="sidebar-item">Knowledge</div>
+      <div class="sidebar-item active">Memory Blocks</div>
+      <div class="sidebar-item">Run History</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Govern</div>
+      <div class="sidebar-item">Review Queue</div>
+      <div class="sidebar-item">Usage</div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Knowledge</span>
+        <span style="color:var(--slate-300)">›</span>
+        <span>Memory Blocks</span>
+        <span style="color:var(--slate-300)">›</span>
+        <span class="topbar-breadcrumb-current">Brand Voice and Tone Principles</span>
+      </div>
+      <div class="topbar-spacer"></div>
+    </div>
+
+    <!-- Page body -->
+    <div class="page-body">
+      <div class="page-content">
+
+        <!-- Page header -->
+        <div class="page-header" style="margin-bottom:6px">
+          <h1 class="page-h1">Brand Voice and Tone Principles</h1>
+        </div>
+
+        <!-- Block meta row -->
+        <div class="block-meta">
+          <span class="block-meta-text">Memory block</span>
+          <span style="color:var(--slate-300);font-size:12px">·</span>
+          <!-- Source pill — clicking activates Sources tab -->
+          <a class="source-pill" id="auto-pill" onclick="activateTab('sources'); return false;" href="#">
+            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Auto-synthesised
+          </a>
+          <span style="color:var(--slate-300);font-size:12px">·</span>
+          <span class="block-meta-text">v4 current</span>
+          <span style="color:var(--slate-300);font-size:12px">·</span>
+          <span class="badge badge-green" style="font-size:10.5px">
+            <span class="status-dot dot-green"></span>
+            Active
+          </span>
+        </div>
+
+        <!-- Tab strip -->
+        <div class="tab-strip">
+          <button class="tab-btn" id="tab-history" onclick="activateTab('history')">
+            Version History
+          </button>
+          <button class="tab-btn" id="tab-diff" onclick="activateTab('diff')">
+            Diff vs Canonical
+          </button>
+          <!-- Sources tab — only present for auto_synthesised blocks -->
+          <button class="tab-btn active" id="tab-sources" onclick="activateTab('sources')">
+            Sources
+            <span class="tab-count">12</span>
+          </button>
+        </div>
+
+        <!-- Version History panel -->
+        <div class="tab-panel" id="panel-history">
+          <p style="font-size:11.5px;color:var(--slate-500);margin-bottom:12px">Select two versions to compare</p>
+          <div class="version-row">
+            <span class="version-num">v4</span>
+            <span class="version-source-chip">auto_synthesised</span>
+            <span class="version-notes">Re-synthesised from 14 new workspace entries</span>
+            <span class="version-time">2 days ago</span>
+          </div>
+          <div class="version-row">
+            <span class="version-num">v3</span>
+            <span class="version-source-chip">auto_synthesised</span>
+            <span class="version-notes">Synthesis pass after team review</span>
+            <span class="version-time">12 days ago</span>
+          </div>
+          <div class="version-row">
+            <span class="version-num">v2</span>
+            <span class="version-source-chip">manual_edit</span>
+            <span class="version-notes">Operator correction applied</span>
+            <span class="version-time">18 days ago</span>
+          </div>
+          <div class="version-row">
+            <span class="version-num">v1</span>
+            <span class="version-source-chip">auto_synthesised</span>
+            <span class="version-notes">Initial synthesis from cluster</span>
+            <span class="version-time">24 days ago</span>
+          </div>
+        </div>
+
+        <!-- Diff vs Canonical panel -->
+        <div class="tab-panel" id="panel-diff">
+          <div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:8px;padding:12px 16px;font-size:13px;color:var(--emerald-700)">
+            Runtime content matches canonical file.
+          </div>
+        </div>
+
+        <!-- Sources panel (active) -->
+        <div class="tab-panel active" id="panel-sources">
+
+          <div class="info-banner">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 8v4m0 4h.01"/></svg>
+            These are the workspace memory entries the synthesis job clustered to produce this version of the block. Entries that have since been soft-deleted are shown with a strikethrough.
+          </div>
+
+          <!-- Version selector -->
+          <div class="sources-header">
+            <div>
+              <div class="sources-title">Source entries for this version</div>
+              <div class="sources-sub">12 entries contributed to v4 (synthesised 2 days ago)</div>
+            </div>
+            <div class="version-selector">
+              Viewing:
+              <select onchange="if(this.value==='v3')alert('Sources for v3: 8 entries. (Demo: v4 loaded)')">
+                <option value="v4">v4 — current</option>
+                <option value="v3">v3 — 12 days ago</option>
+                <option value="v1">v1 — 24 days ago</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Source entry 1 — high quality -->
+          <div class="source-entry">
+            <div class="source-entry-main">
+              <div class="score-dot-wrap">
+                <span class="score-dot high" title="Quality score 0.91"></span>
+              </div>
+              <div class="source-entry-body">
+                <div class="source-excerpt">
+                  "Our writing always sounds like a knowledgeable friend: warm, direct, never stiff. We avoid corporate jargon and favour short sentences. When in doubt, read it aloud — if it sounds like a press release, rewrite it."
+                </div>
+                <div class="source-entry-meta">
+                  <a class="source-run-link" href="#" onclick="alert('Opens AgentRunLivePage for run: Marketing Research Agent, Apr 28'); return false;">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    Marketing Research Agent — Apr 28
+                  </a>
+                  <span class="source-meta-item">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6l4 2"/></svg>
+                    Captured 28 Apr 2026
+                  </span>
+                  <span class="score-label high">0.91</span>
+                </div>
+              </div>
+            </div>
+            <div class="lineage-expander">
+              <button class="lineage-toggle" id="lt1" onclick="toggleLineage('lc1','lt1')">
+                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="transform:rotate(0deg)"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                Also contributed to 2 other blocks
+              </button>
+              <div class="lineage-content" id="lc1">
+                <a class="lineage-block-link" href="#" onclick="alert('Opens Memory Block: Content Style Guide'); return false;">
+                  <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Content Style Guide
+                </a>
+                <a class="lineage-block-link" href="#" onclick="alert('Opens Memory Block: Copywriting Principles'); return false;">
+                  <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Copywriting Principles
+                </a>
+                <div class="lineage-note">This entry's observations were relevant enough to appear in multiple synthesis clusters.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Source entry 2 — medium quality -->
+          <div class="source-entry">
+            <div class="source-entry-main">
+              <div class="score-dot-wrap">
+                <span class="score-dot medium" title="Quality score 0.72"></span>
+              </div>
+              <div class="source-entry-body">
+                <div class="source-excerpt">
+                  "Tone should adapt to context: formal for reports, conversational for email. The constant is clarity. Never sacrifice clarity for style."
+                </div>
+                <div class="source-entry-meta">
+                  <a class="source-run-link" href="#" onclick="alert('Opens AgentRunLivePage for run: Brand Audit Agent, Apr 25'); return false;">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    Brand Audit Agent — Apr 25
+                  </a>
+                  <span class="source-meta-item">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6l4 2"/></svg>
+                    Captured 25 Apr 2026
+                  </span>
+                  <span class="score-label medium">0.72</span>
+                </div>
+              </div>
+            </div>
+            <div class="lineage-expander">
+              <button class="lineage-toggle" id="lt2" onclick="toggleLineage('lc2','lt2')">
+                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                Not used in any other block
+              </button>
+              <div class="lineage-content" id="lc2">
+                <div class="lineage-note" style="padding-top:4px">This entry only contributed to this block.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Source entry 3 — high quality -->
+          <div class="source-entry">
+            <div class="source-entry-main">
+              <div class="score-dot-wrap">
+                <span class="score-dot high" title="Quality score 0.88"></span>
+              </div>
+              <div class="source-entry-body">
+                <div class="source-excerpt">
+                  "Avoid passive voice wherever possible. Active constructions are stronger and more human. Exception: when the subject is unknown or irrelevant."
+                </div>
+                <div class="source-entry-meta">
+                  <a class="source-run-link" href="#" onclick="alert('Opens AgentRunLivePage for run: Content Reviewer Agent, Apr 22'); return false;">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    Content Reviewer Agent — Apr 22
+                  </a>
+                  <span class="source-meta-item">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6l4 2"/></svg>
+                    Captured 22 Apr 2026
+                  </span>
+                  <span class="score-label high">0.88</span>
+                </div>
+              </div>
+            </div>
+            <div class="lineage-expander">
+              <button class="lineage-toggle" id="lt3" onclick="toggleLineage('lc3','lt3')">
+                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                Also contributed to 3 other blocks
+              </button>
+              <div class="lineage-content" id="lc3">
+                <a class="lineage-block-link" href="#" onclick="return false;">
+                  <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Writing Quality Standards
+                </a>
+                <a class="lineage-block-link" href="#" onclick="return false;">
+                  <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Email Tone Guidelines
+                </a>
+                <a class="lineage-block-link" href="#" onclick="return false;">+ 1 more</a>
+                <div class="lineage-note">High-confidence observation; relevant across multiple synthesis clusters.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Source entry 4 — low quality, soft-deleted -->
+          <div class="source-entry" style="opacity:0.6">
+            <div class="source-entry-main">
+              <div class="score-dot-wrap">
+                <span class="score-dot low" title="Quality score 0.31"></span>
+              </div>
+              <div class="source-entry-body">
+                <div class="source-excerpt" style="text-decoration:line-through;color:var(--slate-400)">
+                  "Always use exclamation marks for enthusiasm. This makes the copy feel energetic."
+                </div>
+                <div class="source-entry-meta">
+                  <a class="source-run-link" href="#" onclick="return false;" style="color:var(--slate-400)">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    Content Reviewer Agent — Apr 10
+                  </a>
+                  <span class="source-meta-item">
+                    <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6l4 2"/></svg>
+                    Captured 10 Apr 2026
+                  </span>
+                  <span class="score-label low">0.31</span>
+                  <span class="badge badge-slate" style="font-size:10px;padding:1px 6px">Deleted</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- More entries collapsed -->
+          <button onclick="alert('Shows remaining 8 source entries')"
+            style="width:100%;padding:10px;border:1px dashed var(--slate-200);border-radius:8px;
+                   background:white;color:var(--slate-500);font-size:12.5px;cursor:pointer;
+                   transition:all 0.1s;margin-top:2px"
+            onmouseover="this.style.background='var(--slate-50)'"
+            onmouseout="this.style.background='white'">
+            Show 8 more source entries
+          </button>
+
+        </div>
+        <!-- /panel-sources -->
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function activateTab(name) {
+  // Deactivate all
+  ['history','diff','sources'].forEach(t => {
+    document.getElementById('tab-' + t).classList.remove('active');
+    document.getElementById('panel-' + t).classList.remove('active');
+  });
+  // Activate selected
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+function toggleLineage(contentId, toggleId) {
+  const content = document.getElementById(contentId);
+  const toggle = document.getElementById(toggleId);
+  const isOpen = content.classList.contains('open');
+  content.classList.toggle('open', !isOpen);
+  toggle.classList.toggle('open', !isOpen);
+}
+</script>
+</body>
+</html>

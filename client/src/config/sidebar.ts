@@ -6,7 +6,7 @@
 //
 // INVARIANT: NavGroup declaration order IS the visual render order.
 // MUST emit items in this group sequence:
-//   top → work → projects → agents → company → clientpulse → organisation → platform → footer
+//   top → work → projects → agents → personal → company → clientpulse → organisation → platform → footer
 // Reordering this union (or sorting the output by anything other than this
 // sequence) is a visual regression.
 
@@ -18,6 +18,7 @@ export type NavGroup =
   | 'work'          // workspace-mode work items
   | 'projects'      // dynamic project list
   | 'agents'        // dynamic agent list
+  | 'personal'      // user-owned personal agents
   | 'company'       // company items
   | 'clientpulse'
   | 'organisation'
@@ -50,6 +51,7 @@ export interface NavContext {
   viewMode: 'workspace' | 'org' | 'system';
   navProjects: Array<{ id: string; name: string; color: string; status: string }>;
   navAgents: Array<{ id: string; agentId: string; name: string; icon: string | null }>;
+  userOwnedAgents: Array<{ agentId: string; name: string }>;
   reviewCount: number;
   liveAgentCount: number;
   incidentCount: number;
@@ -69,7 +71,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   const {
     isSystemAdmin, hasOrgContext, hasAnyOrgPerm,
     activeClientId, hasOrgPerm, hasClientPerm, hasSidebarItem,
-    viewMode, navProjects, navAgents,
+    viewMode, navProjects, navAgents, userOwnedAgents,
     reviewCount, liveAgentCount, incidentCount,
     onCreateProject, onCreateAgent, onOpenNewBrief, onLogout,
     onOpenConfigAssistant,
@@ -235,6 +237,21 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
         to: buildRoute('/agents/:agentId', { agentId: a.agentId }),
         iconKey: a.icon ? `emoji:${a.icon}` : 'agents',
         manageTo: buildRoute('/agents/:id/edit', { id: a.agentId }),
+      });
+    }
+  }
+
+  // ── personal group — user-owned agents ──────────────────────────────────
+  if (userOwnedAgents.length > 0) {
+    items.push({ group: 'personal', kind: 'section-header', key: 'personal-header', label: 'Personal' });
+    for (const a of userOwnedAgents) {
+      items.push({
+        group: 'personal',
+        kind: 'link',
+        key: `personal-agent-${a.agentId}`,
+        label: a.name,
+        to: buildRoute('/personal/:agentId', { agentId: a.agentId }),
+        iconKey: 'agents',
       });
     }
   }

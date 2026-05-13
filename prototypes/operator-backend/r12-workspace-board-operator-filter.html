@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<!--
+  R12: Workspace Board — Operator filter chip row + operator task badge
+  ----------------------------------------------------------------------
+  Existing surface: client/src/pages/WorkspaceBoardPage.tsx
+  Route: /admin/subaccounts/:subaccountId/workspace
+
+  WorkspaceBoardPage.tsx structure observed:
+    - Header row: "{subaccountName} — Workspace" h1, task count sub-label, "+ New Task" button
+    - Board: flex gap-3, columns rendered from boardColumn config (key, label, colour)
+    - Each column: flex-1 min-w-[240px], bg-slate-50, rounded-xl, border-slate-200
+    - Column header: px-3.5 py-2.5, border-bottom with col.colour (3px), label + count badge
+    - Column cards: flex-1 p-2 flex flex-col gap-2 overflow-y-auto
+    - TaskCard.tsx: px-3 py-2.5, bg-white, border-slate-200, rounded-lg, shadow-sm
+      - Top row: priority dot (w-2 h-2 rounded-full) + task title (13px font-semibold)
+      - Bottom row: agent chips (bg-slate-100 px-1.5 py-px rounded text-slate-600) + due date
+
+  Round 3 additions only:
+    1. Filter toggle above columns: [ Operator runs only ]. Default off — board shows everything; the operator badge on cards does the at-a-glance work.
+    2. Operator-icon badge on TaskCard: 12px, top-right, monochrome, only on operator tasks
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acme Corp — Workspace Board | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page shell override for board page ── */
+.page-body { padding: 20px 24px; display: flex; flex-direction: column; height: calc(100vh - 52px); box-sizing: border-box; }
+
+/* ── Board header ── */
+.board-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 14px; gap: 12px; flex-shrink: 0;
+}
+.board-title-row { }
+.board-title { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 2px; letter-spacing: -0.02em; }
+.board-sub    { font-size: 13px; color: #94a3b8; }
+
+/* ── Filter toggle (NEW in R12) ── */
+.filter-chip-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 14px; flex-shrink: 0;
+}
+.filter-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 14px 5px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid #e2e8f0; background: white; color: #64748b;
+  font-family: inherit; transition: background 0.1s, border-color 0.1s, color 0.1s;
+  white-space: nowrap;
+}
+.filter-toggle:hover { background: #f8fafc; border-color: #cbd5e1; }
+.filter-toggle.active { background: #4f46e5; border-color: #4f46e5; color: white; }
+.filter-toggle-switch {
+  width: 26px; height: 14px; border-radius: 10px;
+  background: #cbd5e1; position: relative;
+  transition: background 0.15s;
+}
+.filter-toggle.active .filter-toggle-switch { background: rgba(255,255,255,0.4); }
+.filter-toggle-switch::after {
+  content: ''; position: absolute;
+  top: 1.5px; left: 1.5px; width: 11px; height: 11px;
+  border-radius: 50%; background: white;
+  transition: transform 0.15s;
+}
+.filter-toggle.active .filter-toggle-switch::after { transform: translateX(12px); }
+
+/* ── Board columns ── */
+.board { display: flex; gap: 12px; flex: 1; overflow-x: auto; padding-bottom: 4px; min-height: 0; scrollbar-width: thin; }
+.board-col {
+  flex: 1; min-width: 240px; display: flex; flex-direction: column;
+  background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;
+  min-height: 200px;
+}
+.board-col-head {
+  padding: 11px 14px; display: flex; justify-content: space-between; align-items: center;
+}
+.board-col-label { font-size: 14px; font-weight: 600; color: #0f172a; }
+.board-col-count {
+  font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+}
+.board-col-body { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+
+/* ── TaskCard (mirrors TaskCard.tsx) ── */
+.task-card {
+  padding: 10px 12px; background: white; border: 1px solid #e2e8f0;
+  border-radius: 8px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: box-shadow 0.12s, border-color 0.12s;
+  display: flex; flex-direction: column; gap: 6px;
+  position: relative; /* for operator badge */
+}
+.task-card:hover { border-color: #818cf8; box-shadow: 0 2px 6px rgba(99,102,241,0.1); }
+
+.task-card-top { display: flex; align-items: flex-start; gap: 6px; }
+.priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.dot-urgent { background: #ef4444; }
+.dot-high   { background: #f59e0b; }
+.dot-normal { background: #6366f1; }
+.dot-low    { background: #94a3b8; }
+
+.task-title { font-size: 13px; font-weight: 600; color: #0f172a; line-height: 1.3; flex: 1; padding-right: 18px; }
+
+.task-card-bot { display: flex; align-items: center; justify-content: space-between; }
+.agent-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.agent-chip {
+  font-size: 11px; color: #475569; background: #f1f5f9;
+  padding: 1px 6px; border-radius: 4px;
+}
+.due-date { font-size: 11px; color: #64748b; }
+.due-date.overdue { color: #ef4444; }
+.unassigned { font-size: 11px; color: #94a3b8; font-style: italic; }
+
+/* ── Operator badge on TaskCard (NEW in R12) ── */
+/* A monochrome 12px icon, top-right corner of the card, subtle */
+.op-badge {
+  position: absolute; top: 8px; right: 8px;
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  color: #475569; /* monochrome */
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.op-badge svg { width: 12px; height: 12px; }
+/* On hover show tooltip */
+.op-badge-wrap { position: absolute; top: 6px; right: 6px; }
+.op-badge-wrap .op-tip {
+  display: none; position: absolute; right: 0; top: 20px;
+  background: #1e293b; color: white;
+  font-size: 11px; font-weight: 500; line-height: 1.4;
+  padding: 5px 9px; border-radius: 6px;
+  white-space: nowrap; z-index: 10;
+  pointer-events: none;
+}
+.op-badge-wrap:hover .op-tip { display: block; }
+
+/* Running indicator on operator card */
+.op-running-ring {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #10b981; flex-shrink: 0;
+  animation: pulse-dot 1.5s infinite;
+}
+
+/* ── Empty column state ── */
+.col-empty { padding: 20px; text-align: center; color: #cbd5e1; font-size: 12px; font-style: italic; }
+
+/* ── "+ New Task" button ── */
+.btn-new-task {
+  padding: 9px 18px; background: #4f46e5; color: white;
+  border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.btn-new-task:hover { background: #4338ca; }
+
+/* ── Annotation callout ── */
+.annotation {
+  position: fixed; bottom: 24px; right: 24px;
+  background: #1e293b; color: white;
+  padding: 12px 16px; border-radius: 10px;
+  font-size: 12px; line-height: 1.6; max-width: 320px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+.annotation strong { color: #a5b4fc; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Work</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+        Tasks
+      </a>
+      <a class="sidebar-link active" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Board
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Admin</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Agents
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M17.66 17.66l-1.41-1.41M6.34 17.66l1.41-1.41"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-spacer"></div>
+      <div class="topbar-right">
+        <div class="topbar-avatar">AO</div>
+      </div>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Board header (matches WorkspaceBoardPage.tsx header exactly) -->
+      <div class="board-header">
+        <div class="board-title-row">
+          <h1 class="board-title">Acme Corp — Workspace</h1>
+          <div class="board-sub">8 tasks across 4 columns</div>
+        </div>
+        <button class="btn-new-task">+ New Task</button>
+      </div>
+
+      <!-- Filter chip row (NEW in R12) — sits between header and board columns -->
+      <div class="filter-chip-row">
+        <button class="filter-toggle" onclick="toggleOperatorOnly(this)" aria-pressed="false">
+          <span class="filter-toggle-switch" aria-hidden="true"></span>
+          <span>Operator runs only</span>
+        </button>
+      </div>
+
+      <!-- Kanban board — columns from board config, drag-and-drop columns -->
+      <div class="board" id="board">
+
+        <!-- Column: Inbox (colour from boardColumn.colour) -->
+        <div class="board-col">
+          <div class="board-col-head" style="border-bottom: 3px solid #6366f1;">
+            <span class="board-col-label">Inbox</span>
+            <span class="board-col-count" style="color:#6366f1;background:#eef2ff;">2</span>
+          </div>
+          <div class="board-col-body">
+            <!-- Regular task (agent-assigned, no operator badge) -->
+            <div class="task-card" data-type="agent" onclick="void(0)">
+              <div class="task-card-top">
+                <div class="priority-dot dot-normal"></div>
+                <span class="task-title">Review supplier contracts Q2</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips"><span class="agent-chip">Contract Reviewer</span></div>
+                <span class="due-date">Jun 15</span>
+              </div>
+            </div>
+
+            <!-- Unassigned task -->
+            <div class="task-card" data-type="none" onclick="void(0)">
+              <div class="task-card-top">
+                <div class="priority-dot dot-low"></div>
+                <span class="task-title">Update employee handbook draft</span>
+              </div>
+              <div class="task-card-bot">
+                <span class="unassigned">Unassigned</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column: In Progress -->
+        <div class="board-col">
+          <div class="board-col-head" style="border-bottom: 3px solid #f59e0b;">
+            <span class="board-col-label">In Progress</span>
+            <span class="board-col-count" style="color:#b45309;background:#fffbeb;">3</span>
+          </div>
+          <div class="board-col-body">
+
+            <!-- OPERATOR task (running) — has operator badge -->
+            <div class="task-card" data-type="operator" onclick="window.location='r1-opentaskview-operator-running.html'" style="border-color:#c7d2fe;">
+              <!-- Operator badge (top-right, monochrome, 12px icon) -->
+              <div class="op-badge-wrap">
+                <div class="op-badge">
+                  <!-- Operator/automation icon: circuit/robot-like, monochrome -->
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="8" height="7" rx="1.5"/>
+                    <path d="M4 3V2M8 3V2"/>
+                    <circle cx="4.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                    <circle cx="7.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                  </svg>
+                </div>
+                <div class="op-tip">Operator run in progress</div>
+              </div>
+              <div class="task-card-top">
+                <div class="priority-dot dot-high"></div>
+                <span class="task-title">Process May invoices</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips">
+                  <div class="op-running-ring"></div>
+                  <span class="agent-chip">Invoice Processor</span>
+                </div>
+                <span class="due-date" style="color:#047857;font-weight:600;">23 min elapsed</span>
+              </div>
+            </div>
+
+            <!-- Regular agent task -->
+            <div class="task-card" data-type="agent" onclick="void(0)">
+              <div class="task-card-top">
+                <div class="priority-dot dot-normal"></div>
+                <span class="task-title">Draft Q2 board report</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips"><span class="agent-chip">Executive Assistant</span></div>
+                <span class="due-date overdue">May 31</span>
+              </div>
+            </div>
+
+            <!-- OPERATOR task (running, chain link 3) — operator badge -->
+            <div class="task-card" data-type="operator" onclick="window.location='r14-taskheader-chain-link-status.html'" style="border-color:#c7d2fe;">
+              <div class="op-badge-wrap">
+                <div class="op-badge">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="8" height="7" rx="1.5"/>
+                    <path d="M4 3V2M8 3V2"/>
+                    <circle cx="4.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                    <circle cx="7.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                  </svg>
+                </div>
+                <div class="op-tip">Operator run in progress (link 3 of ~12)</div>
+              </div>
+              <div class="task-card-top">
+                <div class="priority-dot dot-urgent"></div>
+                <span class="task-title">Year-end financial summary</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips">
+                  <div class="op-running-ring"></div>
+                  <span class="agent-chip">Financial Analyst</span>
+                </div>
+                <span class="due-date" style="color:#047857;font-weight:600;">~4 hrs elapsed</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Column: Review -->
+        <div class="board-col">
+          <div class="board-col-head" style="border-bottom: 3px solid #8b5cf6;">
+            <span class="board-col-label">Review</span>
+            <span class="board-col-count" style="color:#6d28d9;background:#f5f3ff;">2</span>
+          </div>
+          <div class="board-col-body">
+            <!-- OPERATOR task (completed, awaiting review) — operator badge -->
+            <div class="task-card" data-type="operator" onclick="window.location='r3-opentaskview-operator-completed.html'">
+              <div class="op-badge-wrap">
+                <div class="op-badge">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="8" height="7" rx="1.5"/>
+                    <path d="M4 3V2M8 3V2"/>
+                    <circle cx="4.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                    <circle cx="7.5" cy="6.5" r="0.75" fill="currentColor" stroke="none"/>
+                  </svg>
+                </div>
+                <div class="op-tip">Operator run completed</div>
+              </div>
+              <div class="task-card-top">
+                <div class="priority-dot dot-normal"></div>
+                <span class="task-title">Vendor contract review — Sunrise Media</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips"><span class="agent-chip">Contract Reviewer</span></div>
+                <span class="due-date">Completed 2h ago</span>
+              </div>
+            </div>
+
+            <!-- Regular task -->
+            <div class="task-card" data-type="agent" onclick="void(0)">
+              <div class="task-card-top">
+                <div class="priority-dot dot-normal"></div>
+                <span class="task-title">Social media content June</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips"><span class="agent-chip">Content Writer</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column: Done -->
+        <div class="board-col">
+          <div class="board-col-head" style="border-bottom: 3px solid #10b981;">
+            <span class="board-col-label">Done</span>
+            <span class="board-col-count" style="color:#047857;background:#ecfdf5;">1</span>
+          </div>
+          <div class="board-col-body">
+            <!-- Regular agent task — done -->
+            <div class="task-card" data-type="agent" onclick="void(0)">
+              <div class="task-card-top">
+                <div class="priority-dot dot-low"></div>
+                <span class="task-title" style="color:#94a3b8;">March board minutes transcription</span>
+              </div>
+              <div class="task-card-bot">
+                <div class="agent-chips"><span class="agent-chip">Meeting Scribe</span></div>
+                <span class="due-date">May 2</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- .board -->
+    </div><!-- .page-body -->
+  </main>
+</div>
+
+<!-- Annotation: explains the two additions -->
+<div class="annotation">
+  <strong>R12 additions to WorkspaceBoardPage.tsx:</strong><br>
+  1. Filter toggle (above columns): "Operator runs only", default off. Binary toggle, not tri-state — "Agents only" was ambiguous because operator runs ARE agent runs (just executed via a different backend). The 12px operator badge on cards handles the at-a-glance work in mixed view; this toggle is for the user who specifically wants to monitor operator-backed tasks.<br>
+  2. Operator badge (top-right of card): 12px monochrome icon, visible only on operator-driven tasks. Hover shows tooltip. No coloured banner — subtle signal only.
+</div>
+
+<script>
+function toggleOperatorOnly(btn) {
+  const next = !btn.classList.contains('active');
+  btn.classList.toggle('active', next);
+  btn.setAttribute('aria-pressed', String(next));
+  document.querySelectorAll('.task-card').forEach(card => {
+    if (next) {
+      card.style.display = card.dataset.type === 'operator' ? '' : 'none';
+    } else {
+      card.style.display = '';
+    }
+  });
+}
+</script>
+
+</body>
+</html>

@@ -4,12 +4,12 @@ active_plan: none
 build_slug: none
 branch: none
 status: NONE
-last_updated: 2026-05-11
-last_merged_pr: #286
-last_merged_slug: operator-session-identity
-last_merged_branch: claude/evolve-session-identity-brief-17LO4
-last_merged_at: 2026-05-11T23:05:49Z
-last_merged_commit: 62497257
+last_updated: 2026-05-13T00:22:37Z
+last_merged_pr: #288
+last_merged_slug: operator-backend
+last_merged_branch: claude/sandbox-execution-provider-DLfjn
+last_merged_at: 2026-05-13T00:22:37Z
+last_merged_commit: 83fd8347
 -->
 
 # Current Focus
@@ -28,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **NONE** — no active build.
+**Status:** **NONE**
+
+**Just merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13T00:22:37Z). 12 chunks built in Phase 2 (Operator Backend = first concrete adapter for delegated long-running operator-managed tasks: operator_managed execution mode, operator_runs / operator_task_profiles / subaccount_operator_settings tables with dual-GUC RLS, operator-session.* event family, sandboxStartKey + adoptOrStart seam for crash-recovery idempotency, retry / extend-budget / fresh-profile-restart / refresh-credential / extend-debug-retention task-action routes, per-subaccount operator settings UI). Phase 3 chatgpt-pr-review: 4 rounds APPROVED (commits `3e482410`, `5c63f181`, `4d557172`, `a33f8b05` — refresh-credential connectionId + awaited audit, adoptOrStart terminal-row adoption, extend-budget optimistic predicate, fresh-profile-restart orderBy DESC, assigned-user wiring via new migration 0342 `agent_runs.assigned_user_id`, outer-middleware removal on user-or-manager routes). Phase 3 S2 sync: main shipped PR #291 Personal Assistant V1 with migrations 0327-0332 — operator-backend's eight migrations renumbered 0327-0334 → 0335-0342 (commit `b07b1196`). CI auto-fix 3 iterations: console.warn → logger.warn (`7d46419c`); gate calibrations for sandbox-classification + rls-contract-compliance + rls-protected-tables + pure-helper-convention (`ff08f3c2`); sandbox-classification regex extended to accept adoptOrStart seam (`6c44540f`). All 6 required checks GREEN at merge time. KNOWLEDGE.md +5 patterns (unique-partial-index + adopt-terminal-rows; orderBy DESC for "latest"; coarse permission middleware vs handler actor rule; spec aspirational fields vs schema reality; long-running-review migration-number renumber process).
 
 **Just merged:** PR #286 — `operator-session-identity` (squash-commit `62497257`, 2026-05-11T23:05:49Z). AI Subscriptions + 3-tab Connections (App Integrations / Web Logins / AI Subscriptions) + operator_session credential primitive. 11 chunks built in Phase 2; chatgpt-pr-review 2 rounds APPROVED (F1-F4 closed, T1 deferred as OSI-DEF-13). Phase 3 S2 merge of `sandbox-isolation` drove migration renumber (`0321/0322` → `0325/0326`) and 6-conflict resolution (3 auto + 3 code-area structural unions). CI auto-fix 1 iteration: added `deadLetter` to `operator-session-refresh` job + `guard-ignore` on `operatorSessionConsentService.ts:157` standalone read. All 6 required checks GREEN at merge.
 

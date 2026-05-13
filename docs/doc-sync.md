@@ -30,6 +30,20 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 
 ---
 
+## Event registry conventions
+
+### `operator-session.*` lifecycle event namespace (operator-backend, 2026-05)
+
+Hyphenated lifecycle events (`operator-session.*`) are distinct from dotted incident/audit events (`operator.*`, `task.operator.*`, `subaccount.operator_settings.*`). The separation is enforced by a CI gate.
+
+**Single source of truth:** `shared/types/operatorBackendEvents.ts` — the discriminated union for all `operator-session.*` event-name literals. Any file that needs to reference an event name literal MUST import from this file; it MUST NOT declare a string literal inline (even if the string is identical).
+
+**CI gate:** `scripts/gates/verify-operator-event-registry.sh` — greps the repo for naked `operator-session.*` string literals outside the registry file and the explicitly allow-listed paths (the registry file itself, test fixtures, this spec, plan, and brief). Non-empty output from the gate = CI failure.
+
+**Why this matters:** before this gate, event-name strings drifted across handlers and services, making it impossible to enumerate all producers or consumers of an event without a full-text search. The single-source-of-truth pattern prevents silent drift. Future event families that span multiple producers and consumers should adopt the same pattern: one `shared/types/<domain>Events.ts` file + one CI gate in `scripts/gates/verify-<domain>-event-registry.sh`.
+
+---
+
 ## Investigation procedure
 
 Every doc-sync sweep MUST execute this procedure per registered doc. Verdicts cannot be assigned without it. The procedure is the gate; the verdict is the receipt.

@@ -23,6 +23,7 @@ function baseCtx(overrides: Partial<NavContext> = {}): NavContext {
     viewMode: 'org',
     navProjects: [],
     navAgents: [],
+    userOwnedAgents: [],
     reviewCount: 0,
     liveAgentCount: 0,
     incidentCount: 0,

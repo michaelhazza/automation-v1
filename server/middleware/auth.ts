@@ -150,6 +150,8 @@ export const authenticate = async (
       // setting to this transaction so it's cleared on commit/rollback and
       // cannot leak across pool connections.
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await tx.execute(sql`SELECT set_config('app.current_user_id', ${payload.id}, true)`);
+      await tx.execute(sql`SELECT set_config('app.current_role', ${payload.role}, true)`);
 
       await withOrgTx(
         {

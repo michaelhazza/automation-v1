@@ -321,9 +321,17 @@ export * from './webhookReplayNonces.js';
 export * from './operatorSessionConsents.js';
 export * from './operatorSessionConsentEvents.js';
 
+// Personal Assistant V1 — EA drafts (migration 0327)
+export * from './eaDrafts.js';
+
 // Sandbox Isolation — five RLS-protected tables for untrusted Tier 4 code execution (migrations 0321–0323)
 export * from './sandboxExecutions.js';
 export * from './sandboxArtefacts.js';
 export * from './sandboxTelemetryEvents.js';
 export * from './sandboxEgressAudit.js';
 export * from './sandboxLogs.js';
+
+// Operator Backend — chain-link rows, task profiles, per-subaccount settings (migrations 0327–0329)
+export * from './operatorRuns.js';
+export * from './operatorTaskProfiles.js';
+export * from './subaccountOperatorSettings.js';
