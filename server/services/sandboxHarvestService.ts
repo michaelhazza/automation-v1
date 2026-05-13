@@ -716,6 +716,7 @@ async function step10CostRowWrite(
       organisationId: ctx.organisationId,
       subaccountId: ctx.subaccountId,
       sourceType: 'sandbox_compute',
+      subtype: 'task',
       featureTag: 'sandbox-execution',
       callSite: 'worker',
       provider: ctx.provider,
