@@ -1313,6 +1313,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0346_create_subaccount_iee_browser_settings.sql',
     rationale: 'Per-subaccount IEE browser configuration (status, rollout gate, retention, cost ceilings) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes operational configuration and cost controls.',
   },
+  // 0348 — IEE Browser on e2b: warm-pool session audit trail (dual-GUC org + subaccount)
+  {
+    tableName: 'browser_warm_sessions',
+    schemaFile: 'browserWarmSessions.ts',
+    policyMigration: '0348_create_browser_warm_sessions.sql',
+    rationale: 'Per-subaccount warm browser session rows (available → leased → terminated lifecycle) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes warm-session topology and idle cost attribution.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

@@ -339,3 +339,4 @@ export * from './subaccountOperatorSettings.js';
 // IEE Browser on e2b — session profiles, settings, warm sessions (migrations 0345–0349)
 export * from './ieeBrowserSessionProfiles.js';
 export * from './subaccountIeeBrowserSettings.js';
+export * from './browserWarmSessions.js';
