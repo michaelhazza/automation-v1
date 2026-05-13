@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, real, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import type { HomeWidgetDeclaration } from '../../../shared/types/homeWidget.js';
 
 // ---------------------------------------------------------------------------
 // System Agents — platform-level agent definitions (our IP)
@@ -63,6 +64,9 @@ export const systemAgents = pgTable('system_agents', {
   isPublished: boolean('is_published').notNull().default(false),
   version: integer('version').notNull().default(1),
   status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
+
+  // Home-widget declaration (HomeWidgetDeclaration shape). NULL = not surfaced to home zone.
+  homeWidget: jsonb('home_widget').$type<HomeWidgetDeclaration | null>(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

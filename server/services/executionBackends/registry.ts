@@ -36,10 +36,14 @@ import type { ExecutionMode } from '../../../shared/types/executionEnvironment.j
 // ---------------------------------------------------------------------------
 
 /**
- * The five `ExecutionMode` values that V1 adapters MAY register under.
+ * The `ExecutionMode` values that V1 adapters MAY register under.
  * Mirrors the canonical union in `shared/types/executionEnvironment.ts`;
  * kept inline here as a value-level set so registration validation can run
  * a runtime membership check.
+ *
+ * Operator Backend forward-compat ids (`'operator_external'`) are reserved
+ * type slots and rejected at runtime registration in V1; the operator_external
+ * adapter lands in Phase 5.
  */
 const EXECUTION_MODES: ReadonlySet<ExecutionMode> = new Set<ExecutionMode>([
   'api',
@@ -47,6 +51,7 @@ const EXECUTION_MODES: ReadonlySet<ExecutionMode> = new Set<ExecutionMode>([
   'claude-code',
   'iee_browser',
   'iee_dev',
+  'operator_managed',
 ]);
 
 const SANDBOX_REQUIREMENTS: ReadonlySet<SandboxRequirement> = new Set<SandboxRequirement>([
@@ -95,7 +100,7 @@ export class ExecutionBackendRegistry {
    *
    * Accepts `ExecutionBackendId` (the wider type) so finalisation /
    * reconciliation paths reading `agent_runs.backend_id` (a `text` column
-   * that may carry an OpenClaw variant id in Phase 3+) type-check
+   * that may carry a future variant id in Phase 5+) type-check
    * cleanly. Dispatch callers passing an `ExecutionMode` value are
    * type-compatible because `ExecutionMode` is a subtype of
    * `ExecutionBackendId`.
@@ -136,14 +141,14 @@ export class ExecutionBackendRegistry {
 
   private validate(backend: ExecutionBackend): void {
     // Rule 1: V1-only restriction — id MUST be a valid ExecutionMode value.
-    // OpenClaw forward-compat ids (`'openclaw_managed'` /
-    // `'openclaw_external'`) are reserved type slots and rejected at
-    // runtime registration in V1; the OpenClaw adapter lands in Phase 3.
+    // Operator Backend forward-compat ids (e.g. 'operator_external') are
+    // reserved type slots and rejected at runtime registration in V1;
+    // the operator_external adapter lands in Phase 5.
     if (!isExecutionMode(backend.id)) {
       throw new BackendCapabilityViolation(
         `adapter id '${backend.id}' is not a valid ExecutionMode value; ` +
-          `V1 only accepts 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev'. ` +
-          `OpenClaw ids are reserved for Phase 3.`,
+          `V1 accepts 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev' | 'operator_managed'. ` +
+          `operator_external is reserved for Phase 5.`,
       );
     }
 

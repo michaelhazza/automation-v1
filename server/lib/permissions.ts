@@ -117,6 +117,13 @@ export const ORG_PERMISSIONS = {
   SUPPORT_INBOX_CONFIGURE: 'support.inbox.configure',
   SUPPORT_INBOX_VIEW: 'support.inbox.view',
   SUPPORT_EVALS_VIEW: 'support.evals.view',
+  // ── Personal Assistant V1 (EA / VoiceProfile / HomeWidget; §21.5) ─────────
+  VOICE_PROFILE_READ:  'user.voice_profile.read',
+  VOICE_PROFILE_WRITE: 'user.voice_profile.write',
+  EA_DRAFT_READ:       'user.ea_draft.read',
+  EA_DRAFT_DECIDE:     'user.ea_draft.decide',
+  HOME_WIDGET_READ:    'user.home_widget.read',
+  EA_PROVISION:        'user.ea.provision',
 } as const;
 
 // ─── System-level permissions (sysadmin-only surfaces) ───────────────────────
@@ -200,6 +207,8 @@ export const SUBACCOUNT_PERMISSIONS = {
   OPERATOR_SESSION_DISCONNECT:      'subaccount.operator_session.disconnect',
   OPERATOR_SESSION_REAUTH:          'subaccount.operator_session.reauth',
   OPERATOR_SESSION_ALLOW_AGENT_USE: 'subaccount.operator_session.allow_agent_use',
+  // ── Operator Backend — per-subaccount settings (operator-backend Chunk 7) ─
+  OPERATOR_SETTINGS_WRITE: 'subaccount.operator_settings.write',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -383,6 +392,15 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_DISCONNECT,      description: 'Disconnect an AI Subscription (terminal disable)',               groupName: 'AI Subscriptions' },
   { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_REAUTH,          description: 'Trigger re-authentication when sign-in expired',                groupName: 'AI Subscriptions' },
   { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_ALLOW_AGENT_USE, description: 'Edit per-subscription agent allowlist',                         groupName: 'AI Subscriptions' },
+  // subaccount.operator_settings (Operator Backend; operator-backend Chunk 7)
+  { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SETTINGS_WRITE, description: 'Edit per-subaccount operator runtime caps (org_admin only)', groupName: 'subaccount.operator_settings' },
+  // user.personal_assistant (Personal Assistant V1; §21.5)
+  { key: ORG_PERMISSIONS.VOICE_PROFILE_READ,  description: 'Read own voice profile',                                    groupName: 'user.personal_assistant' },
+  { key: ORG_PERMISSIONS.VOICE_PROFILE_WRITE, description: 'Refresh, opt out of, or reactivate own voice profile',      groupName: 'user.personal_assistant' },
+  { key: ORG_PERMISSIONS.EA_DRAFT_READ,       description: 'View EA drafts awaiting approval',                          groupName: 'user.personal_assistant' },
+  { key: ORG_PERMISSIONS.EA_DRAFT_DECIDE,     description: 'Approve or reject EA drafts',                               groupName: 'user.personal_assistant' },
+  { key: ORG_PERMISSIONS.HOME_WIDGET_READ,    description: 'Read home-widget data for user-owned agents',               groupName: 'user.personal_assistant' },
+  { key: ORG_PERMISSIONS.EA_PROVISION,        description: 'Provision a Personal Assistant agent via the first-run wizard', groupName: 'user.personal_assistant' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
@@ -423,6 +441,12 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.BRIEFS_WRITE,
       ORG_PERMISSIONS.RULES_READ,
       ORG_PERMISSIONS.RULES_WRITE,
+      ORG_PERMISSIONS.VOICE_PROFILE_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
+      ORG_PERMISSIONS.EA_DRAFT_READ,
+      ORG_PERMISSIONS.EA_DRAFT_DECIDE,
+      ORG_PERMISSIONS.HOME_WIDGET_READ,
+      ORG_PERMISSIONS.EA_PROVISION,
     ],
   },
   {
@@ -440,12 +464,26 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.WORKSPACE_VIEW,
       ORG_PERMISSIONS.BRIEFS_READ,
       ORG_PERMISSIONS.RULES_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
+      ORG_PERMISSIONS.EA_DRAFT_READ,
+      ORG_PERMISSIONS.EA_DRAFT_DECIDE,
+      ORG_PERMISSIONS.HOME_WIDGET_READ,
+      ORG_PERMISSIONS.EA_PROVISION,
     ],
   },
   {
     name: 'Subaccount Admin',
     description: 'Full control over a subaccount: automations, members, categories and settings.',
-    permissionKeys: Object.values(SUBACCOUNT_PERMISSIONS),
+    permissionKeys: [
+      ...Object.values(SUBACCOUNT_PERMISSIONS),
+      ORG_PERMISSIONS.VOICE_PROFILE_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
+      ORG_PERMISSIONS.EA_DRAFT_READ,
+      ORG_PERMISSIONS.EA_DRAFT_DECIDE,
+      ORG_PERMISSIONS.HOME_WIDGET_READ,
+      ORG_PERMISSIONS.EA_PROVISION,
+    ],
   },
   {
     name: 'Subaccount Manager',
@@ -465,6 +503,12 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE,
       SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,
       SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE,
+      ORG_PERMISSIONS.VOICE_PROFILE_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
+      ORG_PERMISSIONS.EA_DRAFT_READ,
+      ORG_PERMISSIONS.EA_DRAFT_DECIDE,
+      ORG_PERMISSIONS.HOME_WIDGET_READ,
+      ORG_PERMISSIONS.EA_PROVISION,
     ],
   },
   {
@@ -479,6 +523,12 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       // what the agency will do for them next week without needing general
       // workspace-management access.
       SUBACCOUNT_PERMISSIONS.SCHEDULE_VIEW_CALENDAR,
+      ORG_PERMISSIONS.VOICE_PROFILE_READ,
+      ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
+      ORG_PERMISSIONS.EA_DRAFT_READ,
+      ORG_PERMISSIONS.EA_DRAFT_DECIDE,
+      ORG_PERMISSIONS.HOME_WIDGET_READ,
+      ORG_PERMISSIONS.EA_PROVISION,
     ],
   },
 ];

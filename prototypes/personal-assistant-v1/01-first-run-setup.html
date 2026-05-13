@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Personal Assistant — First-Run Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<style>
+body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding: 0; min-height: 100vh; }
+
+.wizard-shell { max-width: 720px; margin: 40px auto; padding: 0 24px; }
+.wizard-header { margin-bottom: 24px; }
+.wizard-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6366f1; margin-bottom: 8px; }
+.wizard-title { font-size: 26px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.wizard-sub { font-size: 14px; color: #64748b; line-height: 1.6; max-width: 560px; }
+
+.step-tracker { display: flex; align-items: center; gap: 8px; margin-bottom: 28px; }
+.step { display: flex; align-items: center; gap: 8px; }
+.step-num { width: 24px; height: 24px; border-radius: 50%; background: #c7d2fe; color: #4338ca; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.step.done .step-num { background: #10b981; color: white; }
+.step.active .step-num { background: #4338ca; color: white; }
+.step-label { font-size: 12px; font-weight: 600; color: #64748b; }
+.step.active .step-label { color: #0f172a; }
+.step-divider { width: 32px; height: 1.5px; background: #e2e8f0; }
+
+.card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+.card-section-title { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.card-section-sub { font-size: 13px; color: #64748b; margin-bottom: 20px; line-height: 1.6; }
+
+/* CAPABILITY CARDS (Email / Calendar / Files / Team chat) */
+.capability-row { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border: 1px solid #e2e8f0; border-radius: 11px; margin-bottom: 10px; }
+.capability-row.connected { border-color: #a7f3d0; background: #f0fdf4; }
+.cap-icon { width: 42px; height: 42px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.cap-email { background: #eef2ff; color: #4338ca; }
+.cap-cal { background: #f0fdf4; color: #047857; }
+.cap-files { background: #fffbeb; color: #b45309; }
+.cap-chat { background: #fef2f2; color: #b91c1c; }
+.cap-body { flex: 1; }
+.cap-name { font-size: 14.5px; font-weight: 700; color: #0f172a; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; }
+.cap-providers { font-size: 11.5px; color: #64748b; line-height: 1.5; }
+.cap-providers strong { color: #334155; font-weight: 600; }
+.cap-cta { padding: 8px 14px; border-radius: 7px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid transparent; flex-shrink: 0; }
+.cta-primary { background: #4338ca; color: white; }
+.cta-primary:hover { background: #3730a3; }
+.cta-done { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.required-flag { display: inline-block; font-size: 9.5px; font-weight: 700; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; padding: 1.5px 6px; border-radius: 3px; }
+.optional-flag { display: inline-block; font-size: 9.5px; font-weight: 700; color: #64748b; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1.5px 6px; border-radius: 3px; }
+
+/* Provider sub-picker (would be a modal in real product; shown inline here for review) */
+.provider-picker { margin-top: 10px; padding: 12px; background: #fafbfd; border: 1px solid #e2e8f0; border-radius: 9px; display: none; }
+.provider-picker.open { display: block; }
+.provider-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 7px; margin-bottom: 6px; cursor: pointer; }
+.provider-row:hover { border-color: #818cf8; }
+.provider-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.dot-gmail { background: linear-gradient(135deg, #ea4335, #fbbc04); }
+.dot-outlook { background: #0078d4; }
+.provider-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+.provider-status { font-size: 11px; color: #64748b; margin-left: auto; }
+.provider-cta { padding: 5px 11px; background: #4338ca; color: white; border-radius: 6px; font-size: 11.5px; font-weight: 600; border: none; cursor: pointer; }
+.provider-soon { padding: 5px 11px; background: #f1f5f9; color: #64748b; border-radius: 6px; font-size: 11.5px; font-weight: 600; border: 1px solid #cbd5e1; cursor: not-allowed; }
+
+/* Form fields */
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.field-full { grid-column: 1 / -1; }
+.field-label { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px; display: block; }
+.field-input, .field-select, .field-textarea { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 13px; font-family: inherit; color: #0f172a; }
+.field-input:focus, .field-select:focus, .field-textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.field-textarea { min-height: 64px; resize: vertical; line-height: 1.5; }
+.field-hint { font-size: 11.5px; color: #64748b; margin-top: 4px; line-height: 1.5; }
+
+/* Voice profile block */
+.voice-block { padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.voice-explain { font-size: 13px; color: #334155; line-height: 1.65; margin-bottom: 12px; }
+.voice-stat-row { display: flex; gap: 24px; padding: 10px 0; border-top: 1px solid #e2e8f0; font-size: 12px; }
+.voice-stat-label { color: #64748b; }
+.voice-stat-value { color: #0f172a; font-weight: 600; margin-left: 6px; }
+.voice-controls { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+.toggle-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: #334155; }
+.toggle { width: 32px; height: 18px; background: #4338ca; border-radius: 100px; position: relative; cursor: pointer; flex-shrink: 0; }
+.toggle::after { content: ''; width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px; transition: 0.18s; }
+.toggle.off { background: #cbd5e1; }
+.toggle.off::after { right: 16px; }
+
+/* Footer */
+.wizard-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+.btn-secondary { padding: 9px 16px; background: white; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; font-weight: 600; color: #475569; cursor: pointer; }
+.btn-primary { padding: 9px 20px; background: #4338ca; border: 1px solid #4338ca; border-radius: 8px; font-size: 13px; font-weight: 700; color: white; cursor: pointer; }
+.btn-primary:hover { background: #3730a3; }
+.privacy-note { font-size: 11.5px; color: #64748b; line-height: 1.55; max-width: 460px; }
+.privacy-note strong { color: #334155; }
+
+.proto-banner { background: #eef2ff; border-bottom: 1px solid #c7d2fe; padding: 8px 16px; font-size: 11.5px; color: #3730a3; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  Personal Assistant V1 — Mockup 1 of 3 (round 2): capability-first wizard.
+  <a href="index.html" style="color: #4338ca; font-weight: 600; text-decoration: none; margin-left: 8px;">← Back to index</a>
+</div>
+
+<div class="wizard-shell">
+
+  <div class="wizard-header">
+    <div class="wizard-eyebrow">Setting up your Personal Assistant</div>
+    <div class="wizard-title">Get your Personal Assistant ready</div>
+    <div class="wizard-sub">Connect the capabilities your assistant will use, share a bit of context, and confirm how it should write for you. Takes about 2 minutes.</div>
+  </div>
+
+  <div class="step-tracker">
+    <div class="step done"><span class="step-num">✓</span><span class="step-label">Connect</span></div>
+    <div class="step-divider"></div>
+    <div class="step active"><span class="step-num">2</span><span class="step-label">Tell us about you</span></div>
+    <div class="step-divider"></div>
+    <div class="step"><span class="step-num">3</span><span class="step-label">Confirm voice</span></div>
+  </div>
+
+  <!-- STEP 1: Capabilities (not providers) -->
+  <div class="card">
+    <div class="card-section-title">What your assistant can access</div>
+    <div class="card-section-sub">Pick the capabilities your assistant needs. We support multiple providers per capability — pick the one you use.</div>
+
+    <!-- EMAIL -->
+    <div class="capability-row connected">
+      <div class="cap-icon cap-email">✉</div>
+      <div class="cap-body">
+        <div class="cap-name">Email <span class="required-flag">REQUIRED</span></div>
+        <div class="cap-providers">Connected via <strong>Gmail</strong> — michael@synthetos.example · Outlook coming soon</div>
+      </div>
+      <button class="cap-cta cta-done">Connected</button>
+    </div>
+
+    <!-- CALENDAR -->
+    <div class="capability-row connected">
+      <div class="cap-icon cap-cal">📅</div>
+      <div class="cap-body">
+        <div class="cap-name">Calendar <span class="required-flag">REQUIRED</span></div>
+        <div class="cap-providers">Connected via <strong>Google Calendar</strong> — read + write (writes require your approval) · Outlook Calendar coming soon</div>
+      </div>
+      <button class="cap-cta cta-done">Connected</button>
+    </div>
+
+    <!-- FILES (with provider picker shown open for review) -->
+    <div class="capability-row">
+      <div class="cap-icon cap-files">📁</div>
+      <div class="cap-body">
+        <div class="cap-name">Files <span class="optional-flag">OPTIONAL</span></div>
+        <div class="cap-providers">Lets your assistant find documents you reference. Available providers: <strong>Google Drive</strong> · OneDrive (soon) · Dropbox (soon)</div>
+      </div>
+      <button class="cap-cta cta-primary">Connect</button>
+    </div>
+
+    <!-- Provider picker example (shown for review purposes) -->
+    <div class="provider-picker open" style="margin-bottom: 10px;">
+      <div style="font-size: 11.5px; color: #64748b; margin-bottom: 8px;">Pick a provider for <strong style="color: #0f172a;">Files</strong>:</div>
+      <div class="provider-row">
+        <div class="provider-dot dot-gmail"></div>
+        <div class="provider-name">Google Drive</div>
+        <div class="provider-status">Read-only access</div>
+        <button class="provider-cta">Connect</button>
+      </div>
+      <div class="provider-row" style="opacity: 0.6;">
+        <div class="provider-dot" style="background: #0061fe;"></div>
+        <div class="provider-name">Dropbox</div>
+        <div class="provider-status">Coming soon</div>
+        <button class="provider-soon">Soon</button>
+      </div>
+      <div class="provider-row" style="opacity: 0.6;">
+        <div class="provider-dot dot-outlook"></div>
+        <div class="provider-name">OneDrive</div>
+        <div class="provider-status">Coming soon</div>
+        <button class="provider-soon">Soon</button>
+      </div>
+    </div>
+
+    <!-- TEAM CHAT -->
+    <div class="capability-row connected">
+      <div class="cap-icon cap-chat">💬</div>
+      <div class="cap-body">
+        <div class="cap-name">Team chat <span class="optional-flag">OPTIONAL</span></div>
+        <div class="cap-providers">Connected via <strong>Slack</strong> — michael (Synthetos workspace) · Microsoft Teams coming soon</div>
+      </div>
+      <button class="cap-cta cta-done">Connected</button>
+    </div>
+
+  </div>
+
+  <!-- STEP 2: Context questionnaire -->
+  <div class="card">
+    <div class="card-section-title">A few things to know</div>
+    <div class="card-section-sub">Your assistant uses these as defaults. You can change anything later in settings.</div>
+
+    <div class="field-row">
+      <div>
+        <label class="field-label">Your timezone</label>
+        <select class="field-select">
+          <option>Australia/Melbourne (auto-detected)</option>
+          <option>America/New_York</option>
+          <option>Europe/London</option>
+          <option>Asia/Singapore</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Working hours</label>
+        <select class="field-select">
+          <option>9:00 AM — 6:00 PM, Mon–Fri</option>
+          <option>8:00 AM — 5:00 PM, Mon–Fri</option>
+          <option>Custom…</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div>
+        <label class="field-label">Morning briefing time</label>
+        <input class="field-input" type="time" value="07:00" />
+      </div>
+      <div>
+        <label class="field-label">Briefing delivery</label>
+        <select class="field-select">
+          <option>Slack DM (recommended)</option>
+          <option>Email</option>
+          <option>Both</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div>
+        <label class="field-label">Default meeting length</label>
+        <select class="field-select">
+          <option>30 minutes</option>
+          <option>45 minutes</option>
+          <option>60 minutes</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Auto-send scope (Team chat)</label>
+        <select class="field-select">
+          <option>Only me (DMs) — recommended</option>
+          <option>My own channels</option>
+          <option>Anywhere</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-full">
+        <label class="field-label">Close colleagues or family the assistant should recognise <span class="optional-flag">OPTIONAL</span></label>
+        <input class="field-input" placeholder="e.g. Susan (partner), Sarah Chen (CTO), David Kim (head of sales)" />
+        <div class="field-hint">Helps the assistant recognise who you mean when you say "let Sarah know" or flag emails from family.</div>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-full">
+        <label class="field-label">Anything else worth knowing on day one <span class="optional-flag">OPTIONAL</span></label>
+        <textarea class="field-textarea" placeholder="e.g. I'm CEO of Synthetos. I travel often. Always cc finance@ on invoice emails. Tuesday standup is the most important meeting of my week."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: Voice profile -->
+  <div class="card">
+    <div class="card-section-title">Voice profile</div>
+    <div class="card-section-sub">Your assistant will draft emails and messages in your voice — not a generic AI voice.</div>
+
+    <div class="voice-block">
+      <div class="voice-explain">
+        We'll read your <strong>last 50 sent emails from the past 90 days</strong> and learn your writing style — greeting patterns, sentence length, signoff, signature. The result is a feature-level profile (greeting / signoff / register / sentence stats). We do <strong>not</strong> store the original email content, and your voice profile is private to you.
+      </div>
+
+      <div class="voice-stat-row">
+        <div><span class="voice-stat-label">Sample size:</span><span class="voice-stat-value">50 messages</span></div>
+        <div><span class="voice-stat-label">Lookback:</span><span class="voice-stat-value">Last 90 days</span></div>
+        <div><span class="voice-stat-label">Refresh:</span><span class="voice-stat-value">Monthly or 50 new sends</span></div>
+      </div>
+
+      <div class="voice-controls">
+        <div class="toggle-row">
+          <div class="toggle"></div>
+          <span>Derive voice profile from my sent mail</span>
+        </div>
+        <div style="margin-left: auto; font-size: 12px; color: #64748b;">You can opt out later in settings.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wizard-footer">
+    <div class="privacy-note">
+      <strong>Your data, your assistant.</strong> Your email content, calendar attendees, and voice profile are visible only to you. Org admins see metadata (action, time, status, cost) but not content.
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <button class="btn-secondary">Back</button>
+      <button class="btn-primary">Set up my assistant →</button>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

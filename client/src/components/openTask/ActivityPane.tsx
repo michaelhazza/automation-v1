@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TaskProjection } from '../../../../shared/types/taskProjection';
 
-interface ActivityPaneProps { projection: TaskProjection }
+interface CostSummary {
+  subscriptionMediatedCents: number;
+  sandboxComputeCents: number;
+  totalLinks: number;
+}
 
-export function ActivityPane({ projection }: ActivityPaneProps) {
+interface ActivityPaneProps {
+  projection: TaskProjection;
+  operatorRunStatus?: string | null;
+  costSummary?: CostSummary | null;
+}
+
+export function ActivityPane({ projection, operatorRunStatus, costSummary }: ActivityPaneProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [unseenCount, setUnseenCount] = useState(0);
@@ -53,6 +63,15 @@ export function ActivityPane({ projection }: ActivityPaneProps) {
     );
   }
 
+  // Fallback-engaged amber inline row (r6).
+  const fallbackRow =
+    operatorRunStatus === 'fallback_engaged' ? (
+      <div className="text-[12px] text-amber-700 py-0.5 px-1 bg-amber-50 rounded border border-amber-200 my-0.5">
+        <span className="font-medium">Fallback engaged.</span> Switched to API key for the remainder
+        of this session.
+      </div>
+    ) : null;
+
   return (
     <div className="flex flex-col h-full relative" style={{ minWidth: 0 }}>
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 text-[12px] font-semibold text-slate-600">
@@ -64,6 +83,7 @@ export function ActivityPane({ projection }: ActivityPaneProps) {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-3 py-2 space-y-1"
       >
+        {fallbackRow}
         {projection.activityEvents.length === 0 ? (
           <p className="text-[12px] text-slate-400 text-center mt-4">No activity yet.</p>
         ) : (
@@ -88,6 +108,17 @@ export function ActivityPane({ projection }: ActivityPaneProps) {
         >
           {unseenCount} new event{unseenCount !== 1 ? 's' : ''}
         </button>
+      )}
+      {costSummary && (
+        <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 space-y-0.5">
+          <div>{costSummary.totalLinks} session{costSummary.totalLinks !== 1 ? 's' : ''} total</div>
+          {costSummary.subscriptionMediatedCents > 0 && (
+            <div>Subscription: ${(costSummary.subscriptionMediatedCents / 100).toFixed(2)}</div>
+          )}
+          {costSummary.sandboxComputeCents > 0 && (
+            <div>Compute: ${(costSummary.sandboxComputeCents / 100).toFixed(2)}</div>
+          )}
+        </div>
       )}
     </div>
   );

@@ -1,0 +1,47 @@
+You are reviewing a specification document for implementation-readiness. The spec is for the Executive Assistant V1 build in a TypeScript / Node / Postgres / pg-boss / Drizzle / React codebase.
+
+CONTEXT (binding on your review):
+- This is a pre-production codebase. No live users. No staged rollout. No feature flags except for genuine behaviour modes.
+- Testing posture is static-gates-primary with pure-function unit tests only. No frontend tests, no E2E tests, no API contract tests, no performance baselines, no migration safety tests for now.
+- Prefer existing primitives over new abstractions: policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, failure(), createWorker(), credentialBrokerService, agentExecutionService, scheduledTaskService, triggerService, capabilityMapService, agentExecutionEventService, RLS_PROTECTED_TABLES manifest.
+- Migrations ship without feature flags. Phase 2 BUILD is gated on the predecessor `user-owned-agents` MERGED.
+- This is a Major scope build: 4 new migrations, ~6 new services, 2 new platform primitives (VoiceProfile + home-widget contract), 1 new agent template, 6 Calendar + 6 Slack actions, 3 new trigger event types, new google webhook route, 3 V1 workflows.
+
+DO NOT flag (these are out of scope for review):
+- "Add a feature flag for X" — not the project's pattern.
+- "Stage the rollout" / "verify in staging between batches" — pre-production codebase, no staging tier.
+- "Add frontend / E2E / API contract / performance / migration-safety tests" — testing posture is fixed.
+- "Run `npm run test:gates` locally as part of verification" — gates are CI-only.
+- "Add monitoring / compliance / multi-region / circuit breaking" — production-caution suggestions out of scope.
+- "Introduce a new service to handle X" when an existing primitive could be extended.
+
+DO flag (these are useful):
+- Contradictions between two sections of the spec.
+- Stale language: an approach the spec retired surviving in prose elsewhere.
+- Load-bearing claims without contracts: "X must be idempotent" without a mechanism.
+- File inventory drift: prose references files not in the Files-to-change table.
+- Schema overlaps: two tables/columns with adjacent purposes without an explicit source-of-truth statement.
+- Sequencing ordering bugs: item A depends on B but B ships later.
+- Invariants stated in one place but not enforced elsewhere.
+- Missing per-item verdicts (every roadmap item should have an explicit BUILD/DEFER/etc).
+- Unnamed new primitives ("a new service that handles X").
+- Migration numbering placeholders that need to be resolved.
+- Risk-tier classifications that contradict the spec's own conventions.
+- Idempotency-key strategies that miss obvious failure modes.
+- RLS / multi-tenant isolation gaps for any new table.
+- Author confusions between user-scoped vs subaccount-scoped vs org-scoped axes.
+- Skill / action / capability registry entries that the spec asserts but the file inventory misses.
+
+OUTPUT FORMAT:
+Produce a numbered list of findings. For each finding:
+- One-sentence description.
+- Spec section heading (or line range if you can identify it).
+- Suggested fix (one sentence; verbatim words you'd add or change).
+- Severity: critical | important | minor | nit.
+
+Be concise. Skip preambles. Skip rubric-style scoring summaries. Output the findings list directly.
+
+The spec under review is at:
+`docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md`
+
+Read it from the working directory and produce your findings.

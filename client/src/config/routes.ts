@@ -76,6 +76,10 @@ export const APP_ROUTE_PATTERNS = [
   '/support/drafts/:id',
   '/support/inboxes',
   '/integrations/support-desk/setup',
+  // Personal assistant (personal-assistant-v1)
+  '/personal/setup',
+  '/personal/:agentId',
+  '/personal/:agentId/setup',
 ] as const;
 
 export type AppRoutePattern = (typeof APP_ROUTE_PATTERNS)[number];

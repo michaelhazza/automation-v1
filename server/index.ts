@@ -95,6 +95,12 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+// Personal Assistant V1 — EA drafts CRUD + approval/reject/retry (Chunk 6)
+import eaDraftsRouter from './routes/eaDrafts.js';
+// Personal Assistant V1 — Voice profile CRUD + opt-out + reactivate (Chunk 13)
+import voiceProfilesRouter from './routes/voiceProfiles.js';
+// Personal Assistant V1 — Home-widget data endpoint (Chunk 14)
+import agentHomeWidgetsRouter from './routes/agentHomeWidgets.js';
 import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
 import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
@@ -116,6 +122,10 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+import operatorSessionsRouter from './routes/operatorSessions.js';
+import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
 import skillStudioRouter from './routes/skillStudio.js';
@@ -217,6 +227,8 @@ import runArtifactsRouter from './routes/runArtifacts.js';
 import runArtifactsFinalizeRouter from './routes/internal/runArtifactsFinalize.js';
 // Support Desk canonical substrate (C13)
 import supportRouter from './routes/support/index.js';
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+import personalSetupRouter from './routes/personalSetup.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -395,6 +407,9 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(eaDraftsRouter);
+app.use(voiceProfilesRouter);
+app.use(agentHomeWidgetsRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
 // ghl/teamwork/slack/stripe-agent webhook routers mounted before body parsing (need raw body for HMAC)
@@ -416,6 +431,10 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+app.use(operatorSessionsRouter);
+app.use(subaccountOperatorSettingsRouter);
+app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
 app.use(pulseRouter);
@@ -481,6 +500,8 @@ app.use(runArtifactsRouter);
 app.use(runArtifactsFinalizeRouter);
 // Support Desk canonical substrate (C13) — subaccount-scoped per DEC-1 (pre-test-hardening T1)
 app.use('/api/subaccounts/:subaccountId/support', supportRouter);
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+app.use(personalSetupRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -503,12 +524,22 @@ app.use('/api', (req, res) => {
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
 import { ZodError } from 'zod';
+import { mapOperatorBackendErrorToHttp } from './services/operatorBackendErrors.js';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
+  let extraBody: Record<string, unknown> | null = null;
 
-  if (err instanceof ZodError) {
+  // Operator backend typed errors — checked before generic Error branch so
+  // the richer body (kind, current_state / cap, current, subaccount_id) is used.
+  const operatorMapped = mapOperatorBackendErrorToHttp(err);
+  if (operatorMapped) {
+    statusCode = operatorMapped.statusCode;
+    errorCode = operatorMapped.errorCode;
+    message = err instanceof Error ? err.message : String(err);
+    extraBody = operatorMapped.body;
+  } else if (err instanceof ZodError) {
     statusCode = 400;
     errorCode = 'validation_error';
     message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -556,6 +587,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     error: {
       code: errorCode,
       message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+      ...(extraBody ?? {}),
     },
     correlationId,
   });
@@ -684,14 +716,54 @@ async function start() {
     const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
     const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
     const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { operatorManagedBackend } = await import('./services/executionBackends/operatorManagedBackend.js');
     executionBackendRegistry.register(apiBackend);
     executionBackendRegistry.register(headlessBackend);
     executionBackendRegistry.register(claudeCodeBackend);
     executionBackendRegistry.register(ieeBrowserBackend);
     executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(operatorManagedBackend);
   } catch (err) {
     console.error('[boot] failed to register execution backends', err);
     throw err;
+  }
+
+  // Operator Backend pg-boss handlers (Spec D — operator_managed adapter)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionCompletedHandler } = await import('./jobs/operatorSessionCompletedHandler.js');
+      await registerOperatorSessionCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-completed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionDispatchNextChainLinkHandler } = await import('./jobs/operatorSessionDispatchNextChainLinkHandler.js');
+      await registerOperatorSessionDispatchNextChainLinkHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-dispatch-next-chain-link handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionProgressedHandler } = await import('./jobs/operatorSessionProgressedHandler.js');
+      await registerOperatorSessionProgressedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-progressed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorTaskProfileGcHandler } = await import('./jobs/operatorTaskProfileGcHandler.js');
+      await registerOperatorTaskProfileGcHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-task-profile-gc handler', err);
+    }
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
@@ -714,12 +786,15 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const pgboss = await getPgBoss();
-      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
       const { createWorker } = await import('./lib/createWorker.js');
       await createWorker({
         queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
         boss: pgboss,
-        handler: workflowGateStallNotifyHandler,
+        handler: async (job) => {
+          await workflowGateStallNotifyHandler(job as import('pg-boss').Job<import('./jobs/workflowGateStallNotifyJob.js').WorkflowGateStallNotifyPayload>);
+          await eaDraftStallResetHandler();
+        },
       });
     } catch (err) {
       console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
@@ -823,6 +898,45 @@ async function start() {
       logger.info('[boot] operator-session-refresh worker registered');
     } catch (err) {
       console.error('[boot] failed to register operator-session-refresh worker', err);
+    }
+  }
+  // Voice profile refresh (nightly cross-org scan)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { voiceProfileRefreshHandler, VOICE_PROFILE_REFRESH_JOB } = await import('./jobs/voiceProfileRefreshJob.js');
+      await boss.work(VOICE_PROFILE_REFRESH_JOB, async (job) => {
+        await voiceProfileRefreshHandler(job as import('pg-boss').Job<Record<string, never>>);
+      });
+      logger.info('[boot] voice-profile-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register voice-profile-refresh worker', err);
+    }
+  }
+  // Gmail inbox poll (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { gmailInboxPollHandler, GMAIL_INBOX_POLL_JOB } = await import('./jobs/gmailInboxPollJob.js');
+      await boss.work(GMAIL_INBOX_POLL_JOB, async (job) => {
+        await gmailInboxPollHandler(job as import('pg-boss').Job<import('./jobs/gmailInboxPollJob.js').GmailPollJobData>);
+      });
+      logger.info('[boot] gmail-inbox-poll worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register gmail-inbox-poll worker', err);
+    }
+  }
+  // Calendar lookahead (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { calendarLookaheadHandler, CALENDAR_LOOKAHEAD_JOB } = await import('./jobs/calendarLookaheadJob.js');
+      await boss.work(CALENDAR_LOOKAHEAD_JOB, async (job) => {
+        await calendarLookaheadHandler(job as import('pg-boss').Job<import('./jobs/calendarLookaheadJob.js').CalendarLookaheadJobData>);
+      });
+      logger.info('[boot] calendar-lookahead worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register calendar-lookahead worker', err);
     }
   }
   // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)

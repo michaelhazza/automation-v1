@@ -11,6 +11,7 @@ import { WorkspaceTabContent } from '../components/workspace/WorkspaceTabContent
 import { BaselineStatusBadge } from '../components/baseline/BaselineStatusBadge';
 import { ManualBaselineForm } from '../components/baseline/ManualBaselineForm';
 import { AdminBaselineResetButton } from '../components/baseline/AdminBaselineResetButton';
+import OperatorSettingsTab from './govern/operatorSettings/OperatorSettingsTab';
 
 const UsagePage = lazy(() => import('./UsagePage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
@@ -20,11 +21,11 @@ interface Subaccount { id: string; name: string; slug: string; status: string; i
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace';
+type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'operator' | 'usage' | 'admin' | 'workspace';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
-  categories: 'Categories', tags: 'Tags', board: 'Board Config', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
+  categories: 'Categories', tags: 'Tags', board: 'Board Config', operator: 'Operator', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -40,9 +41,16 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [loading, setLoading] = useState(true);
 
   const [searchParams] = useSearchParams();
+  const canSeeOperatorTab = mode === 'admin' && (
+    _user.role === 'org_admin' || _user.role === 'manager' || _user.role === 'system_admin'
+  );
+  const canEditOperatorSettings = _user.role === 'org_admin' || _user.role === 'system_admin';
+  const adminTabs: ActiveTab[] = ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board'];
+  if (canSeeOperatorTab) adminTabs.push('operator');
+  adminTabs.push('usage', 'workspace', 'admin');
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['board', 'categories']
-    : ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'usage', 'workspace', 'admin'];
+    : adminTabs;
   const initialTab = (() => {
     const t = searchParams.get('tab') as ActiveTab | null;
     return t && visibleTabs.includes(t) ? t : visibleTabs[0];
@@ -346,6 +354,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
             </>
           )}
         </div>
+      )}
+
+      {/* Operator */}
+      {activeTab === 'operator' && subaccountId && (
+        <OperatorSettingsTab subaccountId={subaccountId} canEdit={canEditOperatorSettings} />
       )}
 
       {/* Categories */}

@@ -167,6 +167,11 @@ export interface IeeDevBackendOptions {
   ieeTask: DevTaskPayload;
 }
 
+/** `backendId: 'operator_managed'` — delegated operator-session chain link. */
+export interface OperatorManagedBackendOptions {
+  backendId: Extract<ExecutionMode, 'operator_managed'>;
+}
+
 /**
  * Closed discriminated union of per-adapter dispatch options.
  *
@@ -179,4 +184,5 @@ export type BackendOptions =
   | HeadlessBackendOptions
   | ClaudeCodeBackendOptions
   | IeeBrowserBackendOptions
-  | IeeDevBackendOptions;
+  | IeeDevBackendOptions
+  | OperatorManagedBackendOptions;

@@ -51,13 +51,14 @@ export type { BackendOptions };
 /**
  * In-memory key the registry resolves on. Forward-compat superset of
  * `ExecutionMode` so that future internal-variant adapters
- * (`'openclaw_managed'`, `'openclaw_external'`, …) can register without
+ * (`'operator_external'`, …) can register without
  * forcing a contract-wide rename of every dispatch caller.
  *
  * **V1 invariant:** every registered `id` is also a current `ExecutionMode`
- * value. The OpenClaw values are forward-compat type slots only; their
- * adapters land in Phase 3. Runtime registration of an OpenClaw id is
- * rejected by the registry in V1 with `BackendCapabilityViolation`.
+ * value. Operator Backend forward-compat ids are forward-compat type slots
+ * only; their adapters land in Phase 5. Runtime registration of an
+ * operator_external id is rejected by the registry in V1 with
+ * `BackendCapabilityViolation`.
  *
  * Typed as `string` rather than a closed union of literal strings so the
  * contract has a stable public surface that does not need to change every
@@ -77,11 +78,11 @@ export type ExecutionBackendId = string;
  * rather than introspecting the adapter's id. Closed set — adding a value
  * is a spec amendment.
  *
- * The seven values listed here are the ones the V1 contract names directly.
- * Future extensions (`'streaming'`, `'long_running'`, `'session_identity'`)
- * are listed in spec § 4.1 and can be added when the corresponding
- * downstream consumer lands; the registry's capability validation (§ 8.2)
- * only enforces presence-when-declared, never absence-when-undeclared.
+ * The nine values listed here are the ones the V1 contract names directly.
+ * Future extensions (`'streaming'`) are listed in spec § 4.1 and can be
+ * added when the corresponding downstream consumer lands; the registry's
+ * capability validation (§ 8.2) only enforces presence-when-declared,
+ * never absence-when-undeclared.
  */
 export type ExecutionCapability =
   | 'in_process'           // Adapter executes synchronously in the main app process.
@@ -90,7 +91,9 @@ export type ExecutionCapability =
   | 'browser_automation'   // Adapter drives a Playwright session (Tier 3).
   | 'code_execution'       // Adapter executes LLM-derived code (Tier 4). Sandbox required.
   | 'terminal_repo'        // Adapter has filesystem + git access (Tier 5).
-  | 'cancellation';        // Adapter implements cancel(); cancellation is best-effort otherwise.
+  | 'cancellation'         // Adapter implements cancel(); cancellation is best-effort otherwise.
+  | 'long_running'         // Adapter supports multi-link chain-resume sessions (hours to days).
+  | 'session_identity';    // Adapter binds to a persistent operator session credential.
 
 /**
  * How the adapter's execution maps to the cost ledger. Consumed by Spec C

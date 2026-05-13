@@ -2463,6 +2463,11 @@ Any optimiser SA rows registered before this PR exist in pg-boss under `agent-sc
 
 - [ ] `verify-no-direct-credential-service-calls.sh` — author the advisory CI gate sketched in `tasks/builds/synthetos-foundation-refactor/spec.md` §11. Mirrors `verify-no-direct-adapter-calls.sh`; scans non-test source files outside the broker/token/connection services for direct imports. Phase 1 advisory; promote to a hard CI gate in Phase 1.5 if any drift is observed post-merge. Source: chatgpt-spec-review round 1 finding F7. [auto]
 
+### operator-backend (2026-05-12)
+
+- [ ] Mockup hygiene: remove unused `.btn-extend` CSS class from `prototypes/operator-backend/r7-taskheader-operator-controls.html`. The corresponding "Extend duration" CTA was removed (R7 now uses automatic chain-link handoff), but the orphan CSS rule remains. Harmless but tidy-up. Source: chatgpt-spec-review round 1 smaller-polish item. [auto]
+- [ ] Mockup hygiene: archive or delete `prototypes/operator-backend/d9-duration-override-modal.html`. The file describes the removed manual "Extend duration" / "120 min cap" override flow that conflicts with the current auto-extend grace + chain-link handoff model. Move to an archived/deprecated folder the spec does not reference, OR delete outright. Source: chatgpt-spec-review round 2 optional cleanup. [auto]
+
 ---
 
 ## Deferred from pr-reviewer + adversarial-reviewer (workflows-v1) — 2026-05-03
@@ -4406,3 +4411,120 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 - [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
   - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
   - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
+
+---
+
+## Closed by operator-backend (2026-05-13)
+
+- [x] **OP-BACKEND-SR1 — Capability literal import surface.** Closed structurally: the CI gate `scripts/gates/verify-execution-capability-references.sh` covers non-adapter consumer code via grep, and the type-checker enforces adapter-declaration correctness. The deferred runtime-const idea remains a low-priority cosmetic — KNOWLEDGE.md captures the pattern. No follow-up build needed.
+
+---
+
+## Deferred from spec-conformance review — operator-backend (2026-05-12)
+
+**Captured:** 2026-05-12T13:39:59Z
+**Source log:** `tasks/review-logs/spec-conformance-log-operator-backend-2026-05-12T13-39-59Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-12-operator-backend-spec.md`
+
+- [x] REQ #63 — Naked `'operator-session.*'` literals at emit sites bypass the registry (CI gate will fail on PR open)
+  - Spec section: §3.2 item 1 (single source of truth), §4.7 (namespace discipline)
+  - Gap: 18+ naked literals in `server/services/executionBackends/operatorManagedBackend.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/services/credentialBrokerService.ts`, and `shared/types/runTraceEvent.ts`. The `verify-operator-event-registry.sh` gate's allow-list only includes `shared/types/operatorBackendEvents.ts` + `__tests__/` + `.test.ts` + `docs/` + `tasks/` + `.sh:` + `.md:` files. Adapter and handler files are NOT allowed, so every emit-site literal will trip the gate.
+  - Suggested approach: either (a) widen the gate's allow-list to include `server/services/executionBackends/*.ts` and `server/jobs/operator*.ts` (matches spec § 3.2 item 2 intent — the spec already lists "adapter declarations under `server/services/executionBackends/*.ts`" as permitted), or (b) replace naked literals at emit sites with constants imported from the registry. Option (a) is smaller; option (b) is more idiomatic.
+  - Resolved: 2026-05-13 by commit `4106ad2b`. 20 per-event named constants added to `shared/types/operatorBackendEvents.ts` (registry); 8 naked literals at emit sites replaced with imported constants across adapter, progressed handler, and broker. `runTraceEvent.ts` added to gate allow-list (consumer-side type registry). Verified PASS by Round 2 spec-conformance.
+
+- [x] REQ #64 — Lifecycle event names diverge across three sources of truth (RunTrace will not render the chain-link/task lifecycle events)
+  - Spec section: §4.7 (lifecycle events)
+  - Gap: Three name sets in play. Spec §4.7 + registry (`operatorBackendEvents.ts`) uses `chain_link_completed/failed/cancelled` + `task_completed/failed/cancelled` + `dispatched`. Adapter `operatorManagedBackend.ts:754,927` emits `'operator-session.completed'` and `'operator-session.cancelled'` (unprefixed). `shared/types/runTraceEvent.ts:57-67,320-348` defines parallel `eventType` union with `'chain_link_started'`, `'task_terminal_completed'`, `'task_terminal_failed'` (different names again). `RunTraceEventRenderer.tsx:161,211,220` listens on the runTraceEvent.ts names — so the Run Trace never receives the chain-link/task lifecycle events that the adapter actually emits.
+  - Suggested approach: pick spec § 4.7 names as canonical. Update (1) adapter line 754 to emit `'operator-session.task_completed'` or `'operator-session.chain_link_completed'` depending on `action`; (2) adapter line 927 to emit `'operator-session.task_cancelled'`; (3) `runTraceEvent.ts` lines 57-67 + 320-348 to use spec names; (4) `RunTraceEventRenderer.tsx` to listen on spec names. The WebSocket payload shapes also need to match spec § 4.7 per-event fields (the adapter currently sends `{operatorRunId, chainSeq, parentStatus, action}` for `operator-session.completed`; the spec's `task_completed` payload is `{agent_run_id, total_chain_links, total_wall_clock_ms}`).
+  - Resolved: 2026-05-13 by commit `4106ad2b`. Adapter line 754 (now ~767) emits `chain_link_completed/failed/cancelled` based on `terminalState.status`; adapter line 927 (now ~940) emits `task_cancelled`. `runTraceEvent.ts` renamed `chain_link_started → dispatched`, `task_terminal_completed → task_completed`, `task_terminal_failed → task_failed`; added `chain_link_cancelled` and `task_cancelled` discriminated union members. `RunTraceEventRenderer.tsx` switch cases use canonical names + new variant renderers. Verified PASS by Round 2 spec-conformance.
+## Deferred adversarial findings — personal-assistant-v1 (2026-05-12)
+
+Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.
+Confirmed holes fixed inline before pr-reviewer. Deferred items below.
+
+### createDraftWithProposal non-atomic (likely-hole)
+`server/services/eaDrafts/eaDraftService.ts:58-88` — `actionService.proposeAction` and the
+subsequent `db.insert(eaDrafts)` are not wrapped in a single transaction. `proposeAction` does
+not accept a caller transaction handle. Fix requires refactoring `actionService.proposeAction`
+to accept an optional `tx` parameter, or extracting its insert logic into a shared helper.
+Phase 1.5 work item. Risk: orphaned `actions` row on `ea_drafts` insert failure.
+
+### dispatch() missing organisationId filter on integrationConnections lookup (worth-confirming)
+`server/services/triggers/externalSourceTriggers.ts:38-52` — add
+`eq(integrationConnections.organisationId, ctx.organisationId)` for defence-in-depth.
+
+### dispatch() rate-cap count not scoped by organisationId (worth-confirming)
+`server/services/triggers/externalSourceTriggers.ts:87-97` — add organisationId filter to
+rate-cap count query.
+
+### assembleThreadSummaryPrompt future prompt-injection surface (worth-confirming)
+`server/services/slack/slackActionService.ts:267` — when Slack thread summarisation ships,
+the raw Slack message content must be XML-escaped or sandboxed in a structured prompt turn
+before being passed to the LLM.
+
+## Deferred from spec-conformance review — personal-assistant-v1 (2026-05-12)
+
+**Captured:** 2026-05-12T13:15:07Z
+**Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v1-2026-05-12T13-15-07Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md`
+
+- [ ] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract
+  - Spec section: §7.4 + §21.1
+  - Gap: Missing `name` column (display); single `source` column (string) replaced by `sources text[]` array; missing `source_config jsonb` (per-sampler config); missing `refresh_config jsonb` (per-policy config). Renames: `sample_size`→`sample_count`, `last_derived_at`→`last_refreshed_at`, `opt_out_at`→`opted_out_at`.
+  - Suggested approach: Decide whether to bring schema into spec alignment (migration adds 4 cols, drops 1, renames 3) OR amend the spec to match the simpler implementation. The simpler schema is functional but breaks the spec's per-sampler config envelope.
+
+- [ ] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch
+  - Spec section: §8.2 table + §6.3 rationale
+  - Gap: Code uses Tier 6 (max); spec specifies Tier 4 with action-level `defaultGate: review`. The spec rationale (third-party visibility is consent-based) supports Tier 4. Either change works at runtime since both are review-gated, but tier classification drives downstream policy decisions (budget caps, audit categorisation).
+  - Suggested approach: Confirm with the risk-tier rubric authors whether `create_event` is Tier 4 (record-write, consent-based visibility) or Tier 6 (broadcast). Update either the spec or the action registry.
+
+- [ ] REQ-T8 — Dedup key formats diverge from spec §7.1
+  - Spec section: §7.1 + §24.1
+  - Gap: Slack dedup key uses `channelId@messageTs` not `slack_event_id`. Calendar dedup key uses `eventId@startAt@minutesUntilStart` not `{calendarId}@{eventId}@{startAtISO8601}@{lookaheadMinutes}`. Both work as unique keys but diverge from spec's explicit shapes (which were chosen for multi-calendar support + recurring occurrence handling).
+  - Suggested approach: Update `deriveDedupKey` in `externalSourceTriggersPure.ts` to match spec format, or amend spec §7.1 to match the simpler keys.
+
+- [ ] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1
+  - Spec section: §7.1
+  - Gap: Spec specifies envelope with `provider`, `externalEventId`, `subaccountId`, `organisationId`, `integrationConnectionId`, and per-type `messageMetadata`/`eventMetadata`/`mentionMetadata` objects. Code's union has flat field shape (no envelope, owner-only). Loses some downstream consumer affordances (e.g. integration_connection_id passing through).
+  - Suggested approach: Confirm with downstream consumers whether the simplified shape suffices. If not, expand schema to match spec.
+
+- [ ] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2
+  - Spec section: §13.2
+  - Gap: `0332_executive_assistant_seed.sql` `default_org_skill_slugs` lists 16 entries. Spec §13.2 names additionally: `read_inbox`, `send_email`, `read_data_source`, `web_search`, `fetch_url`, `scrape_structured`, `ask_clarifying_question`, `request_clarification`, `read_workspace`, `update_memory_block`, `notify_operator`, `read_priority_feed`, `search_agent_history`.
+  - Suggested approach: Verify whether the missing skills are auto-enabled via universal-skills (per §13.2: "Universal skills per `server/config/universalSkills.ts` are always available regardless of allowlist"). If yes, allowlist is correct. If no, add the missing slugs to the seed.
+
+- [ ] REQ-EA3 — Partial unique index axis differs from spec §13.4
+  - Spec section: §13.4 concurrency guard
+  - Gap: Code uses `agents(organisation_id, owner_user_id) WHERE slug='executive-assistant'`. Spec specifies `agents(subaccount_id, owner_user_id) WHERE slug='executive-assistant'`. Difference matters when a user has access to multiple subaccounts in the same org: spec's axis allows one EA per subaccount per user; code allows only one EA per user per org.
+  - Suggested approach: Align with the multi-subaccount product intent; if users routinely access multiple subaccounts, change the index. If V1 dogfood is single-subaccount only, leave as-is and amend spec.
+
+- [ ] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1
+  - Spec section: §13.1
+  - Gap: Seed uses `every_5m`; spec says `on_login`. The `every_5m` policy creates more API load per user; `on_login` lazily refreshes on route entry (and is what `useHomeWidgets` invalidates on).
+  - Suggested approach: Change seed to `on_login` unless there's a UX reason for periodic refresh.
+
+- [ ] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded
+  - Spec section: §13.1 + §13.6 (display name renaming)
+  - Gap: Seed hardcodes `"Personal Assistant"`; spec specifies `'${agent.displayName}'`. Once users rename their EA via Settings (§13.6), the home widget should reflect the new name.
+  - Suggested approach: Update seed to use template string; ensure homeWidgetService substitutes `${agent.displayName}` when rendering.
+
+- [ ] REQ-M15 — Personal nav group placement
+  - Spec section: §14.1
+  - Gap: Spec says Personal group renders at the TOP of the sidebar, above Operate/Build/Govern. Code places it mid-list per `client/src/config/sidebar.ts` ordering comment ("top → work → projects → agents → personal → company → ...").
+  - Suggested approach: Move Personal group higher in `buildNavItems` if matching the spec is important for the "first thing the user sees" framing.
+
+- [ ] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter
+  - Spec section: §7.3
+  - Gap: Spec input shape includes `types?: Array<'public_channel' | 'private_channel' | 'mpim' | 'im'>`. Code's Zod schema has no `types` field — callers cannot filter channel types.
+  - Suggested approach: Add `types` to the action Zod schema and pass through to the Slack handler.
+
+- [ ] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4
+  - Spec section: §8.4 step 2
+  - Gap: Spec says `code: 'missing_draft_context'` (422) for missing/invalid `eaDraftId` or owner mismatch. Code uses `DRAFT_NOT_APPROVED`, `DRAFT_NOT_FOUND`, `DRAFT_SEND_IN_FLIGHT` (no `missing_draft_context`). Also: no owner-mismatch check (`ea_drafts.ownerUserId !== agent.ownerUserId`).
+  - Suggested approach: Either add the `missing_draft_context` mapping when `eaDraftId` is absent, OR amend spec to use the more granular code set the code emits. Add the owner-mismatch assertion either way (defence-in-depth).
+
+- [ ] REQ-M9 — Stall job 7-day proposal expiry path
+  - Spec section: §5.2 (`workflowGateStallNotifyJob` modification clause) + §20.4 + §22.2
+  - Gap: Spec prose says stall job should "transition expired proposal rows (`createdAt + 7d`) to approval state `expired`" for EA-linked drafts. Code's `eaDraftStallResetHandler` only resets `sending → idle`. Existing `actions` primitive expiry may already cover this, but the spec's explicit clause says it should be added to the stall job for EA-linked rows.
+  - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
+

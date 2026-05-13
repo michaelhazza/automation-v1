@@ -1,15 +1,14 @@
 name: Publish sandbox templates
 
 # Fires on tags of the form: sandbox-template/{name}/v{version}
-# Explicitly EXCLUDES sandbox-template/openclaw-session/v* in V1 — the OpenClaw
-# adapter spec activates that template; until then the directory is placeholder
-# scaffolding only and must not be accidentally published.
+# Currently includes: synthetos-sandbox, operator-session.
+# Add additional template names to the `tags` trigger as they are introduced.
 on:
   push:
     tags:
       - 'sandbox-template/synthetos-sandbox/v*'
+      - 'sandbox-template/operator-session/v*'
       # Add additional V1 template names here as they are introduced.
-      # DO NOT add sandbox-template/openclaw-session/v* until the OpenClaw adapter spec lands.
 
 concurrency:
   group: publish-sandbox-${{ github.ref }}
