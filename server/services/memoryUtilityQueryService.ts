@@ -80,13 +80,20 @@ export async function getMemoryUtilityForOrg(
       AND created_at > transaction_timestamp() - interval '30 days'
   `);
 
+  // Normalise raw JSONB so legacy rows with non-array shapes (scalar JSON,
+  // empty object, etc.) cannot leak through to the pure bucketer (ChatGPT R2 F1).
+  // The MV side already guards via `jsonb_typeof(...) = 'array'`; this brings
+  // the live daily-series path to the same posture.
+  const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
   const forBucketing: RunForBucketing[] = runRows.map((r) => ({
     id: r.id,
     createdAt: new Date(r.created_at),
-    injectedEntryIds: r.injected_entry_ids,
-    citedEntryIds: r.cited_entry_ids ?? [],
-    appliedMemoryBlockIds: r.applied_memory_block_ids ?? [],
-    appliedMemoryBlockCitations: r.applied_memory_block_citations ?? [],
+    injectedEntryIds: Array.isArray(r.injected_entry_ids)
+      ? (r.injected_entry_ids as string[])
+      : null,
+    citedEntryIds: asArray<string>(r.cited_entry_ids),
+    appliedMemoryBlockIds: asArray<string>(r.applied_memory_block_ids),
+    appliedMemoryBlockCitations: asArray<unknown>(r.applied_memory_block_citations),
   }));
 
   const agentRows: AgentUtilityRow[] = mvRows.map((r) => ({

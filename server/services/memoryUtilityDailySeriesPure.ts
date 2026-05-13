@@ -54,7 +54,10 @@ export function bucketDailySeries(rows: RunForBucketing[], now: Date): DailyBuck
     const acc = bucketMap.get(key);
     if (!acc) continue; // outside the 30-day window — skip
 
-    const measured = row.injectedEntryIds !== null;
+    // Mirror the MV's `jsonb_typeof(...) = 'array'` predicate so legacy rows
+    // with malformed JSONB (non-array shape) are treated as unmeasured here
+    // too (ChatGPT R2 F1).
+    const measured = Array.isArray(row.injectedEntryIds);
     if (measured) {
       acc.measuredCount += 1;
       acc.totalInjected += row.injectedEntryIds!.length;

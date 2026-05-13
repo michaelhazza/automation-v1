@@ -18,7 +18,7 @@ import { truncateForEmission, buildDegradedResult } from './retrievalObservabili
 import { rankByPrecedencePure, type MemoryBlockRow } from './memoryBlockRetrievalServicePure.js';
 import {
   getRetrievalConfig,
-  cosineSimilarity,
+  scoreCandidates,
   recallFallbackPredicate,
 } from './retrievalQueryEmbedderPure.js';
 import { generateEmbedding } from '../lib/embeddings.js';
@@ -230,35 +230,47 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
             return true;
           });
 
-        chunkCandidates = preScoredChunks
-          .map(chunk => {
-            const doc = docMap.get(chunk.documentId)!;
-            let finalScore = 0;
-            if (queryEmbedding && Array.isArray(chunk.embedding)) {
-              try {
-                finalScore = cosineSimilarity(chunk.embedding as number[], queryEmbedding);
-              } catch {
-                // per-candidate vector error — keep 0
-              }
-            }
-            return {
-              id: chunk.id,
-              documentId: chunk.documentId,
-              organisationId: chunk.organisationId,
-              kind: 'document_chunk' as const,
-              mode: doc.mode,
-              scopeTier: documentScopeTier.get(chunk.documentId) ?? 1,
-              finalScore,
-              updatedAt: chunk.updatedAt,
-              tokenCount: chunk.tokenCount,
-              content: chunk.content,
-            };
-          })
-          .sort((a, b) => {
-            if (b.scopeTier !== a.scopeTier) return b.scopeTier - a.scopeTier;
-            if (b.updatedAt.getTime() !== a.updatedAt.getTime()) return b.updatedAt.getTime() - a.updatedAt.getTime();
-            return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-          });
+        // Build candidates without finalScore yet, keeping embedding attached
+        // for the scoring boundary below. ChatGPT R2 T1: route scoring through
+        // the tested `scoreCandidates()` helper instead of inline cosine.
+        const candidateBase = preScoredChunks.map(chunk => {
+          const doc = docMap.get(chunk.documentId)!;
+          return {
+            id: chunk.id,
+            documentId: chunk.documentId,
+            organisationId: chunk.organisationId,
+            kind: 'document_chunk' as const,
+            mode: doc.mode,
+            scopeTier: documentScopeTier.get(chunk.documentId) ?? 1,
+            updatedAt: chunk.updatedAt,
+            tokenCount: chunk.tokenCount,
+            content: chunk.content,
+            embedding: Array.isArray(chunk.embedding) ? (chunk.embedding as number[]) : null,
+          };
+        });
+
+        if (queryEmbedding) {
+          // Use scoreCandidates with threshold 0 so it acts as scorer + malformed
+          // exclusion only; the per-category threshold filter applies later.
+          const withEmbedding = candidateBase.filter(
+            (c): c is typeof c & { embedding: number[] } => c.embedding !== null,
+          );
+          chunkCandidates = scoreCandidates({
+            candidates: withEmbedding,
+            queryEmbedding,
+            threshold: 0,
+          }).map(({ embedding: _embedding, ...rest }) => rest as RetrievalCandidate);
+        } else {
+          // Flag off: all candidates pass through with finalScore 0.
+          chunkCandidates = candidateBase.map(
+            ({ embedding: _embedding, ...rest }) => ({ ...rest, finalScore: 0 } as RetrievalCandidate),
+          );
+        }
+        chunkCandidates.sort((a, b) => {
+          if (b.scopeTier !== a.scopeTier) return b.scopeTier - a.scopeTier;
+          if (b.updatedAt.getTime() !== a.updatedAt.getTime()) return b.updatedAt.getTime() - a.updatedAt.getTime();
+          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+        });
 
         // Per-category recall fallback for chunks (spec §13.5; ChatGPT R1 F2)
         if (queryEmbedding && chunkCandidates.length > 0) {
@@ -328,31 +340,40 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
     });
 
     const mbById = new Map(mbRows.map(r => [r.id, r]));
-    memoryBlockCandidates = rankedMb.map(mb => {
+    // Build candidates with embedding still attached, then route scoring
+    // through the tested scoreCandidates() helper (ChatGPT R2 T1).
+    const mbCandidateBase = rankedMb.map(mb => {
       const row = mbById.get(mb.id)!;
       let tier = 1;
       if (row.ownerAgentId) tier = 3;
       else if (row.subaccountId) tier = 2;
-      let finalScore = 0;
-      if (queryEmbedding && Array.isArray(row.embedding)) {
-        try {
-          finalScore = cosineSimilarity(row.embedding as number[], queryEmbedding);
-        } catch {
-          // per-candidate vector error — keep 0
-        }
-      }
       return {
         id: mb.id,
         organisationId: mb.organisationId,
         kind: 'memory_block' as const,
         mode: 'auto' as const,
         scopeTier: tier,
-        finalScore,
         updatedAt: mb.createdAt,
         tokenCount: 0,
         content: mb.content,
+        embedding: Array.isArray(row.embedding) ? (row.embedding as number[]) : null,
       };
     });
+
+    if (queryEmbedding) {
+      const withEmbedding = mbCandidateBase.filter(
+        (c): c is typeof c & { embedding: number[] } => c.embedding !== null,
+      );
+      memoryBlockCandidates = scoreCandidates({
+        candidates: withEmbedding,
+        queryEmbedding,
+        threshold: 0,
+      }).map(({ embedding: _embedding, ...rest }) => rest as RetrievalCandidate);
+    } else {
+      memoryBlockCandidates = mbCandidateBase.map(
+        ({ embedding: _embedding, ...rest }) => ({ ...rest, finalScore: 0 } as RetrievalCandidate),
+      );
+    }
 
     // Per-category recall fallback for memory blocks (spec §13.5; ChatGPT R1 F2)
     if (queryEmbedding && memoryBlockCandidates.length > 0) {
