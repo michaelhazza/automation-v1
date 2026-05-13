@@ -1299,6 +1299,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0330_external_source_triggers.sql',
     rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
   },
+  // 0333 — Memory improvements spec §4 Phase 1: synthesis lineage table
+  {
+    tableName: 'memory_block_version_sources',
+    schemaFile: 'memoryBlockVersionSources.ts',
+    policyMigration: '0333_memory_block_version_sources.sql',
+    rationale: 'Per-version audit record of which workspace_memory_entries contributed to each auto-synthesised memory block version. Cross-tenant leak would expose another org\'s agent knowledge base, synthesis history, and captured source labels including agent run provenance.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

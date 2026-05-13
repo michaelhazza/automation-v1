@@ -1,0 +1,51 @@
+Reading additional input from stdin...
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1
+model: gpt-5.1-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e1ed3-998c-76b2-98c4-c1dbcd3b33f4
+--------
+user
+You are reviewing a draft specification document for "Memory Improvements" in an internal codebase.
+
+The spec file is at `docs/superpowers/specs/2026-05-13-memory-improvements-spec.md`. Read it in full.
+
+Your job is to surface every implementation-readiness issue you find. A spec is implementation-ready when:
+
+1. Every section is internally consistent (no contradictions between sections).
+2. Every "must" / load-bearing claim has a named mechanism that enforces it.
+3. Every file the build phase will touch appears in the File inventory lock (§5), and every prose reference to a file or table matches the inventory.
+4. Every load-bearing decision (deletion-safe columns, single-source-of-truth, RLS posture, idempotency posture) is concrete enough that a builder doesn't need to make a fresh decision.
+5. Migration numbers, route paths, column names, and type names are concrete (not "a route", "a column", "some table").
+6. Every dependency between phases is explicit. No phase reads from a column that hasn't been added yet.
+7. Every "deferred" item appears in §10 (Deferred items).
+8. RLS / permissions are explicit per new tenant table and per new column.
+9. Execution-safety contracts (§13) are present and concrete for every new write path.
+
+Project framing (treat as ground truth):
+- Pre-production codebase, no live users, rapid evolution stage.
+- Testing posture: static gates + pure-function vitest only. No frontend tests, no API contract tests, no E2E tests, no migration safety tests.
+- Rollout model: commit-and-revert. NO staged rollouts. Feature flags only for behaviour modes, not for new migrations or new columns.
+- Prefer existing primitives over new abstractions.
+
+Report each finding as a distinct, numbered item. Be specific about:
+- Which section / line range the finding refers to.
+- Whether the finding is a contradiction, a missing mechanism, a file-inventory drift, a schema ambiguity, a sequencing bug, an under-specified type/name, a load-bearing claim without a contract, or something else.
+- The minimum fix.
+
+Do NOT suggest:
+- Adding feature flags for migrations (this is a pre-production codebase).
+- Adding staged rollouts or canary deploys.
+- Adding monitoring/alerting/SLOs for a pre-production system.
+- Adding API contract tests, supertest harnesses, frontend tests, E2E tests, performance baselines, or composition tests.
+- Introducing a new service layer when existing primitives fit.
+- Multi-region / HA / circuit breakers / rate limiting on pre-production endpoints.
+
+Focus on mechanical tightness: contradictions, missing contracts, ambiguous names, drift between prose and tables.
+ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.1-codex' model is not supported when using Codex with a ChatGPT account."}}
+ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.1-codex' model is not supported when using Codex with a ChatGPT account."}}
