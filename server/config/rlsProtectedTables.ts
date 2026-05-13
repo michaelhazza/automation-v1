@@ -1299,6 +1299,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0330_external_source_triggers.sql',
     rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
   },
+  // 0345 — IEE Browser on e2b: browser session profile volumes (dual-GUC org + subaccount)
+  {
+    tableName: 'iee_browser_session_profiles',
+    schemaFile: 'ieeBrowserSessionProfiles.ts',
+    policyMigration: '0345_create_iee_browser_session_profiles.sql',
+    rationale: 'Per-subaccount browser profile volume pointers keyed by session_key — volume ids are opaque but cross-tenant leak exposes browser session topology and profile state.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
