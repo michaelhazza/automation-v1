@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-13
-**Last updated:** 2026-05-13
+**Last updated:** 2026-05-14
 **Author:** main session (Opus)
 **Build slug:** skill-merge-consolidation-pass
 
@@ -50,7 +50,7 @@ Three design choices, pinned:
 
 1. **Conditional, not unconditional.** Only fires when validator emits `SCOPE_EXPANSION` or `SCOPE_EXPANSION_CRITICAL`. Happy-path merges (output already within budget) pay no extra LLM cost. Trigger band is configurable.
 2. **Separate LLM call, not a stronger single-call prompt.** Asking one prompt to simultaneously "preserve every unique fact" and "be terse" is a known LLM weak spot — the existing soft 30% cap in the merge prompt demonstrates it. Splitting into two passes lets each prompt have a single dominant objective: pass 1 = correctness, pass 2 = concision.
-3. **One attempt, no escalation.** If consolidation fails (timeout, parse failure, post-consolidation validation still bloated), keep the consolidated output if it parsed (likely an improvement even if imperfect) or fall back to the original merge. Emit an informational warning. Never block the row.
+3. **One attempt, no escalation.** Consolidation `fails` only on timeout, parse failure, LLM error, or a newly-introduced hard-constraint violation (`HITL_LOST`, `INVOCATION_LOST`, `REQUIRED_FIELD_DEMOTED`, or `CAPABILITY_OVERLAP`) — in those cases revert to the original merge. A parsed output that is shorter than the pre-consolidation draft but still over the target ceiling is `succeeded`, not `failed`; the row keeps the smaller draft and retains its scope-expansion warning. Emit an informational warning either way. Never block the row.
 
 The reviewer continues to see the existing three-column diff view (Current / Incoming / Recommended), but the Recommended column shows the **consolidated** output. A new informational banner exposes the consolidation outcome with the size delta so the reviewer can audit what changed; the pre-consolidation draft remains stored for debug.
 
@@ -79,7 +79,10 @@ The consolidation prompt receives:
 - **RICHER SOURCE WORD COUNT:** the larger of base and non-base source instruction word counts — used as the target ceiling.
 - **MERGED WORD COUNT:** current word count of the draft.
 - **TARGET CEILING:** the richer source word count × (1 + `scopeExpansionStandardThreshold`). The pass aims to land at or below this ceiling.
-- **PRESERVATION INVENTORY:** machine-extracted lists from the draft — every backtick-wrapped tool/skill reference, every HITL gate phrase match, the invocation trigger block. The prompt instructs the LLM that these must appear verbatim in the consolidated output.
+- **PRESERVATION INVENTORY:** machine-extracted lists from the draft, tiered for safety.
+  - **Tier 1 (hard, verbatim-required):** every backtick-wrapped tool/skill reference, every HITL gate phrase match, the invocation trigger block. Loss of any Tier 1 item in the consolidated output triggers `CONSOLIDATION_FAILED` and reverts to the pre-consolidation draft.
+  - **Tier 2 (best-effort):** known tool/action names from the skill `definition` and `instructions` where they match registered tool/action identifiers in the system (e.g. unbackticked references like `Gmail search_emails`, `create_event`, `send_email`), plus HITL/approval/confirmation gate phrases that match a deterministic phrase set (`requires human approval`, `confirm before`, `do not send without`, etc.). Tier 2 matches are informational — loss is recorded in `consolidationNote` but does NOT by itself trigger `CONSOLIDATION_FAILED`; revert occurs only when `validateMergeOutput()` or a deterministic checker can prove capability loss (e.g. `HITL_LOST`, `INVOCATION_LOST`).
+  - The prompt instructs the LLM that Tier 1 items must appear verbatim in the consolidated output, and Tier 2 items should be preserved unless the LLM can replace them with an equivalent reference.
 
 ### 4.2 Consolidation prompt instructions (key constraints)
 
@@ -99,7 +102,16 @@ The consolidation prompt receives:
 }
 ```
 
-`ProposedMerge` shape: `{ name, description, definition, instructions, mergeRationale }` per `skillAnalyzerServicePure.ts:378–390`. Consolidation **must not change** `name`, `description`, `definition`, `mergeRationale` — only `instructions`. A consolidation response that mutates the non-instructions fields is rejected at parse time and treated as `declinedToConsolidate=true`.
+`ProposedMerge` shape: `{ name, description, definition, instructions, mergeRationale }` per `skillAnalyzerServicePure.ts:378–390`. Consolidation **must not change** `name`, `description`, `definition`, `mergeRationale` — only `instructions`.
+
+Parser rejection rules — a response failing any of the following is rejected at parse time and treated as `declinedToConsolidate=true` with `declineReason='parse_rejected: <rule>'`:
+
+- The response mutates any of `name`, `description`, `definition`, or `mergeRationale`.
+- `instructions` is not a string.
+- `instructions` is empty or whitespace-only.
+- `consolidationNote` is missing, not a string, or empty/whitespace-only.
+- `declinedToConsolidate` is not a boolean.
+- `declinedToConsolidate=true` but `declineReason` is null, empty, or whitespace-only.
 
 ### 4.4 New `MergeWarning` codes
 
@@ -134,13 +146,15 @@ Sequencing inside one result slot:
 3. Existing `validateMergeOutput()` call (line 1217).
 4. **NEW: consolidation gate.** If config has `consolidationEnabled=true` AND warnings include `SCOPE_EXPANSION` or `SCOPE_EXPANSION_CRITICAL` (subject to `consolidationTriggerSeverity` filter), capture pre-consolidation merge then run `routeCall` with consolidation prompt.
 5. **NEW: consolidation parse + apply.** On success, replace `storedMerge` with consolidated output. On parse fail or `declinedToConsolidate`, keep draft.
-6. **NEW: re-validate.** Re-run `validateMergeOutput()` on the final merge. If consolidation succeeded but introduced a hard-constraint violation (`HITL_LOST`, `INVOCATION_LOST`, `REQUIRED_FIELD_DEMOTED`, or `CAPABILITY_OVERLAP` newly emitted by consolidation), revert to pre-consolidation merge and emit `CONSOLIDATION_FAILED` with the violating code.
+6. **NEW: re-validate.** Re-run `validateMergeOutput()` on the final merge. If consolidation succeeded but introduced a hard-constraint violation (`HITL_LOST`, `INVOCATION_LOST`, `REQUIRED_FIELD_DEMOTED`, or `CAPABILITY_OVERLAP` newly emitted by consolidation), revert to pre-consolidation merge and emit `CONSOLIDATION_FAILED` with the violating code. **Warning-set replacement rule:** the final stored `mergeWarnings` MUST correspond to the final stored `proposedMergedContent`. When consolidation is reverted, discard the post-consolidation validation warnings, recompute (or restore) warnings against the pre-consolidation draft, then append `CONSOLIDATION_FAILED`. The reviewer never sees warnings for a draft they are not reviewing.
 7. Existing confidence adjustment.
 8. `insertSingleResult()` with the new fields.
 
+**Outcome classification rule (`succeeded` vs `failed`).** The parsed consolidation output is `succeeded` when it is shorter than the pre-consolidation draft AND passes hard-preservation validation — even if `validateMergeOutput()` still emits `SCOPE_EXPANSION` or `SCOPE_EXPANSION_CRITICAL` because the output is below the pre-consolidation word count but still above the target ceiling. In that case the final warning set retains the applicable scope-expansion warning and appends `CONSOLIDATION_APPLIED`. The outcome is `failed` (and reverts to the pre-consolidation draft) only on parse failure, LLM timeout/error, or a newly-introduced hard-constraint violation. "Still bloated" is NOT a failure when the rest of the row is intact — the reviewer is genuinely seeing a smaller draft and the UI banner copy must reflect that.
+
 This stays within the existing limiter slot so concurrency is unchanged (max 3 in-flight LLM calls across merge + consolidation combined). A consolidation call counts as one slot just like its merge.
 
-Idempotency: on pg-boss retry the existing per-result skip (`skillAnalyzerJob.ts` already skips slugs that have rows in `skill_analyzer_results`) covers consolidation as well — if the row exists, consolidation is not re-run. `consolidationOutcome != null` is the in-band marker that consolidation has been decided for this row.
+Idempotency: job-time idempotency is provided by the existing per-slug skip in `skillAnalyzerJob.ts` — slugs that already have rows in `skill_analyzer_results` are not re-classified, so consolidation is never re-attempted on retry. `consolidationOutcome` is an audit field, NOT the idempotency guard. For rows written after migration `0346`, orchestration MUST always write one of `not_triggered | succeeded | declined | failed` (never NULL) — even when the consolidation gate does not fire, the orchestration writes `not_triggered`. Legacy rows (written before this migration) may be NULL; the UI treats NULL as display-equivalent to `not_triggered`, but legacy NULL rows MUST NOT be interpreted as eligible for re-consolidation.
 
 ## 6. Config surface
 
@@ -153,6 +167,8 @@ Two new columns on `skill_analyzer_config`:
 
 Both propagate through `job.configSnapshot` per the `v2 §11.11.4` invariant (`skillAnalyzerJob.ts:96`).
 
+**`consolidation_trigger_severity` invariant.** Trigger severity is evaluated against the raw validator warning codes (`SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`), NOT against the operator-tunable `warningTierMap`. `'warning'` means trigger consolidation on either scope code; `'critical'` means trigger only on `SCOPE_EXPANSION_CRITICAL`. Changing `warningTierMap` MUST NOT change which warnings fire consolidation — this prevents an unexpected LLM-spend change when an operator re-tunes UI warning tiers. The two configs are independent: `warningTierMap` controls UI banner tiering and reviewer resolution flow; `consolidation_trigger_severity` controls LLM spend.
+
 `warningTierMap` defaults are extended with the three new codes mapped to `informational`. Operators may override via the existing PATCH /config endpoint.
 
 The three new warning codes are added to `DEFAULT_WARNING_TIER_MAP` (`skillAnalyzerServicePure.ts:431`), the `MergeWarningCode` union (`skillAnalyzerServicePure.ts:392`), and the `RESOLUTIONS_FOR_CODE` map (`skillAnalyzerServicePure.ts:547`) — all three are informational and need no reviewer resolution actions.
@@ -162,7 +178,7 @@ The three new warning codes are added to `DEFAULT_WARNING_TIER_MAP` (`skillAnaly
 One additive change in `client/src/components/skill-analyzer/MergeReviewBlock.tsx`:
 
 - New collapsible banner above the three-column diff, visible only when `result.consolidationOutcome` is one of `succeeded | declined | failed`.
-- `succeeded`: green banner, copy "AI tightened this merge from {preWords} to {postWords} words ({reductionPct}% shorter) without losing capability." Includes a "View pre-consolidation draft" disclosure that reveals the raw `preConsolidationMerge` instructions in a read-only collapsible.
+- `succeeded`: green banner, copy "AI tightened this merge from {preWords} to {postWords} words ({reductionPct}% shorter) without losing capability." Below the size-delta line the banner shows the LLM's `consolidationNote` (2–4 sentences summarising what was trimmed and what was kept) so the reviewer can audit the change at a glance. Includes a "View pre-consolidation draft" disclosure that reveals the raw `preConsolidationMerge` instructions in a read-only collapsible.
 - `declined`: amber banner, copy "AI reviewed this merge for tightening and judged it cannot be shortened without losing capability." Shows `declineReason`.
 - `failed`: amber banner, copy "Tightening pass did not complete; reviewer is seeing the original merge." Shows failure reason.
 
@@ -208,13 +224,14 @@ Dependency graph: Chunk 1 strictly before Chunks 2 and 3; Chunk 2 strictly befor
 
 ## 10. Execution-safety contracts
 
-- **Idempotency posture: state-based.** Re-running consolidation on a result row is guarded by `consolidationOutcome IS NOT NULL` — if set, skip. On pg-boss retry of a partially-completed Stage 5, the same row is not re-classified anyway (existing skip in the job), so consolidation is implicitly guarded by the same row presence.
+- **Idempotency posture: row-presence-based.** Re-running consolidation on a result row is guarded by the existing per-slug skip in `skillAnalyzerJob.ts` (slugs already in `skill_analyzer_results` are not re-classified). `consolidationOutcome` is an audit field, NOT a state machine that gates retries. Post-migration rows always carry one of the four enum values; legacy NULL rows are never eligible for re-consolidation.
 - **Retry classification: safe.** The consolidation LLM call has no side effect outside the in-memory `storedMerge`. If it throws, the orchestration catches, marks `consolidationOutcome='failed'`, and continues. No DB row exists yet at consolidation time.
 - **Concurrency guard: none required.** Consolidation runs inside the per-result `p-limit(3)` slot before any DB write. Two workers cannot race because pg-boss assigns one worker per job.
 - **Terminal event guarantee: unchanged.** The existing job's terminal state (`status='completed' | 'failed'`) and per-result `insertSingleResult` write remain the single terminal write per slug. Consolidation only modifies the payload of that write.
 - **No-silent-partial-success.** If consolidation fails after the merge succeeded, the result still ships (with `consolidationOutcome='failed'` and a `CONSOLIDATION_FAILED` warning) — the merge alone is a valid outcome. There is no `partial` state because consolidation is not a deliverable, only a post-process polish.
 - **HTTP status mapping: n/a.** No new unique constraints. PATCH endpoints unchanged.
-- **State machine closure.** `consolidationOutcome` is a closed enum: `not_triggered | succeeded | declined | failed`. Adding values requires a spec amendment. Migration writes `NULL` for legacy rows; the UI treats `NULL` identically to `not_triggered`.
+- **State machine closure.** `consolidationOutcome` is a closed enum: `not_triggered | succeeded | declined | failed`. Adding values requires a spec amendment. Migration `0346` writes `NULL` for legacy rows only; orchestration for post-migration rows MUST write one of the four enum values, never NULL. The UI treats legacy `NULL` identically to `not_triggered`, but builders MUST NOT treat NULL as "consolidation not yet decided".
+- **No-consolidation guarantee for non-merging classifications.** `DUPLICATE` and `DISTINCT` classifications produce no merge, so the consolidation gate MUST NOT fire and MUST NOT call `routeCall` with `featureTag: 'skill-analyzer-consolidate'`. These rows write `consolidationOutcome='not_triggered'` (per the §5 idempotency contract — never NULL for post-migration rows). Acceptance: a job containing only DUPLICATE/DISTINCT results spends zero consolidation LLM tokens.
 
 ## 11. Testing posture
 
