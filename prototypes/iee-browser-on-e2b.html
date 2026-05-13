@@ -303,7 +303,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: 
           <button class="tab-btn" onclick="switchTab(event)">Categories</button>
           <button class="tab-btn" onclick="switchTab(event)">Tags</button>
           <button class="tab-btn" onclick="switchTab(event)">Board Config</button>
-          <!-- Operator tab (admin-only; org_admin / subaccount_admin / system_admin) -->
+          <!-- Operator tab (v5 permissions: visible to org_admin / manager or org_manager (read-only) / subaccount_admin / system_admin; editable by org_admin / subaccount_admin / system_admin) -->
           <button class="tab-btn active" onclick="switchTab(event)">
             Operator
             <span class="admin-only-pill">Admin</span>
