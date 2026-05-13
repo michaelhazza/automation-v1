@@ -1,13 +1,13 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-13-memory-improvements-spec.md
-active_plan: tasks/builds/memory-improvements/plan.md
-build_slug: memory-improvements
-branch: claude/add-memvid-integration-ehAOr
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-13
-last_merge_ready_pr: none
-last_merge_ready_slug: none
-last_merge_ready_branch: none
+last_merge_ready_pr: #298
+last_merge_ready_slug: memory-improvements
+last_merge_ready_branch: claude/add-memvid-integration-ehAOr
 last_merged_pr: #294
 last_merged_slug: fleet-and-codebase-health
 last_merged_branch: codebase-health
@@ -25,11 +25,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** [`docs/superpowers/specs/2026-05-13-memory-improvements-spec.md`](../docs/superpowers/specs/2026-05-13-memory-improvements-spec.md) (Status: accepted, locked 2026-05-13)
-**Active plan:** `tasks/builds/memory-improvements/plan.md` (pending — feature-coordinator writes this in Phase 2)
-**Active build slug:** `memory-improvements`
-**Branch:** `claude/add-memvid-integration-ehAOr`
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-13. All 11 chunks implemented in `a1e87d75`; 3 fix-loop rounds closed all Blocking findings; dual-reviewer APPROVED at `cc8e03c7`. Phase 2 review pass: spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer non-blocking advisory, pr-reviewer APPROVED (final), reality-checker NEEDS_DISCUSSION → operator chose backfill (4 divergences closed). Doc-sync gate: all 15 registered docs verdict-recorded; architecture.md + KNOWLEDGE.md stale `writeVersionSourceLinks` references corrected to `writeLineageRowsForVersion` in same Phase 2 close commit. ~13 non-blocking items deferred to finalisation `chatgpt-pr-review`; 6 env-gated operational items deferred to pre-enablement. **Next:** open a new Claude Code session and type `launch finalisation`.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-13T09:55:58Z for PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) (`memory-improvements`, branch `claude/add-memvid-integration-ehAOr`). All 5 Phase 2 reviewers ran (no REVIEW_GAP); chatgpt-pr-review ran 2 rounds, 11 findings all auto-applied (R1: 4 blockers + 4 tightenings, R2: 1 blocker + 2 tightenings); doc-sync sweep clean across all 15 registered docs. 6 env-gated operational items deferred to pre-enablement (AKR ranker flag). ready-to-merge label applied — awaiting CI green for auto-merge.
 
 **Last merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
 

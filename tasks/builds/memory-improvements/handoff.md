@@ -279,3 +279,96 @@ launch finalisation
 - Apply `ready-to-merge` label (CI runs)
 
 This session ends at Phase 2 close.
+
+---
+
+## Phase 3 (FINALISATION) — complete 2026-05-13T09:55:58Z
+
+**PR number:** #298 — https://github.com/michaelhazza/automation-v1/pull/298
+**Branch HEAD at finalisation:** `35c5abe3 chore(chatgpt-pr-review): PR #298 Round 2 — apply F1 + T1 + T2`
+
+### S2 sync (Step 2)
+
+- Absorbed PR #296 (close deferred personal-assistant-v1 items) + PR #295 (docs/guidelines: codify recurring ChatGPT review findings) + CI snapshot regen.
+- Migration renumber: `0343_memory_utility_30d` → `0345_memory_utility_30d` to avoid collision with main's `0343_ea_home_widget_spec_align`. All live references updated (architecture.md, schema/index.ts, services, migrations/0334 header, build artefacts, tasks/todo.md).
+- Conflicts: KNOWLEDGE.md (resolved by concatenating both sides' new entries — append-only union). architecture.md + tasks/todo.md auto-merged cleanly.
+- Migration renumber commit: `e65035f8`. Merge commit: `a728eef2`.
+
+### G4 regression guard (Step 3)
+
+PASS on first attempt — lint 0 errors, typecheck clean on both client + server tsconfigs.
+
+### chatgpt-pr-review (Step 5)
+
+**Log:** `tasks/review-logs/chatgpt-pr-review-memory-improvements-2026-05-13T09-15-49Z.md`
+**Rounds:** 2
+**Findings:** 11 total (R1: 4 blockers + 4 tightenings; R2: 1 blocker + 2 tightenings)
+**Triage:** 11 technical / 0 user-facing
+**Auto-applied:** 11 / 11
+
+**Round 1 (commit `42596d98`)** — addressed:
+- F1 (BLOCKER): semantic ranker over-filters legacy retrieval when flag off → skip category filter when `queryEmbedding === null`.
+- F2 (BLOCKER): single-category fallback disabled thresholding for all → per-category fallback flags (`chunksFallbackApplied` / `blocksFallbackApplied`).
+- F3 (BLOCKER): empty Memory Utility route falls back to app clock → independent `transaction_timestamp()` query.
+- F4 (BLOCKER): reverse-lineage over-counted (DISTINCT block_version_id, included current block) → `COUNT(DISTINCT memory_block_id)` joined to `memory_block_versions`, excludes current.
+- T1: missing `isNull(memoryBlocks.deletedAt)` on block existence check.
+- T2: `writeLineageRowsForVersion` counted attempted (now `.returning()`-based).
+- T3: architecture/KNOWLEDGE doc drift on lineage column names corrected.
+- T4: task embedding reverted to description-only per spec §10 (was title+description Phase-2 drift).
+
+**Round 2 (commit `35c5abe3`)** — addressed:
+- F1 (BLOCKER): live daily-series JSONB malformed-array guard missing → `Array.isArray()` normalisation in `memoryUtilityQueryService` + predicate switch in `memoryUtilityDailySeriesPure` to mirror MV's `jsonb_typeof = 'array'`.
+- T1: runtime cosine inline → refactored to route through tested `scoreCandidates()` helper.
+- T2: architecture.md "task title + description" → "task description only" matching R1 T4 code revert.
+
+### Doc-sync sweep (Step 6)
+
+**Investigation procedure ran per `docs/doc-sync.md` for all 15 registered docs.** Cross-checked against Phase 2 doc-sync gate verdicts; updated in this Phase 3 pass:
+
+| Doc | Verdict |
+|---|---|
+| architecture.md | yes (Semantic ranker description corrected R2 T2; `writeVersionSourceLinks` → `writeLineageRowsForVersion` corrected in Phase 2 close; new memory-* service rows added to Key files per domain table) |
+| docs/capabilities.md | yes (Memory Injection Utility section at line 856-870 — added in Phase 2 close) |
+| docs/integration-reference.md | n/a — no integration behaviour change |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | n/a — no agent fleet / review pipeline / locked-rules change |
+| CONTRIBUTING.md | n/a — no lint-suppression policy change |
+| docs/frontend-design-principles.md | n/a — UI tabs follow existing conventions |
+| KNOWLEDGE.md | yes (4 memory-improvements pattern entries added in Phase 2 close; no further R1/R2 patterns surfaced) |
+| docs/spec-context.md | n/a — feature pipeline, not spec-review |
+| docs/decisions/ | n/a — no new ADR; spec is the durable artefact |
+| docs/context-packs/ | n/a — no section-anchor changes |
+| references/test-gate-policy.md | n/a — no test-gate posture change |
+| references/spec-review-directional-signals.md | n/a |
+| docs/incident-response.md | n/a |
+| docs/testing-transition-plan.md | n/a |
+| .claude/FRAMEWORK_VERSION | n/a — repo-specific change |
+
+No missing verdicts. No deferred doc-sync gaps.
+
+### KNOWLEDGE.md entries added (Step 7)
+
+4 entries added in Phase 2 close:
+- Semantic ranker recall fallback (per-category)
+- Memory-block lineage idempotency contract
+- 403-before-query for MV-backed routes
+- Synthesis FK ordering (memory_block_versions before memory_block_version_sources)
+
+No further patterns surfaced during R1/R2 — findings were all bug-fixes for known patterns rather than new patterns to capture.
+
+### tasks/todo.md cleanup (Step 8)
+
+REQs #20, #38, #41, #64 — all closed by R2 backfill + R1/R2 follow-ups. Removed from spec-conformance deferred section, replaced with a closure record.
+REQ #67 — partially addressed (B2 entry added; A and D intentionally not catalogued).
+REQ #68 — explicit deferral retained as won't-do/follow-up.
+
+### REVIEW_GAP entries
+
+None. All required reviewers ran on functional Codex CLI.
+
+### Spec deviations reviewed
+
+None recorded.
+
+### ready-to-merge label applied at
+
+2026-05-13T09:55:58Z
