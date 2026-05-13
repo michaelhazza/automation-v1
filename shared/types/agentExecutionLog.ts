@@ -127,7 +127,11 @@ export type AgentExecutionEventType =
   | 'delivery_fallback'
   | 'credential.owner_mismatch'
   | 'webhook.invalid_signature'
-  | 'action.conflict';
+  | 'action.conflict'
+  | 'file.created'
+  | 'file.modified'
+  | 'cross_owner_substep.awaiting_initiator_decision'
+  | 'cross_owner_substep.completed';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -452,6 +456,10 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'credential.owner_mismatch': false,
   'webhook.invalid_signature': false,
   'action.conflict': false,
+  'file.created': false,
+  'file.modified': false,
+  'cross_owner_substep.awaiting_initiator_decision': true,
+  'cross_owner_substep.completed': true,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

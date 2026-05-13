@@ -45,6 +45,8 @@ export interface CapabilityMap {
   write_capabilities: string[];
   skills: string[];
   primitives: string[];
+  /** Set when this capability map belongs to a user-owned agent (V2, spec §5.1). */
+  owner_user_id?: string;
 }
 
 /**
@@ -71,6 +73,7 @@ export function computeCapabilityMapPure(
   skillSlugs: string[],
   snapshot: IntegrationReferenceSnapshot,
   options: { scheduleEnabled: boolean; heartbeatEnabled: boolean } = { scheduleEnabled: false, heartbeatEnabled: false },
+  agentRow?: { owner_user_id?: string | null },
 ): CapabilityMap {
   const integrations = new Set<string>();
   const reads = new Set<string>();
@@ -102,7 +105,7 @@ export function computeCapabilityMapPure(
     for (const p of integration.primitives_required) primitives.add(p);
   }
 
-  return {
+  const result: CapabilityMap = {
     computedAt: new Date().toISOString(),
     referenceLastUpdated: snapshot.schema_meta.last_updated || undefined,
     integrations: Array.from(integrations).sort(),
@@ -111,6 +114,12 @@ export function computeCapabilityMapPure(
     skills: Array.from(skills).sort(),
     primitives: Array.from(primitives).sort(),
   };
+
+  if (agentRow?.owner_user_id != null) {
+    result.owner_user_id = agentRow.owner_user_id;
+  }
+
+  return result;
 }
 
 /**
@@ -209,4 +218,47 @@ export async function listAgentCapabilityMaps(
     agentName: r.agentName,
     capabilityMap: r.capabilityMap,
   }));
+}
+
+/**
+ * Recompute and persist the capability map for a single subaccount_agent row,
+ * including the owning agent's owner_user_id in the output (spec §6.4 invariant).
+ *
+ * Run this in the same Drizzle transaction as any agents.owner_user_id update to
+ * keep the capability_map.owner_user_id field in sync.
+ */
+export async function recomputeCapabilityMapWithOwner(subaccountAgentId: string): Promise<CapabilityMap | null> {
+  const [row] = await db
+    .select({
+      id: subaccountAgents.id,
+      skillSlugs: subaccountAgents.skillSlugs,
+      allowedSkillSlugs: subaccountAgents.allowedSkillSlugs,
+      scheduleEnabled: subaccountAgents.scheduleEnabled,
+      heartbeatEnabled: subaccountAgents.heartbeatEnabled,
+      ownerUserId: agents.ownerUserId,
+    })
+    .from(subaccountAgents)
+    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+    .where(eq(subaccountAgents.id, subaccountAgentId));
+
+  if (!row) return null;
+
+  const base = Array.isArray(row.skillSlugs) ? row.skillSlugs : [];
+  const allowed = Array.isArray(row.allowedSkillSlugs) ? row.allowedSkillSlugs : null;
+  const effective = allowed ? base.filter((slug) => allowed.includes(slug)) : base;
+
+  const snapshot = await loadIntegrationReference();
+  const map = computeCapabilityMapPure(
+    effective,
+    snapshot,
+    { scheduleEnabled: row.scheduleEnabled, heartbeatEnabled: row.heartbeatEnabled },
+    { owner_user_id: row.ownerUserId },
+  );
+
+  await db
+    .update(subaccountAgents)
+    .set({ capabilityMap: map, updatedAt: new Date() })
+    .where(eq(subaccountAgents.id, subaccountAgentId));
+
+  return map;
 }
