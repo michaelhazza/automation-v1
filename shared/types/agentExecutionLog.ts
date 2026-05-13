@@ -11,12 +11,6 @@ import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.
 
 import type { RetrievalResult } from './retrieval.js';
 import type { ObservationType } from './agentObservations.js';
-import type {
-  FileCreatedPayload,
-  FileModifiedPayload,
-  CrossOwnerSubstepAwaitingPayload,
-  CrossOwnerSubstepCompletedPayload,
-} from './operatorEvents.js';
 
 /**
  * Typed-observation payload embedded in run-step terminal events (spec §847).
@@ -44,7 +38,8 @@ export type AgentExecutionSourceService =
   | 'orchestratorFromTaskJob'
   | 'requestClarification'
   | 'correctionCaptureService'
-  | 'retrievalService';
+  | 'retrievalService'
+  | 'workflowGateStallNotifyJob';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy
@@ -406,10 +401,53 @@ export type AgentExecutionEventPayload =
       runId: string;
       error: string;
     }
-  | (FileCreatedPayload & { critical: false })
-  | (FileModifiedPayload & { critical: false })
-  | (CrossOwnerSubstepAwaitingPayload & { critical: true })
-  | (CrossOwnerSubstepCompletedPayload & { critical: true });
+  | {
+      /** Spec §9.4 — file created inside an operator sandbox run. */
+      eventType: 'file.created';
+      critical: false;
+      agentRunId: string;
+      path: string;
+      version: 1;
+      mimeType: string;
+      sizeBytes: number;
+      contentSha256: string;
+      storageKey: string;
+      emittedBy: 'tool_call' | 'watcher';
+      ownerUserId: string | null;
+    }
+  | {
+      /** Spec §9.4 — file modified inside an operator sandbox run. */
+      eventType: 'file.modified';
+      critical: false;
+      agentRunId: string;
+      path: string;
+      /** Always > 1. */
+      version: number;
+      mimeType: string;
+      sizeBytes: number;
+      contentSha256: string;
+      storageKey: string;
+      emittedBy: 'tool_call' | 'watcher';
+      ownerUserId: string | null;
+    }
+  | {
+      /** Spec §7.4 — cross-owner approval timed out; initiator must decide. */
+      eventType: 'cross_owner_substep.awaiting_initiator_decision';
+      critical: true;
+      parent_run_id: string;
+      substep_id: string;
+      initiatorUserId: string;
+      reason: 'cross_owner_approval_timeout';
+    }
+  | {
+      /** Spec §7.4 — cross-owner delegation sub-step reached terminal state. */
+      eventType: 'cross_owner_substep.completed';
+      critical: true;
+      parent_run_id: string;
+      substep_id: string;
+      status: 'success' | 'partial' | 'failed';
+      reason?: string;
+    };
 
 // ---------------------------------------------------------------------------
 // Critical-event registry — single source of truth for the retry tier

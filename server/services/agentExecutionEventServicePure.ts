@@ -127,6 +127,7 @@ const SOURCE_SERVICES: ReadonlyArray<AgentExecutionSourceService> = [
   'orchestratorFromTaskJob',
   'requestClarification',
   'retrievalService',
+  'workflowGateStallNotifyJob',
 ];
 
 export function isValidSourceService(value: unknown): value is AgentExecutionSourceService {
@@ -457,6 +458,58 @@ export function validateEventPayload(
     case 'foundation.execution_environment.rejected':
       if (!isStr(p.runId) || !isStr(p.error)) {
         return { ok: false, reason: 'foundation.execution_environment.rejected_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'file.created':
+      if (
+        !isStr(p.agentRunId) ||
+        !isStr(p.path) ||
+        p.version !== 1 ||
+        !isStr(p.mimeType) ||
+        !isNonNegInt(p.sizeBytes) ||
+        !isStr(p.contentSha256) ||
+        !isStr(p.storageKey) ||
+        !isStr(p.emittedBy)
+      ) {
+        return { ok: false, reason: 'file.created_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'file.modified':
+      if (
+        !isStr(p.agentRunId) ||
+        !isStr(p.path) ||
+        !isInt(p.version) ||
+        (p.version as number) <= 1 ||
+        !isStr(p.mimeType) ||
+        !isNonNegInt(p.sizeBytes) ||
+        !isStr(p.contentSha256) ||
+        !isStr(p.storageKey) ||
+        !isStr(p.emittedBy)
+      ) {
+        return { ok: false, reason: 'file.modified_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'cross_owner_substep.awaiting_initiator_decision':
+      if (
+        !isStr(p.parent_run_id) ||
+        !isStr(p.substep_id) ||
+        !isStr(p.initiatorUserId) ||
+        !isStr(p.reason)
+      ) {
+        return { ok: false, reason: 'cross_owner_substep.awaiting_initiator_decision_missing_fields' };
+      }
+      return { ok: true };
+
+    case 'cross_owner_substep.completed':
+      if (
+        !isStr(p.parent_run_id) ||
+        !isStr(p.substep_id) ||
+        !['success', 'partial', 'failed'].includes(p.status as string)
+      ) {
+        return { ok: false, reason: 'cross_owner_substep.completed_missing_fields' };
       }
       return { ok: true };
 
