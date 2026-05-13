@@ -27,7 +27,6 @@ This spec is organised into ten parts. Each part is self-contained enough that i
 | 7 | Dev execution handler (workspace, git, shell) | 5 |
 | 8 | Tracing, logging, failure classification | 4–7 |
 | 9 | AgentExecutionService routing, action registry integration | 2, 3 |
-| 10 | Verification, MVP acceptance, rollout to DigitalOcean | all |
 
 ---
 
@@ -48,7 +47,7 @@ This spec is organised into ten parts. Each part is self-contained enough that i
 |---|---|---|
 | Main app | Docker Compose (`app` service) | Replit |
 | Postgres + pg-boss | Docker Compose (`postgres` service) | Neon (managed) |
-| IEE worker | Docker Compose (`worker` service) | DigitalOcean VPS (Docker) |
+| IEE worker | Docker Compose (`worker` service) | e2b sandboxes |
 
 The main app and worker share **no filesystem** and make **no direct HTTP calls**. They communicate exclusively via pg-boss jobs and shared Postgres tables.
 
@@ -57,7 +56,7 @@ The main app and worker share **no filesystem** and make **no direct HTTP calls*
 ```
 ┌─────────────────────────┐              ┌─────────────────────────┐
 │ AgentExecutionService   │              │       IEE Worker        │
-│ (main app on Replit)    │              │ (DigitalOcean VPS)      │
+│ (main app on Replit)    │              │ (e2b sandboxes)         │
 ├─────────────────────────┤              ├─────────────────────────┤
 │ routeCall()             │              │ createWorker({          │
 │   → detects IEE route   │              │   queue: 'iee-browser'  │
@@ -572,7 +571,7 @@ ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]
 ```
 
-> Build-time trace of `llmRouter.ts` transitive imports is a build chore called out in Part 10.2. If copying individual files becomes unwieldy, we fall back to a monorepo-style build that compiles the entire `server/` tree and tree-shakes the router.
+> Build-time trace of `llmRouter.ts` transitive imports is a build chore to address before production deployment. If copying individual files becomes unwieldy, we fall back to a monorepo-style build that compiles the entire `server/` tree and tree-shakes the router.
 
 ### 4.7 `.dockerignore`
 
@@ -1090,93 +1089,6 @@ The `enqueueIEETask` service:
 | `server/lib/tracing.ts` | Add new SPAN_NAMES / EVENT_NAMES |
 | `migrations/NNNN_iee_execution_tables.sql` | NEW (Drizzle-generated) |
 
----
-
-## Part 10 — Verification, MVP Acceptance & DigitalOcean Rollout
-
-### 10.1 Verification commands
-
-Per `CLAUDE.md` verification table:
-
-| Trigger | Command | Where |
-|---|---|---|
-| Any TS change in worker | `cd worker && npm run typecheck` | worker/ |
-| Any TS change in server | `npm run typecheck` | repo root |
-| Schema change | `npm run db:generate` then review the migration file | repo root |
-| Any code change | `npm run lint` | repo root |
-| Logic change in server/ | `npm test` (or specific suite) | repo root |
-| Worker logic change | `cd worker && npm test` (vitest, added in v1) | worker/ |
-| Compose changes | `docker compose config` (validate) then `docker compose up --build` | repo root |
-
-### 10.2 Build chore: tracing router imports for the worker
-
-Before the worker Dockerfile copy list is finalised, run:
-
-```bash
-npx madge --extensions ts server/services/llmRouter.ts --json > /tmp/router-deps.json
-```
-
-The output is the exact set of files the worker must include in its build context. This is captured as a script `worker/scripts/trace-router-deps.mjs` that runs as part of `npm run build` and fails the build if a new transitive dependency appears outside an allowlist (so the Dockerfile copy list is kept honest).
-
-### 10.3 Smoke tests (first run)
-
-After `docker compose up --build -d`:
-
-1. **Postgres health** — `docker compose exec postgres pg_isready` returns OK.
-2. **Worker startup** — `docker compose logs worker | grep iee.worker.started` produces a single JSON line including `pollIntervalMs` and `concurrency`.
-3. **Schema present** — `docker compose exec postgres psql -U postgres -d automation_os -c '\d execution_runs'` shows the table.
-4. **End-to-end browser** — manual enqueue (via a small script `worker/scripts/enqueue-test-browser.mjs`) of a `goal: "open https://example.com and extract the page title"`. Expect: `execution_runs.status = 'completed'`, `resultSummary.success = true`, at least 2 steps written.
-5. **End-to-end dev** — manual enqueue of a `goal: "git_clone <public repo>; read README.md; done"`. Expect: workspace created, cloned, file read, workspace destroyed after.
-6. **Idempotency** — re-enqueue the same payload twice. Expect: only one row inserted, second call returns `deduplicated: true`.
-7. **Crash survival** — `docker compose kill worker` mid-run. `docker compose start worker`. The job is redelivered by pg-boss; the worker either resumes (if `pending`) or aborts cleanly (if previous attempt set `running`). No corruption.
-
-### 10.4 MVP acceptance checklist (mirrors brief §16)
-
-- [ ] Browser job navigates and extracts data, writes structured result
-- [ ] Dev job clones, modifies, runs a command, writes result
-- [ ] correlationId propagation visible in tracing for every execution
-- [ ] organisationId scoping enforced at the database (verified by a deliberate cross-tenant test that must fail)
-- [ ] idempotencyKey uniqueness enforced at the index level (verified by a duplicate-insert test)
-- [ ] Worker survives crash + restart (verified per 10.3 §7)
-- [ ] `docker compose up` brings all three services online cleanly
-- [ ] Same code base, only `DATABASE_URL` and path vars changed, runs against external Postgres
-
-### 10.5 DigitalOcean VPS rollout
-
-Once local acceptance passes:
-
-1. **Provision VPS** — Ubuntu 22.04 LTS, minimum 4 GB RAM (Playwright is hungry), 2 vCPU, 40 GB SSD.
-2. **Install Docker + Compose** — official `get-docker.sh` install. Add user to `docker` group. Verify `docker compose version` ≥ v2.
-3. **Create Neon project** — copy the connection string with `?sslmode=require`. Run the app's `db:push` once from a developer machine to apply migrations against Neon.
-4. **Deploy worker** — `git clone` the repo onto the VPS into `/opt/automation-os`. Create `/opt/automation-os/.env` with **only** the worker variables (the VPS does not run the app). Required:
-   ```
-   DATABASE_URL=postgresql://...neon...?sslmode=require
-   BROWSER_SESSION_DIR=/var/browser-sessions
-   WORKSPACE_BASE_DIR=/var/workspaces
-   MAX_STEPS_PER_EXECUTION=25
-   MAX_EXECUTION_TIME_MS=300000
-   MAX_COMMAND_TIME_MS=30000
-   MAX_RETRIES=3
-   WORKER_POLL_INTERVAL_MS=1000
-   IEE_BROWSER_CONCURRENCY=1
-   IEE_DEV_CONCURRENCY=2
-   ```
-5. **Compose file for VPS** — a slimmed `docker-compose.vps.yml` that defines **only** the `worker` service (no `app`, no `postgres`). Same `worker_sessions` named volume. `restart: unless-stopped`.
-6. **Boot** — `docker compose -f docker-compose.vps.yml up -d --build`. Tail `docker compose logs worker -f`.
-7. **Configure Replit** — set the same `DATABASE_URL` in Replit Secrets, point at the Neon connection. Replit's app enqueues; the VPS worker consumes. No Replit-side code changes.
-8. **Firewall** — VPS only needs **outbound** HTTPS (LLM providers, target sites, GitHub clones) and **outbound** Postgres (Neon). No inbound ports. Confirm `ufw` blocks all inbound.
-9. **Backups** — Neon handles Postgres snapshots. The VPS has no stateful data except the `worker_sessions` volume; back this up via a nightly `tar.gz` to S3 or DO Spaces if browser-session loss is unacceptable.
-10. **Monitoring** — log shipping is out of scope for v1; `docker compose logs --since 1h worker` is the v1 incident-response tool. Add a structured log shipper (e.g. Vector → Loki) in v2.
-
-### 10.6 Rollback plan
-
-If the IEE worker introduces issues in production:
-1. `docker compose -f docker-compose.vps.yml down` on the VPS — worker stops consuming, jobs queue up in pg-boss safely.
-2. Set a feature flag in the app (`IEE_ENABLED=false`) — `agentExecutionService` falls back to ignoring `executionMode='browser'|'dev'` and surfaces a clear "IEE disabled" error.
-3. The new tables are additive — no rollback migration needed. Dropping them is safe but unnecessary.
-
----
-
 ## Appendix A — Open questions for review
 
 1. **Async-tool resume hook** (Part 9.1): Does `agentExecutionService` already have a mechanism to resume an agent run from an external job-completion event? If yes, name and reuse it. If no, build the `executionRunCompletionWatcher` fallback.
@@ -1229,7 +1141,7 @@ A cached `executionRuns.llmCostUsd` is **denormalised** at run completion so lis
 
 ### 11.3 Runtime cost (new)
 
-The worker's CPU/RAM time is real money on the DigitalOcean VPS. We attribute it per run.
+The worker's CPU/RAM time is real money on e2b sandboxes. We attribute it per run.
 
 #### 11.3.1 What we measure
 

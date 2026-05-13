@@ -108,6 +108,12 @@ When you hit a stuck-detection condition (per CLAUDE.md §1), append a Blocker s
 
 ---
 
+## Calendar
+
+- [ ] [2026-06-12] Complete tasks/builds/iee-browser-on-e2b/cost-report-month-1.md from observed production traffic.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`
