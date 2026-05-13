@@ -125,3 +125,77 @@ The spec is strong and close, but the warm-pool persistence gap, launch-approval
 
 All 4 high-severity blockers (F1, F3, F4, F5) addressed. 6 medium and 2 low improvements applied. Spec is build-ready unless round 2 surfaces new gaps.
 
+### Round 2 — 2026-05-13T08:00:00Z
+
+**Verdict:** NEEDS_MINOR_TIGHTENING (improvement from CHANGES_REQUESTED → significant progress)
+**Findings:** 7 (2 medium, 5 low — no highs)
+**Sections amended:** §5 ("only genuinely new pieces" list), §7.1 (llmRequests EXTEND), §7.2 (migration 0345 + new 0347), §7.8 (docs disposition decided), §7.11 (totals updated), §8.4 (admin route body), §10 (heading), §10.3 (partial unique index), §15 (CI acceptance test), §18 (round 2 reconciliation), frontmatter
+
+#### ChatGPT Feedback (raw)
+
+```
+A few small things still worth tightening. The round-1 blockers are mostly fixed, and I'd move this from CHANGES_REQUESTED to NEEDS_MINOR_TIGHTENING, not a hard block.
+
+Schema/table count heading still says "two new tables"
+Severity: low / Category: style
+Brief explanation: §10 still says "Schema details (the two new tables)", but the spec now has three new tables after adding browser_warm_sessions. The inventory totals correctly say 3 new tables, so this is just a stale heading.
+
+"Only genuinely new pieces" list is stale
+Severity: low / Category: style
+Brief explanation: §5 still says the only new pieces are the template, warm-pool service, two sibling tables, defaults module, and llm_requests.subtype. It now omits browser_warm_sessions, the rollout route, shared type extensions, and CI gate.
+
+llm_requests(warm_session_id) index assumes a column not listed in the schema extension
+Severity: medium / Category: bug
+Brief explanation: The updated inventory says there is a unique partial index on llm_requests(warm_session_id) WHERE subtype = 'warm_pool', but the listed llmRequests.ts extension only mentions subtype text. Add warm_session_id uuid nullable to the schema extension and migration 0345, or move the uniqueness/idempotency key somewhere else. This is the main remaining implementation-readiness issue.
+
+Rollout approval route says ETag-style conflict but no expected version is in the contract
+Severity: medium / Category: improvement
+Brief explanation: §13.1 says rollout approval uses an ETag-style settings_version predicate and loser gets HTTP 409, but §8.4 route body only includes { approved: boolean }. Either add expectedSettingsVersion / If-Match, or remove the 409 claim and make the route last-write-wins with audit.
+
+Warm-pool refill "one row at a time" needs the enforcement mechanism
+Severity: low / Category: improvement
+Brief explanation: The warm-pool contract says refill is triggered "one row at a time per subaccount," but the browser_warm_sessions schema does not define a partial unique guard for status='available', nor an advisory lock, nor a single-flight job key. Add one mechanism so two refill triggers do not create two available warm sessions for the same subaccount.
+
+Profile mount serialization still relies on a referenced external invariant
+Severity: low / Category: architecture
+Brief explanation: The spec now correctly stops pretending the profile row UPDATE serializes mounts, and instead relies on Spec B's per-volume single-mount invariant. That's acceptable, but because this is load-bearing, the plan should include a named acceptance check that verifies the e2b provider enforces this before profile reuse ships.
+
+Docs disposition still appears as open in §7.8
+Severity: low / Category: style
+Brief explanation: §17 says the Part 10 disposition is decided: split into docs/iee-on-e2b-rollout.md. §7.8 still says "Rewrite… or split… Disposition decided by operator." Update §7.8 to the decided split path so there's no stale forward reference.
+
+Overall verdict: NEEDS_MINOR_TIGHTENING
+The only one I'd definitely fix before handoff is #3, because it is a real schema/index mismatch. #4 is also worth cleaning because ETag semantics tend to rot quickly if the route contract is vague. The rest are polish/self-consistency fixes.
+```
+
+#### Recommendations and Decisions
+
+| ID | Title | Severity | Triage | My recommendation | Final decision |
+|---|---|---|---|---|---|
+| R2-F1 | §10 heading says "two new tables" | low | technical | apply | auto (apply) |
+| R2-F2 | §5 "only new pieces" list stale | low | technical | apply | auto (apply) |
+| R2-F3 | `llm_requests(warm_session_id)` index assumes missing column | medium | technical | apply | auto (apply) |
+| R2-F4 | Rollout route ETag claim but no `expectedSettingsVersion` in body | medium | technical | apply | auto (apply) |
+| R2-F5 | Warm-pool refill lacks DB-level enforcement | low | technical | apply | auto (apply) |
+| R2-F6 | Profile-mount serialization needs named acceptance check | low | technical | apply | auto (apply) |
+| R2-F7 | §7.8 docs disposition stale (still "or split") | low | technical | apply | auto (apply) |
+
+**User approval input:** none required (no high/critical severity findings; all auto-applied per agent rules §3a). Operator reviewed the triage table and confirmed proceed.
+
+#### Actions taken in spec
+
+- R2-F1: §10 heading "the two new tables" → "three new tables — R2-F1 corrected".
+- R2-F2: §5 "only genuinely new pieces" list expanded to 10 items (a-j): template, warm-pool service, 3 sibling tables, defaults module, 2 column-extensions on llm_requests, admin route, 2 shared-type extensions, CI gate.
+- R2-F3: §7.1 llmRequests.ts EXTEND now lists `subtype` + `warmSessionId` (FK to browser_warm_sessions). New migration 0347 added for the FK + partial unique index (split from 0345 to honour migration ordering — 0346 must create the FK target first).
+- R2-F4: §8.4 admin route body gains `expectedSettingsVersion: number`. ETag-style WHERE predicate spelled out; 0 rows → HTTP 409 made consistent with §13.1.
+- R2-F5: §10.3 schema adds partial UNIQUE INDEX `browser_warm_sessions(subaccount_id) WHERE status='available'` — DB-level enforcement of "size 1 per enabled subaccount". Two refill triggers cannot both create an `'available'` row for the same subaccount.
+- R2-F6: §15 adds a named CI acceptance test (`ieeBrowserProfileManager.serialization.test.ts`) that issues two concurrent runTask calls against the same profile volume and asserts provider-layer serialization. Chunk 5 plan-gate: profile manager doesn't ship until this test passes against the e2b provider.
+- R2-F7: §7.8 docs row for `iee-development-spec.md` Part 10 changed from "rewrite-or-split (operator decision)" to "DECIDED — split". New row added for `docs/iee-on-e2b-rollout.md`.
+- §7.11 inventory totals refreshed: column extensions 1 → 2 (warm_session_id added), migration pairs 4 → 5 (0347 added), indexes/CHECKs enumerated.
+- §18 self-consistency pass extended with round 2 reconciliation block.
+- Frontmatter status updated: "rounds 1 + 2 complete — 19 findings applied".
+
+#### Build-readiness verdict after round 2
+
+ChatGPT verdict NEEDS_MINOR_TIGHTENING → all 7 findings tightened. R2-F3 (the only one ChatGPT flagged as "definitely fix before handoff") closed by adding the warm_session_id column + migration 0347. R2-F4 also closed. Spec is build-ready; no remaining mechanical or directional gaps surfaced.
+

@@ -1,4 +1,4 @@
-**Status:** accepted (operator-approved 2026-05-13; chatgpt-spec-review round 1 complete — 12 findings applied)
+**Status:** accepted (operator-approved 2026-05-13; chatgpt-spec-review rounds 1 + 2 complete — 19 findings applied; ChatGPT verdict NEEDS_MINOR_TIGHTENING → tightened)
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
 **Author:** Claude Opus 4.7 (spec-coordinator inline session)
@@ -117,7 +117,19 @@ Quoted from brief §4 (LOCKED v7 — 10 items). The spec author MUST honour thes
 | Three-layer RLS | `withOrgTx`, `getOrgScopedDb`, dual-GUC pattern | `server/middleware/orgScoping.ts`, `server/instrumentation.ts` |
 | RLS manifest | `RLS_PROTECTED_TABLES` | `server/config/rlsProtectedTables.ts` |
 
-The only genuinely new pieces in this spec: (a) the IEE-browser sandbox template under `infra/sandbox-templates/iee-browser/`; (b) the warm-pool service; (c) the new sibling table `iee_browser_session_profiles`; (d) the new sibling table `subaccount_iee_browser_settings`; (e) the operator-backend defaults module; (f) the column-level addition `llm_requests.subtype`. Every other change is an extension of an existing primitive.
+The genuinely new pieces in this spec (updated after round 2 — R2-F2):
+(a) IEE-browser sandbox template under `infra/sandbox-templates/iee-browser/`;
+(b) warm-pool service `browserWarmPool`;
+(c) new sibling table `iee_browser_session_profiles` (one per `(org, subaccount, session_key)`);
+(d) new sibling table `subaccount_iee_browser_settings` (one per subaccount);
+(e) new sibling table `browser_warm_sessions` (one per warm session, audit trail);
+(f) operator-backend defaults module `operatorSettingsDefaults`;
+(g) column-level additions on `llm_requests`: `subtype` (task/warm_pool discriminator) + `warm_session_id` (FK to `browser_warm_sessions`, enables idle-cost-row idempotency);
+(h) admin rollout route `POST /api/admin/iee-browser/rollout-approval/:subaccountId`;
+(i) shared-type extensions on `shared/iee/failureReason.ts` (2 new enum values) and `shared/types/sandbox.ts` (browser fields on `SandboxRunTaskInput`);
+(j) new CI gate `scripts/gates/verify-no-do-references.sh`.
+
+Every other change is an extension of an existing primitive.
 
 ## 6. Phase plan
 
@@ -153,7 +165,7 @@ Dependency graph: 1 → 2 → 3 → (4, 5 in parallel) → (6, 7 in parallel) �
 | `server/db/schema/ieeBrowserSessionProfiles.ts` | NEW | Sibling to `operator_task_profiles`; keyed by `(organisation_id, subaccount_id, session_key)`. Details §10.1. |
 | `server/db/schema/subaccountIeeBrowserSettings.ts` | NEW | Sibling to `subaccount_operator_settings`; PK `subaccount_id`. Details §10.2. |
 | `server/db/schema/browserWarmSessions.ts` | NEW | Per-subaccount warm-pool session rows. Lifecycle `available → leased → terminated`. Details §10.3. (Added round 1 — F1.) |
-| `server/db/schema/llmRequests.ts` | EXTEND | New column `subtype text` (nullable; values `'task' \| 'warm_pool'` when `source_type='sandbox_compute'`; null otherwise). |
+| `server/db/schema/llmRequests.ts` | EXTEND | Two new columns (R2-F3): (1) `subtype text` nullable — values `'task' \| 'warm_pool'` when `source_type='sandbox_compute'`; null otherwise. (2) `warmSessionId uuid('warm_session_id')` nullable, references `browser_warm_sessions(id) ON DELETE SET NULL` — non-null only when `subtype='warm_pool'`. Enables the unique-partial-index F7 idempotency mechanism. |
 | `server/db/schema/index.ts` | EXTEND | Export new tables. |
 | `server/config/rlsProtectedTables.ts` | EXTEND | Add `iee_browser_session_profiles` + `subaccount_iee_browser_settings` + `browser_warm_sessions`. |
 | `shared/iee/failureReason.ts` | EXTEND | Add 2 new enum values: `iee_browser_launch_disabled` (§8.4) and `profile_harvest_failed` (§13.5). (Added round 1 — F4.) |
@@ -165,8 +177,9 @@ Dependency graph: 1 → 2 → 3 → (4, 5 in parallel) → (6, 7 in parallel) �
 |---|---|
 | `migrations/0343_create_iee_browser_session_profiles.sql` + `.down.sql` | Create table + indexes + RLS policy (dual-GUC). |
 | `migrations/0344_create_subaccount_iee_browser_settings.sql` + `.down.sql` | Create table + RLS policy (dual-GUC). MUST default `status` column to `'off'` (§3.5 brief v7 invariant — no mass enable on backfill). |
-| `migrations/0345_llm_requests_add_subtype.sql` + `.down.sql` | `ALTER TABLE llm_requests ADD COLUMN subtype text` (nullable) + CHECK constraint **tightened (F6)**: `CHECK ((source_type = 'sandbox_compute' AND subtype IN ('task', 'warm_pool')) OR (source_type <> 'sandbox_compute' AND subtype IS NULL))`. Rejects null subtype on sandbox-compute rows AND rejects unknown subtype values. |
-| `migrations/0346_create_browser_warm_sessions.sql` + `.down.sql` | Create table + indexes + RLS policy (dual-GUC). Details §10.3. (Added round 1 — F1.) |
+| `migrations/0345_llm_requests_add_subtype.sql` + `.down.sql` | `ALTER TABLE llm_requests ADD COLUMN subtype text` (nullable) + `ADD COLUMN warm_session_id uuid REFERENCES browser_warm_sessions(id) ON DELETE SET NULL` (R2-F3 — nullable, but enforced non-null when subtype='warm_pool' via CHECK below) + CHECK constraint **tightened (F6 + R2-F3)**: `CHECK ((source_type = 'sandbox_compute' AND subtype IN ('task', 'warm_pool')) OR (source_type <> 'sandbox_compute' AND subtype IS NULL))` AND `CHECK ((subtype = 'warm_pool' AND warm_session_id IS NOT NULL) OR (subtype <> 'warm_pool' AND warm_session_id IS NULL))`. Plus the unique partial index `CREATE UNIQUE INDEX llm_requests_warm_session_id_unique_idx ON llm_requests(warm_session_id) WHERE subtype = 'warm_pool'`. **Migration ordering:** 0345 depends on 0346 (FK target must exist before column add); migration runner applies in numeric order, so the spec adjusts ordering by making the FK reference deferrable, OR (preferred) the FK is added in a separate follow-up migration AFTER 0346. Phase 2 architect picks the cleanest path; default: split into `0345_llm_requests_add_subtype.sql` (subtype + check + warm_session_id NULL column) and a follow-up `0347_llm_requests_warm_session_id_fk.sql` that adds the FK + partial unique index after 0346 creates the target table. |
+| `migrations/0346_create_browser_warm_sessions.sql` + `.down.sql` | Create table + indexes + RLS policy (dual-GUC). Details §10.3. (Added round 1 — F1.) Includes the partial UNIQUE index `(subaccount_id) WHERE status='available'` enforcing the V1 "size 1 per enabled subaccount" invariant at the DB layer (R2-F5). |
+| `migrations/0347_llm_requests_warm_session_id_fk.sql` + `.down.sql` | Adds the FK `llm_requests.warm_session_id REFERENCES browser_warm_sessions(id) ON DELETE SET NULL` + the unique partial index `llm_requests(warm_session_id) WHERE subtype='warm_pool'`. Split from 0345 to honour migration ordering (target table must exist first). (R2-F3.) |
 
 ### 7.3 Sandbox template
 
@@ -227,7 +240,8 @@ Dependency graph: 1 → 2 → 3 → (4, 5 in parallel) → (6, 7 in parallel) �
 | File | Action |
 |---|---|
 | `architecture.md` | Update sandbox-substrate references; remove DigitalOcean from deployment-context tables; add IEE-browser sandbox class to sandbox-classification table. |
-| `docs/iee-development-spec.md` Part 10 | Rewrite to describe e2b rollout (or split into a new `docs/iee-on-e2b-rollout.md` and delete legacy Part 10). Disposition decided by operator — open question §17. |
+| `docs/iee-development-spec.md` Part 10 | **DECIDED (operator 2026-05-13 — R2-F7):** SPLIT into new `docs/iee-on-e2b-rollout.md` describing e2b rollout; legacy Part 10 DELETED in the same chunk. Cleaner separation than rewriting in place. |
+| `docs/iee-on-e2b-rollout.md` | NEW | Created in chunk 15 (doc-sync sweep). Describes the e2b first-launch criteria, dogfood gate, rollout-approval mechanic, alarm thresholds, and the post-launch cost-report cadence. Successor to the deleted Part 10. |
 | `tasks/windows-iee-setup-guide.md` | Production-target paragraph rewritten to "production runs on e2b"; dev-setup steps preserved. |
 | `docs/synthetos-governed-agentic-os-brief-v1.2.md` | Substrate references checked, updated. |
 | `tasks/strategic-recommendations.md` | DigitalOcean cost lines deleted or marked superseded. |
@@ -255,11 +269,11 @@ Dependency graph: 1 → 2 → 3 → (4, 5 in parallel) → (6, 7 in parallel) �
 
 ### 7.11 Inventory totals (numeric-count reconciliation per `docs/spec-authoring-checklist.md` §8)
 
-Updated after round 1 chatgpt-spec-review (12 findings applied):
+Updated after rounds 1 + 2 chatgpt-spec-review (12 + 7 findings applied):
 
 - **3 new tables** (`iee_browser_session_profiles`, `subaccount_iee_browser_settings`, `browser_warm_sessions`)
-- **1 schema column extension** (`llm_requests.subtype`) + 1 unique partial index (`llm_requests(warm_session_id) WHERE subtype = 'warm_pool'`)
-- **4 new migration pairs** (0343, 0344, 0345, 0346)
+- **2 schema column extensions on `llm_requests`** (`subtype` + `warm_session_id`) + 2 partial-unique indexes (`llm_requests(warm_session_id) WHERE subtype='warm_pool'`; `browser_warm_sessions(subaccount_id) WHERE status='available'`) + 2 column-level CHECK constraints (subtype enum gate; warm_session_id-vs-subtype consistency)
+- **5 new migration pairs** (0343, 0344, 0345, 0346, 0347)
 - **2 shared-type extensions** (`shared/iee/failureReason.ts`, `shared/types/sandbox.ts`)
 - **1 new sandbox template** (`infra/sandbox-templates/iee-browser/`)
 - **3 new server services** (`browserWarmPool`, `ieeBrowserProfileManager`, `operatorSettingsDefaults`)
@@ -269,8 +283,9 @@ Updated after round 1 chatgpt-spec-review (12 findings applied):
 - **1 new client API client** (`ieeBrowserSettingsApi.ts` or extension to `operatorBackendApi.ts`)
 - **2 new HTTP route files** (`subaccountIeeBrowserSettings.ts` for subaccount settings GET/PATCH; `adminIeeBrowserRollout.ts` for system-admin rollout flip)
 - **1 new CI gate script** (`scripts/gates/verify-no-do-references.sh`)
-- **5 doc files updated** (`architecture.md`, `iee-development-spec.md`, `windows-iee-setup-guide.md`, `synthetos-governed-agentic-os-brief-v1.2.md`, `strategic-recommendations.md`)
+- **5 doc files updated + 1 new doc** (`architecture.md`, `iee-development-spec.md` — Part 10 deleted, `windows-iee-setup-guide.md`, `synthetos-governed-agentic-os-brief-v1.2.md`, `strategic-recommendations.md`; plus NEW `docs/iee-on-e2b-rollout.md` per R2-F7 split decision)
 - **1 placeholder file + 1 calendar-dated todo entry**
+- **1 named CI integration acceptance test** (`server/services/sandbox/__tests__/ieeBrowserProfileManager.serialization.test.ts` — R2-F6 plan-gate for Spec B per-volume single-mount)
 
 ## 8. Contracts
 
@@ -355,13 +370,24 @@ Concrete example:
 
 The dispatch path checks `status === 'on'` AND `rolloutApproved === true` BEFORE calling `SandboxExecutionService.runTask`. If either is false, dispatch returns a typed `LaunchDisabled` failure (extends `FailureError`, new `FailureReason` value `iee_browser_launch_disabled`). The parent run records the failure and does NOT enqueue the task. In-flight tasks already running on e2b are unaffected — the check is at dispatch time, not at every harness step.
 
-**`rolloutApproved` mutation path (F3 — auditable, in-scope):** flipped via `POST /api/admin/iee-browser/rollout-approval/:subaccountId` (`server/routes/adminIeeBrowserRollout.ts`, §7.7). System-admin-only (`requireRole('system_admin')`). The route does three things atomically inside `withOrgTx`:
+**`rolloutApproved` mutation path (F3 — auditable, in-scope):** flipped via `POST /api/admin/iee-browser/rollout-approval/:subaccountId` (`server/routes/adminIeeBrowserRollout.ts`, §7.7). System-admin-only (`requireRole('system_admin')`).
 
-1. UPDATE `subaccount_iee_browser_settings SET rollout_approved = $approved, settings_version = settings_version + 1, updated_at = now(), updated_by_user_id = $actor WHERE subaccount_id = $subaccountId`. Lazy-creates the row if absent (defaulting all other fields).
+**Request body (R2-F4 — ETag self-consistency):**
+
+```jsonc
+{
+  "approved": true,                         // or false to rollback
+  "expectedSettingsVersion": 1              // ETag — caller's last-seen settings_version
+}
+```
+
+The route does three things atomically inside `withOrgTx`:
+
+1. UPDATE `subaccount_iee_browser_settings SET rollout_approved = $approved, settings_version = settings_version + 1, updated_at = now(), updated_by_user_id = $actor WHERE subaccount_id = $subaccountId AND settings_version = $expectedSettingsVersion`. **0 rows → HTTP 409** (ETag conflict; another admin flipped state concurrently); caller re-reads and retries. Lazy-creates the row if absent **only when** `expectedSettingsVersion = 0` (sentinel for "I have not seen this row before") — protects against a stale-version overwrite.
 2. Emit an audit-log row (existing audit schema): `{ action: 'iee_browser.rollout_approval_set', actor_user_id: $actor, organisation_id: <resolved>, subaccount_id: $subaccountId, prior_value: <bool>, new_value: $approved, timestamp: now() }`.
-3. Return 200 with the updated settings row.
+3. Return 200 with the updated settings row (including the new `settings_version`).
 
-Rollback: same route with `approved: false`. No UI surface in V1 — admins call the route directly (curl / internal admin tool). The route is the authoritative mutation point; no other code path writes `rollout_approved`. Audit trail satisfies the F3 visibility requirement.
+Rollback: same route with `approved: false`. No UI surface in V1 — admins call the route directly (curl / internal admin tool). The route is the authoritative mutation point; no other code path writes `rollout_approved`. Audit trail satisfies the F3 visibility requirement; ETag predicate satisfies the R2-F4 concurrency-contract self-consistency.
 
 ### 8.5 Warm-session check-out contract
 
@@ -448,7 +474,7 @@ const canEditOperatorSettings =
 
 The route-level guard on the PATCH endpoint enforces the same role gate. Subaccount admin edits settings for their own subaccount only — RLS continues to scope data access to the user's accessible subaccounts; this predicate is only the page-level gate.
 
-## 10. Schema details (the two new tables)
+## 10. Schema details (three new tables — R2-F1 corrected)
 
 ### 10.1 `iee_browser_session_profiles`
 
@@ -539,6 +565,12 @@ export const browserWarmSessions = pgTable(
   (table) => ({
     subaccountStatusIdx: index('browser_warm_sessions_subaccount_status_idx').on(table.subaccountId, table.status),  // checkout query
     availableAgeIdx: index('browser_warm_sessions_available_age_idx').on(table.createdAt).where(sql`status = 'available'`),  // eviction sweep
+    // R2-F5: DB-level enforcement of "size 1 per enabled subaccount" invariant.
+    // Two concurrent refill triggers cannot both create an 'available' warm session
+    // for the same subaccount; the second INSERT fails with 23505 and the refill
+    // handler treats that as "another worker already refilled" — no error surface.
+    subaccountAvailableUniqueIdx: uniqueIndex('browser_warm_sessions_subaccount_available_unique_idx')
+      .on(table.subaccountId).where(sql`status = 'available'`),
   }),
 );
 ```
@@ -662,6 +694,7 @@ Per `docs/spec-context.md`:
 - **CI:** the existing sandbox provider resolver test suite extends to cover the `'browser'` class — same matrix as `'code_execution'`. Profile-volume tests (volume creation, mount, multi-task reuse, isolation between different keys, corruption recovery, GC of inactive profiles, size-cap enforcement). Warm-pool tests (check-out under contention, fall-through to cold start on starvation, eviction at age, cost-attribution discriminator). Launch-flag / rollback tests (routing primitive blocks or allows dispatches per subaccount flag state; in-flight tasks unaffected; no shadow tests).
 - **End-to-end browser-task regression:** a small suite of real browser flows (navigate, login, extract, download) runs against e2b in CI. Reuses the existing IEE browser fixtures where possible.
 - **NO shadow-disagreement detection.** Quoted from brief §3.8 F2 (v7 fix): "no DO traffic exists to shadow against."
+- **Profile-mount serialization acceptance check (R2-F6 — named gate):** a CI integration test (lives at `server/services/sandbox/__tests__/ieeBrowserProfileManager.serialization.test.ts`, runs in CI only) issues two concurrent `runTask` calls against the same `(org, subaccount, session_key)` profile volume. Asserts: (a) both calls eventually complete with status `'completed'`; (b) the second call's start time is at least N ms after the first call's release time (proving provider-layer blocking); (c) per-volume mount events are emitted in strictly serialised order. This is the named acceptance gate for the Spec B per-volume single-mount invariant relied on by §13.3. **Plan-gate:** chunk 5 (profile manager) does NOT ship until this CI test passes against the e2b provider implementation.
 
 Framing-deviation flag: NONE. The test plan obeys `static_gates_primary` + `pure_function_only` for local; integration suites are CI-only per `references/test-gate-policy.md`.
 
@@ -698,6 +731,7 @@ Remaining items are Phase 2 lookups, not design questions:
 - **Numeric-count reconciliation** (per `docs/spec-authoring-checklist.md` §8, updated after round 1): inventory totals in §7.11 reconcile with §7.1 (3 new schema files + 2 shared-type extensions), §7.2 (4 migration pairs), §7.5 (6 worker files deleted), §7.6 (3 client files edited), §7.7 (2 new HTTP route files), §7.8 (5 docs updated), §7.9b (1 new CI gate). §10 names 3 schemas (10.1, 10.2, 10.3); §13.7 names 3 state machines (`iee_browser_session_profiles.status`, `browser_warm_sessions.status`, `subaccount_iee_browser_settings.status`). No mismatch.
 - **Load-bearing claims with named mechanisms:** "no cross-tenant mount" → mount-authorisation predicate (§9 invariant 1). "Idempotent" → posture table (§13.1). "Source of truth" → precedence statements (§8.2, §8.3, §8.6). "Single-mount-at-a-time" → Spec B per-volume sandbox-isolation invariant (§13.3 F5 correction; explicitly NOT the row UPDATE). "Auditable rollout-approval mutation" → admin route + audit-log row (§8.4 F3). "Idempotent alarm emission" → keys per event (§8.7 F9).
 - **Round 1 chatgpt-spec-review reconciliation:** all 12 findings applied per operator approval 2026-05-13. Session log: `tasks/review-logs/chatgpt-spec-review-iee-browser-on-e2b-2026-05-13T07-00-00Z.md`.
+- **Round 2 chatgpt-spec-review reconciliation:** all 7 findings auto-applied (technical, no high-severity escalation; verdict moved CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → tightened). Stale `§10` heading corrected; §5 "only new pieces" list updated; `llm_requests.warm_session_id` column + migration 0347 added (R2-F3 schema/index reconciliation); admin rollout route gains `expectedSettingsVersion` ETag field (R2-F4); partial-unique index on `browser_warm_sessions(subaccount_id) WHERE status='available'` (R2-F5); named CI acceptance test for profile-mount serialization (R2-F6); §7.8 docs disposition resolved (split, R2-F7).
 
 ## 19. References
 
