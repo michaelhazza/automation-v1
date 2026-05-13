@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
-last_updated: 2026-05-13T23:25:46Z
-last_merge_ready_pr: #297
-last_merge_ready_slug: iee-browser-on-e2b
-last_merge_ready_branch: claude/migrate-browser-e2b-snI99
-last_merged_pr: #288
-last_merged_slug: operator-backend
-last_merged_branch: claude/sandbox-execution-provider-DLfjn
-last_merged_at: 2026-05-13T00:22:37Z
-last_merged_commit: 83fd8347
+status: NONE
+last_updated: 2026-05-14T00:00:00Z
+last_merged_pr: #297
+last_merged_slug: iee-browser-on-e2b
+last_merged_branch: claude/migrate-browser-e2b-snI99
+last_merged_at: 2026-05-14T00:00:00Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -25,9 +22,9 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Status:** **MERGE_READY** — PR [#297](https://github.com/michaelhazza/2026-05-13/pull/297) (`iee-browser-on-e2b` on `claude/migrate-browser-e2b-snI99`). chatgpt-pr-review APPROVED after 4 rounds (R1: 9 fixes, R2: 10 fixes, R3: 6 fixes, R4: 3 cleanups). Doc-sync sweep complete. KNOWLEDGE.md updated (4 patterns). 9 deferred items queued as IEE-DEF-1..9 in `tasks/todo.md`. ready-to-merge label applied 2026-05-13T23:25:46Z. CI monitoring + auto-merge in progress.
+**Status:** **NONE** — no active build. Spec-coordinator entry available for the next brief.
 
-Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md` (Phase 3 section appended).
+**Just merged:** PR #297 — `iee-browser-on-e2b` (squash-commit `pending-squash`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
 
 **Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
 
