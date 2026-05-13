@@ -1,4 +1,4 @@
-**Status:** DRAFT v4 (2026-05-13) — awaiting operator ratification before spec authoring
+**Status:** DRAFT v5 (2026-05-13) — awaiting operator ratification before spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `iee-browser-on-e2b`
@@ -42,7 +42,29 @@ v4 changes:
 - **`tasks/todo.md` triage entry removed.** OB-SIMPLIFY-1/2/3 no longer exist; their work is part of this build.
 - **Net UI surface after this build ships:** the Operator settings tab carries **3 operator-backend fields** (Soft session cap, Concurrent operator sessions, Per-task budget cap) + **4 IEE-browser fields** (Status, Browser profile retention, Per-task cost ceiling, Per-subaccount daily cost ceiling) = 7 fields total, down from today's 6 + (in round 2) 4 = 10.
 
-Permissions on these fields are uniform with the existing tab: org admin or system admin can edit; manager can view read-only. See `OperatorSettingsTab.tsx` and `AdminSubaccountDetailPage.tsx` for the existing `canEditOperatorSettings` + `canSeeOperatorTab` predicates.
+Permissions on these fields are uniform with the existing tab — see the v5 reframe below for the role-visibility expansion landing in this build.
+
+## v5 reframe (operator-tab visibility opens to subaccount admin)
+
+During round 2 review the operator flagged that the existing Operator settings tab is gated to org admin / system admin only (`AdminSubaccountDetailPage.tsx:44-47`), excluding subaccount admins entirely. The original Spec D §3.14 gate was `org_admin / manager / system_admin` for view and `org_admin / system_admin` for edit. The `subaccount_admin` role can't see this tab today, even though it's scoped to a single subaccount they presumably administer.
+
+**Operator rationale (verbatim):** "Option 2 fits the 'subaccounts should be self-containable' principle you raised earlier and removes the cross-role dependency for routine config. It's also a small permission delta — one role added to the predicate. But it's a real expansion of scope for this build, so I want your call." — operator decision, 2026-05-13: go with option 2.
+
+v5 changes:
+- **`canSeeOperatorTab` predicate gains `subaccount_admin`.** New predicate: `mode === 'admin' && (role === 'org_admin' || role === 'manager' || role === 'subaccount_admin' || role === 'system_admin')`. Subaccount admin can now see the tab for their own subaccount.
+- **`canEditOperatorSettings` predicate gains `subaccount_admin`.** New predicate: `role === 'org_admin' || role === 'subaccount_admin' || role === 'system_admin'`. Subaccount admin can edit settings for their own subaccount. Org admin / system admin retain override across all subaccounts. RLS continues to scope data access to the user's accessible subaccounts; this predicate is only the page-level gate.
+- **Section-level "Org admin" pill removed from the IEE-browser section.** Round 1/2 placed an `admin-only-pill` on the IEE-browser section header, which created the false implication that the IEE-browser fields had stricter permissions than the rest of the tab. With v5 permissions uniform across the tab, the section-level pill is dropped. No replacement indicator — the route-level gate already enforces visibility; users who lack access never see the tab.
+- **Naming-inconsistency note (not blocking).** The existing predicate uses literal `'manager'` while `shared/types/assignableUsers.ts` lists the canonical role as `org_manager`. Spec author confirms which spelling is wire-truthful and routes the other to triage if a cleanup is needed; not in scope for this build's UI delta.
+
+Permissions table after this build:
+
+| Role | View tab | Edit any field |
+|---|---|---|
+| `system_admin` | yes (any subaccount) | yes (any subaccount) |
+| `org_admin` | yes (any subaccount in their org) | yes |
+| `manager` / `org_manager` | yes (read-only) | no |
+| `subaccount_admin` | **yes (their own subaccount only)** | **yes (their own subaccount only)** |
+| `subaccount_member` | no | no |
 
 # IEE Browser on e2b — Build Brief
 
