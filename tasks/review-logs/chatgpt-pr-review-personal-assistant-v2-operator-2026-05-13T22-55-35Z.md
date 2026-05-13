@@ -100,3 +100,79 @@ edit:    tasks/review-logs/spec-conformance-log-personal-assistant-v2-operator-c
 ### Round-2 diff prep
 
 After commit, regenerate `.chatgpt-diffs/pr299-round2-code-diff.diff` for the operator to paste into ChatGPT for Round 2.
+
+## Round 2 — 2026-05-14T09:13Z
+
+### ChatGPT Verdict
+CHANGES_REQUESTED — 3 new blockers (F6–F8) + 2 should-fix (T3–T4).
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| F6 | blocker | technical | projection fail-open on `undefined` owner lookup | IMPLEMENT — distinguish `undefined` from `null`; fail closed | applied |
+| F7 | blocker | technical | substep_status_updated_at write-side invariant not enforced centrally | IMPLEMENT — DB trigger auto-bumps on substep_status change | applied |
+| F8 | blocker | technical | event durability: action-insert-success + event-append-fail loses event | IMPLEMENT — independent emit-audit column; sweep retries | applied |
+| T3 | should-fix | technical | runTracePure docstring stale vs implementation | IMPLEMENT — updated docstring + caller contract for `undefined` | applied |
+| T4 | should-fix | technical | template placeholder vs runtime logic | IMPLEMENT (partial) — added prominent README warning + import-prevention note | applied |
+
+### Decisions log
+
+**F6 — Projection fail-open on undefined owner lookup**
+- Triaged technical (privacy boundary).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - `server/routes/agentRuns.ts:751` — `getRunOwnerUserId` result captured into `ownerLookup`; `=== undefined` branch returns 404 `RUN_NOT_FOUND` and the projection only runs against valid `null | string`.
+  - `server/routes/taskEventStream.ts:104` — `=== undefined` branch returns an empty events page with the existing cursor high-water marks preserved (same pattern as fully-redacted non-owner pages, so the client can advance past the missing window without re-polling).
+  - `server/services/runTracePure.ts` docstring — updated to lock the three-state contract: callers MUST handle `undefined` at the route layer and never pass it to the projection.
+- Rationale: `getRunOwnerUserId` returns three states (`string | null | undefined`). Collapsing `undefined` → `null` via `?? null` made every failed-or-cross-org owner lookup fall into the `ownerUserId === null` "subaccount-owned, return all events" branch of the projection — a fail-open on a privacy boundary.
+
+**F7 — substep_status_updated_at not centrally enforced**
+- Triaged technical (correctness invariant).
+- Recommendation: IMPLEMENT.
+- Fix: new migration `0350_delegation_outcomes_substep_status_trigger.sql` adds a `BEFORE UPDATE` trigger gated on `NEW.substep_status IS DISTINCT FROM OLD.substep_status` that auto-bumps `substep_status_updated_at`. The trigger is the DB-layer guarantee — future writers cannot transition `substep_status` without the timestamp moving. No-op race-claim UPDATEs (where `substep_status` is set to its own current value) do NOT trigger the bump, preserving the existing ask_initiator semantics.
+- Rationale: documenting an invariant in a migration comment is not enforcement. A trigger guarantees the invariant on every transition, including future writers we don't know about yet. The three existing direct `.set({ substepStatus, substepStatusUpdatedAt })` calls in `workflowGateStallNotifyJob.ts` are now redundant-but-harmless; the trigger would set the timestamp anyway.
+
+**F8 — Event durability on action-insert-success + event-append-fail**
+- Triaged technical (audit/replay durability).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - Migration 0350 also adds nullable `awaiting_initiator_event_emitted_at TIMESTAMP WITH TIME ZONE NULL`.
+  - Drizzle schema `server/db/schema/delegationOutcomes.ts` adds `awaitingInitiatorEventEmittedAt` field.
+  - `crossOwnerApprovalTimeoutSweep` ask_initiator branch restructured: (1) `actionService.proposeAction` runs unconditionally (idempotent via DB unique constraint); (2) on proposeAction failure, `continue` (next sweep retries from scratch); (3) on success, check the row's `awaitingInitiatorEventEmittedAt` — if NULL, append the event and immediately UPDATE the column to `NOW()`; if non-NULL, log + skip.
+  - Net effect: action insert and event emit are now independently durable. If proposeAction succeeds but appendEvent throws, the column stays NULL and the next 24h sweep retries the event emission alone.
+- Rationale: the Round 1 fix solved the duplicate-event race but introduced an event-loss failure mode. The audit column gives appendEvent its own retry signal independent of proposeAction's idempotency.
+
+**T3 — runTracePure docstring stale**
+- Triaged technical.
+- Recommendation: IMPLEMENT.
+- Fix: docstring on `runTraceProjectionForViewer` rewritten — full allow-list named, payload-purity invariant called out for any new additions, and a new "Caller contract" block documents the three-state `ownerUserId` semantics (pinned by F6).
+
+**T4 — Placeholder template still looks active**
+- Triaged technical.
+- Recommendation: IMPLEMENT (partial — README banner is the right immediate fix; promotion stays backlog).
+- Fix: prepended a bold warning to `infra/sandbox-templates/operator-session/README.md` — "DO NOT IMPORT OR EXECUTE THIS TEMPLATE FROM PRODUCTION CODE", explicit reference to `PA-V2-WATCHER-HOST-BRIDGE`, explicit reference to `PA-V2-OPERATOR-TEMPLATE-PROMOTION`.
+- A grep-gate (CI rule rejecting imports from `infra/sandbox-templates/operator-session/`) is overkill for V1 because there are zero callers today; the README warning is the cheaper defence. Adding the gate is part of `PA-V2-OPERATOR-TEMPLATE-PROMOTION` when the template is activated.
+
+### Verification (G3 — round-2 fix bundle)
+
+- `npm run lint`: 0 errors, 897 warnings (unchanged from baseline pre-Round-1).
+- `npm run typecheck`: clean for touched files; only the 2 pre-existing `@react-pdf/renderer` errors persist.
+- `npx vitest run server/services/__tests__/runTracePure.viewerProjection.test.ts server/services/__tests__/workflowGateStallNotifyJobPure.timeoutPolicyDecisionTree.test.ts`: 9/9 PASS.
+
+### Files changed in Round 2
+
+```
+new:     migrations/0350_delegation_outcomes_substep_status_trigger.sql
+new:     migrations/0350_delegation_outcomes_substep_status_trigger.down.sql
+edit:    server/db/schema/delegationOutcomes.ts
+edit:    server/jobs/workflowGateStallNotifyJob.ts
+edit:    server/routes/agentRuns.ts
+edit:    server/routes/taskEventStream.ts
+edit:    server/services/runTracePure.ts
+edit:    infra/sandbox-templates/operator-session/README.md
+```
+
+### Round-3 diff prep
+
+After commit, regenerate `.chatgpt-diffs/pr299-round3-code-diff.diff` for the operator to paste into ChatGPT for Round 3.

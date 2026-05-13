@@ -138,6 +138,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       subaccountId: delegationOutcomes.subaccountId,
       crossOwnerApprovalTimeoutPolicy: delegationOutcomes.crossOwnerApprovalTimeoutPolicy,
       substepStatus: delegationOutcomes.substepStatus,
+      awaitingInitiatorEventEmittedAt: delegationOutcomes.awaitingInitiatorEventEmittedAt,
       initiatorUserId: agents.ownerUserId,
     })
     .from(delegationOutcomes)
@@ -254,24 +255,27 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       const initiatorUserId = row.initiatorUserId ?? null;
 
       if (initiatorUserId) {
-        // Race-safe dedupe: ask_initiator keeps substep_status non-terminal by
-        // design (terminalAt stays NULL), so the outer WHERE clause matches
-        // this row again on every sweep until the initiator decides.
+        // Two independent invariants applied in order:
         //
-        // The approval-row write is atomically deduped by the DB unique
-        // constraint on (subaccount_id, idempotency_key) — proposeAction
-        // returns {isNew:false} when an earlier sweep already inserted the row.
-        // Event emission MUST be gated on isNew to keep the run trace clean.
+        //  (1) Action durability — proposeAction is dedup-by-DB-unique-constraint
+        //      idempotent. Two concurrent sweeps both calling it yield exactly
+        //      one approval row in pending_approval; the loser sees isNew=false.
         //
-        // Order matters: action insert first, event append second. Reversing
-        // these allows two concurrent sweeps to both observe "no existing
-        // action", both append the event, then one action insert dedupes —
-        // producing duplicate awaiting_initiator_decision events.
+        //  (2) Event durability — appendEvent is NOT idempotent and has no
+        //      unique constraint we can rely on for cross-row dedupe. We gate
+        //      on awaiting_initiator_event_emitted_at instead: append the event
+        //      if and only if the column is NULL (event has never landed), then
+        //      flip the column to NOW() on success. If appendEvent throws after
+        //      a successful proposeAction, the column stays NULL and the next
+        //      sweep retries the event independently of action idempotency.
+        //
+        // Order matters: action first so a future sweep that observes the column
+        // still NULL but isNew=false KNOWS the action already exists and only
+        // the event is missing — that's the retry signal.
         const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
 
-        let proposeResult: { isNew: boolean } | null = null;
         try {
-          proposeResult = await actionService.proposeAction({
+          await actionService.proposeAction({
             organisationId: row.organisationId,
             subaccountId: row.subaccountId,
             agentId: null,
@@ -287,9 +291,18 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             substepId: row.id,
             error: err instanceof Error ? err.message : String(err),
           });
+          // proposeAction failed; do NOT attempt the event append (we have no
+          // approval row to point to). Next sweep will retry from scratch.
+          continue;
         }
 
-        if (proposeResult && proposeResult.isNew) {
+        if (row.awaitingInitiatorEventEmittedAt !== null) {
+          // Event has already landed on a prior sweep; nothing to retry.
+          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
+            runId: row.runId,
+            substepId: row.id,
+          });
+        } else {
           const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
             eventType: 'cross_owner_substep.awaiting_initiator_decision',
             parent_run_id: row.runId,
@@ -305,11 +318,17 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             payload: awaitingPayload,
             sourceService: 'workflowGateStallNotifyJob',
           });
-        } else if (proposeResult && !proposeResult.isNew) {
-          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
-            runId: row.runId,
-            substepId: row.id,
-          });
+
+          // Event landed — flip the audit column so subsequent sweeps don't
+          // re-append. A concurrent sweep that ALSO had the column NULL when
+          // it started will also append; this is acceptable because the
+          // sweep cron fires serially per pg-boss queue, but if that changes
+          // we'd need an UPDATE ... WHERE awaiting_initiator_event_emitted_at
+          // IS NULL RETURNING id pattern + skip-when-zero-rows.
+          await db
+            .update(delegationOutcomes)
+            .set({ awaitingInitiatorEventEmittedAt: new Date() })
+            .where(eq(delegationOutcomes.id, row.id));
         }
       }
 

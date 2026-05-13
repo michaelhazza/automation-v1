@@ -97,11 +97,35 @@ router.get(
 
     // Route-layer viewer projection (spec §5.4 — second of two layers).
     // Fetch ownerUserId from the active run or from the first event's run.
+    //
+    // getRunOwnerUserId returns three states:
+    //   - string  — run is owned by a specific user
+    //   - null    — run is subaccount-owned (no per-user owner)
+    //   - undefined — run does not exist or belongs to a different org
+    // We MUST distinguish undefined from null because the projection treats
+    // ownerUserId===null as "no privacy boundary, return all events". A failed
+    // owner lookup must NOT collapse to that branch — fail closed instead.
     const runIdForProjection =
       activeRunId ?? (page.events.length > 0 ? page.events[0].runId : null);
     let routeOwnerUserId: string | null = null;
     if (runIdForProjection) {
-      routeOwnerUserId = (await agentActivityService.getRunOwnerUserId(runIdForProjection, orgId)) ?? null;
+      const lookup = await agentActivityService.getRunOwnerUserId(runIdForProjection, orgId);
+      if (lookup === undefined) {
+        // Run not found in this org — fail closed. Return an empty projected
+        // page but preserve the cursor high-water marks so the client can
+        // advance past the missing window (same pattern as fully-redacted
+        // non-owner pages, spec §5.4).
+        res.json({
+          events: [],
+          hasGap,
+          oldestRetainedSeq,
+          hasMore: page.hasMore,
+          highestSequenceNumber: page.highestSequenceNumber,
+          highestTaskSequence: page.highestTaskSequence,
+        });
+        return;
+      }
+      routeOwnerUserId = lookup;
     }
     const routeProjected = runTraceProjectionForViewer(user.id, {
       ownerUserId: routeOwnerUserId,

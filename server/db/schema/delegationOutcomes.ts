@@ -86,14 +86,27 @@ export const delegationOutcomes = pgTable(
     // is enforced by migration 0347 (not expressible in Drizzle WHERE API).
     terminalAt: timestamp('terminal_at', { withTimezone: true }),
 
-    // Updated every time substep_status changes (migration 0349). Used by
-    // crossOwnerApprovalTimeoutSweep to detect rows that have been in
+    // Updated every time substep_status changes (migration 0349 + 0350 trigger).
+    // Used by crossOwnerApprovalTimeoutSweep to detect rows that have been in
     // 'awaiting_cross_owner_approval' for more than the timeout window;
     // filtering on created_at would mis-fire on long-lived rows that only
     // recently transitioned to awaiting state.
+    //
+    // A BEFORE UPDATE trigger gated on substep_status IS DISTINCT FROM bumps
+    // this column automatically — direct .set({ substepStatusUpdatedAt: ... })
+    // is redundant but harmless. No-op status updates do NOT touch the column.
     substepStatusUpdatedAt: timestamp('substep_status_updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+
+    // Migration 0350. Set to NOW() right after the awaiting_initiator_decision
+    // event is appended to agent_execution_events. NULL until the event lands.
+    // Independent from proposeAction's idempotency: handles the case where the
+    // action insert succeeds but appendEvent later fails — re-sweeps detect the
+    // missing event via this column and retry.
+    awaitingInitiatorEventEmittedAt: timestamp('awaiting_initiator_event_emitted_at', {
+      withTimezone: true,
+    }),
   },
   (table) => ({
     orgCreatedIdx: index('delegation_outcomes_org_created_idx').on(

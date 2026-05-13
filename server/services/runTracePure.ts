@@ -15,13 +15,25 @@ export interface ProjectableRun {
 /**
  * Project a run's events for a specific viewer.
  *
- * Invariant: owner sees everything. Non-owner (initiator) sees only
- * cross_owner_substep.* events; all other events are redacted to protect
- * owner-private data.
+ * Privacy invariant: owner sees everything. Non-owner (initiator-side) sees
+ * only the allow-listed event types defined in NON_OWNER_ALLOWED_TYPES below
+ * plus any event whose type starts with `cross_owner_substep.`. Everything
+ * else (tool calls, agent run lifecycle, memory reads, LLM payloads, etc.) is
+ * redacted to protect owner-private payload.
+ *
+ * Adding a new event type to the non-owner allow-list MUST verify the payload
+ * carries no owner-private data — these are run-trace lifecycle signals only.
  *
  * Idempotent: applying twice produces the same result as applying once.
  *
  * Throws when viewerUserId is falsy (programmer error).
+ *
+ * Caller contract: the `ownerUserId` field of the input represents three
+ * distinct states. The route layer MUST distinguish them before calling:
+ *   - string  — run owned by a specific user; non-owner viewers get the projection.
+ *   - null    — run is subaccount-owned (no per-user owner); everyone sees all events.
+ *   - never undefined — a failed owner lookup must be handled at the route layer
+ *                       (404 / empty response) and NEVER coerced to null here.
  */
 export function runTraceProjectionForViewer(
   viewerUserId: string,

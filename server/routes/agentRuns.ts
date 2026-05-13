@@ -747,10 +747,27 @@ router.get(
       );
 
       // Route-layer viewer projection (spec §5.4 — second of two layers).
-      const traceOwnerUserId: string | null =
-        (await agentActivityService.getRunOwnerUserId(req.params.runId, req.orgId!)) ?? null;
+      //
+      // getRunOwnerUserId returns three states:
+      //   - string  — run is owned by a specific user
+      //   - null    — run is subaccount-owned (no per-user owner)
+      //   - undefined — run does not exist or belongs to a different org
+      // The undefined case MUST NOT collapse to null — the projection treats
+      // ownerUserId===null as "no privacy boundary, return all events". A
+      // failed owner lookup is failed closed (404) instead.
+      const ownerLookup = await agentActivityService.getRunOwnerUserId(
+        req.params.runId,
+        req.orgId!,
+      );
+      if (ownerLookup === undefined) {
+        res.status(404).json({
+          errorCode: 'RUN_NOT_FOUND',
+          message: 'Run not found in this organisation.',
+        });
+        return;
+      }
       const projected = runTraceProjectionForViewer(req.user!.id, {
-        ownerUserId: traceOwnerUserId,
+        ownerUserId: ownerLookup,
         events: result.events as unknown as import('../services/runTracePure.js').ProjectableEvent[],
       });
 
