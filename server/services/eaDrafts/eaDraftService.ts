@@ -2,6 +2,7 @@ import { eq, and, lt, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
+import { actions, actionEvents } from '../../db/schema/index.js';
 import { actionService } from '../actionService.js';
 import type { EADraftKind } from '../../../shared/types/eaDraft.js';
 import { redactDraftForViewer, type EADraftViewer } from './eaDraftServicePure.js';
@@ -47,8 +48,11 @@ export interface CreateDraftResult {
 export const eaDraftService = {
   /**
    * Creates both the actions row (pending_approval) and the ea_drafts row (idle)
-   * in one transaction. The action row is created first via actionService.proposeAction,
-   * then the draft FK'd to it.
+   * in one transaction. The action row is created first via
+   * actionService.proposeAction; both inserts share a single db.transaction so
+   * a failure on the draft insert rolls back the action row (no orphaned
+   * pending_approval action). See actionService.proposeAction doc-comment for
+   * the atomicity contract.
    */
   async createDraftWithProposal(
     input: CreateDraftInput,
@@ -57,37 +61,42 @@ export const eaDraftService = {
     const actionType = KIND_TO_ACTION_TYPE[input.kind];
     const idempotencyKey = `ea_draft:${input.agentRunId}:${input.kind}:${input.ownerUserId}`;
 
-    const proposalResult = await actionService.proposeAction({
-      organisationId: ctx.organisationId,
-      subaccountId: input.subaccountId,
-      agentId: input.agentId,
-      agentRunId: input.agentRunId,
-      actionType,
-      idempotencyKey,
-      payload: { ...input.body, targetRef: input.targetRef ?? null, kind: input.kind },
-      metadata: { kind: 'ea_draft' },
-      gateOverride: 'review',
+    return db.transaction(async (tx) => {
+      const proposalResult = await actionService.proposeAction(
+        {
+          organisationId: ctx.organisationId,
+          subaccountId: input.subaccountId,
+          agentId: input.agentId,
+          agentRunId: input.agentRunId,
+          actionType,
+          idempotencyKey,
+          payload: { ...input.body, targetRef: input.targetRef ?? null, kind: input.kind },
+          metadata: { kind: 'ea_draft' },
+          gateOverride: 'review',
+        },
+        { tx },
+      );
+
+      const [draft] = await tx
+        .insert(eaDrafts)
+        .values({
+          organisationId: ctx.organisationId,
+          subaccountId: input.subaccountId,
+          ownerUserId: input.ownerUserId,
+          agentId: input.agentId,
+          runId: input.agentRunId,
+          proposalActionId: proposalResult.actionId,
+          kind: input.kind,
+          targetRef: input.targetRef ? { ref: input.targetRef } : {},
+          body: input.body,
+          sendState: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning({ id: eaDrafts.id });
+
+      return { draftId: draft.id, actionId: proposalResult.actionId };
     });
-
-    const [draft] = await db
-      .insert(eaDrafts)
-      .values({
-        organisationId: ctx.organisationId,
-        subaccountId: input.subaccountId,
-        ownerUserId: input.ownerUserId,
-        agentId: input.agentId,
-        runId: input.agentRunId,
-        proposalActionId: proposalResult.actionId,
-        kind: input.kind,
-        targetRef: input.targetRef ? { ref: input.targetRef } : {},
-        body: input.body,
-        sendState: 'idle',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning({ id: eaDrafts.id });
-
-    return { draftId: draft.id, actionId: proposalResult.actionId };
   },
 
   /**
@@ -227,6 +236,76 @@ export const eaDraftService = {
     if (!draft) return null;
     if (!ctx.viewer) return draft;
     return redactDraftForViewer(draft, ctx.viewer);
+  },
+
+  /**
+   * 7-day proposal expiry for EA-linked drafts (spec §5.2 entry for
+   * `workflowGateStallNotifyJob`, §11.4 / §22.2). Scans `actions` rows that:
+   *   - are still `pending_approval`,
+   *   - carry `metadata_json.kind = 'ea_draft'`,
+   *   - have `created_at < NOW() - 7 days`,
+   * and transitions them to `rejected` with
+   * `metadata_json.expired_after_7d = true` plus a `proposal.expired` event.
+   *
+   * The linked `ea_drafts.send_state` stays `idle` per spec (approval-state is
+   * owned by the proposal primitive; expiry hides the draft from the
+   * Workspace tab but does NOT touch the draft row itself).
+   *
+   * Returns the list of expired action IDs (cross-org). Cross-org sweep so
+   * uses `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS).
+   * Pre-2026-05-13 the expiry path did not exist — this closes REQ-M9.
+   */
+  async expireOldEADraftProposals(): Promise<string[]> {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    return withAdminConnection(
+      {
+        source: 'eaDraftService.expireOldEADraftProposals',
+        reason: 'cross-org 7-day proposal expiry for EA-linked drafts',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+        // Single UPDATE with COALESCE-merge on metadata_json — preserves any
+        // existing metadata keys (riskTier, gateLevelSource, kind=ea_draft).
+        const expired = await tx.execute(sql`
+          UPDATE actions
+             SET status = 'rejected',
+                 metadata_json = COALESCE(metadata_json, '{}'::jsonb)
+                                 || jsonb_build_object(
+                                      'expired_after_7d', true,
+                                      'expired_at', to_jsonb(NOW())
+                                    ),
+                 updated_at = NOW()
+           WHERE status = 'pending_approval'
+             AND metadata_json->>'kind' = 'ea_draft'
+             AND created_at < ${cutoff}
+           RETURNING id, organisation_id
+        `);
+
+        const rows = (expired as unknown as { rows?: Array<{ id: string; organisation_id: string }> }).rows
+          ?? (expired as unknown as Array<{ id: string; organisation_id: string }>);
+
+        for (const row of rows) {
+          await tx.insert(actionEvents).values({
+            organisationId: row.organisation_id,
+            actionId: row.id,
+            eventType: 'rejected',
+            actorId: null,
+            metadataJson: { reason: 'expired_after_7d' },
+            createdAt: new Date(),
+          });
+        }
+
+        // Touch `actions` import — drizzle treats the schema as the typed
+        // surface, but the UPDATE above uses raw SQL so the imported `actions`
+        // symbol is otherwise unused. Keep it referenced so future Drizzle
+        // refactors can swap back without re-adding the import.
+        void actions;
+
+        return rows.map((r) => r.id);
+      },
+    );
   },
 
   /**

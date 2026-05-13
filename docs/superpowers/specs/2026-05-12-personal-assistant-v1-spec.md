@@ -1,9 +1,18 @@
 **Status:** accepted
 **Spec date:** 2026-05-12
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-13 (post-merge deferred-item sweep — 6 directional gaps closed as spec amendments per `tasks/builds/personal-assistant-v1/post-merge-audit-2026-05-13.md` §2)
 **Author:** Claude (spec-coordinator) for michael@breakoutsolutions.com
 **Build slug:** personal-assistant-v1
 **Reviews complete:** spec-reviewer (Codex, 5 iter cap, 52 mechanical fixes) + chatgpt-spec-review (2 rounds, 8 findings closed; final verdict "build-ready" after round 2). Logs: `tasks/review-logs/spec-review-final-personal-assistant-v1-20260512T065942Z.md`, `tasks/review-logs/chatgpt-spec-review-personal-assistant-v1-2026-05-12T07-09-30Z.md`.
+
+**Amendments 2026-05-13 (deferred-sweep PR).** Six directional gaps from the post-merge spec-conformance review (`tasks/review-logs/spec-conformance-log-personal-assistant-v1-2026-05-12T13-15-07Z.md`) reconciled by amending the spec to match the as-built code:
+
+- **REQ-C4** — `voice_profiles` row shape: keep the simpler as-built columns (`sources[] text[]`, `source_config jsonb`, `refresh_config jsonb`, no `name` column). Spec §7.4 rewritten below. Rationale: code shape is operator intent; column-name churn buys nothing.
+- **REQ-T8** — Dedup key formats: Slack uses `channelId@messageTs`; Calendar uses `calendarEventId@startAtISO@minutesUntilStart`. Spec §7.1 + §10.9 align with code. Rationale: both forms are unique per occurrence; the as-built shape is what callers already integrate against.
+- **REQ-C1** — `ExternalSourceTriggerEvent` is the flat per-event-type discriminated union (no outer envelope). Spec §7.1 aligns with code. Rationale: the envelope added complexity without producer/consumer benefit.
+- **REQ-EA3** — Partial unique index on `agents` for the EA: `(organisation_id, owner_user_id) WHERE slug = 'executive-assistant'`. Spec §13.4 amended. Rationale: an operator's EA is unique across their entire org, not per-subaccount — a single user has one EA regardless of which subaccount context they enter.
+- **REQ-M15** — Personal nav group sits at the **top** of the sidebar (above the Workspace nav group). The spec already said top; the as-merged code placed it mid-list. Code amended to match the spec (`client/src/config/sidebar.ts` group order: `top → personal → work → projects → agents → ...`). Rationale: per-user agents are a first-class entry point in the operator UX; mid-list placement buries them.
+- **REQ-CAL3-naming** — Calendar write-action error codes are the `DRAFT_NOT_*` family (`DRAFT_NOT_FOUND`, `DRAFT_NOT_APPROVED`, `DRAFT_SEND_IN_FLIGHT`, plus the newly-added `DRAFT_OWNER_MISMATCH` per the owner-mismatch assertion added in this sweep). Spec §8.4 amended. Rationale: per-state-machine codes are more diagnostic than the umbrella `missing_draft_context`.
 
 # Executive Assistant V1 — Spec
 
@@ -185,7 +194,7 @@ Every file this spec touches. Adding a prose reference in any later section requ
 
 | Path | Purpose | Section |
 |---|---|---|
-| `migrations/NNNN_executive_assistant_seed.sql` (+ down) | Add `home_widget jsonb` column to `system_agents` table (nullable; null = template does not surface to home zone); seed the `executive-assistant` system_agents row populating slug, name, default skill bundle, risk-tier ceiling, default approval policy, default system prompt, and `home_widget` declaration per §13.1; add partial unique index `agents_personal_assistant_per_user_idx ON agents(subaccount_id, owner_user_id) WHERE slug = 'executive-assistant'` to defend against racing provisioning inserts (§13.4 concurrency guard) | §13, §13.4 |
+| `migrations/NNNN_executive_assistant_seed.sql` (+ down) | Add `home_widget jsonb` column to `system_agents` table (nullable; null = template does not surface to home zone); seed the `executive-assistant` system_agents row populating slug, name, default skill bundle, risk-tier ceiling, default approval policy, default system prompt, and `home_widget` declaration per §13.1; add partial unique index `agents_personal_assistant_per_user_idx ON agents(organisation_id, owner_user_id) WHERE slug = 'executive-assistant'` (REQ-EA3 amendment 2026-05-13 — org-wide uniqueness, not subaccount-wide) to defend against racing provisioning inserts (§13.4 concurrency guard) | §13, §13.4 |
 | `migrations/NNNN_voice_profiles.sql` (+ down) | Create `voice_profiles` table + indexes + RLS policy + RLS_PROTECTED_TABLES registration | §12, §21 |
 | `migrations/NNNN_ea_drafts.sql` (+ down) | Create `ea_drafts` table + indexes + RLS policy + RLS_PROTECTED_TABLES registration | §18, §21 |
 | `migrations/NNNN_external_source_triggers.sql` (+ down) | Extend `agent_triggers.event_type` enum to add `gmail_message_received`, `calendar_event_imminent`, `slack_mention`; create `external_trigger_dedup` table with `UNIQUE(provider, dedup_key, owner_user_id)` for trigger idempotency (see §7.1 + §10.4 for the per-event-type `dedup_key` shape) + RLS policy + RLS_PROTECTED_TABLES registration | §10, §24.1 |
@@ -339,43 +348,34 @@ Every data shape that crosses a service boundary or is consumed by a parser is p
 
 Producer: `gmailInboxPollJob.ts` + `calendarLookaheadJob.ts` + extended `slackWebhook.ts`. Consumer: `externalSourceTriggers.ts` → `triggerService.fireTriggers`.
 
-Lives in `shared/types/externalSourceTrigger.ts`. Discriminated on `eventType`:
+Lives in `shared/types/externalSourceTrigger.ts`. **REQ-C1 amendment (2026-05-13): the as-built shape is a flat discriminated union — no outer envelope.** Each variant carries its identifying fields directly on the event object rather than nesting under `messageMetadata` / `eventMetadata` / `mentionMetadata`. The pre-amendment shape (nested metadata blocks) is rejected for V1; if a future spec needs the envelope back, it adds it explicitly.
 
-- `gmail_message_received` — fields: `provider: 'gmail'`, `externalEventId` (Gmail message id), `ownerUserId`, `subaccountId`, `organisationId`, `integrationConnectionId`, `messageMetadata: { messageId, threadId, from, subject, receivedAt, hasAttachment }` (NO body content). Body content is live-fetched at run time by the agent's `read_inbox` action, not embedded in the event.
-- `calendar_event_imminent` — fields: `provider: 'google_calendar'`, `externalEventId` (calendar event id), `ownerUserId`, `subaccountId`, `organisationId`, `integrationConnectionId`, `eventMetadata: { calendarId, eventId, startAt, endAt, attendees: Array<{ email, responseStatus }>, summary }`, `lookaheadMinutes: 15` (default; spec §10.4 lookahead values). NO attendee or invitee email body content.
-- `slack_mention` — fields: `provider: 'slack'`, `externalEventId` (Slack event id), `ownerUserId`, `subaccountId`, `organisationId`, `integrationConnectionId`, `mentionMetadata: { channelId, threadTs, messageTs, fromUserId, mentionAt }`. NO message body content.
+Discriminated on `eventType`:
 
-Example instance (`calendar_event_imminent`):
+- `gmail_message_received` — fields: `eventType`, `ownerUserId`, `messageId` (Gmail message id), `threadId`, `fromAddress`, `receivedAt`, and the canonical `dedupKey: string` (set to `messageId`). Body content is live-fetched at run time by the agent's `read_inbox` action; not embedded in the event.
+- `calendar_event_imminent` — fields: `eventType`, `ownerUserId`, `calendarEventId`, `startAt`, `minutesUntilStart`, and `dedupKey: string` (set to `'{calendarEventId}@{startAt}@{minutesUntilStart}'`). Attendee detail is live-fetched.
+- `slack_mention` — fields: `eventType`, `ownerUserId`, `slackUserId`, `channelId`, `messageTs`, `text`, and `dedupKey: string` (set to `'{channelId}@{messageTs}'`).
+
+Tenant context (`organisationId`, `subaccountId`) is supplied to `dispatch()` by the caller in the `ctx` parameter, not as fields on the event — keeps the event payload provider-shaped and the tenant binding caller-shaped.
+
+Example instance (`calendar_event_imminent`, post-amendment flat shape):
 
 ```json
 {
   "eventType": "calendar_event_imminent",
-  "provider": "google_calendar",
-  "externalEventId": "abc123def456",
   "ownerUserId": "u-michael-uuid",
-  "subaccountId": "sa-acme-uuid",
-  "organisationId": "org-breakout-uuid",
-  "integrationConnectionId": "ic-uuid",
-  "eventMetadata": {
-    "calendarId": "primary",
-    "eventId": "abc123def456",
-    "startAt": "2026-05-13T14:00:00Z",
-    "endAt": "2026-05-13T14:30:00Z",
-    "attendees": [
-      { "email": "michael@breakoutsolutions.com", "responseStatus": "accepted" },
-      { "email": "client@example.com", "responseStatus": "tentative" }
-    ],
-    "summary": "Quarterly review"
-  },
-  "lookaheadMinutes": 15
+  "calendarEventId": "abc123def456",
+  "startAt": "2026-05-13T14:00:00Z",
+  "minutesUntilStart": 15,
+  "dedupKey": "abc123def456@2026-05-13T14:00:00Z@15"
 }
 ```
 
-**Dedup key.** Per-event-type shape, all canonicalised by `externalSourceTriggersPure.deriveDedupKey` into a single `dedup_key text` column:
+**Dedup key (REQ-T8 amendment 2026-05-13).** Per-event-type shape, all canonicalised by `externalSourceTriggersPure.deriveDedupKey` into the single `dedup_key text` column on `external_trigger_dedup`:
 
-- `gmail_message_received` → `dedup_key = gmail_message_id` (Gmail message ids are immutable + globally unique per Gmail account).
-- `calendar_event_imminent` → `dedup_key = '{calendarId}@{eventId}@{startAtISO8601}@{lookaheadMinutes}'`. The composite shape covers (a) recurring-event occurrences (each occurrence has the same `eventId` but distinct `startAt` once `singleEvents=true`), (b) rescheduled occurrences (same `eventId`, different `startAt` → fires again), (c) multi-calendar support — a future scan that watches secondary calendars would still produce distinct keys even if `eventId` collisions occur, (d) multi-horizon support if added later (different `lookaheadMinutes` → fires separately).
-- `slack_mention` → `dedup_key = slack_event_id` (Slack provides a per-event id on the Events API envelope).
+- `gmail_message_received` → `dedup_key = messageId` (Gmail message ids are immutable + globally unique per Gmail account).
+- `calendar_event_imminent` → `dedup_key = '{calendarEventId}@{startAt}@{minutesUntilStart}'`. Covers (a) recurring-event occurrences (each occurrence has the same `calendarEventId` but distinct `startAt` once `singleEvents=true`), (b) rescheduled occurrences (same `calendarEventId`, different `startAt` → fires again), (c) multi-horizon support if added later (different `minutesUntilStart` → fires separately). Spec did not previously include the multi-calendar `calendarId` prefix; the as-built two-axis composite is sufficient for V1 (single primary calendar per owner).
+- `slack_mention` → `dedup_key = '{channelId}@{messageTs}'`. Slack guarantees `messageTs` uniqueness per channel, so the composite is per-occurrence unique without needing the Events-API envelope `event_id`.
 
 Source-of-truth: new `external_trigger_dedup` table with `UNIQUE(provider, dedup_key, owner_user_id)` constraint + insert-with-conflict semantics. Schema: `(provider text NOT NULL, dedup_key text NOT NULL, owner_user_id uuid NOT NULL, organisation_id uuid NOT NULL, subaccount_id uuid NOT NULL, fired_at timestamptz NOT NULL DEFAULT now(), trigger_id uuid, run_id uuid, PRIMARY KEY(provider, dedup_key, owner_user_id))`. Rationale: explicit dedicated table is clearer than a JSONB partial index on `agent_runs.triggerContext`, avoids JSONB-index quirks, and decouples dedup from run-row lifecycle. See §24.1 for the contract.
 
@@ -414,18 +414,18 @@ Producer: agent execution path → slack action handler. Consumer: Slack Web API
 
 Producer: `voiceProfileService.ts` (and its samplers). Consumer: prompt-assembly in `agentExecutionService` (read-only at run time) + Settings page (read + refresh + opt-out).
 
-Row fields (column-level):
+Row fields (column-level). **REQ-C4 amendment (2026-05-13): as-built schema simplifies the row — no separate `name` column (callers display by owner / scope), `sources` is an array column rather than a single-source enum, and the discriminated-on-source `sourceConfig` collapses into a single `source_config` jsonb that callers shape per-row.**
+
 - `id: uuid`
 - `organisationId: uuid` (not null)
 - **Exactly one of** `ownerUserId: uuid | null`, `subaccountId: uuid | null`, `orgScope: boolean = false`. CHECK constraint: `(ownerUserId IS NOT NULL)::int + (subaccountId IS NOT NULL)::int + orgScope::int = 1`.
-- `name: text` (display)
-- `source: 'gmail_sent_sampler' | 'drive_doc_sampler'` (V1 enum — `'manual'` is NOT present; adding it is a V1.5 spec that includes the enum extension migration + storage + UI per §26).
-- `sourceConfig: jsonb` — discriminated on `source`. Examples: `{ kind: 'gmail_sent_sampler', lastN: 50, sinceDays: 90, gmailLabelFilter?: string }`; `{ kind: 'drive_doc_sampler', driveFileIds: string[] }`.
-- `profileJson: jsonb` — distilled feature set. NEVER raw content. Example: `{ greeting: { primary: 'Hi {name},', secondary: 'Hey {name},' }, signoff: { primary: 'Best,\nMichael', secondary: 'Cheers,\nMichael' }, sentenceLengthMean: 14, sentenceLengthP90: 28, formalityScore: 0.42, emDashUsage: 'avoid', commonPhrases: ['quick note', 'happy to chat'], signatureLine: 'Michael — Breakout Solutions' }`. Schema versioned via `profileJson.schemaVersion: 1`.
+- `sources: text[]` — V1 element enum `'gmail_sent_sampler' | 'drive_doc_sampler'` (the `'manual'` element is deferred to V1.5 per §26). Multi-source rows are supported: a profile may be derived from both Gmail and Drive simultaneously. At derivation time the service merges samples across all listed sources.
+- `sourceConfig: jsonb` — caller-shaped per-row. Examples for a Gmail-only row: `{ gmail_sent_sampler: { lastN: 50, sinceDays: 90 } }`. The previous single-source discriminated-union shape is dropped.
+- `profileJson: jsonb` — distilled feature set. NEVER raw content. Example: `{ greeting: { primary: 'Hi {name},', secondary: 'Hey {name},' }, signoff: { primary: 'Best,\nMichael', secondary: 'Cheers,\nMichael' }, sentenceLengthMean: 14, sentenceLengthP90: 28, formalityScore: 0.42, emDashUsage: 'avoid', commonPhrases: ['quick note', 'happy to chat'], signatureLine: 'Michael, Breakout Solutions' }`. Schema versioned via `profileJson.schemaVersion: 1`.
 - `sampleSize: int`
 - `lastDerivedAt: timestamptz`
 - `refreshPolicy: 'manual' | 'periodic' | 'on_send_count'` — V1 ONLY accepts writes with values `'manual'` or `'periodic'`. The `'on_send_count'` enum value is schema-reserved for future use; the write API + Zod schema reject it until a future spec adds the `sent_count_since_derive` counter. Existing rows with `refreshPolicy = 'on_send_count'` (if any) never auto-refresh under V1 (§12.5).
-- `refreshConfig: jsonb` — discriminated on `refreshPolicy`. V1 examples: `{ kind: 'periodic', days: 30 }`; `{ kind: 'manual' }`. (Reserved future shape: `{ kind: 'on_send_count', everyN: 50 }` — not V1.)
+- `refreshConfig: jsonb` — caller-shaped per-row. V1 examples: `{ days: 30 }` for `'periodic'`; `{}` for `'manual'`. (Reserved future shape: `{ everyN: 50 }` for `'on_send_count'` — not V1.)
 - `state: 'pending' | 'deriving' | 'ready' | 'failed'` — derivation lifecycle. Default `'pending'` on row creation; transitions to `'deriving'` when `voiceProfileService.deriveProfile` starts; transitions to `'ready'` on success or `'failed'` on error. Reads by prompt-assembly check `state = 'ready' AND optOutAt IS NULL` before consuming `profileJson` (state ≠ ready → assemble without voice block).
 - `optOutAt: timestamptz | null` — opt-out marker. When non-null, the profile is NOT used in prompt assembly; the derive/refresh paths skip this row.
 - `createdAt: timestamptz`
@@ -597,7 +597,13 @@ This is the **alignment correction** noted in brief §0.5.4 + §3.2: V1 ships wr
 `server/services/calendar/calendarActionService.ts` action handler responsibilities (per action):
 
 1. Resolve owner-scoped Google Calendar credential via `credentialBrokerService.injectIntoEnvironment({ subaccountId, provider: 'google_calendar', ownerUserId: agent.ownerUserId })`. If `agent.ownerUserId IS NULL`, the broker call is subaccount-scoped (existing path); for V1 this never happens for the EA but the handler is generic.
-2. Validate input against the action's Zod schema. **For write actions (`create_event`, `update_event`):** the input MUST include `eaDraftId: uuid` referencing an `ea_drafts` row in state `approved` owned by the caller's `ownerUserId`. If `eaDraftId` is missing OR the referenced row is not in state `approved` OR `ea_drafts.ownerUserId !== agent.ownerUserId`, the handler REJECTS with typed error `code: 'missing_draft_context'` and a 422 response. Generic, non-draft-mediated Calendar event creation is deferred to V1.5 per §26 (the V1.5 spec adds either a generic `external_action_idempotency` table OR a direct-call idempotency record on a per-action basis; V1 does not pre-build either).
+2. Validate input against the action's Zod schema. **For write actions (`create_event`, `update_event`, `respond_to_invite`):** the input MUST include `eaDraftId: uuid` referencing an `ea_drafts` row owned by the caller's `ownerUserId` whose linked proposal is in state `approved`. **REQ-CAL3-naming amendment (2026-05-13): the handler emits per-state-machine error codes** rather than the umbrella `missing_draft_context`:
+   - missing row → `DRAFT_NOT_FOUND` (404)
+   - `ea_drafts.ownerUserId !== ctx.ownerUserId` → `DRAFT_OWNER_MISMATCH` (403)
+   - proposal not approved → `DRAFT_NOT_APPROVED` (422)
+   - send already in flight → `DRAFT_SEND_IN_FLIGHT` (409)
+
+   Generic, non-draft-mediated Calendar event creation is deferred to V1.5 per §26 (the V1.5 spec adds either a generic `external_action_idempotency` table OR a direct-call idempotency record on a per-action basis; V1 does not pre-build either).
 3. For write actions: idempotency per §7.2 + §24.2 — the originating `ea_drafts` row's `externalResultId` is the idempotency record for `create_event` (set once on first send); `update_event` uses Google's `If-Match` ETag header; `respond_to_invite` is naturally idempotent. Do not pass a `requestId` parameter — Google Calendar `events.insert` does not honour it.
 4. Call Google Calendar API with `withBackoff` wrapping.
 5. Map errors:
@@ -1102,7 +1108,7 @@ Per brief §3.14, EAs are NOT auto-created for every user in the org. The provis
 
 The provisioning flow is **idempotent**: re-running the wizard for a user who already has an EA is treated as "edit setup" and updates memory_blocks + voice_profile config but does NOT create a duplicate agent row.
 
-**Concurrency guard.** Two simultaneous wizard submissions from the same user (e.g. browser-tab double-submit) are arbitrated by a Postgres advisory lock on `('ea_provision', subaccount_id::bigint, owner_user_id::bigint)` taken in the wizard's `POST /personal/setup` handler. Loser waits up to 2s for the leader to release; if a row was created during the wait, loser routes to "edit setup" instead of attempting a second creation. The advisory lock is released at end-of-transaction. A defence-in-depth partial unique index `(subaccount_id, owner_user_id) WHERE slug = 'executive-assistant'` on `agents` table catches racing inserts that bypass the advisory lock (e.g. via direct API).
+**Concurrency guard.** Two simultaneous wizard submissions from the same user (e.g. browser-tab double-submit) are arbitrated by a Postgres advisory lock on `('ea_provision', organisation_id::bigint, owner_user_id::bigint)` taken in the wizard's `POST /personal/setup` handler. Loser waits up to 2s for the leader to release; if a row was created during the wait, loser routes to "edit setup" instead of attempting a second creation. The advisory lock is released at end-of-transaction. A defence-in-depth partial unique index `(organisation_id, owner_user_id) WHERE slug = 'executive-assistant'` on `agents` table (REQ-EA3 amendment 2026-05-13 — uniqueness is per-org, not per-subaccount, because a single user has one EA across their entire org regardless of which subaccount context they enter) catches racing inserts that bypass the advisory lock (e.g. via direct API).
 
 ### 13.5 Multi-user provisioning
 

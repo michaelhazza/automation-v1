@@ -49,27 +49,14 @@ Branch `claude/hermes-audit-tier-1-qzqlD` merged 2026-04-21.
 
 ### Personal Assistant V1 (PR #291, merged 2026-05-12)
 
-Spec-conformance review found schema/contract divergences. None block ship; all are "amend code OR amend spec" decisions.
+All originally-tracked deferred items closed by the 2026-05-13 deferred-sweep PR (branch `claude/close-deferred-pa-v1-13lHR`). Adversarial fixes (atomicity, cross-org filter, rate-cap scope, prompt-injection escape) shipped as code changes; spec-conformance gaps split between code amendments (CAL2, EA1, EA4, EA5, C3, CAL3-naming owner-mismatch, M9) and spec amendments (C4, T8, C1, EA3, M15-code-aligned, CAL3-naming error-code family). See:
+- Code: `server/services/{eaDrafts,triggers,slack,calendar,homeWidget}/`, `server/services/actionService.ts`, `server/jobs/workflowGateStallNotifyJob.ts`, `server/config/actionRegistry/{calendar,slack}.ts`, `client/src/config/sidebar.ts`.
+- Migration: `migrations/0343_ea_home_widget_spec_align.sql` — data-only seed update for EA template's `home_widget` + `default_org_skill_slugs`.
+- Spec: `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md` — amendments dated 2026-05-13 in the header + inline in §§7.1, 7.4, 8.4, 13.4, 14.1.
 
-- [ ] **REQ-C4** — `voice_profiles` schema diverges from spec §7.4 (missing `name`, `sources[]`, `source_config`, `refresh_config`; renames). Decide: migrate schema to spec, or amend spec to simpler shape.
-- [ ] **REQ-CAL2** — Calendar `create_event` / `update_event` risk tier mismatch (code: Tier 6, spec: Tier 4). Confirm rubric.
-- [ ] **REQ-T8** — Dedup key formats diverge from spec §7.1 (Slack + Calendar). Both work as unique keys; align one direction.
-- [ ] **REQ-C1** — `ExternalSourceTriggerEvent` schema simplified from spec §7.1 (flat shape, no envelope). Confirm downstream consumer needs.
-- [ ] **REQ-EA1** — EA default skill allowlist incomplete vs spec §13.2 (13 skills missing). Verify whether universal-skills covers them.
-- [ ] **REQ-EA3** — Partial unique index axis differs (code: `(org, owner)`, spec: `(subaccount, owner)`). Multi-subaccount product intent decides.
-- [ ] **REQ-EA4** — EA home_widget refreshPolicy is `every_5m`; spec says `on_login`. Reduce API load.
-- [ ] **REQ-EA5** — EA home_widget `titleTemplate` hardcoded "Personal Assistant"; spec says `${agent.displayName}`. Required for §13.6 rename feature.
-- [ ] **REQ-M15** — Personal nav group placement (top vs mid-list).
-- [ ] **REQ-C3** — `slack.list_channels` Zod schema missing `types` filter.
-- [ ] **REQ-CAL3-naming** — Calendar write-action error codes diverge (`missing_draft_context` vs `DRAFT_NOT_*`). Add owner-mismatch assertion either way.
-- [ ] **REQ-M9** — Stall job 7-day proposal expiry path for EA-linked drafts.
+#### Follow-up surfaced during the 2026-05-13 sweep
 
-### Personal Assistant V1 — adversarial findings
-
-- [ ] **createDraftWithProposal non-atomic** (likely-hole) — `server/services/eaDrafts/eaDraftService.ts:58-88`. Refactor `actionService.proposeAction` to accept an optional `tx` parameter, or extract a shared helper.
-- [ ] **dispatch() missing organisationId filter** (worth-confirming) — `server/services/triggers/externalSourceTriggers.ts:38-52`. Add `eq(integrationConnections.organisationId, ctx.organisationId)`.
-- [ ] **dispatch() rate-cap count not scoped by organisationId** (worth-confirming) — same file, lines 87-97.
-- [ ] **assembleThreadSummaryPrompt prompt-injection surface** (worth-confirming) — `server/services/slack/slackActionService.ts:267`. Sandbox / XML-escape Slack content before LLM passthrough when summarisation ships.
+- [ ] **EA-V1-FOLLOWUP-1** (likely-hole; surfaced by adversarial-reviewer 2026-05-13) — `eaDraftService.createDraftWithProposal` builds the action idempotency key from `(agentRunId, kind, ownerUserId)` only (`server/services/eaDrafts/eaDraftService.ts:62`). A single agent run that legitimately drafts twice for the same kind + owner (e.g. two `slack_post`s to different channels) collides on the key: the second `proposeAction` call returns `isNew: false` with the FIRST action's id; the second `ea_drafts` row is then inserted sharing that `proposal_action_id`. On approval, `eaDraftDispatchService.dispatchAfterApproval` only dispatches one of the two drafts (via `.limit(1)`), so the second is permanently stuck in `idle`. Fix: include `targetRef` (or a stable per-call discriminator) in the idempotency key, and/or add a unique constraint on `ea_drafts.proposal_action_id`. Pre-existing from PR #291 — surfaced but not fixed in the deferred-sweep PR to keep the PR scoped to the originally-tracked items.
 
 ---
 

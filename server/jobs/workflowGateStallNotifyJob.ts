@@ -96,4 +96,12 @@ export async function eaDraftStallResetHandler(): Promise<void> {
   for (const id of resetIds) {
     logger.info('ea_draft_stall_reset', { draftId: id });
   }
+
+  // 7-day proposal expiry for EA-linked drafts (spec §5.2 + REQ-M9). Sweeping
+  // here piggybacks on the existing cron — this job already runs frequently
+  // enough that expiries land within minutes of crossing the 7-day threshold.
+  const expiredIds = await eaDraftService.expireOldEADraftProposals();
+  for (const actionId of expiredIds) {
+    logger.info('ea_draft_proposal_expired', { actionId, reason: 'expired_after_7d' });
+  }
 }
