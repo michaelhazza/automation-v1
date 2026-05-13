@@ -11,14 +11,18 @@ import { referenceDocumentChunks } from '../db/schema/referenceDocumentChunks.js
 import { referenceDocumentDataSources } from '../db/schema/referenceDocumentDataSources.js';
 import { referenceDocuments } from '../db/schema/referenceDocuments.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
+import { tasks } from '../db/schema/tasks.js';
 import { rankCandidates } from './retrievalServicePure.js';
 import { groupCandidatesByDocument } from './documentRetrievalServicePure.js';
 import { truncateForEmission, buildDegradedResult } from './retrievalObservabilityServicePure.js';
 import { rankByPrecedencePure, type MemoryBlockRow } from './memoryBlockRetrievalServicePure.js';
+import {
+  getRetrievalConfig,
+  cosineSimilarity,
+  recallFallbackPredicate,
+} from './retrievalQueryEmbedderPure.js';
+import { generateEmbedding } from '../lib/embeddings.js';
 
-// v1 simplification: no query embedding available at run time.
-// Use threshold=0 (all eligible chunks pass) — spec §10.8 handles filtering.
-const V1_RETRIEVAL_THRESHOLD = 0;
 // Default token budget; callers may override in future.
 const DEFAULT_BUDGET_TOKENS = 32000;
 
@@ -31,6 +35,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
     organisationId: string;
     agentId: string;
     subaccountId: string | null;
+    taskId: string | null;
   };
   try {
     const [row] = await db
@@ -39,6 +44,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
         organisationId: agentRuns.organisationId,
         agentId: agentRuns.agentId,
         subaccountId: agentRuns.subaccountId,
+        taskId: agentRuns.taskId,
       })
       .from(agentRuns)
       .where(eq(agentRuns.id, runId))
@@ -58,6 +64,34 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   }
 
   const { organisationId, agentId, subaccountId } = run;
+
+  // ── Semantic ranker config + query embedding ────────────────────────────────
+  // Spec §4 Phase 3 / §13.5. Flag default off; embedding only when flag is on.
+  const config = getRetrievalConfig();
+  let queryEmbedding: number[] | null = null;
+  let anyFallbackApplied = false;
+
+  if (config.semanticEnabled) {
+    try {
+      let taskText: string | null = null;
+      if (run.taskId) {
+        const [taskRow] = await db
+          .select({ title: tasks.title, description: tasks.description })
+          .from(tasks)
+          .where(eq(tasks.id, run.taskId))
+          .limit(1);
+        if (taskRow) {
+          taskText = `${taskRow.title}${taskRow.description ? ' ' + taskRow.description : ''}`;
+        }
+      }
+      if (taskText) {
+        queryEmbedding = await generateEmbedding(taskText);
+      }
+    } catch {
+      // spec §13.5: catch scoped to embedding fetch only; fall back to legacy
+      logger.warn('retrieval.embedding_failed', { runId });
+    }
+  }
 
   // ── Step 2: Build candidate pool from reference_document_chunks ────────────
   // Five-tier UNION scope query (spec §4.1, §1.5 #10).
@@ -177,16 +211,26 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
 
         // Filter chunks to active retrieval version + model, then map to candidates.
         // Sort deterministically: scopeTier DESC, updatedAt DESC, id ASC (spec invariant §1.5 #10).
-        chunkCandidates = chunkRows
+        const preScoredChunks = chunkRows
           .filter(chunk => {
             const doc = docMap.get(chunk.documentId);
             if (!doc) return false;
             if (chunk.versionId !== doc.retrievalVersionId) return false;
             if (chunk.embeddingModel !== doc.activeEmbeddingModel) return false;
             return true;
-          })
+          });
+
+        chunkCandidates = preScoredChunks
           .map(chunk => {
             const doc = docMap.get(chunk.documentId)!;
+            let finalScore = 0;
+            if (queryEmbedding && Array.isArray(chunk.embedding)) {
+              try {
+                finalScore = cosineSimilarity(chunk.embedding as number[], queryEmbedding);
+              } catch {
+                // per-candidate vector error — keep 0
+              }
+            }
             return {
               id: chunk.id,
               documentId: chunk.documentId,
@@ -194,7 +238,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
               kind: 'document_chunk' as const,
               mode: doc.mode,
               scopeTier: documentScopeTier.get(chunk.documentId) ?? 1,
-              finalScore: 0, // v1: no query embedding; threshold=0 passes all
+              finalScore,
               updatedAt: chunk.updatedAt,
               tokenCount: chunk.tokenCount,
               content: chunk.content,
@@ -205,6 +249,16 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
             if (b.updatedAt.getTime() !== a.updatedAt.getTime()) return b.updatedAt.getTime() - a.updatedAt.getTime();
             return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
           });
+
+        // Per-category recall fallback for chunks (spec §13.5)
+        if (queryEmbedding && chunkCandidates.length > 0) {
+          const aboveThreshold = chunkCandidates.filter(c => c.finalScore >= config.threshold).length;
+          if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: chunkCandidates.length })) {
+            anyFallbackApplied = true;
+            logger.warn('retrieval.empty_after_semantic', { runId, category: 'chunks' });
+            chunkCandidates = chunkCandidates.map(c => ({ ...c, finalScore: 0 }));
+          }
+        }
       }
     }
   } catch (err) {
@@ -231,6 +285,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
         pausedAt: memoryBlocks.pausedAt,
         deprecatedAt: memoryBlocks.deprecatedAt,
         createdAt: memoryBlocks.createdAt,
+        embedding: memoryBlocks.embedding,
       })
       .from(memoryBlocks)
       .where(
@@ -261,24 +316,42 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
       candidates: typedMbRows,
     });
 
-    const mbById = new Map(typedMbRows.map(r => [r.id, r]));
+    const mbById = new Map(mbRows.map(r => [r.id, r]));
     memoryBlockCandidates = rankedMb.map(mb => {
       const row = mbById.get(mb.id)!;
       let tier = 1;
       if (row.ownerAgentId) tier = 3;
       else if (row.subaccountId) tier = 2;
+      let finalScore = 0;
+      if (queryEmbedding && Array.isArray(row.embedding)) {
+        try {
+          finalScore = cosineSimilarity(row.embedding as number[], queryEmbedding);
+        } catch {
+          // per-candidate vector error — keep 0
+        }
+      }
       return {
         id: mb.id,
         organisationId: mb.organisationId,
         kind: 'memory_block' as const,
         mode: 'auto' as const,
         scopeTier: tier,
-        finalScore: 0,
+        finalScore,
         updatedAt: mb.createdAt,
         tokenCount: 0,
         content: mb.content,
       };
     });
+
+    // Per-category recall fallback for memory blocks (spec §13.5)
+    if (queryEmbedding && memoryBlockCandidates.length > 0) {
+      const aboveThreshold = memoryBlockCandidates.filter(c => c.finalScore >= config.threshold).length;
+      if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: memoryBlockCandidates.length })) {
+        anyFallbackApplied = true;
+        logger.warn('retrieval.empty_after_semantic', { runId, category: 'blocks' });
+        memoryBlockCandidates = memoryBlockCandidates.map(c => ({ ...c, finalScore: 0 }));
+      }
+    }
   } catch (err) {
     logger.warn('retrievalService.memory_block_load_failed', {
       runId,
@@ -296,7 +369,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   try {
     ranked = rankCandidates({
       candidates: allCandidates,
-      threshold: V1_RETRIEVAL_THRESHOLD,
+      threshold: anyFallbackApplied ? 0 : config.threshold,
       budgetTokens: DEFAULT_BUDGET_TOKENS,
       nowMs: Date.now(),
       orgId: organisationId,

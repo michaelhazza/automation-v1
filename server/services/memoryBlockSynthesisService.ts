@@ -35,6 +35,8 @@ import {
   type SynthesisTier,
 } from './memoryBlockSynthesisServicePure.js';
 import { cosineSimilarity } from './memoryBlockServicePure.js';
+import { writeVersionRow } from './memoryBlockVersionService.js';
+import { writeLineageRowsForVersion } from './memoryBlockLineageService.js';
 import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ export async function runSynthesisForSubaccount(
       qualityScore: workspaceMemoryEntries.qualityScore,
       citedCount: workspaceMemoryEntries.citedCount,
       embedding: workspaceMemoryEntries.embedding,
+      agentRunId: workspaceMemoryEntries.agentRunId,
     })
     .from(workspaceMemoryEntries)
     .where(
@@ -135,6 +138,7 @@ export async function runSynthesisForSubaccount(
     content: string;
     qualityScore: number;
     citedCount: number;
+    agentRunId: string | null;
     vec: number[];
   }
   const withVec: EntryWithVec[] = candidates
@@ -143,6 +147,7 @@ export async function runSynthesisForSubaccount(
       content: c.content,
       qualityScore: c.qualityScore ?? 0,
       citedCount: c.citedCount ?? 0,
+      agentRunId: c.agentRunId ?? null,
       vec: Array.isArray(c.embedding) ? (c.embedding as unknown as number[]) : [],
     }))
     .filter((e) => e.vec.length > 0);
@@ -192,37 +197,66 @@ export async function runSynthesisForSubaccount(
 
     const status = tier === 'high' ? 'active' : 'draft';
 
-    const [created] = await db
-      .insert(memoryBlocks)
-      .values({
-        organisationId,
-        subaccountId,
-        name,
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(memoryBlocks)
+        .values({
+          organisationId,
+          subaccountId,
+          name,
+          content,
+          status,
+          source: 'auto_synthesised',
+          confidence: 'normal',
+        })
+        .returning({ id: memoryBlocks.id });
+
+      // Write memory_block_versions row so the lineage FK has a target.
+      // writeVersionRow returns null for consecutive identical content (no-op).
+      // Spec §4 Phase 1 / R4: this write is new — synthesis did not previously
+      // create a versions row.
+      const versionRow = await writeVersionRow({
+        blockId: created.id,
         content,
-        status,
-        source: 'auto_synthesised',
-        confidence: 'normal',
-      })
-      .returning({ id: memoryBlocks.id });
+        changeSource: 'auto_synthesis',
+        tx,
+      });
+
+      if (versionRow === null) {
+        // Consecutive identical content: no new version committed, no lineage.
+        logger.info('synthesis.lineage_skipped_unchanged_content', { blockId: created.id });
+      } else {
+        await writeLineageRowsForVersion({
+          tx,
+          blockVersionId: versionRow.id,
+          organisationId,
+          cluster,
+          avgQuality,
+        });
+      }
+
+      if (tier !== 'high') {
+        await tx.insert(memoryReviewQueue).values({
+          organisationId,
+          subaccountId,
+          itemType: 'block_proposal',
+          confidence,
+          status: 'pending',
+          payload: {
+            blockId: created.id,
+            name,
+            content,
+            clusterSize: cluster.length,
+            avgQuality,
+          },
+        });
+      }
+    });
 
     if (tier === 'high') {
       blocksAutoActivated += 1;
     } else {
       blocksQueuedForReview += 1;
-      await db.insert(memoryReviewQueue).values({
-        organisationId,
-        subaccountId,
-        itemType: 'block_proposal',
-        confidence,
-        status: 'pending',
-        payload: {
-          blockId: created.id,
-          name,
-          content,
-          clusterSize: cluster.length,
-          avgQuality,
-        },
-      });
     }
   }
 

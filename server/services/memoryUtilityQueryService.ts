@@ -1,0 +1,103 @@
+import { eq, inArray, sql } from 'drizzle-orm';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { mvMemoryUtility30d, agents } from '../db/schema/index.js';
+import {
+  bucketDailySeries,
+  type RunForBucketing,
+  type DailyBucket,
+} from './memoryUtilityDailySeriesPure.js';
+
+export interface AgentUtilityRow {
+  agentId: string;
+  agentName: string;
+  subaccountId: string | null;
+  runsMeasuredEntries: number;
+  runsUnmeasuredEntries: number;
+  totalInjectedEntries: number;
+  totalCitedEntries: number;
+  totalInjectedBlocks: number;
+  totalCitedBlocks: number;
+  entryUtility30d: string | null; // numeric from Drizzle returns string
+  blockUtility30d: string | null;
+}
+
+export interface MemoryUtilityPayload {
+  agents: AgentUtilityRow[];
+  dailySeries: DailyBucket[];
+}
+
+export async function getMemoryUtilityForOrg(
+  organisationId: string,
+): Promise<MemoryUtilityPayload> {
+  const db = getOrgScopedDb('memoryUtilityQueryService');
+
+  // MV aggregate rows for this org (filtered — no unfiltered cross-org read).
+  const mvRows = await db
+    .select()
+    .from(mvMemoryUtility30d)
+    .where(eq(mvMemoryUtility30d.organisationId, organisationId));
+
+  // Resolve agent names from the agents table.
+  const agentIds = [...new Set(mvRows.map((r) => r.agentId))];
+  const agentNameMap = new Map<string, string>();
+  if (agentIds.length > 0) {
+    const agentRows = await db
+      .select({ id: agents.id, name: agents.name })
+      .from(agents)
+      .where(inArray(agents.id, agentIds));
+    for (const a of agentRows) agentNameMap.set(a.id, a.name);
+  }
+
+  // Raw agent_runs for daily bucketing — uses DB-anchored now so SQL window
+  // and JS bucket boundaries share one clock (spec R2 F7).
+  const runRows = await db.execute<{
+    id: string;
+    created_at: Date;
+    injected_entry_ids: string[] | null;
+    cited_entry_ids: string[];
+    applied_memory_block_ids: string[];
+    applied_memory_block_citations: unknown[];
+    db_now: Date;
+  }>(sql`
+    SELECT
+      transaction_timestamp() AS db_now,
+      id,
+      created_at,
+      injected_entry_ids,
+      cited_entry_ids,
+      applied_memory_block_ids,
+      applied_memory_block_citations
+    FROM agent_runs
+    WHERE organisation_id = ${organisationId}
+      AND created_at > transaction_timestamp() - interval '30 days'
+  `);
+
+  const dbNow: Date = runRows[0]?.db_now ?? new Date();
+  const forBucketing: RunForBucketing[] = runRows.map((r) => ({
+    id: r.id,
+    createdAt: new Date(r.created_at),
+    injectedEntryIds: r.injected_entry_ids,
+    citedEntryIds: r.cited_entry_ids ?? [],
+    appliedMemoryBlockIds: r.applied_memory_block_ids ?? [],
+    appliedMemoryBlockCitations: r.applied_memory_block_citations ?? [],
+  }));
+
+  const agentRows: AgentUtilityRow[] = mvRows.map((r) => ({
+    agentId: r.agentId,
+    agentName: agentNameMap.get(r.agentId) ?? r.agentId,
+    subaccountId: r.subaccountId ?? null,
+    runsMeasuredEntries: r.runsMeasuredEntries,
+    runsUnmeasuredEntries: r.runsUnmeasuredEntries,
+    totalInjectedEntries: r.totalInjectedEntries,
+    totalCitedEntries: r.totalCitedEntries,
+    totalInjectedBlocks: r.totalInjectedBlocks,
+    totalCitedBlocks: r.totalCitedBlocks,
+    entryUtility30d: r.entryUtility30d ?? null,
+    blockUtility30d: r.blockUtility30d ?? null,
+  }));
+
+  return {
+    agents: agentRows,
+    dailySeries: bucketDailySeries(forBucketing, dbNow),
+  };
+}

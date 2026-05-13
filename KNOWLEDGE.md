@@ -1190,3 +1190,27 @@ When a single-writer event emitter loses a coordination race (another writer alr
 ### 2026-05-13 Pattern — Closed-enum service-boundary error mapping _(promoted from tasks/todo.md)_
 
 When a service throws typed errors with a `code` discriminator, the route MUST map the code to its HTTP envelope via a closed `switch` (every branch enumerated, `default: throw`). Open-ended string-comparison mapping (`if (err.code === 'foo') ...` cascades) is a blocking review finding — new codes silently fall through with the wrong HTTP status and the wrong envelope shape. The canonical pattern: define the error-code union at the service boundary (`shared/types/...` if shared across routes), import it into both the service and the route, and let TypeScript's exhaustiveness checking enforce the mapping. Surfaced repeatedly during consolidation-govern (CONSOL-GOV-DEF-9) and audit-remediation reviews; promoted because the pattern is reusable across every service that throws typed errors. Cross-link: `architecture.md § Service Layer` now references this entry directly.
+
+### 2026-05-13 Pattern — Semantic ranker recall fallback (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §13.5 + plan Chunk 9.
+
+When `AKR_SEMANTIC_RANKER_ENABLED=true`, `retrievalService` computes cosine similarity per candidate and filters by `AKR_RETRIEVAL_THRESHOLD` (default 0.30). Per-category recall fallback fires when filtering empties a category (all candidates below threshold in that category). Fallback resets `finalScore: 0` for every candidate in that category and sets `anyFallbackApplied = true`. The effective threshold passed to `rankCandidates` is then `0` so fallback candidates are not re-filtered — the fallback is pass-through to legacy scope+recency ordering, not an error. Embedding failure (OpenAI call throws) is caught per-run; `queryEmbedding` stays `null` and scoring branches are skipped entirely (no fallback needed, no semantic filtering attempted). These two safety properties are decoupled from the env flag — you can reason about each independently.
+
+### 2026-05-13 Pattern — Memory-block lineage idempotency contract (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §2, plan Chunk 2.
+
+`memory_block_version_sources` records which `workspace_memory_entries` contributed to each `memory_block_versions` row. Idempotency anchor is the version row, NOT the synthesis run. A synthesis run that produces no content change returns `null` from `writeVersionRow` (dedup guard in `memoryBlockVersionsService`); in that case the caller skips `writeVersionSourceLinks`. A synthesis run that commits a new version row always writes the source links in the same operation. Consequence: every `memory_block_versions` row is guaranteed to have at least one source link if the block is `auto_synthesised`. Pre-migration blocks (`source !== 'auto_synthesised'`) and blocks synthesised before migration 0333 have no source rows — the Sources tab shows "No lineage data available" for those. Deletion-safe: each source link row retains `source_entry_content_hash` and `source_agent_name_at_capture` so lineage remains readable after the source entry is soft-deleted.
+
+### 2026-05-13 Pattern — 403-before-query for MV-backed routes (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §6.2.
+
+Routes that read from materialised views (e.g., `mv_memory_utility_30d`) MUST canonicalise and compare path-org vs session-org BEFORE issuing any DB query. Pattern: `const canonical = pathOrgId.toLowerCase()` vs `req.organisationId.toLowerCase()`, 403 if mismatch. This is doubly important for MV-backed surfaces because MVs are excluded from RLS (they are read-only aggregates; RLS on the base tables governs write access; route-layer permission gates govern read access). Skipping the 403-before-query check on an MV route means a user with a valid session for org A can read org B's aggregated metrics by substituting the path parameter. Detection: any new route that queries an MV or a table in `rlsExclusions.ts` — confirm a 403-before-query guard is present before the first DB call.
+
+### 2026-05-13 Note — Synthesis must always write memory_block_versions before memory_block_version_sources (memory-improvements branch)
+
+Source: plan Chunk 2 review.
+
+`memory_block_version_sources` has a FK to `memory_block_versions`. If auto-synthesis writes a `memoryBlocks` row (insert), it MUST also call `writeVersionRow` to produce a `memory_block_versions` row in the same operation, or the FK constraint for source links will fail. Previously this was implicit; it is now explicit. `writeVersionRow` returns `null` for consecutive identical content (dedup); callers skip `writeVersionSourceLinks` in that case. The correct call order is always: `insertMemoryBlock` → `writeVersionRow` → `writeVersionSourceLinks` (if version row was created).

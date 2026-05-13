@@ -183,6 +183,9 @@ export * from './onboardingBundleConfigs.js';
 // Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
 export * from './memoryBlockVersions.js';
 
+// Memory improvements spec §4 Phase 1 — synthesis lineage table (migration 0333)
+export * from './memoryBlockVersionSources.js';
+
 // Feature 2 — test-input fixtures for inline Run-Now test panel (migration 0153)
 export * from './agentTestFixtures.js';
 
@@ -260,6 +263,10 @@ export * from './agentRecommendations';
 // Sub-Account Optimiser — cross-tenant peer-median view (migration 0277)
 // BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
 export * from './optimiserSkillPeerMedians';
+
+// Memory improvements spec §4 Phase 2 — 30-day utility MV (migration 0343)
+// BYPASSES RLS — multi-tenant MV; org-filtered at route layer (see rlsExclusions.ts).
+export * from './mvMemoryUtility30d.js';
 
 // GHL Agency OAuth — location token cache (migration 0269)
 export * from './connectorLocationTokens.js';
