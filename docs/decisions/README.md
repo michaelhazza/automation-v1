@@ -63,11 +63,11 @@ Update when adding ADRs.
 | [0014](./0014-coordinators-run-inline.md) | Coordinators run INLINE in the main session, never dispatched as sub-agents | accepted | agent fleet, pipeline architecture |
 | [0015](./0015-chatgpt-review-discipline.md) | ChatGPT review loops — convergence and diff-misreading discipline | accepted | review pipeline, chatgpt-pr-review, chatgpt-spec-review |
 | [0016](./0016-frontend-consumer-simple-principle.md) | Frontend-first design principle — consumer-simple over capability-mapped dashboards | accepted | frontend, product design, UX |
-| [0017](./0017-retrieval-ranker-v1-simplified.md) | Retrieval / ranker architecture — v1-simplified | proposed | retrieval / agents |
-| [0018](./0018-overlay-stack-ownership.md) | Overlay stack ownership — central manager | proposed | frontend |
-| [0019](./0019-job-result-and-review-loop-contracts.md) | Job result and review-loop state-machine contracts | proposed | workflow-engine / tooling |
+| [0017](./0017-retrieval-ranker-v1-simplified.md) | Retrieval / ranker architecture — v1-simplified | accepted | retrieval / agents |
+| [0018](./0018-overlay-stack-ownership.md) | Overlay stack ownership — central manager | accepted | frontend |
+| [0019](./0019-job-result-and-review-loop-contracts.md) | Job result and review-loop state-machine contracts | accepted | workflow-engine / tooling |
 | [0020](./0020-test-conventions-vitest-and-test-folder.md) | Test conventions — Vitest only, `__tests__/` folder, `.js` relative imports | accepted | tests / tooling |
-| [0021](./0021-workflows-v1-v2-boundary.md) | Workflows V1 → V2 boundary contract | proposed | workflow-engine |
+| [0021](./0021-workflows-v1-v2-boundary.md) | Workflows V1 → V2 boundary contract | accepted | workflow-engine |
 | [0022](./0022-workspace-inbound-webhook-db-exception.md) | Direct DB access in workspaceInboundWebhook route | accepted | auth, routes |
 
 ADRs 0001-0005 were extracted from KNOWLEDGE.md historical "Decision" entries on 2026-05-03. The remaining 6 historical Decision entries stay in KNOWLEDGE.md as observations — they're either implementation patterns (not durable choices) or research notes (no decision to defend). Promote them to ADRs only if they keep being cited.

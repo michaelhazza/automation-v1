@@ -1,6 +1,6 @@
 # ADR-0019: Job result and review-loop state-machine contracts
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-05-13
 **Domain:** workflow-engine / tooling
 **Supersedes:** _n/a_

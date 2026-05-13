@@ -1,6 +1,6 @@
 # ADR-0021: Workflows V1 → V2 boundary contract
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-05-13
 **Domain:** workflow-engine
 **Supersedes:** _n/a_

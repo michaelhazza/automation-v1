@@ -237,6 +237,18 @@ Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durabl
 
 When adding a no-circular-import assertion (e.g. a test that reads file source and asserts no import of module X), extend the assertion to cover every file in the chain that could reintroduce the cycle — not only the root file. A gap at any downstream node leaves the cycle risk undetected by the test.
 
+### 8.33 Suppression-is-success for single-writer event emitters
+
+For event emitters where a single writer owns the per-entity stream (Home dashboard live reactivity, scheduler claim windows, single-tick agent run progress, etc.), the contract is suppression-is-success: the emitter returns success when it INTENTIONALLY skips an emit (no-op tick, already-emitted state, claim already held by another caller). The caller distinguishes "skipped on purpose" from "failed silently" via a `skipped: true` field on the return, never by inspecting logs. Required pattern:
+
+- Return shape `{ ok: true, skipped: true, reason: '<one-word>' }` when the emitter chose not to emit. `skipped: false` (or absence) means an emit actually happened.
+- Callers MUST treat `skipped: true` as success; never retry, never log as warning.
+- The emitter MUST NOT throw on no-op paths — throwing makes the caller think the operation failed when it succeeded-as-skipped.
+
+Failure mode if violated: silent retry loops on intentional skips, dashboards reporting "0 emits" as a degradation, or worse — a caller retrying a write that the emitter intentionally suppressed because another single-writer already owned that slot.
+
+Reference: `architecture.md § Home dashboard live reactivity`, ADR-0013, and the KNOWLEDGE.md entry on suppression-is-success.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

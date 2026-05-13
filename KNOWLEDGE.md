@@ -3,7 +3,9 @@
 ## 2026-05 quarterly trim — see docs/knowledge-sweep-inventory.md for the full inventory and docs/decisions/ for promoted patterns.
 
 Append-only register of patterns, gotchas, conventions, and corrections discovered during development.
-Read this at the start of every session. Never edit or remove existing entries — only append.
+Read this at the start of every session. Default rule: append only — do not edit or remove existing entries.
+
+**Controlled exception: quarterly compression.** Once per quarter, a maintainer may compress or promote entries when ALL of the following hold: (1) the change is captured in `docs/knowledge-sweep-inventory.md` with before/after rationale, (2) any removed material is preserved either in an ADR under `docs/decisions/` or in git history (with the inventory naming the recovery path), (3) compressed bodies leave a pointer to the new canonical location so future readers can trace from the old anchor. Day-to-day edits remain forbidden; compression is a deliberate, documented, quarterly sweep — never a drive-by trim.
 
 > **Architecture decisions live in [`docs/decisions/`](./docs/decisions/), not here** (convention introduced 2026-05-03). KNOWLEDGE.md captures the "watch out for this" stream — observations, gotchas, learned conventions, user corrections. ADRs capture the "we chose X over Y because Z" stream — durable architectural choices with rationale and trade-offs. When in doubt, write a KNOWLEDGE entry first; promote to ADR if the decision keeps coming up.
 >
@@ -15,7 +17,7 @@ KNOWLEDGE.md is append-only and grows. At year 1, a healthy KNOWLEDGE.md is ~1,5
 
 Two safety valves:
 
-1. **Quarterly grouping pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. The originals stay; the summary becomes the entry future sessions read first. Never edit existing entries.
+1. **Quarterly grouping / compression pass.** Once per quarter, a maintainer (operator or `audit-runner` in a future mode) reads the file end-to-end and groups thematically duplicate entries with a short summary, citing originals by anchor. Compression / removal-by-pointer is also permitted in this pass under the controlled-exception rules at the top of the file: every change recorded in `docs/knowledge-sweep-inventory.md`, removed material recoverable from ADRs or git history, pointers left where bodies were trimmed. Day-to-day edits between sweeps remain forbidden — only the quarterly pass touches existing entries.
 2. **Promote to ADR / architecture.md when an entry keeps being cited.** If a Pattern entry has been quoted in 3+ specs or review logs, promote it: write an ADR or extend `architecture.md`, then leave a final entry pointing future readers to the new home.
 
 The file's value is in retrieval, not preservation. If retrieval slows down, the file is too big.

@@ -1,6 +1,6 @@
 # ADR-0018: Overlay stack ownership — central manager
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-05-13
 **Domain:** frontend
 **Supersedes:** _n/a_

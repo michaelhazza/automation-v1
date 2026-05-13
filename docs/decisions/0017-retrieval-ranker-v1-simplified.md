@@ -1,6 +1,6 @@
 # ADR-0017: Retrieval / ranker architecture — v1-simplified
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-05-13
 **Domain:** retrieval / agents
 **Supersedes:** _n/a_
