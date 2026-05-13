@@ -41,6 +41,11 @@ import { subaccountOperatorSettingsService } from '../subaccountOperatorSettings
 import { notifyOperatorSessionSuspended } from '../operatorSessionSuspensionNotifier.js';
 import { OperatorSessionLimitExceededError } from '../operatorBackendErrors.js';
 import {
+  AUTO_EXTEND_GRACE_MINUTES,
+  MAX_CHAIN_LENGTH,
+  MAX_WALL_CLOCK_PER_TASK_DAYS,
+} from '../operatorSettingsDefaults.js';
+import {
   decideChainResumeOutcome,
 } from './operatorManagedBackendPure.js';
 import type {
@@ -325,9 +330,9 @@ export const operatorManagedBackend: ExecutionBackend = {
         // Write a failed operator_run row for audit.
         const settingsSnapshot = {
           session_soft_cap_minutes: effectiveSettings.session_soft_cap_minutes,
-          auto_extend_grace_minutes: effectiveSettings.auto_extend_grace_minutes,
-          max_chain_length: effectiveSettings.max_chain_length,
-          max_wall_clock_per_task_days: effectiveSettings.max_wall_clock_per_task_days,
+          auto_extend_grace_minutes: AUTO_EXTEND_GRACE_MINUTES,
+          max_chain_length: MAX_CHAIN_LENGTH,
+          max_wall_clock_per_task_days: MAX_WALL_CLOCK_PER_TASK_DAYS,
           per_task_budget_cap_minutes:
             effectiveSettings.per_task_budget_cap_minutes +
             (agentRun.perTaskBudgetExtensionMinutes ?? 0),
@@ -415,9 +420,9 @@ export const operatorManagedBackend: ExecutionBackend = {
     // accumulator so budget extensions are task-scoped (spec §3.17.4).
     const settingsSnapshot = {
       session_soft_cap_minutes: effectiveSettings.session_soft_cap_minutes,
-      auto_extend_grace_minutes: effectiveSettings.auto_extend_grace_minutes,
-      max_chain_length: effectiveSettings.max_chain_length,
-      max_wall_clock_per_task_days: effectiveSettings.max_wall_clock_per_task_days,
+      auto_extend_grace_minutes: AUTO_EXTEND_GRACE_MINUTES,
+      max_chain_length: MAX_CHAIN_LENGTH,
+      max_wall_clock_per_task_days: MAX_WALL_CLOCK_PER_TASK_DAYS,
       per_task_budget_cap_minutes:
         effectiveSettings.per_task_budget_cap_minutes +
         (agentRun.perTaskBudgetExtensionMinutes ?? 0),
