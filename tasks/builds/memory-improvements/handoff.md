@@ -168,3 +168,114 @@ Per CLAUDE.md model-guidance: execution is token-intensive and Sonnet handles a 
 - `pr-reviewer` MUST run after spec-conformance.
 - `dual-reviewer` will auto-skip with `REVIEW_GAP: Codex CLI unavailable` per handoff Phase 1 notes — chatgpt-pr-review in Phase 3 covers second-opinion.
 - `adversarial-reviewer` will auto-trigger (migration 0333 RLS table; migration 0343 MV with RLS-exclusion; two new orgId-scoped routes; `agentExecutionService` change touches request-path code).
+
+---
+
+## Phase 2 (BUILD) — complete 2026-05-13
+
+**Plan path:** [`tasks/builds/memory-improvements/plan.md`](./plan.md) (LOCKED, 11 chunks)
+**Chunks built:** 11 of 11 — squashed in `a1e87d75 feat(memory-improvements): implement all 11 chunks`.
+**Branch HEAD at handoff:** see Phase 2 close commit pushed at finalisation handoff time.
+**G1 attempts (per chunk):** chunk-by-chunk G1 ran inside the Sonnet execution session — see prior session log; G2 then ran cleanly on the integrated branch state.
+**G2 attempts:** 1 (PASS — lint 0 errors, typecheck clean).
+**G3 (post-fix-loop + post-dual-reviewer) attempts:** PASS on each attempt (R1 fixes, R2 backfills, R3 regression fix, post-dual-reviewer).
+
+**Final review verdicts (after 3 fix-loop rounds):**
+
+- **spec-conformance:** CONFORMANT_AFTER_FIXES — 68 REQs, 61 PASS, 1 MECHANICAL_GAP fixed (migration 0333 invalid PostgreSQL RLS syntax), 6 DIRECTIONAL_GAPs routed to `tasks/todo.md`. Operator chose backfill — 4 of 6 directional gaps closed in fix-loop R2; 2 (capabilities.md sub-entry + opportunistic cleanup) remain explicit deferrals.
+  - Log: [`tasks/review-logs/spec-conformance-log-memory-improvements-2026-05-13T05-41-00Z.md`](../../review-logs/spec-conformance-log-memory-improvements-2026-05-13T05-41-00Z.md)
+- **adversarial-reviewer:** HOLES_FOUND — 1 HIGH (synthesis bare-db) resolved by fix-loop R1; 3 advisory deferrals (organisationId filter, LIMIT, concurrent-synthesis lock). Non-blocking advisory per playbook §8.2.
+  - Log: [`tasks/review-logs/adversarial-review-log-memory-improvements-2026-05-13T06-00-00Z.md`](../../review-logs/adversarial-review-log-memory-improvements-2026-05-13T06-00-00Z.md)
+- **pr-reviewer:** APPROVED (Round 5 — final pass after dual-reviewer). 4 fix-loop rounds in total: R1→R2 (RLS/try-catch/GUC), R3 (4 spec divergences), R4 (Sources tab regression fix), R5 (post-dual-reviewer empty-versions null pass-through).
+  - Log: [`tasks/review-logs/pr-review-log-memory-improvements-2026-05-13T05-50-00Z.md`](../../review-logs/pr-review-log-memory-improvements-2026-05-13T05-50-00Z.md)
+- **reality-checker:** Initial NEEDS_DISCUSSION (operationally sound; spec-vs-shipped divergences + env-gated operational items). Operator chose backfill for the 4 divergences → effectively READY-for-Phase-3 after R2 backfill.
+  - Log: [`tasks/review-logs/reality-check-log-memory-improvements-2026-05-13T06-42-00Z.md`](../../review-logs/reality-check-log-memory-improvements-2026-05-13T06-42-00Z.md)
+- **Fix-loop iterations:** 3 rounds (R1: 3 Blocking → APPROVED; R2: 4 spec divergences → 1 new regression; R3: regression → APPROVED).
+- **dual-reviewer:** APPROVED — 3 Codex iterations, 1 ACCEPT (empty-versions null pass-through), 3 REJECT with sound rationale. Auto-committed at `cc8e03c7`.
+  - Log: [`tasks/review-logs/dual-review-log-memory-improvements-2026-05-13T07-26-56Z.md`](../../review-logs/dual-review-log-memory-improvements-2026-05-13T07-26-56Z.md)
+
+**REVIEW_GAP entries:** none (all required reviewers ran; Codex CLI was available — Phase 1's prediction of dual-reviewer auto-skip did not materialise).
+
+**Doc-sync gate verdicts:**
+
+| Doc | Verdict |
+|---|---|
+| architecture.md | yes (Key files per domain table; tasks index; Memory-block lineage section). Stale `writeVersionSourceLinks` references corrected to `writeLineageRowsForVersion`; `memoryBlockLineageService` + `memoryUtilityAggregatorPure` added. |
+| docs/capabilities.md | yes (new "Memory Injection Utility" section). A and D intentionally not catalogued — operator-facing infrastructure, not customer-visible capabilities. |
+| docs/integration-reference.md | n/a — no integration behaviour change. |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | n/a — no agent fleet / review pipeline / locked-rules change. |
+| CONTRIBUTING.md | n/a — no lint-suppression policy change. |
+| docs/frontend-design-principles.md | n/a — UI tabs follow existing default-hidden / one-primary-action conventions. |
+| KNOWLEDGE.md | yes (4 new entries: semantic ranker recall fallback, lineage idempotency, 403-before-query for MV routes, synthesis FK ordering). |
+| docs/spec-context.md | n/a — feature pipeline, not spec-review session. |
+| docs/decisions/ | n/a — no new ADR; spec is the durable artefact. |
+| docs/context-packs/ | n/a — no section-anchor changes. |
+| references/test-gate-policy.md | n/a — no test-gate posture change. |
+| references/spec-review-directional-signals.md | n/a — no spec-reviewer signal additions. |
+| docs/incident-response.md | n/a — no incident-response framework change. |
+| docs/testing-transition-plan.md | n/a — no testing-transition change. |
+| .claude/FRAMEWORK_VERSION | n/a — repo-specific change, not framework-level. |
+
+---
+
+## Open issues for finalisation (chatgpt-pr-review)
+
+The Phase 3 finalisation pass should evaluate these deferrals against the full diff and operator policy. None are blockers for proceeding to Phase 3, but each is a real item the operator may want closed before merge.
+
+**Non-blocking pr-reviewer Should-fix items (deferred from R1/R3):**
+
+1. `server/services/memoryBlockSourcesService.ts` — missing explicit `eq(memoryBlockVersionSources.organisationId, ...)` predicate on the lineage and reverse-lineage queries (defence-in-depth per DEVELOPMENT_GUIDELINES.md §1).
+2. `server/services/memoryBlockSourcesService.ts` — no `LIMIT` on lineage fetch or reverse-lineage aggregate (unbounded — DoS surface when `include_reverse=true`).
+3. `server/services/agentExecutionService.ts:1364-1368` — fire-and-forget `injectedEntryIds` write bypasses `withOrgTx` + omits explicit `organisationId` filter; §8.31 PLAN_GAP entry required to name the residual risk.
+4. `server/services/memoryBlockLineageService.ts:119` — `rowsWritten` counter increments unconditionally after `onConflictDoNothing`; misreports actual inserts.
+5. `server/services/memoryUtilityQueryService.ts` — wire type drift: `entryUtility30d / blockUtility30d` declared as `string | null` (drizzle numeric serialisation) while spec §6.6 declares `number | null`. Operator decision: convert in service vs. amend spec.
+6. `server/services/memoryBlockSourcesService.ts:77` — `versionNumber: null` on 200 empty-versions response (spec §6.1 declares `number`; dual-reviewer's null pass-through fix may close this — operator confirm).
+7. `server/services/memoryBlockSourcesServicePure.ts` — `sourceType: string` too wide; narrow to `'workspace_memory'` literal per spec §6.1.
+8. `client/src/pages/MemoryUtilityTab.tsx` — em-dash `—` placeholder in user-facing copy violates CLAUDE.md UI rule.
+9. `client/src/pages/MemoryBlockSourcesTab.tsx` — retry handler duplicates fetch logic (extract `load()` closure for maintainability).
+10. `client/src/pages/MemoryUtilityTab.tsx` — bare `'x'` dismiss glyph (replace with `×`).
+11. `server/services/memoryBlockSourcesService.ts` — inline SQL ORDER BY would read more naturally as `desc()` drizzle helper.
+12. Missing render test for `MemoryBlockDetailPage` Sources-tab discovery (the Round 3 regression had no test safety net).
+13. `isMeasured()` predicate divergence: aggregator uses `Array.isArray`, daily-series helper uses `!== null` — converge.
+
+**Non-blocking adversarial-reviewer deferrals:**
+
+A. Cross-tenant defence-in-depth on reverse-lineage (same as Should-fix #1).
+B. DoS surface on unbounded lineage fetch (same as Should-fix #2).
+C. Concurrent-synthesis advisory lock missing (pg-boss `teamSize:1` provides first-line; service-layer dedup absent).
+
+**Operator-decision items (spec-conformance directional gaps, 2 not yet closed):**
+
+- REQ #67 (`docs/capabilities.md` lineage + AKR-ranker entries) — partially closed (B2 entry added; A and D intentionally not catalogued — see capabilities.md verdict in doc-sync gate).
+- REQ #68 (opportunistic cleanup `MEMORY_BLOCK_TOP_K`, `MEMORY_BLOCK_POOL_MULTIPLIER` env-overridable) — spec explicitly opts in: "Not required for the spec to land."
+
+**Env-gated pre-enablement gates (run before AKR ranker env flag is flipped on):**
+
+i. `verify-rls-coverage.sh` (CI-gate)
+ii. First MV refresh aggregate spot-check vs raw `agent_runs`
+iii. Threshold-0.30 spot-check on ~10 dev runs (D enablement)
+iv. text-embedding-3-small task-description vs master-prompt A/B
+v. EXPLAIN for daily-series query (index coverage on `agent_runs(organisation_id, created_at)`)
+vi. EXPLAIN for reverse-lineage `COUNT(*) GROUP BY source_entry_id_hash` query (`idx_mbvs_source_entry_hash`)
+
+---
+
+## Next phase: FINALISATION
+
+Open a new Claude Code session and type:
+
+```
+launch finalisation
+```
+
+`finalisation-coordinator` will:
+- S2 sync against main
+- G4 regression guard
+- `chatgpt-pr-review` (manual ChatGPT-web rounds) — primary second-opinion pass for the deferred items above
+- Full doc-sync sweep (re-verify the verdicts in this handoff)
+- KNOWLEDGE.md final extraction
+- `tasks/todo.md` cleanup (deferred items resolution)
+- `current-focus.md` → MERGE_READY
+- Apply `ready-to-merge` label (CI runs)
+
+This session ends at Phase 2 close.

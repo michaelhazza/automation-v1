@@ -66,4 +66,4 @@ Codex output: 4990 lines, completed cleanly (EXIT=0). Two findings:
 
 **Verdict:** APPROVED (3 iterations; 1 of 4 findings accepted and fixed in-branch; 3 rejected with documented rationale)
 
-**Commit at finish:** (to be filled in by auto-commit step)
+**Commit at finish:** cc8e03c7

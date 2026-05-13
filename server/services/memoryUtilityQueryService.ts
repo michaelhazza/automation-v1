@@ -22,6 +22,9 @@ export interface AgentUtilityRow {
 }
 
 export interface MemoryUtilityPayload {
+  organisationId: string;
+  generatedAt: string; // ISO timestamp of the read (transaction_timestamp())
+  windowDays: 30;
   agents: AgentUtilityRow[];
   dailySeries: DailyBucket[];
 }
@@ -97,6 +100,9 @@ export async function getMemoryUtilityForOrg(
   }));
 
   return {
+    organisationId,
+    generatedAt: dbNow.toISOString(),
+    windowDays: 30,
     agents: agentRows,
     dailySeries: bucketDailySeries(forBucketing, dbNow),
   };

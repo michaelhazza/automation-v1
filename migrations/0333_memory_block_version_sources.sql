@@ -23,10 +23,21 @@ CREATE TABLE memory_block_version_sources (
 
 -- Tenant isolation
 ALTER TABLE memory_block_version_sources ENABLE ROW LEVEL SECURITY;
-ALTER TABLE memory_block_version_sources FORCE  ROW LEVEL SECURITY;
+ALTER TABLE memory_block_version_sources FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON memory_block_version_sources
-  USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
+DROP POLICY IF EXISTS memory_block_version_sources_org_isolation ON memory_block_version_sources;
+
+CREATE POLICY memory_block_version_sources_org_isolation ON memory_block_version_sources
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
 
 -- Indexes
 CREATE INDEX idx_mbvs_block_version   ON memory_block_version_sources (block_version_id);

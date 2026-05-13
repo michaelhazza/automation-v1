@@ -14,11 +14,18 @@ interface AgentUtilityRow {
   subaccountId: string | null;
   runsMeasuredEntries: number;
   runsUnmeasuredEntries: number;
+  totalInjectedEntries: number;
+  totalCitedEntries: number;
+  totalInjectedBlocks: number;
+  totalCitedBlocks: number;
   entryUtility30d: string | null;
   blockUtility30d: string | null;
 }
 
 interface MemoryUtilityPayload {
+  organisationId: string;
+  generatedAt: string;
+  windowDays: 30;
   agents: AgentUtilityRow[];
   dailySeries: DailyBucket[];
 }

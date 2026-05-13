@@ -3,7 +3,7 @@ active_spec: docs/superpowers/specs/2026-05-13-memory-improvements-spec.md
 active_plan: tasks/builds/memory-improvements/plan.md
 build_slug: memory-improvements
 branch: claude/add-memvid-integration-ehAOr
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-13
 last_merge_ready_pr: none
 last_merge_ready_slug: none
@@ -29,7 +29,7 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Active plan:** `tasks/builds/memory-improvements/plan.md` (pending — feature-coordinator writes this in Phase 2)
 **Active build slug:** `memory-improvements`
 **Branch:** `claude/add-memvid-integration-ehAOr`
-**Status:** **BUILDING** — Phase 1 (SPEC) complete 2026-05-13. Phase 2 plan LOCKED 2026-05-13: 11 chunks across A synthesis lineage (`memory_block_version_sources`, migration 0333), B1+B2 citation-rate utility (`agent_runs.injected_entry_ids` migration 0334 + `mv_memory_utility_30d` migration 0343 with null-stable unique index for REFRESH CONCURRENTLY, COALESCEd aggregate totals, jsonb_typeof guards, array-shape `measured_entries`), D semantic ranker for AKR (env-flagged, no UI; per-candidate vector-error skip). chatgpt-plan-review 3 rounds — R1 closed 2 BLOCKERs + 6 TIGHTENINGs (commit `331ee9cc`); R2 closed 3 BLOCKERs + 4 TIGHTENINGs + 1 polish (commit `a5b27331`); R3 closed 3 final TIGHTENINGs, APPROVED. All 19 findings TECHNICAL, auto-applied. Phase 1 handoff updated with resume contract for Sonnet execution session: `tasks/builds/memory-improvements/handoff.md`. Plan: `tasks/builds/memory-improvements/plan.md`. **Next:** operator opens new Claude Code session on Sonnet, runs the chunk loop against the locked plan.
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-13. All 11 chunks implemented in `a1e87d75`; 3 fix-loop rounds closed all Blocking findings; dual-reviewer APPROVED at `cc8e03c7`. Phase 2 review pass: spec-conformance CONFORMANT_AFTER_FIXES, adversarial-reviewer non-blocking advisory, pr-reviewer APPROVED (final), reality-checker NEEDS_DISCUSSION → operator chose backfill (4 divergences closed). Doc-sync gate: all 15 registered docs verdict-recorded; architecture.md + KNOWLEDGE.md stale `writeVersionSourceLinks` references corrected to `writeLineageRowsForVersion` in same Phase 2 close commit. ~13 non-blocking items deferred to finalisation `chatgpt-pr-review`; 6 env-gated operational items deferred to pre-enablement. **Next:** open a new Claude Code session and type `launch finalisation`.
 
 **Last merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
 

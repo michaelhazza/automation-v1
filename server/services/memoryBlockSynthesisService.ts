@@ -37,6 +37,7 @@ import {
 import { cosineSimilarity } from './memoryBlockServicePure.js';
 import { writeVersionRow } from './memoryBlockVersionService.js';
 import { writeLineageRowsForVersion } from './memoryBlockLineageService.js';
+import { setOrgGUC } from '../lib/orgScoping.js';
 import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,9 @@ export async function runSynthesisForSubaccount(
     const status = tier === 'high' ? 'active' : 'draft';
 
     await db.transaction(async (tx) => {
+      // Set RLS session GUC for new lineage writes (architecture.md §Layer 1).
+      await setOrgGUC(tx, organisationId);
+
       const [created] = await tx
         .insert(memoryBlocks)
         .values({

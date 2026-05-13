@@ -70,6 +70,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   const config = getRetrievalConfig();
   let queryEmbedding: number[] | null = null;
   let anyFallbackApplied = false;
+  let pendingDegradedReason: 'retrieval.embedding_failed' | 'retrieval.empty_after_semantic' | null = null;
 
   if (config.semanticEnabled) {
     try {
@@ -90,6 +91,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
     } catch {
       // spec §13.5: catch scoped to embedding fetch only; fall back to legacy
       logger.warn('retrieval.embedding_failed', { runId });
+      pendingDegradedReason = 'retrieval.embedding_failed';
     }
   }
 
@@ -256,6 +258,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
           if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: chunkCandidates.length })) {
             anyFallbackApplied = true;
             logger.warn('retrieval.empty_after_semantic', { runId, category: 'chunks' });
+            pendingDegradedReason = 'retrieval.empty_after_semantic';
             chunkCandidates = chunkCandidates.map(c => ({ ...c, finalScore: 0 }));
           }
         }
@@ -349,6 +352,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
       if (recallFallbackPredicate({ filteredCount: aboveThreshold, originalCount: memoryBlockCandidates.length })) {
         anyFallbackApplied = true;
         logger.warn('retrieval.empty_after_semantic', { runId, category: 'blocks' });
+        pendingDegradedReason = 'retrieval.empty_after_semantic';
         memoryBlockCandidates = memoryBlockCandidates.map(c => ({ ...c, finalScore: 0 }));
       }
     }
@@ -408,5 +412,9 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   }
 
   // ── Step 7: Truncate for emission ───────────────────────────────────────────
+  // Attach degraded reason if embedding failed or semantic fallback was applied.
+  if (pendingDegradedReason !== null) {
+    ranked = { ...ranked, degraded: true, degradedReason: pendingDegradedReason };
+  }
   return truncateForEmission(ranked);
 }

@@ -1021,7 +1021,7 @@ Adding a new mode is a spec amendment, not an emergent shape.
 
 `reference_documents.source` (closed enum): `manual` (default), `from_file`, `auto_memory_approved`, `synthesised_by_agent` (reserved), `external` (legacy Drive). Only non-default values render a UI badge — the absence of a badge is the visual carrier of "this is normal".
 
-**Memory-block lineage (migration 0333).** `memory_block_version_sources` is an append-only join table recording which `workspace_memory_entries` contributed to each committed `memory_block_versions` row. Written at synthesis time by `memoryBlockSynthesisService` via `memoryBlockSourcesService.writeVersionSourceLinks()`. Deletion-safe: each row carries `source_entry_content_hash` + `source_agent_name_at_capture` so lineage remains readable even when the source entry row is soft-deleted. Producer-level idempotency contract: one `memory_block_versions` write per synthesis run regardless of how many entries were consumed — the version row is the idempotency anchor, not the synthesis run.
+**Memory-block lineage (migration 0333).** `memory_block_version_sources` is an append-only join table recording which `workspace_memory_entries` contributed to each committed `memory_block_versions` row. Written at synthesis time by `memoryBlockSynthesisService` via `memoryBlockLineageService.writeLineageRowsForVersion()`. Deletion-safe: each row carries `source_entry_content_hash` + `source_agent_name_at_capture` so lineage remains readable even when the source entry row is soft-deleted. Producer-level idempotency contract: one `memory_block_versions` write per synthesis run regardless of how many entries were consumed — the version row is the idempotency anchor, not the synthesis run.
 
 ### Data model
 
@@ -1088,9 +1088,11 @@ Preventive surface, not a runtime safety net. Constants in `retrievalObservabili
 | `server/services/retrievalObservabilityServicePure.ts` | Pure truncation + payload-shaping helpers. |
 | `server/services/retrievalQueryEmbedderPure.ts` | Pure semantic ranker helpers: `cosineSimilarity`, `scoreCandidates`, `recallFallbackPredicate`, `getRetrievalConfig`. Zero DB/network imports. |
 | `server/services/referenceDocumentService.ts` | Chunk-aware version write; mode-update API; triggers summarise + chunk-embed jobs. |
-| `server/services/memoryBlockSourcesService.ts` | Read lineage rows from `memory_block_version_sources` for the Sources tab; write source links at synthesis time via `writeVersionSourceLinks`. |
-| `server/services/memoryUtilityQueryService.ts` | Query `mv_memory_utility_30d` + recent runs for the Memory Utility dashboard; returns `MemoryUtilityPayload`. |
+| `server/services/memoryBlockSourcesService.ts` | Read lineage rows from `memory_block_version_sources` for the Sources tab. Read-only — assembles `MemoryBlockSourcesPayload` via the pure helper. |
+| `server/services/memoryBlockLineageService.ts` | Write lineage rows at synthesis time via `writeLineageRowsForVersion`. Called from inside the synthesis transaction (after `setOrgGUC`). |
+| `server/services/memoryUtilityQueryService.ts` | Query `mv_memory_utility_30d` + recent runs for the Memory Utility dashboard; returns `MemoryUtilityPayload` with top-level `organisationId`, `generatedAt`, `windowDays: 30`. |
 | `server/services/memoryUtilityDailySeriesPure.ts` | Pure daily-series bucketing (UTC midnight, gap-fill to 30 entries, NULL for denominator-zero). |
+| `server/services/memoryUtilityAggregatorPure.ts` | Pure JS aggregator that mirrors the SQL CTE in migration 0343. Spec-conformance deliverable; service path uses the SQL CTE for runtime, this exists for testability of the aggregation contract in isolation. |
 | `server/services/memoryUtilityRefreshService.ts` | Advisory-locked `REFRESH MATERIALIZED VIEW CONCURRENTLY` for `mv_memory_utility_30d`. |
 | `server/db/schema/mvMemoryUtility30d.ts` | Drizzle `.existing()` declaration for the utility MV. |
 | `server/routes/memoryBlockSources.ts` | `GET /api/orgs/:orgId/memory-blocks/:blockId/sources` — lineage read for Sources tab. |

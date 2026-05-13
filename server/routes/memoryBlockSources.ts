@@ -26,20 +26,11 @@ router.get(
     const version = req.query.version !== undefined ? Number(req.query.version) : undefined;
     const includeReverse = req.query.include_reverse === 'true';
 
-    try {
-      const payload = await getSourcesForBlock(blockId, req.orgId!, {
-        version: Number.isFinite(version) ? version : undefined,
-        includeReverse,
-      });
-      res.json(payload);
-    } catch (err) {
-      const e = err as { statusCode?: number; message?: string; errorCode?: string };
-      if (e.statusCode === 404) {
-        res.status(404).json({ error: e.message, errorCode: e.errorCode });
-        return;
-      }
-      throw err;
-    }
+    const payload = await getSourcesForBlock(blockId, req.orgId!, {
+      version: Number.isFinite(version) ? version : undefined,
+      includeReverse,
+    });
+    res.json(payload);
   }),
 );
 

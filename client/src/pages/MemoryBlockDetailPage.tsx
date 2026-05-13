@@ -53,11 +53,11 @@ export default function MemoryBlockDetailPage() {
   useEffect(() => {
     api.get<{ organisationId: string }>('/api/auth/me').then(({ data }) => {
       setOrgId(data.organisationId);
-      return api.get<{ blockSource: string }>(
-        `/api/orgs/${data.organisationId}/memory-blocks/${blockId}/sources`,
+      return api.get<{ id: string; source: string }>(
+        `/api/memory-blocks/${blockId}`,
       );
     }).then(({ data }) => {
-      setBlockSource(data.blockSource);
+      setBlockSource(data.source);
     }).catch(() => {
       // non-fatal — Sources tab stays hidden if lookup fails
     });
