@@ -30,6 +30,12 @@ interface IeeDraft {
   perSubaccountDailyCostCeilingCents: number;
 }
 
+// Read-only display of system-admin-controlled rollout state. Not part of the
+// editable draft; mutated only by the admin rollout-approval route.
+interface IeeRolloutState {
+  rolloutApproved: boolean;
+}
+
 function toDraft(s: OperatorSettings): Draft {
   return {
     sessionSoftCapMinutes: s.sessionSoftCapMinutes,
@@ -46,6 +52,7 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [ieeDraft, setIeeDraft] = useState<IeeDraft | null>(null);
+  const [ieeRollout, setIeeRollout] = useState<IeeRolloutState | null>(null);
   const [ieeEtag, setIeeEtag] = useState('');
   const [ieeSaving, setIeeSaving] = useState(false);
   const [ieeLoadError, setIeeLoadError] = useState<string | null>(null);
@@ -75,6 +82,7 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
       perTaskCostCeilingCents: s.perTaskCostCeilingCents,
       perSubaccountDailyCostCeilingCents: s.perSubaccountDailyCostCeilingCents,
     });
+    setIeeRollout({ rolloutApproved: s.rolloutApproved });
     setIeeEtag(String(s.settingsVersion));
   };
 
@@ -127,6 +135,7 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
       perTaskCostCeilingCents: s.perTaskCostCeilingCents,
       perSubaccountDailyCostCeilingCents: s.perSubaccountDailyCostCeilingCents,
     });
+    setIeeRollout({ rolloutApproved: s.rolloutApproved });
     setIeeEtag(String(s.settingsVersion));
     toast.success('IEE browser settings saved');
   };
@@ -223,6 +232,17 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
           <div className="py-4 px-5 text-sm text-slate-500">Loading...</div>
         ) : (
           <div>
+            {/* Rollout approval status — read-only; system-admin-only mutation. */}
+            {ieeRollout && !ieeRollout.rolloutApproved && (
+              <div className="px-5 pt-3 pb-2 text-[12px] text-amber-700 bg-amber-50 border-b border-amber-100">
+                Rollout approval: <span className="font-semibold">pending</span>. A system admin must approve rollout before IEE browser dispatch starts running, even with status set to On.
+              </div>
+            )}
+            {ieeRollout && ieeRollout.rolloutApproved && (
+              <div className="px-5 pt-3 pb-2 text-[12px] text-emerald-700 bg-emerald-50 border-b border-emerald-100">
+                Rollout approval: <span className="font-semibold">approved</span>.
+              </div>
+            )}
             <ToggleField
               label="IEE browser status"
               helpText="Enable or disable IEE browser sessions for this subaccount."

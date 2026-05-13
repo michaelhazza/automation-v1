@@ -292,9 +292,17 @@ export class E2bSandbox implements SandboxExecutionService {
     // read the task payload and profile mount descriptor at startup.
     // The harness uses profileMount.userDataDirInSandbox to set up the
     // Playwright user-data directory (spec §7.3, §8.1 extension).
+    //
+    // The task envelope (URL, actions, contract, etc.) is threaded through
+    // `input.browserTaskPayload` (NOT `inputFiles` — inputFiles is for file
+    // attachments). The harness validates the envelope it expects.
+    //
+    // Note: the sandbox is already running when this write happens, so the
+    // harness entrypoint must wait for /workspace/input.json before launching
+    // (see entrypoint.sh wait-loop, 30s default).
     if (templateName === 'iee-browser' && input.profileMount) {
       const harnessInput = {
-        taskPayload: input.inputFiles,  // task payload envelope
+        taskPayload: input.browserTaskPayload ?? null,
         profileMount: {
           userDataDirInSandbox: input.profileMount.userDataDirInSandbox,
         },

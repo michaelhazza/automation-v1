@@ -8,8 +8,12 @@ import { promises as fs } from 'fs';
  * (ieeBrowserProfileManager + IEE dispatch layer).
  */
 interface HarnessInput {
-  /** IEE browser task envelope (actions, contract, etc.) */
-  taskPayload: unknown;
+  /**
+   * IEE browser task envelope (actions, contract, etc.). Null when no envelope
+   * was threaded through (e.g. unit-test fixtures without a task payload).
+   * When null, the executor should fail with a clear "missing payload" reason.
+   */
+  taskPayload: unknown | null;
   /** Browser profile volume mount descriptor */
   profileMount: {
     userDataDirInSandbox: string;  // '/workspace/profile'

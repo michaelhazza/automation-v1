@@ -7,7 +7,7 @@ This document describes the first-launch criteria, dogfood gate, rollout-approva
 Before the first subaccount is approved for rollout, confirm:
 
 1. CI passes on the `claude/migrate-browser-e2b-snI99` branch (lint, typecheck, build, all static gates including `verify-no-do-references.sh`).
-2. Manual smoke test: create an `iee_browser` task, confirm the e2b sandbox provisions, the browser session records in `browser_warm_sessions`, and the run finalises with a cost row in `llm_requests` (`source_type='sandbox_compute'`).
+2. Manual smoke test: create an `iee_browser` task and confirm the e2b sandbox provisions and the run finalises with a cost row in `llm_requests` (`source_type='sandbox_compute'`). The `browser_warm_sessions` table records a row **only when a warm session is leased**: the dispatcher decides `warm_leased` vs `cold_start` at task start, and only `warm_leased` writes a row (lifecycle `available → leased → terminated`). Cold-start tasks launch a fresh sandbox without touching `browser_warm_sessions` — smoke validation against this table is conditional on the warm pool being non-empty for that subaccount. Empty warm pool at first-task time is normal.
 3. `subaccount_iee_browser_settings` row created for the dogfood subaccount with `status='on'` and `rollout_approved=true` via the admin rollout route (`POST /api/admin/iee-browser/rollout-approval/:subaccountId`).
 
 ## Dogfood gate

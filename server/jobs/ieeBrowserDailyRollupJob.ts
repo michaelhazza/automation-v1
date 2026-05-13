@@ -77,7 +77,8 @@ export async function runIeeBrowserDailyRollup(): Promise<{
           return tx.execute(sql`
             SELECT COALESCE(SUM(cost_with_margin_cents), 0) AS spend_cents
             FROM llm_requests
-            WHERE subaccount_id = ${setting.subaccount_id}
+            WHERE organisation_id = ${setting.organisation_id}
+              AND subaccount_id = ${setting.subaccount_id}
               AND source_type = 'sandbox_compute'
               AND subtype IN ('task', 'warm_pool')
               AND billing_day = ${yesterday}

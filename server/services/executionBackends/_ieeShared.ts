@@ -173,10 +173,21 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     throw new FailureError(failure('iee_browser_launch_disabled', 'IEE browser feature is disabled for this subaccount'));
   }
 
-  // Step 2: Now attempt warm checkout
+  // Step 2: Now attempt warm checkout. Pass the same settings snapshot we
+  // validated in Step 1 — do NOT re-read here (avoids split-brain if another
+  // admin changes settings mid-dispatch). resolveBrowserDispatch handles null
+  // explicitly so we use `settings ?? null` rather than the non-null assertion.
   const warmCheckout = await browserWarmPool.checkout({ organisationId, subaccountId });
-  const decision = resolveBrowserDispatch(settings!, warmCheckout);
-  // (decision will be warm_leased or cold_start — never launch_disabled here)
+  const decision = resolveBrowserDispatch(settings ?? null, warmCheckout);
+  if (decision.kind === 'launch_disabled') {
+    // Settings became invalid between Step 1 and Step 2 (race with admin toggle).
+    // Return any warm session we just leased before throwing.
+    if (warmCheckout) {
+      await browserWarmPool.terminate({ warmSessionId: warmCheckout.warmSessionId, reason: 'post_lease', organisationId, subaccountId }).catch(() => {});
+    }
+    throw new FailureError(failure('iee_browser_launch_disabled', 'IEE browser feature became disabled mid-dispatch'));
+  }
+  // (decision will be warm_leased or cold_start — race-handler above caught launch_disabled)
 
   // From this point onward a warm session may be leased. Every exit path
   // (including failures in profile resolve/mount, policy build, runTask, etc.)
@@ -204,6 +215,13 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
 
     // 3. Build policy (V1: deny-all network, standard ceilings)
+    // TODO IEE-DEF-7: network.mode='none' makes Playwright browser tasks
+    // unable to navigate. This is the V1 stub posture — production network
+    // policy (allowlist per skill, allowlist per subaccount, or open) must be
+    // wired before any subaccount sets rolloutApproved=true. The
+    // assertNotLatestTemplateVersion guard and the SDK-not-installed factory
+    // prevent dispatch from reaching this code path in production today.
+    // Tracked in tasks/todo.md IEE-DEF-7.
     const costCents = settings?.perTaskCostCeilingCents ?? 100;
     const policy: SandboxPolicy = {
       network: { mode: 'none' },
@@ -238,6 +256,9 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       outputSchemaRef: 'generic',
       profileMount: mounted,
       warmSessionCheckoutId,
+      // Thread the browser task envelope through to the in-sandbox harness.
+      // e2bSandbox writes this to /workspace/input.json as `taskPayload`.
+      browserTaskPayload: ieeTask ?? null,
     });
   } finally {
     // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects,

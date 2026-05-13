@@ -28,14 +28,18 @@ export interface IeeBrowserSettingsResponse {
 // ---------------------------------------------------------------------------
 
 /** Zod schema for PATCH /api/subaccounts/:id/iee-browser-settings body.
- *  Note: rolloutApproved is NOT accepted here — it is admin-only. */
+ *  Note: rolloutApproved is NOT accepted here — it is admin-only.
+ *  `.strict()` rejects unknown keys (including rolloutApproved) with a 400
+ *  instead of silently dropping them, so callers know their patch was not
+ *  applied. The admin rollout-approval route is the only path that can mutate
+ *  rolloutApproved. */
 export const patchBodySchema = z.object({
   status: z.enum(['on', 'off']).optional(),
   browserProfileRetentionDays: z.number().int().min(7).max(90).optional(),
   perTaskCostCeilingCents: z.number().int().min(1).max(10000).optional(),
   perSubaccountDailyCostCeilingCents: z.number().int().min(1).max(100000).optional(),
   expectedSettingsVersion: z.number().int(),
-});
+}).strict();
 
 export type PatchBody = z.infer<typeof patchBodySchema>;
 

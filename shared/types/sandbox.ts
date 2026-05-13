@@ -221,6 +221,14 @@ export interface SandboxRunTaskInput {
    * Non-browser tasks leave this absent.
    */
   warmSessionCheckoutId?: string | null;
+  /**
+   * Browser task envelope (IEE-browser, spec §8.1 extension).
+   * The actual task instructions (URL, actions, contract, etc.) threaded from
+   * `backendOptions.ieeTask` to the in-sandbox harness via /workspace/input.json.
+   * Non-browser tasks leave this absent. Shape is provider-opaque (the harness
+   * validates the envelope it expects).
+   */
+  browserTaskPayload?: unknown;
 }
 
 /**

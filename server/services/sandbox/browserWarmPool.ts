@@ -74,7 +74,7 @@ async function _terminateAndWriteCostRow(
         subtype: 'warm_pool',
         warmSessionId,
         featureTag: 'iee-browser-warm-pool',
-        callSite: 'worker',
+        callSite: 'iee-browser-warm-pool',
         provider: 'e2b',
         model: `sandbox:${BROWSER_TEMPLATE_NAME}`,
         costRaw: costCentsStr,
