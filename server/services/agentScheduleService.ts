@@ -203,6 +203,14 @@ export const agentScheduleService = {
     });
     await pgboss.schedule(PEER_MEDIANS_QUEUE, '0 0 * * *', null, { tz: 'UTC' });
 
+    // ── Memory-utility MV nightly refresh ─────────────────────────────
+    const MEMORY_UTILITY_QUEUE = 'refresh_memory_utility_30d';
+    await pgboss.work(MEMORY_UTILITY_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      const { refreshMemoryUtility30dJob } = await import('../jobs/refreshMemoryUtility30dJob.js');
+      await refreshMemoryUtility30dJob(job);
+    });
+    await pgboss.schedule(MEMORY_UTILITY_QUEUE, '0 16 * * *', null, { tz: 'UTC' });
+
     // ── Optimiser scan — daily per-subaccount scan ─────────────────────
     // createWorker opens db.transaction + withOrgTx, satisfying the ALS
     // requirement that getOrgScopedDb() reads inside runOptimiserScan.

@@ -1248,3 +1248,26 @@ For cross-owner action proposals inside a sub-run, `actions.approver_user_id` is
 `runTraceProjectionForViewer` is applied at BOTH the service layer (`agentExecutionEventService`) AND the route layer (`server/routes/`). The deliberate two-layer enforcement ensures a future direct consumer of `agentExecutionEventService` (bypassing the route) still gets the projection. Do not remove the route-layer call assuming the service call is sufficient — the redundancy is intentional security depth.
 
 Cross-link: `.claude/agents/chatgpt-pr-review.md` §1a duplicate-detection carveouts; this session's log under `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2 entry.
+### 2026-05-13 Pattern — Semantic ranker recall fallback (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §13.5 + plan Chunk 9.
+
+When `AKR_SEMANTIC_RANKER_ENABLED=true`, `retrievalService` computes cosine similarity per candidate and filters each category (chunks, memory blocks) INDEPENDENTLY by `AKR_RETRIEVAL_THRESHOLD` (default 0.30) BEFORE merging the two pools. Per-category recall fallback fires when filtering empties one category (all of THAT category's candidates fell below threshold); the fallback resets `finalScore: 0` for every candidate in that category and bypasses the filter for that category only. The other category's threshold filtering is unaffected. The merged pool is passed to `rankCandidates` with threshold `0` because category-level filtering is already complete (this is what prevents one category's fallback from dragging below-threshold candidates from the other category through). With the flag off, `queryEmbedding` stays `null`, category-level filtering is skipped, every candidate keeps `finalScore: 0`, and legacy scope+recency ordering applies. Embedding failure (OpenAI call throws) is caught per-run; `queryEmbedding` stays `null` and scoring branches are skipped entirely. These three safety properties — per-category isolation, recall fallback, embedding-failure tolerance — are decoupled from the env flag and from each other. Source: ChatGPT PR review R1 F1+F2 (2026-05-13) — the original implementation used a single `anyFallbackApplied` flag and applied threshold globally on the merged pool, which let one category's fallback disable thresholding for the other.
+
+### 2026-05-13 Pattern — Memory-block lineage idempotency contract (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §2, plan Chunk 2.
+
+`memory_block_version_sources` records which `workspace_memory_entries` contributed to each `memory_block_versions` row. Idempotency anchor is the version row, NOT the synthesis run. A synthesis run that produces no content change returns `null` from `writeVersionRow` (dedup guard in `memoryBlockVersionsService`); in that case the caller skips `writeLineageRowsForVersion`. A synthesis run that commits a new version row always writes the source links in the same operation. Consequence: every `memory_block_versions` row is guaranteed to have at least one source link if the block is `auto_synthesised`. Pre-migration blocks (`source !== 'auto_synthesised'`) and blocks synthesised before migration 0333 have no source rows — the Sources tab shows "No lineage data available" for those. Deletion-safe: each source link row retains `content_hash` (entry content snapshot) and `source_run_label_at_capture` (formatted agent + timestamp label) so lineage remains readable after the source entry is soft-deleted or the source `agent_runs` row is hard-deleted.
+
+### 2026-05-13 Pattern — 403-before-query for MV-backed routes (memory-improvements branch)
+
+Source: spec `tasks/builds/memory-improvements/spec.md` §6.2.
+
+Routes that read from materialised views (e.g., `mv_memory_utility_30d`) MUST canonicalise and compare path-org vs session-org BEFORE issuing any DB query. Pattern: `const canonical = pathOrgId.toLowerCase()` vs `req.organisationId.toLowerCase()`, 403 if mismatch. This is doubly important for MV-backed surfaces because MVs are excluded from RLS (they are read-only aggregates; RLS on the base tables governs write access; route-layer permission gates govern read access). Skipping the 403-before-query check on an MV route means a user with a valid session for org A can read org B's aggregated metrics by substituting the path parameter. Detection: any new route that queries an MV or a table in `rlsExclusions.ts` — confirm a 403-before-query guard is present before the first DB call.
+
+### 2026-05-13 Note — Synthesis must always write memory_block_versions before memory_block_version_sources (memory-improvements branch)
+
+Source: plan Chunk 2 review.
+
+`memory_block_version_sources` has a FK to `memory_block_versions`. If auto-synthesis writes a `memoryBlocks` row (insert), it MUST also call `writeVersionRow` to produce a `memory_block_versions` row in the same operation, or the FK constraint for source links will fail. Previously this was implicit; it is now explicit. `writeVersionRow` returns `null` for consecutive identical content (dedup); callers skip `writeLineageRowsForVersion` in that case. The correct call order is always: `insertMemoryBlock` → `writeVersionRow` → `writeLineageRowsForVersion` (if version row was created).

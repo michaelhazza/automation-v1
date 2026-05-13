@@ -1050,6 +1050,23 @@ export async function getBlockMeta(
   return row ?? null;
 }
 
+export async function getBlockById(
+  blockId: string,
+  orgId: string,
+): Promise<Pick<MemoryBlock, 'id' | 'source'> | null> {
+  const [row] = await db
+    .select({ id: memoryBlocks.id, source: memoryBlocks.source })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, orgId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  return row ?? null;
+}
+
 export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {
   // Verify the block belongs to the caller's org before detaching
   const [block] = await db

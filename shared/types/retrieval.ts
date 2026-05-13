@@ -10,11 +10,13 @@ export type RetrievalRejectionReason =
   | 'authorization_filtered'
   | 'below_threshold';
 
-// Closed enum — spec §1.5 #13
+// Closed enum — spec §1.5 #13, §13.5 (D-phase additions)
 export type RetrievalDegradedReason =
   | 'pool_query_failed'
   | 'embedding_provider_failed'
   | 'rank_failed'
+  | 'retrieval.embedding_failed'
+  | 'retrieval.empty_after_semantic'
   | 'unknown';
 
 export interface RetrievalCandidate {

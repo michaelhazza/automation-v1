@@ -166,6 +166,10 @@ import memoryInspectorRouter from './routes/memoryInspector.js';
 import portfolioRollupRouter from './routes/portfolioRollup.js';
 // Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
 import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
+// Memory improvements spec §4 Phase 1 — block sources / lineage route
+import memoryBlockSourcesRouter from './routes/memoryBlockSources.js';
+// Memory improvements spec §4 Phase 2/4 — memory utility dashboard route
+import memoryUtilityRouter from './routes/memoryUtility.js';
 import pulseRouter from './routes/pulse.js';
 // Universal Brief routes (Phase 2 + Phase 5)
 import briefsRouter from './routes/briefs.js';
@@ -374,6 +378,8 @@ app.use(dropZoneRouter);
 app.use(memoryInspectorRouter);
 app.use(portfolioRollupRouter);
 app.use(memoryBlockVersionsRouter);
+app.use(memoryBlockSourcesRouter);
+app.use(memoryUtilityRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

@@ -94,6 +94,20 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ---
 
+## Closed by memory-improvements (PR #298, 2026-05-13)
+
+REQs #20, #38, #41, #64 — all closed by Phase 2 fix-loop R2 (backfill) plus chatgpt-pr-review R1+R2:
+- REQ #20: `MemoryBlockSourcesPayload` reshaped to spec §6.1 nested form; UI + tests updated.
+- REQ #38: `memoryUtilityAggregatorPure.ts` + `.test.ts` shipped (9 named cases per spec §12.1).
+- REQ #41: top-level `organisationId / generatedAt / windowDays:30` + 4 totals fields added.
+- REQ #64: `pendingDegradedReason` threaded through to `RetrievalResult.degradedReason` at emission sites.
+
+REQ #67 — `docs/capabilities.md` partially addressed: "Memory Injection Utility" entry added (B2 dashboard capability). A (lineage) and D (AKR semantic ranker) intentionally not catalogued as separate capabilities; both are operator-facing infrastructure rather than customer-visible product features. Rationale recorded in plan §10.
+
+REQ #68 — Opportunistic cleanup (env-overridable `MEMORY_BLOCK_TOP_K` / `MEMORY_BLOCK_POOL_MULTIPLIER`): explicit operator deferral. Spec says "Not required for the spec to land." Move to follow-up backlog or close as won't-do.
+
+---
+
 ## Known un-built / low-priority
 
 These are noted to prevent re-discovery — none are urgent.

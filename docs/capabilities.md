@@ -855,6 +855,21 @@ Structured access to connected helpdesk inboxes. All read skills are non-destruc
 - **Mobile-responsive operations view** — the in-flight tab renders as a card layout on phones and tablets so on-call response doesn't require a desktop. Same data, same real-time updates.
 - **Token-level streaming progress (infrastructure ready)** — the platform supports token-by-token progress events from LLM providers that expose streaming. Admins see a live tokens-so-far indicator alongside elapsed time during multi-minute reasoning generations. Adapter-level wiring to specific providers rolls out as each vendor's streaming API is adopted.
 
+### Memory Injection Utility
+
+| | |
+|---|---|
+| **Outcome** | Operators see what percentage of injected memory context is actually cited by agents, and which agents have the most and least effective memory — so they can tune memory configuration against evidence rather than intuition |
+| **Trigger** | Reviewing agent effectiveness, preparing for a memory-configuration audit, or investigating why an agent keeps repeating information it was already given |
+| **Deliverable** | 30-day trend charts (entry citation rate, block citation rate) and a per-agent breakdown table with measured run counts and utility percentages |
+
+- **Entry utility and block utility tracked separately** — workspace memory entries (discrete captured facts) and memory blocks (synthesised summaries) have different citation patterns. Tracking them separately lets operators distinguish "the synthesis is good but the blocks are too long for the agent to use" from "the synthesis is poor and the raw entries are what actually helps."
+- **Measured vs. unmeasured run count** — runs before the measurement substrate was added are counted as unmeasured, not as zero-utility. The dashboard never misrepresents old runs as evidence of poor memory injection.
+- **30-day rolling window with daily granularity** — the chart shows trend direction, not just a current snapshot. A falling utility score after a memory-configuration change is legible immediately.
+- **Per-agent breakdown sorted by entry utility** — agents with fewer than 10 measured runs show "Insufficient data" rather than a misleading low percentage based on one run.
+- **Line-chart gaps for missing data** — days with no measured runs render as gaps in the chart line, not as drops to zero. The visual accurately represents data availability.
+- **Nightly refresh, live daily series** — the per-agent table refreshes nightly (slight lag expected); the daily-series charts reflect live run data.
+
 ### Tier 4 Isolated Code Execution
 
 | | |
