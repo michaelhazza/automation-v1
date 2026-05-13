@@ -229,6 +229,8 @@ The codebase already implements much of what the brief proposes, sometimes under
 
 Agents represent roles, responsibilities, goals, and ownership within an organisation. They belong to the organisation structure. They are not tied to a controller or runtime.
 
+Agents may additionally be owned by a specific user. User-owned agents act under that user's identity for credential resolution, run attribution, and privacy boundary. The Executive Assistant (§16.1) is the first consumer; the Dev Agent (§16.3) is the second. Subaccount-owned agents (the existing default) are unaffected.
+
 Examples include: Executive Assistant, Support Agent, Revenue Ops Assistant, Research Intelligence Agent, Paid Ads Monitoring Agent, Appointment Setter, Dev Agent, COO / Orchestrator Agent, QA Agent, Platform Engineering Agent.
 
 Agents answer:
@@ -513,6 +515,8 @@ Credential policy, scope, approval, audit, and revocation are owned by the Synth
 It governs API keys, OAuth tokens, ChatGPT OAuth identities, Gmail credentials, Calendar credentials, browser cookies, SSH keys, certificates, temporary credentials, runtime secrets, session identities, credential injection, credential revocation, credential rotation, tenant and subaccount boundaries, audit access, approval-based access.
 
 Its job is to allow shared IEE infrastructure while preventing credential leakage or cross-tenant exposure.
+
+For user-owned agents, the broker resolves credentials by (subaccount_id, owner_user_id, provider). A mismatch between the requested ownerUserId and the credential's owner_user_id raises OWNER_MISMATCH and fails the run closed.
 
 It should enforce subaccount scoping, agent scoping, session scoping, environment scoping, time-limited access, policy-based injection, auditability, revocation.
 

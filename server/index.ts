@@ -95,6 +95,12 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+// Personal Assistant V1 — EA drafts CRUD + approval/reject/retry (Chunk 6)
+import eaDraftsRouter from './routes/eaDrafts.js';
+// Personal Assistant V1 — Voice profile CRUD + opt-out + reactivate (Chunk 13)
+import voiceProfilesRouter from './routes/voiceProfiles.js';
+// Personal Assistant V1 — Home-widget data endpoint (Chunk 14)
+import agentHomeWidgetsRouter from './routes/agentHomeWidgets.js';
 import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
 import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
@@ -217,6 +223,8 @@ import runArtifactsRouter from './routes/runArtifacts.js';
 import runArtifactsFinalizeRouter from './routes/internal/runArtifactsFinalize.js';
 // Support Desk canonical substrate (C13)
 import supportRouter from './routes/support/index.js';
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+import personalSetupRouter from './routes/personalSetup.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -395,6 +403,9 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(eaDraftsRouter);
+app.use(voiceProfilesRouter);
+app.use(agentHomeWidgetsRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
 // ghl/teamwork/slack/stripe-agent webhook routers mounted before body parsing (need raw body for HMAC)
@@ -481,6 +492,8 @@ app.use(runArtifactsRouter);
 app.use(runArtifactsFinalizeRouter);
 // Support Desk canonical substrate (C13) — subaccount-scoped per DEC-1 (pre-test-hardening T1)
 app.use('/api/subaccounts/:subaccountId/support', supportRouter);
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+app.use(personalSetupRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -714,12 +727,15 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const pgboss = await getPgBoss();
-      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
       const { createWorker } = await import('./lib/createWorker.js');
       await createWorker({
         queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
         boss: pgboss,
-        handler: workflowGateStallNotifyHandler,
+        handler: async (job) => {
+          await workflowGateStallNotifyHandler(job as import('pg-boss').Job<import('./jobs/workflowGateStallNotifyJob.js').WorkflowGateStallNotifyPayload>);
+          await eaDraftStallResetHandler();
+        },
       });
     } catch (err) {
       console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
@@ -823,6 +839,45 @@ async function start() {
       logger.info('[boot] operator-session-refresh worker registered');
     } catch (err) {
       console.error('[boot] failed to register operator-session-refresh worker', err);
+    }
+  }
+  // Voice profile refresh (nightly cross-org scan)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { voiceProfileRefreshHandler, VOICE_PROFILE_REFRESH_JOB } = await import('./jobs/voiceProfileRefreshJob.js');
+      await boss.work(VOICE_PROFILE_REFRESH_JOB, async (job) => {
+        await voiceProfileRefreshHandler(job as import('pg-boss').Job<Record<string, never>>);
+      });
+      logger.info('[boot] voice-profile-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register voice-profile-refresh worker', err);
+    }
+  }
+  // Gmail inbox poll (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { gmailInboxPollHandler, GMAIL_INBOX_POLL_JOB } = await import('./jobs/gmailInboxPollJob.js');
+      await boss.work(GMAIL_INBOX_POLL_JOB, async (job) => {
+        await gmailInboxPollHandler(job as import('pg-boss').Job<import('./jobs/gmailInboxPollJob.js').GmailPollJobData>);
+      });
+      logger.info('[boot] gmail-inbox-poll worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register gmail-inbox-poll worker', err);
+    }
+  }
+  // Calendar lookahead (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { calendarLookaheadHandler, CALENDAR_LOOKAHEAD_JOB } = await import('./jobs/calendarLookaheadJob.js');
+      await boss.work(CALENDAR_LOOKAHEAD_JOB, async (job) => {
+        await calendarLookaheadHandler(job as import('pg-boss').Job<import('./jobs/calendarLookaheadJob.js').CalendarLookaheadJobData>);
+      });
+      logger.info('[boot] calendar-lookahead worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register calendar-lookahead worker', err);
     }
   }
   // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)

@@ -41,6 +41,9 @@ export const auditEvent = {
   agent: {
     observationsRetentionPrune: { name: 'agent.observations.retention_prune' },
   },
+  owner: {
+    contentRevealed: { name: 'owner.content_revealed', severity: 'security_boundary' as const },
+  },
 } as const satisfies Record<string, Record<string, AuditEventSpec>>;
 
 // Derive SecurityAuditEventName as a union of all .name literal values across all namespaces.
@@ -54,4 +57,5 @@ export type SecurityAuditEventName =
   | EventNamesInNamespace<AuditEventFactory['oauth']>
   | EventNamesInNamespace<AuditEventFactory['security']>
   | EventNamesInNamespace<AuditEventFactory['audit']>
-  | EventNamesInNamespace<AuditEventFactory['agent']>;
+  | EventNamesInNamespace<AuditEventFactory['agent']>
+  | EventNamesInNamespace<AuditEventFactory['owner']>;

@@ -60,6 +60,8 @@ export interface CredentialAuditEntry {
   metadata?: Record<string, unknown>;
 }
 
+export const OWNER_MISMATCH = 'OWNER_MISMATCH' as const;
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function mapAuthType(
@@ -169,10 +171,14 @@ export const credentialBrokerService = {
    * Inject credential material into an environment dict for runtime use.
    * Decrypted material is short-lived and dropped at the end of the call
    * site's lifecycle. Delegates to connectionTokenService.
+   *
+   * When ownerUserId is provided and the connection has an owner_user_id set,
+   * the two must match or OWNER_MISMATCH (403) is thrown.
    */
   async injectIntoEnvironment(params: {
     issuedCredential: IssuedCredential | OperatorSessionEnvelope;
     environment: Record<string, string>;
+    ownerUserId?: string;
   }): Promise<void> {
     const { issuedCredential, environment } = params;
 
@@ -199,6 +205,13 @@ export const credentialBrokerService = {
       throw Object.assign(
         new Error(`Connection ${issuedCredential.connectionId} not found for injection`),
         { statusCode: 404, errorCode: 'credential_not_found' },
+      );
+    }
+
+    if (params.ownerUserId && conn.ownerUserId && conn.ownerUserId !== params.ownerUserId) {
+      throw Object.assign(
+        new Error(`Credential owner mismatch: expected owner ${params.ownerUserId}, got ${conn.ownerUserId}`),
+        { statusCode: 403, errorCode: OWNER_MISMATCH },
       );
     }
 
