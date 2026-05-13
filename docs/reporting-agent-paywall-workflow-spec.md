@@ -114,7 +114,7 @@ Generation (one-time, per environment):
 ```bash
 openssl rand -base64 32
 ```
-Add to `.env` (local), Replit secrets (main app prod), and the worker container env (DigitalOcean). Never committed.
+Add to `.env` (local), Replit secrets (main app prod), and the worker container env (e2b). Never committed.
 
 ### 2.5 Audit
 

@@ -3132,7 +3132,7 @@ The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-s
 ### Topology
 
 ```
-Main app (Replit/Express)        Worker (Docker, DigitalOcean)
+Main app (Replit/Express)        Worker (Docker, e2b sandboxes)
   ├─ enqueues IEE jobs              ├─ pulls jobs from pg-boss
   ├─ inserts ieeRuns rows           ├─ runs the execution loop (Playwright / shell)
   └─ serves usage/cost APIs         └─ updates ieeRuns, writes ieeSteps
