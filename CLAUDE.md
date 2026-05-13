@@ -78,8 +78,10 @@ Run only relevant checks unless the change spans client + server. Never skip a f
 
 ## 6. Surgical Changes
 
-- Every changed line should trace directly to the user's request. If it doesn't, revert it.
-- If you notice unrelated dead code, mention it in your response — don't delete it. LLMs are overconfident about what's "certainly unused." The cost of a wrong deletion is high; the cost of mentioning it is zero.
+1. **Three-Similar-Lines rule** — resist abstraction until the fourth occurrence. Three near-identical lines is acceptable; do not extract a helper until a fourth call site lands.
+2. **Line-by-line justification** — every changed line traces directly to the user's request. If it does not, revert it.
+3. **Surface, don't smuggle** — if you notice an out-of-scope improvement (dead code, smell, doc drift) while implementing, surface it in your response and route it to `tasks/todo.md`. Do not silently fix it. LLMs are overconfident about what's "certainly unused." The cost of a wrong deletion is high; the cost of mentioning it is zero.
+
 - Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
 - Match existing style, even if you'd do it differently. No drive-by reformatting.
 - Never duplicate logic — if the same behaviour is needed in two or more places, extract it into a shared function, helper, or service before writing it twice.
@@ -197,6 +199,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `pr-reviewer` | Independent read-only code review; mandatory before marking non-trivial tasks done |
 | `dual-reviewer` | Codex review loop with Claude adjudication; local-only; auto from feature-coordinator when available |
 | `adversarial-reviewer` | Read-only threat-model review (tenant isolation, auth, races, injection); Phase 1 advisory |
+| `reality-checker` | Post-pr-reviewer evidence-demanding verifier; read-only; demands proof before approving a build; Significant/Major only |
 | `spec-reviewer` | Codex review loop for spec documents; max 5 iterations lifetime; non-blocking |
 | `feature-coordinator` | Phase 2 orchestrator — plan, build chunks, branch review, doc-sync, Phase 3 handoff |
 | `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, reviews, handoff |
@@ -208,6 +211,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `chatgpt-pr-review` | ChatGPT PR review coordinator; run in dedicated new Claude Code session |
 | `chatgpt-spec-review` | ChatGPT spec review coordinator; run in dedicated new Claude Code session |
 | `hotfix` | Fast-path for time-critical fixes; bypasses pipeline; minimum review bar enforced |
+| `incident-commander` | Production incident coordinator — SEV classification, scribe, post-mortem; runs INLINE; see `docs/incident-response.md` |
 | `context-pack-loader` | Loads mode-scoped slice of architecture/dev-guidelines/knowledge; inline playbook |
 | `codebase-explainer` | Human-readable narrative tour of the codebase; output in `docs/codebase-tour.md` |
 | `validate-setup` | Read-only framework health checker; verifies fleet, hooks, ADRs, FRAMEWORK_VERSION |
@@ -250,11 +254,13 @@ Classify every task before starting:
 "audit-runner: hotspot rls"              # see audit-runner.md for full mode list
 "dual-reviewer: [brief description]"     # local-only, user must explicitly ask
 "adversarial-reviewer: hunt holes in the changes I just made to [file list]"  # read-only, user must explicitly ask; caller provides the changed-file set
+"reality-checker: verify [success criteria] with evidence [log/screenshot paths]"  # Significant/Major only; auto-invoked by feature-coordinator after pr-reviewer
 "spec-reviewer: review docs/path-to-spec.md"
 "spec-coordinator: <brief or rough spec topic>"   # Phase 1: spec + mockup + review
 "launch feature coordinator"                       # Phase 2: build + review (new session)
 "launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
 "hotfix: <what's broken>"                          # time-critical fix path
+"incident-commander: prod is on fire"              # coordinate incident response, timeline, post-mortem
 ```
 
 **Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, and `audit-runner`.
@@ -265,16 +271,44 @@ For `audit-runner`, the inline rule exists so the TodoWrite task list stays visi
 
 Operator entry phrases (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`) are signals for the main session to ADOPT the playbook — read the agent file and follow it. They are NOT instructions to call `Agent({subagent_type: "<coordinator>"})`.
 
-### Review pipeline (mandatory order)
+### Review pipeline (GRADED posture)
 
-For Standard/Significant/Major tasks, before marking done or opening a PR:
+The review pipeline uses a **GRADED posture**: reviewer requirements scale with task class. Not every reviewer applies to every task. Silently skipping a required reviewer is a policy violation — use the `REVIEW_GAP` artifact format instead.
 
-1. **Spec-driven only:** `spec-conformance` first. If it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
-2. `pr-reviewer` — always.
-3. `dual-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when Codex is available; manual standalone invocation also allowed. Skipped when Codex unavailable.
-4. `adversarial-reviewer` — auto-invoked from `feature-coordinator`'s branch-level review pass when diff matches security surface (§5.1.2). Manual invocation also supported. Phase 1 advisory; non-blocking.
+**Three-tier mandatory/skippable matrix:**
 
-Steps 3 and 4 are independent optional steps; their order does not affect correctness.
+| Reviewer | Trivial | Standard | Significant / Major |
+|---|---|---|---|
+| `spec-conformance` | skip | mandatory if spec-driven | mandatory if spec-driven |
+| `pr-reviewer` | skip | **mandatory** | **mandatory** |
+| `reality-checker` | skip | skip | **mandatory** |
+| `adversarial-reviewer` | skip | skip | mandatory if diff matches §5.1.2 security surface |
+| `dual-reviewer` | skip | skip | mandatory — skippable with `REVIEW_GAP` |
+| `chatgpt-pr-review` | skip | skip | mandatory — skippable with `REVIEW_GAP` |
+
+**Reviewer notes:**
+- `spec-conformance`: if it returns `CONFORMANT_AFTER_FIXES`, re-run `pr-reviewer` on the expanded changed-code set.
+- `reality-checker`: auto-invoked by `feature-coordinator` (§8.4). Caller must supply the implementer's stated criteria and evidence; without evidence it returns `NEEDS_WORK` immediately.
+- `adversarial-reviewer`: auto-invoked when diff matches §5.1.2 security surface. Phase 1 advisory; non-blocking.
+- `dual-reviewer`: auto-invoked when Codex is available; write `REVIEW_GAP` when unavailable.
+- `chatgpt-pr-review` and `dual-reviewer` are independent; their order does not affect correctness.
+
+**`REVIEW_GAP` artifact format:**
+
+```
+REVIEW_GAP: <reviewer-name> | task-class: <Trivial|Standard|Significant|Major> | reason: <one-line> | operator-override: <yes-<ISO-timestamp>|no> | remediation: <TODO-link|accept>
+```
+
+Write this line to `tasks/builds/{slug}/progress.md` whenever a required reviewer is skipped.
+
+**Trigger taxonomy — when to write `REVIEW_GAP`:**
+
+- **Policy-not-applicable → NO `REVIEW_GAP`.** The reviewer was correctly not invoked because the policy itself does not require it for this task class or diff shape. Examples: `reality-checker` skipped for Trivial/Standard; `adversarial-reviewer` skipped because the diff does not cross the §5.1.2 security-sensitive surface; `spec-conformance` skipped because the task is not spec-driven. Coordinator writes a one-line `<reviewer>: skipped — <policy reason>` note in `progress.md`, but no `REVIEW_GAP` line.
+- **Required-but-unavailable → `REVIEW_GAP` REQUIRED.** Policy says invoke; the reviewer could not run. Examples: `dual-reviewer` skipped because Codex CLI is not installed locally; `chatgpt-pr-review` skipped because the operator declined.
+- **Manually skipped / operator override → `REVIEW_GAP` REQUIRED.** The `operator-override` field is `yes-<ISO-timestamp>`.
+- **Ambiguous applicability → `REVIEW_GAP` with `task-class: NEEDS_DISCUSSION`.** Surface to finalisation.
+
+*"A silent skip with no `REVIEW_GAP` entry is itself a policy violation."* This rule applies to the second, third, and fourth trigger types above. Policy-not-applicable skips are NOT silent — they carry a one-line policy-reason note — and are NOT violations.
 
 Full caller contracts (filename convention, deferred-items routing, NON_CONFORMANT triage, log persistence) live in [`tasks/review-logs/README.md`](./tasks/review-logs/README.md). Each agent definition under `.claude/agents/` carries its own copy of the contract relevant to that agent.
 

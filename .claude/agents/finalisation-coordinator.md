@@ -39,9 +39,19 @@ Read in order:
 
 **Time-source invariant:** every timestamp written by this coordinator (handoff sections, label timestamps, log entries, commit summaries) must be UTC ISO 8601 generated from `date -u` at execution time. Never substitute git commit time, DB time, or client-side time. Never mix sources within a run.
 
-**REVIEW_GAP check** — after reading the handoff, check `dual-reviewer verdict:` for `REVIEW_GAP: Codex CLI unavailable`. If present, print immediately before any other output:
+**REVIEW_GAP check** — after reading the handoff, check the `REVIEW_GAP entries:` field for any lines matching the full format:
+```
+REVIEW_GAP: <reviewer-name> | task-class: ... | reason: ... | operator-override: ... | remediation: ...
+```
+Also check `dual-reviewer verdict:` for any legacy short-form `REVIEW_GAP: ...` (for handoffs written before the GRADED-posture upgrade).
 
-> ⚠ **Dual-reviewer was skipped in Phase 2 — reduced review coverage.** `chatgpt-pr-review` in step 5 will be the primary second-opinion pass. Consider running `dual-reviewer` manually if Codex becomes available before merge.
+For each `REVIEW_GAP` found where `operator-override` is `no` (or for any legacy short-form entry), print immediately before any other output:
+
+> ⚠ **Review coverage gap detected in Phase 2.** The following required reviewer(s) were skipped:
+>
+> {each REVIEW_GAP line, one per bullet}
+>
+> `chatgpt-pr-review` in step 5 will be the primary second-opinion pass for any skipped dual-reviewer. For other gaps, review the remediation field and act before merge.
 
 **Spec-deviations check:** check `spec_deviations:` in the handoff. If present, note them — they will be included in the chatgpt-pr-review kickoff context in step 5.
 
@@ -612,9 +622,15 @@ If branch protection on `main` requires PRs (no direct push allowed):
 
 ## Step 13 — End-of-phase prompt (merged)
 
-**REVIEW_GAP check:** if the handoff contains `REVIEW_GAP: Codex CLI unavailable` in the `dual-reviewer verdict:` field, prepend:
+**REVIEW_GAP check:** if the handoff `REVIEW_GAP entries:` field is non-empty, or the `dual-reviewer verdict:` field contains any `REVIEW_GAP:` token (legacy format), prepend for each gap where `operator-override` is `no`:
 
-> ⚠ **Dual-reviewer was skipped — reduced review coverage for this build.** The Codex pass was unavailable. `chatgpt-pr-review` was the primary second-opinion pass; consider running `dual-reviewer` retrospectively against the squash-commit if Codex becomes available.
+> ⚠ **Review coverage gap for this build.** The following required reviewer(s) were skipped:
+>
+> {each REVIEW_GAP line, one per bullet}
+>
+> If any gap remains unresolved (remediation not `accept`), consider running the reviewer retrospectively against the squash-commit.
+
+On finalisation, emit / refresh the `REVIEW_GAP` entries from the handoff as a top-level artefact record in `tasks/current-focus.md` under `## Paused build / artefact record` (or the existing artefact prose section), so future sessions can see which coverage gaps were carried to merge.
 
 Print verbatim:
 
