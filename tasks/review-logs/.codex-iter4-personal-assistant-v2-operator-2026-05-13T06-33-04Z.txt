@@ -1,3 +1,51 @@
+OpenAI Codex v0.118.0 (research preview)
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e200a-5fc4-79b1-be45-ffd3a46ffc01
+--------
+user
+You are reviewing iteration 4 of a draft specification document. Iterations 1, 2, and 3 fixed 26 mechanical defects across the spec.
+
+Two AUTO-DECIDED items are now in `tasks/todo.md` (both BLOCK specific chunks; both have candidate strategies in the spec's §13 open questions):
+
+1. `PA-V2-OP-S1` (BLOCKS CHUNK 7) — the file-events backing-store schema strategy (new `operator_run_files` vs extend `execution_files`). §13 #1.
+2. `PA-V2-OP-S2` (BLOCKS CHUNK 3) — the `delegation_outcomes` state-machine column gap (extend table vs new `cross_owner_substep_state` table). §13 #2.
+
+Do NOT re-raise either. Both are operator-routed.
+
+This iteration is the LAST consistency pass before the loop converges. Look for:
+
+1. **Any remaining contradictions, drift, or unspecified mechanisms.** Be specific. If nothing surfaces, say so explicitly: "no new findings, the spec is clean."
+2. **Has iteration 3's strategy-neutralisation accidentally broken anything else?** Specifically, does §9.4 still make a load-bearing claim that doesn't survive the §13 #2 routing?
+3. **Are there any §11 self-consistency claims that are now stale given iterations 1, 2, 3's edits?**
+4. **§4 inventory lock — last sweep.** Are there ANY remaining file/column/migration mentions not in §4?
+
+Project context (do NOT re-derive):
+- Pre-production. No staged rollouts. No feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, new abstractions duplicating existing primitives.
+- The two open schema decisions (PA-V2-OP-S1, PA-V2-OP-S2).
+
+For each finding, give:
+1. Short title.
+2. Section heading or line range.
+3. Defect.
+4. Minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say: "no new findings, the spec is clean".
+
+The spec is:
+
 **Status:** draft
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
@@ -67,7 +115,7 @@ From `docs/spec-context.md`:
 
 V2-specific framing additions:
 
-- **Universal OpenTaskView + run-trace invariant** (brief §3.1): every agent run under every controller surfaces through the same `OpenTaskView` primitives. The controller-style badge, chain-link boundary markers, and budget events that operator-mode runs surface are emitted by event types ALREADY DEFINED IN OPERATOR-BACKEND (Spec D §3.13 + prototypes `r1-r17`) — V2 introduces NO new badge/boundary/budget event types. The complete list of new event variants V2 adds to the run-trace stream is the four declared in §4.6: `file.created`, `file.modified` (§5.7), `cross_owner_substep.awaiting_initiator_decision` (emitted only on the `ask_initiator` timeout branch, §5.6), and `cross_owner_substep.completed` (the single terminal event for every cross-owner sub-run, §9.4). The "no new visual chrome" claim is therefore enforced by event-type closure: §4.6 is the canonical inventory; anything not listed there must reuse an existing operator-backend renderer. This invariant is platform-level and gets a clause in `architecture.md` during V2's doc-sync sweep (§4).
+- **Universal OpenTaskView + run-trace invariant** (brief §3.1): every agent run under every controller surfaces through the same `OpenTaskView` primitives. The controller-style badge, chain-link boundary markers, and budget events that operator-mode runs surface are emitted by event types ALREADY DEFINED IN OPERATOR-BACKEND (Spec D §3.13 + prototypes `r1-r17`) — V2 introduces NO new badge/boundary/budget event types. The only new event types V2 adds to the run-trace stream are `file.created`, `file.modified` (§5.7), and `cross_owner_substep.completed` (§9.4). The "no new visual chrome" claim is therefore enforced by event-type closure: §4.6 inventories all new event types; anything not listed there must reuse an existing operator-backend renderer. This invariant is platform-level and gets a clause in `architecture.md` during V2's doc-sync sweep (§4).
 - **Two-axis routing** (§5.2). Self-service is `target_owner_user_id` absent and `owner_user_id == requester_user_id`. Cross-ownership is `target_owner_user_id` present and `owner_user_id == target_owner_user_id`.
 - **Two-layer delegation authorisation** (brief §3.6 ratified): named-owner reference in user intent (Layer 1) OR explicit owner-scoped capability request from a trusted parent-agent tool call (Layer 2). If neither, delegation fails closed with a clarifying question.
 
@@ -167,7 +215,7 @@ No new RLS policies expected. If strategy (a) is chosen, `operator_run_files` is
 |---|---|
 | `shared/types/routingContext.ts` (new file if absent; otherwise extend existing) | Add `requester_user_id: string`, `target_owner_user_id?: string`, `raw_intent_text: string`, `normalised_intent_text: string`, `addressed_agent: { id: string; score_boost: number } | null`, `address_parse_result: 'matched' | 'not_found' | 'collision' | 'unsupported_cross_owner'`. |
 | `shared/types/capabilityMap.ts` (new if absent) | Add optional `owner_user_id?: string` on the JSONB shape; type-narrows when `agentRow.owner_user_id` is non-null. |
-| `shared/types/operatorEvents.ts` (extend existing operator-event types) | Add four new event variants: `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`. `file.*` payload shape per §5.7; `cross_owner_substep.completed` payload per §9.4 (carries `parent_run_id`, `substep_id`, `status: 'success' | 'partial' | 'failed'`, optional typed `reason`); `cross_owner_substep.awaiting_initiator_decision` payload carries `parent_run_id`, `substep_id`, and the typed decision request shape (see §5.6 `ask_initiator` branch). Each variant must be registered with criticality in the `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) so `verify-operator-event-registry.sh` passes. Other sub-step lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked on the cross-owner sub-step state record (column/table selected by §13 #2 — see that question for the storage strategy) and do NOT surface as run-trace events (per §9.4). The `substep_id` field on every `cross_owner_substep.*` event is the primary key of that state record; its column name and host table are strategy-neutral and resolve at §13 #2. |
+| `shared/types/operatorEvents.ts` (extend existing operator-event types) | Add four new event variants: `file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, and `cross_owner_substep.completed`. `file.*` payload shape per §5.7; `cross_owner_substep.completed` payload per §9.4 (carries `parent_run_id`, `substep_id`, `status: 'success' | 'partial' | 'failed'`, optional typed `reason`); `cross_owner_substep.awaiting_initiator_decision` payload carries `parent_run_id`, `substep_id`, and the typed decision request shape (see §5.6 `ask_initiator` branch). Each variant must be registered with criticality in the `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) so `verify-operator-event-registry.sh` passes. Other sub-step lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked on `delegation_outcomes.status` and do NOT surface as run-trace events (per §9.4). |
 | `shared/types/crossOwnerApproval.ts` (new) | `CrossOwnerApprovalTimeoutPolicy` literal union; two pause-reason constants: `awaiting_cross_owner_approval` (V1 same-owner approval path, V2 cross-owner approval path) and `awaiting_initiator_decision_after_cross_owner_timeout` (emitted only when `cross_owner_approval_timeout_policy = 'ask_initiator'` fires per §5.6). |
 | `shared/types/agentExecutionLog.ts` (extend existing) | Add four new entries to the `AGENT_EXECUTION_EVENT_CRITICALITY` registry — one per V2-added event variant declared in `shared/types/operatorEvents.ts` (above). Criticality tier per existing convention (file events: warning-tier; cross-owner-substep events: critical-tier). Edited in Chunk 1 alongside the new types. |
 
@@ -193,8 +241,7 @@ Files and gates that this spec cites in §6, §8, §9, §10, and Appendix B but 
 | `docs/doc-sync.md` | §8 Chunk 9, Appendix B: canonical checklist for finalisation doc updates. No edit required. |
 | `references/test-gate-policy.md` | Appendix B: confirm `verify-capability-map-shape.sh` is listed. No edit required unless the gate is missing. |
 | `docs/spec-authoring-checklist.md` | §5 intro: anatomy reference for contract rigour. No edit required. |
-| `.claude/agents/chatgpt-pr-review.md` | §8 Chunk 9: definition of the `chatgpt-pr-review` agent (doc-sync gate at finalisation). No code change. |
-| `server/db/schema/delegationOutcomes.ts` | §13 open question #2: existing schema definition for `delegation_outcomes`. Referenced when evaluating the strategy-(a) extension path for the cross-owner sub-step state machine. |
+| `chatgpt-pr-review` agent | §8 Chunk 9: the doc-sync gate at finalisation. Defined in `.claude/agents/chatgpt-pr-review.md`. No code change. |
 | `client/src/pages/OpenTaskView.tsx` | §1 non-goals: the universal task-view surface that operator-mode runs render through unchanged. |
 | `client/src/components/global-ask-bar/GlobalAskBar.tsx` | §1 non-goals: orchestrator entry; `@`-parsing is server-side, the FE component is unchanged. |
 | `server/db/schema/executionFiles.ts` | §13 open question #1, §4.1 migration 0346: existing schema definition referenced when evaluating the strategy-(b) extension path. |
@@ -359,7 +406,7 @@ type CrossOwnerDelegationRequest = {
 | Viewer | Sees |
 |---|---|
 | Owner (executor's owner) | Full delegated sub-run trace, raw source data, approval detail, result |
-| Initiator (parent run's initiator) | At any point: the current sub-step lifecycle state (`proposed` / `authorised` / `routed` / `executing` / `awaiting_cross_owner_approval` / `approved` / `rejected`) read on demand via the existing run-trace HTTP endpoint, sourced from the cross-owner sub-step state record (column/table per §13 #2), plus the run-trace event stream of emitted events: at most one `cross_owner_substep.awaiting_initiator_decision` event (only on `ask_initiator` timeout path) and exactly one terminal `cross_owner_substep.completed` event with `status: 'success' | 'partial' | 'failed'` plus typed result summary. No raw owner data is included on either path. Intermediate lifecycle states are READ-MODEL ONLY: they are visible to the initiator because the existing run-trace endpoint reads the state record (filtered by `runTraceProjectionForViewer` to hide owner-private payload fields) — they are NOT emitted as separate `cross_owner_substep.*` event variants (see §4.6, §9.4). The closed terminal-event vocabulary remains `success | partial | failed` per §9.4. |
+| Initiator (parent run's initiator) | At any point: the current `delegation_outcomes.status` value (read-model projection of the underlying state machine — `proposed` / `authorised` / `routed` / `executing` / `awaiting_cross_owner_approval` / `approved` / `rejected`) read on demand via the existing run-trace HTTP endpoint, plus the run-trace event stream of emitted events: at most one `cross_owner_substep.awaiting_initiator_decision` event (only on `ask_initiator` timeout path) and exactly one terminal `cross_owner_substep.completed` event with `status: 'success' | 'partial' | 'failed'` plus typed result summary. No raw owner data is included on either path. Intermediate lifecycle states are READ-MODEL ONLY: they are visible to the initiator because the existing run-trace endpoint reads `delegation_outcomes` (filtered by `runTraceProjectionForViewer` to hide owner-private payload fields) — they are NOT emitted as separate `cross_owner_substep.*` event variants (see §4.6, §9.4). The closed terminal-event vocabulary remains `success | partial | failed` per §9.4. |
 | Shared parent run trace | Sub-run outcome only — no raw calendar slots, inbox snippets, draft bodies, attachment names, or credential-derived metadata from the target owner |
 
 The projection is enforced at READ time by `runTraceProjectionForViewer(viewerUserId, run)` (new pure helper in `server/services/runTracePure.ts`), not by per-event filtering. The owner's events stay in the database; the projection chooses what to send over the wire to the initiator. Violations are security bugs.
@@ -398,7 +445,7 @@ type CrossOwnerApprovalTimeoutPolicy = 'fail_parent' | 'continue_without_substep
 
 - `'fail_parent'` → parent task transitions to `failed` with reason `cross_owner_approval_timeout`; sub-run emits `cross_owner_substep.completed { status: 'failed', reason: 'cross_owner_approval_timeout' }` (terminal — per §9.4).
 - `'continue_without_substep'` → mark the sub-step skipped; sub-run emits `cross_owner_substep.completed { status: 'partial', reason: 'cross_owner_approval_timed_out_optional' }` (terminal — per §9.4). Resume parent on next event.
-- `'ask_initiator'` → sub-run is NOT yet terminal at the 24-hour boundary. The stall job (`server/jobs/workflowGateStallNotifyJob.ts` — see §4.3) emits a non-terminal `cross_owner_substep.awaiting_initiator_decision` event (the second emitted `cross_owner_substep.*` variant, registered alongside `.completed` in `AGENT_EXECUTION_EVENT_CRITICALITY` per §4.6), creates an approval row via `actionService.proposeAction(..., { approver_user_id: initiator_user_id })` so the typed decision request lands in the EXISTING approval queue read path (`listPendingApprovalsForUser(initiator_user_id)` — §4.3 actionService row), and the parent stays paused with `awaiting_initiator_decision_after_cross_owner_timeout` until the initiator resolves the approval. When the initiator's approval row transitions to terminal (approved/rejected via the existing approval-flow handler), the resume hook in the parent task triggers the sub-run to emit its single terminal `cross_owner_substep.completed { status: 'success' | 'failed', reason: 'initiator_resumed_after_cross_owner_timeout' | 'initiator_abandoned_after_cross_owner_timeout' }` event. There is no second 24-hour stall — the same V1 approval lifecycle handler that V2 already reuses for `awaiting_cross_owner_approval` also handles `awaiting_initiator_decision_after_cross_owner_timeout`. Both pause reasons resolve through the same existing `actions` → approval-queue → resume-on-decision plumbing.
+- `'ask_initiator'` → sub-run is NOT yet terminal at the 24-hour boundary. The stall job emits a non-terminal `cross_owner_substep.awaiting_initiator_decision` event (the second emitted `cross_owner_substep.*` variant, registered alongside `.completed` in `AGENT_EXECUTION_EVENT_CRITICALITY` per §4.6), surfaces a typed decision request to the initiator, and the parent stays paused with `awaiting_initiator_decision_after_cross_owner_timeout`. When the initiator decides, the sub-run emits its single terminal `cross_owner_substep.completed { status: 'success' | 'failed', reason: 'initiator_resumed_after_cross_owner_timeout' | 'initiator_abandoned_after_cross_owner_timeout' }` event. There is no second 24-hour stall — the initiator decision is its own pg-boss lifecycle handler.
 
 ### 5.7 File events (`file.created`, `file.modified`)
 
@@ -637,9 +684,7 @@ Multi-path termination (closed set — adding a status requires a spec amendment
 - `partial` — `continue_without_substep` timeout policy fired; sub-step skipped; parent continues without the result (explicit, not silent).
 - `failed` — `fail_parent` timeout policy fired, the credential broker failed to resolve, the sub-run hard-failed inside operator runtime, OR the `ask_initiator → initiator_abandoned_after_cross_owner_timeout` path resolved to abandonment (§5.6).
 
-Lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked as values of the cross-owner sub-step state record's lifecycle column (column name + host table strategy-neutral per §13 #2) — they are state-machine transitions, NOT separate emitted events. The only `cross_owner_substep.*` event variants V2 emits onto the run-trace stream are: (a) `cross_owner_substep.awaiting_initiator_decision` (non-terminal, emitted ONLY when the `ask_initiator` timeout-policy branch fires per §5.6) and (b) `cross_owner_substep.completed` (the single terminal event). Both are inventoried in §4.6. State-machine state changes that are NOT emitted as run-trace events MAY still produce ordinary state-record row UPDATEs but they do not surface to the FE event stream — the FE renders the run-trace from `.completed` plus, if the path goes through the `ask_initiator` branch, the intermediate `.awaiting_initiator_decision`.
-
-**Canonical `substep_id` contract (strategy-neutral):** every `cross_owner_substep.*` event payload carries a `substep_id: string` field whose value is the primary key of the cross-owner sub-step state record. Whatever §13 #2 resolves to (extension of `delegation_outcomes` or a new `cross_owner_substep_state` table), the row's `id` column is the source of `substep_id`. The `substep_id` value is stable for the life of the sub-step and is the correlation key paired with `parent_run_id` for the "exactly one terminal event" guarantee.
+Lifecycle states (`proposed`, `authorised`, `routed`, `executing`) are tracked as values of the existing `delegation_outcomes.status` column — they are state-machine transitions, NOT separate emitted events. The only `cross_owner_substep.*` event variants V2 emits onto the run-trace stream are: (a) `cross_owner_substep.awaiting_initiator_decision` (non-terminal, emitted ONLY when the `ask_initiator` timeout-policy branch fires per §5.6) and (b) `cross_owner_substep.completed` (the single terminal event). Both are inventoried in §4.6. State-machine state changes that are NOT emitted as run-trace events MAY still produce ordinary `delegation_outcomes` row UPDATEs but they do not surface to the FE event stream — the FE renders the run-trace from `.completed` plus, if the path goes through the `ask_initiator` branch, the intermediate `.awaiting_initiator_decision`.
 
 ### 9.5 No-silent-partial-success
 
@@ -712,11 +757,9 @@ Performed at draft completion (2026-05-13):
 - **Every load-bearing claim has a named mechanism.**
   - "Credentials follow the executor" → credential broker (`user-owned-agents` §3.3 invariant)
   - "Approval routes to owner not initiator" → `actionService.proposeAction` writes `approver_user_id` + `listPendingApprovalsForUser` union read
-  - "Privacy projection" → `runTraceProjectionForViewer` at read time, invoked by `agentExecutionEventService` + `taskEventStream` + `agentRuns` routes (§4.3)
+  - "Privacy projection" → `runTraceProjectionForViewer` at read time
   - "Idempotent migrations" → state-based predicates (§9.1)
-  - "Universal OpenTaskView invariant" → event-type extensions on existing renderer (no new chrome); §4.6 is the canonical inventory of all four new variants
-  - "`ask_initiator` decision request loop" → reuses the existing V1 approval-row plumbing: `actionService.proposeAction(..., { approver_user_id: initiator_user_id })` writes the typed decision request, `listPendingApprovalsForUser(initiator_user_id)` exposes it, and the existing approval-flow resume hook transitions the paused parent task (§5.6)
-  - "Terminal-event uniqueness `(parent_run_id, substep_id)`" → row-level write-time predicate against the §13 #2 state record (UPDATE-with-`terminal_at IS NULL` form); the §13 #2 strategy choice pins the concrete column names but the row-level enforcement is invariant
+  - "Universal OpenTaskView invariant" → event-type extensions on existing renderer (no new chrome)
 - **Phase dependency graph is acyclic.** §8 chunks 1→9, each prerequisite earlier. Verified by hand.
 
 ## 12. Deferred items
@@ -782,3 +825,79 @@ Per `docs/doc-sync.md`:
 - [ ] `docs/decisions/` — consider ADR for "approval follows executor's owner, not initiator" (durable policy decision)
 
 ## End of spec
+
+codex
+Reviewing the draft strictly for residual consistency defects, stale claims, and inventory-lock leakage. I’m checking the spec as written, not reopening the two operator-routed schema decisions.
+codex
+1. **Event-Type Closure Contradiction**
+Section: §1 “Universal OpenTaskView + run-trace invariant” vs §4.6 / §5.6 / §10
+
+Defect: §1 says the only new V2 event types are `file.created`, `file.modified`, and `cross_owner_substep.completed`, but later sections also add `cross_owner_substep.awaiting_initiator_decision`. That breaks the event-type-closure claim that underpins the “no new visual chrome” invariant.
+
+Minimum fix: amend §1 to list all four V2-added event variants, or restate the invariant as “only the §4.6-inventoried event variants are new.”
+
+Severity: important
+
+2. **§13 #2 Neutralisation Is Incomplete**
+Section: §4.6 `shared/types/operatorEvents.ts`, §5.4 “Run-trace privacy projection”, §9.4 “Terminal event guarantee”
+
+Defect: these sections still make load-bearing claims against `delegation_outcomes.status` as the lifecycle/read-model field, even though §13 #2 explicitly says that state-machine storage is unresolved and may move to a new table. That means iteration 3’s strategy-neutralisation did not fully land. §9.4 also ties the terminal-event guarantee to a `substep_id` sourced from the unresolved state row without giving that identifier a strategy-neutral contract.
+
+Minimum fix: replace all hard references to `delegation_outcomes.status` with a strategy-neutral term such as “cross-owner sub-step state record selected by §13 #2,” and add a small contract that defines the canonical `substep_id` independently of the eventual table choice.
+
+Severity: important
+
+3. **`ask_initiator` Path Has No Concrete Mechanism**
+Section: §5.6, §7, §11
+
+Defect: the `ask_initiator` timeout branch says the system “surfaces a typed decision request to the initiator” and later handles the initiator’s decision, but no concrete producer/consumer path, handler, route, or existing primitive is named for that decision loop. Because of that, §11’s self-consistency claim that “every load-bearing claim has a named mechanism” is now stale.
+
+Minimum fix: pin the exact existing primitive that carries the initiator decision, or inventory the concrete service/job/route that will create, deliver, and resolve that decision request.
+
+Severity: important
+
+4. **§4 Inventory Lock Still Leaks Referenced Files**
+Section: §4 inventory vs §13 #2 and §4.8
+
+Defect: `server/db/schema/delegationOutcomes.ts` is referenced in §13 #2 but does not appear in §4. Also, §4.8 cites the `chatgpt-pr-review` agent while the prose references the actual file `.claude/agents/chatgpt-pr-review.md`; the real file path is not what appears in the inventory table.
+
+Minimum fix: add `server/db/schema/delegationOutcomes.ts` to §4.8, and change the `chatgpt-pr-review` row to use the actual file path `.claude/agents/chatgpt-pr-review.md`.
+
+Severity: minor
+tokens used
+48,216
+1. **Event-Type Closure Contradiction**
+Section: §1 “Universal OpenTaskView + run-trace invariant” vs §4.6 / §5.6 / §10
+
+Defect: §1 says the only new V2 event types are `file.created`, `file.modified`, and `cross_owner_substep.completed`, but later sections also add `cross_owner_substep.awaiting_initiator_decision`. That breaks the event-type-closure claim that underpins the “no new visual chrome” invariant.
+
+Minimum fix: amend §1 to list all four V2-added event variants, or restate the invariant as “only the §4.6-inventoried event variants are new.”
+
+Severity: important
+
+2. **§13 #2 Neutralisation Is Incomplete**
+Section: §4.6 `shared/types/operatorEvents.ts`, §5.4 “Run-trace privacy projection”, §9.4 “Terminal event guarantee”
+
+Defect: these sections still make load-bearing claims against `delegation_outcomes.status` as the lifecycle/read-model field, even though §13 #2 explicitly says that state-machine storage is unresolved and may move to a new table. That means iteration 3’s strategy-neutralisation did not fully land. §9.4 also ties the terminal-event guarantee to a `substep_id` sourced from the unresolved state row without giving that identifier a strategy-neutral contract.
+
+Minimum fix: replace all hard references to `delegation_outcomes.status` with a strategy-neutral term such as “cross-owner sub-step state record selected by §13 #2,” and add a small contract that defines the canonical `substep_id` independently of the eventual table choice.
+
+Severity: important
+
+3. **`ask_initiator` Path Has No Concrete Mechanism**
+Section: §5.6, §7, §11
+
+Defect: the `ask_initiator` timeout branch says the system “surfaces a typed decision request to the initiator” and later handles the initiator’s decision, but no concrete producer/consumer path, handler, route, or existing primitive is named for that decision loop. Because of that, §11’s self-consistency claim that “every load-bearing claim has a named mechanism” is now stale.
+
+Minimum fix: pin the exact existing primitive that carries the initiator decision, or inventory the concrete service/job/route that will create, deliver, and resolve that decision request.
+
+Severity: important
+
+4. **§4 Inventory Lock Still Leaks Referenced Files**
+Section: §4 inventory vs §13 #2 and §4.8
+
+Defect: `server/db/schema/delegationOutcomes.ts` is referenced in §13 #2 but does not appear in §4. Also, §4.8 cites the `chatgpt-pr-review` agent while the prose references the actual file `.claude/agents/chatgpt-pr-review.md`; the real file path is not what appears in the inventory table.
+
+Minimum fix: add `server/db/schema/delegationOutcomes.ts` to §4.8, and change the `chatgpt-pr-review` row to use the actual file path `.claude/agents/chatgpt-pr-review.md`.
+
+Severity: minor
