@@ -239,6 +239,11 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
 
     const sandboxExecutionId = randomUUID();
     const warmSessionCheckoutId = decision.kind === 'warm_leased' ? decision.warmSessionId : null;
+    // When warm-leased, hand the existing provider sandbox id to e2bSandbox so
+    // it adopts the pre-warmed sandbox instead of calling createSandbox().
+    // Cold-start dispatches leave this undefined and the provider creates a
+    // fresh sandbox. This is the whole point of the warm-pool lease.
+    const leasedProviderSandboxId = decision.kind === 'warm_leased' ? decision.sandboxId : undefined;
 
     sandboxOutput = await sandboxRunTask({
       sandboxExecutionId,
@@ -259,6 +264,7 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       // Thread the browser task envelope through to the in-sandbox harness.
       // e2bSandbox writes this to /workspace/input.json as `taskPayload`.
       browserTaskPayload: ieeTask ?? null,
+      leasedProviderSandboxId,
     });
   } finally {
     // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects,

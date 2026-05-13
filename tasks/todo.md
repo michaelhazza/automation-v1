@@ -139,6 +139,7 @@ These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-chec
 - [ ] **IEE-DEF-5** — Wire real Playwright executor into `infra/sandbox-templates/iee-browser/harness/index.ts`. Today the stub writes `status:'failed'` so any accidental deploy fails visibly. Pull the reference implementation from `worker/src/browser/executor.ts` when bundling.
 - [ ] **IEE-DEF-6** — Pre-existing host-disk profiles (`BROWSER_SESSION_DIR`) migration decision was deferred during Phase 2 chunk 5 as no-op given dogfood-first launch. Revisit if production traffic shows profile-data continuity is needed across the substrate switch.
 - [ ] **IEE-DEF-7** — Wire production network policy in `server/services/executionBackends/_ieeShared.ts::ieeDispatchBrowser` policy build. Today `network.mode='none'` makes Playwright tasks unable to navigate. Decide before any subaccount flips `rolloutApproved=true`: allowlist per skill, allowlist per subaccount, or open. The SDK-not-installed factory + `assertNotLatestTemplateVersion` placeholder guard prevent dispatch from reaching production today.
+- [ ] **IEE-DEF-8** — Implement real assertions in `server/services/sandbox/__tests__/ieeBrowserProfileManager.serialization.test.ts`. Today the file is a scaffold gated behind `E2B_E2E=true`; the only assertion is a placeholder. Lands with the e2b SDK install + a real provider client so the test can spawn two concurrent mounts and assert serialisation + cross-tenant safety per spec §15 R2-F6.
 
 ---
 

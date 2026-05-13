@@ -229,6 +229,13 @@ export interface SandboxRunTaskInput {
    * validates the envelope it expects).
    */
   browserTaskPayload?: unknown;
+  /**
+   * Provider-assigned sandbox ID of a pre-warmed sandbox (warm-pool dispatch).
+   * When set, the provider MUST skip createSandbox() and adopt this sandbox
+   * instead — semantically the warm-pool lease's whole point. Non-warm-pool
+   * dispatches leave this absent and the provider creates a fresh sandbox.
+   */
+  leasedProviderSandboxId?: string;
 }
 
 /**

@@ -1,6 +1,5 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { browserWarmSessions } from '../../db/schema/browserWarmSessions.js';
@@ -10,6 +9,7 @@ import { parseCurrentVersion } from './templateVersionParserPure.js';
 import { isRefillEligible, computeIdleCostCents } from './browserWarmPoolPure.js';
 import { logger } from '../../lib/logger.js';
 import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
+import { FailureError, failure } from '../../../shared/iee/failure.js';
 
 const BROWSER_TEMPLATE_NAME = 'iee-browser';
 
@@ -147,71 +147,44 @@ async function terminate(input: {
   await _terminateAndWriteCostRow(input.warmSessionId, input.reason, input.organisationId, input.subaccountId);
 }
 
-// TODO: cross-tenant sweep needs withAdminConnection — deferred
+/**
+ * evictStale — RUNTIME-DISABLED scaffold.
+ *
+ * Cross-tenant sweep of stale 'available' warm sessions. The candidate-discovery
+ * step requires `withAdminConnection` (FORCE RLS blocks cross-tenant reads from
+ * a tenant-scoped connection), and the per-row mutation step needs tenant-scoped
+ * GUC wrapping. Neither is wired today. To prevent accidental use, this function
+ * THROWS at runtime. Wire withAdminConnection per IEE-DEF-1 before any caller
+ * lights up — at that point the implementation in git history (commit `8259da5c`
+ * predecessor) is the reference. Tracked in tasks/todo.md IEE-DEF-1.
+ */
 async function evictStale(): Promise<{ evicted: number }> {
-  // Claim stale sessions inside a transaction so FOR UPDATE SKIP LOCKED
-  // holds locks until we've read the IDs — preventing concurrent workers
-  // from picking the same rows.
-  const rows = await db.transaction(async (tx) => {
-    const staleRows = await tx.execute(sql`
-      SELECT id, organisation_id, subaccount_id FROM browser_warm_sessions
-      WHERE status = 'available'
-        AND created_at < NOW() - INTERVAL '30 minutes'
-      LIMIT 20
-      FOR UPDATE SKIP LOCKED
-    `);
-    return (staleRows as unknown as { rows: Array<{ id: string; organisation_id: string; subaccount_id: string }> }).rows;
-  });
-
-  if (rows.length === 0) return { evicted: 0 };
-
-  let evicted = 0;
-  for (const row of rows) {
-    await _terminateAndWriteCostRow(row.id, 'evict_stale', row.organisation_id, row.subaccount_id);
-    evicted++;
-  }
-
-  logger.info('iee_browser.warm_pool.evict_stale', { evicted });
-  return { evicted };
+  throw new FailureError(
+    failure(
+      'sandbox_provider_unavailable',
+      'browserWarmPool.evictStale is a RUNTIME-DISABLED scaffold. Wire withAdminConnection before enabling (IEE-DEF-1 in tasks/todo.md).',
+      { method: 'evictStale' },
+    ),
+  );
 }
 
-// TODO: add organisationId to ctx and wrap db calls in db.transaction + setOrgAndSubaccountGUC — deferred until refill is wired to a caller
-async function refillIfEligible(ctx: { subaccountId: string }): Promise<void> {
-  const [settings] = await db.select().from(subaccountIeeBrowserSettings)
-    .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
-
-  if (!isRefillEligible(settings ?? null)) return;
-
-  // Provision stub — e2b SDK not yet installed (see e2bSandbox.ts: SANDBOX-DEF-EGRESS-MECH).
-  // A real provisioning call will replace this placeholder when the SDK is available.
-  // The unique partial index on browser_warm_sessions(subaccount_id) WHERE status='available'
-  // ensures only one available row exists; the 23505 catch handles concurrent refill races.
-  const sandboxId = `stub-${randomUUID()}`; // placeholder until e2b SDK is installed
-  const cvPath = join(process.cwd(), 'infra/sandbox-templates/iee-browser/CURRENT_VERSION');
-  let templateVersion = 'local-dev-v1.0.0';
-  try {
-    const parsed = parseCurrentVersion(readFileSync(cvPath, 'utf8'));
-    templateVersion = parsed.version;
-  } catch { /* ignore */ }
-
-  try {
-    await db.insert(browserWarmSessions).values({
-      organisationId: settings!.organisationId,
-      subaccountId: ctx.subaccountId,
-      sandboxId,
-      templateName: BROWSER_TEMPLATE_NAME,
-      templateVersion,
-      status: 'available',
-    });
-    logger.info('iee_browser.warm_pool.refilled', { subaccountId: ctx.subaccountId, sandboxId });
-  } catch (err: unknown) {
-    if ((err as { code?: string }).code === '23505') {
-      // Another worker already refilled — no-op
-      logger.debug('iee_browser.warm_pool.refill_race_lost', { subaccountId: ctx.subaccountId });
-      return;
-    }
-    throw err;
-  }
+/**
+ * refillIfEligible — RUNTIME-DISABLED scaffold.
+ *
+ * Reads settings and inserts warm sessions. Needs organisationId on the ctx and
+ * dual-GUC transaction wrapping; also inserts stub sandbox IDs because the e2b
+ * SDK is not yet installed. To prevent accidental use, this function THROWS at
+ * runtime. Wire the org-scoping + real provisioning per IEE-DEF-2 before any
+ * caller lights up. Tracked in tasks/todo.md IEE-DEF-2.
+ */
+async function refillIfEligible(_ctx: { subaccountId: string }): Promise<void> {
+  throw new FailureError(
+    failure(
+      'sandbox_provider_unavailable',
+      'browserWarmPool.refillIfEligible is a RUNTIME-DISABLED scaffold. Wire dual-GUC + real e2b provisioning before enabling (IEE-DEF-2 in tasks/todo.md).',
+      { method: 'refillIfEligible' },
+    ),
+  );
 }
 
 export const browserWarmPool = { checkout, terminate, evictStale, refillIfEligible } as const;

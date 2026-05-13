@@ -253,21 +253,29 @@ export class E2bSandbox implements SandboxExecutionService {
     });
 
     // --- Phase: start ---
-    const handle = await withSandboxProvider({
-      phase: 'start',
-      sandboxExecutionId,
-      call: () =>
-        this.sdkClient.createSandbox({
-          templateAlias: resolveTemplateAlias(templateName, {
-            synthetos: this.templateDigest,
-            browser: this.browserTemplateDigest ?? undefined,
+    // Warm-pool adoption: if a leased provider sandbox id is supplied, use it
+    // directly and skip createSandbox(). This is the whole point of the
+    // warm-pool lease — the sandbox was pre-created by refillIfEligible.
+    // Cold-start dispatches (no lease) fall through to createSandbox.
+    let providerSandboxId: string;
+    if (input.leasedProviderSandboxId) {
+      providerSandboxId = input.leasedProviderSandboxId;
+    } else {
+      const handle = await withSandboxProvider({
+        phase: 'start',
+        sandboxExecutionId,
+        call: () =>
+          this.sdkClient.createSandbox({
+            templateAlias: resolveTemplateAlias(templateName, {
+              synthetos: this.templateDigest,
+              browser: this.browserTemplateDigest ?? undefined,
+            }),
+            timeoutSeconds,
+            metadata: metadataTags,
           }),
-          timeoutSeconds,
-          metadata: metadataTags,
-        }),
-    });
-
-    const providerSandboxId = handle.sandboxId;
+      });
+      providerSandboxId = handle.sandboxId;
+    }
 
     // --- Phase: credential injection (spec §11) ---
     // Write each credential alias under /workspace/secrets/{alias}.token at
@@ -516,13 +524,23 @@ registerSandboxProvider('e2b', () => {
     'PUBLISHED_VERSION',
   );
 
-  const browserPublishedVersionPath = join(
-    process.cwd(),
-    'infra',
-    'sandbox-templates',
-    'iee-browser',
-    'PUBLISHED_VERSION',
-  );
+  // Browser template loading is gated behind E2B_BROWSER_TEMPLATE_ENABLED.
+  // The committed iee-browser/PUBLISHED_VERSION carries a placeholder
+  // (all-zero) image_digest until the CI sandbox-template-build pipeline
+  // publishes a real one (see SANDBOX-DEF-EGRESS-MECH). Without the gate,
+  // assertNotLatestTemplateVersion rejects the placeholder and blocks the
+  // synthetos-sandbox provider from constructing in dev — even though dev
+  // only needs the base template.
+  const browserTemplateEnabled = process.env['E2B_BROWSER_TEMPLATE_ENABLED'] === 'true';
+  const browserPublishedVersionPath = browserTemplateEnabled
+    ? join(
+        process.cwd(),
+        'infra',
+        'sandbox-templates',
+        'iee-browser',
+        'PUBLISHED_VERSION',
+      )
+    : undefined;
 
   return new E2bSandbox(makeNotInstalledStub(), {
     projectName,

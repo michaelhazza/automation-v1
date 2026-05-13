@@ -15,13 +15,14 @@ import { randomUUID } from 'crypto';
 import { db } from '../../db/index.js';
 import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
 import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
-import { eq, and, sql, inArray } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import {
   assertSameTenant,
   resolveRetentionDays,
 } from './ieeBrowserProfileManagerPure.js';
 import { SafetyError, EnvironmentError } from '../../../shared/iee/failureReason.js';
+import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { logger } from '../../lib/logger.js';
 import type { IeeBrowserSessionProfile } from '../../db/schema/ieeBrowserSessionProfiles.js';
 
@@ -151,66 +152,27 @@ async function unmount(
   });
 }
 
-// TODO: cross-tenant sweep needs withAdminConnection — deferred
+/**
+ * gcSweep — RUNTIME-DISABLED scaffold.
+ *
+ * Cross-tenant profile GC sweep. Candidate discovery (UPDATE … WHERE status =
+ * 'active') runs without org/subaccount GUC scoping, so a tenant-scoped
+ * connection cannot read other tenants' rows under FORCE RLS. The sweep
+ * requires `withAdminConnection` for candidate selection and tenant-scoped
+ * transactions for per-row state writes. Neither is wired today. To prevent
+ * accidental use, this function THROWS at runtime. Wire the admin scan + per-
+ * tenant per-row mutation per IEE-DEF-3 before any caller lights up — at that
+ * point the implementation in git history is the reference. Tracked in
+ * tasks/todo.md IEE-DEF-3.
+ */
 async function gcSweep(): Promise<{ scheduled: number; completed: number }> {
-  // Step 1: schedule eligible 'active' rows whose lastUsedAt is older than
-  // their effective retention window.
-  const scheduleResult = await db.execute(sql`
-    UPDATE iee_browser_session_profiles p
-    SET status = 'scheduled_gc',
-        scheduled_gc_at = NOW(),
-        updated_at = NOW()
-    FROM (
-      SELECT p2.id,
-             COALESCE(
-               p2.retention_days_override,
-               s.browser_profile_retention_days,
-               30
-             ) AS retention_days
-      FROM iee_browser_session_profiles p2
-      LEFT JOIN subaccount_iee_browser_settings s
-        ON s.subaccount_id = p2.subaccount_id
-      WHERE p2.status = 'active'
-    ) AS eligible
-    WHERE p.id = eligible.id
-      AND p.last_used_at < NOW() - (
-        LEAST(90, GREATEST(7, eligible.retention_days)) * INTERVAL '1 day'
-      )
-  `);
-
-  const scheduled = (scheduleResult as any).rowCount ?? 0;
-
-  // Step 2: claim up to 10 'scheduled_gc' rows with SKIP LOCKED and mark them
-  // gc_in_progress → gc_done atomically.
-  const claimed = await db.execute(sql`
-    UPDATE iee_browser_session_profiles
-    SET status = 'gc_in_progress', gc_started_at = NOW(), updated_at = NOW()
-    WHERE id IN (
-      SELECT id FROM iee_browser_session_profiles
-      WHERE status = 'scheduled_gc'
-      LIMIT 10
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id
-  `);
-
-  const claimedIds: string[] = Array.isArray((claimed as any).rows)
-    ? (claimed as any).rows.map((r: any) => r.id)
-    : [];
-
-  let completed = 0;
-  if (claimedIds.length > 0) {
-    const doneResult = await db
-      .update(ieeBrowserSessionProfiles)
-      .set({ status: 'gc_done', updatedAt: new Date() })
-      .where(inArray(ieeBrowserSessionProfiles.id, claimedIds))
-      .returning({ id: ieeBrowserSessionProfiles.id });
-    completed = doneResult.length ?? claimedIds.length;
-  }
-
-  logger.info('iee.browser_profile.gc_sweep', { scheduled, completed });
-
-  return { scheduled, completed };
+  throw new FailureError(
+    failure(
+      'sandbox_provider_unavailable',
+      'ieeBrowserProfileManager.gcSweep is a RUNTIME-DISABLED scaffold. Wire withAdminConnection + per-tenant per-row mutation before enabling (IEE-DEF-3 in tasks/todo.md).',
+      { method: 'gcSweep' },
+    ),
+  );
 }
 
 async function recoverCorruption(

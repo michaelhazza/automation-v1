@@ -152,14 +152,20 @@ describe('patchBodySchema', () => {
     });
   });
 
-  it('rejects rolloutApproved (not accepted in this schema)', () => {
-    // rolloutApproved is not in the schema — strict mode would reject it,
-    // but Zod passthrough ignores it. Verify it is not in the parsed output.
+  it('rejects rolloutApproved (strict mode — not accepted in this schema)', () => {
+    // rolloutApproved is admin-only — the schema is .strict() so unknown keys
+    // return a parse failure instead of silently stripping. Callers know their
+    // patch was not applied; the dedicated admin rollout-approval route is the
+    // only path that mutates rolloutApproved.
     const body = { status: 'on', expectedSettingsVersion: 1, rolloutApproved: true };
     const result = patchBodySchema.safeParse(body);
-    expect(result.success).toBe(true);
-    if (!result.success) throw new Error('parse failed'); // type-narrowing only
-    expect((result.data as Record<string, unknown>).rolloutApproved).toBeUndefined();
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('expected parse failure for rolloutApproved');
+    // Zod's strict-mode error for unknown keys uses code 'unrecognized_keys'
+    // and lists the offending keys in the `keys` field.
+    const unrecognised = result.error.errors.find((e) => e.code === 'unrecognized_keys');
+    expect(unrecognised).toBeDefined();
+    expect((unrecognised as { keys?: string[] }).keys).toContain('rolloutApproved');
   });
 
   it('requires expectedSettingsVersion', () => {
