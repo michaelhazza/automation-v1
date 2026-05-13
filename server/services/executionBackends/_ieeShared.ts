@@ -48,6 +48,7 @@ import {
 import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
+import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -172,6 +173,13 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   const warmCheckout = await browserWarmPool.checkout({ organisationId, subaccountId });
   const decision = resolveBrowserDispatch(settings!, warmCheckout);
   // (decision will be warm_leased or cold_start — never launch_disabled here)
+
+  if (decision.kind === 'cold_start') {
+    logger.info(IEE_BROWSER_EVENT_WARM_POOL_MISS, {
+      subaccountId,
+      reason: 'no_warm_session_available',
+    });
+  }
 
   // 2. Derive session key and resolve profile
   const opts = input.backendOptions;

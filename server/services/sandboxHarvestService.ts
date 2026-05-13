@@ -36,6 +36,9 @@ import {
 } from './sandboxHarvestServicePure.js';
 import type { RedactionPattern } from '../lib/redaction.js';
 import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+import { subaccountIeeBrowserSettingsService } from './subaccountIeeBrowserSettingsService.js';
+import { evaluateTaskCost, IEE_BROWSER_EVENT_TASK_COST_ANOMALY } from './sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
+import { recordIncident } from './incidentIngestor.js';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -1133,6 +1136,11 @@ async function runHarvestPipeline(
 
   const finalCostCents = step10.costCents;
 
+  // Per-task cost alarm (iee-browser only, fire-and-forget — spec §15A).
+  if (ctx.templateName === 'iee-browser') {
+    void fireTaskCostAlarmIfBreached(ctx, step10.costCents);
+  }
+
   // --- Step 11: Telemetry terminal event ---
   const step11result = await step11TelemetryTerminalEvent(
     ctx,
@@ -1176,6 +1184,44 @@ async function runHarvestPipeline(
     finalCostCents,
     step1.metricsJson,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Per-task cost alarm helper (iee-browser only, spec §15A)
+// ---------------------------------------------------------------------------
+
+async function fireTaskCostAlarmIfBreached(
+  ctx: HarvestContext,
+  costCents: number,
+): Promise<void> {
+  try {
+    const settings = await subaccountIeeBrowserSettingsService.getSettings(
+      ctx.organisationId,
+      ctx.subaccountId,
+    );
+    const result = evaluateTaskCost(
+      { agentRunId: ctx.runId, ieeRunId: ctx.taskId, subaccountId: ctx.subaccountId, costCents },
+      { perTaskCostCeilingCents: settings.perTaskCostCeilingCents },
+    );
+    if (result.fire) {
+      const idempotencyKey = `${IEE_BROWSER_EVENT_TASK_COST_ANOMALY}:${ctx.runId}`;
+      void recordIncident({
+        source: 'job',
+        summary: `iee_browser task cost anomaly: subaccount=${ctx.subaccountId} costCents=${costCents} ceiling=${result.payload.ceilingCents}`,
+        errorCode: IEE_BROWSER_EVENT_TASK_COST_ANOMALY,
+        idempotencyKey,
+        errorDetail: result.payload as unknown as Record<string, unknown>,
+        subaccountId: ctx.subaccountId,
+        organisationId: ctx.organisationId,
+      });
+    }
+  } catch (err) {
+    // Advisory alarm — do not fail harvest on alarm error.
+    logger.warn('iee_browser.task_cost_alarm_failed', {
+      sandboxExecutionId: ctx.sandboxExecutionId,
+      error: (err as Error).message,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
