@@ -1,4 +1,4 @@
-**Status:** DRAFT v3 (2026-05-13) — awaiting operator ratification before spec authoring
+**Status:** DRAFT v4 (2026-05-13) — awaiting operator ratification before spec authoring
 **Date:** 2026-05-13
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `iee-browser-on-e2b`
@@ -27,9 +27,22 @@ v3 changes:
 - **Incident event names hidden from the admin UI.** Event names like `iee_browser.task_cost_anomaly` continue to exist in the incident schema and run logs, but the settings tab uses plain-English help text ("Alerts you when a single task costs more than this") and no event-name chips.
 - **Launch flag re-framed as a kill switch (Status: On / Off).** Same control as in round 1, but the language and placement signal "support escalation off-switch", not "per-subaccount opt-in." Default On.
 - **No spend widget on the settings tab.** Month-to-date sandbox-compute spend belongs on Usage & Costs, not duplicated on a config screen.
-- **Out of scope, routed to triage:** the existing operator-backend settings tab (Spec D §3.14) carries three fields (`auto-extend grace`, `max chain length`, `max wall-clock per task`) that are admin-confusing edge-case safety rails. Operator decision: cut them from the UI and hardcode (grace=30 min, chain=100, wall-clock=30 days). This work is a follow-up to the operator-backend build, NOT part of this build. See `tasks/todo.md` for the triage entry.
+- **Net effect on this build's UI surface:** 3 new controls on the existing Operator settings tab — Status (On/Off), Browser profile retention (days), Per-task cost ceiling ($), Per-subaccount daily cost ceiling ($). Four total fields counting the cost-ceiling pair.
 
-Net effect on this build's UI surface: 3 new controls on the existing Operator settings tab — Status (On/Off), Browser profile retention (days), Per-task cost ceiling ($), Per-subaccount daily cost ceiling ($). Four total fields counting the cost-ceiling pair.
+## v4 reframe (operator-backend tab cleanup folded into scope)
+
+Round 2 mockup landed (`prototypes/iee-browser-on-e2b.html`, commit `be22af4`). On review, the operator decided the 3 operator-backend fields originally routed to triage should be cut from the UI as part of THIS build, not deferred to a follow-up PR. Reason: the IEE-browser PR already touches `OperatorSettingsTab.tsx` and `AdminSubaccountDetailPage.tsx`; folding the cleanup in avoids a second PR against the same surface and lands the simpler tab in one go.
+
+v4 changes:
+- **Operator-backend cuts folded into this build's scope.** Three fields removed from the Operator settings tab UI: `Auto-extend grace`, `Max chain length`, `Max wall-clock per task`. The fields stay in the backend type / DB column for forward-compat, but the per-subaccount value is no longer read; the operator-backend service substitutes hardcoded constants instead:
+  - `autoExtendGraceMinutes` → **30 minutes** (constant)
+  - `maxChainLength` → **100 sessions** (constant)
+  - `maxWallClockPerTaskDays` → **30 days** (constant)
+  Spec author confirms the constants live in a single module (`server/services/operatorBackend/operatorSettingsDefaults.ts` or equivalent) so they're discoverable and easy to revisit. Existing tests against these fields are updated to assert the constant is applied, not the per-subaccount value.
+- **`tasks/todo.md` triage entry removed.** OB-SIMPLIFY-1/2/3 no longer exist; their work is part of this build.
+- **Net UI surface after this build ships:** the Operator settings tab carries **3 operator-backend fields** (Soft session cap, Concurrent operator sessions, Per-task budget cap) + **4 IEE-browser fields** (Status, Browser profile retention, Per-task cost ceiling, Per-subaccount daily cost ceiling) = 7 fields total, down from today's 6 + (in round 2) 4 = 10.
+
+Permissions on these fields are uniform with the existing tab: org admin or system admin can edit; manager can view read-only. See `OperatorSettingsTab.tsx` and `AdminSubaccountDetailPage.tsx` for the existing `canEditOperatorSettings` + `canSeeOperatorTab` predicates.
 
 # IEE Browser on e2b — Build Brief
 

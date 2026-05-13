@@ -64,18 +64,6 @@ Spec-conformance review found schema/contract divergences. None block ship; all 
 - [ ] **REQ-CAL3-naming** — Calendar write-action error codes diverge (`missing_draft_context` vs `DRAFT_NOT_*`). Add owner-mismatch assertion either way.
 - [ ] **REQ-M9** — Stall job 7-day proposal expiry path for EA-linked drafts.
 
-### Operator Backend (PR #288) — settings tab simplification (surfaced 2026-05-13)
-
-Surfaced during `iee-browser-on-e2b` brief v3 review. The per-subaccount Operator settings tab introduced by Spec D §3.14 carries three fields that are admin-confusing edge-case safety rails. Operator decision: cut them from the UI and hardcode sensible defaults at the service layer.
-
-- [ ] **OB-SIMPLIFY-1** — Remove **Auto-extend grace** number field from `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx`. Hardcode the value at **30 minutes** in the operator-backend service layer (the field used to be `autoExtendGraceMinutes` in `OperatorSettings`). Keep the backend column / type for forward-compat, but stop reading the per-subaccount value: substitute the constant. Update any tests that exercised the UI surface.
-- [ ] **OB-SIMPLIFY-2** — Remove **Max chain length** number field from the same tab. Hardcode at **100 sessions**. Same pattern as OB-SIMPLIFY-1.
-- [ ] **OB-SIMPLIFY-3** — Remove **Max wall-clock per task** number field from the same tab. Hardcode at **30 days**. Same pattern.
-
-Result after all three: the operator-backend section shrinks from 6 admin knobs to 3 (Soft session cap, Concurrent operator sessions, Per-task budget cap). Plain-English help text on each. Defaults remain unchanged for the kept fields.
-
-Not in scope for the `iee-browser-on-e2b` build; this is operator-backend follow-up. Capture as a small standalone PR.
-
 ### Personal Assistant V1 — adversarial findings
 
 - [ ] **createDraftWithProposal non-atomic** (likely-hole) — `server/services/eaDrafts/eaDraftService.ts:58-88`. Refactor `actionService.proposeAction` to accept an optional `tx` parameter, or extract a shared helper.
