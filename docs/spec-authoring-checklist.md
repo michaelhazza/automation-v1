@@ -273,7 +273,7 @@ Before handoff, grep the draft for inventory counts and reconcile every occurren
 Run:
 
 ```bash
-grep -E "([Ff]our|[Ff]ive|[Ss]ix|[Ss]even|[Ee]ight|[Nn]ine|[Tt]en|[0-9]+) (tables|migrations|jobs|files|columns|endpoints|services|routes)" <spec.md>
+grep -Ei "\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+)\b[[:space:]]+(table|tables|migration|migrations|job|jobs|file|files|column|columns|endpoint|endpoints|service|services|route|routes|section|sections|phase|phases|chunk|chunks)\b" <spec.md>
 ```
 
 Every hit must reconcile to the same number in the file inventory. Mismatched counts are the dominant spec review finding in sandbox-isolation and consolidation reviews.
