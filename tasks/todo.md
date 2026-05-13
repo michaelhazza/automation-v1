@@ -100,6 +100,44 @@ Spec-conformance review found schema/contract divergences. None block ship; all 
 
 ---
 
+## Deferred from spec-conformance review — memory-improvements (2026-05-13)
+
+**Captured:** 2026-05-13T05:41:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-memory-improvements-2026-05-13T05-41-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-13-memory-improvements-spec.md`
+
+- [ ] REQ #20 — `MemoryBlockSourcesPayload` shape diverges from spec §6.1 nested form
+  - Spec section: §6.1
+  - Gap: shipped payload is `{ blockId, blockSource, versionNumber, sources, reverseLineageByEntry? }` with flattened per-row fields; spec §6.1 names `{ blockId, blockVersionId, versionNumber, capturedAt, sources, reverseLineageByEntry? }` with nested `sourceEntry: { id, content, isDeleted } | null` / `sourceRun: { id, label, isDeleted } | null` per row plus separate `sourceRunLabelAtCapture` fallback.
+  - Suggested approach: decide whether to reshape the response to match the spec's nested discriminated-union form (and update `MemoryBlockSourcesTab.tsx`) or to revise §6.1 to match the flattened form actually shipped. The flattened form is a reasonable simplification; the nested form is the published contract.
+
+- [ ] REQ #38 — Missing `memoryUtilityAggregatorPure.ts` + test file named in spec §5.1 + §12.1
+  - Spec section: §5.1, §12.1
+  - Gap: spec file inventory and testing-posture both name `server/services/memoryUtilityAggregatorPure.ts` and `server/services/__tests__/memoryUtilityAggregatorPure.test.ts`. Neither was created; the aggregator logic was collapsed into the SQL CTE in migration 0343.
+  - Suggested approach: either ship the JS aggregator + pure tests (mirroring `memoryUtilityDailySeriesPure.ts`) or update spec §5.1 + §12.1 to record the SQL-CTE-only approach as the chosen path. SQL aggregation in the MV is consistent with the testing posture (static gates primary), so spec-amend is the lighter-weight path.
+
+- [ ] REQ #41 — `MemoryUtilityPayload` shape missing spec-named top-level fields
+  - Spec section: §6.6
+  - Gap: shipped response is `{ agents, dailySeries }`; spec §6.6 names three additional top-level fields — `organisationId`, `generatedAt` (ISO timestamp), `windowDays: 30`. The `agents[]` interface also omits `totalInjectedEntries`, `totalCitedEntries`, `totalInjectedBlocks`, `totalCitedBlocks` (present in DB rows but not declared on `AgentUtilityRow` — UI does not consume them).
+  - Suggested approach: add the three top-level fields (route handler attaches `generatedAt: new Date().toISOString()`, hardcoded `windowDays: 30`, and the path-org as `organisationId`). Declare the four totals on `AgentUtilityRow` for type fidelity even if the UI does not display them.
+
+- [ ] REQ #64 — Two new degraded reasons not surfaced via `RetrievalResult.degradedReason`
+  - Spec section: §6.5
+  - Gap: `RetrievalDegradedReason` union extended with both values (REQ #62 PASS) but emission sites in `retrievalService.ts` use `logger.warn(...)` only — they never set `RetrievalResult.degradedReason = 'retrieval.embedding_failed'` or `'retrieval.empty_after_semantic'` on the returned result. Spec §6.5 names `retrievalObservabilityService` as the consumer; run-trace UI reads `RetrievalResult.degradedReason`. As wired today, these events do not surface to the run trace.
+  - Suggested approach: thread the degraded reason through to the returned `RetrievalResult` (e.g. mark `degraded: true` + set `degradedReason` on the legacy-fallback rank result) so the observability surface sees the event. Design choice: do we degrade the result wholesale on embedding failure, or only annotate it? The plan's intent is the annotation form.
+
+- [ ] REQ #67 — `docs/capabilities.md` operator-facing utility-metric capability not added
+  - Spec section: §5.3
+  - Gap: `docs/capabilities.md` is in the changed-code set per `git status` but contains no entry for the memory-utility / lineage / AKR semantic-ranker capability. Spec §5.3 conditions the update on "if it's currently catalogued"; plan §10 Assumptions defers provisionally.
+  - Suggested approach: draft a vendor-neutral, model-agnostic capability entry under Observability per the editorial rules in `docs/capabilities.md § Editorial Rules`, or confirm with the operator that no customer-facing capability is needed and remove the modified-file flag.
+
+- [ ] REQ #68 — Opportunistic cleanup (env-overridable memory-block pool constants) not shipped
+  - Spec section: §4 Opportunistic cleanup, §5.2
+  - Gap: `MEMORY_BLOCK_TOP_K = 5` and the `* 3` multiplier in `server/services/memoryBlockService.ts:177` were not promoted to env-overridable constants in `server/config/limits.ts` (`MEMORY_BLOCK_POOL_MULTIPLIER`, default 3; `MEMORY_BLOCK_TOP_K`).
+  - Suggested approach: explicitly opted out by the spec ("Not required for the spec to land"). Either ship as a standalone follow-up PR or close out as won't-do. No blocker.
+
+---
+
 ## Known un-built / low-priority
 
 These are noted to prevent re-discovery — none are urgent.

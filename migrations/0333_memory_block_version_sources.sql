@@ -22,8 +22,8 @@ CREATE TABLE memory_block_version_sources (
 );
 
 -- Tenant isolation
-ENABLE ROW LEVEL SECURITY ON memory_block_version_sources;
-FORCE  ROW LEVEL SECURITY ON memory_block_version_sources;
+ALTER TABLE memory_block_version_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_block_version_sources FORCE  ROW LEVEL SECURITY;
 
 CREATE POLICY tenant_isolation ON memory_block_version_sources
   USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
