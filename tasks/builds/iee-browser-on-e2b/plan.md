@@ -16,11 +16,11 @@
 3. System invariants (load-bearing across the build)
 4. Stepwise implementation plan — 19 chunks (overview)
 5. Per-chunk detail
-   - Chunk 1 — `iee_browser_session_profiles` schema + migration 0345 + RLS
-   - Chunk 2 — `subaccount_iee_browser_settings` schema + migration 0346 + RLS
-   - Chunk 3 — `llm_requests` columns `subtype` + `warm_session_id` + CHECKs (migration 0347)
-   - Chunk 4 — `browser_warm_sessions` schema + migration 0348 + RLS + shared-type extensions
-   - Chunk 5 — FK on `llm_requests.warm_session_id` + unique partial index (migration 0349)
+   - Chunk 1 — `iee_browser_session_profiles` schema + migration 0346 + RLS
+   - Chunk 2 — `subaccount_iee_browser_settings` schema + migration 0347 + RLS
+   - Chunk 3 — `llm_requests` columns `subtype` + `warm_session_id` + CHECKs (migration 0348)
+   - Chunk 4 — `browser_warm_sessions` schema + migration 0349 + RLS + shared-type extensions
+   - Chunk 5 — FK on `llm_requests.warm_session_id` + unique partial index (migration 0350)
    - Chunk 6 — Sandbox template `iee-browser` (image + harness entrypoint)
    - Chunk 7 — e2b provider browser-class wiring
    - Chunk 8 — `playwrightContext.ts` sandbox-path resolution edit
@@ -69,7 +69,7 @@ No. **Reject collapse: rationale.** This build is substrate plumbing for an agen
 
 4. **FK `ON DELETE RESTRICT`, not `SET NULL`.** `llm_requests.warm_session_id → browser_warm_sessions(id) RESTRICT`. The service contract says rows are never deleted; the FK action surfaces accidental DELETE attempts as a constraint violation rather than silently nulling out idempotency-bearing data. Defensive, not load-bearing.
 
-5. **Migration 0349 split from 0347.** Adding the FK to `llm_requests.warm_session_id` requires `browser_warm_sessions` to exist (migration 0348). The plan ships 0347 (columns + CHECKs only, no FK), then 0348 (table), then 0349 (FK + unique partial index). This is the locked ordering from spec §7.2. (Note: this spec originally reserved 0343–0347; renumbered to 0345–0349 in the 2026-05-13 S1 sync after PR #296 shipped 0343 + 0344 on main. Ordering invariant is preserved across the shift.)
+5. **Migration 0350 split from 0348.** Adding the FK to `llm_requests.warm_session_id` requires `browser_warm_sessions` to exist (migration 0349). The plan ships 0348 (columns + CHECKs only, no FK), then 0349 (table), then 0350 (FK + unique partial index). This is the locked ordering from spec §7.2. (Note: this spec originally reserved 0343–0347; renumbered to 0345–0349 in the 2026-05-13 S1 sync after PR #296 shipped 0343 + 0344 on main, then renumbered again to 0346–0350 in the 2026-05-14 S2 sync after PR #298 shipped `0345_memory_utility_30d`. Ordering invariant is preserved across both shifts.)
 
 6. **Lease-then-tear-down warm-pool, no V1 reuse.** A leased warm session transitions `available → leased → terminated` after the task completes. No `leased → available` return path. Idle-cost row is emitted at exactly one point per warm session (teardown), keyed on `warmSessionId` for idempotency.
 
@@ -104,10 +104,10 @@ The chunks below depend on these invariants holding across every chunk. Any viol
 3. **`subtype` and `warm_session_id` on `llm_requests` are null when `source_type != 'sandbox_compute'`.** Enforced by CHECK constraints null-safe via `IS DISTINCT FROM`.
 4. **One available warm session per subaccount maximum.** Enforced by `UNIQUE INDEX browser_warm_sessions(subaccount_id) WHERE status='available'`. Two concurrent refills race; the loser gets `23505` and treats it as "another worker already refilled" (no error surface).
 5. **One idle-cost row per warm session maximum.** Enforced by `UNIQUE INDEX llm_requests(warm_session_id) WHERE subtype='warm_pool'`. Re-runs of teardown are no-ops.
-6. **Status default = `'off'` for `subaccount_iee_browser_settings`.** Migration 0346 sets DEFAULT 'off'. No mass-enable on backfill (brief §3.5 v7 invariant).
+6. **Status default = `'off'` for `subaccount_iee_browser_settings`.** Migration 0347 sets DEFAULT 'off'. No mass-enable on backfill (brief §3.5 v7 invariant).
 7. **RLS dual-GUC.** All three new tables use dual-GUC RLS (`app.organisation_id` + `app.subaccount_id` checks via `setOrgAndSubaccountGUC`). Subaccount filtering is enforced by RLS, not service code.
 8. **No cross-tenant mount.** `ieeBrowserProfileManager.mount` asserts the task's `(org, subaccount)` matches the profile row's `(org, subaccount)` before the volume mounts. `session_key` is never sufficient alone to authorise a mount.
-9. **Migration ordering 0345 → 0346 → 0347 → 0348 → 0349.** Forward-only. 0347 adds columns without FK; 0348 creates the FK target; 0349 adds FK + unique partial index.
+9. **Migration ordering 0346 → 0347 → 0348 → 0349 → 0350.** Forward-only. 0348 adds columns without FK; 0349 creates the FK target; 0350 adds FK + unique partial index.
 10. **DO retirement is one-way.** Chunk 17 deletes 6 worker files + `worker/Dockerfile`; the `verify-no-do-references.sh` CI gate locks the absence.
 
 ---
@@ -144,16 +144,16 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 
 ## 5. Per-chunk detail
 
-### Chunk 1 — `iee_browser_session_profiles` schema + migration 0345 + RLS
+### Chunk 1 — `iee_browser_session_profiles` schema + migration 0346 + RLS
 
-**spec_sections:** §7.1, §7.2 (0345), §9, §10.1, §13.1 (profile lazy-create + mount), §13.7 (profile state machine)
+**spec_sections:** §7.1, §7.2 (0346), §9, §10.1, §13.1 (profile lazy-create + mount), §13.7 (profile state machine)
 
 **Files to create or modify:**
 - `server/db/schema/ieeBrowserSessionProfiles.ts` (NEW)
 - `server/db/schema/index.ts` (EXTEND — export new table)
 - `server/config/rlsProtectedTables.ts` (EXTEND — add table name)
-- `migrations/0345_create_iee_browser_session_profiles.sql` (NEW)
-- `migrations/0345_create_iee_browser_session_profiles.down.sql` (NEW)
+- `migrations/0346_create_iee_browser_session_profiles.sql` (NEW)
+- `migrations/0346_create_iee_browser_session_profiles.down.sql` (NEW)
 
 **Module shape:**
 - *Public interface this chunk exposes:* `ieeBrowserSessionProfiles` Drizzle table export (column types, indexes, unique key `(organisation_id, subaccount_id, session_key)`). RLS manifest entry. No service methods.
@@ -176,7 +176,7 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 **Dependencies:** none.
 
 **Acceptance criteria:**
-- `migrations/0345_create_iee_browser_session_profiles.sql` creates the table with the spec §10.1 column shape, all indexes, the dual-GUC RLS policy, and the FKs.
+- `migrations/0346_create_iee_browser_session_profiles.sql` creates the table with the spec §10.1 column shape, all indexes, the dual-GUC RLS policy, and the FKs.
 - `.down.sql` drops policy + indexes + table cleanly.
 - `server/db/schema/index.ts` exports `ieeBrowserSessionProfiles`.
 - `server/config/rlsProtectedTables.ts` lists `iee_browser_session_profiles` in the manifest.
@@ -188,16 +188,16 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 
 ---
 
-### Chunk 2 — `subaccount_iee_browser_settings` schema + migration 0346 + RLS
+### Chunk 2 — `subaccount_iee_browser_settings` schema + migration 0347 + RLS
 
-**spec_sections:** §7.1, §7.2 (0346), §8.3, §9, §10.2, §13.1 (settings PATCH), §13.7 (settings state — ETag, not lifecycle)
+**spec_sections:** §7.1, §7.2 (0347), §8.3, §9, §10.2, §13.1 (settings PATCH), §13.7 (settings state — ETag, not lifecycle)
 
 **Files to create or modify:**
 - `server/db/schema/subaccountIeeBrowserSettings.ts` (NEW)
 - `server/db/schema/index.ts` (EXTEND — export new table)
 - `server/config/rlsProtectedTables.ts` (EXTEND — add table name)
-- `migrations/0346_create_subaccount_iee_browser_settings.sql` (NEW)
-- `migrations/0346_create_subaccount_iee_browser_settings.down.sql` (NEW)
+- `migrations/0347_create_subaccount_iee_browser_settings.sql` (NEW)
+- `migrations/0347_create_subaccount_iee_browser_settings.down.sql` (NEW)
 
 **Module shape:**
 - *Public interface this chunk exposes:* `subaccountIeeBrowserSettings` Drizzle table export with PK `subaccountId`, `settingsVersion` ETag column, the 4 user-facing fields (status, browserProfileRetentionDays, perTaskCostCeilingCents, perSubaccountDailyCostCeilingCents) + `rolloutApproved`.
@@ -215,10 +215,10 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 **Test considerations:**
 - No tests in this chunk.
 
-**Dependencies:** chunk 1 (migration ordering 0345 → 0346).
+**Dependencies:** chunk 1 (migration ordering 0346 → 0347).
 
 **Acceptance criteria:**
-- `migrations/0346_create_subaccount_iee_browser_settings.sql` creates the table with DEFAULT 'off' on `status`, all column defaults, the dual-GUC RLS policy.
+- `migrations/0347_create_subaccount_iee_browser_settings.sql` creates the table with DEFAULT 'off' on `status`, all column defaults, the dual-GUC RLS policy.
 - `.down.sql` reverses cleanly.
 - Schema index exports the new table; RLS manifest lists the table.
 
@@ -229,22 +229,22 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 
 ---
 
-### Chunk 3 — `llm_requests` columns `subtype` + `warm_session_id` + CHECKs (migration 0347)
+### Chunk 3 — `llm_requests` columns `subtype` + `warm_session_id` + CHECKs (migration 0348)
 
-**spec_sections:** §7.1 (`llm_requests` EXTEND), §7.2 (0347), §8.6, §10.3 (FK target), §13.1 (cost-row idempotency)
+**spec_sections:** §7.1 (`llm_requests` EXTEND), §7.2 (0348), §8.6, §10.3 (FK target), §13.1 (cost-row idempotency)
 
 **Files to create or modify:**
 - `server/db/schema/llmRequests.ts` (EXTEND — add `subtype text` nullable + `warmSessionId uuid` nullable, NO FK yet)
-- `migrations/0347_llm_requests_add_subtype.sql` (NEW)
-- `migrations/0347_llm_requests_add_subtype.down.sql` (NEW)
+- `migrations/0348_llm_requests_add_subtype.sql` (NEW)
+- `migrations/0348_llm_requests_add_subtype.down.sql` (NEW)
 
 **Module shape:**
 - *Public interface this chunk exposes:* Two new columns on `llm_requests` (`subtype text` nullable, `warm_session_id uuid` nullable) + two CHECK constraints (subtype enum gate; warm_session_id-vs-subtype consistency).
-- *What stays hidden behind it:* The exact null-safe predicate using `IS DISTINCT FROM` (load-bearing for three-valued-logic correctness), the deliberate omission of the FK (lands in 0349 after 0348).
+- *What stays hidden behind it:* The exact null-safe predicate using `IS DISTINCT FROM` (load-bearing for three-valued-logic correctness), the deliberate omission of the FK (lands in 0350 after 0349).
 
 **Contracts:**
 - Column 1: `subtype text` nullable. Values when `source_type = 'sandbox_compute'`: `'task' | 'warm_pool'`. Null otherwise.
-- Column 2: `warm_session_id uuid` nullable. Non-null only when `subtype = 'warm_pool'`. No FK yet (FK lands in 0349).
+- Column 2: `warm_session_id uuid` nullable. Non-null only when `subtype = 'warm_pool'`. No FK yet (FK lands in 0350).
 - CHECK 1 (subtype enum gate, null-safe):
   ```sql
   CHECK ((source_type = 'sandbox_compute' AND subtype IN ('task','warm_pool'))
@@ -263,12 +263,12 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 **Test considerations:**
 - No tests in this chunk.
 
-**Dependencies:** chunk 2 (migration ordering 0346 → 0347). No dependency on chunk 4 (the target table for the FK does not exist yet; FK lands in chunk 5).
+**Dependencies:** chunk 2 (migration ordering 0347 → 0348). No dependency on chunk 4 (the target table for the FK does not exist yet; FK lands in chunk 5).
 
 **Acceptance criteria:**
 - Migration adds both columns nullable, both CHECK constraints with `IS DISTINCT FROM`.
-- Migration does NOT add FK on `warm_session_id` (deferred to 0349).
-- Migration does NOT add unique partial index on `warm_session_id` (deferred to 0349).
+- Migration does NOT add FK on `warm_session_id` (deferred to 0350).
+- Migration does NOT add unique partial index on `warm_session_id` (deferred to 0350).
 - `.down.sql` drops CHECKs + columns.
 
 **Verification commands:**
@@ -278,16 +278,16 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 
 ---
 
-### Chunk 4 — `browser_warm_sessions` schema + migration 0348 + RLS + shared-type extensions
+### Chunk 4 — `browser_warm_sessions` schema + migration 0349 + RLS + shared-type extensions
 
-**spec_sections:** §7.1, §7.2 (0348), §8.5, §8.6 (warm_session_id as FK target), §9, §10.3, §13.7 (warm-session state machine)
+**spec_sections:** §7.1, §7.2 (0349), §8.5, §8.6 (warm_session_id as FK target), §9, §10.3, §13.7 (warm-session state machine)
 
 **Files to create or modify:**
 - `server/db/schema/browserWarmSessions.ts` (NEW)
 - `server/db/schema/index.ts` (EXTEND — export new table)
 - `server/config/rlsProtectedTables.ts` (EXTEND — add table name)
-- `migrations/0348_create_browser_warm_sessions.sql` (NEW)
-- `migrations/0348_create_browser_warm_sessions.down.sql` (NEW)
+- `migrations/0349_create_browser_warm_sessions.sql` (NEW)
+- `migrations/0349_create_browser_warm_sessions.down.sql` (NEW)
 - `shared/iee/failureReason.ts` (EXTEND — add 2 enum values: `iee_browser_launch_disabled`, `profile_harvest_failed`)
 - `shared/types/sandbox.ts` (EXTEND — add optional `profileMount` + `warmSessionCheckoutId` fields to `SandboxRunTaskInput`)
 
@@ -317,7 +317,7 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 **Test considerations:**
 - No tests in this chunk.
 
-**Dependencies:** chunk 3 (migration ordering 0347 → 0348). No dependency on chunks 1 or 2 beyond shared `organisations` / `subaccounts` tables (existing).
+**Dependencies:** chunk 3 (migration ordering 0348 → 0349). No dependency on chunks 1 or 2 beyond shared `organisations` / `subaccounts` tables (existing).
 
 **Acceptance criteria:**
 - Migration creates the table with the partial unique index, all FKs, the dual-GUC RLS policy.
@@ -332,13 +332,13 @@ Chunk naming honours the spec's chunk-order intent but applies the splits above.
 
 ---
 
-### Chunk 5 — FK on `llm_requests.warm_session_id` + unique partial index (migration 0349)
+### Chunk 5 — FK on `llm_requests.warm_session_id` + unique partial index (migration 0350)
 
-**spec_sections:** §7.2 (0349), §8.6 (idempotency on warm_session_id), §10.3 (deletion contract), §13.1 (warm-session idle-cost-row key-based idempotency)
+**spec_sections:** §7.2 (0350), §8.6 (idempotency on warm_session_id), §10.3 (deletion contract), §13.1 (warm-session idle-cost-row key-based idempotency)
 
 **Files to create or modify:**
-- `migrations/0349_llm_requests_warm_session_id_fk.sql` (NEW)
-- `migrations/0349_llm_requests_warm_session_id_fk.down.sql` (NEW)
+- `migrations/0350_llm_requests_warm_session_id_fk.sql` (NEW)
+- `migrations/0350_llm_requests_warm_session_id_fk.down.sql` (NEW)
 - `server/db/schema/llmRequests.ts` (EXTEND — add `.references()` on the `warmSessionId` column now that the target exists)
 
 **Module shape:**
@@ -1190,16 +1190,16 @@ The script integrates into the existing static-gates suite (wired in via the sam
 |---|---|---|
 | **One-vendor risk on e2b.** Substrate redirect concentrates all browser tasks on a single sandbox provider. Outage = total IEE browser outage. | `SandboxExecutionService` abstraction (Spec B) is the abstraction layer. Spec §4 decision 9 accepts this risk for V1; a second provider is a future spec, not V1 scope. | Spec §4(9), §16; this plan §6 |
 | **Spec B per-volume single-mount invariant.** The "two concurrent dispatches for same profile" correctness story (§13.3) relies on Spec B's provider-layer single-mount, NOT on a row UPDATE. If the e2b provider implementation does not honour this, two concurrent tasks could corrupt a profile. | Named CI plan-gate `ieeBrowserProfileManager.serialization.test.ts` (chunk 9) verifies before chunk 9 ships. If the gate fails, return to chunk 7 (provider mount logic) before resuming. | Spec §13.3, §15 R2-F6; this plan chunk 9 |
-| **Migration ordering.** 0347 adds `warm_session_id` columns but the FK + unique partial index land in 0349 after 0348 creates the target table. A migration applied out of order would either fail (FK target missing) or violate the spec (FK skipped). | Chunks 3 → 4 → 5 strictly serial. The plan ordering matches migration numbering. `npm run db:generate` after each chunk verifies Drizzle ↔ migration agreement. | Spec §7.2; this plan chunks 3, 4, 5 |
+| **Migration ordering.** 0348 adds `warm_session_id` columns but the FK + unique partial index land in 0350 after 0349 creates the target table. A migration applied out of order would either fail (FK target missing) or violate the spec (FK skipped). | Chunks 3 → 4 → 5 strictly serial. The plan ordering matches migration numbering. `npm run db:generate` after each chunk verifies Drizzle ↔ migration agreement. | Spec §7.2; this plan chunks 3, 4, 5 |
 | **DO retirement irreversibility.** Chunk 17 deletes `worker/Dockerfile` + 5 worker handlers + 2 worker runtime files. If a runtime chunk has a latent bug, rolling back the substrate requires git revert of the deletion commit. | Chunk 17 is sequenced AFTER all 16 runtime / settings / UI chunks are confirmed working. CI gate `verify-no-do-references.sh` lands in the same chunk; if a follow-up regression needs DO references back, the gate must be amended deliberately. | Spec §4(7), §7.5; this plan chunk 17 |
 | **Warm-pool starvation under bursty load.** V1 size = 1 per subaccount, not configurable. Multiple concurrent human-triggered tasks for the same subaccount will starve and fall through to cold start. | Acceptable for dogfood (operator-gated, low concurrency). V2 sizing telemetry is in §16 deferred items. The `warm_pool_miss` metric (§8.7) captures the signal for capacity planning. | Spec §16 deferred items; this plan chunk 10 |
-| **Cost-row idempotency on warm-session teardown.** Without the unique partial index, a teardown retry could write two idle-cost rows for the same warm session, double-billing. | Unique partial index `llm_requests(warm_session_id) WHERE subtype='warm_pool'` in chunk 5 (migration 0349). Chunk 10 catches `23505` as no-op. The FK action `ON DELETE RESTRICT` (R3-F3) surfaces any accidental DELETE attempt as a constraint violation rather than silently nulling out idempotency-bearing data. | Spec §10.3 deletion contract, §13.1; this plan chunks 5, 10 |
+| **Cost-row idempotency on warm-session teardown.** Without the unique partial index, a teardown retry could write two idle-cost rows for the same warm session, double-billing. | Unique partial index `llm_requests(warm_session_id) WHERE subtype='warm_pool'` in chunk 5 (migration 0350). Chunk 10 catches `23505` as no-op. The FK action `ON DELETE RESTRICT` (R3-F3) surfaces any accidental DELETE attempt as a constraint violation rather than silently nulling out idempotency-bearing data. | Spec §10.3 deletion contract, §13.1; this plan chunks 5, 10 |
 | **Rollout-approval ETag race.** Two admins race to flip rollout state for the same subaccount; without an ETag, last write wins and one decision is silently lost. | `expectedSettingsVersion` predicate (R2-F4) on the admin route's UPDATE. Loser sees HTTP 409 with the current `settings_version`. Audit-log row written in the same transaction as the UPDATE. | Spec §8.4 R2-F4; this plan chunk 13 |
 | **Q3 sandbox provider path drift.** Spec §17 Q3 flagged the e2b provider exact file path as a Phase 2 lookup. | Verified during plan authoring: `server/services/sandbox/e2bSandbox.ts` exists. Documented in chunk 7. No inventory update required. | Spec §17 Q3; this plan chunk 7 |
 | **Q4 pre-existing host-disk profiles.** If `BROWSER_SESSION_DIR` already contains data, lazy-create on first task could orphan it. | Per spec §17 Q4 ("likely no-op given dogfood-first") — chunk 8's `playwrightContext.ts` edit defaults `mountRoot` only in dev/test; production callers always supply. Existing host-disk profiles are orphaned and reclaimed by ordinary filesystem cleanup. No migration step needed. | Spec §17 Q4; this plan chunk 8 |
 | **Cross-tenant mount via `session_key` collision.** A maliciously or accidentally crafted `session_key` matching another tenant's key could attempt to mount across tenants. | `ieeBrowserProfileManager.mount` asserts the task's `(org, subaccount)` matches the profile row's `(org, subaccount)` BEFORE the volume mounts. `session_key` is never sufficient alone. Plus the dual-GUC RLS policy on `iee_browser_session_profiles` filters at the DB layer. | Spec §9 invariant 1; this plan chunk 9 |
 | **Operator-backend defaults drift.** The 3 constants in `operatorSettingsDefaults` substitute for 3 per-subaccount fields whose DB columns remain. Future operator may forget the constants are the source. | Single discoverable module `operatorSettingsDefaults.ts` with all three constants. Future amendment that resumes per-subaccount reads will touch this file first. Spec §10.2 explicitly notes DB columns stay for forward-compat. | Spec §7.4; this plan chunk 14 |
-| **Status default mass-enable risk on backfill.** A migration that defaults `subaccount_iee_browser_settings.status` to `'on'` would enable IEE browser substrate for every existing subaccount in one commit, bypassing the operator-gated dogfood-first invariant. | Migration 0346 sets `DEFAULT 'off'` explicitly. Spec §3.5 brief v7 invariant locked. Reviewers will check the DDL string against the spec at chunk 2. | Spec §10.2, §3.5; this plan chunk 2 |
+| **Status default mass-enable risk on backfill.** A migration that defaults `subaccount_iee_browser_settings.status` to `'on'` would enable IEE browser substrate for every existing subaccount in one commit, bypassing the operator-gated dogfood-first invariant. | Migration 0347 sets `DEFAULT 'off'` explicitly. Spec §3.5 brief v7 invariant locked. Reviewers will check the DDL string against the spec at chunk 2. | Spec §10.2, §3.5; this plan chunk 2 |
 
 ---
 
@@ -1215,7 +1215,7 @@ The script integrates into the existing static-gates suite (wired in via the sam
   - Goal 7 (Operator settings tab: 4 new, 3 removed, predicate broadened) → chunks 13, 14, 16.
 - **File inventory ↔ chunks (cross-reference against spec §7):** every file in §7.1 through §7.9b appears in exactly one chunk.
   - §7.1 schema files: chunks 1, 2, 3 (`llm_requests`), 4 (warm sessions + shared types).
-  - §7.2 migrations 0345–0349: chunks 1, 2, 3, 4, 5.
+  - §7.2 migrations 0346–0350: chunks 1, 2, 3, 4, 5.
   - §7.3 sandbox template: chunk 6.
   - §7.4 server services: chunks 7 (e2b provider), 9 (profile manager), 10 (warm pool), 11 (harvest), 12 (`_ieeShared`), 13 (settings service), 14 (operator-backend defaults), 15A (incident ingestor + per-task alarm), 15B (end-of-day rollup cron).
   - §7.5 worker files: chunk 8 (`playwrightContext.ts` edit); chunk 17 (deletes).
@@ -1239,8 +1239,8 @@ The script integrates into the existing static-gates suite (wired in via the sam
   - §13.1–§13.7 (execution-safety contracts) → distributed across chunks 1, 2, 3, 4, 5, 9, 10, 12, 13, 15A, 15B.
   - §14 (`session_key` derivation policy) → chunk 12 (the pure helper).
 - **Chunk-ordering check:**
-  - Migration ordering 0345 → 0346 → 0347 → 0348 → 0349 is preserved by chunks 1 → 2 → 3 → 4 → 5.
-  - 0347 column-only-no-FK; 0349 FK-after-target-table → chunk 3 produces 0347 columns only, chunk 5 produces 0349 FK + index.
+  - Migration ordering 0346 → 0347 → 0348 → 0349 → 0350 is preserved by chunks 1 → 2 → 3 → 4 → 5.
+  - 0348 column-only-no-FK; 0350 FK-after-target-table → chunk 3 produces 0348 columns only, chunk 5 produces 0350 FK + index.
   - Chunk 9 (profile manager) ships only after the named CI gate passes against chunk 7's e2b provider.
   - Chunk 17 (DO retirement) is sequenced AFTER chunks 1–16 are confirmed working.
   - `verify-no-do-references.sh` ships in chunk 17 alongside the deletes.
