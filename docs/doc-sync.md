@@ -26,6 +26,8 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `docs/context-packs/` | When a context pack's referenced section anchor changes in `architecture.md`, or when a new mode is needed. Re-run anchor regeneration if section names changed. |
 | `references/test-gate-policy.md` | When the test-gate posture changes (a new umbrella command becomes forbidden, a new local check becomes allowed). |
 | `references/spec-review-directional-signals.md` | When `spec-reviewer` surfaces the same scope/sequencing/posture call >2 times — add a signal so the classifier catches it. |
+| `docs/incident-response.md` | When the SEV classification matrix, on-call rotation, timeline-log format, post-mortem template, or escalation paths change. |
+| `docs/testing-transition-plan.md` | When migration triggers, test-inventory sequencing, per-area effort estimates, or phasing decisions change. |
 | `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | Every framework-level change ships with a version bump and changelog entry. Repo-specific changes (your own architecture.md edits, your own agent additions) DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only. |
 
 ---
