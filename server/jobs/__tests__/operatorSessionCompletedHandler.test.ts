@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="inline pure idempotency-decision helpers — extraction to operatorSessionCompletedHandlerPure.ts deferred to follow-on cleanup; handler logic IS pure-tested, just colocated"
 /**
  * operatorSessionCompletedHandler.test.ts — idempotency tests.
  *

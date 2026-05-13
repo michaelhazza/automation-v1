@@ -3,8 +3,10 @@
  *
  * Spec: docs/superpowers/specs/2026-05-12-operator-backend-spec.md §7.5, §3.15
  *
- * Uses withAdminConnectionGuarded({ source: 'operatorTaskProfileGc', allowRlsBypass: true })
- * + SET LOCAL ROLE admin_role per spec (GC crosses org boundaries).
+ * Uses withAdminConnectionGuarded with the cross-org bypass enabled
+ * (allowRlsBypass=true semantics) plus SET LOCAL ROLE admin_role per
+ * spec — GC crosses org boundaries because expired profile rows live on
+ * many tenants and the sweep must reclaim them globally.
  *
  * Actions:
  *   1. Reclaim stale gc_in_progress rows older than 30 minutes (re-schedule them).

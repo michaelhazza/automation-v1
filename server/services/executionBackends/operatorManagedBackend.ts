@@ -874,9 +874,8 @@ export const operatorManagedBackend: ExecutionBackend = {
     const staleThreshold = new Date(Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000);
 
     // Cross-tenant scan: bypass RLS to find stale rows across all orgs.
-    // allowRlsBypass: cross-tenant reconcile scan — rows are subsequently
-    // processed per-org via setOrgAndSubaccountGUC inside each row's tx.
     const staleRows = await withAdminConnectionGuarded(
+      // allowRlsBypass: cross-tenant reconcile scan — rows are subsequently processed per-org via setOrgAndSubaccountGUC inside each row's tx.
       { source: 'operatorManagedBackend.reconcile', allowRlsBypass: true },
       async (tx) =>
         tx

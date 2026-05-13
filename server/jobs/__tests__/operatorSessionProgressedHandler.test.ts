@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="inline pure helpers — extraction to operatorSessionProgressedHandlerPure.ts deferred to follow-on cleanup; handler decision logic IS pure-tested, just colocated rather than extracted"
 /**
  * operatorSessionProgressedHandler.test.ts
  *

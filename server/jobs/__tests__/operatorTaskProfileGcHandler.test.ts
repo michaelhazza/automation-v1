@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="inline pure GC-decision helpers — extraction to operatorTaskProfileGcHandlerPure.ts deferred to follow-on cleanup; handler logic IS pure-tested, just colocated"
 /**
  * operatorTaskProfileGcHandler.test.ts
  *

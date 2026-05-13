@@ -34,6 +34,7 @@ ADAPTER_DIR="$ROOT_DIR/server/services/executionBackends"
 # Each must call SandboxExecutionService.runTask in its dispatch() body.
 SANDBOX_REQUIRED_ADAPTERS=(
   "ieeDevBackend.ts"
+  "operatorManagedBackend.ts"
 )
 
 # ── Check 0: auto-detect missing calibrations ─────────────────────────────────
