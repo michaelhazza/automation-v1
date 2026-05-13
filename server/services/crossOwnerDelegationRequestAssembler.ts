@@ -3,6 +3,7 @@
 
 import { and, eq, isNull } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { logger } from '../lib/logger.js';
 import { delegationOutcomes } from '../db/schema/delegationOutcomes.js';
 import type { RoutingContextV2 } from '../../shared/types/routingContext.js';
 import {
@@ -57,7 +58,7 @@ export async function build(
   const delegationScope = deriveDelegationScope(parentRun.scope ?? null, delegationPayload);
 
   const db = getOrgScopedDb('crossOwnerDelegationRequestAssembler.build');
-  await db
+  const updated = await db
     .update(delegationOutcomes)
     .set({ crossOwnerApprovalTimeoutPolicy: timeoutPolicy })
     .where(
@@ -65,7 +66,15 @@ export async function build(
         eq(delegationOutcomes.runId, parentRun.id),
         isNull(delegationOutcomes.terminalAt),
       ),
-    );
+    )
+    .returning({ id: delegationOutcomes.id });
+
+  if (updated.length === 0) {
+    logger.warn('crossOwnerDelegationRequestAssembler.no_outcome_row', {
+      runId: parentRun.id,
+      timeoutPolicy,
+    });
+  }
 
   return {
     parent_run_id: parentRun.id,
