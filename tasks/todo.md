@@ -201,6 +201,24 @@ Discovered by: adversarial-reviewer, 2026-05-14.
   - Gap: `infra/sandbox-templates/operator-session/entrypoint.sh:9` launches `node /workspace/file-watcher.js &` as a backgrounded shell process. `process.send` requires `child_process.fork()`, so the watcher's `sendIpc` calls fall through to the "IPC not available" branch and the events are dropped.
   - Suggested approach: the sandbox-template is explicitly infra-managed (Dockerfile header: "PLACEHOLDER: not built by V1 CI. Real build and publish is managed by the Operator Backend infra pipeline."). Either replace the entrypoint with a Node parent process that forks the watcher and bridges IPC over the runtime ↔ host channel, or document the runtime-side contract the infra pipeline must satisfy. Tracked here so future infra work doesn't ship the watcher in a non-functional state.
 
+- [ ] **PA-V2-LIST-APPROVALS-V1-ARM** — wire V1 initiator-defaulted arm into listPendingApprovalsForUser
+  - Origin: chatgpt-pr-review Round 1 F5 (PR #299, personal-assistant-v2-operator).
+  - Context: `listPendingApprovalsForUser` in `server/services/actionService.ts` was shipped with only the explicit-approver arm (`approver_user_id = $userId`). The earlier Arm 2 (`approver_user_id IS NULL`) was removed because it had no V1 initiator predicate and would have exposed every default-approver action in the org/subaccount to any caller.
+  - When to wire: when a caller actually needs the V1 default-approver path through this function. Today the V1 default approver flow is handled elsewhere; this function's scope is the V2 cross-owner approval queue only.
+  - Suggested approach: JOIN actions → agent_runs to derive the run's initiator (column TBD — `agent_runs` has `actingAsUserId` + the principal model; check whichever V1 uses today as the default-approver). Add an Arm 2 that returns `approver_user_id IS NULL` rows where the run's initiator equals `$userId`. Keep the org filter mandatory.
+
+- [ ] **PA-V2-WATCHER-HOST-BRIDGE** — host-side IPC handler that reads sandbox file content
+  - Origin: chatgpt-pr-review Round 1 F1 (PR #299, personal-assistant-v2-operator).
+  - Context: `infra/sandbox-templates/operator-session/file-watcher.js` sends metadata-only IPC payloads (path, sha256-hint, sizeBytes, emittedBy). The canonical `operatorSandboxFileEventBridge.handleWatcherEvent` requires `content: Buffer`. A host-side bridge is needed to read the file from the sandbox shared volume and call `handleWatcherEvent` with the populated payload.
+  - Why deferred: the operator-session sandbox template is explicitly placeholder-only (`README.md`, `Dockerfile`, `entrypoint.sh` all declare PLACEHOLDER status; real implementation lands with the Operator Backend infra pipeline). Pairs with `PA-V2-CONFORMANCE-8` (same infra deliverable, same template).
+  - Suggested approach: spawn watcher.js via `child_process.fork()` from a Node parent (replaces the current sh-backgrounded approach). The parent receives the metadata payload, opens the file from the mounted sandbox volume, calls `handleWatcherEvent({ ...payload, content })` against the canonical bridge. Apply a size cap (10 MB suggested) before reading.
+
+- [ ] **PA-V2-OPERATOR-TEMPLATE-PROMOTION** — promote operator-session template to a CI-built artefact
+  - Origin: chatgpt-pr-review Round 1 T2 (PR #299, personal-assistant-v2-operator).
+  - Context: `infra/sandbox-templates/operator-session/` currently contains active runtime logic (chokidar watcher, Dockerfile, entrypoint.sh) but is documented as PLACEHOLDER and is not built/scanned/tested by V1 CI. ChatGPT flagged this as a grey-zone risk — production-relevant code outside CI coverage, especially the sandbox-side file-access path.
+  - Why deferred: real implementation lands with the operator-backend spec; this PR is intentionally consistent with the placeholder framing per the template's own README (`Placeholder scaffolding. Real implementation lands with the Operator Backend spec; V1 CI does not build, scan, or publish this template.`).
+  - Suggested approach: once operator-backend activates this directory, extend `verify-template-version-coherence` to include the path, add a Dockerfile build job in CI, run security scans on the built image, and add an integration test that the watcher's IPC payload matches `WatcherFileEventInput`'s expected shape.
+
 ## Blockers
 
 _None active._

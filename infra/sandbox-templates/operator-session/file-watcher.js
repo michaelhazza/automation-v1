@@ -134,12 +134,17 @@ function handleFileEvent(eventPath) {
 
   // Step (d): parent-directory escapes handled by realpathSync + isContainedInRoot above.
 
-  // Step (e): read file content
-  let content;
+  // Step (e): stat the file to capture size — content stays on the sandbox FS.
+  // IPC contract: the watcher sends METADATA ONLY. The host-side IPC bridge
+  // (separate, operator-backend-managed; see PA-V2-WATCHER-HOST-BRIDGE backlog
+  // entry) reads file content via shared volume before calling
+  // handleWatcherEvent. Shipping content over IPC was rejected — Node's IPC has
+  // no size guarantee and large files would block the channel.
+  let sizeBytes;
   try {
-    content = fs.readFileSync(resolvedPath);
+    sizeBytes = fs.statSync(resolvedPath).size;
   } catch {
-    console.warn('[file-watcher] readFileSync failed — dropped', { redacted: redactPath(resolvedPath, WATCHED_ROOTS) });
+    console.warn('[file-watcher] statSync failed — dropped', { redacted: redactPath(resolvedPath, WATCHED_ROOTS) });
     return;
   }
 
@@ -153,15 +158,15 @@ function handleFileEvent(eventPath) {
     }
   }
 
-  // Step (g): send via IPC — existingContentSha256 is null because the watcher
-  // does not know the DB-stored sha256; the host runtime fetches it before calling
-  // handleWatcherEvent. shouldWatcherSkip returns false on null, so the event
-  // always proceeds to the canonical UPSERT.
+  // Step (g): send via IPC. Metadata-only payload — the host bridge (not in this
+  // PR; see PA-V2-WATCHER-HOST-BRIDGE) reads file content from the sandbox volume
+  // before invoking handleWatcherEvent. existingContentSha256 is null because the
+  // watcher does not query the DB; the host bridge resolves it before the UPSERT.
   sendIpc({
     type: 'file_event',
     path: relativePath,
     existingContentSha256: null,
-    sizeBytes: content.length,
+    sizeBytes,
     emittedBy: 'watcher',
   });
 }

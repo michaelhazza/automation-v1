@@ -85,6 +85,15 @@ export const delegationOutcomes = pgTable(
     // Partial index on (run_id, substep_status) WHERE terminal_at IS NULL
     // is enforced by migration 0347 (not expressible in Drizzle WHERE API).
     terminalAt: timestamp('terminal_at', { withTimezone: true }),
+
+    // Updated every time substep_status changes (migration 0349). Used by
+    // crossOwnerApprovalTimeoutSweep to detect rows that have been in
+    // 'awaiting_cross_owner_approval' for more than the timeout window;
+    // filtering on created_at would mis-fire on long-lived rows that only
+    // recently transitioned to awaiting state.
+    substepStatusUpdatedAt: timestamp('substep_status_updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => ({
     orgCreatedIdx: index('delegation_outcomes_org_created_idx').on(

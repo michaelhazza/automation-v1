@@ -146,7 +146,10 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
     .where(
       and(
         eq(delegationOutcomes.substepStatus, 'awaiting_cross_owner_approval'),
-        lt(delegationOutcomes.createdAt, cutoff),
+        // Filter on when the row ENTERED awaiting_cross_owner_approval, not on
+        // createdAt. A long-lived row that transitioned into awaiting state
+        // recently would otherwise be timed out immediately on the next sweep.
+        lt(delegationOutcomes.substepStatusUpdatedAt, cutoff),
         isNull(delegationOutcomes.terminalAt),
       ),
     );
@@ -160,7 +163,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
     if (decision.action === 'fail_parent') {
       const updated = await db
         .update(delegationOutcomes)
-        .set({ substepStatus: 'failed', terminalAt: new Date() })
+        .set({ substepStatus: 'failed', terminalAt: new Date(), substepStatusUpdatedAt: new Date() })
         .where(
           and(
             eq(delegationOutcomes.id, row.id),
@@ -195,7 +198,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
     } else if (decision.action === 'continue_without_substep') {
       const updated = await db
         .update(delegationOutcomes)
-        .set({ substepStatus: 'partial', terminalAt: new Date() })
+        .set({ substepStatus: 'partial', terminalAt: new Date(), substepStatusUpdatedAt: new Date() })
         .where(
           and(
             eq(delegationOutcomes.id, row.id),
@@ -251,56 +254,24 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       const initiatorUserId = row.initiatorUserId ?? null;
 
       if (initiatorUserId) {
-        // Re-sweep dedupe: ask_initiator keeps substep_status non-terminal by
+        // Race-safe dedupe: ask_initiator keeps substep_status non-terminal by
         // design (terminalAt stays NULL), so the outer WHERE clause matches
-        // this row again on every sweep until the initiator decides. The
-        // approval-row write is already deduped via the DB unique constraint
-        // on the idempotency key, but appendEvent is not — without this gate
-        // each sweep would append a fresh awaiting_initiator_decision event
-        // to the run trace. Check whether the approval row already exists
-        // and short-circuit the whole branch (suppression-is-success per
-        // DEVELOPMENT_GUIDELINES §8.33) when it does.
+        // this row again on every sweep until the initiator decides.
+        //
+        // The approval-row write is atomically deduped by the DB unique
+        // constraint on (subaccount_id, idempotency_key) — proposeAction
+        // returns {isNew:false} when an earlier sweep already inserted the row.
+        // Event emission MUST be gated on isNew to keep the run trace clean.
+        //
+        // Order matters: action insert first, event append second. Reversing
+        // these allows two concurrent sweeps to both observe "no existing
+        // action", both append the event, then one action insert dedupes —
+        // producing duplicate awaiting_initiator_decision events.
         const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
-        const existingAsk = await db
-          .select({ id: actions.id })
-          .from(actions)
-          .where(
-            and(
-              eq(actions.organisationId, row.organisationId),
-              eq(actions.idempotencyKey, idempotencyKey),
-            ),
-          )
-          .limit(1);
 
-        if (existingAsk.length > 0) {
-          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
-            runId: row.runId,
-            substepId: row.id,
-          });
-          continue;
-        }
-
-        const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
-          eventType: 'cross_owner_substep.awaiting_initiator_decision',
-          parent_run_id: row.runId,
-          substep_id: row.id,
-          initiatorUserId,
-          reason: 'cross_owner_approval_timeout',
-          critical: true,
-        };
-        await appendEvent({
-          runId: row.runId,
-          organisationId: row.organisationId,
-          subaccountId: row.subaccountId,
-          payload: awaitingPayload,
-          sourceService: 'workflowGateStallNotifyJob',
-        });
-
+        let proposeResult: { isNew: boolean } | null = null;
         try {
-          // Keyed on the delegation_outcomes row only — no sweep-varying timestamp
-          // so re-sweeps while the substep is still open produce the same key
-          // and the DB unique constraint deduplicates the approval row.
-          await actionService.proposeAction({
+          proposeResult = await actionService.proposeAction({
             organisationId: row.organisationId,
             subaccountId: row.subaccountId,
             agentId: null,
@@ -315,6 +286,29 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             runId: row.runId,
             substepId: row.id,
             error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        if (proposeResult && proposeResult.isNew) {
+          const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
+            eventType: 'cross_owner_substep.awaiting_initiator_decision',
+            parent_run_id: row.runId,
+            substep_id: row.id,
+            initiatorUserId,
+            reason: 'cross_owner_approval_timeout',
+            critical: true,
+          };
+          await appendEvent({
+            runId: row.runId,
+            organisationId: row.organisationId,
+            subaccountId: row.subaccountId,
+            payload: awaitingPayload,
+            sourceService: 'workflowGateStallNotifyJob',
+          });
+        } else if (proposeResult && !proposeResult.isNew) {
+          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
+            runId: row.runId,
+            substepId: row.id,
           });
         }
       }
