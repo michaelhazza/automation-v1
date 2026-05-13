@@ -264,3 +264,54 @@ The remaining items are editorial or small SQL-hardening issues. I'd clean up #1
 
 ChatGPT verdict APPROVED WITH MINOR EDITS → all 6 findings tightened. The only medium-severity item (R3-F2 null-safe CHECK) closed. R3-F3 (architecture) closed by aligning FK action with the explicit "never deleted" service contract. Spec remains implementation-ready; round 4 is operator-driven (one more pass for final polish, per 2026-05-13 operator decision).
 
+### Round 4 — 2026-05-13T10:00:00Z (FINAL)
+
+**Verdict:** APPROVED (no implementation-readiness blockers remain)
+**Findings:** 1 (low — style only)
+
+#### ChatGPT Feedback (raw)
+
+```
+I think this is ready to lock.
+
+The last pass tightened the remaining real issues: the TOC now includes §10.3, llm_requests.warm_session_id is split cleanly across 0345/0347, the FK is ON DELETE RESTRICT, the CHECK constraints are null-safe, the Part 10 deferred item is removed, and the warm-session billing formula is explicit. The spec also now reconciles the new table count, migration count, CI gate, route inventory, and doc split.
+
+Only one ultra-minor wording nit remains:
+
+Round count text in §7.11 says "rounds 1 + 2"
+Severity: low / Category: style
+Brief: §7.11 says "Updated after rounds 1 + 2 chatgpt-spec-review," but the status and §18 clearly say rounds 1 + 2 + 3 are complete. The content of §7.11 appears updated for round 3, so this is just a stale phrase. Change it to "Updated after rounds 1 + 2 + 3…" for consistency.
+
+Overall verdict: APPROVED
+No implementation-readiness blockers left.
+```
+
+#### Recommendations and Decisions
+
+| ID | Title | Severity | Triage | Recommendation | Final decision |
+|---|---|---|---|---|---|
+| R4-F1 | §7.11 stale "rounds 1 + 2" phrase | low | technical | apply | auto (apply) |
+
+#### Actions taken in spec
+
+- R4-F1: §7.11 header phrase updated to "rounds 1 + 2 + 3 + 4 chatgpt-spec-review (12 + 7 + 6 + 1 = 26 findings applied; final verdict APPROVED)" — matches the reality across all four rounds.
+- Frontmatter status updated: **LOCKED** — accepted; verdict progression noted.
+- §18 self-consistency pass extended with round 4 reconciliation + LOCK declaration.
+
+#### Build-readiness verdict after round 4 — FINAL
+
+**ChatGPT verdict: APPROVED. Spec LOCKED 2026-05-13.**
+
+4 rounds. 26 findings. Verdict trajectory: CHANGES_REQUESTED (R1, 12 findings — 4 high blockers) → NEEDS_MINOR_TIGHTENING (R2, 7 findings — 2 medium + 5 low) → APPROVED WITH MINOR EDITS (R3, 6 findings — 1 medium + 5 low) → APPROVED (R4, 1 low style finding only). Spec is implementation-ready; no remaining blockers; Phase 2 may begin.
+
+## Session summary
+
+**Rounds completed:** 4
+**Total findings applied:** 26 (4 high in R1; 4 medium across rounds; 18 low)
+**Final verdict:** APPROVED
+**Operator decisions during the loop:** R1 — approved all 4 escalated highs "as recommended"; R2-R4 — no high-severity findings, all auto-applied per agent rules.
+**Commits:** `134201c6` (R1), `81583ffe` (R2), `41f8d327` (R3), final commit forthcoming with R4 + finalisation artefacts.
+**PR:** [#297](https://github.com/michaelhazza/automation-v1/pull/297)
+**Spec status:** LOCKED.
+**Phase 1 outcome:** chatgpt-spec-review REVIEW_GAP CLOSED; handoff.md will be updated to record successful directional review.
+

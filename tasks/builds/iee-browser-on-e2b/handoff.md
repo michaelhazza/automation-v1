@@ -9,7 +9,7 @@
 **UI-touching:** yes
 **Mockup paths:** `prototypes/iee-browser-on-e2b.html` (locked at round 3.1)
 **Mockup log:** `tasks/builds/iee-browser-on-e2b/mockup-log.md` (rounds 1, 2, 3, 3.1)
-**Spec status:** accepted
+**Spec status:** **LOCKED** (chatgpt-spec-review APPROVED after 4 rounds, 26 findings applied)
 **Scope class:** Major (new subsystem + cross-cutting + architectural)
 **Spec date:** 2026-05-13
 **Phase 1 completed:** 2026-05-13
@@ -18,25 +18,29 @@
 
 | Reviewer | Outcome | Notes |
 |---|---|---|
-| `spec-reviewer` (Codex) | REVIEW_GAP | Local Codex CLI v0.118.0 incompatible with configured `gpt-5.5` default model (needs v0.125+). No iteration ran, no spec edits made. Pre-emptive citation observation (§3.13 vs §3.15) investigated and dismissed — spec correctly cites §3.15 matching wire-truth in `server/db/schema/operatorTaskProfiles.ts:10`. Codex error logs deleted; informational plan file retained at `tasks/review-logs/spec-review-plan-iee-browser-on-e2b-2026-05-13T120000Z.md`. **0 of 5 iterations consumed** — full budget available for any future Phase 2 spec-reviewer pass (e.g. after a spec amendment). |
-| `chatgpt-spec-review` (manual) | REVIEW_GAP | Operator decision 2026-05-13: skip. Rationale: brief was already heavily refined through 7 ChatGPT-driven external reframes (v2-v7) before spec authoring; directional risk lower than usual. Operator may run chatgpt-spec-review in a later dedicated session if a stress-test is desired before Phase 2 finalisation. |
+| `spec-reviewer` (Codex) | REVIEW_GAP (Codex-CLI environment) | Local Codex CLI v0.118.0 incompatible with configured `gpt-5.5` default model (needs v0.125+). No iteration ran, no spec edits made. Pre-emptive citation observation (§3.13 vs §3.15) investigated and dismissed — spec correctly cites §3.15 matching wire-truth in `server/db/schema/operatorTaskProfiles.ts:10`. **0 of 5 iterations consumed** — full budget available for any future Phase 2 spec-reviewer pass after CLI upgrade. |
+| `chatgpt-spec-review` (manual) | **APPROVED** (4 rounds complete) | Operator changed mind after handoff write and chose to run chatgpt-spec-review. 4 manual rounds with ChatGPT-web: R1 = CHANGES_REQUESTED (12 findings, 4 high-severity blockers); R2 = NEEDS_MINOR_TIGHTENING (7 findings, 2 medium + 5 low); R3 = APPROVED WITH MINOR EDITS (6 findings, 1 medium + 5 low); R4 = **APPROVED** (1 low style finding only). 26 findings applied across rounds. Session log: `tasks/review-logs/chatgpt-spec-review-iee-browser-on-e2b-2026-05-13T07-00-00Z.md`. Commits: `134201c6`, `81583ffe`, `41f8d327`, final round 4 + finalisation. |
 
-**REVIEW_GAP artefacts (per CLAUDE.md):**
+**REVIEW_GAP artefact (per CLAUDE.md) — only spec-reviewer remains gapped:**
 
 ```
 REVIEW_GAP: spec-reviewer | task-class: Major | reason: local Codex CLI v0.118 < required v0.125 for default model gpt-5.5 | operator-override: no | remediation: upgrade `npm install -g @openai/codex@latest` and re-run if a Phase 2 spec amendment justifies the iteration cost; full 5-iteration budget remains available
-REVIEW_GAP: chatgpt-spec-review | task-class: Major | reason: operator-deferred (brief already heavily ChatGPT-reviewed across 7 reframes) | operator-override: yes-2026-05-13T00:00:00Z | remediation: operator may run chatgpt-spec-review as a separate session before Phase 2 finalisation if stress-test desired; otherwise accept
 ```
+
+The chatgpt-spec-review gap was closed by running rounds 1+2+3+4 (operator decision post-handoff). Final verdict APPROVED; no remaining implementation-readiness blockers.
 
 ## Decisions made in Phase 1
 
 1. **PLANNING lock override.** current-focus.md was REVIEWING for sibling `fleet-and-codebase-health` on a different branch; operator switched the pointer. Fleet build preserved as paused entry for restore later.
 2. **Brief v7 committed** (`538641cd`, 2026-05-13). 8 pre-lock findings folded in.
-3. **Sibling-table architecture choice.** Two new tables (`iee_browser_session_profiles`, `subaccount_iee_browser_settings`) rather than extending the operator-area tables. Rationale: different key shapes and concerns.
-4. **Cost-row discriminator design.** `llm_requests.subtype` column (nullable + CHECK constraint) rather than a new cost table.
+3. **Sibling-table architecture choice.** **Three** new tables (`iee_browser_session_profiles`, `subaccount_iee_browser_settings`, `browser_warm_sessions` — last added in chatgpt-spec-review R1 F1) rather than extending the operator-area tables. Rationale: different key shapes and concerns.
+4. **Cost-row discriminator design.** `llm_requests.subtype` column + `warm_session_id` FK column (last added in chatgpt-spec-review R2 F3) with two null-safe CHECK constraints using `IS DISTINCT FROM` (R3 F2), rather than a new cost table.
 5. **`session_key` derivation = path (b)** (operator 2026-05-13). Per-skill derivation with `'default'` fallback. Spec §14 locked.
 6. **`docs/iee-development-spec.md` Part 10 disposition = split** (operator 2026-05-13). Phase 2 creates new `docs/iee-on-e2b-rollout.md` and deletes legacy Part 10.
 7. **Concurrent build coexistence.** `fleet-and-codebase-health` (REVIEWING on `codebase-health` branch) and `iee-browser-on-e2b` (this build) coexist on separate branches; current-focus.md `Paused build` section records the fleet build for later resume.
+8. **Admin rollout-approval route** (chatgpt-spec-review R1 F3). Operator-approved auditable mutation path for `subaccount_iee_browser_settings.rolloutApproved`: `POST /api/admin/iee-browser/rollout-approval/:subaccountId`, system-admin-only, ETag-protected via `expectedSettingsVersion` (R2 F4), emits audit-log row in the same transaction.
+9. **FK action = `ON DELETE RESTRICT`** (chatgpt-spec-review R3 F3). `browser_warm_sessions` rows are never deleted by service code; FK from `llm_requests.warm_session_id` uses RESTRICT (not SET NULL) so any accidental DELETE surfaces as a constraint violation rather than silently nulling out idempotency-bearing data.
+10. **Named CI acceptance gate for profile-mount serialization** (chatgpt-spec-review R2 F6). `server/services/sandbox/__tests__/ieeBrowserProfileManager.serialization.test.ts` is a plan-gate for chunk 5; the profile manager doesn't ship until this CI test confirms the e2b provider honours per-volume single-mount (Spec B invariant).
 
 ## Open questions for Phase 2 (lookups, not design)
 

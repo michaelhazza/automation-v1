@@ -1,4 +1,4 @@
-**Status:** accepted (operator-approved 2026-05-13; chatgpt-spec-review rounds 1 + 2 + 3 complete — 25 findings applied; ChatGPT verdict progression CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → APPROVED WITH MINOR EDITS → tightened)
+**Status:** LOCKED — accepted (operator-approved 2026-05-13; chatgpt-spec-review rounds 1+2+3+4 complete — 26 findings applied; verdict progression CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → APPROVED WITH MINOR EDITS → **APPROVED**)
 **Spec date:** 2026-05-13
 **Last updated:** 2026-05-13
 **Author:** Claude Opus 4.7 (spec-coordinator inline session)
@@ -270,7 +270,7 @@ Dependency graph: 1 → 2 → 3 → (4, 5 in parallel) → (6, 7 in parallel) �
 
 ### 7.11 Inventory totals (numeric-count reconciliation per `docs/spec-authoring-checklist.md` §8)
 
-Updated after rounds 1 + 2 chatgpt-spec-review (12 + 7 findings applied):
+Updated after rounds 1 + 2 + 3 + 4 chatgpt-spec-review (12 + 7 + 6 + 1 = 26 findings applied; final verdict APPROVED):
 
 - **3 new tables** (`iee_browser_session_profiles`, `subaccount_iee_browser_settings`, `browser_warm_sessions`)
 - **2 schema column extensions on `llm_requests`** (`subtype` + `warm_session_id`) + 2 partial-unique indexes (`llm_requests(warm_session_id) WHERE subtype='warm_pool'`; `browser_warm_sessions(subaccount_id) WHERE status='available'`) + 2 column-level CHECK constraints (subtype enum gate; warm_session_id-vs-subtype consistency)
@@ -737,6 +737,7 @@ Remaining items are Phase 2 lookups, not design questions:
 - **Round 1 chatgpt-spec-review reconciliation:** all 12 findings applied per operator approval 2026-05-13. Session log: `tasks/review-logs/chatgpt-spec-review-iee-browser-on-e2b-2026-05-13T07-00-00Z.md`.
 - **Round 2 chatgpt-spec-review reconciliation:** all 7 findings auto-applied (technical, no high-severity escalation; verdict moved CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → tightened). Stale `§10` heading corrected; §5 "only new pieces" list updated; `llm_requests.warm_session_id` column + migration 0347 added (R2-F3 schema/index reconciliation); admin rollout route gains `expectedSettingsVersion` ETag field (R2-F4); partial-unique index on `browser_warm_sessions(subaccount_id) WHERE status='available'` (R2-F5); named CI acceptance test for profile-mount serialization (R2-F6); §7.8 docs disposition resolved (split, R2-F7).
 - **Round 3 chatgpt-spec-review reconciliation:** all 6 findings auto-applied (1 medium + 5 low — no highs; verdict APPROVED WITH MINOR EDITS → tightened). Migration 0345 description rewritten to remove abandoned in-line FK wording (R3-F1); CHECK constraints made null-safe via `IS DISTINCT FROM` (R3-F2); FK action changed `ON DELETE SET NULL` → `ON DELETE RESTRICT` to align with "rows never deleted" service contract (R3-F3); stale Part-10 deferred item removed from §16 (R3-F4); TOC now lists §10.3 (R3-F5); idle-duration formula stated as `terminated_at - created_at` with `leased_at` retained for diagnostics only (R3-F6).
+- **Round 4 chatgpt-spec-review reconciliation:** 1 finding auto-applied (R4-F1 — stale "rounds 1+2" phrase in §7.11 header corrected to "rounds 1+2+3+4"). **Final verdict: APPROVED. Spec LOCKED 2026-05-13.** No implementation-readiness blockers remain across 4 review rounds + 26 findings applied.
 
 ## 19. References
 
