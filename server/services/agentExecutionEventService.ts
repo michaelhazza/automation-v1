@@ -666,12 +666,26 @@ export async function streamEvents(
   const limit = Math.min(Math.max(1, opts.limit ?? 1000), 1000);
 
   // Fetch the run's ownerUserId for the viewer projection (spec §5.4).
+  //
+  // Three-state result, MUST distinguish (Round 3 F9 — service layer):
+  //   - runRows.length === 0 → run not found (or filtered by RLS for another org).
+  //     Fail closed: return an empty page. Do NOT coerce missing-row → null,
+  //     which would put the projection on the "subaccount-owned, return all"
+  //     branch. The route-layer guard (agentRuns.ts F6 fix) prevents this for
+  //     HTTP callers but a direct service consumer must also be safe.
+  //   - runRows[0].ownerUserId === null → subaccount-owned run, all events visible.
+  //   - runRows[0].ownerUserId === string → owner-owned run, projection applies.
   const runRows = await db
     .select({ ownerUserId: agentRuns.ownerUserId })
     .from(agentRuns)
     .where(eq(agentRuns.id, runId))
     .limit(1);
-  const ownerUserId: string | null = runRows[0]?.ownerUserId ?? null;
+
+  if (runRows.length === 0) {
+    return { events: [], hasMore: false, highestSequenceNumber: fromSeq - 1, highestTaskSequence: null };
+  }
+
+  const ownerUserId: string | null = runRows[0].ownerUserId;
 
   const rows = await db
     .select()
@@ -865,6 +879,9 @@ export async function streamEventsByTask(
 
   // Apply viewer projection (spec §5.4 — service layer). Fetch ownerUserId from
   // the run referenced by the first event; task-scoped events share the same run.
+  //
+  // Same three-state distinction as streamEvents (Round 3 F9): a missing run
+  // row must fail closed, not coerce to "subaccount-owned, return all events".
   let ownerUserId: string | null = null;
   if (events.length > 0) {
     const runRows = await db
@@ -872,7 +889,24 @@ export async function streamEventsByTask(
       .from(agentRuns)
       .where(eq(agentRuns.id, events[0].runId))
       .limit(1);
-    ownerUserId = runRows[0]?.ownerUserId ?? null;
+    if (runRows.length === 0) {
+      // Event rows exist but the run is gone (or RLS-filtered for another org).
+      // Fail closed — return an empty projected page; cursor high-water marks
+      // come from the raw page below so callers can advance past the gap.
+      const highestTaskSequenceClosed = page.reduce<number | null>((acc, r) => {
+        if (r.taskSequence == null) return acc;
+        return acc == null ? r.taskSequence : Math.max(acc, r.taskSequence);
+      }, null);
+      const highestSequenceNumberClosed =
+        page.length > 0 ? page[page.length - 1].sequenceNumber : 0;
+      return {
+        events: [],
+        hasMore,
+        highestSequenceNumber: highestSequenceNumberClosed,
+        highestTaskSequence: highestTaskSequenceClosed,
+      };
+    }
+    ownerUserId = runRows[0].ownerUserId;
   }
   const projectedByTask = runTraceProjectionForViewer(opts.forUser.id, {
     ownerUserId,

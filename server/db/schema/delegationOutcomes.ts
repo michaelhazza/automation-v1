@@ -107,6 +107,21 @@ export const delegationOutcomes = pgTable(
     awaitingInitiatorEventEmittedAt: timestamp('awaiting_initiator_event_emitted_at', {
       withTimezone: true,
     }),
+
+    // Migration 0351 — claim+emit audit columns for cross-owner timeout events.
+    // Pattern (per Round 3 chatgpt-pr-review F10/F11): atomic claim before
+    // appendEvent, then UPDATE emitted_at after success. Stale-claim threshold
+    // (5 min) releases the claim for retry if a sweep crashes mid-emit.
+    //
+    // terminal_event_*: gates fail_parent / continue_without_substep terminal
+    //   cross_owner_substep.completed event emission (F10).
+    // awaiting_initiator_event_claim_at: pairs with awaiting_initiator_event_emitted_at
+    //   (added in 0350) to atomically claim awaiting_initiator_decision emission (F11).
+    terminalEventClaimAt: timestamp('terminal_event_claim_at', { withTimezone: true }),
+    terminalEventEmittedAt: timestamp('terminal_event_emitted_at', { withTimezone: true }),
+    awaitingInitiatorEventClaimAt: timestamp('awaiting_initiator_event_claim_at', {
+      withTimezone: true,
+    }),
   },
   (table) => ({
     orgCreatedIdx: index('delegation_outcomes_org_created_idx').on(

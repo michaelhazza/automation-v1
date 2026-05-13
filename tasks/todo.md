@@ -219,6 +219,12 @@ Discovered by: adversarial-reviewer, 2026-05-14.
   - Why deferred: real implementation lands with the operator-backend spec; this PR is intentionally consistent with the placeholder framing per the template's own README (`Placeholder scaffolding. Real implementation lands with the Operator Backend spec; V1 CI does not build, scan, or publish this template.`).
   - Suggested approach: once operator-backend activates this directory, extend `verify-template-version-coherence` to include the path, add a Dockerfile build job in CI, run security scans on the built image, and add an integration test that the watcher's IPC payload matches `WatcherFileEventInput`'s expected shape.
 
+- [ ] **PA-V2-EVENT-IDEMPOTENCY** — content-keyed idempotency in appendEvent
+  - Origin: chatgpt-pr-review Round 3 F10/F11 residual edge case (PR #299, personal-assistant-v2-operator).
+  - Context: `appendEvent` in `server/services/agentExecutionEventService.ts` has no content-based dedupe key. The current claim+emit pattern in `crossOwnerApprovalTimeoutSweep` uses a stale-claim TTL (5 min) to retry crashed emissions, which means a process crash AFTER successful `appendEvent` but BEFORE the `emitted_at` UPDATE will produce a duplicate event when a future sweep re-claims past the staleness threshold.
+  - Why deferred: full event-idempotency support requires extending the `agent_execution_events` schema with an optional `idempotency_key` column + unique index, plus an `appendEvent` API extension. That's a broader refactor than the PA-V2 build should carry, and the residual risk in this build is small (single-process transient between two adjacent DB writes; pg-boss singleton serialisation reduces concurrent-sweep risk further).
+  - Suggested approach: add `agent_execution_events.idempotency_key` (nullable text) + `UNIQUE(run_id, event_type, idempotency_key) WHERE idempotency_key IS NOT NULL`; extend `appendEvent` to accept an optional `idempotencyKey` field that, when set, suppresses duplicate writes via `ON CONFLICT DO NOTHING RETURNING 1`. Then the sweep can append events idempotently and drop the stale-claim TTL altogether.
+
 ## Blockers
 
 _None active._

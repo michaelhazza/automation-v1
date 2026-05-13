@@ -176,3 +176,72 @@ edit:    infra/sandbox-templates/operator-session/README.md
 ### Round-3 diff prep
 
 After commit, regenerate `.chatgpt-diffs/pr299-round3-code-diff.diff` for the operator to paste into ChatGPT for Round 3.
+
+## Round 3 — 2026-05-14T09:32Z
+
+### ChatGPT Verdict
+CHANGES_REQUESTED — 3 blockers (F9–F11) + 1 should-fix (T5).
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| F9 | blocker | technical | service-layer projection still fails open on missing run row | IMPLEMENT — distinguish empty result; return empty page | applied |
+| F10 | blocker | technical | terminal events can be lost if appendEvent fails after terminalAt set | IMPLEMENT — claim+emit pattern + retry pass | applied |
+| F11 | blocker | technical | awaiting_initiator emit gate is read-then-write (race + retry-loss) | IMPLEMENT — atomic claim+emit pattern with stale-claim TTL | applied |
+| T5 | should-fix | technical | manual substepStatusUpdatedAt writes are redundant given the trigger | IMPLEMENT — remove manual writes, rely on trigger | applied |
+
+### Decisions log
+
+**F9 — Service-layer projection still has the fail-open pattern**
+- Triaged technical (privacy boundary).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - `server/services/agentExecutionEventService.ts:streamEvents` — when `runRows.length === 0`, return an empty page (`events: []`, `hasMore: false`, cursor high-water marks set to `fromSeq - 1` / `null`). Do NOT coerce missing-row to `null` for the projection.
+  - `streamEventsByTask` — same pattern: when events exist but the joined run row is missing, return an empty projected page with cursor high-water marks taken from the raw page (so the client can advance past the gap).
+- Rationale: the route-layer F6 fix prevents this for HTTP callers, but any direct service consumer would still fail open. The "two-layer enforcement" claim from the original spec requires BOTH layers to fail closed independently.
+
+**F10 — Terminal event durability**
+- Triaged technical (audit invariant).
+- Recommendation: IMPLEMENT.
+- Fix:
+  - Migration `0351_delegation_outcomes_event_emit_audit.sql` adds `terminal_event_claim_at` + `terminal_event_emitted_at`.
+  - `workflowGateStallNotifyJob.ts` rewritten: fail_parent + continue_without_substep branches now use the atomic claim+emit pattern. After the terminal-state UPDATE, call `claimTerminalEventEmit(rowId)` — atomic `UPDATE terminal_event_claim_at = NOW() WHERE id = $1 AND terminal_event_emitted_at IS NULL AND (terminal_event_claim_at IS NULL OR terminal_event_claim_at < NOW() - 5min) RETURNING id`. If 0 rows, skip (another sweep won). If 1 row, attempt appendEvent. On success, set `terminal_event_emitted_at = NOW()`. On failure, leave the claim set — `EVENT_CLAIM_STALE_AFTER_MS` (5 min) releases it for retry.
+  - New `retryStrandedTerminalEmits()` helper runs at the start of every sweep, picking up rows where `(terminalAt IS NOT NULL AND terminal_event_emitted_at IS NULL AND crossOwnerApprovalTimeoutPolicy IS NOT NULL)`. Re-derives the event payload from `substep_status` + policy and re-emits via the same claim+emit helper.
+- Rationale: terminal-event durability is an audit-trail issue. Without the audit column + retry pass, any crash between UPDATE-terminal and appendEvent permanently loses the `cross_owner_substep.completed` event for the substep. The retry pass at sweep start guarantees stranded terminals get their event landed within one sweep cycle of the stale-claim threshold.
+
+**F11 — awaiting_initiator atomic claim**
+- Triaged technical.
+- Recommendation: IMPLEMENT.
+- Fix:
+  - Migration 0351 also adds `awaiting_initiator_event_claim_at` (the existing `awaiting_initiator_event_emitted_at` from migration 0350 is the second half of the pair).
+  - `claimAwaitingInitiatorEventEmit(rowId)` helper applies the same UPDATE pattern. If the claim succeeds, attempt appendEvent; on success, set emitted_at. On failure, leave claim set for stale-claim retry.
+- Rationale: replaces the prior read-then-write gate (`if (row.awaitingInitiatorEventEmittedAt !== null) skip; else append`) which was vulnerable to concurrent-sweep duplicate emission.
+
+**Residual edge case (documented):** if a sweep successfully appends an event but then crashes between appendEvent and the emitted_at UPDATE, the stale-claim threshold (5 min) will release the claim and a future sweep will re-emit, producing a duplicate event. The window is small (single-process transient between adjacent DB writes). The full fix is event-idempotency support in `appendEvent` / `agent_execution_events` (out of scope; backlog item `PA-V2-EVENT-IDEMPOTENCY`).
+
+**T5 — Trigger makes manual substepStatusUpdatedAt writes redundant**
+- Triaged technical.
+- Recommendation: IMPLEMENT.
+- Fix: removed the manual `substepStatusUpdatedAt: new Date()` writes from the fail_parent and continue_without_substep UPDATE statements. The migration 0350 `BEFORE UPDATE` trigger handles the bump automatically. Code now consistently expresses "I'm changing substep_status; the column-tracking is the DB's job". The ask_initiator branch's no-op UPDATE remains unchanged — the trigger correctly doesn't bump because `substep_status IS NOT DISTINCT FROM` its own value.
+
+### Verification (G3 — round-3 fix bundle)
+
+- `npm run lint`: 0 errors, 896 warnings (back down by 1 from Round 1 baseline — likely a removed import).
+- `npm run typecheck`: clean for touched files; only the 2 pre-existing `@react-pdf/renderer` errors persist.
+- `npx vitest run server/services/__tests__/runTracePure.viewerProjection.test.ts server/services/__tests__/workflowGateStallNotifyJobPure.timeoutPolicyDecisionTree.test.ts`: 9/9 PASS.
+
+### Files changed in Round 3
+
+```
+new:     migrations/0351_delegation_outcomes_event_emit_audit.sql
+new:     migrations/0351_delegation_outcomes_event_emit_audit.down.sql
+edit:    server/db/schema/delegationOutcomes.ts
+edit:    server/jobs/workflowGateStallNotifyJob.ts (significant restructure + 2 new helpers + 1 new retry pass)
+edit:    server/services/agentExecutionEventService.ts (streamEvents + streamEventsByTask)
+edit:    tasks/todo.md (new backlog: PA-V2-EVENT-IDEMPOTENCY)
+```
+
+### Round-4 diff prep
+
+After commit, regenerate `.chatgpt-diffs/pr299-round4-code-diff.diff` for the operator to paste into ChatGPT for Round 4.

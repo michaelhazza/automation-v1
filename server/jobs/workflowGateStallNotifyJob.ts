@@ -1,7 +1,7 @@
 import type PgBoss from 'pg-boss';
-import { eq, and, lt, isNull } from 'drizzle-orm';
+import { eq, and, or, lt, isNull, isNotNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowStepGates, delegationOutcomes, subaccountAgents, agents, actions } from '../db/schema/index.js';
+import { workflowStepGates, delegationOutcomes, subaccountAgents, agents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { isStallFireStale } from '../services/workflowGateStallNotifyServicePure.js';
 import { eaDraftService } from '../services/eaDrafts/eaDraftService.js';
@@ -9,6 +9,26 @@ import { decideTimeoutPolicyAction } from '../services/actionServicePure.js';
 import { actionService } from '../services/actionService.js';
 import { appendEvent } from '../services/agentExecutionEventService.js';
 import type { CrossOwnerSubstepCompletedPayload, CrossOwnerSubstepAwaitingPayload } from '../../shared/types/operatorEvents.js';
+
+// ---------------------------------------------------------------------------
+// Atomic claim+emit pattern (Round 3 chatgpt-pr-review F10/F11)
+//
+// Cross-owner timeout events go through three steps:
+//   1. Atomic claim — UPDATE <type>_event_claim_at = NOW() WHERE id = $1 AND
+//      <type>_event_emitted_at IS NULL AND (<type>_event_claim_at IS NULL OR
+//      <type>_event_claim_at < $cutoff) RETURNING id.
+//      If 0 rows, another sweep claimed (or already emitted) — skip.
+//   2. appendEvent.
+//   3. UPDATE <type>_event_emitted_at = NOW() — confirms the event landed.
+//
+// If step 2 fails, claim_at stays set, emitted_at stays NULL. The stale-claim
+// threshold (5 min) releases the slot for a future sweep to retry. Residual
+// edge case: a crash between step 2 success and step 3 then waiting past the
+// stale-claim threshold can re-emit the same event. Documented in migration
+// 0351 header. Out-of-scope full fix is event idempotency in appendEvent.
+// ---------------------------------------------------------------------------
+
+const EVENT_CLAIM_STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
 // Queue name — exported so both the registrar (index.ts) and the service
@@ -125,9 +145,174 @@ export async function eaDraftStallResetHandler(): Promise<void> {
 // Called by the same cron worker as eaDraftStallResetHandler.
 // ---------------------------------------------------------------------------
 
+/**
+ * Atomic terminal-event claim helper (Round 3 F10).
+ *
+ * UPDATE delegation_outcomes
+ *   SET terminal_event_claim_at = NOW()
+ *   WHERE id = $rowId
+ *     AND terminal_event_emitted_at IS NULL
+ *     AND (terminal_event_claim_at IS NULL
+ *          OR terminal_event_claim_at < $staleClaimCutoff)
+ *   RETURNING id
+ *
+ * Returns true if THIS sweep won the claim; false if another sweep claimed
+ * (or already emitted). Caller proceeds to appendEvent only on `true`.
+ */
+async function claimTerminalEventEmit(rowId: string): Promise<boolean> {
+  const staleClaimCutoff = new Date(Date.now() - EVENT_CLAIM_STALE_AFTER_MS);
+  const claimed = await db
+    .update(delegationOutcomes)
+    .set({ terminalEventClaimAt: new Date() })
+    .where(
+      and(
+        eq(delegationOutcomes.id, rowId),
+        isNull(delegationOutcomes.terminalEventEmittedAt),
+        or(
+          isNull(delegationOutcomes.terminalEventClaimAt),
+          lt(delegationOutcomes.terminalEventClaimAt, staleClaimCutoff),
+        ),
+      ),
+    )
+    .returning({ id: delegationOutcomes.id });
+  return claimed.length > 0;
+}
+
+/**
+ * Atomic awaiting-initiator-event claim helper (Round 3 F11).
+ *
+ * Same shape as claimTerminalEventEmit but keyed on the awaiting columns.
+ * Pairs with the existing awaiting_initiator_event_emitted_at column (0350).
+ */
+async function claimAwaitingInitiatorEventEmit(rowId: string): Promise<boolean> {
+  const staleClaimCutoff = new Date(Date.now() - EVENT_CLAIM_STALE_AFTER_MS);
+  const claimed = await db
+    .update(delegationOutcomes)
+    .set({ awaitingInitiatorEventClaimAt: new Date() })
+    .where(
+      and(
+        eq(delegationOutcomes.id, rowId),
+        isNull(delegationOutcomes.awaitingInitiatorEventEmittedAt),
+        or(
+          isNull(delegationOutcomes.awaitingInitiatorEventClaimAt),
+          lt(delegationOutcomes.awaitingInitiatorEventClaimAt, staleClaimCutoff),
+        ),
+      ),
+    )
+    .returning({ id: delegationOutcomes.id });
+  return claimed.length > 0;
+}
+
+interface TerminalRetryRow {
+  id: string;
+  runId: string;
+  organisationId: string;
+  subaccountId: string;
+  crossOwnerApprovalTimeoutPolicy: 'fail_parent' | 'continue_without_substep' | 'ask_initiator' | null;
+  substepStatus: string;
+}
+
+/**
+ * Retry pass for terminal events whose emit crashed (F10).
+ *
+ * Picks up rows that have transitioned to terminal (terminalAt IS NOT NULL)
+ * but never recorded an emitted_at. Re-derives the event payload from the
+ * row's substep_status + timeout policy and re-emits.
+ */
+async function retryStrandedTerminalEmits(): Promise<void> {
+  const strandedRows: TerminalRetryRow[] = await db
+    .select({
+      id: delegationOutcomes.id,
+      runId: delegationOutcomes.runId,
+      organisationId: delegationOutcomes.organisationId,
+      subaccountId: delegationOutcomes.subaccountId,
+      crossOwnerApprovalTimeoutPolicy: delegationOutcomes.crossOwnerApprovalTimeoutPolicy,
+      substepStatus: delegationOutcomes.substepStatus,
+    })
+    .from(delegationOutcomes)
+    .where(
+      and(
+        isNotNull(delegationOutcomes.terminalAt),
+        isNull(delegationOutcomes.terminalEventEmittedAt),
+        // Only retry rows where the timeout-sweep was the terminal writer.
+        // Rows that became terminal via the normal path (initiator decision,
+        // child run completed) emit their terminal event through other code
+        // paths that already write terminalEventEmittedAt at the same time.
+        isNotNull(delegationOutcomes.crossOwnerApprovalTimeoutPolicy),
+      ),
+    );
+
+  for (const row of strandedRows) {
+    if (!(await claimTerminalEventEmit(row.id))) {
+      logger.info('workflow_gate_stall.cross_owner_timeout.terminal_emit_claim_lost', {
+        runId: row.runId,
+        substepId: row.id,
+      });
+      continue;
+    }
+
+    // Derive the event payload from the row's terminal substepStatus.
+    // Maps directly to the original decideTimeoutPolicyAction output.
+    let status: 'failed' | 'partial' | 'success';
+    let reason: string;
+    if (row.substepStatus === 'failed') {
+      status = 'failed';
+      reason = 'cross_owner_approval_timeout';
+    } else if (row.substepStatus === 'partial') {
+      status = 'partial';
+      reason = 'cross_owner_approval_timed_out_optional';
+    } else {
+      // 'success' or other terminal states — should not happen for timeout-driven
+      // rows but emit a best-effort completed event so the audit trail isn't lost.
+      status = (row.substepStatus as 'failed' | 'partial' | 'success');
+      reason = 'cross_owner_approval_timeout_retry';
+    }
+
+    const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {
+      eventType: 'cross_owner_substep.completed',
+      parent_run_id: row.runId,
+      substep_id: row.id,
+      status,
+      reason,
+      critical: true,
+    };
+
+    try {
+      await appendEvent({
+        runId: row.runId,
+        organisationId: row.organisationId,
+        subaccountId: row.subaccountId,
+        payload: completedPayload,
+        sourceService: 'workflowGateStallNotifyJob',
+      });
+      await db
+        .update(delegationOutcomes)
+        .set({ terminalEventEmittedAt: new Date() })
+        .where(eq(delegationOutcomes.id, row.id));
+      logger.info('workflow_gate_stall.cross_owner_timeout.terminal_emit_retry_success', {
+        runId: row.runId,
+        substepId: row.id,
+        status,
+      });
+    } catch (err) {
+      logger.warn('workflow_gate_stall.cross_owner_timeout.terminal_emit_retry_failed', {
+        runId: row.runId,
+        substepId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Claim stays set; next sweep retries after EVENT_CLAIM_STALE_AFTER_MS.
+    }
+  }
+}
+
 export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
+  // Pass 1 — retry stranded terminal-event emissions (F10).
+  // Runs first so any in-flight cleanup completes before new transitions land.
+  await retryStrandedTerminalEmits();
+
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+  // Pass 2 — fresh transitions for rows past the timeout window.
   // Fetch open sub-steps past the 24h window, joining to derive initiatorUserId
   // from the caller agent's ownerUserId (callerAgentId → subaccountAgents → agents).
   const stalledRows = await db
@@ -161,10 +346,14 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
 
     const decision = decideTimeoutPolicyAction(policy);
 
-    if (decision.action === 'fail_parent') {
+    if (decision.action === 'fail_parent' || decision.action === 'continue_without_substep') {
+      const newStatus = decision.action === 'fail_parent' ? 'failed' : 'partial';
+
+      // Atomic transition — substep_status_updated_at is bumped automatically
+      // by the trigger from migration 0350 (no manual write needed; T5).
       const updated = await db
         .update(delegationOutcomes)
-        .set({ substepStatus: 'failed', terminalAt: new Date(), substepStatusUpdatedAt: new Date() })
+        .set({ substepStatus: newStatus, terminalAt: new Date() })
         .where(
           and(
             eq(delegationOutcomes.id, row.id),
@@ -179,38 +368,12 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
         continue;
       }
 
-      const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {
-        eventType: 'cross_owner_substep.completed',
-        parent_run_id: row.runId,
-        substep_id: row.id,
-        status: decision.eventStatus,
-        reason: decision.eventReason,
-        critical: true,
-      };
-      await appendEvent({
-        runId: row.runId,
-        organisationId: row.organisationId,
-        subaccountId: row.subaccountId,
-        payload: completedPayload,
-        sourceService: 'workflowGateStallNotifyJob',
-      });
-      logger.info('workflow_gate_stall.cross_owner_timeout.fail_parent', { runId: row.runId });
-
-    } else if (decision.action === 'continue_without_substep') {
-      const updated = await db
-        .update(delegationOutcomes)
-        .set({ substepStatus: 'partial', terminalAt: new Date(), substepStatusUpdatedAt: new Date() })
-        .where(
-          and(
-            eq(delegationOutcomes.id, row.id),
-            eq(delegationOutcomes.organisationId, row.organisationId),
-            isNull(delegationOutcomes.terminalAt),
-          ),
-        )
-        .returning({ id: delegationOutcomes.id });
-
-      if (updated.length === 0) {
-        logger.info('workflow_gate_stall.cross_owner_timeout.already_terminal', { runId: row.runId, policy });
+      // Atomic claim before emit (F10). Skip if another sweep claimed.
+      if (!(await claimTerminalEventEmit(row.id))) {
+        logger.info('workflow_gate_stall.cross_owner_timeout.terminal_emit_claim_lost_inline', {
+          runId: row.runId,
+          substepId: row.id,
+        });
         continue;
       }
 
@@ -222,19 +385,43 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
         reason: decision.eventReason,
         critical: true,
       };
-      await appendEvent({
-        runId: row.runId,
-        organisationId: row.organisationId,
-        subaccountId: row.subaccountId,
-        payload: completedPayload,
-        sourceService: 'workflowGateStallNotifyJob',
-      });
-      logger.info('workflow_gate_stall.cross_owner_timeout.continue', { runId: row.runId });
+
+      try {
+        await appendEvent({
+          runId: row.runId,
+          organisationId: row.organisationId,
+          subaccountId: row.subaccountId,
+          payload: completedPayload,
+          sourceService: 'workflowGateStallNotifyJob',
+        });
+        await db
+          .update(delegationOutcomes)
+          .set({ terminalEventEmittedAt: new Date() })
+          .where(eq(delegationOutcomes.id, row.id));
+        logger.info(
+          decision.action === 'fail_parent'
+            ? 'workflow_gate_stall.cross_owner_timeout.fail_parent'
+            : 'workflow_gate_stall.cross_owner_timeout.continue',
+          { runId: row.runId },
+        );
+      } catch (err) {
+        logger.warn('workflow_gate_stall.cross_owner_timeout.terminal_emit_failed', {
+          runId: row.runId,
+          substepId: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Row is terminal; emit failed. Next sweep's retryStrandedTerminalEmits
+        // will pick it up via the (terminalAt IS NOT NULL AND
+        // terminalEventEmittedAt IS NULL) predicate after the claim staleness
+        // threshold passes.
+      }
 
     } else {
       // ask_initiator — sub-step is NOT terminal; keep terminalAt = NULL.
       // No-op SET used as a race-claim guard: atomically confirms the row is
-      // still open before emitting the event. terminalAt stays NULL by design.
+      // still open. substep_status_updated_at is NOT bumped by the trigger
+      // (status is unchanged), so the row stays in the sweep window until the
+      // initiator decides.
       const updated = await db
         .update(delegationOutcomes)
         .set({ substepStatus: 'awaiting_cross_owner_approval' })
@@ -256,22 +443,8 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
 
       if (initiatorUserId) {
         // Two independent invariants applied in order:
-        //
-        //  (1) Action durability — proposeAction is dedup-by-DB-unique-constraint
-        //      idempotent. Two concurrent sweeps both calling it yield exactly
-        //      one approval row in pending_approval; the loser sees isNew=false.
-        //
-        //  (2) Event durability — appendEvent is NOT idempotent and has no
-        //      unique constraint we can rely on for cross-row dedupe. We gate
-        //      on awaiting_initiator_event_emitted_at instead: append the event
-        //      if and only if the column is NULL (event has never landed), then
-        //      flip the column to NOW() on success. If appendEvent throws after
-        //      a successful proposeAction, the column stays NULL and the next
-        //      sweep retries the event independently of action idempotency.
-        //
-        // Order matters: action first so a future sweep that observes the column
-        // still NULL but isNew=false KNOWS the action already exists and only
-        // the event is missing — that's the retry signal.
+        //  (1) Action durability — proposeAction is DB-unique-constraint deduped.
+        //  (2) Event durability — atomic claim+emit pattern (F11).
         const idempotencyKey = `cross_owner_ask_initiator:${row.id}`;
 
         try {
@@ -291,14 +464,18 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             substepId: row.id,
             error: err instanceof Error ? err.message : String(err),
           });
-          // proposeAction failed; do NOT attempt the event append (we have no
-          // approval row to point to). Next sweep will retry from scratch.
+          // proposeAction failed; do NOT attempt the event append. Next sweep retries.
           continue;
         }
 
         if (row.awaitingInitiatorEventEmittedAt !== null) {
-          // Event has already landed on a prior sweep; nothing to retry.
           logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_already_emitted', {
+            runId: row.runId,
+            substepId: row.id,
+          });
+        } else if (!(await claimAwaitingInitiatorEventEmit(row.id))) {
+          // Another sweep claimed this row's event; trust it to land the emit.
+          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_claim_lost', {
             runId: row.runId,
             substepId: row.id,
           });
@@ -311,24 +488,26 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             reason: 'cross_owner_approval_timeout',
             critical: true,
           };
-          await appendEvent({
-            runId: row.runId,
-            organisationId: row.organisationId,
-            subaccountId: row.subaccountId,
-            payload: awaitingPayload,
-            sourceService: 'workflowGateStallNotifyJob',
-          });
-
-          // Event landed — flip the audit column so subsequent sweeps don't
-          // re-append. A concurrent sweep that ALSO had the column NULL when
-          // it started will also append; this is acceptable because the
-          // sweep cron fires serially per pg-boss queue, but if that changes
-          // we'd need an UPDATE ... WHERE awaiting_initiator_event_emitted_at
-          // IS NULL RETURNING id pattern + skip-when-zero-rows.
-          await db
-            .update(delegationOutcomes)
-            .set({ awaitingInitiatorEventEmittedAt: new Date() })
-            .where(eq(delegationOutcomes.id, row.id));
+          try {
+            await appendEvent({
+              runId: row.runId,
+              organisationId: row.organisationId,
+              subaccountId: row.subaccountId,
+              payload: awaitingPayload,
+              sourceService: 'workflowGateStallNotifyJob',
+            });
+            await db
+              .update(delegationOutcomes)
+              .set({ awaitingInitiatorEventEmittedAt: new Date() })
+              .where(eq(delegationOutcomes.id, row.id));
+          } catch (err) {
+            logger.warn('workflow_gate_stall.cross_owner_timeout.ask_initiator_emit_failed', {
+              runId: row.runId,
+              substepId: row.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            // Claim stays set; next sweep retries after EVENT_CLAIM_STALE_AFTER_MS.
+          }
         }
       }
 
@@ -336,3 +515,4 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
     }
   }
 }
+
