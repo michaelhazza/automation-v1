@@ -158,19 +158,20 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     throw new FailureError(failure('iee_browser_launch_disabled', 'Browser tasks require a subaccount context'));
   }
 
-  // 1. Read launch flag
+  // 1. Read launch flag and check FIRST — throw before touching warm pool
   const [settings] = await db.select().from(subaccountIeeBrowserSettings)
     .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
 
-  const warmCheckout = settings?.status === 'on' && settings?.rolloutApproved
-    ? await browserWarmPool.checkout({ organisationId, subaccountId })
-    : null;
-
-  const decision = resolveBrowserDispatch(settings ?? null, warmCheckout);
-
-  if (decision.kind === 'launch_disabled') {
+  // Step 1: Check launch flag FIRST — throw before touching warm pool
+  const launchOnlyDecision = resolveBrowserDispatch(settings ?? null, null);
+  if (launchOnlyDecision.kind === 'launch_disabled') {
     throw new FailureError(failure('iee_browser_launch_disabled', 'IEE browser feature is disabled for this subaccount'));
   }
+
+  // Step 2: Now attempt warm checkout
+  const warmCheckout = await browserWarmPool.checkout({ organisationId, subaccountId });
+  const decision = resolveBrowserDispatch(settings!, warmCheckout);
+  // (decision will be warm_leased or cold_start — never launch_disabled here)
 
   // 2. Derive session key and resolve profile
   const opts = input.backendOptions;
