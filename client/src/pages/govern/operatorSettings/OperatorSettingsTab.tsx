@@ -163,16 +163,6 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
             onChange={set('sessionSoftCapMinutes')}
           />
           <NumberField
-            label="Auto-extend grace"
-            helpText="If the operator is mid-step when the soft cap hits, it gets this extra time to finish the current step before stopping."
-            unit="minutes"
-            value={draft.autoExtendGraceMinutes}
-            min={0}
-            max={60}
-            disabled={!canEdit}
-            onChange={set('autoExtendGraceMinutes')}
-          />
-          <NumberField
             label="Concurrent operator sessions"
             helpText="How many operator runs can be active at the same time across this subaccount. Lowering this protects compute budget."
             unit="max 25"
