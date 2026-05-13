@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
+active_spec: pending
+active_plan: pending
 build_slug: none
-branch: none
-status: NONE
-last_updated: 2026-05-12T23:41:06Z
+branch: claude/add-memvid-integration-ehAOr
+status: PLANNING
+last_updated: 2026-05-13
 last_merge_ready_pr: none
 last_merge_ready_slug: none
 last_merge_ready_branch: none
