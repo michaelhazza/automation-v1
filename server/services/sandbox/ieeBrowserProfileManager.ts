@@ -15,7 +15,7 @@ import { randomUUID } from 'crypto';
 import { db } from '../../db/index.js';
 import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
 import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import {
   assertSameTenant,
   resolveRetentionDays,
@@ -79,6 +79,7 @@ async function resolve({
           ),
         )
         .limit(1);
+      if (!existing) throw new EnvironmentError('profile_disappeared_after_race');
       return existing;
     }
     throw err;
@@ -100,7 +101,7 @@ async function mount(
         eq(ieeBrowserSessionProfiles.status, 'active'),
       ),
     )
-    .returning({ id: ieeBrowserSessionProfiles.id });
+    .returning({ id: ieeBrowserSessionProfiles.id, volumeId: ieeBrowserSessionProfiles.volumeId });
 
   if (updated.length === 0) {
     // Profile exists but was not in 'active' status — check why.
@@ -116,18 +117,21 @@ async function mount(
     ) {
       throw new EnvironmentError('profile_locked_for_gc');
     }
+    throw new EnvironmentError('profile_not_active');
   }
+
+  const [updatedRow] = updated;
 
   logger.info('iee.browser_profile.mounted', {
     profileId: profile.id,
-    volumeId: profile.volumeId,
+    volumeId: updatedRow.volumeId,
     organisationId: ctx.organisationId,
     subaccountId: ctx.subaccountId,
   });
 
   return {
-    sessionProfileId: profile.id,
-    volumeId: profile.volumeId,
+    sessionProfileId: updatedRow.id,
+    volumeId: updatedRow.volumeId,
     userDataDirInSandbox: '/workspace/profile',
   };
 }
@@ -175,7 +179,7 @@ async function gcSweep(): Promise<{ scheduled: number; completed: number }> {
   // gc_in_progress → gc_done atomically.
   const claimed = await db.execute(sql`
     UPDATE iee_browser_session_profiles
-    SET status = 'gc_in_progress', "gcStartedAt" = NOW(), "updatedAt" = NOW()
+    SET status = 'gc_in_progress', gc_started_at = NOW(), updated_at = NOW()
     WHERE id IN (
       SELECT id FROM iee_browser_session_profiles
       WHERE status = 'scheduled_gc'
@@ -191,12 +195,12 @@ async function gcSweep(): Promise<{ scheduled: number; completed: number }> {
 
   let completed = 0;
   if (claimedIds.length > 0) {
-    const doneResult = await db.execute(sql`
-      UPDATE iee_browser_session_profiles
-      SET status = 'gc_done', updated_at = NOW()
-      WHERE id = ANY(${sql.raw(`ARRAY[${claimedIds.map((id) => `'${id}'`).join(',')}]::uuid[]`)})
-    `);
-    completed = (doneResult as any).rowCount ?? claimedIds.length;
+    const doneResult = await db
+      .update(ieeBrowserSessionProfiles)
+      .set({ status: 'gc_done', updatedAt: new Date() })
+      .where(inArray(ieeBrowserSessionProfiles.id, claimedIds))
+      .returning({ id: ieeBrowserSessionProfiles.id });
+    completed = doneResult.length ?? claimedIds.length;
   }
 
   logger.info('iee.browser_profile.gc_sweep', { scheduled, completed });
