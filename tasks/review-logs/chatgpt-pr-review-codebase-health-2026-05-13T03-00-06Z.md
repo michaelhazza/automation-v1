@@ -67,8 +67,41 @@
 
 **G3 status after fixes:** typecheck clean. Lint not re-run (docs-only).
 
-### Round 2 — pending operator action
+### Round 2 — outcome
 
-Next diff: `.chatgpt-diffs/pr294-round2-code-diff.diff` (regenerated after this commit lands).
+**Verdict received:** CHANGES_REQUESTED (one issue) with "After F4, I'd be comfortable finalising."
 
-**Awaiting:** operator paste of round-2 ChatGPT response, or `done` signal.
+#### Per-finding triage
+
+| # | Finding (summary) | Triage | Recommendation | Action |
+|---|---|---|---|---|
+| F4 | DEVELOPMENT_GUIDELINES §8.33 uses `{ ok: true, skipped: true, reason: '<one-word>' }` but ADR-0013 + the KNOWLEDGE entry both use the canonical `{ success: true, suppressed: true, reason }`. Two competing contracts for the same invariant. | technical | apply (standardise on ADR-0013) | rewrote §8.33 to use ADR-0013's canonical shape. Aligned terminology throughout (suppressed not skipped). Added the negative case (genuine failures still return `{ success: false, error }`) and the suggested `suppressedSuccess(reason)` helper from the KNOWLEDGE entry. Explicit cross-ref to ADR-0013 as canonical. |
+
+**Files modified by round 2 fix:**
+- `DEVELOPMENT_GUIDELINES.md` (F4)
+
+**G3 status after fix:** typecheck clean. Docs-only.
+
+---
+
+## Final Summary
+
+**PR #294** (`codebase-health` branch) chatgpt-pr-review pass — APPROVED after 2 rounds.
+
+| Round | Verdict | Findings | Outcome |
+|---|---|---|---|
+| 1 | CHANGES_REQUESTED | 3 doc-contract findings | All 3 applied |
+| 2 | CHANGES_REQUESTED (one issue, "after F4 comfortable finalising") | 1 finding | Applied |
+
+**Net effect:** PR #294 is review-complete. Doc-contract consistency restored: ADR statuses match inventory intent, the DEVELOPMENT_GUIDELINES §8.33 rule the inventory promised now exists and uses the canonical ADR-0013 shape, and KNOWLEDGE.md's append-only rule now formally accommodates the quarterly compression sweep Chunk 12 performed.
+
+**Commits on branch from this review pass:**
+- `3d35e9ab` — Round 1 fixes (3 findings applied)
+- Round 2 fix commit (this one) — 1 finding applied
+
+**Open spec-deviation:** REQ-FCH-C4 (three new top-level `prototypes/` dirs from post-Chunk-3 main merges) was raised in PR description but ChatGPT did not separately flag or block on it across either round. Carried into finalisation as accepted-deferred.
+
+**KNOWLEDGE.md pattern extraction:** none from this PR that aren't already documented in-build (KNOWLEDGE.md itself was a target of this PR's Chunk 12 compression).
+
+**Session closed:** 2026-05-13. Per operator instruction: proceeding to merge both PRs.
+
