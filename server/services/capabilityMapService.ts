@@ -6,6 +6,7 @@ import {
   loadIntegrationReference,
   type IntegrationReferenceSnapshot,
 } from './integrationReferenceService.js';
+import type { RoutingContextV2 } from '../../shared/types/routingContext.js';
 
 // ---------------------------------------------------------------------------
 // Capability Map Service
@@ -218,6 +219,64 @@ export async function listAgentCapabilityMaps(
     agentName: r.agentName,
     capabilityMap: r.capabilityMap,
   }));
+}
+
+export interface RoutingCandidate {
+  subaccountAgentId: string;
+  agentId: string;
+  agentName: string;
+  capabilityMap: CapabilityMap | null;
+}
+
+export interface MatchedCandidate {
+  candidate: RoutingCandidate;
+  /** Additive score boost from @address match. 0 when no address matched. */
+  scoreBoost: number;
+}
+
+/**
+ * Two-axis ownership filter + address score boost per spec §5.2–§5.3.
+ *
+ * Rule:
+ *   if candidate.capabilityMap.owner_user_id is set:
+ *     match iff owner_user_id == (target_owner_user_id ?? requester_user_id)
+ *   else:
+ *     pass through (subaccount-scoped; already filtered at DB layer)
+ *
+ * Score boost of 0.15 is applied when addressed_agent.id == candidate.agentId
+ * AND the candidate passed the ownership check. A capability-failed candidate
+ * (null map or ownership mismatch) cannot be promoted by the boost.
+ *
+ * Returns candidates that passed the ownership check, sorted by scoreBoost
+ * descending (highest boost first so the caller's first-match loop favours
+ * the addressed agent).
+ */
+export function matchCapability(
+  routingContext: RoutingContextV2,
+  candidates: RoutingCandidate[],
+): MatchedCandidate[] {
+  const results: MatchedCandidate[] = [];
+
+  for (const c of candidates) {
+    const map = c.capabilityMap;
+    if (map == null) continue; // null map blocks routing per spec
+
+    // Two-axis owner rule
+    if (map.owner_user_id != null) {
+      const targetOwner = routingContext.target_owner_user_id ?? routingContext.requester_user_id;
+      if (map.owner_user_id !== targetOwner) continue;
+    }
+    // Else: no owner_user_id = subaccount-scoped agent; DB already filtered; pass through
+
+    const scoreBoost =
+      routingContext.addressed_agent?.id === c.agentId
+        ? routingContext.addressed_agent.score_boost
+        : 0;
+
+    results.push({ candidate: c, scoreBoost });
+  }
+
+  return results.sort((a, b) => b.scoreBoost - a.scoreBoost);
 }
 
 /**

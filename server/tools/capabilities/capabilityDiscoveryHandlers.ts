@@ -1,7 +1,7 @@
 import { and, eq, or, isNull } from 'drizzle-orm';
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
-import { integrationConnections } from '../../db/schema/index.js';
+import { integrationConnections, agents, subaccountAgents } from '../../db/schema/index.js';
 import {
   loadIntegrationReference,
   normalizeCapabilitySlugs,
@@ -11,9 +11,10 @@ import {
   type ReferenceState,
   type SchemaMeta,
 } from '../../services/integrationReferenceService.js';
-import { listAgentCapabilityMaps } from '../../services/capabilityMapService.js';
+import { listAgentCapabilityMaps, matchCapability } from '../../services/capabilityMapService.js';
 import { systemSettingsService, SETTING_KEYS } from '../../services/systemSettingsService.js';
 import { logger } from '../../lib/logger.js';
+import type { RoutingContextV2, AddressParseKind } from '../../../shared/types/routingContext.js';
 
 // ---------------------------------------------------------------------------
 // Per-run budget enforcement for capability-discovery skills
@@ -290,6 +291,8 @@ export interface CheckCapabilityGapInput {
   orgId: string;
   subaccountId?: string;
   required_capabilities: RawCapabilityInput[];
+  /** Raw intent text. Parsed for @PA / @MyAssistant / @<DisplayName> address tokens. */
+  raw_intent_text?: string;
 }
 
 export type Availability = 'configured' | 'configurable' | 'unsupported' | 'unknown';
@@ -321,6 +324,82 @@ export interface CheckCapabilityGapOutput {
   missing_for_configurable: string[];
   missing_for_unsupported: string[];
   reference_state: ReferenceState;
+}
+
+type ParsedAddress =
+  | { kind: 'matched'; agentId: string; agentName: string }
+  | { kind: 'not_found'; strippedToken: string }
+  | { kind: 'collision'; candidates: string[]; strippedToken: string }
+  | { kind: 'unsupported_cross_owner'; strippedToken: string }
+  | null; // null when no @token found
+
+/**
+ * Extracts the first @<token> from intentText and resolves it.
+ * Returns null when no @ token is present (not an error).
+ * @PA / @MyAssistant → agent WHERE slug='executive-assistant' AND owner_user_id=requesterUserId AND deleted_at IS NULL
+ * @<DisplayName>     → subaccount-scoped name lookup
+ * @<User>'s PA       → unsupported_cross_owner (logged only)
+ */
+async function parseAddressToken(
+  intentText: string,
+  requesterUserId: string,
+  organisationId: string,
+  subaccountId: string | null,
+): Promise<ParsedAddress> {
+  const match = intentText.match(/@([\w'.\s]+)/);
+  if (!match) return null;
+
+  const raw = match[1].trim();
+
+  // Detect unsupported cross-owner form: "@<something>'s PA" / "@<name>'s assistant"
+  if (/['']s\s+(pa|assistant)/i.test(raw)) {
+    logger.debug('capability_query.address_parse.unsupported_cross_owner', { raw });
+    return { kind: 'unsupported_cross_owner', strippedToken: raw };
+  }
+
+  // @PA or @MyAssistant → requester's own EA
+  if (/^(pa|myassistant)$/i.test(raw)) {
+    const rows = await db
+      .select({ id: agents.id, name: agents.name })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.organisationId, organisationId),
+          eq(agents.slug, 'executive-assistant'),
+          eq(agents.ownerUserId, requesterUserId),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (rows.length === 0) return { kind: 'not_found', strippedToken: raw };
+    return { kind: 'matched', agentId: rows[0].id, agentName: rows[0].name };
+  }
+
+  // @<DisplayName> — subaccount-scoped name lookup
+  const nameConditions = [
+    eq(agents.organisationId, organisationId),
+    eq(agents.name, raw),
+    isNull(agents.deletedAt),
+  ];
+  if (subaccountId) {
+    nameConditions.push(eq(subaccountAgents.subaccountId, subaccountId));
+  }
+
+  const nameRows = await db
+    .select({ id: agents.id, name: agents.name })
+    .from(agents)
+    .innerJoin(
+      subaccountAgents,
+      and(eq(subaccountAgents.agentId, agents.id), eq(subaccountAgents.isActive, true)),
+    )
+    .where(and(...nameConditions))
+    .limit(3);
+
+  if (nameRows.length === 0) return { kind: 'not_found', strippedToken: raw };
+  if (nameRows.length > 1) {
+    return { kind: 'collision', candidates: nameRows.map((r) => r.name), strippedToken: raw };
+  }
+  return { kind: 'matched', agentId: nameRows[0].id, agentName: nameRows[0].name };
 }
 
 export async function executeCheckCapabilityGap(
@@ -356,6 +435,45 @@ export async function executeCheckCapabilityGap(
   const connections = 'connections' in connectionResult ? connectionResult.connections : [];
 
   const agentMaps = await listAgentCapabilityMaps(orgId, subaccountId);
+
+  // Security: discard any client-supplied target_owner_user_id (spec §5.4 untrusted-client invariant)
+  if ((typed as unknown as Record<string, unknown>).target_owner_user_id !== undefined) {
+    logger.debug('capability_query.routing.discard_client_target_owner', {
+      runId: context.runId,
+    });
+  }
+
+  const rawIntentText = typeof typed.raw_intent_text === 'string' ? typed.raw_intent_text : '';
+  const parsed = rawIntentText
+    ? await parseAddressToken(rawIntentText, context.userId ?? '', orgId, subaccountId)
+    : null;
+
+  let addressedAgent: RoutingContextV2['addressed_agent'] = null;
+  let addressParseResult: RoutingContextV2['address_parse_result'] = 'not_found';
+
+  if (parsed !== null) {
+    if (parsed.kind === 'matched') {
+      addressedAgent = { id: parsed.agentId, score_boost: 0.15 };
+      addressParseResult = 'matched';
+    } else {
+      addressParseResult = parsed.kind as AddressParseKind;
+    }
+  }
+
+  const routingContext: RoutingContextV2 = {
+    organisationId: orgId,
+    subaccountId: subaccountId ?? '',
+    requester_user_id: context.userId ?? '',
+    raw_intent_text: rawIntentText,
+    normalised_intent_text: rawIntentText,
+    intent: rawIntentText,
+    addressed_agent: addressedAgent,
+    address_parse_result: addressParseResult,
+  };
+
+  // Apply two-axis ownership filter + address boost (spec §5.2–§5.3)
+  const matchedCandidates = matchCapability(routingContext, agentMaps);
+  const matchedAgentIds = new Set(matchedCandidates.map((m) => m.candidate.agentId));
 
   // 3. Evaluate per-capability availability
   const perCapability: PerCapabilityAvailability[] = [];
@@ -503,6 +621,7 @@ export async function executeCheckCapabilityGap(
   const candidateAgents: CandidateAgent[] = [];
 
   for (const agent of agentMaps) {
+    if (!matchedAgentIds.has(agent.agentId)) continue; // ownership axis filter
     if (!agent.capabilityMap) continue;
     const { matched, missing } = matchedByAgent(agent.capabilityMap);
     candidateAgents.push({
