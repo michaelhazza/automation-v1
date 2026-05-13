@@ -343,5 +343,10 @@ export * from './operatorRuns.js';
 export * from './operatorTaskProfiles.js';
 export * from './subaccountOperatorSettings.js';
 
+// IEE Browser on e2b — session profiles, settings, warm sessions (migrations 0346–0350)
+export * from './ieeBrowserSessionProfiles.js';
+export * from './subaccountIeeBrowserSettings.js';
+export * from './browserWarmSessions.js';
+
 // Operator run files — per-run file artefact pointers (migration 0353)
 export * from './operatorRunFiles.js';

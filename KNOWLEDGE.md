@@ -1248,6 +1248,25 @@ For cross-owner action proposals inside a sub-run, `actions.approver_user_id` is
 `runTraceProjectionForViewer` is applied at BOTH the service layer (`agentExecutionEventService`) AND the route layer (`server/routes/`). The deliberate two-layer enforcement ensures a future direct consumer of `agentExecutionEventService` (bypassing the route) still gets the projection. Do not remove the route-layer call assuming the service call is sufficient — the redundancy is intentional security depth.
 
 Cross-link: `.claude/agents/chatgpt-pr-review.md` §1a duplicate-detection carveouts; this session's log under `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2 entry.
+### 2026-05-13 Pattern — Brief-level external review does NOT substitute for spec-level external review
+
+Discovered during `iee-browser-on-e2b` chatgpt-spec-review. The brief had been refined through 7 ChatGPT-driven external reframes (v2 through v7) before spec authoring; the working hypothesis was that this absorbed the directional review and the spec could skip chatgpt-spec-review. That hypothesis was wrong. When the operator later re-opened chatgpt-spec-review, round 1 surfaced 4 high-severity build-readiness blockers the brief reviews had not caught: (1) a referenced warm-pool persistence table with no schema/migration/RLS definition; (2) an audit-able mutation path for a launch-control flag that was described as "direct DB / future route" with no permission, audit, or rollback contract; (3) two new `FailureReason` enum values introduced in the spec but absent from the file inventory; (4) a profile-mount concurrency claim that didn't actually serialise the operation. Pattern: **brief-level review catches scope and policy gaps; spec-level review catches contract / schema / inventory / safety-mechanism gaps. They are different review surfaces and neither substitutes for the other.** For Significant / Major specs: always run chatgpt-spec-review at least one round, regardless of how thoroughly the brief was reviewed. The brief and the spec speak about different things — a brief that locked the right decisions can still produce a spec that fails build-readiness in execution-safety, schema completeness, or contract mechanics. Cost is small (one or two manual rounds); the downside of skipping is a build that stalls in Phase 2 with implementation-readiness failures.
+
+### 2026-05-13 Pattern — Each review round can introduce its own bugs; trend matters more than absolute count
+
+Discovered during `iee-browser-on-e2b` chatgpt-spec-review. Round 1 fix for warm-pool persistence (added a `browser_warm_sessions` table and a unique partial index on `llm_requests(warm_session_id)`) introduced a new inconsistency caught in round 2: the partial index referenced a `warm_session_id` column that wasn't listed in the `llm_requests` schema EXTEND or any migration. Round 2 fix for that introduced a migration-ordering problem (FK target table 0346 exists AFTER 0345 needs the FK) caught in round 3, which split the FK into 0347. Round 3 fix for that introduced a CHECK-constraint null-three-valued-logic bug caught in round 4. Pattern: **assume each fix may create its own gap; do not lock after one good round.** Two healthy signals to trust: (1) verdict trajectory improves monotonically across rounds (CHANGES_REQUESTED → NEEDS_MINOR_TIGHTENING → APPROVED_WITH_MINOR_EDITS → APPROVED); (2) finding severity decreases monotonically (highs → mediums → lows → style). When both signals hold for two consecutive rounds and the latest round produces only style nits, locking is safe. Locking after a single round risks shipping a fix-that-introduced-a-bug.
+
+### 2026-05-13 Pattern — Postgres CHECK constraints with nullable columns need `IS DISTINCT FROM`, not `<>`
+
+Discovered during `iee-browser-on-e2b` chatgpt-spec-review round 3. SQL's three-valued logic makes `NULL <> 'x'` evaluate to NULL (not TRUE), which means a CHECK constraint of the form `CHECK ((col_a = 'x' AND col_b IS NOT NULL) OR (col_a <> 'x' AND col_b IS NULL))` is trivially satisfied whenever `col_a` is NULL — the constraint silently does nothing. The correct null-safe form is `IS DISTINCT FROM`: `CHECK ((col_a = 'x' AND col_b IS NOT NULL) OR (col_a IS DISTINCT FROM 'x' AND col_b IS NULL))`. The `IS DISTINCT FROM` operator treats NULL as a normal value for comparison purposes — `NULL IS DISTINCT FROM 'x'` returns TRUE, not NULL. Pattern applies to any CHECK that needs to enforce a contract between two columns when at least one is nullable. Easy to miss because `<>` looks idiomatic; the bug surfaces only under specific null-row conditions that may not appear until production data does. Spec-authoring rule: every CHECK constraint that references a nullable column MUST use `IS DISTINCT FROM` (or `IS NOT DISTINCT FROM`) for the comparison; reviewers should flag `<>` against any nullable column as a default-incorrect pattern.
+
+### 2026-05-13 Pattern — "Rows are never deleted" service contracts pair with `ON DELETE RESTRICT`, not `SET NULL`
+
+Discovered during `iee-browser-on-e2b` chatgpt-spec-review round 3. A new `browser_warm_sessions` table was specified with the invariant "rows are never deleted; state transitions only" (`available → leased → terminated`, audit trail preserved). The FK from `llm_requests.warm_session_id` was initially specified as `ON DELETE SET NULL` — the conventional default for nullable FKs. But the two are inconsistent: if `SET NULL` ever fires, it silently destroys the idempotency link (the unique partial index keyed on `warm_session_id` depends on the value being present and unique). Pattern: **when the service contract says rows are never deleted, the FK action should be `ON DELETE RESTRICT`, not `SET NULL`.** RESTRICT surfaces any accidental DELETE as a constraint violation (loud failure); SET NULL silently corrupts the idempotency invariant. SET NULL is correct only when the FK is allowed to outlive its target — explicitly NOT the case for audit / cost-attribution trails. Rule: match the FK action to the service contract; if the contract is "rows never deleted," prefer RESTRICT to surface contract violations rather than masking them with silent NULL.
+
+### 2026-05-13 Pattern — Brief citation drift is normal; spec should cite wire-truth, not the brief
+
+Discovered during `iee-browser-on-e2b` Phase 1 + chatgpt-spec-review round 1. The brief referenced "Spec D §3.13 profile primitive" while the actual Spec D file + the codebase comment in `server/db/schema/operatorTaskProfiles.ts:10` cite "Spec D §3.15". Investigation found the brief was written before Spec D finalised its numbering; the citation drifted between brief-lock and spec-authoring. Pattern: **briefs lock decisions and design intent; section citations within briefs are informational and drift over time.** When authoring a spec from a brief, the spec must cite the WIRE-TRUTH source (codebase comments, actual spec file section numbers, live schema files) rather than copy section references from the brief. spec-reviewer's pre-emptive citation finding raised this; investigation confirmed the spec was correct (§3.15 matches wire-truth) and the brief reference is the stale one. Rule: when section numbers disagree between brief and live source, live source wins; surface the brief drift as a separate todo if the brief might be re-cited later.
 ### 2026-05-13 Pattern — Semantic ranker recall fallback (memory-improvements branch)
 
 Source: spec `tasks/builds/memory-improvements/spec.md` §13.5 + plan Chunk 9.
@@ -1271,3 +1290,53 @@ Routes that read from materialised views (e.g., `mv_memory_utility_30d`) MUST ca
 Source: plan Chunk 2 review.
 
 `memory_block_version_sources` has a FK to `memory_block_versions`. If auto-synthesis writes a `memoryBlocks` row (insert), it MUST also call `writeVersionRow` to produce a `memory_block_versions` row in the same operation, or the FK constraint for source links will fail. Previously this was implicit; it is now explicit. `writeVersionRow` returns `null` for consecutive identical content (dedup); callers skip `writeLineageRowsForVersion` in that case. The correct call order is always: `insertMemoryBlock` → `writeVersionRow` → `writeLineageRowsForVersion` (if version row was created).
+
+### [2026-05-14] Pattern — RUNTIME-DISABLED scaffold for partially-wired features _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 3 F17.
+
+When a service exports methods that the rest of the codebase will eventually call but whose dependencies are not yet wired (cross-tenant sweeps awaiting `withAdminConnection`, provisioning paths awaiting an external SDK install), the unsafe method body MUST be replaced with a runtime throw rather than left as a partially-correct implementation. The throw carries a specific `FailureReason` code from the existing enum (here: `sandbox_provider_unavailable`), a clear message naming the dependency that must land first, and a pointer to the tracking entry in `tasks/todo.md` (IEE-DEF-N). The reference implementation that the future caller will need lives in git history, not in the running tree. This forces any future operator who wires the feature to (a) confront the dependency before re-enabling, (b) read the prior implementation deliberately, (c) re-author the safer version.
+
+Why this beats keeping the broken implementation: silent RLS bypass risk if anyone accidentally wires a caller (the partial implementation would have run without admin connection); visibility (a grep "RUNTIME-DISABLED scaffold" instantly enumerates unsafe methods); doesn't pollute the type system or import graph (the export shape stays the same).
+
+Detection: any function with a stale `TODO: <something> — deferred` comment that still has a working body. Convert to throw with the pattern above and queue the wiring TODO with a stable id.
+
+Cross-link: `server/services/sandbox/browserWarmPool.ts::evictStale` + `refillIfEligible`, `server/services/sandbox/ieeBrowserProfileManager.ts::gcSweep`. Tracked as IEE-DEF-1, IEE-DEF-2, IEE-DEF-3.
+
+### [2026-05-14] Pattern — Placeholder-digest rejection at construction, not at run-time _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 1 F4 + Round 3 F16.
+
+When a service depends on a content-addressed identifier (sha256 digest, immutable image alias, content hash) read from a file at construction time, the parser MUST reject explicit placeholder values (`sha256:0000...`, `1970-01-01T00:00:00Z`, etc.) before the value is handed to downstream code. Two reasons: (1) fail at construction not at runtime — a placeholder digest that passes local validation then hits the external API and fails there is harder to diagnose, costs a network round-trip, and may leak placeholder state into provider-side state; (2) decouple from environment — the rejection is a property of the value itself, not of NODE_ENV.
+
+Companion pattern: env-flag gating for partially-wired template paths. When the rest of the system needs to construct without the placeholder-bearing path, gate that path behind a dedicated env flag (here: `E2B_BROWSER_TEMPLATE_ENABLED=true`). The flag defaults to off; CI flips it to on when the real digest publishes. Cleaner than per-path try/catch.
+
+Detection: any `assertNotPlaceholderX` / `validateNotStub` pattern that only checks one specific stub form. Audit for missed forms: literal all-zero hashes, well-known placeholder values, any string that survives a `[a-z0-9_-]{6,}` regex without distinguishing from a real value.
+
+Cross-link: `server/services/sandbox/e2bSandboxPure.ts::assertNotLatestTemplateVersion`, `server/services/sandbox/e2bSandbox.ts::registerSandboxProvider` (gates browserPublishedVersionPath behind `E2B_BROWSER_TEMPLATE_ENABLED`).
+
+### [2026-05-14] Pattern — Warm-pool lease MUST thread provider identity to the executor _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 3 F15.
+
+When a warm-pool service hands out a pre-provisioned resource, the executor MUST adopt the provider-side identity (sandbox id, container id, connection id) — not create a fresh one and treat the warm-pool row as accounting metadata. Otherwise the warm-pool row becomes a phantom (created, leased, terminated) while every actual execution starts cold. Symptoms: cost ledger shows warm-pool charges but execution latency never improves; warm sessions accumulate in 'available' state but rotation reveals nothing was reused.
+
+The thread-through pattern: warm-pool `checkout()` returns both bookkeeping id (`warmSessionId`) AND provider id (`sandboxId`); dispatcher derives `leasedProviderSandboxId` from the decision when warm_leased; the executor input carries an optional `leasedProviderSandboxId?: string`; the provider's `runTask` adopts the leased id via an if/else around `createSandbox`.
+
+The fix is small but easy to miss: a code review that focuses only on "is the warm-pool row tracked?" misses the question "is the warm-pool sandbox actually executed?" Always ask both. A targeted unit test ("warm-leased dispatch does not call createSandbox") is the cheapest reviewer-facing proof.
+
+Detection: any warm-pool / connection-pool / session-pool service whose `checkout()` returns a provider identity AND whose call site has a "createX" path. Verify the createX path is gated on absence of the leased identity.
+
+Cross-link: `shared/types/sandbox.ts::SandboxRunTaskInput.leasedProviderSandboxId`, `server/services/sandbox/e2bSandbox.ts::E2bSandbox.runTask` (createSandbox skip path), `server/services/executionBackends/_ieeShared.ts::ieeDispatchBrowser`.
+
+### [2026-05-14] Pattern — `.strict()` Zod schemas for admin-controlled fields _(iee-browser-on-e2b)_
+
+Source: PR #297 chatgpt-pr-review Round 2 F13.
+
+When a body schema accepts non-admin patches but the underlying table has an admin-only field (here: `rolloutApproved`), the non-admin schema MUST use `.strict()` so unknown keys return a 400, not silently strip. Silent-strip is dangerous because the client receives a 200 with `rolloutApproved` in their patch body absent from the response — they think it took effect when it didn't. The dedicated admin route is the only path that can mutate the admin-only field; `.strict()` is the receipt that non-admin callers got the right error.
+
+Companion: the matching test must assert the rejection shape. Zod's strict-mode error uses `code: 'unrecognized_keys'` with the offending key list in `keys: string[]`. A test that only asserts `result.success === false` is shallow — also assert `result.error.errors.some(e => e.code === 'unrecognized_keys' && e.keys.includes('forbiddenField'))`. This catches future schema author errors where `.strict()` gets removed and the schema reverts to passthrough.
+
+Detection: any schema where a field is documented as "not accepted here — admin-only" but the schema is plain `z.object({...})` without `.strict()`. The doc comment claims the contract; `.strict()` enforces it.
+
+Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBodySchema`, `server/services/__tests__/subaccountIeeBrowserSettingsServicePure.test.ts` (the unrecognized_keys assertion).

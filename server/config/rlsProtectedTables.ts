@@ -1306,6 +1306,27 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0333_memory_block_version_sources.sql',
     rationale: 'Per-version audit record of which workspace_memory_entries contributed to each auto-synthesised memory block version. Cross-tenant leak would expose another org\'s agent knowledge base, synthesis history, and captured source labels including agent run provenance.',
   },
+  // 0346 — IEE Browser on e2b: browser session profile volumes (dual-GUC org + subaccount)
+  {
+    tableName: 'iee_browser_session_profiles',
+    schemaFile: 'ieeBrowserSessionProfiles.ts',
+    policyMigration: '0346_create_iee_browser_session_profiles.sql',
+    rationale: 'Per-subaccount browser profile volume pointers keyed by session_key — volume ids are opaque but cross-tenant leak exposes browser session topology and profile state.',
+  },
+  // 0347 — IEE Browser on e2b: per-subaccount browser settings (dual-GUC org + subaccount)
+  {
+    tableName: 'subaccount_iee_browser_settings',
+    schemaFile: 'subaccountIeeBrowserSettings.ts',
+    policyMigration: '0347_create_subaccount_iee_browser_settings.sql',
+    rationale: 'Per-subaccount IEE browser configuration (status, rollout gate, retention, cost ceilings) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes operational configuration and cost controls.',
+  },
+  // 0349 — IEE Browser on e2b: warm-pool session audit trail (dual-GUC org + subaccount)
+  {
+    tableName: 'browser_warm_sessions',
+    schemaFile: 'browserWarmSessions.ts',
+    policyMigration: '0349_create_browser_warm_sessions.sql',
+    rationale: 'Per-subaccount warm browser session rows (available → leased → terminated lifecycle) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes warm-session topology and idle cost attribution.',
+  },
   // 0353 — Personal Assistant V2 Operator: per-run operator file artefact pointers
   {
     tableName: 'operator_run_files',

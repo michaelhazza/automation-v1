@@ -3152,7 +3152,7 @@ The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-s
 ### Topology
 
 ```
-Main app (Replit/Express)        Worker (Docker, DigitalOcean)
+Main app (Replit/Express)        Worker (Docker, e2b sandboxes)
   ├─ enqueues IEE jobs              ├─ pulls jobs from pg-boss
   ├─ inserts ieeRuns rows           ├─ runs the execution loop (Playwright / shell)
   └─ serves usage/cost APIs         └─ updates ieeRuns, writes ieeSteps
@@ -3232,19 +3232,16 @@ Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req
 
 ### Worker service
 
-Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerfile`](./worker/Dockerfile) (Playwright base image) and run as the `worker` service in [`docker-compose.yml`](./docker-compose.yml). Resource limits: `IEE_WORKER_MEM_LIMIT` (default 3g), `IEE_WORKER_CPUS` (default 2). Persistent volume for browser sessions at `/var/browser-sessions`.
+Lives in [`worker/`](./worker/). **Production IEE workloads run inside e2b sandboxes** — the worker `Dockerfile` and the `worker` Compose service were retired as part of the iee-browser-on-e2b migration (CI gate `scripts/gates/verify-no-do-references.sh` enforces their absence). The worker code under `worker/src/` remains for local development (`npx tsx worker/src/index.ts`) and the pg-boss handlers (`devTask`, `costRollup`) still register against the local Postgres instance. Browser-class production tasks dispatch via `server/services/sandbox/e2bSandbox.ts` to the `iee-browser` sandbox template; the legacy `worker/src/browser/` Playwright executor is preserved as the reference implementation that the sandbox harness will be wired to once the e2b SDK is installed.
 
 | File | Purpose |
 |------|---------|
-| `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers). Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
-| `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
-| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
-| `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
-| `worker/src/handlers/cleanupOrphans.ts` | Periodic: stale workspaces, browser sessions, expired reservations |
+| `worker/src/index.ts` | Local-dev bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification. Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
+| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue (local dev only) |
 | `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
-| `worker/src/loop/executionLoop.ts` | The four-exit-path loop |
-| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download |
+| `worker/src/loop/executionLoop.ts` | The four-exit-path loop (reference implementation for the sandbox harness) |
+| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download (will be bundled into the `iee-browser` sandbox template when the e2b SDK lands) |
 | `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
 
 ### The execution loop

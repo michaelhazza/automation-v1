@@ -42,9 +42,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const [searchParams] = useSearchParams();
   const canSeeOperatorTab = mode === 'admin' && (
-    _user.role === 'org_admin' || _user.role === 'manager' || _user.role === 'system_admin'
+    _user.role === 'org_admin' || _user.role === 'manager' ||
+    _user.role === 'subaccount_admin' || _user.role === 'system_admin'
   );
-  const canEditOperatorSettings = _user.role === 'org_admin' || _user.role === 'system_admin';
+  const canEditOperatorSettings =
+    _user.role === 'org_admin' || _user.role === 'subaccount_admin' || _user.role === 'system_admin';
   const adminTabs: ActiveTab[] = ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board'];
   if (canSeeOperatorTab) adminTabs.push('operator');
   adminTabs.push('usage', 'workspace', 'admin');

@@ -27,6 +27,7 @@ export interface OpenContextInput {
   sessionKey: string | undefined;
   ieeRunId: string;
   downloadsDir: string;
+  mountRoot?: string;
 }
 
 export interface OpenContextResult {
@@ -42,7 +43,7 @@ function buildUserDataDir(input: OpenContextInput): string {
   const effectiveKey = input.subaccountId
     ? `${input.subaccountId}__${sessionKey}`
     : sessionKey;
-  return path.join(env.BROWSER_SESSION_DIR, input.organisationId, effectiveKey);
+  return path.join(input.mountRoot ?? env.BROWSER_SESSION_DIR, input.organisationId, effectiveKey);
 }
 
 export async function openPersistentContext(input: OpenContextInput): Promise<OpenContextResult> {
