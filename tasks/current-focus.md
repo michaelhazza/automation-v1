@@ -1,7 +1,7 @@
 <!-- mission-control
 active_spec: pending
 active_plan: pending
-build_slug: none
+build_slug: memory-improvements
 branch: claude/add-memvid-integration-ehAOr
 status: PLANNING
 last_updated: 2026-05-13

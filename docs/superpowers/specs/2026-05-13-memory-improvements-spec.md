@@ -2,7 +2,7 @@
 
 **Status:** reviewing
 **Spec date:** 2026-05-13
-**Last updated:** 2026-05-13 (spec-reviewer iteration 1)
+**Last updated:** 2026-05-13 (spec-reviewer iteration 1 + open-question resolutions)
 **Author:** spec-coordinator (inline)
 **Build slug:** `memory-improvements`
 **Source brief:** [`tasks/builds/memory-improvements/brief.md`](../../../tasks/builds/memory-improvements/brief.md) (Rev 6.3, LOCKED 2026-05-12)
@@ -248,7 +248,7 @@ CREATE UNIQUE INDEX idx_mv_memory_utility_30d ON mv_memory_utility_30d
   (organisation_id, subaccount_id, agent_id);
 ```
 
-**Refresh job:** `server/jobs/refreshMemoryUtility30dJob.ts`. pg-boss schedule, nightly at 03:00 UTC. Wraps `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_memory_utility_30d` in a `withAdminConnection` call (the view is multi-tenant by design).
+**Refresh job:** `server/jobs/refreshMemoryUtility30dJob.ts`. pg-boss schedule, nightly at **16:00 UTC** (AU 02:00 AEST / 03:00 AEDT — solidly overnight for the initial Australian customer base; avoids the existing 03:00 UTC optimiser-peer-medians refresh slot). Wraps `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_memory_utility_30d` in a `withAdminConnection` call (the view is multi-tenant by design).
 
 **Write site:** `server/services/agentExecutionService.ts:1349-1356`. After `memoryWithTracking = await workspaceMemoryService.getMemoryForPromptWithTracking(...)` resolves at line 1349, `memoryWithTracking.injectedEntries: Array<{ id: string; content: string }>` is bound at line 1356. Insert the persistence step there: `agent_runs.injected_entry_ids = memoryWithTracking.injectedEntries.map(e => e.id)`. The persistence call lands inside the existing run-state write path; no new transactional boundary required. (Anchor verified at spec-review iteration 1; build phase confirms a final time before commit if the file has drifted.)
 
@@ -592,7 +592,7 @@ The policy uses the canonical three-layer pattern: `current_setting('app.organis
 | 1 | Lineage row insert at synthesis | Inline / synchronous, inside the same transaction as block-version insert | Cluster array is in scope at the call site; atomicity (block version + lineage rows commit together) is a correctness requirement, not a performance optimisation |
 | 1 | `GET /api/memory-blocks/:id/sources` | Inline / synchronous request | Standard admin route; no batch processing |
 | 2 | `injected_entry_ids` write | Inline / synchronous, alongside other `agent_runs` writes at run-end / memory-injection time | Already part of the existing run-state write path; adding a column write is not a new transactional boundary |
-| 2 | Materialised-view refresh | Queued / asynchronous (pg-boss) — nightly at 03:00 UTC | View must refresh during low-traffic; `REFRESH CONCURRENTLY` requires the view to have a unique index (provided in migration) |
+| 2 | Materialised-view refresh | Queued / asynchronous (pg-boss) — nightly at 16:00 UTC (AU overnight) | View must refresh during low-traffic for the initial Australian customer base; `REFRESH CONCURRENTLY` requires the view to have a unique index (provided in migration) |
 | 3 | Query embedding + cosine score | Inline / synchronous, per agent run | Result must be available before retrieval result is returned to the caller (`agentExecutionService.ts:921-922`) |
 | 3 | Degraded-reason event emission | Inline / synchronous, via existing observability service | Mirrors existing degraded-reason emission |
 | 4 | `GET /api/orgs/:orgId/usage/memory-utility` | Inline / synchronous request | Standard usage route |
@@ -807,12 +807,12 @@ The retired mockup `prototypes/memory-improvements/akr-ranker-settings.html` (re
 
 ## 15. Open questions for Phase 2
 
-These are the surviving questions from brief §3 and §4 that the spec deliberately leaves to the build phase. Each is bounded — the build phase decides locally without needing to re-spec.
+All seven questions raised in the initial draft were resolved during spec-coordinator Phase 1. **No questions remain open at spec-lock.** This section records each resolution so the build phase has a single decision log.
 
-1. **Query definition for D.** Brief §3 Proposal D names "task description" as the embedding source. The build phase validates this against a sample of dev-environment runs before committing to `text-embedding-3-small` over the task description specifically. If results suggest "task description + master prompt summary" or "task description + recent turn summary" produces materially better cosine matches, the build phase may extend the query construction — but only after recording the alternative in the implementation plan with evidence.
-2. **Threshold starting value for D.** `AKR_RETRIEVAL_THRESHOLD = 0.30` is the brief's recommended starting point based on `text-embedding-3-small` cosine-distance norms. Build phase tunes this against a sample of dev-environment runs and B1's measured utility before enabling the flag in any environment. Default may be revised in the implementation plan.
-3. **Exact `injected_entry_ids` write site in `agentExecutionService.ts`.** Resolved at spec-review iteration 1: `server/services/agentExecutionService.ts:1349-1356` (immediately after `memoryWithTracking.injectedEntries` is bound). Build phase confirms the file has not drifted before committing the change. No re-spec needed.
-4. **Exact permission key for the Sources route.** Resolved at spec-review iteration 1: `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`, matching the pattern at `server/routes/memoryBlocks.ts:46-49`. No build-phase action.
-5. **Materialised-view refresh window.** Spec defaults to nightly at 03:00 UTC. Build phase confirms 03:00 doesn't collide with the existing optimiser refresh and other admin-connection jobs; reschedules if conflict.
-6. **Reverse-lineage payload performance.** §6.1's `?include_reverse=true` adds a `COUNT(*) GROUP BY source_entry_id_hash` query. Migration `0333` indexes `source_entry_id_hash` via `idx_mbvs_source_entry_hash` (added at spec-review iteration 1) so the reverse query is index-covered. Build phase confirms via EXPLAIN against a sample dataset and ships enabled by default; falls back to a per-row "Expand" affordance only if the EXPLAIN cost is materially worse than expected.
-7. **Coverage metric (the AKR-spec §11 item).** Brief §2.2 lists this as never-built. Out of scope here, but the build phase notes whether the materialised-view rows trivially expose coverage (per-document loaded count) — if yes, exposing it via the existing `retrievalObservabilityService` is a small follow-up; if no, defer.
+1. **Query definition for D — RESOLVED.** Lock to **"task description only"** in v1. Rationale: task description captures intent for this specific run; master prompt is identical across all runs of an agent and would pull every query toward the same centroid; conversation history adds noise and per-run summarisation cost. The D-Recall fallback (§3.7) protects against any "query too narrow" failure mode. B1's utility metric will reveal within ~2 weeks of D enablement whether the choice was wrong; broader-context alternatives may be reconsidered then via a follow-up spec amendment, not now.
+2. **Threshold starting value for D — RESOLVED.** Default `AKR_RETRIEVAL_THRESHOLD = 0.30`. Build phase MUST spot-check ~10 representative dev-environment runs before any enablement; if the spot-check shows aggressive filtering (>50% of recall-relevant chunks rejected), adjust to `0.25` before the first enablement and record the adjustment + evidence in the implementation plan. The flag stays off by default; no production exposure to a wrong default.
+3. **Exact `injected_entry_ids` write site in `agentExecutionService.ts` — RESOLVED at spec-review iteration 1.** `server/services/agentExecutionService.ts:1349-1356` (immediately after `memoryWithTracking.injectedEntries` is bound). Build phase confirms the file has not drifted before committing the change. No re-spec needed.
+4. **Exact permission key for the Sources route — RESOLVED at spec-review iteration 1.** `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`, matching the pattern at `server/routes/memoryBlocks.ts:46-49`. No build-phase action.
+5. **Materialised-view refresh window — RESOLVED.** Nightly at **16:00 UTC** (AU 02:00 AEST / 03:00 AEDT). Rationale: the initial customer base is Australian; 03:00 UTC defaults common in this codebase fall mid-business-day for AU operators (UTC 03:00 = AU 13:00–14:00). 16:00 UTC puts the refresh in AU overnight, avoids the existing 03:00 UTC `mv_optimiser_peer_medians` refresh slot, and completes well before AU morning operator login. Build phase confirms no other 16:00 UTC job collisions exist before commit.
+6. **Reverse-lineage payload performance — RESOLVED at spec-review iteration 1.** Migration `0333` indexes `source_entry_id_hash` via `idx_mbvs_source_entry_hash` so the reverse query (`COUNT(*) GROUP BY source_entry_id_hash`) is index-covered. Build phase confirms via EXPLAIN against a sample dataset and ships `?include_reverse=true` enabled by default; falls back to a per-row "Expand" affordance only if EXPLAIN cost is materially worse than expected.
+7. **Coverage metric (AKR-spec §11 item) — RESOLVED, deferred.** Out of scope for this spec. Coverage answers a different operator question ("which documents are being loaded?") than utility ("how much of what's loaded is used?") and belongs as a follow-up extension of `retrievalObservabilityService`, not as a second reader of `mv_memory_utility_30d`. Added to §10 deferred items.
