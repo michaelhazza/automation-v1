@@ -1096,4 +1096,22 @@ export const WorkflowRunService = {
 
     return { runId: startResult.runId };
   },
+
+  /**
+   * Mark a workflow run as degraded (first-write-wins via predicate).
+   * Used by the task event stream replay endpoint when a consumer-side gap is detected.
+   */
+  async markRunDegraded(runId: string, orgId: string, reason: string): Promise<void> {
+    const orgDb = getOrgScopedDb('workflowRunService.markRunDegraded');
+    await orgDb
+      .update(workflowRuns)
+      .set({ degradationReason: reason })
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, orgId),
+          isNull(workflowRuns.degradationReason),
+        ),
+      );
+  },
 };

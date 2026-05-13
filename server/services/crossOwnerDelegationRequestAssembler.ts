@@ -64,6 +64,7 @@ export async function build(
     .where(
       and(
         eq(delegationOutcomes.runId, parentRun.id),
+        eq(delegationOutcomes.organisationId, parentRun.organisationId),
         isNull(delegationOutcomes.terminalAt),
       ),
     )

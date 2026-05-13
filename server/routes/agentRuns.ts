@@ -21,6 +21,7 @@ import {
   type AgentRunVisibilityUser,
 } from '../lib/agentRunVisibility.js';
 import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
+import { runTraceProjectionForViewer } from '../services/runTracePure.js';
 
 const router = Router();
 
@@ -744,7 +745,16 @@ router.get(
         },
         req.orgId!,
       );
-      res.json(result);
+
+      // Route-layer viewer projection (spec §5.4 — second of two layers).
+      const traceOwnerUserId: string | null =
+        (await agentActivityService.getRunOwnerUserId(req.params.runId, req.orgId!)) ?? null;
+      const projected = runTraceProjectionForViewer(req.user!.id, {
+        ownerUserId: traceOwnerUserId,
+        events: result.events as unknown as import('../services/runTracePure.js').ProjectableEvent[],
+      });
+
+      res.json({ ...result, events: projected.events });
     } catch (err) {
       if (err instanceof InvalidRunTraceCursorError) {
         res.status(400).json({

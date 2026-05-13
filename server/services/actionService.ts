@@ -8,7 +8,6 @@ import {
   type ActionStatus,
 } from '../config/actionRegistry.js';
 import { policyEngineService } from './policyEngineService.js';
-import { IDEMPOTENCY_KEY_VERSION } from '../lib/idempotencyVersion.js';
 import {
   canonicaliseJson,
   hashActionArgs,
@@ -22,50 +21,9 @@ import {
 // tasks/review-logs/spec-conformance-log-agentic-commerce-2026-05-03T14-12-21Z.md.
 export { canonicaliseJson, hashActionArgs, computeValidationDigest };
 
-// ---------------------------------------------------------------------------
-// Deterministic idempotency keys — P1.1 Layer 3 contract
-//
-// Built from (runId, toolCallId, args_hash) so a replay of the same tool
-// call (after pg-boss redelivery, reflection-loop re-emission, or agent
-// resume from checkpoint) resolves to the same action row via the
-// actions.idempotency_key unique constraint.
-//
-// Callers that lack a toolCallId (legacy, non-middleware code paths) should
-// pass a stable synthetic key — e.g. actionType + a stable business key.
-// ---------------------------------------------------------------------------
-
-// canonicaliseJson, hashActionArgs, computeValidationDigest live in
-// server/lib/canonicalJsonPure.ts — re-exported above for callers that
-// import them from this module.
-
-/**
- * Deterministic idempotency key for an action.
- *
- * **Retry vs replay boundary (non-negotiable contract):**
- * - **Retry** (same logical attempt) → same `runId` + `toolCallId` + `args` →
- *   same key. The existing `actions` row is re-used; `actionService.markFailed`
- *   bumps `retry_count`. No new row written.
- * - **Replay** (explicitly new attempt after a terminal failure) → NEW `runId`
- *   or NEW `toolCallId` → new key. A new `actions` row is inserted with
- *   `replay_of_action_id` set to the original (the column ships in migration
- *   0185, the replay runtime lands in a future session).
- *
- * Anyone touching this function later MUST preserve that distinction.
- * Collapsing them (e.g. derive key from payload only, ignoring runId) would
- * break both retry-idempotency (re-runs would bypass the dedup row) and
- * replay auditability (a replay would silently clobber the original row).
- */
-export function buildActionIdempotencyKey(params: {
-  runId: string;
-  toolCallId: string;
-  args: Record<string, unknown>;
-}): string {
-  const argsHash = hashActionArgs(params.args);
-  // Prefixed with `IDEMPOTENCY_KEY_VERSION` so a canonicalisation contract
-  // change forces a deliberate version bump rather than silent dedup drift.
-  // See `tasks/llm-inflight-deferred-items-brief.md` §2.
-  return `${IDEMPOTENCY_KEY_VERSION}:${params.runId}:${params.toolCallId}:${argsHash}`;
-}
+// buildActionIdempotencyKey is a pure computation — no DB dependency.
+// Canonical home is actionServicePure.ts; re-exported here for backward compat.
+export { buildActionIdempotencyKey } from './actionServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Action Service — create, validate, and transition actions
