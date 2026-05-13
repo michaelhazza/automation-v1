@@ -136,4 +136,34 @@ Integrity check: 1 issue found this round (auto: 1, escalated: 0) — §4.4 row 
 
 ---
 
+## Round 3 — 2026-05-13T23:54:17Z
+
+### ChatGPT Feedback (raw)
+
+> Round 3 looks lock-ready. The previous contradictions are resolved cleanly: parser rejection now routes to failed, valid model decline routes to declined, warning detail is the canonical telemetry source, and test coverage now names those distinctions explicitly.
+>
+> I have no blocking findings. One tiny editorial nit only:
+>
+> **T1 — Fix typo in §11 test coverage.** Current: "parser handles valid `declinedToConsolidate=true` and orchestration ignores any payload that carries with it". Suggested: "...any payload that comes with it" or "...any accompanying payload".
+>
+> Lock decision: Lock it. The spec now has clear enough contracts for implementation: no new workflow or API surface, bounded LLM spend, deterministic source-of-truth rules, clean failure/decline/success semantics, no retry/state-machine ambiguity, warning telemetry reuse without schema bloat, acceptable manual smoke coverage for this class of change. I'd move to build.
+
+Overall verdict (explicit): **APPROVED** — lock-ready, move to build. One editorial typo fix applied.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| T1 — §11 typo: "carries with it" → "comes with it" | technical | apply | auto (apply) | low | Editorial fix matching ChatGPT's first suggested phrasing. No semantic change. |
+
+Top themes: editorial polish only — no contract changes; ChatGPT signalled lock-ready.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] T1 — Fixed §11 typo: "any payload that carries with it" → "any payload that comes with it".
+
+Integrity check: 0 issues found this round. Post-integrity sanity: n/a (no mechanical fixes applied beyond the typo itself).
+
+---
+
 

@@ -243,7 +243,7 @@ Per `references/test-gate-policy.md` and `docs/spec-context.md`:
   - prompt builder includes the tiered preservation inventory (Tier 1 verbatim list + Tier 2 best-effort list);
   - parser rejects mutated non-instructions fields, non-string/empty `instructions`, missing/empty `consolidationNote`, non-boolean `declinedToConsolidate`, and `declinedToConsolidate=true` with empty `declineReason`;
   - parser-rejected response routes to `consolidationOutcome='failed'` with `CONSOLIDATION_FAILED` and `failureReason='parse_rejected: <rule>'` (distinct from a valid `declined` response);
-  - parser handles valid `declinedToConsolidate=true` and orchestration ignores any payload that carries with it (route to `consolidationOutcome='declined'`);
+  - parser handles valid `declinedToConsolidate=true` and orchestration ignores any payload that comes with it (route to `consolidationOutcome='declined'`);
   - integration of the three new warning codes into the tier map and `RESOLUTIONS_FOR_CODE` map.
 - **Static gates.** Lint + typecheck + build:server + build:client. All chunks must pass G1.
 - **No new frontend tests, no new API contract tests, no E2E** (matches framing in `docs/spec-context.md`).
