@@ -1,5 +1,5 @@
 // Pure aggregation helper for memory utility metrics (spec §5.1, §12.1).
-// Replicates the per_run + per_agent_sums CTE logic from migration 0343
+// Replicates the per_run + per_agent_sums CTE logic from migration 0345
 // for testability of the aggregation contract in isolation.
 // Zero DB imports — all DB logic lives in memoryUtilityQueryService.ts.
 
@@ -39,7 +39,7 @@ export function isMeasured(injectedEntryIds: string[] | null): boolean {
 
 /**
  * Aggregate a set of agent run rows into per-agent utility metrics.
- * Mirrors the per_run + per_agent_sums CTEs in migration 0343.
+ * Mirrors the per_run + per_agent_sums CTEs in migration 0345.
  */
 export function aggregateAgentRuns(runs: AgentRunForAggregation[]): AgentUtilityAggregate {
   let runsMeasuredEntries = 0;

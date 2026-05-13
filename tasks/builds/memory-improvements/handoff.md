@@ -149,7 +149,7 @@ Per CLAUDE.md model-guidance: execution is token-intensive and Sonnet handles a 
 
 **Plan-time findings to keep in mind during build:**
 - **R4 / Chunk 2 — `writeVersionRow` at auto-synthesis:** the synthesis service does NOT currently write `memory_block_versions` rows. Chunk 2 must wire `writeVersionRow({changeSource: 'auto_synthesis'})` inside the block-insert transaction, then write lineage rows against the returned version id. Operator-approved.
-- **F1 / Chunk 5 — migration 0343, not appended to 0334:** MV + null-stable unique index + initial refresh land in new file `migrations/0343_memory_utility_30d.sql` (after main's 0335-0342). 0334 stays single-purpose (column only). Don't append.
+- **F1 / Chunk 5 — migration 0345, not appended to 0334:** MV + null-stable unique index + initial refresh land in new file `migrations/0345_memory_utility_30d.sql` (after main's 0335-0342). 0334 stays single-purpose (column only). Don't append.
 - **F2 / Chunk 5 — null-stable unique index:** `COALESCE(subaccount_id, '00000000-0000-0000-0000-000000000000'::uuid)` so REFRESH CONCURRENTLY works. Two acceptance checks listed in §9 Phase 2 of the plan.
 - **F1 R2 / Chunk 5 — MV aggregates COALESCEd to 0:** totals are NOT NULL in Drizzle declaration; ratios remain nullable. Two-CTE shape in the migration.
 - **F2 R2 / Chunk 5 — `jsonb_typeof` guards on every `jsonb_array_length`:** legacy rows with non-array JSONB do not brick the nightly refresh.
@@ -161,13 +161,13 @@ Per CLAUDE.md model-guidance: execution is token-intensive and Sonnet handles a 
 - `agentExecutionService.ts:1349-1356` line anchors still valid (Chunk 4).
 - `memoryBlockSynthesisService.ts:195-206` line anchors still valid (Chunk 2).
 - 16:00 UTC cron slot still free (Chunk 5 — grep `agentScheduleService.ts` for `'16'`).
-- No 0343 migration-number collision with main (re-fetch + check before commit).
+- No 0345 migration-number collision with main (re-fetch + check before commit).
 
 **Phase 2 review-pass posture:**
 - `spec-conformance` MUST run on the full branch diff after all chunks land.
 - `pr-reviewer` MUST run after spec-conformance.
 - `dual-reviewer` will auto-skip with `REVIEW_GAP: Codex CLI unavailable` per handoff Phase 1 notes — chatgpt-pr-review in Phase 3 covers second-opinion.
-- `adversarial-reviewer` will auto-trigger (migration 0333 RLS table; migration 0343 MV with RLS-exclusion; two new orgId-scoped routes; `agentExecutionService` change touches request-path code).
+- `adversarial-reviewer` will auto-trigger (migration 0333 RLS table; migration 0345 MV with RLS-exclusion; two new orgId-scoped routes; `agentExecutionService` change touches request-path code).
 
 ---
 

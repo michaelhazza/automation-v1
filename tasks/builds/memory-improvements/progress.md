@@ -106,7 +106,7 @@ G2 PASS (1 attempt).
 **Directional gaps deferred to `tasks/todo.md` § "Deferred from spec-conformance review — memory-improvements (2026-05-13)":**
 1. REQ #20 — `memoryBlockSources` payload nested-vs-flattened divergence from spec.
 2. REQ #41 — `memoryUtility` payload missing top-level `organisationId/generatedAt/windowDays`.
-3. REQ #38 — Missing `memoryUtilityAggregatorPure.ts` + `.test.ts` (spec §5.1/§12.1); aggregator logic collapsed into SQL CTE in migration 0343 instead.
+3. REQ #38 — Missing `memoryUtilityAggregatorPure.ts` + `.test.ts` (spec §5.1/§12.1); aggregator logic collapsed into SQL CTE in migration 0345 instead.
 4. REQ #64 — New degraded reasons added to type union but emission path uses `logger.warn` only; `RetrievalResult.degradedReason` never set, so run-trace UI does not see embedding-failed / empty-after-semantic events.
 5. REQ #67 — `docs/capabilities.md` modified but no memory-utility capability entry added.
 6. REQ #68 — Opportunistic cleanup explicitly optional per spec; not shipped.
@@ -184,7 +184,7 @@ Builder backfilled all 4 REQs to match spec. Files modified/created:
 - `server/services/memoryUtilityQueryService.ts` — added top-level `organisationId/generatedAt/windowDays:30`; AgentUtilityRow gained 4 totals fields.
 - `client/src/pages/MemoryUtilityTab.tsx` — UI updated for new payload fields.
 - `server/services/retrievalService.ts` — `pendingDegradedReason` tracked + patched onto `RetrievalResult` before `truncateForEmission`.
-- **NEW** `server/services/memoryUtilityAggregatorPure.ts` — parallel JS aggregator (spec §5.1 inventory deliverable; mirrors SQL CTE in migration 0343).
+- **NEW** `server/services/memoryUtilityAggregatorPure.ts` — parallel JS aggregator (spec §5.1 inventory deliverable; mirrors SQL CTE in migration 0345).
 - **NEW** `server/services/__tests__/memoryUtilityAggregatorPure.test.ts` — 9 named test cases from spec §12.1.
 
 G3: PASS. Targeted tests: 19 pass (10 sources + 9 aggregator).
@@ -225,7 +225,7 @@ Effective post-backfill reality-checker verdict: **READY-for-Phase-3** with the 
 
 ### Step 9 — Doc-sync gate
 
-Investigation procedure ran per `docs/doc-sync.md`. Candidate-stale-reference set: new files (memoryBlockLineageService, memoryUtilityAggregatorPure, etc.), new tables (memory_block_version_sources, mv_memory_utility_30d), new column (agent_runs.injected_entry_ids), new migrations (0333, 0334, 0343), new env vars (AKR_SEMANTIC_RANKER_ENABLED, AKR_RETRIEVAL_THRESHOLD), new routes, `writeLineageRowsForVersion` (corrected from earlier drift `writeVersionSourceLinks`).
+Investigation procedure ran per `docs/doc-sync.md`. Candidate-stale-reference set: new files (memoryBlockLineageService, memoryUtilityAggregatorPure, etc.), new tables (memory_block_version_sources, mv_memory_utility_30d), new column (agent_runs.injected_entry_ids), new migrations (0333, 0334, 0345), new env vars (AKR_SEMANTIC_RANKER_ENABLED, AKR_RETRIEVAL_THRESHOLD), new routes, `writeLineageRowsForVersion` (corrected from earlier drift `writeVersionSourceLinks`).
 
 **Verdicts:**
 

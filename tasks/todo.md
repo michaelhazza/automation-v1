@@ -113,7 +113,7 @@ Spec-conformance review found schema/contract divergences. None block ship; all 
 
 - [ ] REQ #38 — Missing `memoryUtilityAggregatorPure.ts` + test file named in spec §5.1 + §12.1
   - Spec section: §5.1, §12.1
-  - Gap: spec file inventory and testing-posture both name `server/services/memoryUtilityAggregatorPure.ts` and `server/services/__tests__/memoryUtilityAggregatorPure.test.ts`. Neither was created; the aggregator logic was collapsed into the SQL CTE in migration 0343.
+  - Gap: spec file inventory and testing-posture both name `server/services/memoryUtilityAggregatorPure.ts` and `server/services/__tests__/memoryUtilityAggregatorPure.test.ts`. Neither was created; the aggregator logic was collapsed into the SQL CTE in migration 0345.
   - Suggested approach: either ship the JS aggregator + pure tests (mirroring `memoryUtilityDailySeriesPure.ts`) or update spec §5.1 + §12.1 to record the SQL-CTE-only approach as the chosen path. SQL aggregation in the MV is consistent with the testing posture (static gates primary), so spec-amend is the lighter-weight path.
 
 - [ ] REQ #41 — `MemoryUtilityPayload` shape missing spec-named top-level fields

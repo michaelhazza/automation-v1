@@ -264,7 +264,7 @@ export * from './agentRecommendations';
 // BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
 export * from './optimiserSkillPeerMedians';
 
-// Memory improvements spec §4 Phase 2 — 30-day utility MV (migration 0343)
+// Memory improvements spec §4 Phase 2 — 30-day utility MV (migration 0345)
 // BYPASSES RLS — multi-tenant MV; org-filtered at route layer (see rlsExclusions.ts).
 export * from './mvMemoryUtility30d.js';
 

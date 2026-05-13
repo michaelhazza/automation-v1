@@ -1,5 +1,5 @@
 -- Migration 0334: agent_runs.injected_entry_ids column.
--- Materialised view + index land in 0343 (after main's 0335-0342) to keep
+-- Materialised view + index land in 0345 (after main's 0335-0344) to keep
 -- migration files single-purpose and re-runnable independently.
 
 ALTER TABLE agent_runs

@@ -1,6 +1,7 @@
--- Migration 0343: 30-day memory-utility materialised view + null-stable unique
--- index + initial refresh. Numbered 0343 (after main's 0335-0342 from PR #288)
--- so the file is single-purpose and applies independently from migration 0334.
+-- Migration 0345: 30-day memory-utility materialised view + null-stable unique
+-- index + initial refresh. Originally numbered 0343 (after main's 0335-0342 from
+-- PR #288); renumbered to 0345 at S2 sync after main absorbed 0343 + 0344 from
+-- PR #296. So the file is single-purpose and applies independently from migration 0334.
 -- Spec §4 Phase 2. MV is multi-tenant by design; defended at the route layer
 -- in server/routes/memoryUtility.ts (path-org / session-org 403 check).
 
