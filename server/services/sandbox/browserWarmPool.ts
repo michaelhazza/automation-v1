@@ -161,16 +161,20 @@ async function terminate(input: {
 }
 
 async function evictStale(): Promise<{ evicted: number }> {
-  // Claim stale available sessions with FOR UPDATE SKIP LOCKED
-  const staleRows = await db.execute(sql`
-    SELECT id FROM browser_warm_sessions
-    WHERE status = 'available'
-      AND created_at < NOW() - INTERVAL '30 minutes'
-    LIMIT 20
-    FOR UPDATE SKIP LOCKED
-  `);
+  // Claim stale sessions inside a transaction so FOR UPDATE SKIP LOCKED
+  // holds locks until we've read the IDs — preventing concurrent workers
+  // from picking the same rows.
+  const ids = await db.transaction(async (tx) => {
+    const staleRows = await tx.execute(sql`
+      SELECT id FROM browser_warm_sessions
+      WHERE status = 'available'
+        AND created_at < NOW() - INTERVAL '30 minutes'
+      LIMIT 20
+      FOR UPDATE SKIP LOCKED
+    `);
+    return (staleRows as unknown as { rows: Array<{ id: string }> }).rows.map((r) => r.id);
+  });
 
-  const ids = (staleRows as unknown as { rows: Array<{ id: string }> }).rows.map((r) => r.id);
   if (ids.length === 0) return { evicted: 0 };
 
   let evicted = 0;
