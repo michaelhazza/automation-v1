@@ -3,8 +3,8 @@ active_spec: tasks/builds/iee-browser-on-e2b/spec.md
 active_plan: tasks/builds/iee-browser-on-e2b/plan.md
 build_slug: iee-browser-on-e2b
 branch: claude/migrate-browser-e2b-snI99
-status: BUILDING
-last_updated: 2026-05-13T00:00:00Z
+status: REVIEWING
+last_updated: 2026-05-14T00:00:00Z
 last_merged_pr: #288
 last_merged_slug: operator-backend
 last_merged_branch: claude/sandbox-execution-provider-DLfjn
@@ -23,12 +23,12 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 ---
 
 **Active spec:** `tasks/builds/iee-browser-on-e2b/spec.md` (accepted 2026-05-13)
-**Active plan:** `tasks/builds/iee-browser-on-e2b/plan.md` (Phase 2 — to be authored by `architect`)
+**Active plan:** `tasks/builds/iee-browser-on-e2b/plan.md` (LOCKED — 19 chunks, all complete)
 **Active build slug:** `iee-browser-on-e2b`
 **Branch:** `claude/migrate-browser-e2b-snI99`
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
-Phase 1 (SPEC) complete. Brief LOCKED v7. Mockups locked at round 3.1. Spec accepted with both REVIEW_GAPs logged (`spec-reviewer` Codex CLI version mismatch; `chatgpt-spec-review` operator-deferred). Handoff at `tasks/builds/iee-browser-on-e2b/handoff.md`. Next: open a new Claude Code session and run `launch feature coordinator`.
+Phase 2 (BUILD) complete as of 2026-05-14. All 19 chunks built. Full review pass done: spec-conformance CONFORMANT_AFTER_FIXES, pr-reviewer APPROVED (0 blocking), reality-checker READY (9/9), dual-reviewer applied 4 fixes. No REVIEW_GAPs. Progress: `tasks/builds/iee-browser-on-e2b/progress.md`. Next: open a new Claude Code session and run `launch finalisation`.
 
 **Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
 

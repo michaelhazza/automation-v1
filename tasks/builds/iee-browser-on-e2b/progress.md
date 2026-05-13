@@ -42,6 +42,35 @@ Two design-level open questions resolved in Phase 1 (recorded as DECIDED in spec
 - Sandbox provider implementation exact file path (Phase 2 chunk 1 confirms).
 - Pre-existing host-disk profile migration handling (Phase 2 chunk 5 confirms; likely no-op since dogfood-first launch).
 
+## Phase 2 status
+
+**Completed:** 2026-05-14
+
+| Step | Status | Notes |
+|---|---|---|
+| Plan locked | done | `tasks/builds/iee-browser-on-e2b/plan.md` — 19 chunks, LOCKED after 2 ChatGPT plan-review rounds |
+| Chunks 1–15B | done | All built, G1 gate passed per chunk. Commits c40a37db–383f5af6 |
+| Chunk 16 | done | IEE browser operator settings UI (`_fields.tsx`, `OperatorSettingsTab.tsx`, `AdminSubaccountDetailPage.tsx`). Commit 4464966c |
+| Chunk 17 | done | DigitalOcean retirement + CI gate (`verify-no-do-references.sh`, worker files deleted). Commit e3a001be |
+| Chunk 18 | done | Doc-sync post-DO-retirement (`docs/iee-on-e2b-rollout.md`, cost-report placeholder, calendar todo). Commit 831b0c58 |
+| G2 gate | done | `npm run lint` + `npm run typecheck` + `npm run build:server` + `npm run build:client` all clean |
+| spec-conformance | CONFORMANT_AFTER_FIXES | Removed `autoExtendGraceMinutes` NumberField from OperatorSettingsTab (now a server-side constant). Log: `tasks/review-logs/spec-conformance-log-iee-browser-on-e2b-2026-05-13T13-16-18Z.md`. Commit e7271991 |
+| pr-reviewer (post-conformance) | APPROVED — 0 blocking | Initial pass: CHANGES_REQUESTED (4 blocking RLS issues B1-B4). RLS fix applied (commit e9293275); re-review: APPROVED (0 blocking, 3 strong, 4 non-blocking) |
+| RLS fix (B1-B4) | done | `browserWarmPool`, `ieeBrowserProfileManager`, `_ieeShared`, `ieeBrowserDailyRollupJob` — all FORCE RLS tables now use `setOrgAndSubaccountGUC` inside transactions; daily rollup uses `withAdminConnection + SET LOCAL ROLE admin_role`. Commit e9293275 |
+| reality-checker | READY (9/9) | All criteria verified via deterministic checks and pr-reviewer log. Log: `tasks/review-logs/reality-check-log-iee-browser-on-e2b-2026-05-13T14-00-00Z.md` |
+| dual-reviewer (Codex) | done | Applied 4 fixes: dispatch safety (`_ieeShared.ts` `mounted=null` guard), upsert race fix (`ieeBrowserProfileManager.ts` INSERT ON CONFLICT), migration backfill, compose cleanup. Commit 3c44e44c |
+| adversarial-reviewer | policy-not-applicable | Diff touches FORCE RLS tables but all scoped writes use `setOrgAndSubaccountGUC` per pr-reviewer APPROVED; no auth/token/webhook surface matching §5.1.2 auto-trigger conditions |
+| doc-sync | done | All changed domains updated in same commit: `architecture.md`, `KNOWLEDGE.md`, `docs/iee-on-e2b-rollout.md`, `docs/iee-development-spec.md` Part 10 replaced, `docker-compose.yml` comments updated |
+| Phase 3 handoff | this file | Ready for `launch finalisation` |
+
+### Deferred items (non-blocking, TODO comments in code)
+- `browserWarmPool.evictStale` — outer FOR UPDATE SKIP LOCKED still without `withAdminConnection`; not on critical dispatch path; zero callers of evictStale outside its own definition
+- `browserWarmPool.refillIfEligible` — dead code (zero callers); TODO: add `organisationId` + dual-GUC when wired
+- `ieeBrowserProfileManager.gcSweep` — cross-tenant sweep, TODO: `withAdminConnection`; dead code
+
+### REVIEW_GAPs
+None — all mandatory reviewers for Major class ran and completed.
+
 ## Concurrent build note
 
 `fleet-and-codebase-health` (REVIEWING, on `codebase-health` branch) was active when this Phase 1 was launched. Operator chose to switch current-focus.md to iee-browser; fleet build is recorded in the `Paused build` section of current-focus.md for restore when work returns to that branch.
