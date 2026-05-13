@@ -3974,6 +3974,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Permissions | `VOICE_PROFILE_READ`, `VOICE_PROFILE_WRITE`, `EA_DRAFT_READ`, `EA_DRAFT_DECIDE`, `HOME_WIDGET_READ`, `EA_PROVISION` |
 | Skill definitions | `server/skills/calendar-*.md` (6 files), `server/skills/slack-*.md` (6 files) |
 | EA draft F2 invariant | `ea_drafts.send_state` is NEVER `approved`; approval is on `actions.status`. See KNOWLEDGE.md [2026-05-13] entry. |
+| EA draft proposal-action 1:1 invariant | `ea_drafts.proposal_action_id` is UNIQUE (migration 0344). `createDraftWithProposal` upstream idempotency key carries a per-call discriminator (`targetRef` or hashed `{ kind, body }`) so two drafts of the same kind from the same run + owner produce different proposal actions. See KNOWLEDGE.md [2026-05-13] Pattern — Idempotency keys MUST include a per-emission discriminator. |
 
 #### Trust & Verification Layer (trust-verification-layer, 2026-05)
 

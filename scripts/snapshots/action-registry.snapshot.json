@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-05-12T23:15:36.008Z",
+  "capturedAt": "2026-05-13T07:32:08.441Z",
   "entries": {
     "add_deliverable": {
       "actionCategory": "worker",
@@ -693,7 +693,7 @@
         ]
       },
       "reversible": false,
-      "riskTier": 6,
+      "riskTier": 4,
       "topics": [
         "calendar"
       ],
@@ -1076,7 +1076,7 @@
         ]
       },
       "reversible": false,
-      "riskTier": 6,
+      "riskTier": 4,
       "topics": [
         "calendar"
       ],
@@ -7603,7 +7603,7 @@
       "blastRadius": "external",
       "createsBoardTask": false,
       "defaultGateLevel": "auto",
-      "description": "List public and private Slack channels the bot is a member of. Returns channel name, ID, member count, and topic. Supports pagination via cursor.",
+      "description": "List Slack channels the bot is a member of, filtered by `types` (public/private/mpim/im — see spec §7.3). Returns channel name, ID, member count, and topic. Supports pagination via cursor.",
       "idempotencyStrategy": "read_only",
       "isExternal": true,
       "liveFetchRationale": "Channel membership changes at any time; list must be live",
@@ -7619,6 +7619,7 @@
         "cursor",
         "limit",
         "excludeArchived",
+        "types",
         "ownerUserId"
       ],
       "readPath": "liveFetch",
@@ -7657,6 +7658,20 @@
           "type": "ZodString",
           "optional": true,
           "describe": "User ID for scoping the request"
+        },
+        "types": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodEnum",
+            "enum": [
+              "public_channel",
+              "private_channel",
+              "mpim",
+              "im"
+            ]
+          },
+          "optional": true,
+          "describe": "Channel-kind filter (spec §7.3). Defaults to ['public_channel'] when omitted — matches the slack.com `conversations.list` default."
         }
       }
     },

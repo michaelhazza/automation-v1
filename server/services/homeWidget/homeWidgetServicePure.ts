@@ -25,3 +25,19 @@ export function shouldRefetch({ refreshPolicy, lastFetchedAt, now }: ShouldRefet
   if (lastFetchedAt === null) return true;
   return now.getTime() - lastFetchedAt.getTime() > 5 * 60 * 1000;
 }
+
+/**
+ * Resolve a home-widget titleTemplate against the owning agent. Supports the
+ * spec §13.1 placeholder `${agent.displayName}` and falls back to the agent's
+ * displayName when the template is empty / null / unspecified. Pure helper.
+ *
+ * Only `agent.displayName` is supported in V1 — adding more placeholders is a
+ * forward-compatible change but each one must be enumerated here.
+ */
+export function resolveTitleTemplate(
+  template: string | null | undefined,
+  agent: { displayName: string },
+): string {
+  if (!template || template.trim() === '') return agent.displayName;
+  return template.replace(/\$\{agent\.displayName\}/g, agent.displayName);
+}

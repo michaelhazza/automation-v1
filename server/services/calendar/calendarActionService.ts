@@ -145,11 +145,13 @@ async function gcalFetch(
 async function writePreFlight(
   draftId: string,
   organisationId: string,
+  callerOwnerUserId: string,
 ): Promise<void> {
   const rows = await db
     .select({
       sendState: eaDrafts.sendState,
       actionStatus: actions.status,
+      draftOwnerUserId: eaDrafts.ownerUserId,
     })
     .from(eaDrafts)
     .innerJoin(actions, eq(eaDrafts.proposalActionId, actions.id))
@@ -166,6 +168,17 @@ async function writePreFlight(
     throw Object.assign(
       new Error(`EA draft ${draftId} not found`),
       { statusCode: 404, errorCode: 'DRAFT_NOT_FOUND' },
+    );
+  }
+
+  // Owner-mismatch guard (spec §8.4 + post-merge audit 2026-05-13). A draft
+  // belongs to exactly one owner user; an agent run executing on a different
+  // owner's behalf must NOT be allowed to commit somebody else's draft, even
+  // within the same organisation.
+  if (row.draftOwnerUserId !== callerOwnerUserId) {
+    throw Object.assign(
+      new Error(`Draft ${draftId} does not belong to caller ${callerOwnerUserId}`),
+      { statusCode: 403, errorCode: 'DRAFT_OWNER_MISMATCH' },
     );
   }
 
@@ -281,7 +294,7 @@ export const calendarActionService = {
     input: CalendarCreateEventInput & { eaDraftId: string },
     ctx: CalendarCtx,
   ): Promise<CalendarEvent> {
-    await writePreFlight(input.eaDraftId, ctx.organisationId);
+    await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
     // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
     if (!ctx._dispatchPreClaimed) {
@@ -351,7 +364,7 @@ export const calendarActionService = {
     input: CalendarUpdateEventInput & { eaDraftId: string; etag?: string },
     ctx: CalendarCtx,
   ): Promise<CalendarEvent> {
-    await writePreFlight(input.eaDraftId, ctx.organisationId);
+    await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
     // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
     if (!ctx._dispatchPreClaimed) {
@@ -413,7 +426,7 @@ export const calendarActionService = {
     input: CalendarRespondToInviteInput & { eaDraftId: string; ownerEmail: string },
     ctx: CalendarCtx,
   ): Promise<CalendarEvent> {
-    await writePreFlight(input.eaDraftId, ctx.organisationId);
+    await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
     // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
     if (!ctx._dispatchPreClaimed) {
