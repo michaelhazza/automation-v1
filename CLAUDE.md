@@ -240,8 +240,8 @@ Classify every task before starting:
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
 | **Standard** | 2–4 files, clear approach, no new patterns | Implement, then `spec-conformance` (if spec-driven), then `pr-reviewer` |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then `spec-conformance` (if spec-driven), then `pr-reviewer`. `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
-| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → `spec-conformance` → `pr-reviewer`). `dual-reviewer` optionally — **only if the user explicitly asks and the session is running locally** (see note below). |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then apply the full GRADED review posture (§ *Review pipeline* below): `spec-conformance` if spec-driven → `pr-reviewer` → `reality-checker` → `adversarial-reviewer` if §5.1.2 surface → `dual-reviewer` + `chatgpt-pr-review` (mandatory — skippable with `REVIEW_GAP`). |
+| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline (architect → implement → full GRADED review posture). `feature-coordinator` auto-invokes each review tier. See § *Review pipeline* below. |
 
 ### Common invocations
 

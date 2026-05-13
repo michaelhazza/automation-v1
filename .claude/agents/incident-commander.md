@@ -43,11 +43,11 @@ Classify the incident using the matrix in `docs/incident-response.md`. Ask the o
 
 Print the proposed SEV level and its justification from the matrix. **Confirm with the operator before proceeding.** If the operator disagrees, update the classification and note the reasoning.
 
-Create the incident folder immediately after confirmation:
+Create the incident folder, `timeline.md` skeleton, and the first timeline entry (incident opened, SEV level, classification timestamp) immediately after confirmation. Use the template from `docs/incident-response.md § Timeline-log format`.
 
 ```
 tasks/incidents/<YYYY-MM-DD-slug>/
-  timeline.md       (created in Step 3)
+  timeline.md       (created here)
   postmortem.md     (created in Step 5)
 ```
 
@@ -67,7 +67,7 @@ Timeline entry format (one entry per action or observation):
 - Observation: what was detected.
 - Action: what was done in response.
 
-Create `timeline.md` with the skeleton from `docs/incident-response.md § Timeline-log format` and add the first entry (incident opened, SEV level, classification timestamp).
+Append entries as the incident unfolds. The `timeline.md` skeleton and first entry are created in Step 2.
 
 ## Step 4 — Hotfix handoff
 
@@ -75,7 +75,7 @@ Incident-commander does NOT dispatch another coordinator. Coordinators cannot di
 
 Print to the operator:
 
-> "Switching the main session to the hotfix playbook. Read `.claude/agents/hotfix.md` and follow its Step 1 onward; I'll continue the timeline alongside."
+> "The main session now adopts the hotfix playbook. Read `.claude/agents/hotfix.md` and follow Step 1 onward."
 
 Continue appending timeline entries as the hotfix progresses. Key timeline milestones to log:
 - Hotfix playbook adopted
