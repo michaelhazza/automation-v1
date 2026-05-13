@@ -43,6 +43,7 @@ import {
   assertNotLatestTemplateVersion,
   buildE2bMetadataTags,
   credentialAliasPath,
+  resolveTemplateAlias,
   type E2bTerminalSignal,
 } from './e2bSandboxPure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
@@ -174,6 +175,14 @@ export interface E2bSandboxConfig {
    * relative to process.cwd(). Overridable for tests.
    */
   publishedVersionPath: string;
+
+  /**
+   * Path to the iee-browser PUBLISHED_VERSION file.
+   * When set, enables browser-class sandbox execution (templateName = 'iee-browser').
+   * Default: 'infra/sandbox-templates/iee-browser/PUBLISHED_VERSION'
+   * relative to process.cwd().
+   */
+  browserPublishedVersionPath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +193,7 @@ export class E2bSandbox implements SandboxExecutionService {
   private readonly sdkClient: E2bSdkClient;
   private readonly config: E2bSandboxConfig;
   private readonly templateDigest: string;
+  private readonly browserTemplateDigest: string | null;
 
   constructor(sdkClient: E2bSdkClient, config: E2bSandboxConfig) {
     this.sdkClient = sdkClient;
@@ -198,6 +208,16 @@ export class E2bSandbox implements SandboxExecutionService {
 
     assertNotLatestTemplateVersion(published.image_digest, 'E2bSandbox.constructor');
     this.templateDigest = published.image_digest;
+
+    // Load iee-browser template digest if configured (enables browser-class tasks).
+    if (config.browserPublishedVersionPath) {
+      const browserRaw = readFileSync(config.browserPublishedVersionPath, 'utf-8');
+      const browserPublished = parsePublishedVersion(browserRaw);
+      assertNotLatestTemplateVersion(browserPublished.image_digest, 'E2bSandbox.constructor(browser)');
+      this.browserTemplateDigest = browserPublished.image_digest;
+    } else {
+      this.browserTemplateDigest = null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -238,7 +258,10 @@ export class E2bSandbox implements SandboxExecutionService {
       sandboxExecutionId,
       call: () =>
         this.sdkClient.createSandbox({
-          templateAlias: this.templateDigest,
+          templateAlias: resolveTemplateAlias(templateName, {
+            synthetos: this.templateDigest,
+            browser: this.browserTemplateDigest ?? undefined,
+          }),
           timeoutSeconds,
           metadata: metadataTags,
         }),
@@ -262,6 +285,31 @@ export class E2bSandbox implements SandboxExecutionService {
       // When available: this.sdkClient.writeFile(providerSandboxId, targetPath,
       //   Buffer.from(credentialValue), { mode: 0o600 });
       void (alias.alias + targetPath); // suppress lint unused-var until C13 wires
+    }
+
+    // --- Phase: harness input injection (browser tasks only) ---
+    // For iee-browser tasks, write /workspace/input.json so the harness can
+    // read the task payload and profile mount descriptor at startup.
+    // The harness uses profileMount.userDataDirInSandbox to set up the
+    // Playwright user-data directory (spec §7.3, §8.1 extension).
+    if (templateName === 'iee-browser' && input.profileMount) {
+      const harnessInput = {
+        taskPayload: input.inputFiles,  // task payload envelope
+        profileMount: {
+          userDataDirInSandbox: input.profileMount.userDataDirInSandbox,
+        },
+        artefactsDir: '/workspace/artefacts',
+      };
+      await withSandboxProvider({
+        phase: 'start',
+        sandboxExecutionId,
+        call: () =>
+          this.sdkClient.writeFile(
+            providerSandboxId,
+            '/workspace/input.json',
+            Buffer.from(JSON.stringify(harnessInput)),
+          ),
+      });
     }
 
     // --- Phase: mid_execution / terminal harvest ---
@@ -460,8 +508,17 @@ registerSandboxProvider('e2b', () => {
     'PUBLISHED_VERSION',
   );
 
+  const browserPublishedVersionPath = join(
+    process.cwd(),
+    'infra',
+    'sandbox-templates',
+    'iee-browser',
+    'PUBLISHED_VERSION',
+  );
+
   return new E2bSandbox(makeNotInstalledStub(), {
     projectName,
     publishedVersionPath,
+    browserPublishedVersionPath,
   });
 });
