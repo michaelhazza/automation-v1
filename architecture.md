@@ -291,6 +291,8 @@ When `reference_state === 'unavailable'`, routing falls back to legacy keyword p
 
 `NULL` = not yet computed; `check_capability_gap` treats a null map as zero-capability so Path A cannot fire against uncomputed state. The stored `referenceLastUpdated` is string-exact-compared against the current reference's `schema_meta.last_updated`; mismatch disqualifies the map from Path A and forces Path B (re-verification by the Configuration Assistant).
 
+**V2 `owner_user_id` scope axis (migration 0156 extension, personal-assistant-v2-operator build):** User-owned agents carry an additional `owner_user_id` field in `capabilityMap`. For subaccount-owned agents (org-level agents, standard subaccount agents), this field is absent/null. For user-owned agents (e.g., the Executive Assistant), `owner_user_id` is set to `agents.owner_user_id` and is recomputed atomically with any `agents.owner_user_id` update (same transaction, mandatory per DEVELOPMENT_GUIDELINES §6.4). The two-axis matcher rule in the orchestrator uses this field: when `capabilityMap.owner_user_id` is set, the target is resolved as `target_owner_user_id ?? requester_user_id` (see `crossOwnerDelegationAuthorisationPure.ts`).
+
 ### Capability discovery skills
 
 Four new system skills, all `idempotencyStrategy: 'read_only'` except `request_feature` (`keyed_write`). Registered in `server/config/actionRegistry/core.ts` (assembled by `server/config/actionRegistry/index.ts`) and dispatched in `server/services/skillExecutor.ts`. Handlers at `server/tools/capabilities/`.
@@ -4087,6 +4089,8 @@ The PATCH route also requires `AGENTS_EDIT` (general). `SUBACCOUNT_OPERATOR_SETT
 
 Both literals are defined at `server/services/executionBackends/types.ts` (single source of truth). The CI gate `scripts/gates/verify-execution-capability-references.sh` enforces that `'long_running'` and `'session_identity'` strings appear only in the canonical types file, adapter declarations, test fixtures, and documentation.
 
+**Universal `OpenTaskView` + run-trace invariant:** Every controller — native, operator-mode, and future controller styles — surfaces through the same `OpenTaskView` primitives and the same event renderer. V2 adds four event variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) and zero new visual chrome. The invariant is enforced by the shared `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) and the `verify-operator-event-registry.sh` gate.
+
 ---
 
 <a id="architecture-rules-automation-os-specific"></a>
@@ -4208,6 +4212,20 @@ Three detectors for the delegation subsystem (all in `server/services/workspaceH
 - `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
 - `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
 - `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.
+
+### Cross-ownership delegation pattern (V2)
+
+V2 extends hierarchical delegation to support cross-owner sub-steps: any agent in the org can delegate a sub-step to a user-owned agent (e.g., the Executive Assistant) when the sub-step requires the owner's data.
+
+Key invariants:
+- **Two-axis `RoutingContext`** — `requester_user_id` (who asked) + optional `target_owner_user_id` (whose agent to use). The matcher reads `capabilityMap.owner_user_id`; when set, target resolves to `target_owner_user_id ?? requester_user_id`.
+- **Credentials follow the executor** — sub-runs resolve credentials with `ownerUserId = target_owner_user_id` via the existing credential broker (V1 `user-owned-agents` §3.3 invariant, unchanged).
+- **Approval routes to the owner** — cross-owner action proposals set `actions.approver_user_id = executor_agent.owner_user_id`; same-owner runs preserve V1 default (NULL = initiator-defaulted path).
+- **Run-trace privacy projection** — `runTraceProjectionForViewer` is applied at both service and route layers. Initiator-side views receive status + typed summary only; owner-side source data is private by default. Two-layer enforcement is deliberate: a future direct consumer of `agentExecutionEventService` still gets the projection.
+- **`target_owner_user_id` is server-side-only** — HTTP-supplied values are discarded before `RoutingContext` is built. Never accepted from client/FE input.
+- **Single terminal event per `(parent_run_id, substep_id)`** — `delegation_outcomes` UPDATE predicate is `WHERE id = $2 AND terminal_at IS NULL`; 0 rows updated means already-terminal, and no event is emitted.
+
+State machine columns added in migration 0347: `substep_status` (ten-value union), `terminal_at`, `cross_owner_approval_timeout_policy` (three-value union). Partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` supports the status query.
 
 ---
 

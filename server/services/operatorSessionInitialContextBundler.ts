@@ -2,7 +2,7 @@
 //
 // Reads raw inputs from DB, then delegates to the pure trim function.
 //
-// Spec: docs/superpowers/specs/2026-05-11-personal-assistant-v2-operator-spec.md §4.2, §5.8
+// Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md §4.2, §5.8
 
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';

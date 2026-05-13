@@ -1223,4 +1223,28 @@ Source: PR #296 chatgpt-pr-review Round 2 F2 reversal. `chatgpt-pr-review` §1a 
 
 **Detection.** Any chatgpt-pr-review Round 2+ finding that matches a prior decided finding by `finding_type + file` — if the agent's instinct is to override the duplicate-auto-apply, STOP and require an explicit operator instruction. The instruction must include the substantive new reasoning (one sentence is fine); the audit log records both.
 
+---
+
+## Two-axis routing for owner-scoped capabilities (V2, 2026-05-13)
+
+When a capability map has `owner_user_id` set, the orchestrator's target resolution is `target_owner_user_id ?? requester_user_id` (not `requester_user_id` alone). Without the second axis, cross-owner delegation (Sarah asking about Michael's calendar) would filter out Michael's PA because `requester_user_id != owner_user_id`. The two fields must both be propagated from HTTP intake through `RoutingContext` to the matcher. `target_owner_user_id` is server-side-only — HTTP-supplied values are discarded at intake.
+
+---
+
+## Approval routes follow the executor's owner, not the initiator (V2, 2026-05-13)
+
+For cross-owner action proposals inside a sub-run, `actions.approver_user_id` is set to `executor_agent.owner_user_id`, not the initiating user. This means Michael's EA, when invoked by Sarah's parent task, routes approvals to Michael's queue — not Sarah's. Same-owner runs preserve V1 default: `approver_user_id = NULL` (initiator-defaulted path unchanged). Pattern: **approval ownership follows the executor's data boundary, not the request origin**.
+
+---
+
+## Live-file events on R2 via UPSERT-derived version (V2, 2026-05-13)
+
+`operator_run_files` uses a canonical UPSERT (`INSERT ... ON CONFLICT (agent_run_id, path) DO UPDATE SET version = operator_run_files.version + 1 RETURNING version`) as the single source of truth for event type. `version === 1` → `file.created`; `version > 1` → `file.modified`. Never use a preflight SELECT to determine event type — two racing writers would both observe "no prior row" and both emit `file.created`. The UPSERT serialises the conflict under Postgres row-lock and the returned `version` is authoritative. Both the tool-call interceptor path and the sandbox watcher path go through the same UPSERT.
+
+---
+
+## Two-layer service + route privacy projection enforcement (V2, 2026-05-13)
+
+`runTraceProjectionForViewer` is applied at BOTH the service layer (`agentExecutionEventService`) AND the route layer (`server/routes/`). The deliberate two-layer enforcement ensures a future direct consumer of `agentExecutionEventService` (bypassing the route) still gets the projection. Do not remove the route-layer call assuming the service call is sufficient — the redundancy is intentional security depth.
+
 Cross-link: `.claude/agents/chatgpt-pr-review.md` §1a duplicate-detection carveouts; this session's log under `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2 entry.

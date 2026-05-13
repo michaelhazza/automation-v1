@@ -5,6 +5,7 @@
 **Branch:** `claude/personal-assistant-post-merge-audit`
 **Base:** `72f2849316a1bfe56325471579c85d9afddca062` (merge-base with `main`)
 **HEAD at check:** `40f26022` (`feat(pa-v2-chunk4-fix): wire new event types into payload validator + discriminated union`)
+**Commit at finish:** `dcd2a18a` (this log)
 **Scope:** Chunk 4 — Approval-owner routing + stall job + timeout-policy decision tree (per `tasks/builds/personal-assistant-v2-operator/plan.md` §Chunk 4)
 **Spec sections in scope:** §4.3 (`actionService`, `workflowGateStallNotifyJob` rows), §4.6 (event-type registry rows for `cross_owner_substep.*` + `file.*`), §5.5 (`APPROVAL_ROW_V2`), §5.6 (`CROSS_OWNER_APPROVAL_TIMEOUT_POLICY`), §9.1 (idempotency rows for cross-owner action + stall job), §9.4 (terminal-event uniqueness predicate), §9.7 (cross-owner sub-step state machine)
 **Changed-code set:** 9 files (8 named in invocation + the new pure test file)

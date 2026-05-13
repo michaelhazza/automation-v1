@@ -3,7 +3,7 @@
  *
  * Pure tests for the operator session initial-context bundler trim algorithm.
  *
- * Spec: docs/superpowers/specs/2026-05-11-personal-assistant-v2-operator-spec.md §4.2, §4.3
+ * Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md §4.2, §4.3
  *
  * Runnable via:
  *   npx vitest run server/services/__tests__/operatorSessionInitialContextBundlerPure.test.ts

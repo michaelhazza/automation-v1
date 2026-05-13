@@ -7,6 +7,7 @@
 **Scope:** all-of-spec (post-merge audit; caller-confirmed full coverage of chunks 1a, 1b, 2, 3, 4, 5, 6, 7, 8, 9)
 **Changed-code set:** 459 files changed since merge-base; spec-relevant V2 files audited explicitly
 **Run at:** 2026-05-13T20:55:39Z
+**Commit at finish:** `afbd3b828e0224f2387e096f9857b6b4b551bc95`
 
 ---
 

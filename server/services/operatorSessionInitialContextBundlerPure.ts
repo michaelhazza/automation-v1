@@ -3,7 +3,7 @@
 //
 // No DB access, no side effects. Same inputs → same outputs (§8.21).
 //
-// Spec: docs/superpowers/specs/2026-05-11-personal-assistant-v2-operator-spec.md §4.2, §4.3, §5.8, §7
+// Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md §4.2, §4.3, §5.8, §7
 
 // ---------------------------------------------------------------------------
 // Types
