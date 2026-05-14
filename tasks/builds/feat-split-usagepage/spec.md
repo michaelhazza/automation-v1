@@ -46,7 +46,7 @@
 | Primitive | Why reuse |
 |---|---|
 | `client/src/components/<feature>/` folder convention | Mirrors `pulse/`, `clientpulse/`, `skill-analyzer/`, `baseline/` |
-| `client/src/components/ActivityCharts.tsx` → `RunActivityChart` | Already extracted; passed `daily: DayBucket[]`, not touched |
+| `client/src/components/ActivityCharts.tsx` → `RunActivityChart` | Already extracted; receives the `daily: DayBucket[]` array via its `data` prop (`<RunActivityChart data={daily} />`); not touched |
 | `client/src/lib/api.ts` axios wrapper | All fetch calls keep using it |
 | `useParams` from `react-router-dom` | Host page keeps reading `subaccountId` |
 | `client/src/lib/formatMoney.ts` | **Not yet used here.** Today UsagePage has its own `formatCents` / `formatTokens`. See §11 — consolidating to the shared helper is deferred to avoid behavioural drift in this refactor. |
@@ -77,9 +77,11 @@ The spec-authoring checklist sections 0 (verify present state), 4 (RLS), 5 (exec
 ```
 client/src/pages/UsagePage.tsx                          ← host only (~150–200 LOC target)
 client/src/components/usage/
-  ├─ types.ts                                           ← 11 interfaces + `Tab` union + `FallbackChainEntry` type alias
+  ├─ types.ts                                           ← 11 interfaces + `Tab` union + `FallbackChainEntry` + `RoutingFilters` + `IeeFilters` type aliases
   ├─ format.ts                                          ← formatCents, formatTokens, monthLabel, prevMonth, nextMonth, parseFallbackChain, anomalyColor
   ├─ constants.ts                                       ← ANOMALY_THRESHOLDS, TIER_COLORS, REASON_COLORS, STATUS_COLORS
+  ├─ __tests__/
+  │   └─ format.test.ts                                 ← Vitest tests for the 7 pure helpers (§9)
   ├─ MonthNavigator.tsx                                 ← prev/next + month label (uses ChevLeft/ChevRight inline)
   ├─ SummaryCards.tsx                                   ← the 4-card row (Month Spend, Today, LLM Requests, Tokens Used)
   ├─ BudgetBars.tsx                                     ← wrapper that renders 1-2 BudgetBar instances when limits exist
@@ -120,7 +122,7 @@ UsagePage  (host — ~150–200 LOC)
 │    └── <MonthNavigator month, thisMonth, onPrev, onNext />
 ├── <SummaryCards summary, loading />
 ├── <BudgetBars monthlySpent, todaySpent, monthLimit, dailyLimit /> ← renders null when both limits absent
-├── <RunActivityChart data />                            ← unchanged primitive
+├── <RunActivityChart data={daily} />                    ← unchanged primitive (`data` is the existing prop name)
 ├── <TabBar active, onChange />
 └── tab body — dispatch by active tab
     ├── overview → <OverviewTab month, summary />
@@ -181,6 +183,35 @@ The two fetch effects today happen to share a single `tabLoading` boolean across
 
 ## 8. Prop contracts at each new boundary
 
+### 8.0 Shared filter types (in `types.ts`)
+
+```
+type RoutingFilters = {
+  provider?:        string;
+  routingReason?:   string;
+  capabilityTier?:  string;
+  executionPhase?:  string;
+  status?:          string;
+  wasDowngraded?:   string;        // 'true' | 'false' | '' as today
+  wasEscalated?:    string;        // 'true' | 'false' | '' as today
+  agentName?:       string;
+  runId?:           string;
+};
+
+type IeeFilters = {
+  types:        string;            // comma-separated, e.g. 'browser,dev'
+  statuses:     string;            // comma-separated, e.g. 'completed,failed'
+  minCostCents: string;
+  search:       string;
+};
+```
+
+`RoutingFilters` keys are the exact set today's `<FilterSelect>` / `<FilterText>` rows write to via `setFilter(key, value)` (today's UsagePage lines 1046–1054). The fields are optional because the current code starts with `{}` and only sets keys as the user interacts; the spread `{ month, ...routingFilters }` into the GET-params object continues to omit absent keys.
+
+`IeeFilters` mirrors today's inline literal type at UsagePage.tsx lines 275–280.
+
+Both types live in `client/src/components/usage/types.ts` and are imported by the hook, the parent `<RoutingTab>` / `<IeeTab>`, and (for routing only) the `<RoutingFilters>` sub-component.
+
 ### 8.1 `<MonthNavigator>`
 
 ```
@@ -192,6 +223,8 @@ props: {
 }
 ```
 Right-arrow disabled when `month >= thisMonth`. Uses the existing `monthLabel` helper for display.
+
+Note: today's host derives `thisMonth = new Date().toISOString().slice(0, 7)` once at mount, while `nextMonth(ym)` independently calls `new Date()` inside the helper. Both derivations are time-of-day sensitive but agree for any single session. The spec preserves this behaviour — `thisMonth` stays a host-level constant for the disabled-state check, and `nextMonth` keeps its current self-contained clamp. Do NOT plumb `thisMonth` into `nextMonth`; doing so would silently change behaviour for the very-rare cross-midnight-at-month-end edge case.
 
 ### 8.2 `<SummaryCards>`
 
@@ -257,9 +290,9 @@ props: {
   nextCursorId: string | null;
   loadingMore: boolean;
   selectedRequest: RoutingLogItem | null;
-  filters: Record<string, string>;
+  filters: RoutingFilters;
   tabLoading: boolean;
-  onFilterChange(f: Record<string, string>): void;
+  onFilterChange(f: RoutingFilters): void;
   onLoadMore(): void;
   onSelectRequest(r: RoutingLogItem | null): void;
 }
@@ -270,7 +303,7 @@ Internally composes `<RoutingAnomalies>`, `<RoutingDistribution>`, `<RoutingFilt
 Sub-component props:
 - `<RoutingAnomalies>`: `{ dist: RoutingDistribution }` — renders only when `dist.totalRequests > 0`.
 - `<RoutingDistribution>`: `{ dist: RoutingDistribution }` — four `DistributionBar`s + latency summary.
-- `<RoutingFilters>`: `{ dist: RoutingDistribution | null; filters: Record<string, string>; onFilterChange(next: Record<string, string>): void }`.
+- `<RoutingFilters>`: `{ dist: RoutingDistribution | null; filters: RoutingFilters; onFilterChange(next: RoutingFilters): void }`.
 - `<RoutingLogTable>`:
   ```
   {
@@ -293,8 +326,8 @@ props: {
   rows: IeeUsageRow[];
   summary: IeeUsageSummary | null;
   loading: boolean;
-  filters: { types: string; statuses: string; minCostCents: string; search: string };
-  onFilterChange(next): void;
+  filters: IeeFilters;
+  onFilterChange(next: IeeFilters): void;
 }
 ```
 Renames `tabLoading` prop to `loading` for consistency with the other tabs. Internal `setF(key, value)` helper preserved.
@@ -332,6 +365,7 @@ Each chunk is independently revertible. Order: types and helpers first, atoms se
 ### Chunk 1 — Extract `types.ts`, `format.ts`, `constants.ts`
 
 - Move all 11 interfaces + `Tab` union + `FallbackChainEntry` type alias to `client/src/components/usage/types.ts`.
+- Add two new named type aliases to `types.ts`: `RoutingFilters` and `IeeFilters` per §8.0. `RoutingFilters` replaces today's inline `Record<string, string>` annotation on the host's `routingFilters` state and on all routing prop sites; `IeeFilters` replaces today's inline literal type on the host's `ieeFilters` state and on the `IeeTab` filter props. Behaviour is unchanged — keys remain the same — only the type-annotation is tightened.
 - Move all 7 pure helpers to `format.ts`. Add `__tests__/format.test.ts` per §9.
 - Move the four colour-map constants to `constants.ts`.
 - Host imports from new paths.
@@ -376,6 +410,7 @@ Each chunk is independently revertible. Order: types and helpers first, atoms se
 - Confirm host is 150–200 LOC: imports, params + state, `useUsageData` call, return JSX composing chrome + tabs.
 - Confirm `embedded` prop still hides the header-title block.
 - Run lint + typecheck + build:client + `npx vitest run client/src/components/usage/__tests__/format.test.ts`.
+- **Byte-for-byte verification of the §2 invariant** (Tailwind class strings, SVG path data, colour bands, shimmer animation timings): for each extracted component, the implementer copy-pastes the JSX (including `className=` strings) from `UsagePage.tsx` verbatim into the new file. Before declaring the chunk done, the implementer eyeballs the diff between the original block and the extracted component to confirm no class string was reformatted, abbreviated, or rewritten — and renders both the standalone usage page and the embedded subaccount-detail usage tab side-by-side against a pre-refactor screenshot of the same view to catch any visual drift.
 - Manual smoke: standalone `/admin/subaccounts/:id/usage` and embedded usage tab inside `AdminSubaccountDetailPage` both render identically; month picker works; all six tabs render; routing filters + Load-more work; IEE filters work.
 
 ## 11. Deferred Items
