@@ -245,7 +245,7 @@ Every Standard+ build follows this nine-step sequence:
 - **Construction** — `feature-coordinator` drives per-chunk `builder` runs against the plan; G1 gate per chunk.
 - **Review** — branch-level review pass: `spec-conformance` → `adversarial-reviewer` (conditional) → `pr-reviewer` → `reality-checker` → `dual-reviewer`.
 - **Capability Registration** — `finalisation-coordinator` Step 6; emits a Capability Registration verdict for `docs/capabilities.md` (one of the eight §6.2.1 valid strings); blocks `MERGE_READY` until recorded.
-- **Compound Learning** — `finalisation-coordinator` Step 7a; routes patterns from Step 7 to a target enum; operator approves; no auto-apply.
+- **Compound Learning** — `finalisation-coordinator` Step 7a; emits proposal rows that route patterns from Step 7 to a target enum for future-build learning; operator may approve later; no auto-apply and no merge block.
 - **Merge** — `finalisation-coordinator` Step 9 sets `MERGE_READY`; Step 10 applies the label.
 
 Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.

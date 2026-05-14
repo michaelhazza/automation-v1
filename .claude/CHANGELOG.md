@@ -53,7 +53,7 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ## 2.4.0 — 2026-05-14
 
-**Highlights:** adds lightweight governance overlay to the dev pipeline — intent intake, duplication/strategy check, Lifecycle Declaration + ABCd sizing, Asset Register, Capability Registration verdict, and Compound Learning Feedback. All additions are operator-driven and markdown-only; no new runtime code paths. Pipeline is fully backwards-compatible: Trivial builds keep the existing `brief.md` flow; Significant/Major builds produce `intent.md` with a structured schema.
+**Highlights:** adds lightweight governance overlay to the dev pipeline — intent intake, duplication/strategy check, Lifecycle Declaration + ABCd sizing, Asset Register, Capability Registration verdict, and Compound Learning Feedback. All additions are operator-driven and markdown-only; no new runtime code paths. Pipeline is fully backwards-compatible: Trivial builds keep the existing `brief.md` flow; Standard, Significant, and Major builds produce `intent.md` with a structured schema.
 
 **Added:**
 - `spec-coordinator.md` — Step 3 renamed to "Intent intake"; branches on classification (Trivial → `brief.md` unchanged; Standard+ → produces `tasks/builds/<slug>/intent.md` per §7.1 schema with 9 required H2 sections + §7.1.1 Risk Surface vocabulary + provisional-slug rule + migration rule).

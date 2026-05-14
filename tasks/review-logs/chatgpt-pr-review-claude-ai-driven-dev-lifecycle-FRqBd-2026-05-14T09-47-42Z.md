@@ -118,3 +118,75 @@ The direction is strong, but I would not merge this round. The core conceptual i
 - `npm run typecheck`: clean
 
 ---
+
+## Round 2 — 2026-05-14T10:30:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+Round 2 verdict: close, but I would do one more small revision before merge. No major architectural blockers from the supplied diff, but I found 1 should-fix and 2 tightenings.
+
+Note: the earlier uploaded files have expired on my side, so this review is based on the Round 2 payload currently available.
+
+**Should-fix**
+
+F4 — Ambiguous classification path writes to progress.md before the provisional slug is guaranteed
+
+The Step 3 text says that when classification is ambiguous, the coordinator should ask whether this is a single-file obvious change, then record the decision in:
+- tasks/builds/<provisional-slug>/progress.md
+
+But the provisional-slug rule appears after that paragraph, and only says the operator nominates a working slug "at intent capture time." In the ambiguous path, the coordinator may need to record the classification decision before it has clearly captured or created the provisional slug directory.
+
+Why it matters: this is the same class of sequencing risk as Round 1 F1, just narrowed to the ambiguity branch.
+
+Fix: move the provisional-slug rule above the ambiguous-classification paragraph, or amend the ambiguous path to say:
+- If the answer is "no" and the build becomes Standard, nominate/create the provisional slug directory first, then record the classification decision in progress.md.
+
+**Tightenings**
+
+T3 — Changelog summary omits Standard builds from the intent.md cutover
+
+The changelog highlight says Trivial builds keep brief.md, while "Significant/Major builds produce intent.md." But the actual Step 3 contract says Standard, Significant, and Major all produce intent.md.
+
+Fix: change the highlight to:
+- Trivial builds keep the existing brief.md flow; Standard+ builds produce intent.md with a structured schema.
+
+T4 — CLAUDE.md says "operator approves" for Compound Learning, but Step 7a explicitly does not wait
+
+finalisation-coordinator Step 7a says it never blocks MERGE_READY, emits proposals, and continues regardless of operator response. But the CLAUDE.md lifecycle summary says "operator approves," which can be read as a required synchronous approval before merge.
+
+Fix: change the CLAUDE.md bullet to:
+- Compound Learning — finalisation-coordinator Step 7a; emits proposal rows for future-build learning targets; operator may approve later; no auto-apply and no merge block.
+
+**Overall**
+
+The prior F2 and F3a appear fixed in the active Step 3a text: intent.md is now scanned alongside spec.md and brief.md, and Mature is explicitly included in the Strategic-fit clear path.
+
+I'd apply the three wording/sequencing fixes above, then this should be safe to lock unless the hidden full-branch diff introduces something outside this payload.
+```
+
+### Top themes
+- architecture (F4 — sequencing), naming (T3, T4 — doc accuracy)
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F4 — Ambiguous-classification path writes `progress.md` before provisional-slug rule appears | technical | implement | auto (implement) | high | Verified live file: `.claude/agents/spec-coordinator.md` line 125 (ambiguous-classification para) references `tasks/builds/<provisional-slug>/progress.md` BEFORE the provisional-slug rule at line 127. Real sequencing issue — same class as Round 1 F1 but localised to the ambiguity branch (Round 1 F1 was a false positive because line 127 reconciles the general case, but the ambiguous para's write happens *before* line 127 is in scope textually). Fix: moved the provisional-slug rule above the ambiguous-classification rule and amended the ambiguous para to explicitly say "nominate the provisional slug and create the directory per the rule above" before recording the decision. |
+| T3 — Changelog says "Significant/Major produce intent.md" but actual contract is Standard+ | technical | implement | auto (implement) | low | Verified `.claude/CHANGELOG.md` line 56 said "Significant/Major builds produce `intent.md`" but `spec-coordinator.md` Step 3 lines 122-123 confirm Standard, Significant, and Major all produce `intent.md`. Mechanical wording fix: changed to "Standard, Significant, and Major builds produce `intent.md` with a structured schema." |
+| T4 — `CLAUDE.md` says Compound Learning "operator approves" but Step 7a is non-blocking proposal-emit | technical | implement | auto (implement) | low | Verified `CLAUDE.md` line 248 said "operator approves" which reads as a synchronous merge-gate, but `finalisation-coordinator` Step 7a explicitly never blocks `MERGE_READY` (per Round 1 changelog: "auto-apply prohibition; never blocks `MERGE_READY`"). Mechanical wording fix: changed to "emits proposal rows that route patterns from Step 7 to a target enum for future-build learning; operator may approve later; no auto-apply and no merge block." |
+
+### Duplicate detection
+- None — F4 is a distinct localised sequencing issue (Round 1 F1 was the general case, correctly rejected per spec line 127 reconciliation). T3 and T4 are new doc-accuracy findings, not duplicates of any Round 1 finding.
+
+### Implemented (auto-applied technical)
+
+- [auto] **F4** — `.claude/agents/spec-coordinator.md` Step 3 — reordered the provisional-slug rule above the ambiguous-classification rule, and amended the ambiguous branch to explicitly nominate the provisional slug + create the directory before recording the classification decision in `progress.md`.
+- [auto] **T3** — `.claude/CHANGELOG.md` line 56 — changelog highlight now says "Standard, Significant, and Major builds produce `intent.md`" (was "Significant/Major builds…").
+- [auto] **T4** — `CLAUDE.md` line 248 — Compound Learning bullet rewritten to "emits proposal rows that route patterns from Step 7 to a target enum for future-build learning; operator may approve later; no auto-apply and no merge block." (was "operator approves; no auto-apply.")
+
+### Verification
+- `npm run lint`: 0 errors (pre-existing warnings only — none from this round's edits since changes are markdown)
+- `npm run typecheck`: clean
+
+---
