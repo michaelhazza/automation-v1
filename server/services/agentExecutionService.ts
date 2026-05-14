@@ -49,7 +49,7 @@ export const agentExecutionService = {
 
     try {
       const configResult = await configureRun(request, ctx);
-      if (configResult.kind === 'workspace_limit_failed') return configResult.result;
+      if (configResult.kind === 'early_exit_failed') return configResult.result;
 
       await loadRunContextAndHierarchy(request, ctx);
 

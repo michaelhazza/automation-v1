@@ -19,7 +19,7 @@ import type { AgentRunRequest, AgentRunResult, RunExecutionContext } from '../ty
 export async function configureRun(
   request: AgentRunRequest,
   ctx: RunExecutionContext,
-): Promise<{ kind: 'workspace_limit_failed'; result: AgentRunResult } | { kind: 'configured' }> {
+): Promise<{ kind: 'early_exit_failed'; result: AgentRunResult } | { kind: 'configured' }> {
   const run = ctx.run!;
 
   // ── 2. Load agent config ────────────────────────────────────────────
@@ -91,7 +91,7 @@ export async function configureRun(
     }).where(eq(agentRuns.id, run.id));
 
     return {
-      kind: 'workspace_limit_failed',
+      kind: 'early_exit_failed',
       result: {
         runId: run.id,
         status: 'failed',
@@ -229,7 +229,7 @@ export async function configureRun(
     }).where(eq(agentRuns.id, run.id));
 
     return {
-      kind: 'workspace_limit_failed',
+      kind: 'early_exit_failed',
       result: {
         runId: run.id,
         status: 'failed',
