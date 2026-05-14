@@ -84,11 +84,10 @@ client/src/components/subaccount-knowledge/
   ├─ ReferencesTab.tsx                              ← owns: ReferencesTable + filtered list + Reference create/edit modal + Rename modal + Promote modal + Archive ConfirmDialog
   ├─ InsightsTab.tsx                                ← owns: InsightsTable + InsightFilterSelect + insight filters + insights fetch
   ├─ BlocksTab.tsx                                  ← owns: BlocksTable + filtered list + Memory Block create/edit modal + Demote ConfirmDialog
-  ├─ RenameReferenceModal.tsx                       (only created if ReferencesTab.tsx still exceeds ~300 LOC after Chunk 4 — see §10 Chunk 4)
-  └─ atoms/                                         (created only if shared atoms emerge during build — same precedent as usage/atoms/ in batch 1)
+  └─ RenameReferenceModal.tsx                       (only created if ReferencesTab.tsx still exceeds ~300 LOC after Chunk 4 — see §10 Chunk 4)
 ```
 
-`ReferencesTable`, `InsightsTable`, and `BlocksTable` stay as internal non-exported functions inside their respective `*Tab.tsx` files. They are not promoted to top-level files. The only conditional additions allowed are: (a) `RenameReferenceModal.tsx` as a single optional file extraction (per Chunk 4); (b) an `atoms/` directory if — and only if — a genuinely shared atom (used by two or more tab files) emerges during the build. Neither is created speculatively. No other sub-files are introduced.
+`ReferencesTable`, `InsightsTable`, and `BlocksTable` stay as internal non-exported functions inside their respective `*Tab.tsx` files. They are not promoted to top-level files. The only conditional addition allowed is `RenameReferenceModal.tsx` as a single optional file extraction (per Chunk 4). No `atoms/` directory is created — there are no atoms shared across the three tabs today (`TabButton` is the only candidate and it already sits at the folder root). If a future refactor surfaces a shared atom, it gets its own spec.
 
 Host import path in `App.tsx` is unchanged.
 
@@ -149,7 +148,7 @@ props: {
 
 Owns internally: `filteredRefs` (`useMemo` over `items` + `search`), the Reference create/edit modal (Tiptap), the Promote modal (label + condensed content + REFERENCE_PROMOTE_PREVIEW_MAX seeding), the Rename modal, the Archive ConfirmDialog, and the four handlers (`handleSaveReference`, `handlePromote`, `handleRenameReference`, `handleArchiveReference`). Renders an internal non-exported `ReferencesTable` (moved verbatim from host).
 
-Create-on-mount pattern: a `useEffect(() => { if (openCreateOnMount) { setEditRef('new'); onCreateConsumed(); } }, [openCreateOnMount])` opens the create modal exactly once when the prop transitions true and immediately clears the host flag via `onCreateConsumed()`. The same pattern is used by `<BlocksTab>` (§8.4).
+Create-on-mount pattern: a `useEffect(() => { if (openCreateOnMount) { setEditRef('new'); onCreateConsumed(); } }, [openCreateOnMount, onCreateConsumed])` opens the create modal exactly once when the prop transitions true and immediately clears the host flag via `onCreateConsumed()`. The host stabilises `onCreateConsumed` with `useCallback(() => setPendingCreate(null), [])` so the callback identity is stable across renders and the effect does not re-fire on host re-renders. The same pattern is used by `<BlocksTab>` (§8.4).
 
 Promote callback ordering: `await api.post(.../promote)` → `toast.success` → close modal → `await onMutated()` → `onTabSwitchTo('blocks')`. The order is reversed from today's source (today: `setTab('blocks'); await load()`) so the mutating call completes inside the still-mounted ReferencesTab, avoiding an unmounted-state-update warning. The user-visible result is identical: the user lands on the Blocks tab and sees the new block.
 
@@ -180,7 +179,7 @@ props: {
 }
 ```
 
-Owns internally: `filteredBlocks` (`useMemo`), the Memory Block create/edit modal, the Demote ConfirmDialog, and handlers `handleSaveBlock` + `handleDemote`. Renders an internal non-exported `BlocksTable`. Uses the same create-on-mount pattern as §8.2 (a `useEffect` on `openCreateOnMount` that opens the create modal once and immediately calls `onCreateConsumed`).
+Owns internally: `filteredBlocks` (`useMemo`), the Memory Block create/edit modal, the Demote ConfirmDialog, and handlers `handleSaveBlock` + `handleDemote`. Renders an internal non-exported `BlocksTable`. Uses the same create-on-mount pattern as §8.2 (a `useEffect(..., [openCreateOnMount, onCreateConsumed])` that opens the create modal once and immediately calls `onCreateConsumed`; host stabilises the callback via `useCallback`).
 
 Demote callback ordering: `await api.post(.../demote)` → `toast.success` → close confirm → `await onMutated()` → `onTabSwitchTo('references')`. Same reorder as §8.2's promote to keep the mutating call inside the still-mounted tab.
 
@@ -206,7 +205,7 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 - Create `__tests__/format.test.ts` per §9.
 - Create `TabButton.tsx` (move verbatim from host lines 848-870).
 - Update host imports for the moved symbols. The inlined `ReferencesTable`, `InsightFilterSelect`, `InsightsTable`, `BlocksTable` sub-components stay in the host file for this chunk — they move with their owning tab in Chunks 2-4.
-- **Done when:** host imports the four new modules; `npx vitest run client/src/components/subaccount-knowledge/__tests__/format.test.ts` passes; lint + typecheck + build:client clean.
+- **Done when:** host imports the three new runtime modules (`types`, `format`, `TabButton`); `npx vitest run client/src/components/subaccount-knowledge/__tests__/format.test.ts` passes; lint + typecheck + build:client clean.
 
 ### Chunk 2 — `BlocksTab`
 - Create `BlocksTab.tsx`. Move into it: the inlined `BlocksTable` sub-component (as an internal non-exported function inside the file), `filteredBlocks` `useMemo`, the Memory Block create/edit modal JSX + its state (`editBlock`, `editBlockLabel`, `editBlockContent`, `openEditBlock`), the Demote ConfirmDialog JSX + its state (`demoteBlockId`), and the handlers `handleSaveBlock` + `handleDemote`.
@@ -222,7 +221,7 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 ### Chunk 4 — `ReferencesTab`
 - Create `ReferencesTab.tsx`. Move into it: the inlined `ReferencesTable` sub-component (as an internal non-exported function), `filteredRefs` `useMemo`, the Reference create/edit modal (Tiptap) + its state (`editRef`, `editRefContent`, `openEditReference`), the Promote modal + its state (`promoteFrom`, `promoteLabel`, `promoteContent`, `promoting`, `openPromote`, `handlePromote`), the Rename modal + its state (`renameRef`, `renameTitle`, `handleRenameReference`), the Archive ConfirmDialog + its state (`archiveRefId`, `handleArchiveReference`), and `handleSaveReference`.
 - Add `openCreateOnMount` / `onCreateConsumed` / `onMutated` / `onTabSwitchTo` props per §8.2.
-- **If `ReferencesTab.tsx` exceeds ~300 LOC after this move**, extract the Rename modal into `client/src/components/subaccount-knowledge/RenameReferenceModal.tsx` with props `{ reference: Reference; initialTitle: string; onClose(): void; onRenamed(): Promise<void> }`. (`reference` not `ref` because `ref` is a reserved React prop name.) No other extractions.
+- **If `ReferencesTab.tsx` exceeds ~300 LOC after this move**, extract the Rename modal into `client/src/components/subaccount-knowledge/RenameReferenceModal.tsx` with props `{ reference: Reference; initialTitle: string; onClose(): void; onRename(newTitle: string): Promise<void> }`. The modal owns its own `title` input state seeded from `initialTitle`; on submit it calls `await onRename(title.trim())`, then `onClose()`. The parent `<ReferencesTab>`'s `onRename` callback wraps `api.patch(.../references/:id, { content: renameReferenceHtml(reference.content, newTitle) })` + `toast.success` + `await onMutated()`. (`reference` not `ref` because `ref` is a reserved React prop name.) No other extractions.
 - Host stops owning the Reference modal pair (create/edit, promote, rename, archive). The host's "+ New Reference" button now sets `pendingCreate = 'reference'`.
 - **Done when:** References tab renders, "+ New Reference" opens the create modal, edit / save / rename / archive / promote all round-trip, promote flips to Blocks tab and refreshes both lists.
 
@@ -249,18 +248,19 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 - Header "+ New Reference" / "+ New Memory Block" buttons: still rendered by host conditional on `activeTab`. Click flows through new `pendingCreate` host state into the active tab's `openCreateOnMount` prop, which opens the create modal once and calls `onCreateConsumed` to clear the host flag.
 - Inactive tabs unmount: modal-open and unsaved form state inside an inactive tab is discarded on tab switch. Same accepted minor delta as batch 1's AdminSubaccountDetailPage.
 - `search` input remains in host; each tab receives `search` and filters its own list — preserves today's "type once, all three lists filter" behaviour.
+- **Acknowledged behaviour delta — Insights tab-bar count.** Today the host owns the `insights` state, so once the user visits the Insights tab the count `Insights (N)` appears in the tab bar from any tab. After the refactor, `insights` state lives inside `InsightsTab` and is discarded on unmount. The tab bar therefore shows `Insights` (no count) whenever the Insights tab is not active. This is a minor delta, accepted because (a) replicating the old behaviour would require the host to mirror the count via a callback prop and would defeat the ownership split; (b) the References and Memory Blocks counts ARE host-owned today (they come from `load()`) and continue to display from any tab — the asymmetry is intentional and matches the natural data-ownership boundary.
 
 ## 13. Acceptance criteria
 
 - `git diff client/src/pages/SubaccountKnowledgePage.tsx` shows the host shrunk to ≤ 280 LOC; no JSX or class strings changed for any element that remains in the host (header, error banner, baseline-artefacts list, tab bar, search input, drawer render).
-- New folder `client/src/components/subaccount-knowledge/` exists with: `types.ts`, `format.ts`, `__tests__/format.test.ts`, `TabButton.tsx`, `ReferencesTab.tsx`, `InsightsTab.tsx`, `BlocksTab.tsx`, and optionally `RenameReferenceModal.tsx` (only if Chunk 4 triggered the extraction). No other files; no `atoms/` directory unless a shared atom was genuinely needed.
+- New folder `client/src/components/subaccount-knowledge/` exists with: `types.ts`, `format.ts`, `__tests__/format.test.ts`, `TabButton.tsx`, `ReferencesTab.tsx`, `InsightsTab.tsx`, `BlocksTab.tsx`, and optionally `RenameReferenceModal.tsx` (only if Chunk 4 triggered the extraction). No other files; no `atoms/` directory.
 - `npm run lint`, `npm run typecheck`, `npm run build:client`, `npx vitest run client/src/components/subaccount-knowledge/__tests__/format.test.ts` all pass.
 - Manual smoke test:
-  - All three tabs render; tab-bar counts (`References (N)`, `Insights (N)`, `Memory Blocks (N)`) update after every mutation.
+  - All three tabs render; tab-bar counts `References (N)` and `Memory Blocks (N)` update from any tab after every mutation. `Insights` count appears only while the Insights tab is active (see §12 delta).
   - "+ New Reference" opens the create modal on the References tab; "+ New Memory Block" opens it on the Blocks tab.
-  - Promote a Reference → switches to Blocks tab, the new block appears, References count drops by 1.
-  - Demote a Memory Block → switches to References tab, the new reference appears, Memory Blocks count drops by 1.
-  - Promote an Insight → switches to References tab, the new reference appears, the insight leaves the Insights list.
+  - Promote a Reference → lands on Blocks tab, the new block appears, References count drops by 1.
+  - Demote a Memory Block → lands on References tab, the new reference appears, Memory Blocks count drops by 1.
+  - Promote an Insight → lands on References tab, the new reference appears in the list. Returning to the Insights tab then refetches and confirms the promoted insight no longer appears (the local insights state was discarded on unmount and the mount-effect re-fetches fresh).
   - Rename, Archive, Edit (Reference + Block), Demote ConfirmDialog, Archive ConfirmDialog all round-trip.
   - Baseline artefacts: status badge per slug, Edit drawer opens and saves.
   - Search input filters all three tab lists in real time.
@@ -268,4 +268,4 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 
 ## 14. Open questions
 
-- None. The decomposition is mechanical; batch 1's `admin-subaccount-detail/` and `usage/` precedents answer every "where does X go" question. Implementation choices that earlier drafts left open (`key={blocksKey}` vs context; optional `atoms/`; optional rename-modal split) are now pinned: host owns `references` + `blocks` so no remount key is needed; `atoms/` is not created unless a genuinely shared atom emerges; `RenameReferenceModal.tsx` is the only allowed conditional extraction and only if the LOC budget triggers it.
+- None. The decomposition is mechanical; batch 1's `admin-subaccount-detail/` and `usage/` precedents answer every "where does X go" question. Implementation choices that earlier drafts left open (`key={blocksKey}` vs context; optional `atoms/`; optional rename-modal split) are now pinned: host owns `references` + `blocks` so no remount key is needed; no `atoms/` directory is created; `RenameReferenceModal.tsx` is the only allowed conditional extraction and only if the LOC budget triggers it.
