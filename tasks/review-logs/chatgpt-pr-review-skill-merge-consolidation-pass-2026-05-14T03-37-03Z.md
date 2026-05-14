@@ -84,3 +84,51 @@ None this round — all findings classified as technical (no UX, workflow, visib
 - Typecheck: clean
 - Targeted: `server/services/__tests__/skillAnalyzerServicePure.consolidation.test.ts` — 27/27 passing (was 26; +1 from the key-reorder regression test added in this round)
 
+### Round 1 commit
+
+- `b0470e30` — fix(skill-merge-consolidation-pass): chatgpt-pr-review Round 1 — canonical-JSON definition compare (F4)
+
+---
+
+## Round 2
+
+**Status:** complete.
+**Operator paste received:** 2026-05-14T03:55:00Z (approx).
+**ChatGPT verdict:** READY (1 should-fix conditional on serializer-shape verification — verified clean).
+
+### ChatGPT Feedback (raw)
+
+> Round 2 PR review: no blocking issues found in the current diff. The F4 canonical JSON fix is directionally correct and covered by a regression test for reordered object keys.
+>
+> Verdict: Ready to merge after 1 small should-fix, or acceptable to defer if this is already covered by route/API tests.
+>
+> 🟡 Should-fix
+> **F6 — Confirm API/result serialization includes the three new consolidation fields** (preConsolidationMerge, consolidationOutcome, consolidationNote). If results are passed through directly from Drizzle row shape, no code change needed. Add a note to the review log.
+>
+> ✅ Round 2 checks: canonical JSON fix closes the previous key-order false-negative cleanly; new test correctly proves reordered definition keys are accepted; no new migration blocker; no new type-contract blocker.
+>
+> Final recommendation: Assuming F6 is verified, I'd mark this ready to merge.
+
+### Triage table
+
+| ID | Title | Triage | Severity | Recommendation | Rationale |
+|---|---|---|---|---|---|
+| F6 | API/result serialization should expose three new fields | technical | should-fix (conditional) | **REJECT (verified-by-grep, no fix needed)** | Confirmed drizzle row passthrough end-to-end: (1) `server/db/schema/skillAnalyzerResults.ts:129-131` declares `preConsolidationMerge`, `consolidationOutcome`, `consolidationNote` columns; (2) `server/services/skillAnalyzerService.ts:302` defines `EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {...}` — auto-includes every schema column; (3) `getJob` at lines 380-393 spreads `...r` from `rawResults` and only attaches `matchedSkillContent` — no manual shaping, no fields stripped; (4) route at `server/routes/skillAnalyzer.ts:151-154` returns `res.json({ job, results })` verbatim. ChatGPT itself said: "If results are passed through directly from Drizzle row shape, no code change needed." Verified-by-grep — no fix required. |
+
+### Auto-applied actions (technical findings)
+
+None — F6 verified clean by code inspection. No code change.
+
+### User-facing actions
+
+None this round — all findings classified as technical.
+
+### Round 2 G3 (verification)
+
+- Lint: not re-run — no code change in this round (verification-by-grep only).
+- Typecheck: not re-run — no code change.
+- Targeted tests: not re-run — no code change.
+
+ChatGPT's "ready to merge" verdict stands conditional on F6 being verified, which it is.
+
+
