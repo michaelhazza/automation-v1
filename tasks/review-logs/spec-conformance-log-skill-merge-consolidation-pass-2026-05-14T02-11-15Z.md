@@ -7,6 +7,7 @@
 **Scope:** all spec (4 chunks complete per progress.md; single-phase build)
 **Changed-code set:** 19 files (per caller invocation)
 **Run at:** 2026-05-14T02-11-15Z
+**Commit at finish:** b47b1019
 
 ---
 

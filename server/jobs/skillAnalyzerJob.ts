@@ -1261,6 +1261,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             const triggerFired =
               consolidationEnabled &&
               hasScopeExpansion &&
+              !classifierFallbackApplied &&
               (triggerSeverity === 'warning' || mergeWarnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL'));
 
             if (triggerFired && storedMerge) {
@@ -1275,8 +1276,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               const mergedWords = consolidationWordCount(storedMerge.instructions);
               const scopeExpansionStandardThreshold = configSnapshot?.scopeExpansionStandardThreshold ?? 0.40;
 
+              const mergeForConsolidation = { ...storedMerge, mergeRationale: mergeRationale ?? undefined };
               const { system: consolidationSystem, userMessage: consolidationUserMessage } =
-                buildConsolidationPrompt(storedMerge, richerSourceWords, mergedWords, scopeExpansionStandardThreshold);
+                buildConsolidationPrompt(mergeForConsolidation, richerSourceWords, mergedWords, scopeExpansionStandardThreshold);
 
               const consolidationAbort = new AbortController();
               const consolidationTimeoutId = setTimeout(
@@ -1327,7 +1329,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               }
 
               if (rawConsolidationContent !== null) {
-                const parseResult = parseConsolidationResponse(rawConsolidationContent, storedMerge);
+                const parseResult = parseConsolidationResponse(rawConsolidationContent, mergeForConsolidation);
 
                 if ('reason' in parseResult) {
                   // Branch (2): typed parser rejection → failed
@@ -1394,8 +1396,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                       jobId, slug: candidate.slug, outcome: 'failed', failureReason,
                     });
                   } else {
-                    // Success
-                    storedMerge = postConsolidationMerge as unknown as StoredMerge;
+                    // Success — strip mergeRationale so jsonb columns retain four-field shape;
+                    // the rationale already flows into its dedicated DB column via mergeRationale arg.
+                    storedMerge = { ...postConsolidationMerge, mergeRationale: undefined } as StoredMerge;
                     mergeWarnings = postWarnings;
                     slotConsolidationOutcome = 'succeeded';
                     slotConsolidationNote = parseResult.consolidationNote;

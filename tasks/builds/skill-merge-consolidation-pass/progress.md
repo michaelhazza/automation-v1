@@ -11,16 +11,17 @@
 
 | Chunk | Status | G1 attempts | Commit |
 |-------|--------|-------------|--------|
-| C1 — schema-config | in_progress | — | — |
-| C2 — pure-functions-and-warnings | pending | — | — |
-| C3 — orchestration-gate | pending | — | — |
-| C4 — ui-banner | pending | — | — |
+| C1 — schema-config | done | 1 | bd24983c |
+| C2 — pure-functions-and-warnings | done | 1 | 3691a5e7 |
+| C3 — orchestration-gate | done | 1 | 86cd31a6 |
+| C4 — ui-banner | done | 1 | 65d8f4d4 |
 
 ---
 
 ## G2 gate
-- Status: pending
-- Attempts: —
+- Status: passed (lint: 0 errors / 899 pre-existing warnings unrelated to build; typecheck: clean)
+- Attempts: 1
+- Run at: 2026-05-14T01:00:00Z
 
 ---
 

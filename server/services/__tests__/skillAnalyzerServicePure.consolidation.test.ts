@@ -96,8 +96,13 @@ describe('buildConsolidationPrompt', () => {
     // Tier-1 HITL phrase appears in user message preservation inventory
     expect(userMessage).toContain('do not send directly');
 
-    // Tier-2 phrase appears under Tier 2 section
-    expect(userMessage).toContain('confirm before');
+    // 'confirm before' is Tier-1 only — it must NOT appear in the Tier-2 section as a hitl_phrase duplicate.
+    // Split at the Tier 2 header to check per-section.
+    const tier2SectionIdx = userMessage.indexOf('### Tier 2');
+    const tier1Section = userMessage.slice(0, tier2SectionIdx);
+    const tier2Section = userMessage.slice(tier2SectionIdx);
+    expect(tier1Section).toContain('confirm before');
+    expect(tier2Section).not.toContain('[hitl_phrase] confirm before');
 
     // Both tier sections present
     expect(userMessage).toContain('Tier 1');

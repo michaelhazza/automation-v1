@@ -3342,7 +3342,6 @@ const CONSOLIDATION_TIER1_HITL_PHRASES = [
 
 /** Tier-2 (lower-confidence) HITL phrases used as best-effort preservation hints. */
 const CONSOLIDATION_TIER2_HITL_PHRASES = [
-  'confirm before',
   'requires human approval',
   'do not act without confirmation',
 ] as const;
