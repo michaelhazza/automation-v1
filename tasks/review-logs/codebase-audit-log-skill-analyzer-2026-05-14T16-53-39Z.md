@@ -79,10 +79,6 @@ Tracks A (PR #308) and A2 (PR #309) in flight. Non-overlapping file sets.
 
 **N/A — no code modified in Pass 2.**
 
-## Pass 2 Changes Applied
-
-_(populated below)_
-
 ## Pass 3 Items
 
 Cross-listed in `tasks/todo.md` under `## Deferred from codebase audit — 2026-05-14 (Track A3: skillAnalyzerServicePure split)`.
