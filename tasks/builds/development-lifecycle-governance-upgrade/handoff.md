@@ -124,3 +124,44 @@ REVIEW_GAP: dual-reviewer | task-class: Significant | reason: Codex CLI not inst
 12. `tasks/ai-dlc-governance-brief.md` (stale path fix)
 13. `tasks/review-logs/README.md` (§6.2.1 format fix)
 14. `tasks/review-logs/spec-conformance-log-development-lifecycle-governance-upgrade-2026-05-14T08-51-26Z.md` (spec-conformance auto-committed)
+
+---
+
+## Phase 3 (FINALISATION) — complete (out-of-order; recovered post-merge)
+
+**PR number:** #304
+**PR URL:** https://github.com/michaelhazza/2025-automation/pull/304
+**Merge commit:** `0ffbf081` (true merge — `gh pr merge --merge --delete-branch`, not the project-convention `--squash --admin --delete-branch`)
+**Merged at:** 2026-05-14T10:13:36Z
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-claude-ai-driven-dev-lifecycle-FRqBd-2026-05-14T09-47-42Z.md
+**spec_deviations reviewed:** n/a — none recorded in Phase 2 handoff
+**ChatGPT review verdict:** APPROVED (3 rounds; 5 applied / 4 rejected / 0 deferred)
+- Round 1 (commit `4d7b368a`): F2 (duplication scan includes intent.md), F3a (Mature → Strategic-fit clear), M1 (§7.4.5 reference disambiguation). 4 rejected: F1 (false positive — already reconciled at line 127), F3b, T1, T2 (false positives from code-only diff exclusion scope)
+- Round 2 (commit `3313af53`): F4 (provisional-slug rule moved above ambiguous-classification branch), T3 (changelog "Standard, Significant, and Major"), T4 (Compound Learning bullet rewritten)
+- Round 3 (commit `50223358`): T5 (governance brief Elaboration reconciliation note added)
+**Doc-sync sweep verdicts (sub-agent's pass + finalisation-coordinator's recovery cross-check):**
+- `architecture.md`: no — lifecycle wording aligned with finalised contract pre-existing branch state; zero stale candidates
+- `docs/capabilities.md`: **CORRECTED at Phase 3 recovery — actual verdict is `yes: create new capability record` AND `yes: update existing capability record`** (the sub-agent's doc-sync emitted only `yes: update` for the 47 historical backfill rows but missed the dev-lifecycle-governance row; the post-merge recovery commit adds the new row per the Phase 2 handoff's expected verdict)
+- `docs/integration-reference.md`: n/a — no integration scope
+- `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md`: yes — Compound Learning bullet rewrite (Round 2 T4)
+- `docs/frontend-design-principles.md`: n/a — no UI surface changes
+- `KNOWLEDGE.md`: yes — 2 patterns appended by the sub-agent (code-only-diff false positives; narrowed-case subfinding rule)
+**KNOWLEDGE.md entries added:** 2
+**tasks/todo.md items removed:** 1 (F14 — deferred spec decision resolved by Asset Register schema lock)
+**tasks/todo.md items added:** 1 (owner-resolution: dev-lifecycle-governance — for the new capability row)
+**Step 7a Compound Learning Feedback:** 4 proposal rows emitted to `progress.md` (LEARNING_FEEDBACK_PROPOSAL table) — operator-pending. Targets: agent-instruction:finalisation-coordinator (×2), hook-or-grep-gate (×1), agent-instruction:pr-reviewer-deferred (×1).
+**ready-to-merge label applied at:** **n/a — label step skipped.** Sub-agent invoked `gh pr merge` directly; no CI re-fire from a label trigger. CI passed on the chatgpt-pr-review per-round push commits (`50223358` was the last per-round commit). The project-convention `--squash --admin --delete-branch` flow was bypassed; the merge is a true-merge commit on main. Out-of-band-merge artefact captured here so the post-mortem of Step 12 contract violations is durable.
+
+### Phase 3 contract deviations (durable artefact)
+
+1. **Sub-agent executed `gh pr merge` itself.** chatgpt-pr-review's charter ends at "return verdict + summary"; it does not own Step 12. Recovery: post-merge prep commit on main with the missing Asset Register row + current-focus.md transition + this Phase 3 handoff section. Compound Learning Feedback row 1 targets `agent-instruction: finalisation-coordinator` to harden the boundary.
+2. **Merge style was `--merge` (true merge), not the project-convention `--squash --admin --delete-branch`.** Cosmetic but real: `main` now has the per-round chatgpt-pr-review commits (`4d7b368a`, `3313af53`, `50223358`) plus the S2-sync commit (`64ea9791`) as first-class history rather than squashed under one commit. Not reversible.
+3. **Asset Register row for `dev-lifecycle-governance` was missing from the merge.** Phase 2 handoff explicitly named the expected verdict (`yes: create new capability record`); sub-agent's doc-sync only emitted `yes: update existing` for the 47 historical backfill rows. Recovery: row added in the post-merge prep commit. Compound Learning Feedback rows 2 and 3 target this class of verdict-mismatch.
+
+### REVIEW_GAP entries (carried forward to post-merge audit)
+
+```
+REVIEW_GAP: dual-reviewer | task-class: Significant | reason: Codex CLI not installed locally | operator-override: no | remediation: accept
+```
+
+No new REVIEW_GAP added by Phase 3 itself. The sub-agent's deviations are captured above as contract deviations, not as review coverage gaps.

@@ -255,14 +255,6 @@ These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-chec
 
 ---
 
-## Deferred spec decisions — development-lifecycle-governance-upgrade
-
-Items routed here by `spec-reviewer` during the iteration loop for the spec at `tasks/builds/development-lifecycle-governance-upgrade/spec.md`. Each item is AUTO-DECIDED to keep the loop unblocked; review at your leisure and either confirm or amend the spec.
-
-- **F14 — ABCd dimensions vs Asset Register row schema.** Codex flagged that ABCd captures four dimensions (Acquire / Build / Carry / decommission) but the Asset Register row only carries Carry notes and Decommission notes. AUTO-DECIDED: accept-minimum-change. Acquire and Build remain pre-merge planning context (visible in the spec, absent from the Register). The spec's §7.3 Consumer wording and §14 Deferred Items now state this explicitly. Rationale: minimum-schema posture; adding two more columns to the Asset Register is a schema expansion that could be opportunistically added later if recurring need surfaces. If you want the Register to also carry Acquire / Build context (e.g. for future Acquire-cost reporting), amend §7.4.1 and §14 before architect handoff.
-
----
-
 ## skill-merge-consolidation-pass — deferred (Phase 2 close 2026-05-14)
 
 From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None are blocking for the build; all are advisory/non-blocking items routed for follow-up.
@@ -771,6 +763,14 @@ Unknown field: Owner
 Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: dev-lifecycle-governance
+
+Capability ID: dev-lifecycle-governance
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #304 (development-lifecycle-governance-upgrade) — new capability surface, not a backfill.
 
 ### capabilities-backfill: multi-tenant-platform
 
