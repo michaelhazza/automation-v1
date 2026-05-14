@@ -1372,3 +1372,12 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 **Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 6 T7
 **Pattern:** `jsonb_typeof(col->'key')` returns SQL `NULL` for absent keys, and `NULL != 'array'` evaluates to `NULL` (not `TRUE`) — so a WHERE clause like `WHERE jsonb_typeof(col->'key') != 'array'` silently accepts rows where the key is missing entirely. Always combine key-existence (`NOT (col ? 'key')`) with the type assertion: `WHERE NOT (col ? 'key') OR jsonb_typeof(col->'key') != 'array'`. Three-valued logic in CI gates is a common silent-failure source.
 **Why it matters:** prevents JSONB-shape gates from silently passing rows that are missing the required key. Pair with explicit FAIL messages that say "absent or non-array" so the cause is unambiguous when the gate finally triggers on a real violation.
+
+
+---
+
+## [Pattern title] Stripped-field upstream means downstream cannot reconstruct it
+**Date:** 2026-05-14
+**Source:** feature-coordinator branch review on skill-merge-consolidation-pass — pr-reviewer Round 1 Blocking 1 (rationale not threaded into consolidation prompt/parser)
+**Pattern:** when a shared object has a field stripped to `undefined` for storage-shape conformance (e.g. `mergeRationale` stripped from `storedMerge` before persistence to a four-field jsonb column), DO NOT pass the stripped object into a downstream consumer that expects the full shape. The consumer cannot tell "never had it" from "stripped before passing." `JSON.stringify` will silently drop the field from prompts; equality-check parsers will reject any non-undefined response as "mutated." Always reconstruct the full-shape object from local state at the point of consumption: `const forConsumer = { ...stripped, neededField: localValue }`. Mirror it on both the prompt-build and the parser-input sides; passing different shapes to each is a separate latent bug.
+**Why it matters:** the round-trip invariant for LLM prompts that ask the model to echo a field is silently broken when the field is `undefined` in the input — `JSON.stringify` drops it, the LLM sees nothing to echo, and the parser rejects every response. The bug is invisible at the call site and only surfaces in end-to-end testing. Pin with a unit test that exercises the full round-trip: build prompt -> synthetic LLM response echoing the field -> parser -> assert non-rejection.

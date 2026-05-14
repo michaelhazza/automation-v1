@@ -3,8 +3,8 @@ active_spec: tasks/builds/skill-merge-consolidation-pass/spec.md
 active_plan: tasks/builds/skill-merge-consolidation-pass/plan.md
 build_slug: skill-merge-consolidation-pass
 branch: claude/improve-skill-analyzer-RiFpB
-status: BUILDING
-last_updated: 2026-05-14T01:00:00Z
+status: REVIEWING
+last_updated: 2026-05-14T03:25:00Z
 last_merged_pr: #299
 last_merged_slug: personal-assistant-v2-operator
 last_merged_branch: claude/personal-assistant-post-merge-audit
@@ -26,9 +26,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Active plan:** tasks/builds/skill-merge-consolidation-pass/plan.md
 **Active build slug:** skill-merge-consolidation-pass
 **Branch:** claude/improve-skill-analyzer-RiFpB
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
-**Active build:** `skill-merge-consolidation-pass` — adds a conditional LLM consolidation pass to the skill analyzer's merge pipeline. Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. Spec at `tasks/builds/skill-merge-consolidation-pass/spec.md` (3 ChatGPT review rounds complete). Plan at `tasks/builds/skill-merge-consolidation-pass/plan.md` (1 ChatGPT plan-review round complete; all F1–F4 + T1–T5 applied; lock-ready). Phase 1 handoff bridged 2026-05-13 (spec was authored directly without spec-coordinator; operator confirmed "bridge and proceed" before Phase 2 launch). Task class: Significant. **Migration-slot drift (2026-05-14 S1 sync):** main merged PR #299 occupying slots 0351–0357; plan must renumber from `0351` to **`0358`** before Chunk 1 commit. Spec text patch in R13 picks up the new number.
+**Active build:** `skill-merge-consolidation-pass` — adds a conditional LLM consolidation pass to the skill analyzer's merge pipeline. Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. Spec at `tasks/builds/skill-merge-consolidation-pass/spec.md` (3 ChatGPT review rounds + Phase 2 amendment for `not_shortened` failureReason). Plan at `tasks/builds/skill-merge-consolidation-pass/plan.md` (1 ChatGPT plan-review round complete). Task class: Significant. Migration `0358` (renumbered from 0351 after PR #299 occupied slots 0351–0357).
+
+**Phase 2 complete (2026-05-14T03:25:00Z).** 4 chunks built, branch-level review pass complete: spec-conformance CONFORMANT_AFTER_FIXES (3 mechanical gaps auto-fixed); adversarial-reviewer HOLES_FOUND advisory (6 items routed to backlog); pr-reviewer rounds 1→3 closing with APPROVED (round 1 found 3 blockers — consolidation success path was structurally unreachable due to rationale-stripping; resolved in fix-loop commit 17d9d930); reality-checker READY; dual-reviewer APPROVED with 1 ACCEPT applied (non-shortening outputs routed to `failed` — commit b7432cf1). Doc-sync gate: architecture.md + capabilities.md + KNOWLEDGE.md updated. Handoff at `tasks/builds/skill-merge-consolidation-pass/handoff.md`. Next: open a new Claude Code session and type `launch finalisation`.
 
 **Last merged:** PR #299 — `personal-assistant-v2-operator` (squash-commit `6cd7e158`, 2026-05-14T00:44:20Z). Personal Assistant V2 (Operator Mode): cross-owner delegation pattern, live file events via R2 + UPSERT-derived version, capability-map V2 axis (`owner_user_id`), three-state owner-lookup privacy projection enforced at both service and route layers with org-scoped fail-closed, atomic claim+emit pattern for cross-owner timeout events with stale-claim TTL retry, DB trigger to auto-bump substep status-transition timestamp. 7 rounds of chatgpt-pr-review (APPROVED on Round 7); 22 findings applied; 4 backlog items routed to tasks/todo.md (PA-V2-LIST-APPROVALS-V1-ARM, PA-V2-WATCHER-HOST-BRIDGE, PA-V2-OPERATOR-TEMPLATE-PROMOTION, PA-V2-EVENT-IDEMPOTENCY). Mid-Phase-3 main-sync renumbered 6 V2 migrations to 0351-0356 (after main's iee-browser-on-e2b PR #297 claimed 0346-0350), plus EA controller-style flip moved 0345 → 0357. CI auto-fix loop closed: 2 iterations (RLS-gate single-line CREATE POLICY + action-registry snapshot refresh; then PDF determinism standalone-date-literal normaliser fix).
 

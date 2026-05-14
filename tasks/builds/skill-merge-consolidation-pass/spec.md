@@ -119,7 +119,7 @@ Parser rejection rules — a response failing any of the following is rejected a
 |---|---|---|---|
 | `CONSOLIDATION_APPLIED` | warning | informational | Consolidation ran and produced a smaller output. Detail records `{ preWords, postWords, reductionPct }`. |
 | `CONSOLIDATION_DECLINED` | warning | informational | Consolidation ran but LLM returned `declinedToConsolidate=true`. Detail records `declineReason`. |
-| `CONSOLIDATION_FAILED` | warning | informational | Consolidation call timed out, parse-failed, or post-consolidation validator detected a hard-constraint violation (HITL/tool-ref/invocation lost) and the system reverted to the pre-consolidation draft. Detail records `failureReason` (e.g. `parse_rejected: <rule>`, `timeout`, `hard_constraint_violation: <code>`). |
+| `CONSOLIDATION_FAILED` | warning | informational | Consolidation call timed out, parse-failed, post-consolidation validator detected a hard-constraint violation (HITL/tool-ref/invocation lost), or the LLM returned valid output but did not actually shorten the merge (post-word-count `>=` pre-word-count). System reverts to the pre-consolidation draft. Detail records `failureReason` (e.g. `parse_rejected: <rule>`, `timeout`, `hard_constraint_violation: <code>`, `not_shortened`). |
 
 All three are informational tier — they never block approval and never participate in the critical-warning confirmation gate.
 
