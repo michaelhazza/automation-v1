@@ -156,7 +156,7 @@ Sequencing inside one result slot:
 
 This stays within the existing limiter slot so concurrency is unchanged (max 3 in-flight LLM calls across merge + consolidation combined). A consolidation call counts as one slot just like its merge.
 
-Idempotency: job-time idempotency is provided by the existing per-slug skip in `skillAnalyzerJob.ts` — slugs that already have rows in `skill_analyzer_results` are not re-classified, so consolidation is never re-attempted on retry. `consolidationOutcome` is an audit field, NOT the idempotency guard. For rows written after migration `0346`, orchestration MUST always write one of `not_triggered | succeeded | declined | failed` (never NULL) — even when the consolidation gate does not fire, the orchestration writes `not_triggered`. Legacy rows (written before this migration) may be NULL; the UI treats NULL as display-equivalent to `not_triggered`, but legacy NULL rows MUST NOT be interpreted as eligible for re-consolidation.
+Idempotency: job-time idempotency is provided by the existing per-slug skip in `skillAnalyzerJob.ts` — slugs that already have rows in `skill_analyzer_results` are not re-classified, so consolidation is never re-attempted on retry. `consolidationOutcome` is an audit field, NOT the idempotency guard. For rows written after migration `0358`, orchestration MUST always write one of `not_triggered | succeeded | declined | failed` (never NULL) — even when the consolidation gate does not fire, the orchestration writes `not_triggered`. Legacy rows (written before this migration) may be NULL; the UI treats NULL as display-equivalent to `not_triggered`, but legacy NULL rows MUST NOT be interpreted as eligible for re-consolidation.
 
 ## 6. Config surface
 
@@ -198,7 +198,7 @@ No new client-side state, no new API call. The new fields ride on the existing `
 | `server/services/skillAnalyzerConfigService.ts` | Read + persist the two new config columns. Update `effectiveTierMap` baseline if needed. |
 | `server/db/schema/skillAnalyzerConfig.ts` | Add `consolidationEnabled`, `consolidationTriggerSeverity` columns. Extend default `warningTierMap` with three new codes mapped to `informational`. |
 | `server/db/schema/skillAnalyzerResults.ts` | Add `preConsolidationMerge` (jsonb, nullable), `consolidationOutcome` (text, nullable, enum `not_triggered | succeeded | declined | failed`), `consolidationNote` (text, nullable). |
-| `server/db/migrations/0346_skill_merge_consolidation.sql` + `.down.sql` | Add the columns above. Add config column defaults. No backfill of existing rows (legacy results stay `null` and read as "consolidation did not run"). |
+| `migrations/0358_skill_merge_consolidation.sql` + `.down.sql` | Add the columns above. Add config column defaults. No backfill of existing rows (legacy results stay `null` and read as "consolidation did not run"). |
 | `client/src/components/skill-analyzer/types.ts` | Add `preConsolidationMerge`, `consolidationOutcome`, `consolidationNote` to `AnalysisResult` type. |
 | `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Add consolidation banner per §7. |
 | `client/src/components/skill-analyzer/mergeTypes.ts` | Add the three new warning codes to the local `MergeWarningCode` union and tier map. |
@@ -211,7 +211,7 @@ Total: 6 modified server files, 1 migration pair, 1 modified client component, 2
 Single phase, four chunks. All chunks land on the same branch.
 
 **Chunk 1 — Schema + config.**
-Migration `0346` adds the three result columns and two config columns. Drizzle schema files updated. `skillAnalyzerConfigService` read path returns the new fields. `effectiveTierMap` includes the three new codes. No runtime behaviour change yet (job still skips consolidation because the gate is not wired).
+Migration `0358` adds the three result columns and two config columns. Drizzle schema files updated. `skillAnalyzerConfigService` read path returns the new fields. `effectiveTierMap` includes the three new codes. No runtime behaviour change yet (job still skips consolidation because the gate is not wired).
 
 **Chunk 2 — Pure functions + prompt.**
 `buildConsolidationPrompt`, `parseConsolidationResponse`, preservation-inventory extraction helper, new warning codes added to all three maps in `skillAnalyzerServicePure.ts`. Pure tests authored. Still no orchestration wired.
@@ -232,7 +232,7 @@ Dependency graph: Chunk 1 strictly before Chunks 2 and 3; Chunk 2 strictly befor
 - **Terminal event guarantee: unchanged.** The existing job's terminal state (`status='completed' | 'failed'`) and per-result `insertSingleResult` write remain the single terminal write per slug. Consolidation only modifies the payload of that write.
 - **No-silent-partial-success.** If consolidation fails after the merge succeeded, the result still ships (with `consolidationOutcome='failed'` and a `CONSOLIDATION_FAILED` warning) — the merge alone is a valid outcome. There is no `partial` state because consolidation is not a deliverable, only a post-process polish.
 - **HTTP status mapping: n/a.** No new unique constraints. PATCH endpoints unchanged.
-- **State machine closure.** `consolidationOutcome` is a closed enum: `not_triggered | succeeded | declined | failed`. Adding values requires a spec amendment. Migration `0346` writes `NULL` for legacy rows only; orchestration for post-migration rows MUST write one of the four enum values, never NULL. The UI treats legacy `NULL` identically to `not_triggered`, but builders MUST NOT treat NULL as "consolidation not yet decided".
+- **State machine closure.** `consolidationOutcome` is a closed enum: `not_triggered | succeeded | declined | failed`. Adding values requires a spec amendment. Migration `0358` writes `NULL` for legacy rows only; orchestration for post-migration rows MUST write one of the four enum values, never NULL. The UI treats legacy `NULL` identically to `not_triggered`, but builders MUST NOT treat NULL as "consolidation not yet decided".
 - **No-consolidation guarantee for non-merging classifications.** `DUPLICATE` and `DISTINCT` classifications produce no merge, so the consolidation gate MUST NOT fire and MUST NOT call `routeCall` with `featureTag: 'skill-analyzer-consolidate'`. These rows write `consolidationOutcome='not_triggered'` (per the §5 idempotency contract — never NULL for post-migration rows). Acceptance: a job containing only DUPLICATE/DISTINCT results spends zero consolidation LLM tokens.
 
 ## 11. Testing posture
