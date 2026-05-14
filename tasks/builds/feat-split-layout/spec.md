@@ -136,10 +136,10 @@ Layout  (host — ~150–200 LOC)
      ├── <CreateProjectModal activeClientId, open, onClose, onCreated />
      ├── <CreateAgentModal activeClientId, open, onClose, onCreated />
      ├── <CreateClientModal open, onClose, onCreated />
-     └── <NewBriefModal open, onClose, identity, orgs, subaccounts, onCreated />
+     └── <NewBriefModal open, onClose, identity, orgs, subaccounts, onSubmitted />
 ```
 
-The host's primary job becomes orchestration: wire hooks together, derive `navCtx`, call `buildNavItems(navCtx)`, pass slices to chrome components, own the four modal-open flags. All side effects move into the hooks; all presentation moves into the chrome components.
+The host's primary job becomes orchestration: wire hooks together, derive `navCtx`, call `buildNavItems(navCtx)`, pass slices to chrome components, own the four modal-open flags. All cross-component side effects move into the hooks; all presentation moves into the chrome components. **Exception:** the org-picker outside-click listener (today's inline `useEffect` in Layout) is local UI state for the picker popover and stays inside `IconRail` (or `OrgPicker` if extracted) — it does not graduate into a hook because no other component reads or writes the open/closed flag.
 
 ## 7. Data and side-effect ownership (hooks extracted)
 
@@ -147,12 +147,13 @@ Each hook owns a coherent slice of state. The host wires the slices into a singl
 
 ### 7.1 `useLayoutIdentity(user)`
 
-Owns: `activeOrgId` / `activeOrgName` / `activeClientId` / `activeClientName` mirror state, the auto-set-org effect (line 356-370 today), `setActiveOrg` / `setActiveClient` / `removeActiveClient` / `removeSystemAdminOrgOverride` integrations, `handleSelectOrg`, `handleSelectClient`, `handleSelectClientFromPalette`.
+Owns: `activeOrgId` / `activeOrgName` / `activeClientId` / `activeClientName` mirror state, the auto-set-org effect (line 356-370 today), the **subaccounts list** + per-org refetch effect (today's lines 380–391 — refetches `/api/subaccounts` on org change; this is identity-coupled because the list and the active client are both org-scoped), `setActiveOrg` / `setActiveClient` / `removeActiveClient` / `removeSystemAdminOrgOverride` integrations, `handleSelectOrg`, `handleSelectClient`, `handleSelectClientFromPalette`.
 
 Returns:
 ```
 {
   activeOrgId, activeOrgName, activeClientId, activeClientName,
+  subaccounts,                    // ClientOption[]; refreshed on org change
   hasOrgContext, isSystemAdmin,
   selectOrg(org), selectClient(sa), selectClientFromPalette(id, name),
   clearClient(),
@@ -160,7 +161,7 @@ Returns:
 }
 ```
 
-Internally calls `reconnectSocket()` on org change and clears `systemAdminOrgOverride` on client select.
+Internally calls `reconnectSocket()` on org change and clears `systemAdminOrgOverride` on client select. The subaccounts refetch is the existing org-scoped effect from Layout.tsx (eslint-disable rationale comments around the dependency array carry over verbatim — see §12).
 
 ### 7.2 `useLayoutPermissions(identity)`
 
@@ -325,7 +326,7 @@ Each modal opens-closes via prop; submission state is internal.
 - The `Icons` object and `Ico` wrapper move to `client/src/components/layout/icons.tsx`. Existing consumers inside Layout become imports.
 - `resolveIcon(iconKey)` and `renderNavItem(spec)` — both inline closures today — move into `NavItemRenderer.tsx`. The closure dependency on `Icons` and on the small set of inline button bodies (`new-task`, `sign-out` special cases) becomes explicit-prop-driven inside the renderer.
 
-Tests: add one Vitest unit file `client/src/components/layout/__tests__/breadcrumbs.test.ts` covering: empty pathname → []; UUID after `subaccounts` → uses `clientName`; UUID without preceding `subaccounts` → skipped; `SEG[part] === null` → segment skipped; unknown segment → title-case fallback. The other helpers (`avatarColor`, `toInitials`) are too trivial to test individually; their behaviour is covered by visual smoke.
+Tests: add one Vitest unit file `client/src/components/layout/__tests__/breadcrumbs.test.ts` covering: empty pathname → []; UUID after `subaccounts` → uses `clientName`; UUID without preceding `subaccounts` → skipped; `SEG[part] === null` → segment skipped; unknown segment → title-case fallback. The other helpers (`avatarColor`, `toInitials`) are intentionally left untested by this spec because they are trivial display helpers — `avatarColor` is a deterministic char-code-sum mod a palette, `toInitials` is a one-line first-letter join.
 
 ## 10. Migration plan (chunked)
 
