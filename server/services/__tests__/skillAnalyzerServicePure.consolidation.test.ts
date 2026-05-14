@@ -200,6 +200,23 @@ describe('parseConsolidationResponse', () => {
     }
   });
 
+  test('parseConsolidationResponse accepts key-reordered definition (canonical compare)', () => {
+    const original = makeOriginal({
+      definition: { type: 'object', properties: { foo: { type: 'string' }, bar: { type: 'number' } } },
+    });
+    const raw = makeValidResponse(original, {
+      consolidatedMerge: {
+        name: original.name,
+        description: original.description,
+        definition: { properties: { bar: { type: 'number' }, foo: { type: 'string' } }, type: 'object' },
+        instructions: 'Tightened instructions referencing `tool-a`.',
+        mergeRationale: original.mergeRationale,
+      },
+    });
+    const result = parseConsolidationResponse(raw, original);
+    expect(isRejection(result)).toBe(false);
+  });
+
   test('parseConsolidationResponse rejects mutated mergeRationale when echoed back', () => {
     const original = makeOriginal();
     const raw = makeValidResponse(original, {

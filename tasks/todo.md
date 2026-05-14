@@ -273,6 +273,10 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 - [ ] **SKILL-MERGE-TEST-1** — Add direct test coverage for the `postWords >= preWords` outcome-classification decision (the new `not_shortened` branch from dual-reviewer's fix). Easiest path: extract a small pure helper `classifyConsolidationOutcome({ preWords, postWords })` from `server/jobs/skillAnalyzerJob.ts` ~line 1407 and Vitest it. Reference: `tasks/review-logs/pr-review-log-skill-merge-consolidation-pass-2026-05-14T03-15-00Z.md` Should-fix #2.
 - [ ] **SKILL-MERGE-COPY-1** (Consider/Nit) — Map `failureReason` enum values to plain-English copy in `MergeReviewBlock.tsx` failed banner (today the value renders verbatim, e.g. `Reason: not_shortened` — opaque to non-technical reviewers). Reference: round-3 pr-review-log Consider section.
 
+**From chatgpt-pr-review (Phase 3, Round 1):**
+
+- [ ] **SKILL-MERGE-RATIONALE-1** (Consider/Nit) — Short-circuit the consolidation gate when `mergeRationale` is null upstream, instead of routing to `parseConsolidationResponse` and letting it reject with `rationale_missing_or_invalid`. Today the LLM is prompted to always echo a rationale and fallback paths backfill it, so the null-path is theoretical — but a 2-line guard at the consolidation gate (`server/jobs/skillAnalyzerJob.ts` ~line 1267) would avoid one wasted LLM call per occurrence. Reference: chatgpt-pr-review Round 1 finding F5 (defer).
+
 ---
 
 ## Pointers

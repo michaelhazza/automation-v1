@@ -81,6 +81,25 @@ function isValidClassification(v: unknown): v is ClassificationResult['classific
   return typeof v === 'string' && (VALID_CLASSIFICATIONS as readonly string[]).includes(v);
 }
 
+/** Deterministic JSON stringification with sorted object keys. Used for
+ *  semantic deep-equality of plain JSON objects where key order is not
+ *  meaningful (e.g. tool-definition shapes echoed back by an LLM). */
+function canonicalJSON(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = sortKeys((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** Three similarity bands for controlling LLM call volume. */
 export type SimilarityBand = 'likely_duplicate' | 'ambiguous' | 'distinct';
 
@@ -3591,8 +3610,11 @@ export function parseConsolidationResponse(
     return { reason: 'mutated_description' };
   }
 
-  // Rule 4: definition deep-equal
-  if (JSON.stringify(cm.definition) !== JSON.stringify(original.definition)) {
+  // Rule 4: definition deep-equal. Key order is not semantic, so canonicalise
+  // both sides before comparison — LLMs commonly reorder JSON keys even when
+  // the shape is equivalent, and rejecting on order would emit spurious
+  // CONSOLIDATION_FAILED.
+  if (canonicalJSON(cm.definition) !== canonicalJSON(original.definition)) {
     return { reason: 'mutated_definition' };
   }
 
