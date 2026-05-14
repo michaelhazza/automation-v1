@@ -99,17 +99,13 @@ export type { LoopParams };
 // and consuming the returned `BackendDispatchResult`.
 // ---------------------------------------------------------------------------
 
-import { executionBackendRegistry } from './executionBackends/registry.js';
-import { ParentRunNotDispatchable } from './executionBackends/types.js';
-import type { ExecutionMode } from '../../shared/types/executionEnvironment.js';
-import type { ExecutionClosureContext, AgentRunRequest, AgentRunResult } from './agentExecutionService/types.js';
-import { buildTeamRoster, buildSmartBoardContext, buildTaskContext, buildAutonomousInstructions } from './agentExecutionService/promptBuilders.js';
-import { buildBackendOptionsForMode } from './agentExecutionService/backendDispatch.js';
+import type { AgentRunRequest, AgentRunResult } from './agentExecutionService/types.js';
 import { validateAndPrepare } from './agentExecutionService/runLifecycle/validate.js';
 import { persistAndAnnounce } from './agentExecutionService/runLifecycle/persistRun.js';
 import { configureRun } from './agentExecutionService/runLifecycle/configure.js';
 import { loadRunContextAndHierarchy } from './agentExecutionService/runLifecycle/loadContext.js';
 import { prepareRun } from './agentExecutionService/runLifecycle/prepare.js';
+import { dispatchRun } from './agentExecutionService/runLifecycle/dispatch.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -145,127 +141,37 @@ export const agentExecutionService = {
 
 
       // ── 8. Execute — dispatch through executionBackendRegistry ──────────
-      // Chunk 5 of the ExecutionBackend Adapter Contract refactor replaces
-      // the pre-Chunk-5 if/else ladder with a single registry resolve +
-      // dispatch. Each adapter owns its own dispatch body in
-      // `server/services/executionBackends/`. The post-completion
-      // finalisation block below consumes `loopResult` exactly as the
-      // inline branches produced it.
-      //
-      // Per-adapter validation (`IEE_TASK_REQUIRED`, `IEE_TASK_TYPE_MISMATCH`,
-      // and the `BackendOptionsMismatch` invariant) lives inside the
-      // adapter's own `dispatch()` body — see `_ieeShared.ts::ieeDispatch`.
-      // The dispatch site here neither knows nor cares which executionMode
-      // is in flight.
-      const effectiveMode: ExecutionMode = request.executionMode ?? 'api';
-
-      // Closure-context bundle assembled from the ctx fields populated by
-      // prepareRun (Chunk 7b) and forwarded to the api/headless adapters via
-      // `BackendDispatchInput.backendOptions.loopContext`. See
-      // `executionBackends/options.ts:ApiHeadlessLoopContext`.
-      const closureContext: ExecutionClosureContext = {
-        agent: ctx.agent!,
-        effectiveTools: ctx.effectiveTools!,
-        pipeline: ctx.pipeline!,
-        mcpClients: ctx.mcpClients ?? null,
-        mcpLazyRegistry: ctx.mcpLazyRegistry ?? null,
-        runContextData: ctx.runContextData!,
-        saLink: ctx.saLink!,
-        agentDomain: ctx.agentDomain,
-        configVersion: ctx.configVersion!,
-        hierarchyContext: ctx.hierarchyContext,
-        orgProcesses: ctx.orgProcesses!,
-        request,
-        startTime,
-        isOrgSubaccountRun: ctx.isOrgSubaccountRun,
-        maxLoopIterations: ctx.maxLoopIterations!,
-        // Routing context for the LLM router — built here because
-        // `run.id` and `agent.name` are only in scope at the dispatch
-        // site. Mirrors the pre-Chunk-5 inline construction.
-        routerCtx: {
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId ?? undefined,
-          runId: run.id,
-          subaccountAgentId: request.subaccountAgentId ?? undefined,
-          agentName: ctx.agent!.name,
-          sourceType: 'agent_run',
-        },
-        // Claude Code runner consumes a task prompt (workspace summary or
-        // a default fallback if the workspace is empty).
-        taskPrompt: ctx.workspaceContext! || 'Review the current workspace and report status.',
-      };
-
-      const backend = executionBackendRegistry.resolve(effectiveMode);
-      let loopResult: LoopResult;
-
-      try {
-        const dispatchResult = await backend.dispatch({
-          runId: run.id,
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId ?? null,
-          agentId: request.agentId,
-          promptAssembly: { stablePrefix: ctx.stablePrefix!, dynamicSuffix: ctx.dynamicSuffix! },
-          tokenBudget: ctx.tokenBudget!,
-          maxToolCalls: ctx.maxToolCalls!,
-          timeoutMs: ctx.timeoutMs!,
-          backendOptions: buildBackendOptionsForMode(effectiveMode, request, closureContext),
-        });
-
-        if (dispatchResult.lifecycle === 'delegated') {
-          // The adapter has already updated the parent with status,
-          // backendId, backendTaskId, ieeRunId, and emitted the delegated
-          // websocket event. Return the delegated-run response shape;
-          // post-completion hooks fire later via the terminal event
-          // handler.
-          return {
-            runId: run.id,
-            status: 'delegated',
-            summary: null,
-            totalToolCalls: 0,
-            totalTokens: 0,
-            durationMs: Date.now() - startTime,
-            tasksCreated: 0,
-            tasksUpdated: 0,
-            deliverablesCreated: 0,
-            ieeRunId: dispatchResult.backendTaskId ?? undefined,
-            delegationDeduplicated: dispatchResult.deduplicated,
-          };
-        }
-
-        // In-process / subprocess: the loop ran inline and the adapter
-        // returned the loop result. The post-completion finalisation
-        // block below handles the terminal write + side-effects.
-        loopResult = dispatchResult.loopResult!;
-      } catch (err) {
-        if (err instanceof ParentRunNotDispatchable) {
-          // The parent run moved past the delegation window before the
-          // adapter could claim it (cancellation racing dispatch, or a
-          // duplicate dispatch). The adapter has already written the
-          // backend-side orphan-cleanup row.
-          //
-          // Plan § 8 / spec § 13.1.1 contract: this catch MUST map to the
-          // EXACT existing race-loser response shape currently returned by
-          // the pre-cutover dispatch path, if one exists. The pre-cutover
-          // codepath had no such shape — orphan-cleanup is a new lifecycle
-          // surface introduced by this contract — so the plan explicitly
-          // says: "rethrow and document the behaviour in the PR — do not
-          // invent a silent success response (no 5xx, no panic)."
-          //
-          // Rethrow with a structured warn line so operators see the race
-          // in logs. The route layer will surface the typed error
-          // according to the existing error-envelope behaviour. A
-          // deliberate AgentRunResult shape for this case can be added
-          // later once the desired client-visible shape is decided — that
-          // is a behaviour change, out of scope here.
-          logger.warn('agentExecutionService.parent_not_dispatchable', {
-            runId: run.id,
-            mode: effectiveMode,
-            reason: err.reason,
-          });
-          throw err;
-        }
-        throw err;
+      const dispatchOutcome = await dispatchRun(request, ctx);
+      if (dispatchOutcome.kind === 'parent_not_dispatchable') {
+        throw dispatchOutcome.error;
       }
+      ctx.dispatchResult = dispatchOutcome.result;
+
+      if (ctx.dispatchResult.lifecycle === 'delegated') {
+        // The adapter has already updated the parent with status,
+        // backendId, backendTaskId, ieeRunId, and emitted the delegated
+        // websocket event. Return the delegated-run response shape;
+        // post-completion hooks fire later via the terminal event
+        // handler.
+        return {
+          runId: run.id,
+          status: 'delegated',
+          summary: null,
+          totalToolCalls: 0,
+          totalTokens: 0,
+          durationMs: Date.now() - startTime,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+          ieeRunId: ctx.dispatchResult.backendTaskId ?? undefined,
+          delegationDeduplicated: ctx.dispatchResult.deduplicated,
+        };
+      }
+
+      // In-process / subprocess: the loop ran inline and the adapter
+      // returned the loop result. The post-completion finalisation
+      // block below handles the terminal write + side-effects.
+      const loopResult = ctx.dispatchResult.loopResult!;
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;

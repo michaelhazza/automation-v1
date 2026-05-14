@@ -9,6 +9,7 @@ import type { getOrgProcessesForTools, AnthropicTool } from '../llmService.js';
 import type { MiddlewarePipeline } from '../middleware/types.js';
 import type { McpClientInstance } from '../mcpClientManager.js';
 import type { McpServerConfig } from '../../db/schema/mcpServerConfigs.js';
+import type { BackendDispatchResult } from '../executionBackends/types.js';
 
 /**
  * Closure-context bundle assembled in `executeRun` and forwarded to each
@@ -274,6 +275,8 @@ export interface RunExecutionContext {
   dynamicSuffix?: string;
   systemPrompt?: string;
   systemPromptTokens?: number;
+  // Populated by dispatchRun (Chunk 8)
+  dispatchResult?: BackendDispatchResult;
 }
 
 /**
