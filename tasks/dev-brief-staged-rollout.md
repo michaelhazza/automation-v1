@@ -36,6 +36,7 @@
    - 3.6 Reversibility taxonomy and skill classification
    - 3.7 Emergency per-skill disable flag
    - 3.8 Detection threshold calibration (no-op canary)
+   - 3.9 Pre-deploy prevention agent (CI-stage)
 4. Mockup integration — how the existing set lines up with this brief
 5. What is explicitly out of scope (Phase 1)
 6. Sequencing inside Phase 1
@@ -310,6 +311,56 @@ The discipline that protects the pipeline from false-positive fatigue and false-
 
 **Phase 1 deliverable.** Calibration is run before the pipeline is permitted to auto-pause anything. Until calibrated, all auto-pauses are **advisory** (alert only, no rollback action).
 
+### 3.9 Pre-deploy prevention agent (CI-stage)
+
+A small Strands-style agent that runs at the CI/CD stage of a system-skill change — **before any ring sees it** — to catch the "deploy breaks in-flight runs" class of bug before any traffic is exposed.
+
+**Source.** AWS resilience demo (transcript 2026-05-13 16-46-47). AWS demonstrated a CI/CD-stage agent using CloudControl MCP and AWS Docs MCP to check whether a proposed change would destroy an active resource and block the deploy if so. The same shape transfers cleanly to skill/agent changes — the resource is a skill version, the "destroy" is "promote a change that breaks runs already depending on the prior shape."
+
+**Where it sits in the lifecycle.**
+
+```
+Author saves to Dev → [CI runs pre-deploy agent] → revision lands in Dev ring → Test → Canary → Prod
+                            ↑ this section
+```
+
+This is **pre-deploy validation**, distinct from §3.4's **post-deploy canary validation**. The two complement each other: this catches structural breaks before the change is ever live anywhere; the rings catch behavioural drift after the change is live in a small cohort.
+
+**Checks the agent performs.**
+
+| Check | Phase | Depends on |
+|---|---|---|
+| **In-flight runs would be affected?** Any pinned versions in `agent_runs` that match the about-to-promote revision shape? | Phase 1 | Per-run version pinning (§3.1) |
+| **Active subaccount amendments would conflict?** Any rows in `skill_amendments` (closed-loop) that reference text or behaviour the change removes? | Phase 1 *(only if closed-loop has shipped first)* | Closed-loop amendment primitive |
+| **Subaccount amendments depend on a guardrail this change removes?** Asymmetric removal guard (§3.6 of closed-loop brief) extended to look across both system and amendment text. | Phase 1 *(same prerequisite)* | Closed-loop §3.6 |
+| **Reversibility class downgrade?** Has this change taken a skill from I or R class into K or X without explicit author acknowledgement? | Phase 1 | §3.6 reversibility classification |
+| **Tool description change?** Detect when a tool's externally-visible description (the part the LLM reads) has changed; force the full four-ring rollout class even if change diff looks small. | Phase 1 | None new — heuristic |
+
+**Output: three verdicts, one action.**
+
+- **Pass.** Promote-to-Dev proceeds normally. CI run logs the verdict and the checks performed.
+- **Warn.** Promote-to-Dev still proceeds, but the rollout pipeline UI (Mockup 03) shows a yellow chip on the revision card with the warnings expanded inline. Examples: "tool description changed — auto-classified as full four-ring," "reversibility class downgrade from R to K — added Synthetos-author acknowledgement required at Test→Canary boundary."
+- **Block.** Promote-to-Dev fails. The author sees a structured explanation: which check failed, which rows in `agent_runs` or `skill_amendments` are implicated, and the smallest possible fix. Examples: "12 in-flight runs (subaccount IDs listed) are pinned to a prior shape this change removes — wait for them to drain, or override with explicit ack," "3 subaccount amendments would be invalidated by this change — review them at <links>." UI surface is a Mockup 04 variant — the promote modal shows red blocking checks instead of green ready checks.
+
+**The "override" path matters.** Block must support an explicit author override ("I've reviewed; promote anyway") with a required justification that lands in the audit log. Without override, the agent is a deploy hostage. With override, it's a high-friction speed bump for the rare case where the warning is wrong.
+
+**Implementation shape.** A single agent definition, kebab-case slug `pre-deploy-skill-check`, runs as a CI job. Tools it has access to:
+- Read-only handle on `agent_runs` (for in-flight check, scoped to non-terminal runs).
+- Read-only handle on `skill_amendments` (for amendment-conflict check, only meaningful once closed-loop has shipped).
+- Read access to the diff being promoted.
+- Read access to a small "skill conventions" reference (the equivalent of AWS Docs MCP in the source demo) — the canonical shape rules a system skill must obey (kebab-case slug, processor hook signature, gate-level enum, etc.). Without this, the agent has to infer convention from the diff and is prone to hallucinated reasoning. With it, the trajectory is grounded.
+
+**Learning from the source demo.** The AWS team initially built this with a single tool (a CloudWatch metric reader). The verdict was almost always correct, but the *trajectory* was correct only ~50% of the time — the agent hallucinated metrics that didn't exist and stumbled into the right answer by ensemble luck. Adding two MCP servers (CloudControl for live config, AWS Docs for canonical rules) lifted trajectory accuracy by grounding every reasoning step against verifiable sources. The analogous pattern for Synthetos: the agent needs a way to ground its reasoning against (a) the live state of `agent_runs` and `skill_amendments` (the equivalent of CloudControl MCP), and (b) the canonical skill/agent conventions (the equivalent of AWS Docs MCP). Verdict accuracy is necessary; trajectory accuracy is what makes the agent auditable.
+
+Cost: low-to-moderate per run. Frontier model on the diff-comprehension step, smaller model on the table-lookup steps. Typical run < 10 seconds.
+
+**Why this is Phase 1, not Phase 2.**
+- The in-flight-run check and tool-description-change check require only per-run version pinning (§3.1) and are valuable on day one of the internal-release flavour.
+- The amendment-conflict checks require closed-loop to have shipped. Since Phase 1 of this brief is gated on closed-loop being validated first anyway (§11.1), by the time staged-rollout Phase 1 ships, the amendment substrate exists.
+- The check is fastest-feedback in the loop: catches breakage in seconds at CI time, vs minutes-to-hours after promotion to Test or Canary. Cheap and high-leverage.
+
+**Phase 1 deliverable.** The pre-deploy agent runs on every Dev-ring promotion. Block-class findings prevent promotion; warn-class findings annotate the rollout pipeline card; pass-class findings are silent except in the CI log.
+
 ## 4. Mockup integration — how the existing set lines up with this brief
 
 The mockup set at [`prototypes/skill-agent-rings/`](../prototypes/skill-agent-rings/) was drafted before the deep-research passes. The shape survives; specific gate-metric and surface decisions need adjustment.
@@ -388,6 +439,8 @@ This is the spec-session's mapping table — useful when the spec session is dec
 
 **Step 7. Emergency per-skill disable flag UI.** Single-action operator surface; audit log; immediate effect. Backed by Mockup 10 (to be created — see §4.4).
 
+**Step 7a. Pre-deploy prevention agent.** Per §3.9. The CI-stage agent that runs on every Dev-ring promotion. Phase-1 scope is the in-flight-runs check, tool-description-change detection, and reversibility-class-downgrade detection. The amendment-conflict checks engage automatically once closed-loop has shipped the `skill_amendments` table — no separate step is needed because the agent reads whatever schemas exist at promotion time. Sequence is after the kill switch (Step 7) so the audit-log infrastructure is in place, and before the mockup refresh (Step 8) so the blocked-promote UI variant is included in that pass.
+
 **Step 8. Mockup refresh.** Update `prototypes/skill-agent-rings/` per §4.2–4.3:
 - Cache-hit-rate demoted from primary canary-health table to Advanced (`05-canary-health.html`).
 - Reversibility class column added to skill-list views (`07-system-skills-library.html`).
@@ -395,6 +448,7 @@ This is the spec-session's mapping table — useful when the spec session is dec
 - Phase 1 vs Phase 2 status banner on rollout pipeline.
 - Per-run version pinning called out in promote and rollback modal copy (`04`, `06`).
 - New Mockup 10: kill switch surface.
+- New Mockup 11 (or variant on Mockup 04): "Promote blocked by pre-deploy agent" surface, showing structured block findings with the override path and required justification.
 
 **Step 9. Documentation.** Runbook for operating the pipeline (how to promote, how to rollback, what to do on auto-pause). Lives at `docs/rollout-runbook.md`.
 
@@ -427,6 +481,7 @@ The build is successful when:
 - Every system skill has a reversibility class assigned (I / R / K / X), and X-class skills cannot execute without an in-place human approval gate.
 - No-op canary calibration has run for at least one full week, variance is measured for every gate metric, and real thresholds are set at 2σ / 3σ above no-op variance before any auto-action is enabled.
 - The `prototypes/skill-agent-rings/` mockup set reflects the §4.2–4.3 revisions: cache-hit-rate-as-diagnostic-only, reversibility class surface, calibration status indicator, Phase 1/2 banner, per-run-pinning copy, and a Mockup 10 for the kill switch.
+- The pre-deploy prevention agent (§3.9) runs on every Dev-ring promotion; a synthetic test (promote a change that touches a system skill while in-flight runs are pinned to the prior shape) reliably produces a `Block` verdict with a structured explanation, and the override path is logged in the audit trail.
 
 ## 9. Known failure modes we are designing against
 
@@ -535,6 +590,7 @@ The mockups and brief on this branch are the *receipts* of the design thinking. 
 - **Cached context infrastructure** (PRs landed via migration 0185+). The prefix-hash column on `llm_requests` is the substrate for the cache-hit-rate diagnostic in §3.4.
 - **LLM observability ledger generalisation.** The `/system/llm-pnl` admin page and `llm_inflight_history` table are the substrate for the per-step cost and model attribution this brief assumes.
 - **Riley Observations — Explore Mode / Execute Mode.** Per-run safety mode for the *end user* (operator choosing "try this safely"). Orthogonal to the per-revision safety this brief provides for the *platform author*. The two compose: Dev ring runs ≈ author running in Execute mode on their own test subaccount.
+- **AWS resilience-lifecycle demo** (transcript 2026-05-13 16-46-47, Chris Severins + Islam Ghanem). Source for the pre-deploy prevention agent in §3.9. The demo also showcased two adjacent agent patterns we have not adopted in this brief but which are worth holding in mind for later phases: (a) an always-on incident-response agent running on the AWS DevOps platform that does autonomous post-incident root-cause analysis, and (b) a chaos-engineering agent that reads RCA reports and generates Fault Injection Service experiments to test the hypotheses surfaced. Pattern (a) is conceptually analogous to combining our existing run-trace infrastructure with `pr-reviewer`-style agents — not a new build. Pattern (b) is out of scope here but is worth a separate brief if Synthetos ever runs proactive chaos testing on its own production agents.
 
 ### 11.5 Spec-context flag
 
