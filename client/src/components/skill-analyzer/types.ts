@@ -198,6 +198,12 @@ export interface AnalysisResult {
   approvedAt?: string | null;
   /** v2 §11.12.2: surfaces "modified after previous approval" badge. */
   wasApprovedBefore?: boolean;
+  /** Consolidation pass audit — pre-consolidation first-pass merge (null on not_triggered). */
+  preConsolidationMerge?: ProposedMergedContent | null;
+  /** Consolidation pass outcome — null on legacy rows (display-equivalent to 'not_triggered'). */
+  consolidationOutcome?: 'not_triggered' | 'succeeded' | 'declined' | 'failed' | null;
+  /** Consolidation pass note from the LLM explaining its decision. */
+  consolidationNote?: string | null;
 }
 
 export interface BackupMetadata {

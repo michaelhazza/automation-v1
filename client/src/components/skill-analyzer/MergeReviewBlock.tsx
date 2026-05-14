@@ -479,6 +479,9 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
         </div>
       )}
 
+      {/* Consolidation banner — spec §7 */}
+      <ConsolidationBanner result={result} />
+
       {/* Diff legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs text-slate-400">
         <span className="flex items-center gap-1.5">
@@ -686,6 +689,9 @@ function WarningResolutionBlock({
 const FORMATTING_WARNING_CODES = new Set<MergeWarningCode>([
   'NAME_MISMATCH',
   'CROSS_REFERENCES_DISTINCT',
+  'CONSOLIDATION_APPLIED',
+  'CONSOLIDATION_DECLINED',
+  'CONSOLIDATION_FAILED',
 ]);
 
 // Dev-time guard: the partition is implicit — anything NOT in
@@ -944,6 +950,115 @@ function WarningItem({
     <div className="mb-2">
       {header}
       {warning.detail && <div className="ml-4 text-slate-500 text-[10px]">{warning.detail}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConsolidationBanner — consolidation pass result (spec §7)
+// ---------------------------------------------------------------------------
+interface ConsolidationBannerProps {
+  result: AnalysisResult;
+}
+
+function ConsolidationBanner({ result }: ConsolidationBannerProps) {
+  const outcome = result.consolidationOutcome;
+  if (!outcome || outcome === 'not_triggered') return null;
+
+  if (outcome === 'succeeded') {
+    // Parse size delta from CONSOLIDATION_APPLIED warning detail
+    const appliedWarning = result.mergeWarnings?.find(w => w.code === 'CONSOLIDATION_APPLIED');
+    let preWords: number | undefined;
+    let postWords: number | undefined;
+    let reductionPct: number | undefined;
+    try {
+      const detail = JSON.parse(appliedWarning?.detail ?? '{}');
+      preWords = typeof detail.preWords === 'number' ? detail.preWords : undefined;
+      postWords = typeof detail.postWords === 'number' ? detail.postWords : undefined;
+      reductionPct = typeof detail.reductionPct === 'number' ? detail.reductionPct : undefined;
+    } catch {
+      // neutral fallback on parse failure
+    }
+
+    const headlineText = preWords !== undefined && postWords !== undefined && reductionPct !== undefined
+      ? `AI tightened this merge from ${preWords} to ${postWords} words (${reductionPct}% shorter) without losing capability.`
+      : 'AI tightened this merge to fit the target ceiling.';
+
+    return (
+      <div
+        data-testid="consolidation-banner"
+        className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900"
+      >
+        <p className="font-medium mb-1">{headlineText}</p>
+        {result.consolidationNote && (
+          <p className="text-emerald-800 whitespace-pre-wrap mb-2">{result.consolidationNote}</p>
+        )}
+        {result.preConsolidationMerge?.instructions && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-emerald-700 hover:text-emerald-900">
+              View pre-consolidation draft
+            </summary>
+            <pre className="mt-2 p-2 bg-emerald-100 rounded text-[10px] text-emerald-900 whitespace-pre-wrap overflow-auto max-h-48">
+              {result.preConsolidationMerge.instructions}
+            </pre>
+          </details>
+        )}
+        {!result.preConsolidationMerge?.instructions && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-emerald-700 hover:text-emerald-900">
+              View pre-consolidation draft
+            </summary>
+            <p className="mt-2 text-emerald-700 italic">No pre-consolidation draft available.</p>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  if (outcome === 'declined') {
+    const declinedWarning = result.mergeWarnings?.find(w => w.code === 'CONSOLIDATION_DECLINED');
+    let declineReason: string | undefined;
+    try {
+      const detail = JSON.parse(declinedWarning?.detail ?? '{}');
+      declineReason = typeof detail.declineReason === 'string' ? detail.declineReason : undefined;
+    } catch {
+      // ignore
+    }
+    return (
+      <div
+        data-testid="consolidation-banner"
+        className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900"
+      >
+        <p className="font-medium mb-1">
+          AI reviewed this merge for tightening and judged it cannot be shortened without losing capability.
+        </p>
+        {declineReason && (
+          <p className="text-amber-800">Reason: {declineReason}</p>
+        )}
+      </div>
+    );
+  }
+
+  // outcome === 'failed'
+  const failedWarning = result.mergeWarnings?.find(w => w.code === 'CONSOLIDATION_FAILED');
+  let failureReason: string | undefined;
+  try {
+    const detail = JSON.parse(failedWarning?.detail ?? '{}');
+    failureReason = typeof detail.failureReason === 'string' ? detail.failureReason : undefined;
+  } catch {
+    // ignore
+  }
+  return (
+    <div
+      data-testid="consolidation-banner"
+      className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900"
+    >
+      <p className="font-medium mb-1">
+        Tightening pass did not complete; reviewer is seeing the original merge.
+      </p>
+      {failureReason && (
+        <p className="text-amber-800">Reason: {failureReason}</p>
+      )}
     </div>
   );
 }
