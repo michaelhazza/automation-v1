@@ -99,6 +99,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "depcheck": "1.4.7",
     "jscpd": "4.1.1",
     "knip": "6.13.1",
     "madge": "8.0.0",
