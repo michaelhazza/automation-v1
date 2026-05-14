@@ -463,8 +463,66 @@ Grep for `\| \|` in the Asset Register section: the 16 matches found are ALL in 
 
 ## Chunk 5 — doc-sync trigger row + finalisation Step 6 verdict
 
-**Status:** PENDING
-**Files:** `docs/doc-sync.md`, `.claude/agents/finalisation-coordinator.md` (Step 6)
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:**
+- `docs/doc-sync.md` (capabilities.md trigger row extended)
+- `.claude/agents/finalisation-coordinator.md` (Step 6 capabilities.md table row updated + Capability Registration verdict prose block added)
+
+### Changes made
+
+**`docs/doc-sync.md`:**
+- Replaced the simple `docs/capabilities.md` row (previously: "Any add / remove / rename...") with the full Capability Registration trigger row per spec §5 (Chunk 5 contracts).
+- New row includes: trigger conditions (any Asset Register row §7.4.1 field change), Editorial Rules reference, all 8 valid §6.2.1 verdict strings (`yes: create new capability record`, `yes: update existing capability record`, `yes: split existing capability record`, `yes: merge with existing capability record`, `n/a: docs-only change`, `n/a: test-only change`, `n/a: internal refactor with no capability surface change`, `n/a: build / tooling change only`), `yes`-class and `n/a`-class requirements, and explicit statement that any other phrasing is invalid and blocks `MERGE_READY`.
+
+**`.claude/agents/finalisation-coordinator.md` Step 6:**
+- Updated the Reference-doc update-triggers table row for `docs/capabilities.md` to reference §6.2.1 combined verdict format and the new doc-sync row.
+- Added a new "Capability Registration verdict" prose block immediately after the reference-doc table and before "Record verdicts in the chatgpt-pr-review session log". The prose block:
+  - Names the eight valid §6.2.1 strings verbatim.
+  - States that any other phrasing is invalid and treated as a missing verdict.
+  - Adds the `yes`-class and `n/a`-class explicit requirements.
+  - Handles the `split` case inline: original row's `Lifecycle state` moved to `Sunset Candidate` or `Sunset`; Related-docs link points to successor row(s).
+  - States the MERGE_READY block clause: Step 9 is blocked until a valid §6.2.1 verdict is recorded; absent or invalid verdict → record reason in `progress.md` and halt pipeline.
+
+### Dry-run walkthroughs
+
+**Branch 1: Capability-surface-touching change**
+
+Scenario: a PR merges a new route that introduces a new background-task scheduler capability.
+
+- Doc-sync sweep reaches `docs/capabilities.md`.
+- Coordinator inspects the diff: new code surface, new asset register row required.
+- Verdict recorded: `yes: create new capability record`
+- Asset Register row is added with all §7.4.1 fields populated (Capability ID, Name, Description, Owner per §7.4.3, Cluster, Lifecycle state = Inception, Launch source = build slug, Risk surface, Last review date = today, Carry notes from ABCd, Decommission notes = "None planned", Related docs).
+- This matches one of the four valid `yes:` strings — verdict is accepted. MERGE_READY proceeds.
+
+**Branch 2: Internal refactor with no capability surface change**
+
+Scenario: a PR refactors the webhook handler's internal retry logic without changing any user-visible behaviour or API surface.
+
+- Doc-sync sweep reaches `docs/capabilities.md`.
+- Coordinator inspects the diff: no new capability, no Asset Register row mutated, no cluster/name/description/lifecycle state changes.
+- Verdict recorded: `n/a: internal refactor with no capability surface change`
+- This matches one of the four valid `n/a:` strings — verdict is accepted. MERGE_READY proceeds without requiring an Asset Register update.
+
+### Grep-the-old-value pass results
+
+Grep for `Add / remove / rename capability` in `.claude/agents/finalisation-coordinator.md`: **0 matches** — old phrasing fully replaced.
+
+Grep for `capabilities\.md` in `.claude/agents/finalisation-coordinator.md`: **4 matches** — all in Step 6:
+1. Line 271: updated table row (new §6.2.1 combined-format reference). Correct.
+2. Line 278: new Capability Registration verdict heading. Correct.
+3. Line 280: new prose "When the doc-sync sweep reaches `docs/capabilities.md`...". Correct.
+4. Line 297: new MERGE_READY block clause. Correct.
+
+No stale references to the old doc-sync format remain.
+
+### G1 gate result
+
+- `npx eslint docs/doc-sync.md .claude/agents/finalisation-coordinator.md`: exit 0; 2 expected warnings (markdown files not in eslint config). No errors.
+- `npm run typecheck`: exit 0 (both tsconfigs). No TypeScript files touched.
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 

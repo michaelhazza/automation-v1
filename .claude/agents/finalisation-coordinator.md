@@ -268,12 +268,33 @@ Reference doc update triggers:
 | Doc | Update when... |
 |---|---|
 | `architecture.md` | Service boundaries, route conventions, agent fleet, RLS, etc. |
-| `docs/capabilities.md` | Add / remove / rename capability, skill, integration. Editorial Rules apply. |
+| `docs/capabilities.md` | **Capability Registration (§6.2.1 combined verdict required).** Trigger: any merge that creates, mutates, splits, or merges a capability surface (any Asset Register row field per spec §7.4.1). Editorial Rules apply. Verdict must use the §6.2.1 combined format — see prose below this table. |
 | `docs/integration-reference.md` | Integration behaviour change. Update `last_verified`. |
 | `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | Build discipline, conventions, agent fleet, locked rules. |
 | `docs/frontend-design-principles.md` | New UI pattern, hard rule, worked example. |
 | `KNOWLEDGE.md` | Patterns and corrections — always check. |
 | `docs/spec-context.md` | Spec-review sessions only — n/a here. |
+
+**Capability Registration verdict — `docs/capabilities.md` (§6.2.1 combined format).**
+
+When the doc-sync sweep reaches `docs/capabilities.md`, the verdict is recorded in the combined format `<verdict>: <registration outcome>`. Exactly one of these eight strings is valid:
+
+- `yes: create new capability record`
+- `yes: update existing capability record`
+- `yes: split existing capability record`
+- `yes: merge with existing capability record`
+- `n/a: docs-only change`
+- `n/a: test-only change`
+- `n/a: internal refactor with no capability surface change`
+- `n/a: build / tooling change only`
+
+Any other phrasing is invalid and treated as a missing verdict.
+
+A `yes`-class verdict requires that the Asset Register row(s) follow spec §7.4.1 and that one of the §7.4.4 registration outcomes is named explicitly. A `n/a`-class verdict requires that one of the four reasons above is named explicitly.
+
+For a `yes: split existing capability record` verdict: the original row's `Lifecycle state` is moved to `Sunset Candidate` or `Sunset`; a Related-docs link is added pointing to the successor row(s).
+
+**`MERGE_READY` block:** Step 9 (`MERGE_READY`) is blocked until a valid §6.2.1 verdict is recorded for `docs/capabilities.md`. If the verdict is absent or invalid, record the missing-verdict reason in `progress.md` and halt the pipeline. Do not set `MERGE_READY` until the verdict is corrected.
 
 Record verdicts in the chatgpt-pr-review session log under `## Final Summary`.
 
