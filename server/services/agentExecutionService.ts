@@ -1,82 +1,14 @@
-﻿// executionMode in code = 'Execution Environment' in the v1.2 product brief. controllerStyle in code = 'Controller' in the v1.2 product brief. See docs/synthetos-nomenclature.md
+// executionMode in code = 'Execution Environment' in the v1.2 product brief. controllerStyle in code = 'Controller' in the v1.2 product brief. See docs/synthetos-nomenclature.md
 
 import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { describeTransition } from '../../shared/stateMachineGuards.js';
-import {
-  agentRuns,
-  tasks,
-} from '../db/schema/index.js';
-import { skillService } from './skillService.js';
-import { systemSkillService } from './systemSkillService.js';
-import { systemAgents } from '../db/schema/index.js';
-import { taskService } from './taskService.js';
-import {
-  buildSystemPrompt,
-  getOrgProcessesForTools,
-  approxTokens,
-  type AnthropicTool,
-} from './llmService.js';
+import { agentRuns } from '../db/schema/index.js';
 import {
   computeRunResultStatus,
-  assembleVoiceBlock,
 } from './agentExecutionServicePure.js';
-import * as voiceProfileService from './voiceProfile/voiceProfileService.js';
-import { persistAssembly as persistPromptAssembly } from './agentRunPromptService.js';
-import { agentRoleToDomain } from './workspaceMemoryService.js';
-import * as memoryBlockService from './memoryBlockService.js';
-import { agentBeliefService } from './agentBeliefService.js';
-import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
-import { buildForRun as buildHierarchyForRun, HierarchyContextBuildError } from './hierarchyContextBuilderService.js';
-import type { HierarchyContext } from '../../shared/types/delegation.js';
-import {
-  createDefaultPipeline,
-  type MiddlewareContext,
-} from './middleware/index.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
-// orgAgentConfigService import removed — deprecated post-migration 0106
-import {
-  createEvent,
-} from '../lib/tracing.js';
-// `langfuse`, `withTrace`, `createSpan`, `finalizeTrace`, `generateRunFingerprint`,
-// `FinalStatus`, `ErrorType` and `claudeCodeRunner` were consumed by the
-// pre-Chunk-5 dispatch ladder. After the Chunk 5 cutover the api/headless
-// adapter (`executionBackends/_apiHeadlessShared.ts`) and the claude-code
-// adapter (`executionBackends/claudeCodeBackend.ts`) own those imports;
-// the dispatch site here resolves an adapter from
-// `executionBackendRegistry` and consumes the returned `BackendDispatchResult`.
-import { buildThreadContextReadModel } from './conversationThreadContextService.js';
-import { formatThreadContextBlock, prependThreadContextToBasePrompt } from './conversationThreadContextServicePure.js';
-import type { ThreadContextReadModel } from '../../shared/types/conversationThreadContext.js';
-
-// ---------------------------------------------------------------------------
-// Agentic loop executor — extracted to neutral sibling module
-// (`agentExecutionLoop.ts`) in Chunk 4 of the ExecutionBackend Adapter
-// Contract refactor. Keep these imports adjacent so the relocated symbols
-// are visible at a glance to readers of this file.
-// ---------------------------------------------------------------------------
-
-// `runAgenticLoop` is no longer called from this file after the Chunk 5
-// cutover — the api/headless adapter (`_apiHeadlessShared.ts`) is the
-// only direct caller now. `LoopParams` stays as a `import type` because
-// `ExecutionClosureContext` derives every field from it and the
-// re-export is consumed by historical importers of this module.
-import type { LoopParams } from './agentExecutionLoop.js';
-
-export type { LoopParams };
-
-// ---------------------------------------------------------------------------
-// Execution backend registry — Chunk 5 cutover.
-//
-// The pre-Chunk-5 dispatch ladder (`if (mode === 'iee_*') … else if
-// (mode === 'claude-code') … else …`) is replaced by a single
-// `executionBackendRegistry.resolve(mode).dispatch(input)` call. Each
-// adapter owns its own dispatch body in `executionBackends/`; the dispatch
-// site here is responsible only for assembling the `BackendDispatchInput`
-// (including the closure-context bundle on `backendOptions.loopContext`)
-// and consuming the returned `BackendDispatchResult`.
-// ---------------------------------------------------------------------------
 
 import type { AgentRunRequest, AgentRunResult } from './agentExecutionService/types.js';
 import { validateAndPrepare } from './agentExecutionService/runLifecycle/validate.js';
@@ -88,10 +20,14 @@ import { dispatchRun } from './agentExecutionService/runLifecycle/dispatch.js';
 import { finalizeRun, cleanupMcp } from './agentExecutionService/runLifecycle/complete.js';
 
 // ---------------------------------------------------------------------------
-// Types
+// Public-surface re-exports (§4 / spec §5.6)
 // ---------------------------------------------------------------------------
 
 export type { AgentRunRequest, AgentRunResult } from './agentExecutionService/types.js';
+export { resumeAgentRun } from './agentExecutionService/resume.js';
+export type { ResumeAgentRunOptions, ResumeAgentRunResult } from './agentExecutionService/resume.js';
+export type { LoopParams } from './agentExecutionLoop.js';
+export type { LoopResult } from './agentExecutionTypes.js';
 
 // ---------------------------------------------------------------------------
 // Execution service
@@ -310,28 +246,3 @@ export const agentExecutionService = {
     return { runId: run.id, status: 'running' };
   },
 };
-
-export { resumeAgentRun } from './agentExecutionService/resume.js';
-export type { ResumeAgentRunOptions, ResumeAgentRunResult } from './agentExecutionService/resume.js';
-
-// ---------------------------------------------------------------------------
-// The agentic loop — `runAgenticLoop` and `LoopParams` were extracted to
-// `./agentExecutionLoop.ts` in Chunk 4 of the ExecutionBackend Adapter
-// Contract refactor (spec § 4.1 / plan Chunk 4). The import at the top of
-// this file pulls them back in for the dispatch ladder. External callers
-// should import directly from `agentExecutionLoop.ts`.
-// ---------------------------------------------------------------------------
-
-// LoopResult is the relocated neutral shape consumed by both the agentic
-// loop and the ExecutionBackend dispatch contract
-// (server/services/executionBackends/types.ts -> BackendDispatchResult).
-// See spec § 4.1 "Neutral type file" — extraction breaks the import cycle
-// between agentExecutionService.ts and executionBackends/registry.ts.
-//
-// The neutral source of truth lives in `agentExecutionTypes.ts`. The
-// `export type` re-export here keeps backwards-compat for existing
-// importers of this module (and future consumers reach for the neutral
-// file directly).
-import type { LoopResult } from './agentExecutionTypes.js';
-export type { LoopResult };
-

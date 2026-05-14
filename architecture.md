@@ -1614,6 +1614,8 @@ Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple age
 <a id="agent-execution-middleware-pipeline"></a>
 ## Agent Execution Middleware Pipeline
 
+`agentExecutionService.executeRun()` is the main entry point for autonomous agent execution. The implementation is decomposed across `server/services/agentExecutionService/` with the barrel at `server/services/agentExecutionService.ts` (thin re-export shell, < 250 LOC). Phase modules in `runLifecycle/` run in order: validate → persistRun → configure → loadContext → prepare → dispatch → complete. Supporting modules: `types.ts` (shared interfaces), `backendDispatch.ts` (backend adapter wiring), `promptBuilders.ts` (prompt-assembly helpers), `resume.ts` (`resumeAgentRun` entry point).
+
 The agent execution loop runs every tool call through a three-phase middleware chain defined in `server/services/middleware/index.ts`. The pipeline is the central quality/safety filter for all agent behaviour.
 
 ### Phase 1 — preCall (before the LLM call)
