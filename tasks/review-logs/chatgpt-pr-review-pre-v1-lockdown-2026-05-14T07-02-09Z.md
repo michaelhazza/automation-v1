@@ -191,30 +191,36 @@ All six findings stem from one structural cause: ChatGPT can only see the diff, 
 - **Dep declarations:** static import sites pre-exist in `main` at `server/routes/users.ts:2`, `server/routes/systemUsers.ts:2`, `server/mcp/mcpServer.ts:14`. The audit's exact purpose was to declare them.
 - **PR scope:** audit-runner's three-pass model intentionally batches Pass 2 fixes per-topic at commit level (`9af5eafb`, `a99cc0a2`, `4b2b74a3`, `e6687754`). Splitting at this stage carries CI/review overhead with negligible reviewability gain.
 
-### Deferred to a later session (per operator instruction)
+### Finalisation pickup — 2026-05-14T07:30:00Z
 
-Finalisation-coordinator steps NOT executed in this session:
+Operator resumed finalisation; the deferred steps were executed in this commit:
 
-- Final KNOWLEDGE.md pattern extraction (lesson candidates: manual-mode upload-expiry behaviour; diff-only reviewer false-positive shapes on deletion + manifest-only PRs; audit-batch vs feature-PR posture mismatch with general PR-review heuristics).
-- Doc-sync sweep across the change-set.
-- pg dep ownership confirmation in `tasks/todo.md`.
-- `tasks/current-focus.md` → MERGE_READY.
-- `ready-to-merge` label application.
+- pg dep ownership confirmed at `tasks/todo.md:297` (origin-tagged `[origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z]`, status:open, in § Deferred from codebase audit — 2026-05-14).
+- Doc-sync sweep executed across the change-set per `docs/doc-sync.md`.
+- KNOWLEDGE.md appended 3 new patterns extracted from this chatgpt-pr-review loop.
+- `architecture.md` Skill Analyzer section updated with retirement note + stale-reference removal (3 deleted-file rows + 1 prose mention).
+- `docs/codebase-audit-framework.md` footer fixed (v1.3 → v1.4).
 
-Operator will pick these up in a follow-up session.
-
-### Final Summary fields (chatgpt-pr-review standard contract — partial pending operator pickup)
+### Final Summary fields (chatgpt-pr-review standard contract)
 
 ```
-- KNOWLEDGE.md updated: no — deferred to operator pickup (3 lesson candidates listed above)
-- architecture.md updated: no — checked diff against architecture.md update triggers (service boundaries, route conventions, agent fleet, RLS); zero changes in this PR touch architecture-level conventions. The skill-analyzer client subtree was UI-only.
-- capabilities.md updated: no — no skill / capability / integration add/remove/rename in this PR. Deleted UI was a wizard surface for an existing capability whose backend remains intact.
-- integration-reference.md updated: no — no integration behaviour change.
-- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked CLAUDE.md and DEVELOPMENT_GUIDELINES.md against diff; no build-discipline, agent-fleet, gates, or §8-rule changes.
-- frontend-design-principles.md updated: no — no new UI pattern, hard rule, or worked example.
+- KNOWLEDGE.md updated: yes (3 entries — manual-mode chatgpt-pr-review context-loss pattern; diff-only reviewer false-positive shapes on deletion + manifest-only PRs; audit-branch Light finalisation recovery path)
+- architecture.md updated: yes (Skill Analyzer section — added "UI retired 2026-05-14 (PR #305)" callout under the section heading; removed three deleted-file rows from the Files table at the §Files anchor; dropped the "client/src/components/skill-analyzer/mergeTypes.ts mirrors it for optimistic UI preview" clause from the v2 bug-fix-cycle prose at line 2686)
+- capabilities.md updated: no — grep for "skill-analyzer | MergeReviewBlock | SkillAnalyzerWizard" returned only historical changelog entries at lines 1225-1244 describing past PRs; these are accurate historical records of past releases, not current-state claims about live UI. No editorial-rules trigger from the diff (no capability / skill / integration add / remove / rename).
+- integration-reference.md updated: n/a — no integration behaviour change in the diff (no new scope / skill / status / write capability / OAuth provider / MCP preset / alias).
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — grep for "codebase-audit-framework" against both files; CLAUDE.md cites it indirectly via the agent-fleet reference, but the v1.3 → v1.4 bump is internal to the framework doc and does not change build-discipline / agent-fleet / locked-rule semantics. No §8 development-discipline rule additions in this PR.
+- CONTRIBUTING.md updated: no — no lint-suppression / comment-format / contributor-convention changes.
+- frontend-design-principles.md updated: no — UI deletion was wholesale, not a design-pattern change. No new hard rule or worked example.
 - spec-context.md updated: n/a — not a spec-review session.
-- docs/codebase-audit-framework.md: yes (v1.3 → v1.4 §2 context block — already in the PR's own commit `4b2b74a3`, not added in this review)
+- docs/decisions/ updated: n/a — audit findings are symptom + prevention; no new ADR-worthy architectural choice locked.
+- docs/context-packs/ updated: no — no anchor changes in architecture.md (only a callout addition + table row removal within an existing anchor).
+- references/test-gate-policy.md updated: no — `docs/codebase-audit-framework.md` §2 v1.4 refresh was aligned with this policy; the policy itself did not change.
+- references/spec-review-directional-signals.md updated: n/a — not a spec-review session.
+- docs/incident-response.md updated: n/a — no SEV / on-call / timeline / post-mortem template change.
+- docs/testing-transition-plan.md updated: n/a — no migration trigger / inventory / phasing change.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a — `docs/codebase-audit-framework.md` v1.4 is repo-specific (audit-framework version, not agent-fleet framework version). Per `docs/doc-sync.md`: "Repo-specific changes... DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only."
+- docs/codebase-audit-framework.md: yes (header v1.3 → v1.4 in the PR's own commit `4b2b74a3`; footer v1.3 → v1.4 fixed in this finalisation pass per pr-reviewer Consider item #1)
 ```
 
-`pr-reviewer` log + this log are the durable artefact record for the audit branch's review pass.
+`pr-reviewer` log + this log + the doc-sync artefacts above are the durable record for the audit branch's review pass.
 

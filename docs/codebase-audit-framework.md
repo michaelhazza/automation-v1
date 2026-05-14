@@ -1584,5 +1584,5 @@ The audit is a tool for protecting the codebase. Better to escalate than to ship
 
 ---
 
-*AutomationOS Codebase Audit Framework v1.3 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code), v1.2 Audit Completion Criteria, v1.3 path corrections + completion-criteria tightening, all 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
+*AutomationOS Codebase Audit Framework v1.4 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code), v1.2 Audit Completion Criteria, v1.3 path corrections + completion-criteria tightening (all 2026-04-25); v1.4 §2 context-block Vitest + lint refresh (2026-05-14). Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
 

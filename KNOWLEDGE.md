@@ -1429,3 +1429,27 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 **Source:** audit-runner pre-v1 lockdown — Area 1 finding 1 (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`)
 **Pattern:** `client/src/App.tsx:39` has a comment listing 9 superseded pages that the build-stream consolidation replaced. Only the entry point (`SkillAnalyzerPage.tsx`) was actually deleted; the rest of the subtree (Wizard, ImportStep, ProcessingStep, ResultsStep, ExecuteStep, MergeReviewBlock, RestoreBackupControl, RestoreOutcomeBanner, analyzerStatus, mergeTypes, types) survived as dead replicas — ~4,114 LOC, including 2 god files. The consolidation comment described intent but didn't carry a paired deletion task. Pattern: when a refactor replaces a page or feature, the same PR must delete the replaced subtree OR file an explicit follow-up task (`tasks/todo.md` entry, not a code comment). Prevention proposal P15 (`verify-no-orphan-react-component.sh`) would have caught this at write time.
 **Why it matters:** dead replicas cost in three ways — they slow `grep`/IDE search ("which one is real?"), they confuse future authors who copy from them, and they age into hard-to-delete tangles as transitive imports drift. The consolidation comment created the illusion of cleanup. The audit caught it; the gate proposed will catch the next one.
+
+---
+
+## [2026-05-14] Pattern — Manual-mode chatgpt-pr-review loses prior-round context between rounds
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** Between rounds of a `chatgpt-pr-review` MANUAL session, ChatGPT's web UI expires prior file uploads (and may not retain prior-turn rationale unless re-pasted explicitly). On PR #305, Round 2 came back with byte-identical findings to Round 1 even though Round 1's REJECT rationale had been pasted into the chat — ChatGPT explicitly stated *"some prior uploaded files have expired on the platform side, so I reviewed the current pasted diff only, plus the prior round summary from this chat."* If you want continuity-aware rounds, paste the prior round's rationale ALONGSIDE the diff every round; otherwise expect each round to be a cold review.
+**Why it matters:** the operator drives cadence on the loop, but without prior-round context ChatGPT will re-surface the same false positives every round. Two rounds with the same findings is the canonical signal that the loop has reached diminishing returns under the cold-paste workflow. Don't keep iterating expecting a different answer — either inject context, change the framing question, or close the loop.
+
+---
+
+## [2026-05-14] Pattern — Diff-only second-opinion reviewers produce predictable false positives on deletion-heavy + manifest-only PRs
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** ChatGPT (and any diff-only reviewer) only sees the diff under review, not the surrounding repo. On PR #305 it flagged the 4,114 LOC skill-analyzer deletion as a "regression" (evidence of importers lives outside the diff — gone post-deletion, by definition) and the four `package.json` dep declarations as "unrelated to visible source changes" (the static-import sites at `server/routes/users.ts:2`, `server/routes/systemUsers.ts:2`, `server/mcp/mcpServer.ts:14` are pre-existing in `main`, hence not in the diff). Both classes of finding are structural to the reviewer's input shape, not real issues. `pr-reviewer` (with full-tree grep access) is the right verification for deletion-safety and manifest-correctness questions. Reserve diff-only second-opinion reviewers for prose/semantic/UX issues where the diff is self-contained evidence.
+**Why it matters:** failing to classify these as expected false positives consumes review cycles and (worse) can pressure the implementer to "fix" already-correct code. Calibrate reviewer expectations to reviewer inputs.
+
+---
+
+## [2026-05-14] Pattern — Audit branches bypass the formal Phase 1/2/3 entry guard via Light finalisation
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** `audit-runner` produces a different pipeline shape from `feature-coordinator` — it auto-commits/pushes its three-pass output but does NOT write a `tasks/builds/{slug}/handoff.md` and does NOT set `tasks/current-focus.md` to `REVIEWING`. The `finalisation-coordinator` entry guard refuses to proceed without `status: REVIEWING`, which means audit branches need a recovery path. Canonical recovery: **Light finalisation** — operator-confirmed entry-guard bypass; open PR manually, run pr-reviewer + optionally chatgpt-pr-review, run the doc-sync sweep, then apply `ready-to-merge`. Audit branches do NOT execute `finalisation-coordinator` Step 9 (MERGE_READY transition) because they were never in REVIEWING — they go straight from `NONE` to `MERGED` on squash.
+**Why it matters:** without this recovery path the operator either has to manually fake a handoff (high-friction + state-confusing) or skip the formal finalisation entirely (skipping doc-sync and KNOWLEDGE extraction). Naming the recovery as "Light finalisation" makes it explicit and reusable for future audit branches.
