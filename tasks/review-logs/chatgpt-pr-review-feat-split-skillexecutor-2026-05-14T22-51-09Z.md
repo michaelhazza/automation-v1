@@ -5,6 +5,7 @@
 - PR: #311 — https://github.com/michaelhazza/automation-v1/pull/311
 - Mode: manual
 - Started: 2026-05-14T22:51:09Z
+- **Verdict:** APPROVED (2 rounds, 0 implement / 1 reject + 1 duplicate auto-reject / 0 defer)
 
 PR title: feat(skillexecutor): split 6,133-LOC monolith into 38 modules
 
@@ -72,5 +73,60 @@ There is NO consumer where iteration order is functionally observable. The findi
 ### Implemented (auto-applied technical + user-approved user-facing)
 
 No code changes — only finding was rejected after verification.
+
+---
+
+## Round 2 — 2026-05-15T00:00:00Z
+
+### ChatGPT Feedback (raw)
+
+> Severity: medium
+> Category: bug
+> File: server/services/skillExecutor/registry.ts
+> Finding: SKILL_HANDLERS insertion order is still not preserved.
+> Rationale: The handler key set appears preserved, but the registry still groups handlers via spreads in a different sequence from the original monolith. In the old file, trigger_process, spawn_sub_agents, read_data_source, and the auto-gated task/web handlers came before methodology, review-gated, system monitor, optimiser, config, support, calendar, Slack, and capability handlers. In the new registry, grouped spreads such as ...methodologyStubHandlers, ...autoGatedStubHandlers, ...reviewGatedProposerHandlers, ...systemMonitorShellHandlers, ...optimiserShellHandlers, ...spendShellHandlers, and ...configShellHandlers appear before trigger_process and the task handlers, while capability discovery is now last. Because the registry comment explicitly calls out enumeration by the skill-analyzer, this remains observable behaviour drift in a no-behaviour-change refactor.
+>
+> Verdict: CHANGES_REQUESTED
+
+### Duplicate detection (per-round-loop step 1a)
+
+Substantive duplicate of Round 1 / F1:
+- Same `finding_type`: architecture (handler registry ordering)
+- Same file: `server/services/skillExecutor/registry.ts`
+- Same code area: `SKILL_HANDLERS` declaration
+- Same evidence: grouped spreads change `Object.keys` order vs the monolith
+- Same "skill-analyzer enumerates" claim (already debunked in Round 1 — `skillAnalyzerService.ts:1592` uses `in`, not iteration)
+- No new evidence introduced; rephrasing of the same observation
+
+Auto-apply prior decision (`reject`) per spec § per-round-loop step 1a. The carveouts (severity / defer / user-facing) do not apply once the user has actually decided the underlying finding — repetition adds zero judgement value. This is the documented manual-mode pattern in KNOWLEDGE.md § `[2026-05-14] Manual-mode ChatGPT has no session memory across rounds`.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| SKILL_HANDLERS insertion order is still not preserved | technical | reject | auto (reject) — duplicate of Round 1 / F1 | low | Duplicate of Round 1 finding (same file, same code area, same skill-analyzer claim, no new evidence). Round 1 verified all 30+ consumers — every iteration site is order-insensitive; the only order surface is one diagnostic console.log of orphan handler names. Manual-mode ChatGPT has no session memory across rounds (KNOWLEDGE.md 2026-05-14), so the same finding will recur until the diff itself disproves it. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+
+No code changes — duplicate finding auto-rejected per spec § per-round-loop step 1a.
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 0 implemented | 2 rejected (1 first-pass + 1 duplicate auto-reject) | 0 deferred
+- User-decided:              0 implemented | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #311: none
+- Architectural items surfaced to screen (user decisions): none — only finding was the SKILL_HANDLERS ordering claim, verified inert and rejected
+- KNOWLEDGE.md updated: no — duplicate-detection pattern already documented at `[2026-05-14] Pattern — Manual-mode ChatGPT has no session memory across rounds — same diff-misread can recur indefinitely` (line 1518). No new pattern emerged this session — Round 2 was a textbook repeat of the documented case.
+- architecture.md updated: no — checked grep terms `SKILL_HANDLERS`, `skillExecutor`, `skill-analyzer`, `methodologyStubHandlers`, `autoGatedStubHandlers`. The architecture.md file does describe the skill executor splits at the module-map level; this PR's split implements an already-approved spec (`tasks/builds/feat-split-skillexecutor/spec.md`) and the architecture description is current with the new 38-module layout. No stale references found.
+- capabilities.md updated: n/a: internal refactor with no capability surface change
+- integration-reference.md updated: n/a — no skill / capability / integration add/remove/rename in this PR; pure module split of existing handlers preserving the public skill-name set.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked grep terms `skillExecutor`, `SKILL_HANDLERS`, `skill executor`, `38 modules`. No stale references; build-discipline rules (RLS, service-tier, gates, migrations, §8) unchanged by a mechanical split.
+- frontend-design-principles.md updated: n/a — backend-only refactor, no UI surface touched.
+- main merged into branch: deferred to step 10 of finalisation
+- PR: #311 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/311
 
 ---
