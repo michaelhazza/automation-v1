@@ -24,7 +24,10 @@ export type MergeWarningCode =
   | 'SOURCE_FORK'
   | 'NEAR_REPLACEMENT'
   | 'CONTENT_OVERLAP'
-  | 'CROSS_REFERENCES_DISTINCT';
+  | 'CROSS_REFERENCES_DISTINCT'
+  | 'CONSOLIDATION_APPLIED'
+  | 'CONSOLIDATION_DECLINED'
+  | 'CONSOLIDATION_FAILED';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -58,6 +61,9 @@ export const DEFAULT_WARNING_TIER_MAP: Record<MergeWarningCode, WarningTier> = {
   NEAR_REPLACEMENT:         'standard',
   CONTENT_OVERLAP:          'standard',
   CROSS_REFERENCES_DISTINCT: 'informational',
+  CONSOLIDATION_APPLIED:  'informational',
+  CONSOLIDATION_DECLINED: 'informational',
+  CONSOLIDATION_FAILED:   'informational',
 };
 
 export type WarningResolutionKind =
@@ -116,6 +122,9 @@ const RESOLUTIONS_FOR_CODE: Record<MergeWarningCode, WarningResolutionKind[]> = 
   NEAR_REPLACEMENT:         ['acknowledge_warning'],
   CONTENT_OVERLAP:          ['acknowledge_warning'],
   CROSS_REFERENCES_DISTINCT: [],
+  CONSOLIDATION_APPLIED:  [],
+  CONSOLIDATION_DECLINED: [],
+  CONSOLIDATION_FAILED:   [],
 };
 
 export function parseDemotedFields(detail: string | undefined): string[] {
@@ -279,6 +288,9 @@ export function warningLabel(code: MergeWarningCode): string {
     case 'NEAR_REPLACEMENT':         return 'Near-replacement (low source retention)';
     case 'CONTENT_OVERLAP':          return 'Content overlap with another skill';
     case 'CROSS_REFERENCES_DISTINCT': return 'Cross-references another skill';
+    case 'CONSOLIDATION_APPLIED':  return 'Consolidation applied';
+    case 'CONSOLIDATION_DECLINED': return 'Consolidation declined';
+    case 'CONSOLIDATION_FAILED':   return 'Consolidation failed';
   }
 }
 
@@ -301,5 +313,8 @@ export function warningBadgeClass(code: MergeWarningCode): string {
     case 'NEAR_REPLACEMENT':         return 'bg-amber-100 text-amber-800';
     case 'CONTENT_OVERLAP':          return 'bg-orange-100 text-orange-800';
     case 'CROSS_REFERENCES_DISTINCT': return 'bg-slate-100 text-slate-700';
+    case 'CONSOLIDATION_APPLIED':  return 'bg-emerald-100 text-emerald-800';
+    case 'CONSOLIDATION_DECLINED': return 'bg-amber-100 text-amber-800';
+    case 'CONSOLIDATION_FAILED':   return 'bg-amber-100 text-amber-800';
   }
 }
