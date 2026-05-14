@@ -92,6 +92,9 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Modules & subscriptions | `modules.ts` |
 | GEO audits | `geoAudits.ts` |
 | Onboarding | `onboarding.ts` |
+| EA drafts | `eaDrafts.ts` |
+| Personal setup | `personal.ts` (POST /api/personal/setup) |
+| Agent home widgets | `agentHomeWidgets.ts` (GET /api/agent-home-widgets) |
 
 ### Shared route helpers
 
@@ -120,6 +123,10 @@ A new service file is justified only when (a) the route has more than one DB int
 3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
 4. **Background / maintenance jobs that write tenant data** — acquire an admin connection for top-level iteration, then call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts`. A job that skips this pattern silently no-ops on every write because RLS sees no session var.
 5. **Log-and-swallow services** (bookkeeping, audit inserts, best-effort mirrors — anything whose contract says "must not block execution") — `getOrgScopedDb()` must be the first line **inside** the `try` block, never above it. Placing it above the catch turns a missing-org-context throw into a hard failure that escapes the error boundary.
+
+### Service-boundary closed-enum error mapping (promoted from tasks/todo.md on 2026-05-13)
+
+When a service throws typed errors with a `code` discriminator, routes MUST map the code to the response envelope via a closed `switch` (every branch enumerated, default `throw`). Open-ended string mapping is a blocking finding in review — adds drift surface and silently passes new codes through with the wrong HTTP status. See `KNOWLEDGE.md` for the canonical pattern entry promoted from CONSOL-GOV-DEF-9.
 
 ---
 
@@ -178,6 +185,15 @@ Subaccount Agent (subaccountAgents table)
   — Has parentSubaccountAgentId for subaccount-level hierarchy
 ```
 
+### User-owned agents (Personal Assistant pattern)
+
+A fourth variant of the org-tier agent: `agents.owner_user_id` is set to a specific user's ID. This is the personal assistant / executive-assistant pattern where the agent operates on behalf of exactly one user — not the org, not a subaccount.
+
+- `owner_user_id` is immutable post-creation. Skills that access user-scoped OAuth tokens (calendar, Slack) resolve the owner via `resolveAgentOwner(agentId, orgId, db)` in `skillExecutor.ts` and never from LLM input.
+- `agents.slug = 'executive-assistant'` is the reserved slug for the personal assistant agent. One per user maximum.
+- Home widgets (`home_widget` JSONB column on `system_agents`) are the per-user dashboard surface for the personal assistant.
+- RLS: `ea_drafts`, `voice_profiles` are FORCE RLS tables scoped to `owner_user_id`. Background jobs that scan them require `withAdminConnection` + `SET LOCAL ROLE admin_role`. See KNOWLEDGE.md [2026-05-13] cross-org job pattern.
+
 ### Key agent fields
 
 | Field | Where | Meaning |
@@ -190,6 +206,7 @@ Subaccount Agent (subaccountAgents table)
 | `agentRole` | agents, subaccountAgents | Role in hierarchy (orchestrator, specialist, etc.) |
 | `parentAgentId` | agents | Org-level hierarchy parent |
 | `parentSubaccountAgentId` | subaccountAgents | Subaccount-level hierarchy parent |
+| `owner_user_id` | agents | When set, agent is user-owned (personal assistant). Scopes all user-credential resolution. |
 
 ### Subaccount agent link overrides
 
@@ -273,6 +290,8 @@ When `reference_state === 'unavailable'`, routing falls back to legacy keyword p
 - **Asynchronously** on reference-version change via `recomputeOrgCapabilityMaps(orgId)`.
 
 `NULL` = not yet computed; `check_capability_gap` treats a null map as zero-capability so Path A cannot fire against uncomputed state. The stored `referenceLastUpdated` is string-exact-compared against the current reference's `schema_meta.last_updated`; mismatch disqualifies the map from Path A and forces Path B (re-verification by the Configuration Assistant).
+
+**V2 `owner_user_id` scope axis (migration 0156 extension, personal-assistant-v2-operator build):** User-owned agents carry an additional `owner_user_id` field in `capabilityMap`. For subaccount-owned agents (org-level agents, standard subaccount agents), this field is absent/null. For user-owned agents (e.g., the Executive Assistant), `owner_user_id` is set to `agents.owner_user_id` and is recomputed atomically with any `agents.owner_user_id` update (same transaction, mandatory per DEVELOPMENT_GUIDELINES §6.4). The two-axis matcher rule in the orchestrator uses this field: when `capabilityMap.owner_user_id` is set, the target is resolved as `target_owner_user_id ?? requester_user_id` (see `crossOwnerDelegationAuthorisationPure.ts`).
 
 ### Capability discovery skills
 
@@ -758,6 +777,8 @@ Skills are defined as Markdown files in `server/skills/*.md`. Built-in system sk
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
 | Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 | Output (operator-facing) | `output.recommend` (write to `agent_recommendations` via single-writer service — see §Agent Recommendations Surface) |
+| Calendar (user-scoped) | `calendar.list_events`, `calendar.get_event`, `calendar.find_free_slot`, `calendar.create_event`, `calendar.update_event`, `calendar.respond_to_invite` — user-scoped Google Calendar skills; write skills route through EA draft + approval gate |
+| Slack (user-scoped) | `slack.list_channels`, `slack.read_channel`, `slack.search_messages`, `slack.summarise_thread`, `slack.post_message`, `slack.post_dm` — user-scoped Slack skills; post skills route through EA draft + approval gate |
 
 `send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings. The LLM router (`llmRouter.routeCall`) was added as a breaker caller in Hermes Tier 1 Phase C, via the new direct-ledger sibling `assertWithinRunBudgetFromLedger` — Slack + Whisper continue to use the original `assertWithinRunBudget` (cost_aggregates-backed).
 
@@ -996,9 +1017,13 @@ CHECK constraint on `reference_document_data_sources` (migration 0290) enforces 
 
 Adding a new mode is a spec amendment, not an emergent shape.
 
+**Semantic ranker (env-flag gated).** `AKR_SEMANTIC_RANKER_ENABLED=true` activates Phase D: at run start, `retrievalService` embeds the run's task description (description-only per spec §10) via `generateEmbedding`, computes cosine similarity against each chunk and memory-block embedding, and uses the score as `finalScore`. `AKR_RETRIEVAL_THRESHOLD` (default `0.30`, range 0-1) is the per-candidate acceptance floor. Threshold filtering is applied per category BEFORE merging the two candidate pools: chunk and memory-block pools are each filtered independently to `finalScore >= threshold`, and per-category recall fallback (`chunksFallbackApplied` / `blocksFallbackApplied`) fires for a category only when filtering empties THAT pool. A fallback resets every candidate in that category to `finalScore: 0` and bypasses the filter for that pool alone (the other pool's threshold filtering is unaffected). The merged pool is passed to `rankCandidates` with threshold `0` because category-level filtering is already complete. With the flag off, `queryEmbedding` is null, category filtering is skipped (every candidate keeps `finalScore: 0`), and legacy scope+recency ordering applies. Embedding failure is caught per-run and logged (`retrieval.embedding_failed`); scoring is skipped for that run (legacy ordering). The flag is off by default — no schema migration required to enable.
+
 ### Source provenance
 
 `reference_documents.source` (closed enum): `manual` (default), `from_file`, `auto_memory_approved`, `synthesised_by_agent` (reserved), `external` (legacy Drive). Only non-default values render a UI badge — the absence of a badge is the visual carrier of "this is normal".
+
+**Memory-block lineage (migration 0333).** `memory_block_version_sources` is an append-only join table recording which `workspace_memory_entries` contributed to each committed `memory_block_versions` row. Written at synthesis time by `memoryBlockSynthesisService` via `memoryBlockLineageService.writeLineageRowsForVersion()`. Deletion-safe: each row carries `content_hash` (source entry content snapshot) + `source_run_label_at_capture` (formatted "agent name · timestamp" label) so lineage remains readable even when the source entry row is soft-deleted or the source `agent_runs` row is hard-deleted. Producer-level idempotency contract: one `memory_block_versions` write per synthesis run regardless of how many entries were consumed — the version row is the idempotency anchor, not the synthesis run.
 
 ### Data model
 
@@ -1042,6 +1067,8 @@ Preventive surface, not a runtime safety net. Constants in `retrievalObservabili
 - Operator-facing copy when always-available documents exceed budget mid-run: `"Context limits prevented some always-available documents from loading."`
 - Telemetry events: `retrieval.always_available.doc_count`, `retrieval.always_available.token_cost`. Threshold tuning is a post-launch amendment once production data lands.
 
+**Memory utility metric substrate (migration 0334 + 0345).** `agent_runs.injected_entry_ids` (JSONB, nullable, no DEFAULT) records the workspace-memory entry IDs injected into each run. NULL is the unmeasured discriminator — runs written before migration 0334 remain NULL and are counted as "unmeasured" in the utility MV, not as zero-injection runs. The `mv_memory_utility_30d` materialised view rolls up citation rates per agent over the rolling 30-day window. Refreshed nightly via pg-boss (`refresh_memory_utility_30d` queue, 16:00 UTC) using `REFRESH MATERIALIZED VIEW CONCURRENTLY` with an advisory-lock guard. MV is excluded from RLS (read-only, aggregated, route-layer permission gates). The Memory Utility dashboard (`/usage` → Memory Utility tab) surfaces the daily-series chart (live run data) + per-agent table (nightly MV, may lag up to 24 h).
+
 ### Files vs Documents
 
 `execution_files` is NOT modified by this build. The Files tab is a read view of existing rows filtered by sub-account / agent / scope. The "Add to Knowledge" action transforms an `execution_files` row into a new `reference_documents` row plus link rows; the file row itself is untouched in the inline transaction. The source file becomes durable — `execution_files.expiresAt` is flipped to NULL or far-future by the `document:promotion-finalise` job after the chunking job commits. Until finalise runs, the file is still expirable; the `document_promotion_audit` row prevents the promotion path from re-running if expiry races finalise. Operator-facing: the file row is marked "durable" in the UI as soon as the inline transaction completes (audit-row backed); the `expiresAt` flip is invisible to the operator.
@@ -1061,7 +1088,19 @@ Preventive surface, not a runtime safety net. Constants in `retrievalObservabili
 | `server/services/documentPromotionService.ts` | Add-to-Knowledge transaction: file → document + link rows + `document_promotion_audit` row. |
 | `server/services/retrievalObservabilityService.ts` | Emits the `retrieval.summary` event into `agent_execution_events`. |
 | `server/services/retrievalObservabilityServicePure.ts` | Pure truncation + payload-shaping helpers. |
+| `server/services/retrievalQueryEmbedderPure.ts` | Pure semantic ranker helpers: `cosineSimilarity`, `scoreCandidates`, `recallFallbackPredicate`, `getRetrievalConfig`. Zero DB/network imports. |
 | `server/services/referenceDocumentService.ts` | Chunk-aware version write; mode-update API; triggers summarise + chunk-embed jobs. |
+| `server/services/memoryBlockSourcesService.ts` | Read lineage rows from `memory_block_version_sources` for the Sources tab. Read-only — assembles `MemoryBlockSourcesPayload` via the pure helper. |
+| `server/services/memoryBlockLineageService.ts` | Write lineage rows at synthesis time via `writeLineageRowsForVersion`. Called from inside the synthesis transaction (after `setOrgGUC`). |
+| `server/services/memoryUtilityQueryService.ts` | Query `mv_memory_utility_30d` + recent runs for the Memory Utility dashboard; returns `MemoryUtilityPayload` with top-level `organisationId`, `generatedAt`, `windowDays: 30`. |
+| `server/services/memoryUtilityDailySeriesPure.ts` | Pure daily-series bucketing (UTC midnight, gap-fill to 30 entries, NULL for denominator-zero). |
+| `server/services/memoryUtilityAggregatorPure.ts` | Pure JS aggregator that mirrors the SQL CTE in migration 0345. Spec-conformance deliverable; service path uses the SQL CTE for runtime, this exists for testability of the aggregation contract in isolation. |
+| `server/services/memoryUtilityRefreshService.ts` | Advisory-locked `REFRESH MATERIALIZED VIEW CONCURRENTLY` for `mv_memory_utility_30d`. |
+| `server/db/schema/mvMemoryUtility30d.ts` | Drizzle `.existing()` declaration for the utility MV. |
+| `server/routes/memoryBlockSources.ts` | `GET /api/orgs/:orgId/memory-blocks/:blockId/sources` — lineage read for Sources tab. |
+| `server/routes/memoryUtility.ts` | `GET /api/orgs/:orgId/usage/memory-utility` — Memory Utility dashboard data. |
+| `client/src/pages/MemoryBlockSourcesTab.tsx` | Sources tab component — renders lineage rows. |
+| `client/src/pages/MemoryUtilityTab.tsx` | Memory Utility tab — canvas line charts + per-agent table. |
 | `server/jobs/documentSummariseJob.ts` | `document:summarise` queue handler. |
 | `server/jobs/documentChunkEmbedJob.ts` | `document:chunk-embed` queue handler. Atomic-swap source of truth for `retrieval_version_id`. |
 | `server/jobs/documentReembedJob.ts` | `document:reembed` queue handler. Background sweep on embedding-model upgrade. |
@@ -1073,7 +1112,7 @@ Preventive surface, not a runtime safety net. Constants in `retrievalObservabili
 | `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` | Documents tab — list / add / edit / promote. |
 | `client/src/pages/govern/components/KnowledgeFilesTab.tsx` | Files tab — read view of `execution_files` with Add-to-Knowledge action. |
 | `client/src/api/filesApi.ts` | Client API hooks for the Files tab. |
-| `prototypes/auto-knowledge-retrieval/` | Mockup directory; design source of truth. |
+| `_archive/prototypes/auto-knowledge-retrieval/` | Mockup directory; design source of truth. |
 
 ### Routes
 
@@ -1728,6 +1767,19 @@ CREATE POLICY <table>_org_isolation ON <table>
 
 Also add the table to `server/config/rlsProtectedTables.ts` in the same migration PR. `policyMigration` in that manifest must point at the migration that physically runs `CREATE POLICY ... ON <table>` — when a corrective migration's header NOTE explicitly excludes a table, the manifest still references the original. Use `grep -rl "CREATE POLICY.*ON <table>" migrations/` to confirm.
 
+#### Dual-GUC pattern (subaccount-scoped tables)
+
+Some tables are scoped to a specific subaccount, not just an org. Their RLS policy checks BOTH `app.organisation_id` AND `app.subaccount_id`. Setting only `app.organisation_id` (the org-scoped helper `setOrgGUC`) leaves `app.subaccount_id` unset; FORCE RLS then returns 0 rows silently.
+
+Use `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` from `server/lib/orgScoping.ts` for ALL reads and writes against these tables:
+- `operator_runs`
+- `operator_task_profiles`
+- `subaccount_operator_settings`
+
+Call it as the **first statement** inside `db.transaction(async (tx) => { ... })`. Never make bare `db.select()`/`db.update()` calls against dual-GUC tables outside a transaction — the pool picks a fresh connection with no GUC set and the query silently returns nothing.
+
+`setOrgGUC` (single GUC) remains correct for org-scoped-only tables such as `agent_runs`, `iee_runs`, and existing org-tenant tables.
+
 #### Corrective migrations (when RLS is broken or missing)
 
 Migrations are append-only. To repair: write a new migration with the next number, `DROP POLICY IF EXISTS` for **every** historical policy name on the table (enumerate `*_tenant_isolation`, `*_org_isolation`, `*_subaccount_isolation`, etc.), then `CREATE POLICY <table>_org_isolation` with the canonical shape. Reference: `migrations/0213_fix_cached_context_rls.sql` (precedent), `migrations/0200_fix_universal_brief_rls.sql` (canonical policy shape source).
@@ -1756,6 +1808,8 @@ Any route with a `:subaccountId` URL parameter calls `resolveSubaccount(req.para
 `server/lib/orgScopedDb.ts` — `getOrgScopedDb(source)` returns the Drizzle transaction handle from the current `withOrgTx(...)` block. Throws `failure('missing_org_context')` if called outside a transaction. This is the **first line of defence** — the intent is to catch bugs at the service layer before RLS silently returns empty result sets.
 
 Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/adminDbConnection.ts` → `withAdminConnection()` which acquires a connection bound to the `admin_role` Postgres role (BYPASSRLS) and logs every invocation to `audit_events`.
+
+> **Gotcha:** `withOrgTx({ tx: db })` fakes the AsyncLocalStorage context but does **not** set the `app.organisation_id` session var on the connection. Use `withOrgTx(organisationId, ...)` for real tenant scoping. See [`KNOWLEDGE.md` 2026-05-05 entry on `withOrgTx({ tx })` fake-context](./KNOWLEDGE.md) for the failure mode (promoted to architecture-doc cross-link on 2026-05-13 from tasks/todo.md OSI-DEF-1).
 
 ### Layer 2 — Scope assertions at retrieval boundaries
 
@@ -2099,6 +2153,7 @@ When introducing a new feature whose behaviour the agents will need to query, as
 109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0358` — Skill Analyzer conditional consolidation pass: adds `skill_analyzer_results.pre_consolidation_merge` (jsonb), `consolidation_outcome` (text, closed enum), `consolidation_note` (text); adds `skill_analyzer_config.consolidation_enabled` (bool) + `consolidation_trigger_severity` (text); extends `warning_tier_map` defaults with `CONSOLIDATION_APPLIED|DECLINED|FAILED` at informational tier.
 - `0275` — Agentic Commerce hardening: partial UNIQUE index on `org_subaccount_channel_grants(org_channel_id, subaccount_id) WHERE active = true` — DB-level idempotency guard for the grant-active uniqueness invariant. Pairs with SELECT-then-INSERT race-handling in `approvalChannelService.addGrant`.
 - `0274` — Agentic Commerce Chunk 8: `actions.agent_id` made nullable to support agent-less spend reservations (system / cron / webhook-driven charges that do not originate from an agent run).
 - `0273` — Agentic Commerce Chunk 3: adds `'stripe_agent'` to `integration_connections.providerType`; documents SPT vault extension (TypeScript-layer only — providerType is TEXT, no DB ENUM)
@@ -2141,6 +2196,17 @@ Recent migrations:
 - `0073` — Reporting Agent paywall workflow
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
+
+### Schema invariants
+
+**FK references to `agent_execution_events(id)` — `ON DELETE` policy** _(promoted from tasks/todo.md on 2026-05-13)_
+
+Every new column that references `agent_execution_events(id)` MUST declare an explicit `ON DELETE` policy:
+
+- **Pointer / "last seen" / "current focus" columns (nullable):** use `ON DELETE SET NULL`. The row is a free-floating pointer; events may be pruned by retention without breaking the parent.
+- **Dependent / "this row was generated from this event" columns (NOT NULL):** use `ON DELETE CASCADE` — but think about retention. If events are pruned by a job, do you want the dependent row pruned too? If yes, `CASCADE`; if no, design the row to outlive the event with a separate retention policy.
+
+Default `ON DELETE NO ACTION` is **never** acceptable for these references — it silently blocks integration-test cleanup and event retention sweeps. The builder-system-prompt CI-gate pre-flight (§4) checks this on every new migration touching these references; a missed policy is a blocking finding in review.
 
 ---
 
@@ -2599,6 +2665,8 @@ All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (conf
 <a id="skill-analyzer"></a>
 ## Skill Analyzer
 
+> **UI retired 2026-05-14 (PR #305):** the client wizard subtree (`client/src/components/skill-analyzer/*`) was deleted as dead code after PR #300 (`skill-merge-consolidation-pass`) superseded its workflow. The server pipeline below remains operational; UI-affordance prose in this section describes the underlying REST contract, not a live UI surface.
+
 System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
 
 Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
@@ -2609,6 +2677,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 4. **Compare** — cosine similarity produces a single best-match per candidate; banded into `likely_duplicate` (>0.92) / `ambiguous` (0.60–0.92) / `distinct` (<0.60).
 5. **Classify + merge** — Claude Sonnet 4.6 produces classification (DUPLICATE / IMPROVEMENT / PARTIAL_OVERLAP / DISTINCT) and, for overlap classifications, a `proposedMerge` object. See §Rule-based fallback below when the classifier is unavailable.
 6. **Validate** — pure post-processing in `skillAnalyzerServicePure.validateMergeOutput` emits structured warnings (scope expansion, invocation-block loss, HITL-gate loss, table-row drops, required-field demotion, capability overlap, name mismatch, output-format loss).
+6a. **Consolidation gate** (conditional, migration 0358) — when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL` and `consolidation_enabled = true`, a second Sonnet pass tightens the merge before reviewer review. Single attempt, no retry. Outcomes captured in `skill_analyzer_results.consolidation_outcome` (closed enum: `not_triggered | succeeded | declined | failed`); pre-consolidation draft snapshot kept in `pre_consolidation_merge` (jsonb) for audit. Outcome-classification rule: `succeeded` requires `postWords < preWords`; non-shortening outputs route to `failed` with `failureReason='not_shortened'`. Mutation guards (`parseConsolidationResponse`) reject any LLM response that mutated `name`, `description`, `definition` (canonical-JSON deep-equal — key-order tolerant), or `mergeRationale`. Three informational warnings ride on `mergeWarnings`: `CONSOLIDATION_APPLIED | CONSOLIDATION_DECLINED | CONSOLIDATION_FAILED`.
 7. **Agent propose** (DISTINCT only) — cosine rank of the candidate against existing system agents; top-K persisted to `agentProposals` with optional Haiku enrichment.
 8. **Cluster recommend** — if ≥3 DISTINCT candidates lack a good agent home, Sonnet proposes a new agent and retro-injects a synthetic proposal into each affected result's `agentProposals`.
 
@@ -2616,7 +2685,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 
 The v2 cycle closed seven correctness holes in the Review + Execute flow. Key additions:
 
-- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; `client/src/components/skill-analyzer/mergeTypes.ts` mirrors it for optimistic UI preview. The server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
+- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; the server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
 - **Warning tier system** (config-driven). Tiers are `informational` | `standard` | `decision_required` | `critical`, mapped per warning code via `skill_analyzer_config.warning_tier_map`. Tier dictates the Approve-button gate: structured resolution (per-field accept/restore for demoted required fields; use-library / use-incoming for name mismatch; scope-down / flag-other / accept-overlap for graph collisions); single-click acknowledgment; or critical-phrase typed confirmation.
 - **Rule-based fallback merger.** When the LLM classifier is unavailable or returns an invalid proposal, `buildRuleBasedMerge` produces a deterministic merge (library-dominant name for DB slug stability; definition-bearing skill wins schema; H2-section union for instructions). Always emits `CLASSIFIER_FALLBACK` warning + low-confidence banner requiring reviewer acknowledgment. No more `proposedMerge=null` dead rows.
 - **Name consistency cascade.** `detectNameMismatch` compares top-level `name`, `definition.name`, and bare-identifier references in description/instructions. When a reviewer resolves via `use_library_name` / `use_incoming_name`, the chosen name cascades atomically into `proposedMergedContent.name`, `definition.name`, and `execution_resolved_name`; Execute reads `execution_resolved_name` as the canonical source to survive drift.
@@ -2654,7 +2723,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 
 | Table / column | Purpose |
 |----------------|---------|
-| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`. Bumps `config_version` on every update. |
+| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`, `consolidation_enabled` (bool, default true), `consolidation_trigger_severity` (enum `'warning' \| 'critical'`, default `'warning'`). Bumps `config_version` on every update. |
 | `skill_analyzer_results.warning_resolutions` | JSONB array of reviewer decisions, deduped by `(warningCode, details.field)`. Wiped on merge edit. |
 | `skill_analyzer_results.classifier_fallback_applied` | True when rule-based merger produced the proposal. |
 | `skill_analyzer_results.execution_resolved_name` | Canonical name chosen via NAME_MISMATCH resolution; authoritative at Execute. |
@@ -2673,6 +2742,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 - `collision_max_candidates` ∈ positive integer; `execution_lock_stale_seconds` same.
 - `critical_warning_confirmation_phrase` ≥ 3 characters.
 - Cross-field invariant: `scope_expansion_standard_threshold < scope_expansion_critical_threshold` with `MIN_THRESHOLD_DELTA = 0.05` gap to prevent degenerate collapses.
+- `consolidation_trigger_severity` must be `'warning'` or `'critical'` (closed enum).
 - Every successful update emits `skill_analyzer_config_updated` structured log with `{ changedFields, before, after, configVersion }`.
 
 ### Files
@@ -2683,14 +2753,11 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 | `server/db/schema/skillAnalyzerConfig.ts` | Drizzle schema for the config singleton |
 | `server/db/schema/skillAnalyzerJobs.ts` | Jobs table (+ v2 columns) |
 | `server/db/schema/skillAnalyzerResults.ts` | Results table (+ v2 columns) |
-| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, warning codes, tier map, validator |
+| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, `buildConsolidationPrompt`, `parseConsolidationResponse`, `extractPreservationInventory`, `consolidationWordCount`, warning codes, tier map, validator. Internal helpers `canonicalJSON` + `sortKeys` give key-order-tolerant deep-equality for LLM-echoed objects. |
 | `server/services/skillAnalyzerService.ts` | Stateful — `createJob`, `getJob`, `setResultAction`, `patchMergeFields`, `resetMergeToOriginal`, `resolveWarning`, `updateProposedAgent`, `executeApproved` (3-phase staged pipeline) |
 | `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
 | `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
 | `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
-| `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Three-column merge view + `WarningResolutionBlock` with per-warning resolution controls |
-| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Review screen, `AgentChipBlock`, `ProposedAgentBanner` with Confirm/Reject |
-| `client/src/components/skill-analyzer/mergeTypes.ts` | Browser-safe mirror of the approval evaluator + warning types |
 
 ### Tests
 
@@ -3087,7 +3154,7 @@ The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-s
 ### Topology
 
 ```
-Main app (Replit/Express)        Worker (Docker, DigitalOcean)
+Main app (Replit/Express)        Worker (Docker, e2b sandboxes)
   ├─ enqueues IEE jobs              ├─ pulls jobs from pg-boss
   ├─ inserts ieeRuns rows           ├─ runs the execution loop (Playwright / shell)
   └─ serves usage/cost APIs         └─ updates ieeRuns, writes ieeSteps
@@ -3167,19 +3234,16 @@ Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req
 
 ### Worker service
 
-Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerfile`](./worker/Dockerfile) (Playwright base image) and run as the `worker` service in [`docker-compose.yml`](./docker-compose.yml). Resource limits: `IEE_WORKER_MEM_LIMIT` (default 3g), `IEE_WORKER_CPUS` (default 2). Persistent volume for browser sessions at `/var/browser-sessions`.
+Lives in [`worker/`](./worker/). **Production IEE workloads run inside e2b sandboxes** — the worker `Dockerfile` and the `worker` Compose service were retired as part of the iee-browser-on-e2b migration (CI gate `scripts/gates/verify-no-do-references.sh` enforces their absence). The worker code under `worker/src/` remains for local development (`npx tsx worker/src/index.ts`) and the pg-boss handlers (`devTask`, `costRollup`) still register against the local Postgres instance. Browser-class production tasks dispatch via `server/services/sandbox/e2bSandbox.ts` to the `iee-browser` sandbox template; the legacy `worker/src/browser/` Playwright executor is preserved as the reference implementation that the sandbox harness will be wired to once the e2b SDK is installed.
 
 | File | Purpose |
 |------|---------|
-| `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification (fails fast if the worker image was built without browsers). Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
-| `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
-| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
-| `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
-| `worker/src/handlers/cleanupOrphans.ts` | Periodic: stale workspaces, browser sessions, expired reservations |
+| `worker/src/index.ts` | Local-dev bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification. Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
+| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue (local dev only) |
 | `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
-| `worker/src/loop/executionLoop.ts` | The four-exit-path loop |
-| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download |
+| `worker/src/loop/executionLoop.ts` | The four-exit-path loop (reference implementation for the sandbox harness) |
+| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download (will be bundled into the `iee-browser` sandbox template when the e2b SDK lands) |
 | `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
 
 ### The execution loop
@@ -3763,7 +3827,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the in-flight registry or its UI | In-memory registry at `server/services/llmInflightRegistry.ts` + `llmInflightRegistryPure.ts`. Router wiring in `llmRouter.ts` captures `queuedAt`, `attemptSequence`, `fallbackIndex` on every add; payload snapshot in `server/services/llmInflightPayloadStore.ts` (LRU 100 / 200 KB cap with `originalSizeBytes` metadata on truncation); history fire-and-forget into `llm_inflight_history` (migration 0191) gated by a soft circuit breaker from `server/lib/softBreakerPure.ts` (50-sample window, 50% threshold, 5-min open). Client at `client/src/components/system-pnl/PnlInFlightTable.tsx` + `PnlInFlightPayloadDrawer.tsx` (row-click opens live payload; mobile card layout under `md:` breakpoint). Admin routes: snapshot + history + payload all on `server/routes/systemPnl.ts`. |
 | Add a fire-and-forget persistence path | Use `server/lib/softBreakerPure.ts` — pure sliding-window breaker (config: `windowSize`, `minSamples`, `failThreshold`, `openDurationMs`). Pattern: wrap the write with `shouldAttempt(state, now)` before + `recordOutcome(state, success, now, config)` after; log exactly once on `trippedNow: true`. Example: `persistHistoryEvent` in `llmInflightRegistry.ts`. Never block the primary path on the breaker — it only gates the write, not the caller. |
 | Stream tokens from a provider adapter | Adapter contract in `server/services/providers/types.ts` — optional `stream?(): AsyncIterable<StreamTokenChunk> & { done: Promise<ProviderResponse> }`. Router opt-in via `RouterCallParams.stream: true`. Server-side 1 Hz throttle per runtimeKey in `llmInflightRegistry.emitProgress()`; socket event `llm-inflight:progress`. Tripwires per `tasks/llm-inflight-deferred-items-brief.md` §5: cap per-stream memory, cap process-total-buffered-tokens, abort-safe cost attribution. No provider ships `stream()` yet — adding it is the hand-off from this branch. |
-| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `prototypes/system-costs-page.html`. |
+| View System-level LLM P&L | `/system/llm-pnl` (system-admin only). Service: `server/services/systemPnlService.ts`; routes: `server/routes/systemPnl.ts`; shared types: `shared/types/systemPnl.ts`; P&L math: `systemPnlServicePure.ts`. Reference UI: `_archive/prototypes/system-costs-page.html`. |
 | Modify the per-run cost panel | `client/src/components/run-cost/RunCostPanel.tsx` (thin shell) + `RunCostPanelPure.ts` (branch decisions + formatters) + `shared/types/runCost.ts` (response type) + `server/routes/llmUsage.ts` (`/api/runs/:runId/cost` handler). Panel is hosted on `SessionLogCardList`, `RunTraceView`, and `AgentEditPage` (Build stream, formerly `AdminAgentEditPage`). Pure module covers the full §9.1 rendering matrix. |
 | Modify the per-thread cost & token meter | `client/src/components/CostMeterPill.tsx` (pill UI, reads from `conversationCost` context) + `server/services/conversationCostService.ts` (aggregates `cost_cents`, `tokens_in`, `tokens_out`, `model_id` from `agent_messages`) + `shared/types/conversationCost.ts` (response shape) + route `GET /api/agents/:agentId/conversations/:convId/cost` in `server/routes/agentRuns.ts`. Migration 0262 adds the four cost columns to `agent_messages`; `agentExecutionService.ts` populates them at LLM call time. Cost approach: on-row (not `cost_aggregates` rollup) — see spec-conformance deferred B-D1 before switching to the canonical cost path. |
 | Modify the suggested next-action chips | `client/src/components/SuggestedActionChips.tsx` (chip row rendered below each assistant message) + `server/services/suggestedActionDispatchService.ts` (dispatches chip clicks to the agent) + `server/routes/suggestedActions.ts` (`POST /api/agents/:agentId/conversations/:convId/suggested-actions/:actionId/dispatch`) + `shared/types/messageSuggestedActions.ts` (`MessageSuggestedAction` shape). Chips are stored as JSONB in `agent_messages.suggested_actions` (migration 0263). Agent emits them via the `suggest_next_actions` action registered in `server/config/actionRegistry/` (see `configuration.ts`) and handled by `server/services/skillExecutor.ts`. |
@@ -3775,8 +3839,10 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Attach a Google Drive file as a live external reference | `server/services/externalDocumentResolverService.ts` (resolve pipeline) + `server/services/resolvers/googleDriveResolver.ts` (Drive fetch + normalisation) + `server/routes/externalDocumentReferences.ts` (CRUD) + `server/routes/integrations/googleDrive.ts` (OAuth + picker). Cache: `document_cache`. Audit log: `document_fetch_events`. Pure helpers: `server/services/runContextLoaderPure.ts`. See §External Document References above. |
 | Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry/clientpulse.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
 | Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
-| Modify the document retrieval pipeline (chunk ranking, mode handling, scope precedence) | `server/services/retrievalServicePure.ts` (pure ranker, comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` — DO NOT REORDER) + `server/services/retrievalService.ts` (DB-backed surface) + `server/services/documentRetrievalServicePure.ts` (mode + version-pinning filters) + `server/services/documentChunkingServicePure.ts` (chunk boundaries) + `server/services/documentEmbeddingService.ts` + `server/services/documentSummariseService.ts` + `server/services/retrievalObservabilityService.ts` + `server/services/retrievalObservabilityServicePure.ts` + `shared/types/retrieval.ts`. Jobs: `documentSummariseJob`, `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`. Tables: `reference_documents` (extended), `reference_document_chunks`, `reference_document_data_sources`, `document_promotion_audit`. Migrations 0288–0294. See § Document Retrieval Pipeline above. |
-| Modify the Knowledge Documents / Files tabs | `client/src/pages/govern/KnowledgePage.tsx` (tab strip) + `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` + `client/src/pages/govern/components/KnowledgeFilesTab.tsx` + `client/src/api/filesApi.ts`. Mockups: `prototypes/auto-knowledge-retrieval/` (design source of truth). Routes: `GET /api/reference-documents/...` + `GET /api/files/...`. |
+| Modify the document retrieval pipeline (chunk ranking, mode handling, scope precedence) | `server/services/retrievalServicePure.ts` (pure ranker, comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` — DO NOT REORDER) + `server/services/retrievalService.ts` (DB-backed surface) + `server/services/retrievalQueryEmbedderPure.ts` (cosine similarity, recall fallback predicate, env-flag config) + `server/services/documentRetrievalServicePure.ts` (mode + version-pinning filters) + `server/services/documentChunkingServicePure.ts` (chunk boundaries) + `server/services/documentEmbeddingService.ts` + `server/services/documentSummariseService.ts` + `server/services/retrievalObservabilityService.ts` + `server/services/retrievalObservabilityServicePure.ts` + `shared/types/retrieval.ts`. Jobs: `documentSummariseJob`, `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`. Tables: `reference_documents` (extended), `reference_document_chunks`, `reference_document_data_sources`, `document_promotion_audit`. Migrations 0288–0294, 0333, 0334, 0345. See § Document Retrieval Pipeline above. |
+| Modify memory-block lineage or the Sources tab | `server/services/memoryBlockSourcesService.ts` + `server/db/schema/memoryBlockVersionSources.ts` + `server/routes/memoryBlockSources.ts` + `client/src/pages/MemoryBlockSourcesTab.tsx` + `client/src/pages/MemoryBlockDetailPage.tsx`. Table: `memory_block_version_sources` (migration 0333). |
+| Modify the Memory Utility dashboard | `server/services/memoryUtilityQueryService.ts` + `server/services/memoryUtilityDailySeriesPure.ts` + `server/services/memoryUtilityRefreshService.ts` + `server/routes/memoryUtility.ts` + `server/db/schema/mvMemoryUtility30d.ts` + `client/src/pages/MemoryUtilityTab.tsx` + `client/src/pages/UsagePage.tsx`. Table: `mv_memory_utility_30d` (migration 0345). Column: `agent_runs.injected_entry_ids` (migration 0334). |
+| Modify the Knowledge Documents / Files tabs | `client/src/pages/govern/KnowledgePage.tsx` (tab strip) + `client/src/pages/govern/components/KnowledgeDocumentsTab.tsx` + `client/src/pages/govern/components/KnowledgeFilesTab.tsx` + `client/src/api/filesApi.ts`. Mockups: `_archive/prototypes/auto-knowledge-retrieval/` (design source of truth). Routes: `GET /api/reference-documents/...` + `GET /api/files/...`. |
 | Add a new document-retrieval scope tier | Spec amendment first. Then: extend the CHECK constraint in a corrective migration that names the new FK column explicitly (per § Five-tier scope model in Document Retrieval Pipeline). Update `reference_document_data_sources` schema, RLS policy, indexes, and the scope-precedence comparator in `retrievalServicePure.ts`. The polymorphic `scope_type`/`scope_id` shape is explicitly rejected — keep the named-FK pattern. |
 | Promote a file to a Knowledge document | `server/services/documentPromotionService.ts` (transaction: file → document row + link rows + `document_promotion_audit` row inside one tx) + `server/jobs/documentPromotionFinaliseJob.ts` (post-commit side effects: flip `execution_files.expiresAt` to NULL, emit telemetry). The `document_promotion_audit` row with `UNIQUE (file_id) WHERE deleted_at IS NULL` is the idempotency anchor — it prevents the promotion path from re-running if expiry races finalise. UI: `client/src/pages/govern/components/KnowledgeFilesTab.tsx` "Add to Knowledge" action. |
 | Add a new agent execution log event type | Extend the union in `shared/types/agentExecutionLog.ts` (AgentExecutionEventType + AgentExecutionEventPayload + AGENT_EXECUTION_EVENT_CRITICALITY) and add a validator branch in `server/services/agentExecutionEventServicePure.ts::validateEventPayload`. Emit via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. If the new type links to a new entity kind, extend `LinkedEntityType` + the mask branch in `server/lib/agentRunEditPermissionMaskPure.ts` + the batched label resolver in `server/lib/agentRunEditPermissionMask.ts`. Pure tests under `server/services/__tests__/agentExecutionEventServicePure.test.ts`. Spec: `tasks/live-agent-execution-log-spec.md` §5.3a. |
@@ -3817,6 +3883,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
 | Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
+| Modify the Operator Backend (chain-link dispatch, chain-resume, cost writer, settings) | `server/services/executionBackends/operatorManagedBackend.ts` (adapter) + `server/services/operatorChainResumeService.ts` (resume payload) + `server/services/operatorTaskProfileService.ts` (browser profile) + `server/services/subaccountOperatorSettingsService.ts` (per-subaccount settings) + `server/services/operatorCostWriter.ts` (cost rows) + `server/services/operatorChainSchedulerService.ts` (FIFO dispatch). See §Operator Backend (operator-backend, 2026-05) for full file inventory. |
 | Modify operator_session connections (CRUD) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
 | Modify the credential broker | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + provider registry at `server/config/operatorSessionProviders.ts` |
 | Add a new operator_session provider | `server/config/operatorSessionProviders.ts` — extend the registry; bump `OPERATOR_SESSION_DISCLOSURE_VERSION` if disclosure copy changed |
@@ -3906,6 +3973,30 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Shared contracts | `shared/types/govern.ts`, `client/src/api/governApi.ts` |
 | Schema additions | `server/db/schema/memoryBlocks.ts` (`auto_update_disabled`), `server/db/schema/memoryBlockVersions.ts` (`body_hash`), `migrations/0287_govern_auto_update_disabled.sql` |
 
+#### Personal Assistant / Executive Assistant (personal-assistant-v1, 2026-05)
+
+| Concern | Files |
+|---|---|
+| EA draft CRUD routes | `server/routes/eaDrafts.ts` — `GET/POST /api/ea-drafts`, `POST /api/ea-drafts/:id/approve` |
+| EA draft service | `server/services/eaDrafts/eaDraftService.ts` |
+| EA provisioning (personal setup) | `server/services/eaDrafts/eaProvisioningService.ts` + `POST /api/personal/setup` route |
+| Voice profile service | `server/services/calendar/voiceProfileService.ts` + `GET/POST /api/voice-profiles` route |
+| Calendar action service | `server/services/calendar/calendarActionService.ts` — executes `calendar.*` skill handlers |
+| Slack action service | `server/services/slack/slackActionService.ts` — executes `slack.*` skill handlers |
+| Home widget service | `server/services/homeWidgetService.ts` + `GET /api/agent-home-widgets` route |
+| External source triggers | `server/services/triggers/` — Gmail inbox poll, calendar lookahead, external_trigger_dedup dedup table |
+| Action registry — calendar skills | `server/config/actionRegistry/calendar.ts` |
+| Action registry — Slack user skills | `server/config/actionRegistry/slack.ts` |
+| Background jobs | `server/jobs/voiceProfileRefreshJob.ts`, `server/jobs/gmailInboxPollJob.ts`, `server/jobs/calendarLookaheadJob.ts` |
+| Schema | `server/db/schema/eaDrafts.ts`, `server/db/schema/voiceProfiles.ts`, `server/db/schema/externalTriggerDedup.ts` |
+| Client — first-run wizard | `client/src/components/EAFirstRunWizard.tsx` |
+| Client — personal assistant page | `client/src/pages/PersonalAssistantPage.tsx` |
+| Client hooks | `client/src/hooks/useEADrafts.ts`, `client/src/hooks/useHomeWidgets.ts`, `client/src/hooks/useVoiceProfile.ts`, `client/src/hooks/useUserOwnedAgents.ts` |
+| Permissions | `VOICE_PROFILE_READ`, `VOICE_PROFILE_WRITE`, `EA_DRAFT_READ`, `EA_DRAFT_DECIDE`, `HOME_WIDGET_READ`, `EA_PROVISION` |
+| Skill definitions | `server/skills/calendar-*.md` (6 files), `server/skills/slack-*.md` (6 files) |
+| EA draft F2 invariant | `ea_drafts.send_state` is NEVER `approved`; approval is on `actions.status`. See KNOWLEDGE.md [2026-05-13] entry. |
+| EA draft proposal-action 1:1 invariant | `ea_drafts.proposal_action_id` is UNIQUE (migration 0344). `createDraftWithProposal` upstream idempotency key carries a per-call discriminator (`targetRef` or hashed `{ kind, body }`) so two drafts of the same kind from the same run + owner produce different proposal actions. See KNOWLEDGE.md [2026-05-13] Pattern — Idempotency keys MUST include a per-emission discriminator. |
+
 #### Trust & Verification Layer (trust-verification-layer, 2026-05)
 
 Three-stage quality layer: runtime skill checks (Stage 1), scoring + bench evaluation (Stage 2), operator correction memory (Stage 3). Spec: `tasks/builds/trust-verification-layer/spec.md`.
@@ -3945,6 +4036,79 @@ Six new permission keys (migration 0297):
 | `scorecard:judge:forced` | Event-driven (enqueued on correction) | teamSize 4, teamConcurrency 1 | Forced judgement triggered by operator correction |
 | `bench:execute` | Event-driven (enqueued by POST /bench-runs/:id/run) | teamSize 2, teamConcurrency 1 | Execute a bench run against all bench items |
 | `correction:pattern-detect` | Daily 05:00 UTC | teamSize 1, teamConcurrency 1 | Cluster operator corrections; promote patterns to pending_review memory blocks |
+
+#### Operator Backend (operator-backend, 2026-05)
+
+New `operator_managed` execution adapter. Drives long-form autonomous tasks across sequential 120-minute chain links using an operator-session subscription or API-key fallback. Parallel to IEE (`iee_runs`) with chain-link state in `operator_runs`. See ADR `docs/decisions/0011-operator-backend-chain-resume-model.md` for the D8+D11 scope-lock rationale.
+
+**Key files per domain:**
+
+| Concern | Files |
+|---------|-------|
+| Adapter registration + lifecycle | `server/services/executionBackends/operatorManagedBackend.ts` — implements `dispatch`, `loadTerminalState`, `finalise`, `reconcile`, `cancel`; registered at `server/index.ts` alongside the five existing adapters |
+| Pure helpers (failure classifier, finaliser decision, stickiness) | `server/services/executionBackends/operatorManagedBackendPure.ts` |
+| Chain-resume payload composer | `server/services/operatorChainResumeService.ts` + `server/services/operatorChainResumeServicePure.ts` (K=5 conversation-history window) |
+| Per-task browser profile lifecycle | `server/services/operatorTaskProfileService.ts` + `server/services/operatorTaskProfileServicePure.ts` (retention-window math, GC scheduling) |
+| Per-subaccount operator settings | `server/services/subaccountOperatorSettingsService.ts` + `server/services/subaccountOperatorSettingsServicePure.ts` (range validation; ETag = `String(settings_version)` — integer column, R2-F3) |
+| Cost writer (subscription_mediated + sandbox_compute rows) | `server/services/operatorCostWriter.ts` + `server/services/operatorCostWriterPure.ts` (idempotency key: `(operator_run_id, source_type, boundary)`) |
+| Chain-link FIFO scheduler + concurrency-cap accounting | `server/services/operatorChainSchedulerService.ts` + `server/services/operatorChainSchedulerServicePure.ts` |
+| Suspension CS notification | `server/services/operatorSessionSuspensionNotifier.ts` — emits `cs.operator_session.suspended_detected` |
+| Typed error classes | `server/services/operatorBackendErrors.ts` — `OperatorBackendConflictError` (409), `OperatorSessionLimitExceededError` (429) |
+| Runtime error classifier | `server/services/operatorRuntimeErrors.ts` — closed set; maps HTTP/broker signals to `session_unavailable` etc. |
+| Task-action routes | `server/routes/operatorTasks.ts` — retry-chain-failure, extend-budget, fresh-profile-restart, cancel |
+| Per-subaccount settings routes | `server/routes/subaccountOperatorSettings.ts` — `GET / PATCH` under `/api/admin/subaccounts/:id/operator-settings` |
+| Progress poll route | `server/routes/operatorSessions.ts` — `GET /api/subaccounts/:subaccountId/operator-sessions/:operatorRunId/progress` |
+| pg-boss handlers | `server/jobs/operatorSessionCompletedHandler.ts`, `server/jobs/operatorSessionDispatchNextChainLinkHandler.ts`, `server/jobs/operatorSessionProgressedHandler.ts`, `server/jobs/operatorTaskProfileGcHandler.ts` |
+| Encryption helper | `server/services/agentRunPayloadEncryptionService.ts` — wraps pgcrypto for `checkpoint_payload` at rest |
+| Schema — chain-link rows | `server/db/schema/operatorRuns.ts` (parallel to `iee_runs`; `operator_runs` table) |
+| Schema — persistent browser profiles | `server/db/schema/operatorTaskProfiles.ts` |
+| Schema — per-subaccount settings | `server/db/schema/subaccountOperatorSettings.ts` (mirrors `subaccount_optimiser_settings`; includes `settings_version` integer for ETag) |
+| Shared types | `shared/types/operatorRuns.ts`, `shared/types/checkpointPayload.ts` (`CheckpointPayloadSchemaV1`), `shared/types/operatorConversationArtefact.ts` (`OperatorConversationLinkArtefact`, MIME constant), `shared/types/operatorBackendEvents.ts` (single source of truth for `operator-session.*` event-name literals) |
+| Settings UI tab | `client/src/pages/govern/operatorSettings/OperatorSettingsTab.tsx` + `_fields.tsx` — "Operator" tab on `AdminSubaccountDetailPage`, between Board Config and Usage |
+| Run Trace integration | `client/src/components/run-trace/ChainLinkDivider.tsx`, `client/src/components/run-trace/AttemptGroup.tsx` |
+| Task-view operator UI | `client/src/components/openTask/OperatorChainLinkIndicator.tsx`, `client/src/components/openTask/OperatorAutoExtendBanner.tsx` |
+| Operator modals + badge + filter | `client/src/components/operator/OperatorBadge.tsx`, `OperatorFilterToggle.tsx`, `OperatorConcurrencyLimitModal.tsx`, `OperatorUnavailableModal.tsx`, `OperatorBudgetExceededModal.tsx` |
+| Client API helpers | `client/src/lib/api/operatorTasks.ts` |
+| Migrations | `migrations/0335–0339` (operator_runs, operator_task_profiles, subaccount_operator_settings, agent_runs extensions: `operator_chain_failure_count`, llm_requests extensions), `0340` (sandbox_executions: `sandbox_start_key`), `0341` (agent_runs: `per_task_budget_extension_minutes` — per-task accumulator for extend-budget route), `0342` (agent_runs: `assigned_user_id` — data source for the route actor-rule "assigned user OR manager+") |
+| CS runbook | `docs/runbooks/operator-session-account-suspension.md` + comms templates in `docs/runbooks/templates/` |
+
+**Sandbox primitive extension (additive, Spec B unchanged for non-operator callers):**
+`SandboxRunTaskInput` (`shared/types/sandbox.ts`) gains optional `sandboxStartKey?: string`. `sandboxExecutionService` gains `adoptOrStart(input)` for dispatch-crash recovery. Non-operator callers compile unchanged (field is optional; existing `runTask` path is byte-identical).
+
+**Chain-resume model (ADR-0011):**
+One agent run = 1..N chain links. Each chain link is an `operator_runs` row. When the soft session cap approaches, the operator checkpoints and exits; the `operator-session-dispatch-next-chain-link` queue triggers the next link. Chain links communicate via `operator_runs.checkpoint_payload` (encrypted at rest) and the persistent browser profile (`operator_task_profiles`). The `paused_for_chain_continuation` task state holds the task between links. Dispatcher predicate excludes `'cancelled'` — cancellation-vs-dispatch race is safe.
+
+**Per-subaccount operator settings:**
+`subaccount_operator_settings` table with dual-GUC RLS (`app.organisation_id` AND `app.subaccount_id`). Every read/write calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` (`server/lib/orgScoping.ts`) before touching the table. ETag is `String(settings_version)` (integer column incremented on every PATCH — collision-free even for same-second writes).
+
+**Four new pg-boss queues:**
+
+| Queue name | Purpose |
+|------------|---------|
+| `operator-session-completed` | Terminal chain-link finalisation (triggers `finaliseAgentRunFromBackend`) |
+| `operator-session-dispatch-next-chain-link` | FIFO chain-continuation dispatch |
+| `operator-session-progressed` | Mid-run progress updates (step_count, last_progress_at) |
+| `operator-task-profile-gc` | Deferred browser-profile garbage collection |
+
+**Vendor codename discipline:** the vendor operator runtime codename appears only in `infra/sandbox-templates/operator-session/Dockerfile` and env-manifest entries. It does not appear in code, schema, UI, telemetry, customer copy, or this document.
+
+**Permissions:**
+
+| Permission slug | Guard location | Grants |
+|----------------|---------------|--------|
+| `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` | `server/routes/subaccountOperatorSettings.ts` PATCH route | Allows PATCH to `subaccount_operator_settings` for the requesting subaccount |
+
+The PATCH route also requires `AGENTS_EDIT` (general). `SUBACCOUNT_OPERATOR_SETTINGS_WRITE` is the fine-grained gate layered on top — org_admin-only in practice per the route actor-rule.
+
+**ExecutionCapability literals (operator-backend additions):**
+
+`'long_running'` — signals that the adapter can handle tasks whose total wall-clock duration exceeds a single session cap by checkpointing and continuing across chain links. Dispatcher must honour `settings_snapshot.max_wall_clock_per_task_days`.
+
+`'session_identity'` — signals that the adapter maintains a persistent browser profile (`operator_task_profiles`) between chain links within a task attempt. Retry path must preserve the profile row; fresh-profile-restart bumps `attempt_number` and supersedes prior chain links.
+
+Both literals are defined at `server/services/executionBackends/types.ts` (single source of truth). The CI gate `scripts/gates/verify-execution-capability-references.sh` enforces that `'long_running'` and `'session_identity'` strings appear only in the canonical types file, adapter declarations, test fixtures, and documentation.
+
+**Universal `OpenTaskView` + run-trace invariant:** Every controller — native, operator-mode, and future controller styles — surfaces through the same `OpenTaskView` primitives and the same event renderer. V2 adds four event variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) and zero new visual chrome. The invariant is enforced by the shared `AGENT_EXECUTION_EVENT_CRITICALITY` registry (`shared/types/agentExecutionLog.ts`) and the `verify-operator-event-registry.sh` gate.
 
 ---
 
@@ -4067,6 +4231,23 @@ Three detectors for the delegation subsystem (all in `server/services/workspaceH
 - `subaccountMultipleRoots` (Phase 1, severity `critical`) — partial unique index violation; investigate immediately.
 - `subaccountNoRoot` (Phase 1, severity `info`) — subaccount lacks a root; briefs fall back to org-level routing.
 - `explicitDelegationSkillsWithoutChildren` (Phase 4, severity `info`) — agent has the delegation trio attached explicitly but no active children. Supported escape hatch per §6.5; surfaces for operator awareness after team restructures.
+
+### Cross-ownership delegation pattern (V2)
+
+V2 extends hierarchical delegation to support cross-owner sub-steps: any agent in the org can delegate a sub-step to a user-owned agent (e.g., the Executive Assistant) when the sub-step requires the owner's data.
+
+Key invariants:
+- **Two-axis `RoutingContext`** — `requester_user_id` (who asked) + optional `target_owner_user_id` (whose agent to use). The matcher reads `capabilityMap.owner_user_id`; when set, target resolves to `target_owner_user_id ?? requester_user_id`.
+- **Credentials follow the executor** — sub-runs resolve credentials with `ownerUserId = target_owner_user_id` via the existing credential broker (V1 `user-owned-agents` §3.3 invariant, unchanged).
+- **Approval routes to the owner** — cross-owner action proposals set `actions.approver_user_id = executor_agent.owner_user_id`; same-owner runs preserve V1 default (NULL = initiator-defaulted path).
+- **Run-trace privacy projection** — `runTraceProjectionForViewer` is applied at both service and route layers. Initiator-side views receive status + typed summary only; owner-side source data is private by default. Two-layer enforcement is deliberate: a future direct consumer of `agentExecutionEventService` still gets the projection.
+- **`target_owner_user_id` is server-side-only** — HTTP-supplied values are discarded before `RoutingContext` is built. Never accepted from client/FE input.
+- **Single terminal event per `(parent_run_id, substep_id)`** — `delegation_outcomes` UPDATE predicate is `WHERE id = $2 AND terminal_at IS NULL`; 0 rows updated means already-terminal, and no event is emitted.
+- **Cross-org service-layer fail-closed** — `agentExecutionEventService.streamEvents` and `streamEventsByTask` scope the owner lookup by `opts.forUser.organisationId`; a cross-org or missing runId fails closed (empty page) rather than coercing the projection to "subaccount-owned, all visible".
+
+State machine columns added in migration 0352: `substep_status` (ten-value union), `terminal_at`, `cross_owner_approval_timeout_policy` (three-value union). Partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` supports the status query.
+
+Timeout-sweep durability columns added in migrations 0354-0356: `substep_status_updated_at` (auto-bumped by trigger on real status transitions; used by sweep cutoff filter), `awaiting_initiator_event_claim_at` + `awaiting_initiator_event_emitted_at`, `terminal_event_claim_at` + `terminal_event_emitted_at`. The pattern is atomic-claim-then-emit with a 5-minute stale-claim TTL: every emit attempt claims via `UPDATE *_event_claim_at = NOW() WHERE *_event_emitted_at IS NULL AND (claim_at IS NULL OR claim_at < NOW() - 5min) RETURNING id`; only the claim winner appends the event; on success the matching `_event_emitted_at` is set. `crossOwnerApprovalTimeoutSweep` runs a retry pass at the start of every sweep to re-emit stranded terminal events.
 
 ---
 

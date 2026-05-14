@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-11 (Sandbox Isolation: Tier 4 isolated code execution capability added — external compute provider-backed, default-deny network, schema-validated output, cost-ceiling enforcement, insert-only cost ledger)
+> **Last updated:** 2026-05-12 (Subscription-Driven Long-Task Execution: subscription-mediated session management, automatic chain-resume across sessions, persistent browser context per task, graceful fallback to direct billing, per-subaccount session limits)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -58,8 +58,10 @@ This document is written for external-ready, marketing- and sales-appropriate la
   - [Pages & Content Builder](#pages--content-builder)
   - [Integration Framework](#integration-framework)
   - [Execution Infrastructure](#execution-infrastructure)
+  - [Personal Assistant](#personal-assistant)
   - [Sandboxed Runtime (IEE)](#sandboxed-runtime-iee)
   - [Persistent Agent Workspace](#persistent-agent-workspace)
+  - [Subscription-Driven Long-Task Execution](#subscription-driven-long-task-execution)
 - [Replaces / Consolidates](#replaces--consolidates)
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
@@ -295,7 +297,7 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 - **Per-client skill customisation** — Workspaces can create custom skills that replace platform defaults, so each client gets exactly the behaviour they need
 - **Per-agent allowlists** — Each agent link specifies exactly which skills are available — no accidental access to capabilities a client shouldn't use
 - **Skill authoring** — Definition editor, regression simulation, version history, and rollback across all scopes; accessible from the agent edit surface under the Skills tab
-- **Skill Analyzer** — Bulk import skill libraries from uploaded files, pasted JSON, or a GitHub repo; the platform compares every incoming skill against the existing catalogue, produces a recommended merge for near-duplicates, flags scope creep, name collisions, capability overlap, missing review gates, and required-field regressions, and routes each candidate to a reviewer with structured accept / restore / rename / acknowledge decisions. Approval is locked once granted — edits require explicit unapprove — and every run captures a snapshot of the approval state for audit. When the comparison engine is offline, a deterministic rule-based merger still produces a proposal flagged as low-confidence so the library never stalls. Execution is transactional across skills and suggested new agents, with a pre-mutation backup for one-click rollback.
+- **Skill Analyzer** — Bulk import skill libraries from uploaded files, pasted JSON, or a GitHub repo; the platform compares every incoming skill against the existing catalogue, produces a recommended merge for near-duplicates, flags scope creep, name collisions, capability overlap, missing review gates, and required-field regressions, and routes each candidate to a reviewer with structured accept / restore / rename / acknowledge decisions. When a recommended merge expands too far beyond the source skill, the platform automatically runs a second tightening pass before showing it to the reviewer; the tightened recommendation is the one used downstream, and the pre-tightening draft is retained for audit. Approval is locked once granted — edits require explicit unapprove — and every run captures a snapshot of the approval state for audit. When the comparison engine is offline, a deterministic rule-based merger still produces a proposal flagged as low-confidence so the library never stalls. Execution is transactional across skills and suggested new agents, with a pre-mutation backup for one-click rollback.
 - **Full version history** — Every skill change is tracked with immutable versions; restore any previous version with one click
 - **Built-in safeguards** — Total skill instructions are capped to prevent runaway costs; backup/restore built in for safe experimentation
 - **Review gating** — 42+ skills require human approval before execution; 6 deterministic skills run instantly without AI involvement
@@ -533,6 +535,20 @@ Production-grade reliability — agents run consistently, recover from failures,
 - Infinite loop detection, automatic crash recovery, and full execution tracing for debugging
 - **Working time accounting:** billable compute time tracked per run and surfaced in the Usage Explorer — the working-time chart in each agent's workspace is the same number on the invoice.
 
+### Personal Assistant
+
+A dedicated AI assistant for individual users — monitors your calendar and inbox, handles scheduling, drafts Slack messages for your review, and keeps you briefed on what matters today.
+
+- **Calendar management** — reads your calendar to find free slots, creates and updates events, responds to invitations, and surfaces scheduling conflicts before they become problems. All calendar writes require your explicit approval before they take effect.
+- **Slack communication** — reads channel history, summarises threads, and drafts messages or DMs for your review. Nothing is posted to Slack without your sign-off — every outbound message routes through an approval step.
+- **Daily briefing** — surfaces what needs attention today: upcoming meetings, unread threads flagged as high-priority, and outstanding requests the assistant identified in your inbox.
+- **Inbox triage** — scans incoming email for action items, deadlines, and follow-up requests; surfaces them as a prioritised review queue rather than leaving you to excavate each message yourself.
+- **Meeting prep** — compiles relevant context for upcoming meetings: prior notes, related tasks, and open items from previous conversations with the same attendees.
+- **Voice and tone** — learns your communication style and applies it when drafting replies and messages, so output sounds like you rather than a generic assistant.
+- **Personal connection privacy** — the assistant uses your personal connected accounts (calendar, email, Slack) exclusively. No other user or agent can access these credentials.
+- **One-time setup** — connects to your accounts in a guided first-run wizard; your personal assistant is available immediately once connections are established.
+- **Standing autonomous operator** — when configured in autonomous mode, your personal assistant operates continuously on your behalf: monitoring your accounts, taking actions within your approval settings, and reporting back when tasks are complete. All autonomous actions respect your configured approval policies; actions above your approval threshold pause for your review before executing.
+
 ### Sandboxed Runtime (IEE)
 
 Agents that need to do real work on systems without APIs — filling forms, navigating websites, downloading files, scraping paywalled content — get an on-demand isolated environment provisioned just for that task. When the task completes, the environment is released; nothing persists between runs.
@@ -554,6 +570,17 @@ Every agent has a named, persistent workspace that operators can open at any tim
 - **Files produced** — every file the agent delivered appears in the workspace with a direct link. No hunting through run logs to find what the agent generated.
 - **Working time** — billable compute time is tracked automatically and shown as a working-time chart inside the workspace. The chart is the invoice line — what the agent was actively running, not idle time.
 - **Fleet view at a glance** — the Home page shows all agents at a glance, sectioned by what they're doing: Waiting on you, Working now, Failing, Scheduled next, Idle. One screen replaces the need to check each agent individually.
+
+### Subscription-Driven Long-Task Execution
+
+Agents that need to run multi-hour or multi-day tasks — where per-token API spend would be prohibitive — can instead run inside a subscription-mediated session that dramatically reduces cost. The platform handles the full lifecycle: session credential management, session-to-session continuity, fallback to direct billing if the session becomes unavailable, and per-task cost tracking in the usage explorer.
+
+- **Long-form tasks without a time ceiling** — a single task can span multiple automated sessions, each picking up exactly where the last left off. The user sees one task progressing, not a series of separate attempts.
+- **Automatic session continuity** — when a session approaches its limit, the agent self-checkpoints and the platform automatically starts the next session with the agent's state fully restored. No user action required.
+- **Persistent browser context** — each task maintains its own browser identity across sessions, so authenticated sites and in-progress workflows stay live for the duration of the task.
+- **Graceful fallback** — if a subscription session becomes unavailable mid-task, the platform detects it, optionally continues on direct billing, and pauses the task with a clear notification rather than failing silently.
+- **Subscription-mediated cost attribution** — the usage explorer tracks both subscription and direct-billing costs separately per task, so agencies see the true cost of delivery for each execution mode.
+- **Per-subaccount limits** — operators set concurrency caps, per-task session budgets, and retry policies per subaccount from the Connections page settings. Changes take effect on the next session.
 
 ---
 
@@ -828,6 +855,21 @@ Structured access to connected helpdesk inboxes. All read skills are non-destruc
 - **Mobile-responsive operations view** — the in-flight tab renders as a card layout on phones and tablets so on-call response doesn't require a desktop. Same data, same real-time updates.
 - **Token-level streaming progress (infrastructure ready)** — the platform supports token-by-token progress events from LLM providers that expose streaming. Admins see a live tokens-so-far indicator alongside elapsed time during multi-minute reasoning generations. Adapter-level wiring to specific providers rolls out as each vendor's streaming API is adopted.
 
+### Memory Injection Utility
+
+| | |
+|---|---|
+| **Outcome** | Operators see what percentage of injected memory context is actually cited by agents, and which agents have the most and least effective memory — so they can tune memory configuration against evidence rather than intuition |
+| **Trigger** | Reviewing agent effectiveness, preparing for a memory-configuration audit, or investigating why an agent keeps repeating information it was already given |
+| **Deliverable** | 30-day trend charts (entry citation rate, block citation rate) and a per-agent breakdown table with measured run counts and utility percentages |
+
+- **Entry utility and block utility tracked separately** — workspace memory entries (discrete captured facts) and memory blocks (synthesised summaries) have different citation patterns. Tracking them separately lets operators distinguish "the synthesis is good but the blocks are too long for the agent to use" from "the synthesis is poor and the raw entries are what actually helps."
+- **Measured vs. unmeasured run count** — runs before the measurement substrate was added are counted as unmeasured, not as zero-utility. The dashboard never misrepresents old runs as evidence of poor memory injection.
+- **30-day rolling window with daily granularity** — the chart shows trend direction, not just a current snapshot. A falling utility score after a memory-configuration change is legible immediately.
+- **Per-agent breakdown sorted by entry utility** — agents with fewer than 10 measured runs show "Insufficient data" rather than a misleading low percentage based on one run.
+- **Line-chart gaps for missing data** — days with no measured runs render as gaps in the chart line, not as drops to zero. The visual accurately represents data availability.
+- **Nightly refresh, live daily series** — the per-agent table refreshes nightly (slight lag expected); the daily-series charts reflect live run data.
+
 ### Tier 4 Isolated Code Execution
 
 | | |
@@ -914,6 +956,25 @@ Complete list of all 117 skills.
 | `score_lead` | Score an inbound or outbound lead against configured qualification criteria | LLM | — |
 | `trigger_account_intervention` | Propose intervention action (check-in, pause, alert) | LLM | HITL |
 | `update_crm` | Write contact/deal updates to CRM | Deterministic | HITL |
+
+### Calendar & Personal Productivity
+
+User-scoped calendar and Slack skills available to the Personal Assistant. All write operations route through the review queue — nothing executes without the owner's approval.
+
+| Skill | Description | Type | Gate |
+|-------|-------------|------|------|
+| `calendar.list_events` | List calendar events in a date range for the connected user | Deterministic | — |
+| `calendar.get_event` | Retrieve full detail for a specific calendar event | Deterministic | — |
+| `calendar.find_free_slot` | Find available meeting slots across a date range, respecting existing commitments | Deterministic | — |
+| `calendar.create_event` | Propose a new calendar event for review before it is created | LLM | HITL |
+| `calendar.update_event` | Propose changes to an existing calendar event for review before they are applied | LLM | HITL |
+| `calendar.respond_to_invite` | Draft an accept, decline, or tentative response to a calendar invitation for review | LLM | HITL |
+| `slack.list_channels` | List Slack channels the connected user is a member of | Deterministic | — |
+| `slack.read_channel` | Read recent messages from a Slack channel | Deterministic | — |
+| `slack.search_messages` | Search across Slack workspace messages (requires paid Slack plan) | Deterministic | — |
+| `slack.summarise_thread` | Summarise a Slack thread into key points and action items | LLM | — |
+| `slack.post_message` | Draft a message to a Slack channel for review before posting | LLM | HITL |
+| `slack.post_dm` | Draft a Slack direct message for review before sending | LLM | HITL |
 
 ### Email & Communication
 
@@ -1156,6 +1217,7 @@ _Skill authoring is now accessed via the agent edit surface (Skills tab). The `s
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-12 | Subscription-Driven Long-Task Execution: add product capability section covering subscription-mediated long-form tasks, automatic session continuity (chain-resume), persistent browser context per task, graceful session-unavailability fallback to direct billing, subscription-mediated cost attribution, and per-subaccount session limits. Vendor-neutral; reflects the Operator Backend build (operator-backend branch). | — |
 | 2026-05-07 | Consolidation Build: retire 9 legacy admin pages (AdminAgentsPage, AdminAgentEditPage, AdminSkillsPage, AdminSkillEditPage, SkillStudioPage, SkillAnalyzerPage, SystemAgentsPage, ScheduledTasksPage, GoalsPage) into 4 consolidated Build-stream pages (AgentsListPage, AgentEditPage, RecurringTasksPage, ProjectEditPage). Skill authoring now accessed via AgentEditPage > Skills tab. Goals migrated to ProjectEditPage. Skills Reference section "Skill Studio" renamed "Skill Authoring" to reflect consolidated entry point. See ADR 0007. | — |
 | 2026-05-04 | F1 Sub-Account Baseline Artefacts (migration 0277): sub-accounts now capture six baseline artefacts at onboarding via the baseline-artefacts-capture workflow. Brand identity and voice/tone (tier 1) are prepended to every client-touching agent run system prompt in hash-stable order for prefix caching. Offer positioning and audience profile (tier 2) are injected when the agent role matches the artefact domain. Operating constraints and proof library (tier 3) are stored in workspace memory and retrieved on demand. Artefact capture status is tracked per sub-account in a versioned JSONB field. The onboarding wizard includes a dedicated capture step; captured artefacts are editable from the sub-account Knowledge page. | — |
 | 2026-05-04 | Agent Spending: ship the agent spending primitive — operator-defined Spending Budgets per sub-account with hard ceiling, daily and monthly caps, and a kill switch that pauses all charges immediately and is re-checked at execute time. Each budget carries a Spending Policy with per-transaction limits, merchant allowlists, approval thresholds, and category rules; policies start in shadow mode (full decision logic, no money moved) and require an explicit approval to promote to live. Per-charge approval gates pause high-risk charges before execution; expired approvals re-queue rather than executing late. Multi-channel approval routing supports per-sub-account and shared agency-level channels. Five payment skills (`pay_invoice`, `purchase_resource`, `subscribe_to_service`, `top_up_balance`, `issue_refund`) all route through one charge router for uniform policy decisions, idempotency, and ledger writes. Immutable spend ledger as append-only audit trail with database-level lifecycle guards; settled-vs-in-flight visibility distinguishes money moved from money committed. Refunds preserve the original charge record by writing a new inbound-refund ledger entry. Tenant-isolated at the database level for budgets, policies, channels, and ledger rows. Compute Budget rename (formerly "Budget") clears the namespace for the new spending primitive — vocabulary lock: no bare "Budget" in the product. | — |

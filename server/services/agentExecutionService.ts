@@ -32,7 +32,9 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   buildResumeContext,
   computeRunResultStatus,
+  assembleVoiceBlock,
 } from './agentExecutionServicePure.js';
+import * as voiceProfileService from './voiceProfile/voiceProfileService.js';
 import {
   streamMessages as streamAgentRunMessages,
 } from './agentRunMessageService.js';
@@ -250,6 +252,10 @@ function buildBackendOptionsForMode(
         backendId: 'iee_dev',
         ieeTask: request.ieeTask as never,
       };
+    case 'operator_managed':
+      // operator_managed runs are dispatched by the operator backend service,
+      // not through this function. Reaching here is a programming error.
+      throw new Error(`buildBackendOptionsForMode: 'operator_managed' runs must be dispatched via operatorRunService, not agentExecutionService`);
     default: {
       const _exhaustive: never = mode;
       void _exhaustive;
@@ -1251,6 +1257,24 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
 
+      // Personal Assistant V1 §12.4, §22.3 — voice block injection.
+      // SOT: memory_block named 'ea.voice_profile_id' carries the profile UUID.
+      try {
+        const voiceProfileIdBlock = composedBlocks.find((b) => b.name === 'ea.voice_profile_id');
+        if (voiceProfileIdBlock?.content) {
+          const voiceProfile = await voiceProfileService.getProfile(
+            { profileId: voiceProfileIdBlock.content.trim() },
+            { organisationId: request.organisationId },
+          );
+          const voiceBlock = assembleVoiceBlock(voiceProfile);
+          if (voiceBlock) {
+            systemPromptParts.push(`\n\n---\n${voiceBlock}`);
+          }
+        }
+      } catch {
+        // Non-fatal — agent runs without voice block if profile is unavailable
+      }
+
       // ── Stable/dynamic split for multi-breakpoint prompt caching (Phase 0C) ──
       // Sections 1-6 + team roster = stablePrefix (cached across runs)
       // Briefing, task instructions, manifest, memory, entities, board, autonomous = dynamicSuffix
@@ -1334,6 +1358,14 @@ export const agentExecutionService = {
       );
       memory = memoryWithTracking.promptText;
       const injectedMemoryEntries = memoryWithTracking.injectedEntries;
+      // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV.
+      // Fire-and-forget: transient failure leaves the row NULL (counted as
+      // unmeasured by the MV), which is the spec-correct graceful degradation.
+      void db
+        .update(agentRuns)
+        .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
+        .where(eq(agentRuns.id, run.id))
+        .catch(() => {});
       if (memory) {
         dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
       }

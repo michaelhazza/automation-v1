@@ -3,7 +3,7 @@
 _Date: 2026-05-02_
 _Status: post-stakeholder-review revision (v2). Integrates external review feedback on top of the v1 stakeholder draft. Pre-spec._
 _Branch: `claude/workflows-brainstorm-LSdMm`_
-_Mockups: [`prototypes/workflows/`](../prototypes/workflows/index.html)_
+_Mockups: [`_archive/prototypes/workflows/`](../_archive/prototypes/workflows/index.html)_
 
 ---
 
@@ -259,7 +259,7 @@ Visualised on the canvas as a dashed orange line going backward from the Approva
 
 ## 6. Operator surface — the open task view
 
-This is the most important screen in the product. It's where 95% of operator time is spent. Mockup: [`prototypes/workflows/07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html).
+This is the most important screen in the product. It's where 95% of operator time is spent. Mockup: [`_archive/prototypes/workflows/07-open-task-three-panel.html`](../_archive/prototypes/workflows/07-open-task-three-panel.html).
 
 ### 6.1 Layout
 
@@ -331,7 +331,7 @@ The Activity column on the left and the Activity tab on the right show the same 
 
 ### 6.4 What changed from prior brief work
 
-The mockup builds on `prototypes/brief-endtoend.html` (the existing brief surface) and the live `client/src/pages/AgentChatPage.tsx`. The visual language (org chart with status dots, activity feed with View/Edit chips on linked entities, ref-chip styling) is preserved exactly.
+The mockup builds on `_archive/prototypes/brief-endtoend.html` (the existing brief surface) and the live `client/src/pages/AgentChatPage.tsx`. The visual language (org chart with status dots, activity feed with View/Edit chips on linked entities, ref-chip styling) is preserved exactly.
 
 Three meaningful changes from the brief mockup:
 
@@ -345,7 +345,7 @@ The 3-panel layout is denser than the brief — the user explicitly named this t
 
 ## 7. Authoring surface — the Studio
 
-The Studio is where org admins / power users edit the structure of a workflow template. Mockups: [`prototypes/workflows/04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) (the four A's per-step inspectors) and [`prototypes/workflows/05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) (the canvas + inspector).
+The Studio is where org admins / power users edit the structure of a workflow template. Mockups: [`_archive/prototypes/workflows/04-four-as-step-types.html`](../_archive/prototypes/workflows/04-four-as-step-types.html) (the four A's per-step inspectors) and [`_archive/prototypes/workflows/05-studio-route-editor.html`](../_archive/prototypes/workflows/05-studio-route-editor.html) (the canvas + inspector).
 
 ### 7.1 Where it lives
 
@@ -388,7 +388,7 @@ When a step is selected, the inspector shows fields specific to that step type. 
 - **V1 field types** (~7): text, textarea, single-select, multi-select, number, date, checkbox. Standard HTML form patterns; no new infrastructure.
 - **V2 deferrals.** File-upload fields, conditional fields ("show field B if field A is X"), custom validation beyond required + type, no-code forms-builder UI. We never build a separate forms studio — the author defines fields directly in the step inspector.
 
-The mockups for this surface (`prototypes/workflows/09-ask-step-authoring.html` and `prototypes/workflows/10-ask-step-runtime.html`) demonstrate the authoring inspector, the four submitter routing variants, and the runtime form-card states (awaiting / validating / submitted).
+The mockups for this surface (`_archive/prototypes/workflows/09-ask-step-authoring.html` and `_archive/prototypes/workflows/10-ask-step-runtime.html`) demonstrate the authoring inspector, the four submitter routing variants, and the runtime form-card states (awaiting / validating / submitted).
 - **Approval** — Name, what approvers see (which step outputs to render to the reviewer), approver routing (humans-only — see Section 8), quorum (N approvers required), if-approved routing, if-rejected routing (with the loop-back option)
 
 ### 7.4 Publishing
@@ -687,13 +687,13 @@ Grouped by surface so it maps cleanly to spec sections later. Effort estimates a
 
 | # | Item | Mockup | Effort |
 |---|---|---|---|
-| 6 | Open task view (3-panel: chat / activity / tabs) | [`07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) | ~5-7 days |
-| 7 | Studio canvas + inspector (the four A's) | [`05-studio-route-editor.html`](../prototypes/workflows/05-studio-route-editor.html) and [`04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) | ~7-10 days |
-| 8 | Studio chat panel (docked, agent diffs) | [`03-studio-chat-active.html`](../prototypes/workflows/03-studio-chat-active.html) for the diff-card pattern | ~3-5 days |
-| 9 | Files tab — top thumbnail strip + reader pane + document toolbar | Inside [`07-open-task-three-panel.html`](../prototypes/workflows/07-open-task-three-panel.html) (Files tab state) | ~3 days |
-| 10 | Approver picker UI (specific people / team / requester / org admin + quorum) | Inside [`04-four-as-step-types.html`](../prototypes/workflows/04-four-as-step-types.html) (Approval state) | ~1-2 days |
+| 6 | Open task view (3-panel: chat / activity / tabs) | [`07-open-task-three-panel.html`](../_archive/prototypes/workflows/07-open-task-three-panel.html) | ~5-7 days |
+| 7 | Studio canvas + inspector (the four A's) | [`05-studio-route-editor.html`](../_archive/prototypes/workflows/05-studio-route-editor.html) and [`04-four-as-step-types.html`](../_archive/prototypes/workflows/04-four-as-step-types.html) | ~7-10 days |
+| 8 | Studio chat panel (docked, agent diffs) | [`03-studio-chat-active.html`](../_archive/prototypes/workflows/03-studio-chat-active.html) for the diff-card pattern | ~3-5 days |
+| 9 | Files tab — top thumbnail strip + reader pane + document toolbar | Inside [`07-open-task-three-panel.html`](../_archive/prototypes/workflows/07-open-task-three-panel.html) (Files tab state) | ~3 days |
+| 10 | Approver picker UI (specific people / team / requester / org admin + quorum) | Inside [`04-four-as-step-types.html`](../_archive/prototypes/workflows/04-four-as-step-types.html) (Approval state) | ~1-2 days |
 | 11 | Team management page in Org settings | Not mocked — small CRUD | ~half day |
-| 12 | Workflow library page (admin-only) | [`riley-observations/08-workflows-library.html`](../prototypes/riley-observations/08-workflows-library.html) needs refresh for the four A's | ~2 days |
+| 12 | Workflow library page (admin-only) | [`riley-observations/08-workflows-library.html`](../_archive/prototypes/riley-observations/08-workflows-library.html) needs refresh for the four A's | ~2 days |
 | 13 | Document toolbar with download + open-in-new-window | Inside the Files tab | included in #9 |
 
 ### 11.3 Orchestrator changes
@@ -762,33 +762,33 @@ These were genuine design directions explored in the brainstorm and then ruled o
 
 ## 14. Mockup references
 
-All mockups live in [`prototypes/workflows/`](../prototypes/workflows/index.html). Open the index for the full set with descriptions; the table below is the canonical reference for what each mockup is for.
+All mockups live in [`_archive/prototypes/workflows/`](../_archive/prototypes/workflows/index.html). Open the index for the full set with descriptions; the table below is the canonical reference for what each mockup is for.
 
 ### 14.1 Master mockups (V1 build)
 
 | # | Mockup | Purpose | Section refs |
 |---|---|---|---|
-| 04 | [Four A's per-step inspector showcase](../prototypes/workflows/04-four-as-step-types.html) | The visual language. Click each of the four state buttons to see how Agent / Action / Ask / Approval render in a workflow with the inspector showing fields specific to that step type. | §4.2, §7.3 |
-| 05 | [Studio — route editor](../prototypes/workflows/05-studio-route-editor.html) | Canvas-first authoring. The four A's, branching as inline chips, parallel rendered as fork, Approval-on-reject as a dashed back-arrow. Inspector slide-out for the selected step. Floating bottom action bar with `Publish vN`. Chat as a docked pill bottom-left. | §7 |
-| 07 | [Open task view — 3-panel master](../prototypes/workflows/07-open-task-three-panel.html) | The operator surface. 26% chat / 22% activity (collapsible) / 52% tabs. Tabs: Now (org chart) / Plan (planned route) / Files (top thumbnail strip + reader pane with portrait + landscape support, document toolbar with download + open-in-new-window). The mockup file may still render the v1 labels "Live / Flow"; the tab names per §6.3 are Now / Plan. | §6, §9 |
+| 04 | [Four A's per-step inspector showcase](../_archive/prototypes/workflows/04-four-as-step-types.html) | The visual language. Click each of the four state buttons to see how Agent / Action / Ask / Approval render in a workflow with the inspector showing fields specific to that step type. | §4.2, §7.3 |
+| 05 | [Studio — route editor](../_archive/prototypes/workflows/05-studio-route-editor.html) | Canvas-first authoring. The four A's, branching as inline chips, parallel rendered as fork, Approval-on-reject as a dashed back-arrow. Inspector slide-out for the selected step. Floating bottom action bar with `Publish vN`. Chat as a docked pill bottom-left. | §7 |
+| 07 | [Open task view — 3-panel master](../_archive/prototypes/workflows/07-open-task-three-panel.html) | The operator surface. 26% chat / 22% activity (collapsible) / 52% tabs. Tabs: Now (org chart) / Plan (planned route) / Files (top thumbnail strip + reader pane with portrait + landscape support, document toolbar with download + open-in-new-window). The mockup file may still render the v1 labels "Live / Flow"; the tab names per §6.3 are Now / Plan. | §6, §9 |
 
 ### 14.2 Reference mockups (already in the repo, used for context)
 
 | Mockup | Why it's relevant |
 |---|---|
-| [`prototypes/brief-endtoend.html`](../prototypes/brief-endtoend.html) | The existing brief / task surface. Mock 07's three-panel layout builds on this. Status colours, activity-feed format, and ref-chip styling are preserved. |
-| [`prototypes/riley-observations/05-workflow-studio-step-picker.html`](../prototypes/riley-observations/05-workflow-studio-step-picker.html) | Earlier step picker pattern. Will need a refresh for the four A's vocabulary (currently shows the older taxonomy). |
-| [`prototypes/riley-observations/06-automation-picker-drawer.html`](../prototypes/riley-observations/06-automation-picker-drawer.html) | The drawer that opens when an Action step picks an external automation (n8n / Make / Zapier / GHL / custom webhook). Reuse for V1 Action step's "External automation" radio path. |
-| [`prototypes/riley-observations/07-invoke-automation-run-detail.html`](../prototypes/riley-observations/07-invoke-automation-run-detail.html) | How an external-automation step renders during a live run (in the Activity tab / Flow tab). Reuse for V1. |
-| [`prototypes/riley-observations/08-workflows-library.html`](../prototypes/riley-observations/08-workflows-library.html) | Workflows library page. Needs a refresh for the four A's once the spec is locked. |
+| [`_archive/prototypes/brief-endtoend.html`](../_archive/prototypes/brief-endtoend.html) | The existing brief / task surface. Mock 07's three-panel layout builds on this. Status colours, activity-feed format, and ref-chip styling are preserved. |
+| [`_archive/prototypes/riley-observations/05-workflow-studio-step-picker.html`](../_archive/prototypes/riley-observations/05-workflow-studio-step-picker.html) | Earlier step picker pattern. Will need a refresh for the four A's vocabulary (currently shows the older taxonomy). |
+| [`_archive/prototypes/riley-observations/06-automation-picker-drawer.html`](../_archive/prototypes/riley-observations/06-automation-picker-drawer.html) | The drawer that opens when an Action step picks an external automation (n8n / Make / Zapier / GHL / custom webhook). Reuse for V1 Action step's "External automation" radio path. |
+| [`_archive/prototypes/riley-observations/07-invoke-automation-run-detail.html`](../_archive/prototypes/riley-observations/07-invoke-automation-run-detail.html) | How an external-automation step renders during a live run (in the Activity tab / Flow tab). Reuse for V1. |
+| [`_archive/prototypes/riley-observations/08-workflows-library.html`](../_archive/prototypes/riley-observations/08-workflows-library.html) | Workflows library page. Needs a refresh for the four A's once the spec is locked. |
 
 ### 14.3 Earlier exploration (rejected, kept for reference)
 
 | Mockup | Status |
 |---|---|
-| [01 · Chat-driven Studio with live preview](../prototypes/workflows/01-studio-chat-with-live-preview.html) | Rejected — too busy. Three permanent panes. |
-| [02 · Canvas-first, chat collapsed](../prototypes/workflows/02-studio-canvas-first.html) | Superseded by 05 (used the older eight-step-type taxonomy). |
-| [03 · Canvas-first, chat activated](../prototypes/workflows/03-studio-chat-active.html) | Superseded by 05. The diff-card pattern in the chat panel still applies. |
+| [01 · Chat-driven Studio with live preview](../_archive/prototypes/workflows/01-studio-chat-with-live-preview.html) | Rejected — too busy. Three permanent panes. |
+| [02 · Canvas-first, chat collapsed](../_archive/prototypes/workflows/02-studio-canvas-first.html) | Superseded by 05 (used the older eight-step-type taxonomy). |
+| [03 · Canvas-first, chat activated](../_archive/prototypes/workflows/03-studio-chat-active.html) | Superseded by 05. The diff-card pattern in the chat panel still applies. |
 
 (Mock 06 — earlier 2-panel version of the open task view — was deleted after mock 07 became the master.)
 
@@ -823,4 +823,4 @@ All mockups live in [`prototypes/workflows/`](../prototypes/workflows/index.html
 
 ---
 
-_End of brief. Mockup index: [`prototypes/workflows/index.html`](../prototypes/workflows/index.html)._
+_End of brief. Mockup index: [`_archive/prototypes/workflows/index.html`](../_archive/prototypes/workflows/index.html)._

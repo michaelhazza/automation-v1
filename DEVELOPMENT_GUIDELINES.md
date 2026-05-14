@@ -1,7 +1,7 @@
 # Development Guidelines
 
 **Maintained by:** the operator, updated after major audits and architectural decisions.
-**Last updated:** 2026-05-10 (§8.32 cycle-prevention assertions must cover all files in the import chain — execution-backend-adapter-contract)
+**Last updated:** 2026-05-13 (§8.34-8.37 + §9 viewer discriminator — derived from ChatGPT PR/spec review log audit)
 **Status:** Living document — update when a new invariant is locked or a pattern is retired.
 
 These guidelines are the "how we build" companion to `architecture.md` ("what we're building") and `CLAUDE.md` ("how agents behave"). They encode lessons from the 2026-04-25 full-codebase audit and the remediation programme. Every new feature and every PR is expected to follow these rules.
@@ -103,7 +103,7 @@ The current posture is `static_gates_primary` per `docs/spec-context.md`. This m
 - **Run individual tests** with `npx vitest run <path-to-test-file>` — do not use `npx tsx` or `scripts/run-all-unit-tests.sh` for Vitest tests.
 - **Spy on the logger object directly, not `process.env` or `console.*`.** `server/lib/logger.ts` resolves `LOG_LEVEL` to a `const` at import time, so patching env in `beforeEach` is a no-op — use `mock.method(logger, 'warn', () => {})` to intercept at the object level.
 
-When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture.
+When `docs/spec-context.md` flips `testing_posture`, update §7 of this document to describe the new posture. For the inventory of suites that must exist before the flip, the trigger condition, and the sequencing plan, see [`docs/testing-transition-plan.md`](./docs/testing-transition-plan.md).
 
 ## 8. Development discipline
 
@@ -237,11 +237,44 @@ Any fire-and-forget (`void promise.catch(...)`) that bypasses the pg-boss durabl
 
 When adding a no-circular-import assertion (e.g. a test that reads file source and asserts no import of module X), extend the assertion to cover every file in the chain that could reintroduce the cycle — not only the root file. A gap at any downstream node leaves the cycle risk undetected by the test.
 
+### 8.33 Suppression-is-success for single-writer event emitters
+
+For emitters where a single writer owns the per-entity stream (Home dashboard live reactivity, terminal status-transition writers under last-write-wins ordering, cache populators, idempotent webhook receivers, notification dedup, `writeDiagnosis`, etc.), the contract is suppression-is-success: when the emitter loses a coordination race (another writer got there first, or a stamped-newer payload makes this write redundant), it returns SUCCESS, not failure. Required pattern:
+
+- Return shape `{ success: true, suppressed: true, reason }` — `reason` is a short string naming the suppression cause (e.g. `'lost_race'`, `'newer_payload_already_written'`, `'already_emitted'`).
+- `suppressed: false` (or absence of the field) means a write actually happened.
+- Callers MUST treat `suppressed: true` as success; never retry, never log as warning, never increment a failure-rate metric.
+- The emitter MUST NOT throw on suppression paths — throwing inverts the natural control flow for what is, by design, a healthy outcome.
+
+Failure mode if violated: retry storms on intentional suppressions, false incident signals, broken success-rate metrics, and alert fatigue (the four regressions ADR-0013 was written to prevent).
+
+Does NOT apply to genuine failures: DB connection lost, malformed payload, permission denied, downstream API 5xx — those return `{ success: false, error: ... }` as normal. The convention is specifically for the class where "another writer beat me" is a healthy outcome.
+
+A `suppressedSuccess(reason)` helper at the call site is preferred over hand-rolling the shape every time.
+
+Reference: ADR-0013 (canonical), `architecture.md § Home dashboard live reactivity`, and the 2026-05-13 KNOWLEDGE.md entry "Pattern — 'Suppression is success' for single-writer event emitters".
+
+### 8.34 Paginated and list-returning queries ship a deterministic ORDER BY with a stable tiebreaker
+
+Every list query exposed to a UI or paginated API uses `ORDER BY <primary>, <stable secondary>` where the secondary is an immutable key (`id`, or `created_at, id`); cursor encoding includes both keys. Primary-only sorts reorder under equal primary values and break pagination silently.
+
+### 8.35 State-changing UPDATEs filter by org, status, and assert single-row effect
+
+Every UPDATE that transitions a row to a new state filters by `organisationId` AND the expected current `status` (`WHERE organisation_id = ? AND status IN (...)`), asserts `rowCount === 1`, and returns 409 `invalid_state_transition` otherwise. Bare `eq(id, x)` on a state row is a blocking review finding.
+
+### 8.36 Empty `.catch(() => {})` is banned
+
+No silent catch. Every caught promise rejection routes through `logger.warn({scope, ids, error})`, `logger.error(...)`, or `logAndSwallow` — never an empty arrow. Silent catches strip every signal needed to debug production incidents.
+
+### 8.37 React `useEffect` async loads carry a cancellation guard
+
+Every `useEffect` that awaits a fetch and then calls `setState` carries a `cancelled` boolean or generation-counter ref, checked before the `setState`. Bare `setState` after `await` causes stale-state writes when inputs change mid-flight.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)
 
-Before any PR that touches tenant data merges, answer YES to all eight:
+Before any PR that touches tenant data merges, answer YES to all nine:
 
 - [ ] **Org-scoped at the table level.** New table has `organisation_id NOT NULL`, `RLS_PROTECTED_TABLES` entry, and canonical org-isolation policy in the same migration.
 - [ ] **Org-scoped at the query level.** Every read/write by ID also filters by `organisationId` explicitly.
@@ -251,6 +284,8 @@ Before any PR that touches tenant data merges, answer YES to all eight:
 - [ ] **Background jobs follow the admin/org tx pattern.** Any new maintenance job that writes tenant rows mirrors `memoryDedupJob.ts` (admin connection for iteration, `withOrgTx` per tenant write).
 - [ ] **Log-and-swallow services keep `getOrgScopedDb` inside `try`.** No resolution above the catch boundary.
 - [ ] **Cross-entity ID verified.** Server-side handlers that take a parent ID in the URL and a client-supplied child ID in the body verify the child belongs to the parent before any write.
+- [ ] **Dual-GUC tables use `setOrgAndSubaccountGUC`.** Any new table whose RLS policy checks both `app.organisation_id` and `app.subaccount_id` (dual-GUC) calls `setOrgAndSubaccountGUC(tx, orgId, subaccountId)` — never bare `db.select()`/`db.update()` and never plain `setOrgGUC` — as the first statement inside every `db.transaction(...)` that touches it. See architecture.md "Dual-GUC pattern".
+- [ ] **Owner-only reads pass a viewer discriminator.** Any table where RLS allows admin reads but the spec requires content redaction for non-owners ships a serialiser that accepts `viewer = { userId, role, organisationId }` and returns the redacted shape when `viewer.userId !== row.ownerUserId`. Sharing one serialiser across roles without a viewer argument is a blocking review finding.
 
 ---
 

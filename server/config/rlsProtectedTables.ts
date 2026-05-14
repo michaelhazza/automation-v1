@@ -1228,6 +1228,25 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0325_operator_session_consents.sql',
     rationale: 'Consent event ledger — records granted/revoked/superseded events; cross-tenant leak would allow one org to see another org\'s consent history.',
   },
+  // 0327–0329 — Operator Backend: three new tables with dual-GUC (org+subaccount) RLS (Spec D)
+  {
+    tableName: 'operator_runs',
+    schemaFile: 'operatorRuns.ts',
+    policyMigration: '0335_create_operator_runs.sql',
+    rationale: 'Chain-link rows for long-running autonomous operator tasks — contain checkpoint payloads, credential mode, and vendor session ids. Dual-GUC (org + subaccount) RLS; cross-tenant or cross-subaccount leak exposes task state and credential attribution.',
+  },
+  {
+    tableName: 'operator_task_profiles',
+    schemaFile: 'operatorTaskProfiles.ts',
+    policyMigration: '0336_create_operator_task_profiles.sql',
+    rationale: 'Persistent browser profile volume pointers per task attempt — volume ids are opaque but cross-tenant leak exposes task topology and debug-retention state.',
+  },
+  {
+    tableName: 'subaccount_operator_settings',
+    schemaFile: 'subaccountOperatorSettings.ts',
+    policyMigration: '0337_create_subaccount_operator_settings.sql',
+    rationale: 'Per-subaccount operator backend configuration (session caps, task limits, concurrency) — cross-tenant leak exposes operational configuration and financial constraints.',
+  },
   // 0321–0323 — Sandbox Isolation: five RLS-protected tables for untrusted Tier 4 code execution (Spec B)
   {
     tableName: 'sandbox_executions',
@@ -1258,6 +1277,62 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'sandboxLogs.ts',
     policyMigration: '0322_create_sandbox_artefacts_telemetry_logs.sql',
     rationale: 'Redacted per-line stdout/stderr log rows from harvested sandbox executions. Cross-tenant leak exposes customer-derived script output and potentially PII or secrets that survived redaction.',
+  },
+  // 0328 — Personal Assistant V1: voice profile derivation + opt-out state
+  {
+    tableName: 'voice_profiles',
+    schemaFile: 'voiceProfiles.ts',
+    policyMigration: '0328_voice_profiles.sql',
+    rationale: 'Per-owner derived voice style features used to personalise agent output — contains writing-style signals extracted from sent emails and documents. Three-axis scoping (user / subaccount / org); cross-tenant leak exposes personal communication patterns and PII.',
+  },
+  // 0329 — Personal Assistant V1: EA draft post-approval send state
+  {
+    tableName: 'ea_drafts',
+    schemaFile: 'eaDrafts.ts',
+    policyMigration: '0329_ea_drafts.sql',
+    rationale: 'Per-owner EA draft payloads with send-state machine — body and target_ref may contain email content, calendar details, or Slack messages. Owner-scoped visibility with admin read-through; cross-tenant leak exposes personal communications and PII.',
+  },
+  // 0330 — Personal Assistant V1: external-source trigger dedup ledger
+  {
+    tableName: 'external_trigger_dedup',
+    schemaFile: 'externalTriggerDedup.ts',
+    policyMigration: '0330_external_source_triggers.sql',
+    rationale: 'Idempotency ledger for external-source trigger events (Gmail, Calendar, Slack) — composite key (provider, dedup_key, owner_user_id) prevents duplicate run enqueuing. Owner-scoped visibility with admin read-through; cross-tenant leak exposes which external events triggered agent runs.',
+  },
+  // 0333 — Memory improvements spec §4 Phase 1: synthesis lineage table
+  {
+    tableName: 'memory_block_version_sources',
+    schemaFile: 'memoryBlockVersionSources.ts',
+    policyMigration: '0333_memory_block_version_sources.sql',
+    rationale: 'Per-version audit record of which workspace_memory_entries contributed to each auto-synthesised memory block version. Cross-tenant leak would expose another org\'s agent knowledge base, synthesis history, and captured source labels including agent run provenance.',
+  },
+  // 0346 — IEE Browser on e2b: browser session profile volumes (dual-GUC org + subaccount)
+  {
+    tableName: 'iee_browser_session_profiles',
+    schemaFile: 'ieeBrowserSessionProfiles.ts',
+    policyMigration: '0346_create_iee_browser_session_profiles.sql',
+    rationale: 'Per-subaccount browser profile volume pointers keyed by session_key — volume ids are opaque but cross-tenant leak exposes browser session topology and profile state.',
+  },
+  // 0347 — IEE Browser on e2b: per-subaccount browser settings (dual-GUC org + subaccount)
+  {
+    tableName: 'subaccount_iee_browser_settings',
+    schemaFile: 'subaccountIeeBrowserSettings.ts',
+    policyMigration: '0347_create_subaccount_iee_browser_settings.sql',
+    rationale: 'Per-subaccount IEE browser configuration (status, rollout gate, retention, cost ceilings) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes operational configuration and cost controls.',
+  },
+  // 0349 — IEE Browser on e2b: warm-pool session audit trail (dual-GUC org + subaccount)
+  {
+    tableName: 'browser_warm_sessions',
+    schemaFile: 'browserWarmSessions.ts',
+    policyMigration: '0349_create_browser_warm_sessions.sql',
+    rationale: 'Per-subaccount warm browser session rows (available → leased → terminated lifecycle) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes warm-session topology and idle cost attribution.',
+  },
+  // 0353 — Personal Assistant V2 Operator: per-run operator file artefact pointers
+  {
+    tableName: 'operator_run_files',
+    schemaFile: 'operatorRunFiles.ts',
+    policyMigration: '0353_operator_run_files.sql',
+    rationale: 'Per-run operator file artefact pointers with R2 storage keys — content-sha256, MIME type, and emitted_by metadata are scoped per org. Cross-tenant leak exposes another org\'s operator run file paths and storage keys.',
   },
 ];
 

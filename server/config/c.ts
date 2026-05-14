@@ -29,6 +29,7 @@ export const SUBACCOUNT_AGENTS: SystemAgentEntry[] = [
   { slug: 'finance-agent',          name: 'Patel',   agentRole: 'Specialist', executionScope: 'subaccount' },
   { slug: 'email-outreach-agent',   name: 'Riley',   agentRole: 'Worker',     executionScope: 'subaccount' },
   { slug: 'sdr-agent',              name: 'Dana',    agentRole: 'Worker',     executionScope: 'subaccount' },
+  { slug: 'executive-assistant',    name: 'Personal Assistant', agentRole: 'Specialist', executionScope: 'subaccount' },
 ];
 
 /**

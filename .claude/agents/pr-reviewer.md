@@ -21,7 +21,9 @@ Before reviewing, read:
 
 Organise findings into three tiers. Be specific — point to file paths and line numbers. Propose the fix, not just the problem.
 
-### Blocking Issues (must fix before marking done)
+**Finding format (mandatory):** Every finding line MUST be prefixed with `[🔴|🟡|💭] <file:line>` and MUST carry a `Why: <one-line rationale>` on the line immediately after the finding statement.
+
+### 🔴 Blocking — must be fixed before merge
 
 - **Convention violations** — routes accessing `db` directly; manual try/catch instead of `asyncHandler`; service throwing raw strings instead of `{ statusCode, message }`; missing `resolveSubaccount` in routes with `:subaccountId`
 - **Security** — missing auth middleware on protected routes; unscoped queries missing `organisationId` filter; SQL injection risk; missing HMAC verification on webhook handlers; secrets logged or exposed in responses
@@ -30,18 +32,30 @@ Organise findings into three tiers. Be specific — point to file paths and line
 - **Three-tier agent model violations** — changes that bypass the System → Org → Subaccount hierarchy; masterPrompt editable on system-managed agents; system skills exposed to org UI incorrectly
 - **Missing soft-delete filters** — queries on tables with `deletedAt` that don't filter `isNull(table.deletedAt)`
 
-### Strong Recommendations (should fix)
+### 🟡 Should-fix — non-blocking but expected to be addressed in-PR unless explicitly deferred
 
 - Missing test coverage for new behaviour — describe the missing test in Given/When/Then format so the main session has a clear spec to implement. The implementer authors a Vitest test (`**/__tests__/*.test.ts`, `import { test, expect } from 'vitest'`) and runs ONLY that file locally via `npx vitest run <path-to-test>`. Never recommend `npx tsx`, `node:test`, or handwritten harnesses — they are rejected by `scripts/verify-test-quality.sh`. The broader suite runs in CI on the PR; never ask the implementer to run `npm test` or any test-gate command.
 - Opportunities where a simpler approach exists — with concrete suggestion
 - Performance issues that will matter at scale — with evidence, not speculation
 - **Shallow modules** — for any new module, service, class, or non-trivial helper introduced by these changes, ask: is the public interface more complex than the implementation behind it? Smell signals: a wrapper that forwards arguments verbatim to a single underlying call; a service whose every method maps 1:1 to a table row; an exported type surface (options bag, return shape, error union) larger than the body it guards; a "manager" or "helper" file whose only job is re-exporting. When the smell is present, name it and propose either inlining at the call site or absorbing the surface into a neighbouring deep module. Do NOT flag established thin layers that exist for a documented reason (route → service → db tier separation, asyncHandler wrappers, the resolveSubaccount guard) — those are conventions, not shallow modules.
 
-### Non-Blocking Improvements
+### 💭 Consider — taste / future-proofing / nice-to-have
 
 - Readability improvements (naming, structure)
 - Consistency with existing patterns in the codebase
 - Comments that would genuinely help the next reader
+
+---
+
+## Files NOT read
+
+When parts of the diff were skimmed or skipped, list them here:
+
+```
+<path> — <reason>
+```
+
+If files are not read, state whether unread files could invalidate the verdict. If yes, the verdict cannot be `APPROVED`.
 
 ---
 
@@ -87,11 +101,17 @@ Organise findings into three tiers. Be specific — point to file paths and line
 
 ## Final output envelope
 
-Wrap your complete review in a single fenced markdown block tagged `pr-review-log` and emit it as the LAST content in your response. The block must contain: a header with the files reviewed and an ISO 8601 UTC timestamp, the three tier sections (Blocking / Strong / Non-Blocking), and a one-line Verdict. Outside the block you may add a brief prose summary pointing at the highest-priority finding, but the persist-ready review lives INSIDE the block.
+Wrap your complete review in a single fenced markdown block tagged `pr-review-log` and emit it as the LAST content in your response. The block must contain: a header with the files reviewed and an ISO 8601 UTC timestamp, the three tier sections (🔴 Blocking / 🟡 Should-fix / 💭 Consider), a summary count line, and a one-line Verdict. Outside the block you may add a brief prose summary pointing at the highest-priority finding, but the persist-ready review lives INSIDE the block.
 
 Why: the caller is instructed to extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>-<timestamp>.md` BEFORE fixing any issues, so the review trail persists on disk — same pattern as `review-logs/spec-review-log-*`. This feeds future pattern mining across many reviews.
 
 ### Verdict line format (mandatory)
+
+The persisted log MUST end with a summary count line IMMEDIATELY before the `**Verdict:**` line:
+
+```
+Blocking: N / Should-fix: N / Consider: N
+```
 
 The Verdict line MUST appear within the first 30 lines of the persisted log and MUST match:
 
@@ -111,9 +131,9 @@ or
 **Verdict:** NEEDS_DISCUSSION
 ```
 
-Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUESTED (3 blocking, 2 strong)`). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Do not deviate from the enum — non-conforming verdicts render as "unknown" in the dashboard.
+Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUESTED (3 blocking, 2 should-fix)`). The Mission Control dashboard parses this line via the regex documented in `tasks/review-logs/README.md § Verdict header convention`. Do not deviate from the enum — non-conforming verdicts render as "unknown" in the dashboard.
 
-- `APPROVED` — zero Blocking issues; Strong recommendations may exist but are not gating.
+- `APPROVED` — zero Blocking issues; Should-fix items may exist but are not gating.
 - `CHANGES_REQUESTED` — at least one Blocking issue.
 - `NEEDS_DISCUSSION` — review surfaced a question that needs the user's input before a verdict can be assigned (e.g. an architectural concern with multiple viable resolutions).
 
@@ -127,4 +147,4 @@ Trailing prose is allowed after the enum value (e.g. `**Verdict:** CHANGES_REQUE
 - Don't nitpick style unless it violates a documented convention
 - When flagging missing tests, write the test description in Given/When/Then so it's immediately actionable
 - You have read-only tools. You review, you do not fix. Return your findings and let the main session implement.
-- **Test gates are CI-only — never recommend running them locally.** Do not ask the implementer to run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` as part of resolving a finding. Continuous integration runs the complete suite as a pre-merge gate. If you flag a missing test, the implementer authors it and runs only that single file (`npx tsx <path-to-test>`) — CI runs everything else. See `CLAUDE.md` § *Test gates are CI-only — never run locally*.
+- **Test gates are CI-only — never recommend running them locally.** Do not ask the implementer to run `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, or `scripts/run-all-*.sh` as part of resolving a finding. Continuous integration runs the complete suite as a pre-merge gate. If you flag a missing test, the implementer authors it and runs only that single file (`npx vitest run <path-to-test>`) — CI runs everything else. See `CLAUDE.md` § *Test gates are CI-only — never run locally*.

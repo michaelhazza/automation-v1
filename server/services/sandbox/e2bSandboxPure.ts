@@ -133,6 +133,17 @@ export function assertNotLatestTemplateVersion(
         'pin to the immutable digest from PUBLISHED_VERSION.image_digest (spec §15.3)',
     );
   }
+  // Reject the literal all-zero sha256 placeholder — it is never a real digest.
+  // The 'local-dev-*' marker is allowed (used by the in-tree template files until
+  // CI publishes a real digest); the production factory guards on NODE_ENV
+  // separately (see registerSandboxProvider in e2bSandbox.ts).
+  if (templateVersion === 'sha256:0000000000000000000000000000000000000000000000000000000000000000') {
+    throw new Error(
+      `${context}: templateVersion is the all-zero sha256 placeholder — ` +
+        'PUBLISHED_VERSION must carry a real CI-published digest before the sandbox ' +
+        'provider can construct (spec §15.3).',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,4 +195,34 @@ export function buildE2bMetadataTags(ctx: {
  */
 export function credentialAliasPath(alias: string): string {
   return `/workspace/secrets/${alias}.token`;
+}
+
+// ---------------------------------------------------------------------------
+// Template alias resolver — picks the right template digest by template name
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the template alias (image digest) for the given template name.
+ *
+ * 'synthetos-sandbox' → uses the synthetos digest.
+ * 'iee-browser' → uses the browser digest (throws if not configured).
+ * Unknown names → falls back to synthetos digest (defensive; CI template
+ * build pipeline is the authority on valid template names).
+ *
+ * Pure: no I/O, no SDK, no DB.
+ */
+export function resolveTemplateAlias(
+  templateName: string,
+  digests: { synthetos: string; browser?: string },
+): string {
+  if (templateName === 'iee-browser') {
+    if (!digests.browser) {
+      throw new Error(
+        'iee-browser template digest not configured — browserPublishedVersionPath not set in E2bSandboxConfig; ' +
+          'load infra/sandbox-templates/iee-browser/PUBLISHED_VERSION to enable browser-class sandbox execution',
+      );
+    }
+    return digests.browser;
+  }
+  return digests.synthetos;
 }

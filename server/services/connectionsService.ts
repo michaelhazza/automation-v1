@@ -32,6 +32,7 @@ type RawConnectionRow = {
   subaccount_id: string | null;
   subaccount_name: string | null;
   organisation_id: string;
+  owner_user_id: string | null;
 };
 
 type FacetRow = { facet: string; value: string; count: number };
@@ -133,7 +134,8 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
         ic.created_at,
         ic.last_successful_sync_at AS last_sync_at,
         ic.subaccount_id,
-        ic.organisation_id
+        ic.organisation_id,
+        ic.owner_user_id
       FROM integration_connections ic
       WHERE ic.organisation_id = ${input.organisationId}::uuid
 
@@ -151,7 +153,8 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
         ms.created_at,
         NULL::timestamptz AS last_sync_at,
         ms.subaccount_id,
-        ms.organisation_id
+        ms.organisation_id,
+        NULL::uuid AS owner_user_id
       FROM mcp_server_configs ms
       WHERE ms.organisation_id = ${input.organisationId}::uuid
     ),
@@ -204,7 +207,8 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
       c.last_sync_at,
       c.subaccount_id::text AS subaccount_id,
       sa.name AS subaccount_name,
-      c.organisation_id::text AS organisation_id
+      c.organisation_id::text AS organisation_id,
+      c.owner_user_id::text AS owner_user_id
     FROM derived c
     LEFT JOIN subaccounts sa ON sa.id = c.subaccount_id AND sa.deleted_at IS NULL
     WHERE 1=1
@@ -252,6 +256,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
       owner: isWorkspace
         ? { kind: 'workspace' as const, id: r.subaccount_id!, name: r.subaccount_name ?? r.subaccount_id! }
         : { kind: 'org' as const, id: r.organisation_id, name: 'Organisation' },
+      ownerUserId: r.owner_user_id ?? null,
       createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
     };
   });
@@ -300,6 +305,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
         owner: opRow.subaccountId
           ? { kind: 'workspace' as const, id: opRow.subaccountId, name: opRow.subaccountId }
           : { kind: 'org' as const, id: opRow.organisationId, name: 'Organisation' },
+        ownerUserId: aiConn.user.userId ?? null,
         createdAt: aiConn.createdAt,
       });
     }

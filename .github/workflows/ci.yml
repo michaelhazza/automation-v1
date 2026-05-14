@@ -182,6 +182,27 @@ jobs:
           STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}
         run: bash scripts/gates/verify-template-version-coherence.sh
 
+      # Operator Backend (§ 3.2 item 2) — single-source-of-truth gate for the
+      # 'long_running' and 'session_identity' ExecutionCapability literals.
+      # Enforces that these literals only appear in the canonical definition
+      # (types.ts), adapter declarations, test fixtures, and documentation.
+      - name: "Operator Backend: ExecutionCapability literals confined to canonical sites (§ 3.2)"
+        run: bash scripts/gates/verify-execution-capability-references.sh
+
+      # Operator Backend (§ 4.7) — event-registry namespace discipline gate.
+      # Enforces that naked 'operator-session.*' string literals only appear in
+      # the registry file (shared/types/operatorBackendEvents.ts), test fixtures,
+      # and documentation. All other call sites must import from the registry.
+      - name: "Operator Backend: operator-session.* literals confined to event registry (§ 4.7)"
+        run: bash scripts/gates/verify-operator-event-registry.sh
+
+      # Operator Backend (§ 3.14 item 10) — checkpoint-payload logging ban.
+      # Bans logger/console calls that reference checkpoint_payload. The payload
+      # is encrypted at rest and contains sensitive session state (page URLs,
+      # screenshots, conversation history) that must never leak into logs.
+      - name: "Operator Backend: no logger/console reference to checkpoint_payload (§ 3.14)"
+        run: bash scripts/gates/verify-no-checkpoint-logging.sh
+
   portable_framework_tests:
     # Runs the portable bundle's test suite (113 node:test tests) on every
     # PR, unconditional. Without this, the sync engine in setup/portable/

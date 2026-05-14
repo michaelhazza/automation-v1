@@ -129,6 +129,9 @@ const TicketDetailPage = lazy(() => import('./pages/support/TicketDetailPage'));
 const DraftReviewQueue = lazy(() => import('./pages/support/DraftReviewQueue'));
 const InboxConfigPage = lazy(() => import('./pages/support/InboxConfigPage'));
 const SupportDeskSetupPage = lazy(() => import('./pages/integrations/SupportDeskSetupPage'));
+// Personal Assistant V1 — EA first-run wizard + PA page (Chunk 19c)
+const EAFirstRunWizard = lazy(() => import('./pages/personal/EAFirstRunWizard'));
+const PersonalAssistantPage = lazy(() => import('./pages/personal/PersonalAssistantPage'));
 
 function PageLoader() {
   return (
@@ -537,6 +540,11 @@ export default function App() {
             <Route path="/support/inboxes" element={<InboxConfigPage />} />
             <Route path="/integrations/support-desk/setup" element={<SupportDeskSetupPage />} />
           </Route>
+
+          {/* Personal assistant (personal-assistant-v1, §14) — pages created by chunk 19c */}
+          <Route path="/personal/setup" element={<EAFirstRunWizard />} />
+          <Route path="/personal/:agentId" element={<PersonalAssistantPage />} />
+          <Route path="/personal/:agentId/setup" element={<PersonalAssistantPage />} />
 
           {/* ClientPulse routes — gated by module subscription. Sidebar suppresses
               the nav items via hasSidebarItem('clientpulse'); ModuleGuard mirrors

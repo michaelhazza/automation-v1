@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-05-10T21:48:32.906Z",
+  "capturedAt": "2026-05-14T00:20:07.190Z",
   "entries": {
     "add_deliverable": {
       "actionCategory": "worker",
@@ -643,6 +643,495 @@
               }
             }
           }
+        }
+      }
+    },
+    "calendar.create_event": {
+      "actionCategory": "api",
+      "actionType": "calendar.create_event",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "Create a new event on the owner's Google Calendar. Requires an EA draft (`eaDraftId`) — the handler enforces that `actions.status = 'approved'` AND `ea_drafts.send_state = 'idle'` before sending. Supports attendees, conferencing, recurrence, and a private `ea_draft_id` extended property for idempotency recovery.",
+      "idempotencyStrategy": "keyed_write",
+      "integrationNotResumable": true,
+      "isExternal": true,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eaDraftId",
+        "calendarId",
+        "summary",
+        "start",
+        "end",
+        "attendees",
+        "description",
+        "location",
+        "conferenceType",
+        "recurrence",
+        "ownerUserId"
+      ],
+      "readPath": "none",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error",
+          "5xx"
+        ],
+        "doNotRetryOn": [
+          "4xx",
+          "validation_error"
+        ]
+      },
+      "reversible": false,
+      "riskTier": 4,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Internal config skill — covered by RLS audit + service integration tests; deterministic post-check would duplicate existing coverage",
+      "parameterSchemaShape": {
+        "attendees": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodObject",
+            "properties": {
+              "email": {
+                "type": "ZodString"
+              }
+            }
+          },
+          "optional": true,
+          "describe": "List of attendees"
+        },
+        "calendarId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Calendar ID (default: primary)"
+        },
+        "description": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Event description"
+        },
+        "eaDraftId": {
+          "type": "ZodString",
+          "describe": "EA draft ID for approval flow and idempotency"
+        },
+        "end": {
+          "type": "ZodString",
+          "describe": "Event end time (ISO8601)"
+        },
+        "location": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Event location"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to create the event on"
+        },
+        "start": {
+          "type": "ZodString",
+          "describe": "Event start time (ISO8601)"
+        },
+        "summary": {
+          "type": "ZodString",
+          "describe": "Event title"
+        }
+      }
+    },
+    "calendar.find_free_slot": {
+      "actionCategory": "api",
+      "actionType": "calendar.find_free_slot",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Find available time slots in the owner's Google Calendar within a window. Uses the Google freebusy API to return gaps that fit the requested duration, respecting working hours.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Free/busy state changes constantly; must be live",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "timeMin",
+        "timeMax",
+        "durationMinutes",
+        "calendarIds",
+        "workingHoursStart",
+        "workingHoursEnd",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "calendarIds": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodString"
+          },
+          "optional": true,
+          "describe": "Calendar IDs to check (default: primary)"
+        },
+        "durationMinutes": {
+          "type": "ZodNumber",
+          "describe": "Required slot duration in minutes"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to query"
+        },
+        "timeMax": {
+          "type": "ZodString",
+          "describe": "End of the search window (ISO8601)"
+        },
+        "timeMin": {
+          "type": "ZodString",
+          "describe": "Start of the search window (ISO8601)"
+        },
+        "workingHoursEnd": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Working hours end time (HH:MM)"
+        },
+        "workingHoursStart": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Working hours start time (HH:MM)"
+        }
+      }
+    },
+    "calendar.get_event": {
+      "actionCategory": "api",
+      "actionType": "calendar.get_event",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Fetch a single calendar event by ID from the owner's Google Calendar. Returns full event detail including attendees, conferencing links, and recurrence rules.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Event detail is mutable (attendees can RSVP at any time); reads must be live",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eventId",
+        "calendarId",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "calendarId": {
+          "type": "ZodString",
+          "innerShape": {
+            "type": "ZodString"
+          },
+          "default": "primary",
+          "optional": true,
+          "describe": "Calendar ID (default: primary)"
+        },
+        "eventId": {
+          "type": "ZodString",
+          "describe": "Google Calendar event ID"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to query"
+        }
+      }
+    },
+    "calendar.list_events": {
+      "actionCategory": "api",
+      "actionType": "calendar.list_events",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "List calendar events within a time range for the owner's Google Calendar. Returns event titles, start/end times, attendees, and location. Supports optional filtering by calendar ID.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Calendar events are time-sensitive; caching would miss same-day updates",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "calendarId",
+        "timeMin",
+        "timeMax",
+        "maxResults",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "calendarId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Calendar ID to query (default: primary)"
+        },
+        "maxResults": {
+          "type": "ZodNumber",
+          "max": 250,
+          "optional": true,
+          "describe": "Maximum number of events to return (max 250)"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to query"
+        },
+        "timeMax": {
+          "type": "ZodString",
+          "describe": "End of the time range (ISO8601)"
+        },
+        "timeMin": {
+          "type": "ZodString",
+          "describe": "Start of the time range (ISO8601)"
+        }
+      }
+    },
+    "calendar.respond_to_invite": {
+      "actionCategory": "api",
+      "actionType": "calendar.respond_to_invite",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "Accept, decline, or tentatively accept a calendar invitation on behalf of the owner. Requires an EA draft (`eaDraftId`). Handler enforces write-action invariant.",
+      "idempotencyStrategy": "keyed_write",
+      "integrationNotResumable": true,
+      "isExternal": true,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eaDraftId",
+        "eventId",
+        "calendarId",
+        "response",
+        "ownerUserId"
+      ],
+      "readPath": "none",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error",
+          "5xx"
+        ],
+        "doNotRetryOn": [
+          "4xx",
+          "validation_error"
+        ]
+      },
+      "reversible": false,
+      "riskTier": 3,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Internal config skill — covered by RLS audit + service integration tests; deterministic post-check would duplicate existing coverage",
+      "parameterSchemaShape": {
+        "calendarId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Calendar ID (default: primary)"
+        },
+        "eaDraftId": {
+          "type": "ZodString",
+          "describe": "EA draft ID for approval flow and idempotency"
+        },
+        "eventId": {
+          "type": "ZodString",
+          "describe": "Google Calendar event ID"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to respond on behalf of"
+        },
+        "response": {
+          "type": "ZodEnum",
+          "enum": [
+            "accepted",
+            "declined",
+            "tentative"
+          ],
+          "describe": "RSVP response"
+        }
+      }
+    },
+    "calendar.update_event": {
+      "actionCategory": "api",
+      "actionType": "calendar.update_event",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "Update an existing event on the owner's Google Calendar. Requires an EA draft (`eaDraftId`). Uses etag-based conflict detection. Handler enforces write-action invariant: `actions.status = 'approved'` AND `ea_drafts.send_state = 'idle'`.",
+      "idempotencyStrategy": "keyed_write",
+      "integrationNotResumable": true,
+      "isExternal": true,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eaDraftId",
+        "eventId",
+        "calendarId",
+        "summary",
+        "start",
+        "end",
+        "attendees",
+        "description",
+        "location",
+        "etag",
+        "ownerUserId"
+      ],
+      "readPath": "none",
+      "requiredIntegration": "google_calendar",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error",
+          "5xx"
+        ],
+        "doNotRetryOn": [
+          "4xx",
+          "validation_error"
+        ]
+      },
+      "reversible": false,
+      "riskTier": 4,
+      "topics": [
+        "calendar"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Internal config skill — covered by RLS audit + service integration tests; deterministic post-check would duplicate existing coverage",
+      "parameterSchemaShape": {
+        "attendees": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodObject",
+            "properties": {
+              "email": {
+                "type": "ZodString"
+              }
+            }
+          },
+          "optional": true,
+          "describe": "Updated attendee list"
+        },
+        "calendarId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Calendar ID (default: primary)"
+        },
+        "eaDraftId": {
+          "type": "ZodString",
+          "describe": "EA draft ID for approval flow and idempotency"
+        },
+        "end": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Updated end time (ISO8601)"
+        },
+        "etag": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "ETag for optimistic concurrency control"
+        },
+        "eventId": {
+          "type": "ZodString",
+          "describe": "Google Calendar event ID to update"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "describe": "User ID whose calendar to update"
+        },
+        "start": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Updated start time (ISO8601)"
+        },
+        "summary": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Updated event title"
         }
       }
     },
@@ -3182,6 +3671,42 @@
         "toContactId": {
           "type": "ZodString",
           "describe": "CRM contact ID"
+        }
+      }
+    },
+    "cross_owner.ask_initiator_decision": {
+      "actionCategory": "worker",
+      "actionType": "cross_owner.ask_initiator_decision",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "A cross-owner delegation sub-step has timed out. The run initiator must decide whether to continue, approve retrospectively, or abandon the sub-step.",
+      "idempotencyStrategy": "keyed_write",
+      "isExternal": false,
+      "payloadFields": [
+        "substepId",
+        "parentRunId"
+      ],
+      "readPath": "none",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "sideEffectClass": "write",
+      "verify": null,
+      "verifyNullJustification": "System-generated delegation decision request — outcome is a human decision, not a deterministic side effect; no post-action check is possible.",
+      "parameterSchemaShape": {
+        "parentRunId": {
+          "type": "ZodString",
+          "describe": "Parent agent run ID that owns this delegation"
+        },
+        "substepId": {
+          "type": "ZodString",
+          "describe": "delegation_outcomes row ID for this sub-step"
         }
       }
     },
@@ -7105,6 +7630,444 @@
         "to": {
           "type": "ZodString",
           "describe": "Recipient email address"
+        }
+      }
+    },
+    "slack.list_channels": {
+      "actionCategory": "api",
+      "actionType": "slack.list_channels",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "List Slack channels the bot is a member of, filtered by `types` (public/private/mpim/im — see spec §7.3). Returns channel name, ID, member count, and topic. Supports pagination via cursor.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Channel membership changes at any time; list must be live",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "cursor",
+        "limit",
+        "excludeArchived",
+        "types",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "cursor": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Pagination cursor from a previous response"
+        },
+        "excludeArchived": {
+          "type": "ZodBoolean",
+          "optional": true,
+          "describe": "Exclude archived channels"
+        },
+        "limit": {
+          "type": "ZodNumber",
+          "max": 200,
+          "optional": true,
+          "describe": "Maximum number of channels to return (max 200)"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        },
+        "types": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodEnum",
+            "enum": [
+              "public_channel",
+              "private_channel",
+              "mpim",
+              "im"
+            ]
+          },
+          "optional": true,
+          "describe": "Channel-kind filter (spec §7.3). Defaults to ['public_channel'] when omitted — matches the slack.com `conversations.list` default."
+        }
+      }
+    },
+    "slack.post_dm": {
+      "actionCategory": "api",
+      "actionType": "slack.post_dm",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "Send a direct message in Slack. Review-gated when target is not the owner; auto when target equals owner (decision made by `decideAutoSendScope` in slackActionService). Requires `im:write` scope. Requires an EA draft (`eaDraftId`) for review-gated invocations.",
+      "idempotencyStrategy": "keyed_write",
+      "integrationNotResumable": true,
+      "isExternal": true,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eaDraftId",
+        "targetUserId",
+        "text",
+        "blocks",
+        "ownerUserId"
+      ],
+      "readPath": "none",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error",
+          "5xx"
+        ],
+        "doNotRetryOn": [
+          "4xx",
+          "validation_error"
+        ]
+      },
+      "reversible": false,
+      "riskTier": 6,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Internal config skill — covered by RLS audit + service integration tests; deterministic post-check would duplicate existing coverage",
+      "parameterSchemaShape": {
+        "blocks": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodUnknown"
+          },
+          "optional": true,
+          "describe": "Block Kit blocks for rich formatting"
+        },
+        "eaDraftId": {
+          "type": "ZodString",
+          "describe": "EA draft ID for approval flow and idempotency"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        },
+        "targetUserId": {
+          "type": "ZodString",
+          "describe": "Slack user ID to send the DM to"
+        },
+        "text": {
+          "type": "ZodString",
+          "describe": "Message text"
+        }
+      }
+    },
+    "slack.post_message": {
+      "actionCategory": "api",
+      "actionType": "slack.post_message",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "Post a message to a Slack channel. Always review-gated (Tier 6). Requires an EA draft (`eaDraftId`) when invoked via the EA approval flow. Handler enforces write-action invariant: `actions.status = 'approved'` AND `ea_drafts.send_state = 'idle'`.",
+      "idempotencyStrategy": "keyed_write",
+      "integrationNotResumable": true,
+      "isExternal": true,
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "eaDraftId",
+        "channelId",
+        "text",
+        "blocks",
+        "threadTs",
+        "ownerUserId"
+      ],
+      "readPath": "none",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 3,
+        "strategy": "exponential_backoff",
+        "retryOn": [
+          "timeout",
+          "network_error",
+          "5xx"
+        ],
+        "doNotRetryOn": [
+          "4xx",
+          "validation_error"
+        ]
+      },
+      "reversible": false,
+      "riskTier": 6,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Internal config skill — covered by RLS audit + service integration tests; deterministic post-check would duplicate existing coverage",
+      "parameterSchemaShape": {
+        "blocks": {
+          "type": "ZodArray",
+          "items": {
+            "type": "ZodUnknown"
+          },
+          "optional": true,
+          "describe": "Block Kit blocks for rich formatting"
+        },
+        "channelId": {
+          "type": "ZodString",
+          "describe": "Slack channel ID to post to"
+        },
+        "eaDraftId": {
+          "type": "ZodString",
+          "describe": "EA draft ID for approval flow and idempotency"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        },
+        "text": {
+          "type": "ZodString",
+          "describe": "Message text"
+        },
+        "threadTs": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Thread timestamp to reply in a thread"
+        }
+      }
+    },
+    "slack.read_channel": {
+      "actionCategory": "api",
+      "actionType": "slack.read_channel",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Read recent messages from a Slack channel. Returns message text, sender, timestamp, and thread reply counts. Requires `channels:history` scope.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Message history is append-only but unbounded; reads must be live",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "channelId",
+        "limit",
+        "oldest",
+        "latest",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "channelId": {
+          "type": "ZodString",
+          "describe": "Slack channel ID"
+        },
+        "latest": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "End of the time range (Unix timestamp)"
+        },
+        "limit": {
+          "type": "ZodNumber",
+          "max": 100,
+          "optional": true,
+          "describe": "Maximum number of messages to return (max 100)"
+        },
+        "oldest": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "Start of the time range (Unix timestamp)"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        }
+      }
+    },
+    "slack.search_messages": {
+      "actionCategory": "api",
+      "actionType": "slack.search_messages",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Search Slack messages across the workspace using full-text search. Requires the `search:read` scope (paid Slack plans only). Returns matching messages with context. Returns PLAN_NOT_SUPPORTED when the workspace plan does not support search.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Search index is live; results must be from Slack API",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "query",
+        "count",
+        "page",
+        "sort",
+        "sortDir",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "count": {
+          "type": "ZodNumber",
+          "max": 100,
+          "optional": true,
+          "describe": "Number of results per page (max 100)"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        },
+        "page": {
+          "type": "ZodNumber",
+          "optional": true,
+          "describe": "Page number for pagination"
+        },
+        "query": {
+          "type": "ZodString",
+          "describe": "Full-text search query"
+        },
+        "sort": {
+          "type": "ZodEnum",
+          "enum": [
+            "score",
+            "timestamp"
+          ],
+          "optional": true,
+          "describe": "Sort order for results"
+        },
+        "sortDir": {
+          "type": "ZodEnum",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "optional": true,
+          "describe": "Sort direction"
+        }
+      }
+    },
+    "slack.summarise_thread": {
+      "actionCategory": "api",
+      "actionType": "slack.summarise_thread",
+      "blastRadius": "external",
+      "createsBoardTask": false,
+      "defaultGateLevel": "auto",
+      "description": "Fetch all replies in a Slack thread and return a structured summary using the LLM. Reads the thread via `conversations.replies`, then assembles a summary prompt.",
+      "idempotencyStrategy": "read_only",
+      "isExternal": true,
+      "liveFetchRationale": "Thread replies are live data; must fetch from Slack API",
+      "mcp": {
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true
+        }
+      },
+      "payloadFields": [
+        "channelId",
+        "threadTs",
+        "ownerUserId"
+      ],
+      "readPath": "liveFetch",
+      "requiredIntegration": "slack",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "topics": [
+        "slack"
+      ],
+      "verify": null,
+      "verifyNullJustification": "Read-only skill with no observable side effect to verify",
+      "parameterSchemaShape": {
+        "channelId": {
+          "type": "ZodString",
+          "describe": "Slack channel ID containing the thread"
+        },
+        "ownerUserId": {
+          "type": "ZodString",
+          "optional": true,
+          "describe": "User ID for scoping the request"
+        },
+        "threadTs": {
+          "type": "ZodString",
+          "describe": "Thread timestamp (ts of the parent message)"
         }
       }
     },

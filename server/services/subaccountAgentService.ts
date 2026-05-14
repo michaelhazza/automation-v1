@@ -565,4 +565,41 @@ export const subaccountAgentService = {
       .limit(1);
     return row;
   },
+
+  async assertBelongsToSubaccount(subaccountAgentId: string, subaccountId: string): Promise<void> {
+    const [row] = await db
+      .select({ id: subaccountAgents.id })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.id, subaccountAgentId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+        )
+      )
+      .limit(1);
+    if (!row) throw { statusCode: 404, message: 'subaccountAgent not found' };
+  },
+
+  async getAllowedSkillSlugs(agentId: string, subaccountId: string): Promise<string[] | null> {
+    try {
+      const [row] = await db
+        .select({ allowedSkillSlugs: subaccountAgents.allowedSkillSlugs })
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.agentId, agentId),
+            eq(subaccountAgents.subaccountId, subaccountId),
+          )
+        )
+        .limit(1);
+
+      if (row?.allowedSkillSlugs) {
+        return row.allowedSkillSlugs as string[];
+      }
+      return null;
+    } catch {
+      // Tolerate invalid UUID input or lookup failures
+      return null;
+    }
+  },
 };

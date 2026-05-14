@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Portal routes — accessed by subaccount members.
  *
  * These endpoints are scoped to a specific subaccount and require the caller
@@ -10,28 +10,13 @@ import { authenticate, requireSubaccountPermission } from '../middleware/auth.js
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
-import {
-  subaccounts,
-  subaccountAutomationLinks,
-  subaccountCategories,
-  subaccountUserAssignments,
-  permissionSetItems,
-  automations,
-  executions,
-  executionPayloads,
-  automationEngines,
-  workflowRuns,
-  workflowTemplateVersions,
-  systemWorkflowTemplateVersions,
-  scheduledTasks,
-} from '../db/schema/index.js';
-import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
 import { WorkflowRunService } from '../services/workflowRunService.js';
-import { taskService } from '../services/taskService.js';
-import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { automationService } from '../services/automationService.js';
+import { executionService } from '../services/executionService.js';
+import { permissionSetService } from '../services/permissionSetService.js';
+import { getSubaccountsForUser } from '../services/orgSubaccountService.js';
+import { scheduledTaskService } from '../services/scheduledTaskService.js';
 
 const router = Router();
 
@@ -43,41 +28,9 @@ const router = Router();
  * Used by the portal landing page to let users pick which subaccount to access.
  */
 router.get('/api/portal/my-subaccounts', authenticate, asyncHandler(async (req, res) => {
-  const rows = await db
-    .select({
-      id: subaccounts.id,
-      name: subaccounts.name,
-      slug: subaccounts.slug,
-      status: subaccounts.status,
-    })
-    .from(subaccountUserAssignments)
-    .innerJoin(subaccounts, eq(subaccounts.id, subaccountUserAssignments.subaccountId))
-    .where(
-      and(
-        eq(subaccountUserAssignments.userId, req.user!.id),
-        eq(subaccounts.status, 'active'),
-        isNull(subaccounts.deletedAt)
-      )
-    );
+  const rows = await getSubaccountsForUser(req.user!.id);
   res.json(rows);
 }));
-
-// ─── Helper: check if user has a specific subaccount permission ───────────────
-
-async function hasSubaccountPerm(userId: string, subaccountId: string, key: string): Promise<boolean> {
-  const [row] = await db
-    .select({ key: permissionSetItems.permissionKey })
-    .from(subaccountUserAssignments)
-    .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, subaccountUserAssignments.permissionSetId))
-    .where(
-      and(
-        eq(subaccountUserAssignments.userId, userId),
-        eq(subaccountUserAssignments.subaccountId, subaccountId),
-        eq(permissionSetItems.permissionKey, key)
-      )
-    );
-  return !!row;
-}
 
 // ─── Portal: list automations ───────────────────────────────────────────────────
 
@@ -97,49 +50,7 @@ router.get(
       return;
     }
 
-    // Org automations linked (active link + active process)
-    const linkedRows = await db
-      .select({
-        processId: subaccountAutomationLinks.processId,
-        subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
-        processName: automations.name,
-        processDescription: automations.description,
-        processInputSchema: automations.inputSchema,
-        processOutputSchema: automations.outputSchema,
-      })
-      .from(subaccountAutomationLinks)
-      .innerJoin(automations, eq(automations.id, subaccountAutomationLinks.processId))
-      .where(
-        and(
-          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId),
-          eq(subaccountAutomationLinks.isActive, true),
-          eq(automations.status, 'active'),
-          isNull(automations.deletedAt)
-        )
-      );
-
-    // Subaccount-native automations
-    const nativeRows = await db
-      .select()
-      .from(automations)
-      .where(
-        and(
-          eq(automations.subaccountId, req.params.subaccountId),
-          eq(automations.status, 'active'),
-          isNull(automations.deletedAt)
-        )
-      );
-
-    // Categories for grouping
-    const categories = await db
-      .select()
-      .from(subaccountCategories)
-      .where(
-        and(
-          eq(subaccountCategories.subaccountId, req.params.subaccountId),
-          isNull(subaccountCategories.deletedAt)
-        )
-      );
+    const { linkedRows, nativeRows, categories } = await automationService.listPortalAutomations(req.params.subaccountId);
 
     const catMap = Object.fromEntries(
       categories.map((c) => [c.id, { id: c.id, name: c.name, colour: c.colour }])
@@ -204,110 +115,22 @@ router.post(
       return;
     }
 
-    // Verify the process is accessible to this subaccount (linked or native)
-    const linkedResult = await db
-      .select({ processId: subaccountAutomationLinks.processId })
-      .from(subaccountAutomationLinks)
-      .where(
-        and(
-          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId),
-          eq(subaccountAutomationLinks.processId, processId),
-          eq(subaccountAutomationLinks.isActive, true)
-        )
-      );
-
-    const nativeResult = await db
-      .select({ id: automations.id })
-      .from(automations)
-      .where(
-        and(
-          eq(automations.id, processId),
-          eq(automations.subaccountId, req.params.subaccountId),
-          eq(automations.status, 'active'),
-          isNull(automations.deletedAt)
-        )
-      );
-
-    if (linkedResult.length === 0 && nativeResult.length === 0) {
+    const accessible = await automationService.isProcessAccessibleToSubaccount(processId, req.params.subaccountId);
+    if (!accessible) {
       res.status(404).json({ error: 'Process not found or not accessible in this subaccount' });
       return;
     }
 
-    // Fetch process and engine
-    const [process] = await db
-      .select()
-      .from(automations)
-      .where(and(eq(automations.id, processId), eq(automations.status, 'active'), isNull(automations.deletedAt)));
+    const result = await executionService.createPortalExecution(
+      req.user!.id,
+      req.user!.organisationId,
+      req.params.subaccountId,
+      processId,
+      inputData,
+      notifyOnComplete,
+    );
 
-    if (!process || !process.automationEngineId) {
-      res.status(400).json({ error: 'Process not available' });
-      return;
-    }
-
-    const [engine] = await db
-      .select()
-      .from(automationEngines)
-      .where(eq(automationEngines.id, process.automationEngineId));
-
-    if (!engine) {
-      res.status(400).json({ error: 'Workflow engine not found' });
-      return;
-    }
-
-    // 5-minute duplicate prevention
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentExec = await db
-      .select({ id: executions.id, createdAt: executions.createdAt, isTestExecution: executions.isTestExecution })
-      .from(executions)
-      .where(
-        and(
-          eq(executions.triggeredByUserId, req.user!.id),
-          eq(executions.processId, processId),
-          gte(executions.createdAt, fiveMinutesAgo)
-        )
-      );
-
-    const nonTestRecent = recentExec.filter((e) => !e.isTestExecution);
-    if (nonTestRecent.length > 0) {
-      const oldest = nonTestRecent.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
-      const waitSec = Math.ceil((oldest.createdAt.getTime() + 5 * 60 * 1000 - Date.now()) / 1000);
-      res.status(429).json({
-        error: `Duplicate execution: this process was already triggered recently. Please wait ${waitSec} seconds before retrying.`,
-      });
-      return;
-    }
-
-    const [execution] = await db.transaction(async (tx) => {
-      const [exec] = await tx
-        .insert(executions)
-        .values({
-          organisationId: process.organisationId ?? req.orgId!,
-          processId,
-          triggeredByUserId: req.user!.id,
-          subaccountId: req.params.subaccountId,
-          status: 'pending',
-          inputData: inputData ?? null,
-          engineType: engine.engineType,
-          isTestExecution: false,
-          notifyOnComplete: notifyOnComplete ?? false,
-          retryCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning();
-      await tx.insert(executionPayloads)
-        .values({ executionId: exec.id, processSnapshot: process as unknown as Record<string, unknown> })
-        .onConflictDoNothing();
-      return [exec];
-    });
-
-    try {
-      await queueService.enqueueExecution(execution.id);
-    } catch {
-      // Queue failure should not fail the API response
-    }
-
-    res.status(201).json({ id: execution.id, status: execution.status, processId: execution.processId });
+    res.status(201).json(result);
   })
 );
 
@@ -324,45 +147,28 @@ router.get(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
-    const canViewAll = await hasSubaccountPerm(
+    const canViewAll = await permissionSetService.hasSubaccountPermission(
       req.user!.id,
       req.params.subaccountId,
-      SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL
+      SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL,
     );
 
     const { from, to, processId, limit: limitRaw, offset: offsetRaw } = req.query;
-    const limit = Math.min(parseInt(limitRaw as string) || 50, 200);
-    const offset = parseInt(offsetRaw as string) || 0;
 
-    const conditions = [eq(executions.subaccountId, req.params.subaccountId)];
-    if (!canViewAll) conditions.push(eq(executions.triggeredByUserId, req.user!.id));
-    if (processId) conditions.push(eq(executions.processId, processId as string));
-    if (from) conditions.push(gte(executions.createdAt, new Date(from as string)));
-    if (to) conditions.push(lte(executions.createdAt, new Date(to as string)));
-
-    const rows = await db
-      .select()
-      .from(executions)
-      .where(and(...conditions))
-      .orderBy(desc(executions.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    res.json(
-      rows.map((e) => ({
-        id: e.id,
-        processId: e.processId,
-        status: e.status,
-        inputData: e.inputData,
-        outputData: e.outputData,
-        errorMessage: e.errorMessage,
-        isTestExecution: e.isTestExecution,
-        startedAt: e.startedAt,
-        completedAt: e.completedAt,
-        durationMs: e.durationMs,
-        createdAt: e.createdAt,
-      }))
+    const rows = await executionService.listPortalExecutions(
+      req.params.subaccountId,
+      req.user!.id,
+      canViewAll,
+      {
+        processId: processId as string | undefined,
+        from: from as string | undefined,
+        to: to as string | undefined,
+        limit: limitRaw ? parseInt(limitRaw as string) : undefined,
+        offset: offsetRaw ? parseInt(offsetRaw as string) : undefined,
+      },
     );
+
+    res.json(rows);
   })
 );
 
@@ -377,47 +183,20 @@ router.get(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
 
-    const [execution] = await db
-      .select()
-      .from(executions)
-      .where(
-        and(
-          eq(executions.id, req.params.executionId),
-          eq(executions.subaccountId, req.params.subaccountId)
-        )
-      );
+    const canViewAll = await permissionSetService.hasSubaccountPermission(
+      req.user!.id,
+      req.params.subaccountId,
+      SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL,
+    );
 
-    if (!execution) {
-      res.status(404).json({ error: 'Execution not found' });
-      return;
-    }
+    const execution = await executionService.getPortalExecution(
+      req.params.executionId,
+      req.params.subaccountId,
+      req.user!.id,
+      canViewAll,
+    );
 
-    // Check ownership unless user has view_all
-    if (execution.triggeredByUserId !== req.user!.id) {
-      const canViewAll = await hasSubaccountPerm(
-        req.user!.id,
-        req.params.subaccountId,
-        SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL
-      );
-      if (!canViewAll) {
-        res.status(404).json({ error: 'Execution not found' });
-        return;
-      }
-    }
-
-    res.json({
-      id: execution.id,
-      processId: execution.processId,
-      status: execution.status,
-      inputData: execution.inputData,
-      outputData: execution.outputData,
-      errorMessage: execution.errorMessage,
-      isTestExecution: execution.isTestExecution,
-      startedAt: execution.startedAt,
-      completedAt: execution.completedAt,
-      durationMs: execution.durationMs,
-      createdAt: execution.createdAt,
-    });
+    res.json(execution);
   })
 );
 
@@ -479,49 +258,7 @@ router.get(
     const { subaccountId } = req.params;
     const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
 
-    // Load visible runs newest-first.
-    const runs = await db
-      .select()
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.subaccountId, subaccountId),
-          eq(workflowRuns.organisationId, sa.organisationId),
-          eq(workflowRuns.isPortalVisible, true),
-        ),
-      )
-      .orderBy(desc(workflowRuns.createdAt));
-
-    if (runs.length === 0) {
-      res.json({ runs: [] });
-      return;
-    }
-
-    // Batch-load portalPresentation: one query per version table instead of
-    // one query per run (avoids N+1 when the portal has many visible runs).
-    const versionIds = runs.map((r) => r.templateVersionId);
-
-    const orgVersions = await db
-      .select({ id: workflowTemplateVersions.id, definitionJson: workflowTemplateVersions.definitionJson })
-      .from(workflowTemplateVersions)
-      .where(inArray(workflowTemplateVersions.id, versionIds));
-    const orgVersionMap = new Map(orgVersions.map((v) => [v.id, v.definitionJson]));
-
-    // For IDs not found in org versions, fall back to system template versions.
-    const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
-    const sysVersionMap = new Map<string, unknown>();
-    if (missingIds.length > 0) {
-      const sysVersions = await db
-        .select({ id: systemWorkflowTemplateVersions.id, definitionJson: systemWorkflowTemplateVersions.definitionJson })
-        .from(systemWorkflowTemplateVersions)
-        .where(inArray(systemWorkflowTemplateVersions.id, missingIds));
-      for (const v of sysVersions) sysVersionMap.set(v.id, v.definitionJson);
-    }
-
-    const enriched = runs.map((run) => {
-      const defJson = (orgVersionMap.get(run.templateVersionId) ?? sysVersionMap.get(run.templateVersionId)) as Record<string, unknown> | undefined;
-      return { ...run, portalPresentation: defJson?.portalPresentation ?? null };
-    });
+    const enriched = await WorkflowRunService.listPortalRuns(sa.organisationId, subaccountId);
 
     res.json({ runs: enriched });
   }),
@@ -559,38 +296,16 @@ router.get(
 
     const DAILY_BRIEF_SLUG = 'intelligence-briefing';
 
-    const [latestRun] = await db
-      .select({
-        id: workflowRuns.id,
-        completedAt: workflowRuns.completedAt,
-      })
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.subaccountId, subaccountId),
-          eq(workflowRuns.organisationId, sa.organisationId),
-          eq(workflowRuns.workflowSlug, DAILY_BRIEF_SLUG),
-          eq(workflowRuns.status, 'completed'),
-        ),
-      )
-      .orderBy(desc(workflowRuns.completedAt))
-      .limit(1);
+    const latestRun = await WorkflowRunService.getLatestCompletedRunBySlug(
+      sa.organisationId,
+      subaccountId,
+      DAILY_BRIEF_SLUG,
+    );
 
-    const [activeSchedule] = await db
-      .select({
-        id: scheduledTasks.id,
-        nextRunAt: scheduledTasks.nextRunAt,
-      })
-      .from(scheduledTasks)
-      .where(
-        and(
-          eq(scheduledTasks.subaccountId, subaccountId),
-          eq(scheduledTasks.createdByWorkflowSlug, DAILY_BRIEF_SLUG),
-          eq(scheduledTasks.isActive, true),
-        ),
-      )
-      .orderBy(desc(scheduledTasks.nextRunAt))
-      .limit(1);
+    const activeSchedule = await scheduledTaskService.findActiveSubaccountScheduleByWorkflowSlug(
+      subaccountId,
+      DAILY_BRIEF_SLUG,
+    );
 
     const active = Boolean(latestRun && activeSchedule);
 
@@ -626,80 +341,14 @@ router.post(
     const { subaccountId, runId } = req.params;
     const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
 
-    // Load the source run to extract orgId + templateVersionId.
-    const [sourceRun] = await db
-      .select()
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.id, runId),
-          eq(workflowRuns.subaccountId, subaccountId),
-          eq(workflowRuns.organisationId, sa.organisationId),
-          eq(workflowRuns.isPortalVisible, true),
-        ),
-      );
-    if (!sourceRun) {
-      res.status(404).json({ error: 'Run not found' });
-      return;
-    }
+    const result = await WorkflowRunService.replayPortalRun(
+      sa.organisationId,
+      subaccountId,
+      runId,
+      req.user!.id,
+    );
 
-    // Determine whether this was a system or org template so we can pass the
-    // right identifier to startRun.
-    const [orgVer] = await db
-      .select({ templateId: workflowTemplateVersions.templateId })
-      .from(workflowTemplateVersions)
-      .where(eq(workflowTemplateVersions.id, sourceRun.templateVersionId));
-
-    let startResult: { runId: string; status: string };
-    if (orgVer) {
-      const tx = getOrgScopedDb('route:portal.replay-org');
-      const task = await taskService.createTask(
-        {
-          organisationId: sourceRun.organisationId,
-          subaccountId,
-          data: { title: `Workflow run`, status: 'inbox', brief: JSON.stringify({}) },
-          userId: req.user!.id,
-        },
-        tx,
-      );
-      startResult = await WorkflowRunService.startRun({
-        organisationId: sourceRun.organisationId,
-        subaccountId,
-        templateId: orgVer.templateId,
-        initialInput: {},
-        startedByUserId: req.user!.id,
-        taskId: task.id,
-        runMode: 'auto',
-        isPortalVisible: true,
-      });
-    } else {
-      if (!sourceRun.workflowSlug) {
-        res.status(422).json({ error: 'Cannot replay: workflowSlug not set on source run' });
-        return;
-      }
-      const tx = getOrgScopedDb('route:portal.replay-system');
-      const task = await taskService.createTask(
-        {
-          organisationId: sourceRun.organisationId,
-          subaccountId,
-          data: { title: `System workflow run`, status: 'inbox', brief: JSON.stringify({}) },
-          userId: req.user!.id,
-        },
-        tx,
-      );
-      startResult = await WorkflowRunService.startRun({
-        organisationId: sourceRun.organisationId,
-        subaccountId,
-        systemTemplateSlug: sourceRun.workflowSlug,
-        initialInput: {},
-        startedByUserId: req.user!.id,
-        taskId: task.id,
-        runMode: 'auto',
-        isPortalVisible: true,
-      });
-    }
-
-    res.status(201).json({ runId: startResult.runId });
+    res.status(201).json(result);
   }),
 );
 

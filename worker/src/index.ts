@@ -6,12 +6,9 @@
 import { bootstrap } from './bootstrap.js';
 import { env } from './config/env.js';
 import { logger } from './logger.js';
-import { registerBrowserHandler } from './handlers/browserTask.js';
 import { registerDevHandler } from './handlers/devTask.js';
-import { registerCleanupHandler } from './handlers/cleanupOrphans.js';
 import { registerCostRollupHandler } from './handlers/costRollup.js';
 import { reconcileAbandonedRuns } from './persistence/reconcile.js';
-import { startQueueMetricsLogger } from './runtime/queueMetrics.js';
 
 async function main(): Promise<void> {
   const { boss, workerInstanceId, shutdown } = await bootstrap();
@@ -20,17 +17,11 @@ async function main(): Promise<void> {
   // Spec §13.3.
   await reconcileAbandonedRuns(workerInstanceId);
 
-  await registerBrowserHandler(boss, workerInstanceId);
   await registerDevHandler(boss, workerInstanceId);
-  await registerCleanupHandler(boss);
   await registerCostRollupHandler(boss);
-
-  // Reviewer round 4 #5 — periodic queue depth signal for SREs
-  const queueMetrics = startQueueMetricsLogger(env.IEE_QUEUE_METRICS_INTERVAL_MS);
 
   logger.info('iee.worker.started', {
     pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,
-    browserConcurrency: env.IEE_BROWSER_CONCURRENCY,
     devConcurrency: env.IEE_DEV_CONCURRENCY,
     databaseHost: (() => {
       try { return new URL(env.DATABASE_URL).host; } catch { return 'unknown'; }
@@ -39,7 +30,6 @@ async function main(): Promise<void> {
 
   const handleSignal = (sig: string) => {
     logger.info('iee.worker.signal', { signal: sig });
-    queueMetrics.stop();
     void shutdown().then(() => process.exit(0));
   };
   process.on('SIGTERM', () => handleSignal('SIGTERM'));

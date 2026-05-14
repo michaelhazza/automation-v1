@@ -1,8 +1,15 @@
 import crypto from 'crypto';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { automationEngines } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
+
+type EngineRow = typeof automationEngines.$inferSelect;
+
+function sanitizeEngine(engine: EngineRow) {
+  const { hmacSecret: _hmacSecret, apiKey: _apiKey, ...rest } = engine;
+  return rest;
+}
 
 export class EngineService {
   async listEngines(organisationId: string, params: { status?: string }) {
@@ -122,6 +129,210 @@ export class EngineService {
     await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
 
     return { message: 'Workflow engine deleted successfully' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // System-engine methods (global scope — no orgId, filtered by scope='system')
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns all active system engines.
+   * System engines are global (scope='system') and have no organisationId.
+   * hmacSecret and apiKey are stripped from the response.
+   */
+  async listSystemEngines() {
+    const rows = await db
+      .select()
+      .from(automationEngines)
+      .where(and(eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)))
+      .orderBy(desc(automationEngines.createdAt));
+
+    return rows.map(sanitizeEngine);
+  }
+
+  /**
+   * Creates a new system engine (scope='system', no organisationId).
+   * Generates a fresh hmacSecret; apiKey stored as-is (plain) for system engines.
+   */
+  async createSystemEngine(data: {
+    name: string;
+    engineType: string;
+    baseUrl: string;
+    apiKey?: string;
+  }) {
+    const hmacSecret = crypto.randomBytes(32).toString('hex');
+
+    const [engine] = await db
+      .insert(automationEngines)
+      .values({
+        organisationId: null,
+        name: data.name,
+        engineType: data.engineType as 'n8n',
+        baseUrl: data.baseUrl,
+        apiKey: data.apiKey ?? null,
+        scope: 'system',
+        subaccountId: null,
+        hmacSecret,
+        status: 'inactive',
+      })
+      .returning();
+
+    return sanitizeEngine(engine);
+  }
+
+  /**
+   * Fetches a single system engine by id (scope='system', not deleted).
+   * Throws 404 if not found.
+   */
+  async getSystemEngineById(id: string) {
+    const [engine] = await db
+      .select()
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
+
+    if (!engine) throw { statusCode: 404, message: 'System engine not found' };
+
+    return sanitizeEngine(engine);
+  }
+
+  /**
+   * Updates a system engine by id.
+   * Throws 404 if not found.
+   */
+  async updateSystemEngine(
+    id: string,
+    data: { name?: string; engineType?: string; baseUrl?: string; apiKey?: string; status?: string; metadata?: unknown }
+  ) {
+    const [existing] = await db
+      .select()
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
+
+    if (!existing) throw { statusCode: 404, message: 'System engine not found' };
+
+    const allowed = ['name', 'engineType', 'baseUrl', 'apiKey', 'status', 'metadata'] as const;
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    for (const key of allowed) {
+      if (data[key] !== undefined) updates[key] = data[key];
+    }
+
+    const [updated] = await db
+      .update(automationEngines)
+      .set(updates)
+      .where(eq(automationEngines.id, id))
+      .returning();
+
+    return sanitizeEngine(updated);
+  }
+
+  /**
+   * Soft-deletes a system engine by setting deletedAt.
+   * Throws 404 if not found.
+   */
+  async deleteSystemEngine(id: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(automationEngines)
+      .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
+
+    if (!existing) throw { statusCode: 404, message: 'System engine not found' };
+
+    await db
+      .update(automationEngines)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(automationEngines.id, id));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Subaccount-engine methods (scope='subaccount', filtered by subaccountId)
+  // ---------------------------------------------------------------------------
+
+  async listSubaccountEngines(subaccountId: string) {
+    const rows = await db
+      .select()
+      .from(automationEngines)
+      .where(and(
+        eq(automationEngines.subaccountId, subaccountId),
+        eq(automationEngines.scope, 'subaccount'),
+        isNull(automationEngines.deletedAt)
+      ))
+      .orderBy(desc(automationEngines.createdAt));
+
+    return rows.map(sanitizeEngine);
+  }
+
+  async createSubaccountEngine(
+    organisationId: string,
+    subaccountId: string,
+    data: { name: string; engineType: string; baseUrl: string; apiKey?: string | null }
+  ) {
+    const hmacSecret = crypto.randomBytes(32).toString('hex');
+
+    const [engine] = await db
+      .insert(automationEngines)
+      .values({
+        organisationId,
+        name: data.name,
+        engineType: data.engineType as 'n8n',
+        baseUrl: data.baseUrl,
+        apiKey: data.apiKey ?? null,
+        scope: 'subaccount',
+        subaccountId,
+        hmacSecret,
+        status: 'inactive',
+      })
+      .returning();
+
+    return sanitizeEngine(engine);
+  }
+
+  async updateSubaccountEngine(
+    id: string,
+    subaccountId: string,
+    data: { name?: string; engineType?: string; baseUrl?: string; apiKey?: string | null; status?: string; metadata?: unknown }
+  ) {
+    const [existing] = await db
+      .select()
+      .from(automationEngines)
+      .where(and(
+        eq(automationEngines.id, id),
+        eq(automationEngines.subaccountId, subaccountId),
+        isNull(automationEngines.deletedAt)
+      ));
+
+    if (!existing) throw { statusCode: 404, message: 'Engine not found' };
+
+    const allowed = ['name', 'engineType', 'baseUrl', 'apiKey', 'status', 'metadata'] as const;
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    for (const key of allowed) {
+      if (data[key] !== undefined) updates[key] = data[key];
+    }
+
+    const [updated] = await db
+      .update(automationEngines)
+      .set(updates)
+      .where(eq(automationEngines.id, id))
+      .returning();
+
+    return sanitizeEngine(updated);
+  }
+
+  async deleteSubaccountEngine(id: string, subaccountId: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(automationEngines)
+      .where(and(
+        eq(automationEngines.id, id),
+        eq(automationEngines.subaccountId, subaccountId),
+        isNull(automationEngines.deletedAt)
+      ));
+
+    if (!existing) throw { statusCode: 404, message: 'Engine not found' };
+
+    await db
+      .update(automationEngines)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(automationEngines.id, id));
   }
 
   async testEngineConnection(id: string, organisationId: string) {

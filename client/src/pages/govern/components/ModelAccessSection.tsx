@@ -96,9 +96,21 @@ export function ModelAccessSection({ agentId, subaccountId }: Props) {
         <div>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-[13px] font-semibold text-slate-700">Autonomous runs</span>
-            <span className="inline-flex items-center text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">
-              Available soon
-            </span>
+            {sorted && sorted.length > 0 && sorted.some(r => r.usabilityState === 'connected_usable') ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Active
+              </span>
+            ) : sorted && sorted.length > 0 ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                Needs attention
+              </span>
+            ) : (
+              <span className="inline-flex items-center text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                No subscription
+              </span>
+            )}
           </div>
           <p className="text-[12px] text-slate-400 mb-3">Allowed AI Subscriptions for this agent:</p>
 

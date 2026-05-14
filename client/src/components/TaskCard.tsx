@@ -1,3 +1,5 @@
+import { OperatorBadge } from './operator/OperatorBadge';
+
 interface Agent {
   id: string;
   name: string | null;
@@ -13,6 +15,7 @@ interface TaskCardProps {
     assignedAgent?: Agent | null;
     dueDate?: string | null;
     createdAt: string;
+    executionBackendId?: string | null;
   };
   onClick: () => void;
   provided?: {
@@ -46,6 +49,7 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
   const visibleAgents = agents.slice(0, MAX_VISIBLE);
   const overflow = agents.length - MAX_VISIBLE;
   const isOverdue = item.dueDate && new Date(item.dueDate) < new Date();
+  const isOperator = item.executionBackendId === 'operator_managed';
 
   return (
     <div
@@ -64,6 +68,7 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
         <span className="text-[13px] font-semibold text-slate-800 leading-[1.3] truncate">
           {item.title}
         </span>
+        {isOperator && <OperatorBadge />}
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-slate-400">

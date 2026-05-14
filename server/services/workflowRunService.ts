@@ -9,7 +9,7 @@
  * external callers, and delegates to the engine for any state advance.
  */
 
-import { eq, and, desc, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workflowRuns,
@@ -45,6 +45,8 @@ import { TaskAlreadyHasActiveRunError } from './errors/TaskAlreadyHasActiveRunEr
 import { insertRunRowWithUniqueGuard } from './workflowRunInsertHelper.js';
 import { appendAndEmitTaskEvent } from './taskEventService.js';
 import { assertRunDepth } from '../lib/runDepthGuard.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { taskService } from './taskService.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -943,5 +945,173 @@ export const WorkflowRunService = {
 
     emitApprovalResolved('approved');
     return { stepRunStatus: 'completed', newVersion: stepRun.version + 1 };
+  },
+
+  /**
+   * List portal-visible workflow runs for a subaccount, enriched with
+   * portalPresentation metadata from the locked template version definition.
+   * Batches template version lookups to avoid N+1 queries.
+   */
+  async listPortalRuns(organisationId: string, subaccountId: string) {
+    const runs = await db
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, organisationId),
+          eq(workflowRuns.isPortalVisible, true),
+        ),
+      )
+      .orderBy(desc(workflowRuns.createdAt));
+
+    if (runs.length === 0) return [];
+
+    const versionIds = runs.map((r) => r.templateVersionId);
+
+    const orgVersions = await db
+      .select({ id: workflowTemplateVersions.id, definitionJson: workflowTemplateVersions.definitionJson })
+      .from(workflowTemplateVersions)
+      .where(inArray(workflowTemplateVersions.id, versionIds));
+    const orgVersionMap = new Map(orgVersions.map((v) => [v.id, v.definitionJson]));
+
+    const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
+    const sysVersionMap = new Map<string, unknown>();
+    if (missingIds.length > 0) {
+      const sysVersions = await db
+        .select({ id: systemWorkflowTemplateVersions.id, definitionJson: systemWorkflowTemplateVersions.definitionJson })
+        .from(systemWorkflowTemplateVersions)
+        .where(inArray(systemWorkflowTemplateVersions.id, missingIds));
+      for (const v of sysVersions) sysVersionMap.set(v.id, v.definitionJson);
+    }
+
+    return runs.map((run) => {
+      const defJson = (orgVersionMap.get(run.templateVersionId) ?? sysVersionMap.get(run.templateVersionId)) as Record<string, unknown> | undefined;
+      return { ...run, portalPresentation: defJson?.portalPresentation ?? null };
+    });
+  },
+
+  /**
+   * Get the latest completed run for a given workflow slug in a subaccount.
+   * Used by the intelligence briefing card endpoint.
+   */
+  async getLatestCompletedRunBySlug(
+    organisationId: string,
+    subaccountId: string,
+    workflowSlug: string,
+  ): Promise<{ id: string; completedAt: Date | null } | null> {
+    const [row] = await db
+      .select({ id: workflowRuns.id, completedAt: workflowRuns.completedAt })
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, organisationId),
+          eq(workflowRuns.workflowSlug, workflowSlug),
+          eq(workflowRuns.status, 'completed'),
+        ),
+      )
+      .orderBy(desc(workflowRuns.completedAt))
+      .limit(1);
+    return row ?? null;
+  },
+
+  /**
+   * Replay a portal-visible workflow run by starting a fresh run of the same
+   * template. Creates a task via taskService (using the org-scoped db context)
+   * and delegates to startRun. The getOrgScopedDb call is service-side.
+   */
+  async replayPortalRun(
+    organisationId: string,
+    subaccountId: string,
+    runId: string,
+    userId: string,
+  ): Promise<{ runId: string }> {
+    const [sourceRun] = await db
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.subaccountId, subaccountId),
+          eq(workflowRuns.organisationId, organisationId),
+          eq(workflowRuns.isPortalVisible, true),
+        ),
+      );
+
+    if (!sourceRun) throw { statusCode: 404, message: 'Run not found' };
+
+    const [orgVer] = await db
+      .select({ templateId: workflowTemplateVersions.templateId })
+      .from(workflowTemplateVersions)
+      .where(eq(workflowTemplateVersions.id, sourceRun.templateVersionId));
+
+    const tx = getOrgScopedDb('service:workflowRunService.replayPortalRun');
+
+    let startResult: { runId: string; status: string };
+    if (orgVer) {
+      const task = await taskService.createTask(
+        {
+          organisationId: sourceRun.organisationId,
+          subaccountId,
+          data: { title: 'Workflow run', status: 'inbox', brief: JSON.stringify({}) },
+          userId,
+        },
+        tx,
+      );
+      startResult = await WorkflowRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        templateId: orgVer.templateId,
+        initialInput: {},
+        startedByUserId: userId,
+        taskId: task.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    } else {
+      if (!sourceRun.workflowSlug) {
+        throw { statusCode: 422, message: 'Cannot replay: workflowSlug not set on source run' };
+      }
+      const task = await taskService.createTask(
+        {
+          organisationId: sourceRun.organisationId,
+          subaccountId,
+          data: { title: 'System workflow run', status: 'inbox', brief: JSON.stringify({}) },
+          userId,
+        },
+        tx,
+      );
+      startResult = await WorkflowRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        systemTemplateSlug: sourceRun.workflowSlug,
+        initialInput: {},
+        startedByUserId: userId,
+        taskId: task.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    }
+
+    return { runId: startResult.runId };
+  },
+
+  /**
+   * Mark a workflow run as degraded (first-write-wins via predicate).
+   * Used by the task event stream replay endpoint when a consumer-side gap is detected.
+   */
+  async markRunDegraded(runId: string, orgId: string, reason: string): Promise<void> {
+    const orgDb = getOrgScopedDb('workflowRunService.markRunDegraded');
+    await orgDb
+      .update(workflowRuns)
+      .set({ degradationReason: reason })
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.organisationId, orgId),
+          isNull(workflowRuns.degradationReason),
+        ),
+      );
   },
 };

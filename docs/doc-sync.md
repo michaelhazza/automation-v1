@@ -26,7 +26,23 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `docs/context-packs/` | When a context pack's referenced section anchor changes in `architecture.md`, or when a new mode is needed. Re-run anchor regeneration if section names changed. |
 | `references/test-gate-policy.md` | When the test-gate posture changes (a new umbrella command becomes forbidden, a new local check becomes allowed). |
 | `references/spec-review-directional-signals.md` | When `spec-reviewer` surfaces the same scope/sequencing/posture call >2 times — add a signal so the classifier catches it. |
+| `docs/incident-response.md` | When the SEV classification matrix, on-call rotation, timeline-log format, post-mortem template, or escalation paths change. |
+| `docs/testing-transition-plan.md` | When migration triggers, test-inventory sequencing, per-area effort estimates, or phasing decisions change. |
 | `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | Every framework-level change ships with a version bump and changelog entry. Repo-specific changes (your own architecture.md edits, your own agent additions) DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only. |
+
+---
+
+## Event registry conventions
+
+### `operator-session.*` lifecycle event namespace (operator-backend, 2026-05)
+
+Hyphenated lifecycle events (`operator-session.*`) are distinct from dotted incident/audit events (`operator.*`, `task.operator.*`, `subaccount.operator_settings.*`). The separation is enforced by a CI gate.
+
+**Single source of truth:** `shared/types/operatorBackendEvents.ts` — the discriminated union for all `operator-session.*` event-name literals. Any file that needs to reference an event name literal MUST import from this file; it MUST NOT declare a string literal inline (even if the string is identical).
+
+**CI gate:** `scripts/gates/verify-operator-event-registry.sh` — greps the repo for naked `operator-session.*` string literals outside the registry file and the explicitly allow-listed paths (the registry file itself, test fixtures, this spec, plan, and brief). Non-empty output from the gate = CI failure.
+
+**Why this matters:** before this gate, event-name strings drifted across handlers and services, making it impossible to enumerate all producers or consumers of an event without a full-text search. The single-source-of-truth pattern prevents silent drift. Future event families that span multiple producers and consumers should adopt the same pattern: one `shared/types/<domain>Events.ts` file + one CI gate in `scripts/gates/verify-<domain>-event-registry.sh`.
 
 ---
 

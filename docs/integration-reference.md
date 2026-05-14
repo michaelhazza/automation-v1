@@ -17,7 +17,7 @@ See `docs/orchestrator-capability-routing-spec.md` for the full design rationale
 
 ```yaml integration_reference_meta
 schema_version: "1.0.0"
-last_updated: "2026-04-17"
+last_updated: "2026-05-12"
 ```
 
 ---
@@ -64,6 +64,9 @@ read_capabilities:
   - slug: channel_messages_read
     aliases: [read_channel, slack_messages_read, channel_history]
     description: Read messages from a chat channel
+  - slug: drive_read
+    aliases: [read_drive, google_drive_read, file_read]
+    description: Read files from a cloud storage provider (documents, spreadsheets, PDFs)
   - slug: subaccount_read
     aliases: [read_subaccount, location_read]
     description: Read subaccount/location metadata from a multi-tenant CRM
@@ -102,6 +105,24 @@ write_capabilities:
   - slug: create_event
     aliases: [event_create, calendar_event_create, schedule_event]
     description: Create a calendar event
+  - slug: calendar_event_create
+    aliases: [ea_calendar_create, calendar_create_gated]
+    description: Create new calendar events; review-gated via EA draft
+  - slug: calendar_event_update
+    aliases: [ea_calendar_update, calendar_update_gated]
+    description: Update existing calendar events; review-gated via EA draft
+  - slug: calendar_event_respond
+    aliases: [ea_calendar_respond, calendar_rsvp, calendar_accept_decline]
+    description: Accept/decline/tentatively accept calendar invitations; review-gated via EA draft
+  - slug: channel_post_message
+    aliases: [slack_channel_post, ea_slack_post, channel_message_send]
+    description: Post messages to Slack channels; always review-gated via EA draft
+  - slug: channel_search_messages
+    aliases: [slack_search, workspace_search_messages]
+    description: Workspace-wide Slack message search; requires search:read scope (paid plans only)
+  - slug: dm_send
+    aliases: [slack_dm_send, direct_message_send, ea_dm]
+    description: Send Slack DMs; auto-send to owner, review-gated to others
   - slug: create_contact
     aliases: [contact_create, add_contact, new_contact]
     description: Create a new contact in a CRM
@@ -339,7 +360,7 @@ owner: platform-team
 ### Google Calendar
 
 ```yaml integration
-slug: google-calendar
+slug: google_calendar
 name: Google Calendar
 provider_type: oauth
 status: partial
@@ -348,6 +369,9 @@ read_capabilities:
   - calendar_read
 write_capabilities:
   - create_event
+  - calendar_event_create
+  - calendar_event_update
+  - calendar_event_respond
 skills_enabled: []
 primitives_required:
   - oauth_connection
@@ -361,16 +385,18 @@ setup_doc_link: null
 typical_use_cases:
   - Scheduled reporting on calendar load
   - Creating follow-up meetings after deals advance
+  - EA reads availability and creates or updates events with approval
 broadly_useful_patterns:
   - Meeting recap summaries
   - Calendar-based workload reporting
+  - EA-gated event creation and RSVP management
 known_gaps:
   - Attendee availability checks not yet exposed
   - Recurring event modification limited
 client_specific_patterns:
   - Meeting templates tied to a specific client's booking preferences
 implemented_since: "2026-03-01"
-last_verified: "2026-04-17"
+last_verified: "2026-05-12"
 owner: platform-team
 ```
 
@@ -386,6 +412,9 @@ read_capabilities:
   - channel_messages_read
 write_capabilities:
   - post_message
+  - channel_post_message
+  - channel_search_messages
+  - dm_send
 skills_enabled: []
 primitives_required:
   - oauth_connection
@@ -396,23 +425,27 @@ required_scopes:
   - channels:history
   - chat:write
   - groups:read
+  - im:write
+  - search:read
 setup_steps_summary: Install the Synthetos Slack app into your workspace and select channels to listen on.
 setup_doc_link: null
 typical_use_cases:
   - Alert channel notifications
   - Agent-initiated posts to client channels
   - Listening to specific channels for triggers
+  - EA posts or DMs with owner approval
 broadly_useful_patterns:
   - Agent alerts on exception events
   - Scheduled summary posts to channels
+  - EA-gated channel posts and DMs
 known_gaps:
-  - DM-level operations not yet supported
   - File upload API not yet wrapped
+  - channel_search_messages requires a paid Slack plan (search:read scope)
 client_specific_patterns:
   - Channel IDs unique to one workspace
   - Bot display names branded per agency
 implemented_since: "2026-02-15"
-last_verified: "2026-04-17"
+last_verified: "2026-05-12"
 owner: platform-team
 ```
 
@@ -851,6 +884,7 @@ provider_type: oauth
 status: partial
 visibility: public
 read_capabilities:
+  - drive_read
   - page_read
   - spreadsheet_read
 write_capabilities: []

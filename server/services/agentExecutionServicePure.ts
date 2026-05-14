@@ -559,6 +559,21 @@ export function isComplexRun(params: {
 // Returns `null` for non-terminal statuses (the caller must not write
 // `runResultStatus` until the status reaches a terminal state).
 
+// ---------------------------------------------------------------------------
+// assembleVoiceBlock — Personal Assistant V1 §12.4, §22.3
+//
+// Returns a <voice>...</voice> XML block for injection into the stable-prefix
+// cache partition when the profile is ready and the user has not opted out.
+// Returns null in all other cases so the caller can skip injection cleanly.
+// ---------------------------------------------------------------------------
+
+export function assembleVoiceBlock(
+  profile: { state: string; optedOutAt: Date | null; profileJson: unknown } | null,
+): string | null {
+  if (!profile || profile.state !== 'ready' || profile.optedOutAt !== null) return null;
+  return `<voice>\n${JSON.stringify(profile.profileJson, null, 2)}\n</voice>`;
+}
+
 export type RunResultStatus = 'success' | 'partial' | 'failed';
 
 export function computeRunResultStatus(

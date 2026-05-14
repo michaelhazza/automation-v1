@@ -1,11 +1,12 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, type Transaction } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import {
   loadIntegrationReference,
   type IntegrationReferenceSnapshot,
 } from './integrationReferenceService.js';
+import type { RoutingContextV2 } from '../../shared/types/routingContext.js';
 
 // ---------------------------------------------------------------------------
 // Capability Map Service
@@ -45,6 +46,8 @@ export interface CapabilityMap {
   write_capabilities: string[];
   skills: string[];
   primitives: string[];
+  /** Set when this capability map belongs to a user-owned agent (V2, spec §5.1). */
+  owner_user_id?: string;
 }
 
 /**
@@ -71,6 +74,7 @@ export function computeCapabilityMapPure(
   skillSlugs: string[],
   snapshot: IntegrationReferenceSnapshot,
   options: { scheduleEnabled: boolean; heartbeatEnabled: boolean } = { scheduleEnabled: false, heartbeatEnabled: false },
+  agentRow?: { owner_user_id?: string | null },
 ): CapabilityMap {
   const integrations = new Set<string>();
   const reads = new Set<string>();
@@ -102,7 +106,7 @@ export function computeCapabilityMapPure(
     for (const p of integration.primitives_required) primitives.add(p);
   }
 
-  return {
+  const result: CapabilityMap = {
     computedAt: new Date().toISOString(),
     referenceLastUpdated: snapshot.schema_meta.last_updated || undefined,
     integrations: Array.from(integrations).sort(),
@@ -111,6 +115,12 @@ export function computeCapabilityMapPure(
     skills: Array.from(skills).sort(),
     primitives: Array.from(primitives).sort(),
   };
+
+  if (agentRow?.owner_user_id != null) {
+    result.owner_user_id = agentRow.owner_user_id;
+  }
+
+  return result;
 }
 
 /**
@@ -209,4 +219,111 @@ export async function listAgentCapabilityMaps(
     agentName: r.agentName,
     capabilityMap: r.capabilityMap,
   }));
+}
+
+export interface RoutingCandidate {
+  subaccountAgentId: string;
+  agentId: string;
+  agentName: string;
+  capabilityMap: CapabilityMap | null;
+}
+
+export interface MatchedCandidate {
+  candidate: RoutingCandidate;
+  /** Additive score boost from @address match. 0 when no address matched. */
+  scoreBoost: number;
+}
+
+/**
+ * Two-axis ownership filter + address score boost per spec §5.2–§5.3.
+ *
+ * Rule:
+ *   if candidate.capabilityMap.owner_user_id is set:
+ *     match iff owner_user_id == (target_owner_user_id ?? requester_user_id)
+ *   else:
+ *     pass through (subaccount-scoped; already filtered at DB layer)
+ *
+ * Score boost of 0.15 is applied when addressed_agent.id == candidate.agentId
+ * AND the candidate passed the ownership check. A capability-failed candidate
+ * (null map or ownership mismatch) cannot be promoted by the boost.
+ *
+ * Returns candidates that passed the ownership check, sorted by scoreBoost
+ * descending (highest boost first so the caller's first-match loop favours
+ * the addressed agent).
+ */
+export function matchCapability(
+  routingContext: RoutingContextV2,
+  candidates: RoutingCandidate[],
+): MatchedCandidate[] {
+  const results: MatchedCandidate[] = [];
+
+  for (const c of candidates) {
+    const map = c.capabilityMap;
+    if (map == null) continue; // null map blocks routing per spec
+
+    // Two-axis owner rule
+    if (map.owner_user_id != null) {
+      const targetOwner = routingContext.target_owner_user_id ?? routingContext.requester_user_id;
+      if (map.owner_user_id !== targetOwner) continue;
+    }
+    // Else: no owner_user_id = subaccount-scoped agent; DB already filtered; pass through
+
+    const scoreBoost =
+      routingContext.addressed_agent?.id === c.agentId
+        ? routingContext.addressed_agent.score_boost
+        : 0;
+
+    results.push({ candidate: c, scoreBoost });
+  }
+
+  return results.sort((a, b) => b.scoreBoost - a.scoreBoost);
+}
+
+/**
+ * Recompute and persist the capability map for a single subaccount_agent row,
+ * including the owning agent's owner_user_id in the output (spec §6.4 invariant).
+ *
+ * Pass `tx` to run inside the caller's Drizzle transaction — required when this
+ * is called in the same transaction as an agents.owner_user_id update so that
+ * capability_map.owner_user_id stays in sync atomically (spec §6.4).
+ */
+export async function recomputeCapabilityMapWithOwner(
+  subaccountAgentId: string,
+  tx?: Transaction,
+): Promise<CapabilityMap | null> {
+  const client = tx ?? db;
+
+  const [row] = await client
+    .select({
+      id: subaccountAgents.id,
+      skillSlugs: subaccountAgents.skillSlugs,
+      allowedSkillSlugs: subaccountAgents.allowedSkillSlugs,
+      scheduleEnabled: subaccountAgents.scheduleEnabled,
+      heartbeatEnabled: subaccountAgents.heartbeatEnabled,
+      ownerUserId: agents.ownerUserId,
+    })
+    .from(subaccountAgents)
+    .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+    .where(eq(subaccountAgents.id, subaccountAgentId));
+
+  if (!row) return null;
+
+  const base = Array.isArray(row.skillSlugs) ? row.skillSlugs : [];
+  const allowed = Array.isArray(row.allowedSkillSlugs) ? row.allowedSkillSlugs : null;
+  const effective = allowed ? base.filter((slug) => allowed.includes(slug)) : base;
+
+  const snapshot = await loadIntegrationReference();
+  const map = computeCapabilityMapPure(
+    effective,
+    snapshot,
+    { scheduleEnabled: row.scheduleEnabled, heartbeatEnabled: row.heartbeatEnabled },
+    { owner_user_id: row.ownerUserId },
+  );
+
+  await client
+    .update(subaccountAgents)
+    .set({ capabilityMap: map, updatedAt: new Date() })
+    .where(eq(subaccountAgents.id, subaccountAgentId));
+
+  return map;
 }

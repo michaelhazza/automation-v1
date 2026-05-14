@@ -14,7 +14,7 @@ All review-log filenames use the shape:
 tasks/review-logs/<agent>-log-<slug>[-<chunk-slug>]-<timestamp>.md
 ```
 
-- **`<agent>`** — fixed per agent: `pr-review`, `spec-conformance`, `dual-review`, `spec-review`, `codebase-audit`, `adversarial-review`, `chatgpt-pr-review`, `chatgpt-spec-review`.
+- **`<agent>`** — fixed per agent: `pr-review`, `spec-conformance`, `dual-review`, `spec-review`, `codebase-audit`, `adversarial-review`, `reality-check`, `chatgpt-pr-review`, `chatgpt-spec-review`.
 - **`<slug>`** — the feature/spec slug when working under `tasks/builds/<slug>/`, otherwise a short kebab-case name derived from the branch or spec path.
 - **`<chunk-slug>`** — present **only** when the review is scoped to a single plan chunk (e.g. `feature-coordinator` per-chunk invocations of `spec-conformance` or `pr-reviewer`); omitted for manual whole-branch invocations.
   - **Format:** kebab-case of the chunk name — lowercase, ASCII, hyphen-separated, no spaces or underscores, no duplicate hyphens.
@@ -42,6 +42,22 @@ Format:
 
 Trailing prose on the same line is allowed and ignored by the parser (e.g. `**Verdict:** CONFORMANT_AFTER_FIXES (1 mechanical gap closed; 4 directional items routed)`). The Mission Control dashboard at `tools/mission-control/` reads this line per log to surface the latest verdict per build.
 
+### `pr-reviewer` output format
+
+`pr-reviewer` logs use severity-tiered glyphs for findings:
+
+- `🔴 Blocking` — must be fixed before merge
+- `🟡 Should-fix` — non-blocking but expected to be addressed in-PR unless explicitly deferred
+- `💭 Consider` — taste / future-proofing / nice-to-have
+
+Each finding line is prefixed with `[🔴|🟡|💭] <file:line>` and carries a `Why: <one-line rationale>` on the line immediately after.
+
+The log MUST include a summary count line immediately before the `**Verdict:**` line:
+
+```
+Blocking: N / Should-fix: N / Consider: N
+```
+
 Per-agent enum (locked):
 
 | Agent | Allowed values |
@@ -52,6 +68,7 @@ Per-agent enum (locked):
 | `spec-reviewer` (final report) | `READY_FOR_BUILD` \| `NEEDS_REVISION` |
 | `audit-runner` | `PASS` \| `PASS_WITH_DEFERRED` \| `FAIL` |
 | `adversarial-reviewer` | `NO_HOLES_FOUND` \| `HOLES_FOUND` \| `NEEDS_DISCUSSION` |
+| `reality-checker` | `READY` \| `NEEDS_WORK` \| `NEEDS_DISCUSSION` |
 | `chatgpt-pr-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
 | `chatgpt-spec-review` | `APPROVED` \| `CHANGES_REQUESTED` \| `NEEDS_DISCUSSION` |
 
@@ -70,9 +87,9 @@ When adding a new review agent, extend this table AND add a Verdict line to its 
 **Caller responsibility:** before fixing any issues, extract the block verbatim and write it to `tasks/review-logs/pr-review-log-<slug>[-<chunk-slug>]-<timestamp>.md`. Persist first, then fix — this captures the raw reviewer voice before code changes overwrite the context.
 
 **After persisting**, process findings in this order:
-1. Blocking non-architectural findings → implement in-session.
-2. Blocking findings that are architectural in nature (significant redesign, contract change, multi-service impact) → route to `tasks/todo.md` under `## PR Review deferred items / ### <slug>` rather than attempting in-place.
-3. Strong Recommendations → implement if in-scope, otherwise defer to the same backlog section.
+1. 🔴 Blocking non-architectural findings → implement in-session.
+2. 🔴 Blocking findings that are architectural in nature (significant redesign, contract change, multi-service impact) → route to `tasks/todo.md` under `## PR Review deferred items / ### <slug>` rather than attempting in-place.
+3. 🟡 Should-fix findings → implement if in-scope, otherwise defer to the same backlog section.
 
 ### `spec-conformance`
 
@@ -104,7 +121,30 @@ Read-only. Emits its complete review inside a fenced markdown block tagged `adve
 - `likely-hole` findings → route to the same backlog with the agent's "what would confirm" note attached.
 - `worth-confirming` findings → keep in the log only; do not propagate to the backlog unless the user escalates.
 
-Manually invoked only — the user must explicitly ask. Phase 1 advisory; non-blocking.
+Manual invocation is supported (the operator can ask for an ad-hoc adversarial pass on a changed-file set). `feature-coordinator` also auto-invokes `adversarial-reviewer` during the Phase 2 branch-level review pass when the branch diff matches the §5.1.2 security surface (`server/db/schema`, `server/routes`, auth/permission services, middleware, RLS migrations, webhook handlers — see `.claude/agents/feature-coordinator.md` §8.2 for the canonical pathspec). Phase 1 advisory; non-blocking.
+
+### `reality-checker`
+
+Read-only. Emits its complete verification inside a fenced markdown block tagged `reality-check-log` and prints it as the LAST content of its response — same pattern as `pr-reviewer`.
+
+**Caller responsibility — input:** the caller must supply (a) the implementer's stated success criteria and (b) the implementer's claimed evidence (log file paths, pasted excerpts, screenshot paths, or deterministic-check descriptions). Without evidence, `reality-checker` returns `NEEDS_WORK` immediately without reading any files.
+
+**Caller responsibility — persistence:** before acting on the verdict, extract the block verbatim and write it to `tasks/review-logs/reality-check-log-<slug>-<timestamp>.md`. Persist first, then route.
+
+**Verdict enum:**
+- `READY` — every criterion has verified evidence; build may proceed to dual-reviewer.
+- `NEEDS_WORK` — one or more criteria unverified; fix-loop back to builder (max 2 rounds).
+- `NEEDS_DISCUSSION` — criteria themselves are ambiguous; escalate to operator.
+
+The log MUST include a summary count line immediately before the `**Verdict:**` line:
+
+```
+Verified: N / Unverified: N
+```
+
+**Scope:** Significant and Major tasks only. Skipped for Trivial/Standard — `feature-coordinator` records `reality-checker: skipped — task class Trivial/Standard (per GRADED policy)` in `progress.md`.
+
+**Mission Control regex:** same as all other agents — `^\*\*Verdict:\*\*\s+([A-Z_]+)\b`. Enum values `READY`, `NEEDS_WORK`, `NEEDS_DISCUSSION` are all uppercase-underscore and pass the regex.
 
 ### `spec-reviewer`
 

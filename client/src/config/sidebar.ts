@@ -6,15 +6,21 @@
 //
 // INVARIANT: NavGroup declaration order IS the visual render order.
 // MUST emit items in this group sequence:
-//   top → work → projects → agents → company → clientpulse → organisation → platform → footer
+//   top → personal → work → projects → agents → company → clientpulse → organisation → platform → footer
 // Reordering this union (or sorting the output by anything other than this
 // sequence) is a visual regression.
+//
+// REQ-M15 (2026-05-13 spec-conformance amendment): `personal` sits immediately
+// after `top` (above `work`/`projects`/`agents`) per spec §14.1 — per-user
+// agents are a first-class entry point and burying them mid-list defeats the
+// UX intent. Pre-2026-05-13 the order placed `personal` after `agents`.
 
 import { buildRoute, staticRoute } from './routes.js';
 import type { AppRoute } from './routes.js';
 
 export type NavGroup =
   | 'top'           // Home / New Task — above named sections
+  | 'personal'      // user-owned personal agents (above Work per spec §14.1 / REQ-M15)
   | 'work'          // workspace-mode work items
   | 'projects'      // dynamic project list
   | 'agents'        // dynamic agent list
@@ -50,6 +56,7 @@ export interface NavContext {
   viewMode: 'workspace' | 'org' | 'system';
   navProjects: Array<{ id: string; name: string; color: string; status: string }>;
   navAgents: Array<{ id: string; agentId: string; name: string; icon: string | null }>;
+  userOwnedAgents: Array<{ agentId: string; name: string }>;
   reviewCount: number;
   liveAgentCount: number;
   incidentCount: number;
@@ -69,7 +76,7 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
   const {
     isSystemAdmin, hasOrgContext, hasAnyOrgPerm,
     activeClientId, hasOrgPerm, hasClientPerm, hasSidebarItem,
-    viewMode, navProjects, navAgents,
+    viewMode, navProjects, navAgents, userOwnedAgents,
     reviewCount, liveAgentCount, incidentCount,
     onCreateProject, onCreateAgent, onOpenNewBrief, onLogout,
     onOpenConfigAssistant,
@@ -108,6 +115,21 @@ export function buildNavItems(ctx: NavContext): NavItemSpec[] {
       to: staticRoute('/'),
       iconKey: 'inbox',
     });
+  }
+
+  // ── personal group — user-owned agents (REQ-M15 spec §14.1: above Work) ──
+  if (userOwnedAgents.length > 0) {
+    items.push({ group: 'personal', kind: 'section-header', key: 'personal-header', label: 'Personal' });
+    for (const a of userOwnedAgents) {
+      items.push({
+        group: 'personal',
+        kind: 'link',
+        key: `personal-agent-${a.agentId}`,
+        label: a.name,
+        to: buildRoute('/personal/:agentId', { agentId: a.agentId }),
+        iconKey: 'agents',
+      });
+    }
   }
 
   // ── work group — only in workspace mode ─────────────────────────────────

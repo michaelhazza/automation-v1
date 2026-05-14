@@ -1,0 +1,36 @@
+You are reviewing iteration 4 of a draft specification document. Iterations 1, 2, and 3 fixed 26 mechanical defects across the spec.
+
+Two AUTO-DECIDED items are now in `tasks/todo.md` (both BLOCK specific chunks; both have candidate strategies in the spec's §13 open questions):
+
+1. `PA-V2-OP-S1` (BLOCKS CHUNK 7) — the file-events backing-store schema strategy (new `operator_run_files` vs extend `execution_files`). §13 #1.
+2. `PA-V2-OP-S2` (BLOCKS CHUNK 3) — the `delegation_outcomes` state-machine column gap (extend table vs new `cross_owner_substep_state` table). §13 #2.
+
+Do NOT re-raise either. Both are operator-routed.
+
+This iteration is the LAST consistency pass before the loop converges. Look for:
+
+1. **Any remaining contradictions, drift, or unspecified mechanisms.** Be specific. If nothing surfaces, say so explicitly: "no new findings, the spec is clean."
+2. **Has iteration 3's strategy-neutralisation accidentally broken anything else?** Specifically, does §9.4 still make a load-bearing claim that doesn't survive the §13 #2 routing?
+3. **Are there any §11 self-consistency claims that are now stale given iterations 1, 2, 3's edits?**
+4. **§4 inventory lock — last sweep.** Are there ANY remaining file/column/migration mentions not in §4?
+
+Project context (do NOT re-derive):
+- Pre-production. No staged rollouts. No feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, new abstractions duplicating existing primitives.
+- The two open schema decisions (PA-V2-OP-S1, PA-V2-OP-S2).
+
+For each finding, give:
+1. Short title.
+2. Section heading or line range.
+3. Defect.
+4. Minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say: "no new findings, the spec is clean".
+
+The spec is:
+

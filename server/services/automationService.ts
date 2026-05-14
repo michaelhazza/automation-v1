@@ -1,6 +1,6 @@
 import { eq, and, isNull, ilike, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { automations, automationEngines, executions, executionPayloads } from '../db/schema/index.js';
+import { automations, automationEngines, executions, executionPayloads, subaccountAutomationLinks, subaccountCategories } from '../db/schema/index.js';
 import { webhookService } from './webhookService.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
@@ -391,6 +391,88 @@ export class AutomationService {
     }).returning();
 
     return cloned;
+  }
+
+  /**
+   * List automations visible to a subaccount via linked or native automations.
+   * Returns linked rows, native rows, and categories for the portal automations page.
+   */
+  async listPortalAutomations(subaccountId: string) {
+    const linkedRows = await db
+      .select({
+        processId: subaccountAutomationLinks.processId,
+        subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
+        processName: automations.name,
+        processDescription: automations.description,
+        processInputSchema: automations.inputSchema,
+        processOutputSchema: automations.outputSchema,
+      })
+      .from(subaccountAutomationLinks)
+      .innerJoin(automations, eq(automations.id, subaccountAutomationLinks.processId))
+      .where(
+        and(
+          eq(subaccountAutomationLinks.subaccountId, subaccountId),
+          eq(subaccountAutomationLinks.isActive, true),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt),
+        ),
+      );
+
+    const nativeRows = await db
+      .select()
+      .from(automations)
+      .where(
+        and(
+          eq(automations.subaccountId, subaccountId),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt),
+        ),
+      );
+
+    const categories = await db
+      .select()
+      .from(subaccountCategories)
+      .where(
+        and(
+          eq(subaccountCategories.subaccountId, subaccountId),
+          isNull(subaccountCategories.deletedAt),
+        ),
+      );
+
+    return { linkedRows, nativeRows, categories };
+  }
+
+  /**
+   * Verify that a process is accessible to a subaccount (linked or native).
+   * Returns true if accessible, false otherwise.
+   */
+  async isProcessAccessibleToSubaccount(processId: string, subaccountId: string): Promise<boolean> {
+    const [linked] = await db
+      .select({ processId: subaccountAutomationLinks.processId })
+      .from(subaccountAutomationLinks)
+      .where(
+        and(
+          eq(subaccountAutomationLinks.subaccountId, subaccountId),
+          eq(subaccountAutomationLinks.processId, processId),
+          eq(subaccountAutomationLinks.isActive, true),
+        ),
+      );
+
+    if (linked) return true;
+
+    const [native] = await db
+      .select({ id: automations.id })
+      .from(automations)
+      .where(
+        and(
+          eq(automations.id, processId),
+          eq(automations.subaccountId, subaccountId),
+          eq(automations.status, 'active'),
+          isNull(automations.deletedAt),
+        ),
+      );
+
+    return !!native;
   }
 
   private _mapProcess(t: typeof automations.$inferSelect, includeAdmin: boolean) {

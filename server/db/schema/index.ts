@@ -183,6 +183,9 @@ export * from './onboardingBundleConfigs.js';
 // Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
 export * from './memoryBlockVersions.js';
 
+// Memory improvements spec §4 Phase 1 — synthesis lineage table (migration 0333)
+export * from './memoryBlockVersionSources.js';
+
 // Feature 2 — test-input fixtures for inline Run-Now test panel (migration 0153)
 export * from './agentTestFixtures.js';
 
@@ -261,6 +264,10 @@ export * from './agentRecommendations';
 // BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
 export * from './optimiserSkillPeerMedians';
 
+// Memory improvements spec §4 Phase 2 — 30-day utility MV (migration 0345)
+// BYPASSES RLS — multi-tenant MV; org-filtered at route layer (see rlsExclusions.ts).
+export * from './mvMemoryUtility30d.js';
+
 // GHL Agency OAuth — location token cache (migration 0269)
 export * from './connectorLocationTokens.js';
 
@@ -321,9 +328,25 @@ export * from './webhookReplayNonces.js';
 export * from './operatorSessionConsents.js';
 export * from './operatorSessionConsentEvents.js';
 
+// Personal Assistant V1 — EA drafts (migration 0327)
+export * from './eaDrafts.js';
+
 // Sandbox Isolation — five RLS-protected tables for untrusted Tier 4 code execution (migrations 0321–0323)
 export * from './sandboxExecutions.js';
 export * from './sandboxArtefacts.js';
 export * from './sandboxTelemetryEvents.js';
 export * from './sandboxEgressAudit.js';
 export * from './sandboxLogs.js';
+
+// Operator Backend — chain-link rows, task profiles, per-subaccount settings (migrations 0327–0329)
+export * from './operatorRuns.js';
+export * from './operatorTaskProfiles.js';
+export * from './subaccountOperatorSettings.js';
+
+// IEE Browser on e2b — session profiles, settings, warm sessions (migrations 0346–0350)
+export * from './ieeBrowserSessionProfiles.js';
+export * from './subaccountIeeBrowserSettings.js';
+export * from './browserWarmSessions.js';
+
+// Operator run files — per-run file artefact pointers (migration 0353)
+export * from './operatorRunFiles.js';

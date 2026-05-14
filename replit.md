@@ -20,7 +20,7 @@ This runs the Vite client (default port 5000) and the Express server (default po
 npx tsc --noEmit && npx tsc -p server/tsconfig.json --noEmit
 ```
 
-The repo has two TypeScript projects. The root `tsconfig.json` covers `client/src/`; `server/tsconfig.json` covers `server/` and `shared/`. The one-liner above exercises both. There is no `npm run typecheck` script.
+The repo has two TypeScript projects. The root `tsconfig.json` covers `client/src/`; `server/tsconfig.json` covers `server/` and `shared/`. The one-liner above exercises both, and is equivalent to `npm run typecheck` (which also runs both projects — see `CLAUDE.md` § Verification Commands).
 
 **Where to look next:**
 
