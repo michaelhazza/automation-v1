@@ -50,7 +50,7 @@ client/src/components/workflow-run/
   ├─ types.ts                                          ← StepType, SideEffectType, StepRunStatus, RunStatus, StepRun, StepDef, RunRow, Envelope interfaces + STATUS_COLORS / STATUS_DOT_COLORS / SIDE_EFFECT_COLORS / TERMINAL_RUN_STATUSES constants
   ├─ format.ts                                         ← formatDuration helper
   ├─ __tests__/
-  │   └─ format.test.ts                                ← three edge cases for formatDuration (see §9)
+  │   └─ format.test.ts                                ← five cases for formatDuration (see §9 table)
   ├─ RunHeader.tsx                                     ← name, version, status pill, kebab menu (Cancel / Replay / Portal toggle)
   ├─ StepDag.tsx                                       ← left-rail step list (read-only DAG)
   ├─ StepDetailPane.tsx                                ← extracted, was inline
@@ -70,7 +70,7 @@ WorkflowRunPage (host, ~180 LOC)
 ├── two-pane body
 │    ├── <StepDag … />                                            ← see §8.2
 │    └── <StepDetailPane stepRun, stepDef />
-└── <HitlActionBar stepRun, runId, stepDef, onActionTaken />     ← sticky, conditional on stepRun.status
+└── <HitlActionBar stepRun, runId, stepDef, onActionTaken />     ← host renders this only when selectedStep?.status === 'awaiting_input' || 'awaiting_approval'; the component itself assumes non-null actionable stepRun
 ```
 
 The host's job: call `useWorkflowRunEnvelope(subaccountId, runId)` (which returns `selectedStepRunId` + `setSelectedStepRunId` as well as the envelope — see §7), compose the four region components, and supply the four header callbacks (`onCancel` / `onReplay` / `onPortalToggle` and the HITL `onActionTaken`) which all call `refetch()` on success.
@@ -93,6 +93,8 @@ Owns:
 
 Returns: `{ envelope, loading, error, refetch, socketConnected, selectedStepRunId, setSelectedStepRunId }`. `selectedStepRunId` lives inside the hook so the default-selection logic stays co-located with the envelope it derives from.
 
+**Not in the hook contract.** The topological sort that produces `orderedStepRuns` (today's `useMemo` at WorkflowRunPage.tsx:257-268) stays in the host across all six chunks of this refactor — it's a small derivation that doesn't need to move. Same for `stepDefById` and `selectedStep` (the resolved step record). The Deferred Items section flags promoting these into the hook if a second consumer emerges.
+
 The host wires all action handlers (Cancel / Replay / Portal toggle / HITL approve / HITL reject / HITL respond) to call `refetch()` on success.
 
 The WS room identifier is the `(roomType, roomId)` pair, not a colon-joined string. `useSocketRoom` emits `join:workflow-run` with `runId` as the payload and `leave:workflow-run` on cleanup — preserved verbatim from `client/src/hooks/useSocket.ts`.
@@ -112,7 +114,16 @@ props: {
   onPortalToggle(): Promise<void>;
 }
 ```
-Renders the back-link, title block (name + version + onboarding / portal-visible pills), the metadata line (`completedSteps / totalSteps · mode … · started …`), the status pill, the optional `⚠ polling` indicator, the kebab dropdown (Cancel / Replay / Portal toggle / Edit template in Studio), and the run-error box. Owns the kebab open/closed local state, the document-level click-to-close effect, and the two `ConfirmDialog` modals for Cancel and Replay (the header renders the modals and triggers `onCancel()` / `onReplay()` on confirm; the host owns the action handlers themselves — `handleCancelRun` / `handleReplayRun` — which fire the toasts and call `refetch()`). `onPortalToggle()` is `async` because today's implementation awaits the PATCH before refetching — the host's handler does the PATCH + toast + `refetch()`, the header just invokes it.
+Renders the back-link, title block (name + version + onboarding / portal-visible pills), the metadata line (`completedSteps / totalSteps · mode … · started …`), the status pill, the optional `⚠ polling` indicator, the kebab dropdown (Cancel / Replay / Portal toggle / Edit template in Studio), and the run-error box.
+
+Fields read off the props (no other implicit dependencies):
+- Back-link href: `subaccountId ? '/admin/subaccounts/${subaccountId}' : '/'`
+- Title: `definition?.name ?? run.WorkflowSlug ?? 'Workflow run'`; version pill from `definition?.version`.
+- Onboarding / portal pills: `run.isOnboardingRun`, `run.isPortalVisible`.
+- Metadata line: `stepRuns.filter(s => s.status === 'completed').length` / `definition?.steps?.length ?? stepRuns.length` · `run.runMode` · `run.startedAt`.
+- Edit-template link: rendered only when `definition?.slug` is set; `to={'/system/workflow-studio?slug=' + encodeURIComponent(definition.slug)}` (preserved verbatim from WorkflowRunPage.tsx:552-561).
+- Run-error box: rendered only when `run.error` is non-null; displays `run.error` plus optionally `run.failedDueToStepId` (preserved verbatim from WorkflowRunPage.tsx:566-576).
+- Cancellable: `!TERMINAL_RUN_STATUSES.includes(run.status) && run.status !== 'cancelling'` (gates the kebab's "Cancel run" item). Owns the kebab open/closed local state, the document-level click-to-close effect, and the two `ConfirmDialog` modals for Cancel and Replay (the header renders the modals and triggers `onCancel()` / `onReplay()` on confirm; the host owns the action handlers themselves — `handleCancelRun` / `handleReplayRun` — which fire the toasts and call `refetch()`). `onPortalToggle()` is `async` because today's implementation awaits the PATCH before refetching — the host's handler does the PATCH + toast + `refetch()`, the header just invokes it.
 
 ### 8.2 `<StepDag>`
 ```
@@ -145,7 +156,9 @@ props: {
   onActionTaken(): Promise<void>;    // calls refetch() in the host
 }
 ```
-Renders the sticky action bar only when the host has determined `stepRun.status === 'awaiting_input'` or `'awaiting_approval'`. Owns the action-form local state internally (`inputFormOpen`, `inputFormData`, `editApproveOpen`, `editApproveData`, `actionSubmitting`, `actionError`) and the effect that resets the forms when `stepRun.id` changes (preserved from WorkflowRunPage.tsx:293-299).
+**Render contract.** The host decides whether to render `<HitlActionBar>` (guard: `selectedStep?.status === 'awaiting_input' || 'awaiting_approval'`). The component itself does not re-check the status — it assumes the host's guard already passed and that `stepRun` is the actionable step. This keeps the conditional in one place and lets the component focus on the form state.
+
+Owns the action-form local state internally (`inputFormOpen`, `inputFormData`, `editApproveOpen`, `editApproveData`, `actionSubmitting`, `actionError`) and the effect that resets the forms when `stepRun.id` changes (preserved from WorkflowRunPage.tsx:293-299).
 
 Endpoints called (preserved verbatim from today's host):
 - `POST /api/workflow-runs/${runId}/steps/${stepRunId}/input` with `{ data: parsed, expectedVersion: stepRun.version }` — the awaiting-input path.
@@ -165,7 +178,7 @@ Move `formatDuration` to `format.ts` (today's lines 838-849). Test file `__tests
 | `startedAt: null` | `formatDuration(null, '2026-05-15T00:00:00.000Z')` | `null` |
 | `completedAt: null` (running step) | freezes `Date.now()` with `vi.useFakeTimers()` + `vi.setSystemTime('2026-05-15T00:00:02.300Z')`, calls `formatDuration('2026-05-15T00:00:00.000Z', null)` | `'2.3s'` |
 
-The type aliases and interfaces at lines 24-120 (`StepType`, `SideEffectType`, `StepRunStatus`, `RunStatus`, `StepRun`, `StepDef`, `RunRow`, `Envelope`) plus the presentation constants at lines 124-162 (`TERMINAL_RUN_STATUSES`, `STATUS_COLORS`, `STATUS_DOT_COLORS`, `SIDE_EFFECT_COLORS`) move to `types.ts` and are re-exported by each region file that needs them.
+The type aliases and interfaces at lines 24-120 (`StepType`, `SideEffectType`, `StepRunStatus`, `RunStatus`, `StepRun`, `StepDef`, `RunRow`, `Envelope`) plus the presentation constants at lines 124-162 (`TERMINAL_RUN_STATUSES`, `STATUS_COLORS`, `STATUS_DOT_COLORS`, `SIDE_EFFECT_COLORS`) move to `types.ts`. Each region file imports from `types.ts` directly — no barrel `index.ts` is introduced.
 
 ## 10. Migration plan
 
@@ -201,6 +214,7 @@ The type aliases and interfaces at lines 24-120 (`StepType`, `SideEffectType`, `
 
 - **Shared step-status badge component.** Today the StepDag and StepDetailPane both render their own status pills. A shared `<StepStatusBadge>` is tempting but defer until 3+ surfaces need it.
 - **Promote `useWorkflowRunEnvelope` to a more generic `useRunEnvelope`** that other run-types could consume. No second consumer today; defer.
+- **Move `orderedStepRuns` / `stepDefById` derivations into the hook.** Today (and after this refactor) they live in the host as small `useMemo` blocks. If a second consumer of the hook emerges or the host approaches the 200-LOC ceiling, fold them in.
 
 ## 12. Self-consistency
 
@@ -227,7 +241,9 @@ The type aliases and interfaces at lines 24-120 (`StepType`, `SideEffectType`, `
 | Portal toggle off | `toast.success('Hidden from portal')` | WorkflowRunPage.tsx:528-532 |
 | Portal toggle failed | `toast.error(server.error ?? 'Failed to toggle portal visibility')` | WorkflowRunPage.tsx:535-538 |
 
-Toasts that move with their handler: the four HITL toasts go to `HitlActionBar`. All seven other toasts (two cancel, two replay, three portal-toggle) stay in the host. Pattern: the kebab UI and the two `ConfirmDialog` modals move to `RunHeader`; the mutation + toast + `refetch()` implementation stays host-owned and is invoked via the `onCancel` / `onReplay` / `onPortalToggle` callbacks. This keeps the API mutations co-located with the `refetch()` they need to call.
+Toasts that move with their handler: the four HITL success toasts go to `HitlActionBar`. All seven other toasts (two cancel, two replay, three portal-toggle) stay in the host. Pattern: the kebab UI and the two `ConfirmDialog` modals move to `RunHeader`; the mutation + toast + `refetch()` implementation stays host-owned and is invoked via the `onCancel` / `onReplay` / `onPortalToggle` callbacks. This keeps the API mutations co-located with the `refetch()` they need to call.
+
+**HITL failure path.** Today's HITL handlers (submit-input, approve, reject, edited-approve) do NOT fire a toast on failure — they surface `response.data.error` inline in `actionError` and leave the form open so the user can retry (WorkflowRunPage.tsx:314-321 + 346-353). This behaviour is preserved verbatim by `HitlActionBar`. Hence the inventory above lists only the four HITL success toasts.
 
 ## 13. Acceptance criteria
 
@@ -235,7 +251,8 @@ Toasts that move with their handler: the four HITL toasts go to `HitlActionBar`.
 - §5 directory diff matches exactly: 4 region files (`RunHeader.tsx`, `StepDag.tsx`, `StepDetailPane.tsx`, `HitlActionBar.tsx`) + `types.ts` + `format.ts` + `__tests__/format.test.ts` under `client/src/components/workflow-run/`, plus `useWorkflowRunEnvelope.ts` under `client/src/hooks/`. No extras, no missing files.
 - G1 gates green locally: `npm run lint`, `npm run typecheck`, `npm run build:client`, and `npx vitest run client/src/components/workflow-run/__tests__/format.test.ts`. CI runs the full gate suite.
 - `App.tsx` import path for `WorkflowRunPage` unchanged; default-export signature still `(_props: { user: User }) => JSX.Element`.
-- Manual smoke: run loads, step selection works, status pills correct, cancel / replay / portal actions fire and refresh, HITL approve / reject / edited approve / submit input actions succeed, the "⚠ polling" indicator appears when the WS disconnects on a non-terminal run, and the 12s poll fires while disconnected.
+- Mandatory automated checks (gate the merge): the four `npx` commands above + the format test pass. The full CI suite runs as the merge gate.
+- Author-side manual smoke (mandatory before opening the PR; not automated): run loads, step selection works, status pills correct, cancel / replay / portal actions fire and refresh, HITL approve / reject / edited approve / submit input actions succeed (success toasts fire, failure surfaces inline `actionError` with no toast), the "⚠ polling" indicator appears when the WS disconnects on a non-terminal run, and the 12s poll fires while disconnected.
 
 ## 14. Open questions
 
