@@ -21,7 +21,6 @@ import { promisify } from 'util';
 import { env } from '../lib/env.js';
 import { createSpan, createEvent } from '../lib/tracing.js';
 import { TripWire } from '../lib/tripwire.js';
-import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentRuns, tasks, actions, scheduledTasks } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
@@ -60,7 +59,6 @@ const execFileAsync = promisify(execFile);
 // Register worker adapter for execution layer (handles review-gated worker actions)
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
-import { recordIncident } from './incidentIngestor.js';
 import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
@@ -150,166 +148,8 @@ interface SkillExecutionParams {
   toolCallId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
-//
-// When a skill handler throws or returns { success: false, ... }, look up
-// the action definition's `onFailure` directive and dispatch:
-//
-//   - 'retry' (default)  — propagate the original error / failure object
-//                          unchanged. Caller is responsible for retry logic
-//                          (withBackoff / TripWire / agent loop).
-//   - 'skip'             — return { success: false, skipped: true, reason }
-//                          to the LLM. The agent loop continues without the
-//                          result. Used for non-essential reads.
-//   - 'fail_run'         — terminate the entire agent run via the closed
-//                          FailureReason enum. Caller catches via FailureError.
-//   - 'fallback'         — return actionDef.fallbackValue as the result
-//                          instead of failing. Used for read-only tools where
-//                          a stale or empty value is preferable.
-// ---------------------------------------------------------------------------
-
-import {
-  applyOnFailurePure,
-  applyOnFailureForStructuredFailurePure,
-  type OnFailureDirective,
-} from './skillExecutorPure.js';
-
-function applyOnFailure(toolSlug: string, err: unknown): unknown {
-  const actionDef = getActionDefinition(toolSlug);
-  const directive: OnFailureDirective = actionDef?.onFailure ?? 'retry';
-  return applyOnFailurePure(toolSlug, directive, actionDef?.fallbackValue, err);
-}
-
-function applyOnFailureForStructuredFailure(
-  toolSlug: string,
-  result: Record<string, unknown>,
-): unknown {
-  const actionDef = getActionDefinition(toolSlug);
-  const directive: OnFailureDirective = actionDef?.onFailure ?? 'retry';
-  return applyOnFailureForStructuredFailurePure(toolSlug, directive, actionDef?.fallbackValue, result);
-}
-
-// ---------------------------------------------------------------------------
-// Per-tool processor hooks registry
-// Maps action type slug → ProcessorHooks (input/output transform pipeline)
-// ---------------------------------------------------------------------------
-
-const processorRegistry: Map<string, ProcessorHooks> = new Map();
-
-/** Register processor hooks for a tool slug. Called at module load time. */
-export function registerProcessor(toolSlug: string, hooks: ProcessorHooks): void {
-  processorRegistry.set(toolSlug, hooks);
-}
-
-/** Internal: run registered processor phases around a tool executor. */
-async function runWithProcessors(
-  toolSlug: string,
-  input: Record<string, unknown>,
-  context: SkillExecutionContext,
-  executor: (processedInput: Record<string, unknown>) => Promise<unknown>,
-  actionId?: string,
-): Promise<unknown> {
-  const hooks = processorRegistry.get(toolSlug);
-  const processorCtx: ProcessorContext = {
-    toolSlug,
-    input,
-    subaccountId: context.subaccountId,
-    organisationId: context.organisationId,
-    agentRunId: context.runId,
-    actionId,
-  };
-
-  let processedInput = input;
-
-  // Phase 1: processInput (before gate)
-  if (hooks?.processInput) {
-    try {
-      processedInput = (await hooks.processInput({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
-    } catch (err) {
-      if (err instanceof TripWire) {
-        if (!err.options.retry) throw err;  // fatal — propagate to caller
-        return { success: false, error: err.reason, retryable: true };
-      }
-      throw err;
-    }
-  }
-
-  // Phase 2: processInputStep (after gate, before execute)
-  if (hooks?.processInputStep) {
-    try {
-      processedInput = (await hooks.processInputStep({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
-    } catch (err) {
-      if (err instanceof TripWire) {
-        if (!err.options.retry) throw err;
-        return { success: false, error: err.reason, retryable: true };
-      }
-      throw err;
-    }
-  }
-
-  // Execute — dispatch on actionDef.onFailure (P0.2 Slice C) for failures.
-  let result: unknown;
-  try {
-    result = await executor(processedInput);
-  } catch (err) {
-    if (err instanceof TripWire) {
-      return { success: false, error: err.reason, retryable: err.options.retry };
-    }
-    // Non-TripWire failure — apply the action's onFailure directive if declared.
-    // When fail_run fires, record a system incident before propagating.
-    const actionDef = getActionDefinition(toolSlug);
-    if ((actionDef?.onFailure ?? 'retry') === 'fail_run') {
-      recordIncident({
-        source: 'skill',
-        summary: `Skill terminal failure: ${toolSlug} — ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
-        errorCode: 'skill_fail_run',
-        stack: err instanceof Error ? err.stack : undefined,
-        organisationId: context.organisationId,
-        subaccountId: context.subaccountId,
-        fingerprintOverride: `skill:${toolSlug}:fail_run`,
-      });
-    }
-    return applyOnFailure(toolSlug, err);
-  }
-
-  // Successful return value but the executor signalled a structured failure.
-  // Apply onFailure here too so 'skip' / 'fallback' fire on either error path.
-  if (
-    result !== null &&
-    typeof result === 'object' &&
-    (result as { success?: unknown }).success === false
-  ) {
-    // Symmetric with the thrown-error path: the pure helper already handles
-    // 'retry' / unset by returning the result unchanged.
-    result = applyOnFailureForStructuredFailure(toolSlug, result as Record<string, unknown>);
-  }
-
-  // Phase 3: processOutputStep (after execute)
-  if (hooks?.processOutputStep) {
-    try {
-      result = await hooks.processOutputStep({ ...processorCtx, input: processedInput, actionId }, result);
-    } catch (err) {
-      if (err instanceof TripWire) {
-        if (!err.options.retry) throw err;
-        return { success: false, error: err.reason, retryable: true };
-      }
-      throw err;
-    }
-  }
-
-  return result;
-}
-
-// Handoff job queue name
-const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
-
-// pg-boss reference for enqueueing handoff jobs (set by agentScheduleService)
-let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null = null;
-
-export function setHandoffJobSender(sender: (name: string, data: object) => Promise<string | null>) {
-  pgBossSend = sender;
-}
+import { runWithProcessors, enqueueHandoff } from './skillExecutor/pipeline.js';
+export { registerProcessor, setHandoffJobSender } from './skillExecutor/pipeline.js';
 
 /**
  * Registry of skill handlers keyed by skill name. The `skillExecutor.execute`
@@ -3853,95 +3693,6 @@ async function executeAddDeliverable(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to add deliverable: ${errMsg}` };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Handoff enqueuing
-// ---------------------------------------------------------------------------
-
-interface HandoffRequest {
-  taskId: string;
-  agentId: string;
-  subaccountId: string;
-  organisationId: string;
-  sourceRunId: string;
-  handoffDepth: number;
-  handoffContext?: string;
-}
-
-async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
-  // Depth cap
-  if (req.handoffDepth > MAX_HANDOFF_DEPTH) {
-    console.warn(`[Handoff] Depth ${req.handoffDepth} exceeds max ${MAX_HANDOFF_DEPTH}, skipping`);
-    return false;
-  }
-
-  // Look up the subaccount agent link for the target agent
-  const [saLink] = await db
-    .select({
-      sa: subaccountAgents,
-    })
-    .from(subaccountAgents)
-    .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
-    .where(
-      and(
-        eq(subaccountAgents.subaccountId, req.subaccountId),
-        eq(subaccountAgents.agentId, req.agentId),
-        eq(subaccountAgents.isActive, true),
-        eq(agents.status, 'active'),
-      )
-    );
-
-  if (!saLink) {
-    console.warn(`[Handoff] No active subaccount agent link for agent ${req.agentId} in subaccount ${req.subaccountId}`);
-    return false;
-  }
-
-  // Duplicate prevention: check for running/pending runs for same agent+task
-  const [existingRun] = await db
-    .select()
-    .from(agentRuns)
-    .where(
-      and(
-        eq(agentRuns.agentId, req.agentId),
-        eq(agentRuns.taskId, req.taskId),
-        eq(agentRuns.subaccountId, req.subaccountId)
-      )
-    )
-    .limit(1);
-
-  if (existingRun && (existingRun.status === 'running' || existingRun.status === 'pending')) {
-    console.warn(`[Handoff] Agent ${req.agentId} already has a ${existingRun.status} run for task ${req.taskId}, skipping`);
-    return false;
-  }
-
-  if (!pgBossSend) {
-    console.warn('[Handoff] pg-boss sender not configured, cannot enqueue handoff');
-    return false;
-  }
-
-  try {
-    await pgBossSend(AGENT_HANDOFF_QUEUE, {
-      taskId: req.taskId,
-      agentId: req.agentId,
-      subaccountAgentId: saLink.sa.id,
-      subaccountId: req.subaccountId,
-      organisationId: req.organisationId,
-      sourceRunId: req.sourceRunId,
-      handoffDepth: req.handoffDepth,
-      handoffContext: req.handoffContext,
-    });
-    createEvent('agent.handoff.enqueued', {
-      targetAgentId: req.agentId,
-      sourceRunId: req.sourceRunId,
-      handoffDepth: req.handoffDepth,
-      taskId: req.taskId,
-    });
-    return true;
-  } catch (err) {
-    console.error('[Handoff] Failed to enqueue handoff job:', err);
-    return false;
   }
 }
 
