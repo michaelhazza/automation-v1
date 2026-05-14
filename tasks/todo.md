@@ -4504,3 +4504,15 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 - [ ] **Codex #9 — `setRoutingFilters` / `setIeeFilters` update-pattern contract.** AUTO-REJECT (framing). Codex suggested specifying how filter setters avoid reload loops. Rejected because this is a pure refactor preserving today's plain `setState` behaviour, and adding a defensive contract over a simple setter is over-specification for pre-production / rapid-evolution scope.
 
+
+
+## Deferred from spec-conformance review — feat-split-adminsubaccountdetailpage (2026-05-15)
+
+**Captured:** 2026-05-15T14:26:25Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-adminsubaccountdetailpage-2026-05-15T14-26-25Z.md`
+**Spec:** `tasks/builds/feat-split-adminsubaccountdetailpage/spec.md`
+
+- [ ] **E4 — Host retains shared `error` state + banner that spec §8 and plan §Chunk 4 said to remove.**
+  - Spec section: §8 error-banner contract (final paragraph: "The host's shared `error` state and banner are removed"); §12 self-consistency check ("Visible error-banner location: changes from one host-level banner above the tab dispatch to one local banner inside whichever extracted tab raised the error"); plan §Chunk 4 ("Remove the shared `error` state and its banner above the tab dispatch (Categories / Workflows / Admin tabs now render their own banners; no other consumer remains)").
+  - Gap: Host `AdminSubaccountDetailPage.tsx` still declares `const [error, setError] = useState('')` at line 38, calls `setError(...)` in the `load()` catch at line 57, clears it on tab-click at line 102, and renders `{error && <div className="text-[13px] text-red-600 mb-4">{error}</div>}` at line 115. Caller's invocation note frames this as deliberate ("page-level load failures only, per spec §10 Chunk 4 'Option A'") but no "Option A" exists in spec §10 Chunk 4 or anywhere in the spec — the spec text and plan both say remove. The implementation kept it because `load()` can be called from child tabs via `onChange={load}` and a refresh failure needs *somewhere* to surface, which the spec did not address.
+  - Suggested approach: Two acceptable options — (a) **accept the divergence**: update the spec or add a one-line errata note acknowledging the host retains `error` for `load()` failures only (since the spec was silent on subsequent-refresh failure surfacing), OR (b) **close the gap mechanically**: remove the host's `error` state, the tab-bar `setError('')` clear, and the line-115 banner; replace line 73's `{error || 'Subaccount not found'}` with just `'Subaccount not found'`; route subsequent-refresh failures via `toast.error()` (matches BeliefsTab's existing pattern) inside `load()`'s catch. The choice between (a) and (b) is a design decision: does the user value silent-banner behaviour on refresh failures, or migrate to toast for consistency. Decision belongs to the human, not the conformance agent.
