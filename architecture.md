@@ -2675,6 +2675,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 4. **Compare** — cosine similarity produces a single best-match per candidate; banded into `likely_duplicate` (>0.92) / `ambiguous` (0.60–0.92) / `distinct` (<0.60).
 5. **Classify + merge** — Claude Sonnet 4.6 produces classification (DUPLICATE / IMPROVEMENT / PARTIAL_OVERLAP / DISTINCT) and, for overlap classifications, a `proposedMerge` object. See §Rule-based fallback below when the classifier is unavailable.
 6. **Validate** — pure post-processing in `skillAnalyzerServicePure.validateMergeOutput` emits structured warnings (scope expansion, invocation-block loss, HITL-gate loss, table-row drops, required-field demotion, capability overlap, name mismatch, output-format loss).
+6a. **Consolidation gate** (conditional, migration 0358) — when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL` and `consolidation_enabled = true`, a second Sonnet pass tightens the merge before reviewer review. Single attempt, no retry. Outcomes captured in `skill_analyzer_results.consolidation_outcome` (closed enum: `not_triggered | succeeded | declined | failed`); pre-consolidation draft snapshot kept in `pre_consolidation_merge` (jsonb) for audit. Outcome-classification rule: `succeeded` requires `postWords < preWords`; non-shortening outputs route to `failed` with `failureReason='not_shortened'`. Mutation guards (`parseConsolidationResponse`) reject any LLM response that mutated `name`, `description`, `definition` (canonical-JSON deep-equal — key-order tolerant), or `mergeRationale`. Three informational warnings ride on `mergeWarnings`: `CONSOLIDATION_APPLIED | CONSOLIDATION_DECLINED | CONSOLIDATION_FAILED`.
 7. **Agent propose** (DISTINCT only) — cosine rank of the candidate against existing system agents; top-K persisted to `agentProposals` with optional Haiku enrichment.
 8. **Cluster recommend** — if ≥3 DISTINCT candidates lack a good agent home, Sonnet proposes a new agent and retro-injects a synthetic proposal into each affected result's `agentProposals`.
 
@@ -2720,7 +2721,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 
 | Table / column | Purpose |
 |----------------|---------|
-| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`. Bumps `config_version` on every update. |
+| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`, `consolidation_enabled` (bool, default true), `consolidation_trigger_severity` (enum `'warning' \| 'critical'`, default `'warning'`). Bumps `config_version` on every update. |
 | `skill_analyzer_results.warning_resolutions` | JSONB array of reviewer decisions, deduped by `(warningCode, details.field)`. Wiped on merge edit. |
 | `skill_analyzer_results.classifier_fallback_applied` | True when rule-based merger produced the proposal. |
 | `skill_analyzer_results.execution_resolved_name` | Canonical name chosen via NAME_MISMATCH resolution; authoritative at Execute. |
@@ -2739,6 +2740,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 - `collision_max_candidates` ∈ positive integer; `execution_lock_stale_seconds` same.
 - `critical_warning_confirmation_phrase` ≥ 3 characters.
 - Cross-field invariant: `scope_expansion_standard_threshold < scope_expansion_critical_threshold` with `MIN_THRESHOLD_DELTA = 0.05` gap to prevent degenerate collapses.
+- `consolidation_trigger_severity` must be `'warning'` or `'critical'` (closed enum).
 - Every successful update emits `skill_analyzer_config_updated` structured log with `{ changedFields, before, after, configVersion }`.
 
 ### Files
@@ -2749,7 +2751,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 | `server/db/schema/skillAnalyzerConfig.ts` | Drizzle schema for the config singleton |
 | `server/db/schema/skillAnalyzerJobs.ts` | Jobs table (+ v2 columns) |
 | `server/db/schema/skillAnalyzerResults.ts` | Results table (+ v2 columns) |
-| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, warning codes, tier map, validator |
+| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, `buildConsolidationPrompt`, `parseConsolidationResponse`, `extractPreservationInventory`, `consolidationWordCount`, warning codes, tier map, validator. Internal helpers `canonicalJSON` + `sortKeys` give key-order-tolerant deep-equality for LLM-echoed objects. |
 | `server/services/skillAnalyzerService.ts` | Stateful — `createJob`, `getJob`, `setResultAction`, `patchMergeFields`, `resetMergeToOriginal`, `resolveWarning`, `updateProposedAgent`, `executeApproved` (3-phase staged pipeline) |
 | `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
 | `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
