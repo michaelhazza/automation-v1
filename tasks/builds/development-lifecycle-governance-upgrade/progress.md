@@ -155,8 +155,178 @@ Read both files end-to-end. Confirmed:
 
 ## Chunk 3 — Duplication / Strategy Check hard gate (Step 3a)
 
-**Status:** PENDING
-**Files:** `.claude/agents/spec-coordinator.md` (Step 3a insert)
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:** `.claude/agents/spec-coordinator.md`
+
+### Changes made
+
+- Inserted `## Step 3a — Duplication / Strategy Check` section at line 186, between Step 3 (line 116) and Step 4 (line 257).
+- Step 3a includes:
+  - Order invariant statement: Step 3 → Step 3a → Step 4 → Step 5 → Step 6 (with spec path as authority).
+  - Inputs section: three sources verbatim from spec §6.1.1 (intent.md fields, Asset Register, in-flight builds).
+  - Sources to consult: two mechanical greps verbatim from spec §6.1.1.
+  - Decision criteria table: three outputs with fixed value sets, matching spec §6.1.1.
+  - Multi-cluster and mixed-lifecycle tie-break rules verbatim from spec §6.1.1.
+  - Recording location: §7.1.0 mandatory Markdown table shape reproduced verbatim.
+  - Hard gate behaviour (stop / merge with existing capability): halt, append `### Duplication gate escalation` to progress.md, require `**Operator decision:**` line to resume.
+  - Soft gate behaviour (revise): pause, append `### Revise loop` to progress.md, require amendment + `**Operator decision:** revision complete` to proceed to Step 4.
+  - `proceed` path: continue to Step 4 normally.
+  - Error handling edge cases: all four from spec §6.3 reproduced.
+
+### Lines changed
+
+- Original: Step 3 ended at line 184; Step 4 started at line 186 (2 lines between).
+- New: Step 3a inserted at line 186 (72 lines); Step 4 now starts at line 257.
+
+### Grep-the-old-value pass results
+
+Grep for `Step 3.*Step 4` (cross-references that skip Step 3a):
+
+- **Frontmatter description (line 3):** was `Step 3 — intent intake + UI-touch detection. Step 4 — build slug derivation`. Updated to insert `Step 3a — duplication / strategy check (Standard+ only)` between Step 3 and Step 4.
+- **TodoWrite list in Step 1 (lines 64–70):** was item 3 directly followed by item 4. Updated to add item `3a. Duplication / Strategy Check (Standard+ only)` between them.
+- **Step 3 body intent.md schema note (line 133):** was "before proceeding to Step 4". Updated to "before proceeding to Step 3a".
+- **Line 58 (`After Step 4 derives the actual slug...`):** references what Step 4 does, not Step 3 → Step 4 ordering. No update needed.
+- **Line 126 (`Step 4 ratifies (or, on operator decision...`):** references the provisional-slug rule (what happens at Step 4), not ordering. No update needed.
+
+All three ordering cross-references updated. Two references confirmed as legitimate "about Step 4" prose that do not need updating.
+
+### Dry-run walkthroughs
+
+**Branch 1: `proceed` (clear / clear)**
+
+Scenario: operator intends to add a webhook rate-limiting feature.
+
+- `intent.md` Affected Capability Area: `Integrations`
+- Asset Register scan: no row with Name or Description overlapping "rate limiting on webhooks"
+- In-flight spec scan: no `tasks/builds/*/spec.md` title mentions rate limiting for webhooks
+- Duplication assessment: `clear` — no overlap found
+- Strategic fit: `clear` — `Integrations` cluster has active rows in Growth state
+- Recommendation: `proceed`
+
+Step 3a writes to `intent.md`:
+```
+| Dimension | Assessment | Notes |
+|---|---|---|
+| Duplication | clear | No Asset Register row or in-flight spec covers webhook rate limiting |
+| Strategic fit | clear | Integrations cluster is active (Growth state) |
+| Recommendation | proceed | |
+```
+
+Step 3a continues to Step 4 without escalation. No `progress.md` entry written.
+
+**Branch 2: `revise` (partial overlap) — soft-gate loop**
+
+Scenario: operator intends to add "enhanced webhook monitoring dashboard".
+
+- `intent.md` Affected Capability Area: `Integrations`
+- Asset Register scan: finds existing row "Webhook Handler" in `Integrations` cluster — shares cluster but outcome differs (monitoring dashboard vs the handler itself)
+- Duplication assessment: `partial overlap`
+- Strategic fit: `clear` — Integrations is Growth
+- Recommendation: `revise`
+
+Step 3a writes to `intent.md`:
+```
+| Dimension | Assessment | Notes |
+|---|---|---|
+| Duplication | partial overlap | Existing "Webhook Handler" row in Integrations cluster shares cluster; outcome differs (dashboard vs handler) |
+| Strategic fit | clear | Integrations cluster is active (Growth state) |
+| Recommendation | revise | |
+```
+
+Step 3a appends to `tasks/builds/<slug>/progress.md`:
+```
+### Revise loop
+
+Duplication: partial overlap — "Webhook Handler" row in Integrations shares cluster.
+Strategic fit: clear.
+Recommendation: revise.
+Gate output written to intent.md.
+Coordinator paused. Operator must amend intent.md (Affected Capability Area, Desired Outcome, or Problem Statement) to resolve partial overlap, then append: **Operator decision:** revision complete
+```
+
+Coordinator pauses. Operator amends `intent.md` — changes Desired Outcome to "extend the existing Webhook Handler capability with a rate-limiting endpoint policy" and Affected Capability Area stays `Integrations`. Step 3a re-runs.
+
+Re-run:
+- Asset Register scan: closest match is "Webhook Handler" — now outcome aligns with extending that row (operator has scoped it as an extension, not a new separate capability)
+- Duplication assessment: `clear` (extending an existing row is not a duplicate — it is an update)
+- Strategic fit: `clear`
+- Recommendation: `proceed`
+
+Operator appends `**Operator decision:** revision complete` to the `### Revise loop` section. Step 3a proceeds to Step 4.
+
+**Branch 3: `merge with existing capability` (likely duplicate) — hard gate**
+
+Scenario: operator intends to add "webhook event routing" — a new capability.
+
+- `intent.md` Affected Capability Area: `Integrations`
+- Asset Register scan: finds existing row "Webhook Handler" — Name is "Webhook Handler", Description includes "event routing via webhook callbacks". Cluster: `Integrations`. Both cluster AND outcome overlap.
+- Duplication assessment: `likely duplicate`
+- Strategic fit: `clear`
+- Recommendation: `merge with existing capability`
+
+Step 3a writes to `intent.md`:
+```
+| Dimension | Assessment | Notes |
+|---|---|---|
+| Duplication | likely duplicate | "Webhook Handler" row covers same cluster (Integrations) and outcome (webhook event routing) |
+| Strategic fit | clear | Integrations cluster active (Growth) |
+| Recommendation | merge with existing capability | |
+```
+
+Step 3a appends to `tasks/builds/<slug>/progress.md`:
+```
+### Duplication gate escalation
+
+Duplication: likely duplicate — "Webhook Handler" row in Asset Register covers same cluster AND outcome.
+Strategic fit: clear.
+Recommendation: merge with existing capability.
+Gate output written to intent.md.
+Coordinator halted. Operator must append **Operator decision:** line to this section before the coordinator resumes.
+```
+
+Coordinator halts. Operator reviews. If operator decides to proceed as an update to the existing webhook-handler capability, they append: `**Operator decision:** proceed as update to webhook-handler capability row`. Step 4 then uses the existing build for that row's updates.
+
+If operator decides to stop: `**Operator decision:** stop — not proceeding`. Pipeline ends.
+
+**Branch 4: `stop` (not aligned) — hard gate**
+
+Scenario: operator intends to add "ML-based lifecycle scoring for capability health".
+
+- `intent.md` Affected Capability Area: `Audit & Governance`
+- Asset Register scan: `Audit & Governance` cluster rows exist; all are in `Sunset Candidate` state (lifecycle governance tooling being wound down).
+- Duplication assessment: `clear` — no existing row covers ML lifecycle scoring
+- Strategic fit: `not aligned` — `Audit & Governance` cluster is in Sunset Candidate state, not active
+- Recommendation: `stop`
+
+Step 3a writes to `intent.md`:
+```
+| Dimension | Assessment | Notes |
+|---|---|---|
+| Duplication | clear | No existing row covers ML lifecycle scoring |
+| Strategic fit | not aligned | Audit & Governance cluster in Sunset Candidate state |
+| Recommendation | stop | |
+```
+
+Step 3a appends to `tasks/builds/<slug>/progress.md`:
+```
+### Duplication gate escalation
+
+Duplication: clear.
+Strategic fit: not aligned — Audit & Governance cluster is Sunset Candidate; intent targets a capability in a cluster being wound down.
+Recommendation: stop.
+Gate output written to intent.md.
+Coordinator halted. Operator must append **Operator decision:** line to this section before the coordinator resumes.
+```
+
+Coordinator halts. Operator must append `**Operator decision:** stop confirmed — discarding this intent` or `**Operator decision:** override — proceed with different cluster` before the coordinator can resume. Without the `**Operator decision:**` line, typing "continue" does nothing.
+
+### G1 gate result
+
+- `npx eslint .claude/agents/spec-coordinator.md`: exit 0; 1 expected warning (file ignored — no matching config for .md). No errors.
+- `npm run typecheck`: exit 0 (both tsconfigs). No TypeScript files touched.
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: spec-coordinator
-description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — intent intake + UI-touch detection. Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
+description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — intent intake + UI-touch detection. Step 3a — duplication / strategy check (Standard+ only). Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
 tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
 model: opus
 ---
@@ -64,6 +64,7 @@ Emit a TodoWrite list with one item per phase step. Update items in real time as
 1. Context loading + set current-focus.md → PLANNING
 2. Branch-sync S0 + freshness check
 3. Intent intake + UI-touch detection
+3a. Duplication / Strategy Check (Standard+ only)
 4. Build slug derivation + tasks/builds/{slug}/ directory creation
 5. Mockup loop (conditional on UI-detect)
 6. Spec authoring
@@ -129,7 +130,7 @@ Read the brief (provided in the invocation, or read from a file the operator nam
 
 ### intent.md schema (Standard | Significant | Major only)
 
-For any Standard+ build, produce `tasks/builds/<provisional-slug>/intent.md` with the following nine H2 sections in order before proceeding to Step 4:
+For any Standard+ build, produce `tasks/builds/<provisional-slug>/intent.md` with the following nine H2 sections in order before proceeding to Step 3a:
 
 ```markdown
 ## Problem Statement
@@ -181,6 +182,77 @@ If `ui_touch == true`, prompt the operator:
 > Reply: **yes** or **no**.
 
 If `no`, skip Step 5 entirely. If `yes`, run Step 5 in full before authoring the spec.
+
+## Step 3a — Duplication / Strategy Check
+
+**Order invariant:** Step 3 → Step 3a → Step 4 → Step 5 → Step 6, in this exact order (per `tasks/builds/development-lifecycle-governance-upgrade/spec.md §6.1`).
+
+This step runs immediately after Step 3 produces `intent.md` and before Step 4 derives the build slug. It does not run for Trivial builds.
+
+### Inputs (read at Step 3a)
+
+1. The just-authored `intent.md` — specifically: Problem Statement, Desired Outcome, Affected Capability Area.
+2. The Asset Register at `docs/capabilities.md` (§7.4 schema — read all rows).
+3. Any in-flight build under `tasks/builds/*/` with a non-merged spec.
+
+### Sources to consult (mechanical greps)
+
+1. **Row-by-row Asset Register comparison:** scan `docs/capabilities.md` for rows whose Name, Description, or Cluster overlaps with the Affected Capability Area and Desired Outcome from `intent.md`.
+2. **In-flight spec comparison:** scan `tasks/builds/*/spec.md` (or `brief.md`) title and Goals sections for overlap with the Desired Outcome from `intent.md`.
+
+### Decision criteria
+
+Produce three outputs. Each has a fixed value set:
+
+| Output | Possible values | Decision rule |
+|---|---|---|
+| Duplication assessment | `clear` / `partial overlap` / `likely duplicate` | `clear` = no Asset Register row or in-flight spec covers this intent. `partial overlap` = the closest match shares the cluster but differs on outcome. `likely duplicate` = the closest match shares cluster AND outcome. |
+| Strategic fit | `clear` / `questionable` / `not aligned` | `clear` = the intent extends an active capability cluster (Inception/Growth state in the Asset Register). `questionable` = the cluster is in `Declining` / `Sunset Candidate` / `Sunset`. `not aligned` = no cluster fits, or the closest cluster is being decommissioned. |
+| Recommendation | `proceed` / `revise` / `merge with existing capability` / `stop` | `proceed` if Duplication = `clear` AND Strategic fit ∈ {`clear`, `questionable`}. `revise` if Duplication = `partial overlap`. `merge with existing capability` if Duplication = `likely duplicate`. `stop` if Strategic fit = `not aligned`. |
+
+### Multi-cluster and mixed-lifecycle tie-break rules
+
+- **Multiple clusters in Affected Capability Area:** evaluate every Asset Register row whose cluster appears in the intent's Affected Capability Area, plus every in-flight spec touching any of those clusters. Compute Duplication assessment and Strategic fit independently for each cluster, then collapse using **most-conservative-wins**: Duplication assessment: `likely duplicate` > `partial overlap` > `clear`; Strategic fit: `not aligned` > `questionable` > `clear`. Recommendation is derived from the collapsed values via the table above.
+- **Mixed lifecycle states within a single cluster:** when the cluster has multiple Asset Register rows in different lifecycle states, use the **worst (most-toward-Sunset) state** as the cluster's effective state for Strategic fit. Lifecycle ordering: `Sunset` > `Sunset Candidate` > `Declining` > `Mature` > `Growth` > `Inception`.
+- **Recording tie-break supplementary rows:** when tie-break rules fire, record each per-cluster sub-result in `intent.md` under `## Duplication / Strategy Check` as supplementary rows below the mandatory three-row table (one row per cluster, with cluster name in the Output column), so the operator can see why the collapsed recommendation was reached.
+
+### Recording location
+
+Write all three outputs into `intent.md` under `## Duplication / Strategy Check` using the §7.1.0 mandatory Markdown table shape:
+
+```markdown
+| Dimension | Assessment | Notes |
+|---|---|---|
+| Duplication | <None / Partial overlap / Likely duplicate> | <free text> |
+| Strategic fit | <Aligned / Neutral / Not aligned> | <free text> |
+| Recommendation | <proceed / revise / merge with existing capability / stop> | <free text> |
+```
+
+Any supplementary per-cluster rows are appended below this table in the same section.
+
+### Gate behaviour
+
+**Hard gate — recommendation = `stop` OR `merge with existing capability`:**
+1. Halt the coordinator immediately.
+2. Append a `### Duplication gate escalation` heading to `tasks/builds/<slug>/progress.md` with the gate outputs verbatim.
+3. Escalate to the operator — explain which output triggered the gate and why.
+4. The coordinator may resume **only** after the operator appends a `**Operator decision:**` line to the `### Duplication gate escalation` section. Operator typing "continue" without this line is not sufficient — the `**Operator decision:**` line is the gate signal. Without it, the coordinator does not resume. This makes the gate textually idempotent.
+
+**Soft gate — recommendation = `revise`:**
+1. Pause the coordinator.
+2. Append a `### Revise loop` heading to `tasks/builds/<slug>/progress.md` with the gate outputs verbatim.
+3. Require the operator to amend `intent.md` — typically Affected Capability Area, Desired Outcome, or Problem Statement — to resolve the partial overlap.
+4. After amendment, re-run Step 3a from the top. The loop is naturally re-entrant — if the amended `intent.md` creates a new partial overlap, Step 3a runs again.
+5. The coordinator proceeds to Step 4 only when the re-run produces `recommendation = proceed` AND the operator appends `**Operator decision:** revision complete` to the `### Revise loop` section.
+
+**`proceed` path:** continue to Step 4 normally.
+
+### Error handling edge cases
+
+1. **Operator types "continue" before adding `**Operator decision:**`:** the decision line is the gate signal — without it, the coordinator does not resume (gate is textually idempotent).
+2. **Multi-cluster Affected Capability Area:** tie-break rules applied as above; per-cluster sub-results recorded as supplementary rows in `intent.md`.
+3. **Mixed-lifecycle clusters within one cluster header:** worst-toward-Sunset ordering applied as above.
+4. **Operator amends `intent.md` during the `revise` loop creating a NEW partial overlap:** re-run Step 3a from the top — the loop handles it naturally.
 
 ## Step 4 — Build slug derivation + directory creation
 
