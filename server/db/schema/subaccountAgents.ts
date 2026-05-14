@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -26,6 +27,7 @@ export const subaccountAgents = pgTable(
     // ── Applied template tracking ──────────────────────────────────────
     appliedTemplateId: uuid('applied_template_id'),
     appliedTemplateVersion: integer('applied_template_version'),
+    appliedTemplateSlug: text('applied_template_slug'),
 
     // ── Scheduling ──────────────────────────────────────────────────────
     scheduleCron: text('schedule_cron'), // e.g. "0 */2 * * *"
@@ -63,6 +65,19 @@ export const subaccountAgents = pgTable(
     // ── Cost caps ───────────────────────────────────────────────────────
     maxCostPerRunCents: integer('max_cost_per_run_cents'),
     maxLlmCallsPerRun: integer('max_llm_calls_per_run'),
+
+    // ── Safety mode default (F10) ───────────────────────────────────────────
+    // Agency-configured default safety posture for portal-initiated runs on
+    // this (agent, subaccount) pair. Resolution order: parentRun → request →
+    // this column → agents.default_safety_mode → 'explore' literal.
+    portalDefaultSafetyMode: text('portal_default_safety_mode').notNull().default('explore').$type<'explore' | 'execute'>(),
+
+    // ── Meaningful-run tracking (F22) ───────────────────────────────────────
+    // Updated by the run-completion hook when a run produces meaningful output
+    // (status='completed' AND (action proposed OR memory block written)).
+    // Used by heartbeat gate Rules 2 + 4.
+    lastMeaningfulTickAt: timestamp('last_meaningful_tick_at', { withTimezone: true }),
+    ticksSinceLastMeaningfulRun: integer('ticks_since_last_meaningful_run').notNull().default(0),
 
     // ── Run tracking ────────────────────────────────────────────────────
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
@@ -102,6 +117,18 @@ export const subaccountAgents = pgTable(
       primitives: string[];
     } | null>(),
 
+    // ── Governance (spec §5.2.9) ─────────────────────────────────────────
+    // Which controller styles are permitted for runs against this agent link.
+    // 'native_only' = conservative default; 'native_and_operator' = operator mode enabled.
+    controllerStyleAllowed: text('controller_style_allowed').notNull().default('native_only').$type<'native_only' | 'native_and_operator'>(),
+    // Execution environments this agent is permitted to run in.
+    // DB stores raw text[]; app-layer Zod enforces closed enum (spec §3.6).
+    allowedEnvironments: text('allowed_environments').array().notNull().default(['api_tool', 'headless', 'browser']),
+    // Maximum risk tier for actions this agent may take without subaccount override (0–6).
+    maxRiskTier: integer('max_risk_tier').notNull().default(3),
+    // Require human approval for actions at or above this tier (0–6).
+    requireApprovalAtTier: integer('require_approval_at_tier').notNull().default(4),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -111,6 +138,9 @@ export const subaccountAgents = pgTable(
     agentIdx: index('subaccount_agents_agent_idx').on(table.agentId),
     uniqueIdx: uniqueIndex('subaccount_agents_unique_idx').on(table.subaccountId, table.agentId),
     scheduleIdx: index('subaccount_agents_schedule_idx').on(table.scheduleEnabled),
+    oneRootPerSubaccount: uniqueIndex('subaccount_agents_one_root_per_subaccount')
+      .on(table.subaccountId)
+      .where(sql`${table.parentSubaccountAgentId} IS NULL AND ${table.isActive} = true`),
   })
 );
 

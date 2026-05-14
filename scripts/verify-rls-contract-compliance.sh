@@ -45,6 +45,7 @@ ALLOWLIST_DIRS=(
   "server/lib/createWorker.ts"
   "server/lib/reportingAgentRunHook.ts"
   "server/lib/resolveSubaccount.ts"
+  "server/lib/resolveAgent.ts"
   "server/lib/runCostBreaker.ts"
   "server/middleware/auth.ts"
   "server/middleware/subdomainResolution.ts"
@@ -83,6 +84,15 @@ WHITELIST=(
   "server/routes/systemEngines.ts"
   "server/routes/projects.ts"
   "server/routes/llmUsage.ts"
+  # Operator Backend task-action routes import db for the readAgentRunOrThrow
+  # helper + dual-GUC transactions (fresh-profile-restart, extend-budget).
+  # Pattern matches existing complex routes above; full extraction into
+  # services would require a new agentRunReadService and is tracked as
+  # deferred backlog (H2). Spec §6.5b.
+  "server/routes/operatorTasks.ts"
+  # Operator Backend progress poll route: dual-GUC tx on operator_runs read.
+  # Spec §7.3 R2-F1.
+  "server/routes/operatorSessions.ts"
 )
 
 is_allowlisted_path() {
@@ -121,7 +131,7 @@ while IFS= read -r line; do
     "Direct \`db\` import outside services. RLS fail-closes on queries issued without the ALS tx." \
     "Move the query into a server/services/** function or, for admin-bypass paths, wrap it in withAdminConnection()."
   VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE "from ['\"]([^'\"]*\/)?db(\/index(\.js)?)?['\"]" "$ROOT_DIR/server/" --include='*.ts' 2>/dev/null | grep -E "\\bdb\\b" || true)
+done < <(grep -rnE "from ['\"]([^'\"]*\/)?db(\/index(\.js)?)?['\"]" "$ROOT_DIR/server/" --include='*.ts' 2>/dev/null | grep -E "\\bdb\\b" | grep -v "import type" || true)
 
 # ── Rule 2: no .transaction() calls in routes or middleware ─────────────────
 # Routes and middleware must not open transactions directly. The
@@ -145,7 +155,7 @@ while IFS= read -r line; do
     "Route/middleware calls db.transaction() directly. Nested tx must live in services." \
     "Move the transaction into a service, or use the ALS-managed request tx via getOrgScopedDb()."
   VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE "db\.transaction\s*\(" "$ROOT_DIR/server/routes/" "$ROOT_DIR/server/middleware/" --include='*.ts' 2>/dev/null || true)
+done < <(grep -rnE "db\.transaction\s*\(" "$ROOT_DIR/server/routes/" "$ROOT_DIR/server/middleware/" --include='*.ts' --exclude-dir=__tests__ 2>/dev/null || true)
 
 FILES_SCANNED=$(find "$ROOT_DIR/server/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
 

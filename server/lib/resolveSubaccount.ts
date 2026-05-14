@@ -4,14 +4,17 @@ import { eq, and, isNull } from 'drizzle-orm';
 
 /**
  * Validates that a subaccount exists and belongs to the given organisation.
- * Throws { statusCode: 404 } if not found.
+ * Throws { statusCode: 403 } if the subaccount exists but belongs to a
+ * different organisation (access denied), or { statusCode: 404 } if the
+ * subaccount id is not found at all.
  */
 export async function resolveSubaccount(subaccountId: string, organisationId: string) {
   const [sa] = await db
     .select()
     .from(subaccounts)
-    .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));
+    .where(and(eq(subaccounts.id, subaccountId), isNull(subaccounts.deletedAt)));
 
   if (!sa) throw { statusCode: 404, message: 'Subaccount not found' };
+  if (sa.organisationId !== organisationId) throw { statusCode: 403, message: 'Subaccount not found' };
   return sa;
 }

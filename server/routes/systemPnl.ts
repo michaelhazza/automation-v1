@@ -1,13 +1,10 @@
 import { Router } from 'express';
-import { and, desc, gte, lte, eq } from 'drizzle-orm';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { systemPnlService } from '../services/systemPnlService.js';
 import * as llmInflightRegistry from '../services/llmInflightRegistry.js';
 import * as llmInflightPayloadStore from '../services/llmInflightPayloadStore.js';
 import { INFLIGHT_SNAPSHOT_HARD_CAP } from '../config/limits.js';
-import { db } from '../db/index.js';
-import { llmInflightHistory } from '../db/schema/llmInflightHistory.js';
 import type { PnlResponse, PnlResponseMeta } from '../../shared/types/systemPnl.js';
 
 // ---------------------------------------------------------------------------
@@ -183,8 +180,6 @@ router.get(
 // System-admin only. Returns add/remove events from the llm_inflight_history
 // table within the requested time window. Capped at 1000 rows — narrow
 // the window rather than paginating to avoid long scans under load.
-const INFLIGHT_HISTORY_HARD_CAP = 1_000;
-
 router.get(
   '/api/admin/llm-pnl/in-flight/history',
   authenticate,
@@ -200,26 +195,15 @@ router.get(
       throw { statusCode: 400, errorCode: 'INVALID_TO', message: 'to must be ISO 8601' };
     }
     const rawLimit = Number(req.query.limit);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, INFLIGHT_HISTORY_HARD_CAP)
-      : 200;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 200;
 
-    const conditions = [];
-    if (fromDate) conditions.push(gte(llmInflightHistory.createdAt, fromDate));
-    if (toDate)   conditions.push(lte(llmInflightHistory.createdAt, toDate));
-    if (typeof runtimeKey === 'string' && runtimeKey.length > 0) {
-      conditions.push(eq(llmInflightHistory.runtimeKey, runtimeKey));
-    }
-    if (typeof idempotencyKey === 'string' && idempotencyKey.length > 0) {
-      conditions.push(eq(llmInflightHistory.idempotencyKey, idempotencyKey));
-    }
-
-    const rows = await db
-      .select()
-      .from(llmInflightHistory)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(llmInflightHistory.createdAt))
-      .limit(limit);
+    const rows = await systemPnlService.listInflightHistory({
+      from: fromDate,
+      to: toDate,
+      runtimeKey: typeof runtimeKey === 'string' && runtimeKey.length > 0 ? runtimeKey : undefined,
+      idempotencyKey: typeof idempotencyKey === 'string' && idempotencyKey.length > 0 ? idempotencyKey : undefined,
+      limit,
+    });
 
     res.json({
       events: rows.map((r) => ({

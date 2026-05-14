@@ -1,0 +1,6 @@
+# Known-bad fixture for verify-assert-active.sh (B.1)
+# This pattern SHOULD trip the gate: a file queries a soft-deletable table
+# (subaccounts) via findFirst but has no assertActive() or isActive() call.
+
+const row = await db.query.subaccounts.findFirst({ where: eq(subaccounts.id, id) });
+return row;

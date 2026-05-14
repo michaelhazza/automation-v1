@@ -3,22 +3,14 @@
  * Allows subaccounts to bring their own execution engines (e.g. own n8n instance).
  */
 
-import crypto from 'crypto';
 import { Router } from 'express';
-import { eq, and, isNull, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { workflowEngines } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
+import { engineService } from '../services/engineService.js';
 
 const router = Router();
-
-function sanitizeEngine(engine: typeof workflowEngines.$inferSelect) {
-  const { hmacSecret, apiKey, ...rest } = engine;
-  return rest;
-}
 
 // List subaccount engines
 router.get(
@@ -27,15 +19,8 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const rows = await db.select()
-      .from(workflowEngines)
-      .where(and(
-        eq(workflowEngines.subaccountId, subaccount.id),
-        eq(workflowEngines.scope, 'subaccount'),
-        isNull(workflowEngines.deletedAt)
-      ))
-      .orderBy(desc(workflowEngines.createdAt));
-    res.json(rows.map(sanitizeEngine));
+    const engines = await engineService.listSubaccountEngines(subaccount.id);
+    res.json(engines);
   })
 );
 
@@ -52,21 +37,14 @@ router.post(
       throw { statusCode: 400, message: 'name, engineType, and baseUrl are required' };
     }
 
-    const hmacSecret = crypto.randomBytes(32).toString('hex');
-
-    const [engine] = await db.insert(workflowEngines).values({
-      organisationId: req.orgId!,
+    const engine = await engineService.createSubaccountEngine(req.orgId!, subaccount.id, {
       name,
       engineType,
       baseUrl,
       apiKey: apiKey ?? null,
-      scope: 'subaccount',
-      subaccountId: subaccount.id,
-      hmacSecret,
-      status: 'inactive',
-    }).returning();
+    });
 
-    res.status(201).json(sanitizeEngine(engine));
+    res.status(201).json(engine);
   })
 );
 
@@ -77,28 +55,8 @@ router.patch(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(workflowEngines)
-      .where(and(
-        eq(workflowEngines.id, req.params.id),
-        eq(workflowEngines.subaccountId, subaccount.id),
-        isNull(workflowEngines.deletedAt)
-      ));
-
-    if (!existing) throw { statusCode: 404, message: 'Engine not found' };
-
-    const allowed = ['name', 'engineType', 'baseUrl', 'apiKey', 'status', 'metadata'] as const;
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) updates[key] = req.body[key];
-    }
-
-    const [updated] = await db.update(workflowEngines)
-      .set(updates)
-      .where(eq(workflowEngines.id, req.params.id))
-      .returning();
-
-    res.json(sanitizeEngine(updated));
+    const engine = await engineService.updateSubaccountEngine(req.params.id, subaccount.id, req.body);
+    res.json(engine);
   })
 );
 
@@ -109,20 +67,7 @@ router.delete(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(workflowEngines)
-      .where(and(
-        eq(workflowEngines.id, req.params.id),
-        eq(workflowEngines.subaccountId, subaccount.id),
-        isNull(workflowEngines.deletedAt)
-      ));
-
-    if (!existing) throw { statusCode: 404, message: 'Engine not found' };
-
-    await db.update(workflowEngines)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(workflowEngines.id, req.params.id));
-
+    await engineService.deleteSubaccountEngine(req.params.id, subaccount.id);
     res.json({ success: true });
   })
 );

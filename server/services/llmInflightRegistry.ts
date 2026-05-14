@@ -532,6 +532,7 @@ export function _resetHistoryBreakerForTests(): void {
   historyBreakerState.lastOpenedLogMs = 0;
 }
 
+// @rls-allowlist-bypass: llm_inflight_history persistHistoryEvent [ref: spec §3.3.1]
 function persistHistoryEvent(input: PersistHistoryInput): void {
   // Feature flag — default on. The env var lets an operator disable the
   // write if the history table is temporarily unhealthy, without a code

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../lib/api.js';
+import { logAndSwallow } from '../lib/silentCatchHelper.js';
 
 export type ConversationScopeType = 'task' | 'agent_run' | 'brief' | 'agent';
 
@@ -70,7 +71,7 @@ export function useConversation(
         setConversationId(res.data.conversationId);
         setMessages(res.data.messages);
       })
-      .catch(() => {});
+      .catch(logAndSwallow('useConversation: conversation fetch', { severity: 'critical' }));
   }, [scopeType, scopeId]);
 
   useEffect(() => {

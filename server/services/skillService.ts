@@ -1,6 +1,8 @@
 import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
+import { isActive } from '../lib/queryHelpers.js';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { configHistoryService } from './configHistoryService.js';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 import type { AnthropicTool } from './llmService.js';
@@ -19,6 +21,8 @@ import {
   MAX_TOTAL_SKILL_INSTRUCTIONS,
   MAX_SKILLS_PER_SUBACCOUNT,
 } from '../config/limits.js';
+import type { HierarchyContext } from '../../shared/types/delegation.js';
+import { computeDerivedSkills, shouldWarnMissingHierarchy } from './skillServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -36,7 +40,7 @@ export const skillService = {
     return db
       .select()
       .from(skills)
-      .where(and(conditions, eq(skills.isActive, true), isNull(skills.deletedAt)))
+      .where(and(conditions, eq(skills.isActive, true), isActive(skills)))
       .orderBy(skills.skillType, skills.name);
   },
 
@@ -49,7 +53,7 @@ export const skillService = {
     const [skill] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), orgCondition, eq(skills.isActive, true), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), orgCondition, eq(skills.isActive, true), isActive(skills)));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
     return skill;
   },
@@ -63,7 +67,7 @@ export const skillService = {
     const rows = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.slug, slug), eq(skills.isActive, true), orgCondition, isNull(skills.deletedAt)));
+      .where(and(eq(skills.slug, slug), eq(skills.isActive, true), orgCondition, isActive(skills)));
 
     if (organisationId) {
       const orgSkill = rows.find(s => s.organisationId === organisationId);
@@ -87,7 +91,7 @@ export const skillService = {
       .where(and(
         eq(skills.slug, slug),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
         or(
           and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)),
           and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
@@ -112,16 +116,25 @@ export const skillService = {
     skillSlugs: string[],
     organisationId: string,
     subaccountId?: string,
+    hierarchy?: Readonly<HierarchyContext>,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
-    if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
+    const derivedSlugs = computeDerivedSkills({ hierarchy });
+    if (shouldWarnMissingHierarchy({ hierarchy, subaccountId })) {
+      logger.warn('hierarchy_missing_at_resolver_time', {
+        organisationId,
+        subaccountId,
+      });
+    }
+    const effectiveSlugs = Array.from(new Set([...skillSlugs, ...derivedSlugs]));
+    if (effectiveSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
 
     // Batch-fetch all matching skills across tiers in one query
     const candidates = await db
       .select()
       .from(skills)
       .where(and(
-        inArray(skills.slug, skillSlugs),
-        isNull(skills.deletedAt),
+        inArray(skills.slug, effectiveSlugs),
+        isActive(skills),
         eq(skills.isActive, true),
         or(
           subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
@@ -146,7 +159,7 @@ export const skillService = {
     }
 
     // Any slugs not found in skills table → fall back to systemSkillService (batch)
-    const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
+    const missingSlugs = effectiveSlugs.filter(s => !bySlug.has(s));
     const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
     if (missingSlugs.length > 0) {
       try {
@@ -174,7 +187,7 @@ export const skillService = {
     const tools: AnthropicTool[] = [];
     const allInstructions: string[] = [];
 
-    for (const slug of skillSlugs) {
+    for (const slug of effectiveSlugs) {
       const skill = bySlug.get(slug);
       if (skill) {
         const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
@@ -230,6 +243,10 @@ export const skillService = {
     description?: string;
     definition: object;
     instructions?: string;
+    verify?: object | null;
+    verifyNullJustification?: string | null;
+    reversible?: boolean;
+    blastRadius?: 'self' | 'tenant' | 'external';
   }, userId?: string) {
     const skill = await db.transaction(async (tx) => {
       // Cross-table slug guard when creating a built-in (org=null) skill
@@ -250,6 +267,10 @@ export const skillService = {
           skillType: 'custom',
           definition: data.definition,
           instructions: data.instructions ?? null,
+          verify: data.verify ?? null,
+          verifyNullJustification: data.verifyNullJustification ?? null,
+          reversible: data.reversible ?? false,
+          blastRadius: data.blastRadius ?? 'self',
           createdAt: new Date(),
           updatedAt: new Date(),
         })
@@ -289,6 +310,10 @@ export const skillService = {
     instructions: string;
     isActive: boolean;
     visibility: SkillVisibility;
+    verify: object | null;
+    verifyNullJustification: string | null;
+    reversible: boolean;
+    blastRadius: 'self' | 'tenant' | 'external';
   }>, userId?: string) {
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
@@ -306,7 +331,7 @@ export const skillService = {
           eq(skills.id, id),
           eq(skills.organisationId, organisationId),
           isNull(skills.subaccountId),
-          isNull(skills.deletedAt),
+          isActive(skills),
         ));
 
       if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -328,6 +353,10 @@ export const skillService = {
       if (data.instructions !== undefined) update.instructions = data.instructions;
       if (data.isActive !== undefined) update.isActive = data.isActive;
       if (data.visibility !== undefined) update.visibility = data.visibility;
+      if (data.verify !== undefined) update.verify = data.verify;
+      if (data.verifyNullJustification !== undefined) update.verifyNullJustification = data.verifyNullJustification;
+      if (data.reversible !== undefined) update.reversible = data.reversible;
+      if (data.blastRadius !== undefined) update.blastRadius = data.blastRadius;
 
       const [row] = await tx.update(skills).set(update).where(and(
         eq(skills.id, id),
@@ -367,7 +396,7 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isActive(skills)));
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') {
       throw { statusCode: 400, message: 'Built-in skill visibility is managed at the system tier' };
@@ -449,7 +478,7 @@ export const skillService = {
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ))
       .orderBy(skills.skillType, skills.name);
 
@@ -474,7 +503,7 @@ export const skillService = {
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
         eq(skills.isActive, true),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
 
@@ -498,7 +527,7 @@ export const skillService = {
       const [countRow] = await tx
         .select({ count: sql<number>`count(*)` })
         .from(skills)
-        .where(and(eq(skills.subaccountId, subaccountId), isNull(skills.deletedAt)));
+        .where(and(eq(skills.subaccountId, subaccountId), isActive(skills)));
       if ((countRow?.count ?? 0) >= MAX_SKILLS_PER_SUBACCOUNT) {
         throw { statusCode: 400, message: `Subaccount skill limit (${MAX_SKILLS_PER_SUBACCOUNT}) reached` };
       }
@@ -571,7 +600,7 @@ export const skillService = {
           eq(skills.id, id),
           eq(skills.organisationId, organisationId),
           eq(skills.subaccountId, subaccountId),
-          isNull(skills.deletedAt),
+          isActive(skills),
         ));
 
       if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -628,7 +657,7 @@ export const skillService = {
         eq(skills.id, id),
         eq(skills.organisationId, organisationId),
         eq(skills.subaccountId, subaccountId),
-        isNull(skills.deletedAt),
+        isActive(skills),
       ));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
@@ -646,7 +675,7 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isActive(skills)));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };
@@ -660,43 +689,63 @@ export const skillService = {
   },
 
   /**
-   * Seed built-in skills (idempotent — skips if slug already exists)
+   * Seed built-in skills (idempotent — skips if slug already exists).
+   *
+   * Built-in skills carry `organisation_id = NULL` (platform-global rows visible
+   * to every tenant for READ). Migration 0245 tightens the `skills` RLS WITH
+   * CHECK clause to reject NULL writes from tenant code paths, so this seed
+   * MUST run via `withAdminConnection` + `SET LOCAL ROLE admin_role` (BYPASSRLS).
    */
   async seedBuiltInSkills() {
     const builtInSkills = getBuiltInSkillDefinitions();
 
-    for (const def of builtInSkills) {
-      const existing = await db
-        .select()
-        .from(skills)
-        .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)));
+    await withAdminConnection(
+      {
+        source: 'skill-seed',
+        reason: 'boot-time built-in skills seed (organisation_id = NULL platform-global rows)',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      if (existing.length > 0) {
-        // Update existing built-in skill with latest instructions (if changed)
-        const current = existing[0];
-        if (current.instructions !== (def.instructions ?? null)) {
-          await db.update(skills).set({
-            instructions: def.instructions ?? null,
+        for (const def of builtInSkills) {
+          const existing = (await tx
+            .select()
+            .from(skills)
+            .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)))) as Array<{
+            id: string;
+            instructions: string | null;
+          }>;
+
+          if (existing.length > 0) {
+            const current = existing[0];
+            if (current.instructions !== (def.instructions ?? null)) {
+              await tx
+                .update(skills)
+                .set({
+                  instructions: def.instructions ?? null,
+                  updatedAt: new Date(),
+                })
+                // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug; runs under admin_role bypass"
+                .where(eq(skills.id, current.id));
+            }
+            continue;
+          }
+
+          await tx.insert(skills).values({
+            organisationId: null,
+            name: def.name,
+            slug: def.slug,
+            description: def.description,
+            skillType: 'built_in',
+            definition: def.definition,
+            instructions: def.instructions,
+            isActive: true,
+            createdAt: new Date(),
             updatedAt: new Date(),
-          // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug"
-          }).where(eq(skills.id, current.id));
+          });
         }
-        continue;
-      }
-
-      await db.insert(skills).values({
-        organisationId: null,
-        name: def.name,
-        slug: def.slug,
-        description: def.description,
-        skillType: 'built_in',
-        definition: def.definition,
-        instructions: def.instructions,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    }
+      },
+    );
   },
 };
 

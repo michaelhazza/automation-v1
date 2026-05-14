@@ -1,4 +1,5 @@
 import { Component, ReactNode } from 'react';
+import api from '../lib/api';
 
 interface Props {
   children: ReactNode;
@@ -20,6 +21,13 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary] Caught render error:', error, info.componentStack);
+    if (process.env.NODE_ENV === 'development') return;
+    api.post('/api/client-errors', {
+      message: error.message,
+      componentStack: info.componentStack ?? undefined,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+    }).catch(() => { /* reporting failure must not cascade */ });
   }
 
   handleReload = () => {

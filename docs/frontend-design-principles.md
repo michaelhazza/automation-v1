@@ -17,10 +17,11 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 - [The primary rule](#the-primary-rule)
 - [Pre-design checklist](#pre-design-checklist)
 - [What to ship by default](#what-to-ship-by-default)
+- [Visuals as simplicity](#visuals-as-simplicity)
 - [What to defer by default](#what-to-defer-by-default)
 - [Complexity budget per screen](#complexity-budget-per-screen)
 - [Progressive disclosure patterns](#progressive-disclosure-patterns)
-- [Worked example — cached-context infrastructure](#worked-example--cached-context-infrastructure)
+- [Worked examples](#worked-examples) → see [`frontend-design-examples.md`](./frontend-design-examples.md)
 - [Re-check before delivery](#re-check-before-delivery)
 - [When to break these rules](#when-to-break-these-rules)
 
@@ -36,6 +37,7 @@ The trap this doc prevents: **treating the spec's exposed capability surface as 
 
 Work through these in order. An unchecked box is a design finding; every unchecked box means the artifact is under-specified and not ready to build.
 
+- [ ] **Where does this surface live in the existing UI?** Identify the existing page(s) and component(s) the new capability extends *before drafting anything*. Search `client/src/pages/` and `client/src/components/`. Read the actual files. Quote the layout, tab labels, status pill text, vocabulary you'll inherit. New capabilities surface inside existing pages by default. A new dedicated page requires explicit justification (cross-cutting overview, distinct user journey, no extensible surface exists). The most expensive design mistake is inventing a parallel UI universe when the app already has the right surface.
 - [ ] **Who is the primary user of this screen?** Roles: agency operator / solo founder / tenant admin / internal staff / Synthetos admin. Different users tolerate different complexity ceilings. Agency operator = lowest tolerance. Internal staff = highest.
 - [ ] **What single task are they here to complete?** One sentence. Example: *"Attach a document bundle to this scheduled task."* NOT *"Manage document bundles and monitor utilization and review run history."* If the answer is a list, you have multiple screens, not one.
 - [ ] **What is the minimum information needed to complete that task?** List it. Example: bundle name, bundle document count, an attach button. NOT utilization-per-tier, cache-hit-rate, prefix-hash preview, attach button.
@@ -52,6 +54,36 @@ Work through these in order. An unchecked box is a design finding; every uncheck
 - **The result of the last action taken** — inline confirmation (e.g. "attached · 2m ago"), not a history table.
 - **One sidebar callout at most** — only if it's load-bearing for completing the primary task (e.g. a required field's help text).
 - **Empty states with one next action** — "No bundles yet. [Create bundle]". Not a tour, not tips, not a chart of nothing.
+- **Load-bearing inline visuals** — status dots, band pills, sparklines next to names, outcome badges, a single hero visualisation where *understanding trajectory IS the primary task*. These communicate state faster than text and are *encouraged*, not deferred. See [Visuals as simplicity](#visuals-as-simplicity) below.
+
+---
+
+## Visuals as simplicity
+
+A common misread of this document is "cut all visuals to ship faster". That is wrong. **Visuals are how consumer-simple products communicate state.** A status dot beats a paragraph. A sparkline beats three lines of trend prose. A single hero chart on a drilldown where *understanding the trajectory* is the primary task beats five lines explaining the same number.
+
+**The test is never "is there a visual?" — it's "is this visual load-bearing for the primary task?"**
+
+| Ship | Don't ship |
+|---|---|
+| Status dots inline on list rows (band, health, run outcome) | A row of five KPI tiles at the top of every page |
+| Sparklines next to a client name showing 4-week trajectory | Multi-series comparison charts nobody asked for |
+| Band pills, severity pills, outcome badges | 7/30/90-day toggle charts as decoration |
+| A single hero trend visualisation on a drilldown page | Trend dashboards that duplicate content visible inline below |
+| Progress indicators on active flows | Observability explorers on primary user journeys |
+| Micro-gauges, subtle colour accents for state | Multi-panel dashboards when the task is *operating*, not *monitoring* |
+
+A sparkline communicating a trend in 60 pixels earns its place. A KPI tile row showing four numbers the user already sees in the list below does not. A hero chart on a page whose primary task *is* "read the trajectory" earns its place. A hero chart on a page whose primary task is "pick one and act" is decoration.
+
+### Aesthetic quality is not negotiable
+
+Pages must be **aesthetically beautiful**, not just functional. Plain-text lists with no visual hierarchy read as unfinished. Every surface should feel intentional: confident type hierarchy, generous whitespace, colour accents for state, small visual signals that communicate faster than words.
+
+**Consumer-simple means *beautiful and obvious*, not *stripped and bare*.**
+
+If a screen is entirely text, pause and ask: *is there a visual that would communicate this state faster?* Usually yes. Ship it. A list of clients without trend sparklines is harder to scan than one with. A drilldown without a health-score visualisation hides the single most important thing the operator is there to see.
+
+The caps in the [complexity budget](#complexity-budget-per-screen) below are about **defaulting away from the dashboard-of-dashboards anti-pattern** — rows of tiles, multi-chart explorers, observability sprawl. They are *not* a mandate against visual richness. Sparklines, inline gauges, status indicators, outcome badges, and load-bearing single hero visualisations are never counted against those caps.
 
 ---
 
@@ -59,8 +91,8 @@ Work through these in order. An unchecked box is a design finding; every uncheck
 
 Everything below is **deferred out of v1 unless explicitly requested for a specific user workflow**. Not "maybe v2" — actively cut from the v1 artifact.
 
-- Metric dashboards, KPI boards, tile rows of numbers.
-- Trend charts over time windows (7-day / 30-day / 90-day).
+- Metric dashboards and KPI tile rows — the "four-to-seven big numbers at the top of every page" anti-pattern. Inline single-metric signals (a sparkline next to a name, a band pill, a status dot) are different — ship those freely. See [Visuals as simplicity](#visuals-as-simplicity).
+- Trend-chart decks with 7/30/90-day toggles as decoration at the top of pages. A single hero trend visualisation on a drilldown where *understanding trajectory IS the primary task* is different — ship that.
 - Diagnostic panels that expose internal identifiers (prefix hashes, snapshot IDs, idempotency keys, correlation IDs).
 - Aggregated cost rollups, per-tenant financial breakdowns, spend-saved calculations, cost-split donuts.
 - Observability explorers ("Usage Explorer", "Bundle Lens", "Model Lens", "Feature Lens").
@@ -106,57 +138,122 @@ Pick the lowest-weight pattern that works. Do not mix three patterns on one scre
 
 ---
 
-## Worked example — cached-context infrastructure
+## Recurring UI patterns
 
-The cached-context spec exposes these backend capabilities: reference document CRUD, document bundle CRUD, bundle resolution snapshots, prefix-hash identity, cache read/write attribution, three-way run-outcome classification, bundle utilization per model tier, per-tenant cache-cost rollups, HITL budget-breach block payload.
+Concrete, copy-once-paste-often patterns that came out of the auto-knowledge-retrieval mockup pass (May 2026). When designing a new screen, default to these unless you have a clear reason not to. Mockup references in `_archive/prototypes/auto-knowledge-retrieval/`.
 
-### What the v1 UI should ship
+### Three-dot (⋮) context menus on rows
 
-The primary user task is **attach documents to automations**. That's the whole feature from the user's POV. Everything else is invisible infrastructure.
+- **Maximum 6 to 8 visible items.** If you have more, you're probably grouping wrong.
+- **Collapse grouped sub-options into a single item with a `›` chevron** that opens a flyout, instead of expanding inline as a multi-section block. Example: *"Change mode ›"* opens a flyout with Auto / Always available / Reference only. Do not list those three as inline items under a section header in the parent menu.
+- **Never show "Open" and "Edit" as two separate items.** Row-click opens the detail modal (which is both view and edit). The three-dots menu has *Edit* xor *Open*, never both.
+- **Reserve danger actions to the bottom**, separated by a divider, in red.
 
-- **Documents page** — a simple list of uploaded reference documents (name, size, updated). One primary action: upload. Standard primitive.
-- **Bundle creation** — name + add documents. One primary action: save. Standard primitive.
-- **Bundle attachment control** — reused inline on agent / task / scheduled-task config pages. One drop-down or multi-select. One primary action: attach. Shows currently attached bundles as chips with a remove (x).
-- **One inline signal on the bundle list row** — a dot/label: `healthy` / `near cap` / `at cap`. Drives user attention to trim when needed. No tier-by-tier breakdown visible by default.
-- **One inline signal on the task / scheduled-task row** — last run outcome (`completed` / `degraded` / `failed`) as a dot. Runs live in the existing run log.
+Reference: `_archive/prototypes/auto-knowledge-retrieval/agent-data-sources.html`, `knowledge-documents-tab.html`.
 
-That's it. Three new screens (documents, bundle detail, bundle attachment control) + two inline signals on existing pages. No new dashboards, no new explorers, no charts, no tiles.
+### Source / origin / provenance badges
 
-### What the v1 UI should NOT ship
+Don't badge the default case. Default-case badges are decoration, not signal.
 
-- Bundle utilization dashboard with green/amber/red radial rings per tier.
-- Scheduled-task detail with 7-day run-calendar, detailed run table, sidebar bundle utilization.
-- Run-detail page exposing prefix hashes, components JSON, snapshot integrity checks, cache-read-vs-write tokens, cost-saved counterfactual.
-- Usage Explorer with per-bundle hit-rate trend lines, cost-split donut, bundle ranking, per-tenant breakdown.
-- Any comparison view of Sonnet vs Opus vs Haiku.
-- Any exposure of `prefix_hash`, `bundleSnapshotId`, `idempotencyKey`, or other internal identifiers to the primary user.
+- For a list of items where most are *manually authored / uploaded by the operator*, do not show a "Manually authored" badge on every row. Only show a badge when the source is non-default ("From file", "Approved from auto-memory", "Uploaded PDF", etc.).
+- The default-case absence-of-badge becomes the visual carrier of *"this is normal."* Special badges become the visual carrier of *"this came from somewhere interesting."*
 
-All of these represent real backend signals that can and should be computed. They surface (if at all) on an admin-only observability page gated behind an explicit role, never on the primary user journey. Most will be deferred out of v1 entirely — **shipping them is optional; the feature works without them**.
+### Token / cost / size information
 
-### The mockups in `prototypes/cached-context/`
+Hide by default. Only surface as a warning when it's actionable.
 
-The five mockups in [`prototypes/cached-context/`](../prototypes/cached-context/) were generated before this doc existed. They violate rules 1, 2, 3, 4 — most of them represent "what the backend could surface if we exposed every column", not "what the user needs to complete the task".
+- Do not show token counts, cost-per-run, retrieval latency, embedding size, or similar engineering metrics in default views.
+- Surface a small warning chip on the affected row when a threshold is crossed (e.g. "⚠ Large document" when a document exceeds the recommended size). The chip carries the action: *something here is unusual, you might want to look*.
+- Detail modals are an acceptable place for one expanded size widget (visual bar + qualitative label like "Small" / "Medium"), so users can self-debug if they want. Still no raw numbers as the primary information.
 
-- **`mockup-budget-breach-block.html`** — valid. Renders the `HitlBudgetBlockPayload` shape the spec commits to (§4.5). Safety-critical screen that legitimately has to surface WHY a run is blocked. Keep.
-- **`mockup-pack-utilization.html`** — reduce to a single inline badge on the bundle list row. The tier-by-tier radial dashboard is the anti-pattern. (Historical filename; this mockup was deleted in the UX revision.)
-- **`mockup-scheduled-task-with-pack.html`** — replace with an inline attachment control on the existing scheduled-task config page. Run-history lives in the run log, not here.
-- **`mockup-run-detail-cached.html`** — delete from v1. Runs open the existing run-detail page. Prefix-hash / cache attribution surfaces there as a collapsed "Advanced" section, not as its own screen.
-- **`mockup-usage-explorer-packs.html`** — delete from v1. The observability story is a valid admin concern but not a v1 deliverable.
+### Stat tiles on list / table pages
 
-Build the replacement v1 mockup set focused on the attach workflow before implementation begins.
+Maximum two stat tiles. The table itself is the data; tiles are for what the table can't show.
+
+- Good tile: *"Total documents: 23"* (a count the table doesn't aggregate).
+- Good tile: *"Most loaded: [name]"* (a top-1 the table doesn't sort to by default).
+- Bad tile: *"Avg per run: 2.4"* (operational metric, not actionable for the operator).
+- Bad tile: *"Last 30 days: $2.40"* (cost detail, hidden by default per the rule above).
+
+If a tile fails the "would the operator act on this?" check, cut it.
+
+### Explainer banners
+
+Useful for first-time users; must be dismissable.
+
+- Every explainer banner has a `×` close button. Closing persists per-user.
+- Do not ship permanent help copy at the top of every page. The banner is a one-time learning aid, not an instruction strip.
+- Footer notes that repeat what the banner just said are noise. Pick one, not both.
+
+### Admin-only controls
+
+Hide entirely from non-admin users. Do not render disabled; do not render with "you can't do this" copy.
+
+- Org-admin-only fields (e.g. a "Promote to org-wide" scope picker in a sub-account-scoped modal) are absent for sub-account admins. The field doesn't exist in their DOM.
+- Use a small "Org admin only" pill on the field label in the org-admin view itself, so the org admin understands the scope of their own action. Never show that pill to non-admins.
+
+### Default-case controls
+
+If a control has only one meaningful choice, hide it.
+
+- "Available to" radios with only one option ("All agents in this sub-account", because the user has no other sub-account) is a non-decision. Hide the radio entirely. The default action takes effect on save.
+- A "Restrict to specific agents" override lives behind an Advanced expander, not in the primary form.
+
+### Modal advanced expanders
+
+Default to collapsed.
+
+- A modal that asks for a title, scope, and an Advanced section should ship with Advanced collapsed and a single line ("Advanced: change loading mode" or similar). Most users complete the action without expanding.
+- Mockups should show the collapsed state by default. Show the expanded state only when the mockup is specifically demonstrating the advanced flow.
+
+### Em-dashes
+
+CLAUDE.md prohibits em-dashes in UI copy, labels, or app-facing text. Use commas, colons, or rewrite the sentence. This applies to mockup data (sample document names, sample agent names) too, not just chrome.
+
+### Sub-text on rows
+
+Trim aggressively.
+
+- Multi-fact sub-text strings ("Pinned to organisation · 2,300 tokens · last updated 5 days ago by Michael H.") become noise after the first row. Keep the most actionable single fact ("Updated 5 days ago"); push the rest to the detail modal.
+- Mime types are usually carried by the file icon. Don't repeat them in text.
+- Run identifiers ("produced during run #1284") are operator-debugging context. Show on hover or in detail, not in default rows.
 
 ---
+
+## Worked examples
+
+Three worked examples — drawn from origin-project features — live in [`frontend-design-examples.md`](./frontend-design-examples.md):
+
+- **Cached-context infrastructure** — backend exposes 9 capabilities; UI ships 3 screens + 2 inline signals. The bulk of the deferred-by-default rule.
+- **ClientPulse health monitoring** — analytical complexity in the backend does not imply analytical complexity in the UI. One drilldown, one modal, one settings page.
+- **Tier-1 agent chat uplift** — backend richness (cost attribution, suggested actions, OCC versioning) maps to the smallest possible UI signals: a number, a chip row, a text field, a card.
+
+Read for method, not content. If you're adapting this framework to a new project, replace these with worked examples from your own product.
 
 ## Re-check before delivery
 
 Before committing any UI artifact (mockup, PR, component), run through this quickly:
 
+**The five hard rules:**
+- [ ] Did I extend an existing page/component instead of inventing a new one? (If new page: did I justify why no existing surface fits?)
 - [ ] Did I start from the user's task, not the data model?
 - [ ] Is there exactly one primary action on this screen?
 - [ ] Is every element load-bearing for the primary task?
 - [ ] Have I deferred every monitoring / observability / diagnostic element that the task doesn't need?
 - [ ] If a non-technical operator landed here, would they know what to do in 3 seconds?
 - [ ] Am I under the complexity-budget caps?
+
+**The recurring-pattern rules** (per *Recurring UI patterns* section above):
+- [ ] Three-dot menus: under 8 items? Sub-options as flyouts not inline sections?
+- [ ] Source / provenance badges: only on non-default cases?
+- [ ] No token / cost / size numbers in default views? Warnings only as actionable chips?
+- [ ] Stat tiles: 2 maximum, each one the operator would act on?
+- [ ] Explainer banners: dismissable? No duplicate footer note?
+- [ ] Admin-only fields: absent (not disabled) for non-admins?
+- [ ] Single-choice "Available to" / "Apply to" controls hidden?
+- [ ] Modal advanced expander defaulted to collapsed?
+- [ ] No em-dashes in any UI copy or sample data?
+- [ ] Row sub-text trimmed to one most-actionable fact?
 
 If any answer is "no" or "not sure", cut before shipping. Shipping a fatter UI "just in case someone wants it" is how this product loses the consumer-simple positioning.
 

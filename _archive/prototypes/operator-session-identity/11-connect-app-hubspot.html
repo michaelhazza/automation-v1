@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!--
+  Screen 11: Connect HubSpot — per-app connect modal (Round 9)
+  Reached from the App Integrations card: "Connect" or "Add another" on HubSpot.
+  Uses HubSpot's own vocabulary: "Private App Token" — not "API Key".
+  No generic "API Key" label. No mention of auth method type.
+  Primary action: "Connect and test"
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect HubSpot | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+}
+.modal {
+  background: white; border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.22);
+  width: 460px; max-width: calc(100vw - 48px);
+  padding: 32px 32px 28px;
+  position: relative;
+}
+
+/* App identity header */
+.app-header {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 20px;
+}
+.app-icon-lg {
+  width: 52px; height: 52px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; flex-shrink: 0;
+  background: #fff3e0; color: #e8460a;
+}
+.modal-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.modal-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+
+/* Body copy */
+.modal-body-copy {
+  font-size: 13.5px; color: #334155; line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+/* Form fields */
+.form-group { margin-bottom: 18px; }
+.form-label {
+  display: block; font-size: 12px; font-weight: 600; color: #374151;
+  margin-bottom: 5px; letter-spacing: 0.01em;
+}
+.form-label-sub {
+  font-size: 11px; color: #94a3b8; font-weight: 400; margin-left: 4px;
+}
+.form-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 13px; color: #0f172a; font-family: inherit;
+  outline: none; transition: border-color 0.12s; box-sizing: border-box;
+}
+.form-input:focus { border-color: #818cf8; }
+.form-input::placeholder { color: #cbd5e1; }
+.form-hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+.form-hint a { color: #6366f1; text-decoration: none; }
+.form-hint a:hover { text-decoration: underline; }
+
+/* Password field with show/hide */
+.password-field-wrap { position: relative; }
+.password-field-wrap .form-input { padding-right: 40px; }
+.show-hide-btn {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; padding: 4px; font-family: inherit;
+}
+.show-hide-btn:hover { color: #4338ca; }
+
+/* Inline result */
+.result-block {
+  display: none;
+  padding: 12px 14px; border-radius: 9px; margin-top: 10px;
+  font-size: 13px; line-height: 1.5;
+}
+.result-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.result-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+
+/* Actions */
+.modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.btn-primary {
+  width: 100%; padding: 11px 16px; border-radius: 9px;
+  background: #4f46e5; color: white;
+  font-size: 14px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; transition: background 0.12s;
+}
+.btn-primary:hover { background: #4338ca; }
+.action-note {
+  font-size: 11.5px; color: #94a3b8; text-align: center; line-height: 1.4;
+}
+.btn-cancel {
+  width: 100%; padding: 9px 16px; border-radius: 9px;
+  background: white; color: #334155;
+  font-size: 13px; font-weight: 500; border: 1.5px solid #e2e8f0; cursor: pointer;
+  font-family: inherit; transition: border-color 0.12s;
+}
+.btn-cancel:hover { border-color: #c7d2fe; color: #4338ca; }
+</style>
+</head>
+<body>
+<!-- Fake page behind modal -->
+<div style="position:fixed;inset:0;background:#f8fafc;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+  <div style="font-size:12px;color:#cbd5e1;">Connections / App Integrations</div>
+</div>
+
+<div class="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+
+    <!-- App header -->
+    <div class="app-header">
+      <div class="app-icon-lg">HS</div>
+      <div>
+        <div class="modal-title" id="modalTitle">Connect HubSpot</div>
+        <div class="modal-subtitle">CRM, contacts, deals and pipeline data</div>
+      </div>
+    </div>
+
+    <!-- Body copy -->
+    <div class="modal-body-copy">
+      Connect your HubSpot account to let agents read contacts, deals, and pipeline data. You'll need a Private App Token from HubSpot.
+    </div>
+
+    <!-- Token field -->
+    <div class="form-group">
+      <label class="form-label" for="hsToken">HubSpot Private App Token</label>
+      <div class="password-field-wrap">
+        <input class="form-input" type="password" id="hsToken" placeholder="pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+        <button class="show-hide-btn" onclick="toggleToken()" id="showHideBtn" title="Show / hide token">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div class="form-hint">
+        Find this in HubSpot under Settings, Integrations, Private Apps.
+        <a href="#" onclick="return false;">Where to find this?</a>
+      </div>
+    </div>
+
+    <!-- Label field (optional) -->
+    <div class="form-group">
+      <label class="form-label" for="hsLabel">
+        Show as
+        <span class="form-label-sub">optional</span>
+      </label>
+      <input class="form-input" type="text" id="hsLabel" placeholder="e.g. HubSpot Marketing">
+      <div class="form-hint">Helpful when you connect more than one HubSpot account.</div>
+    </div>
+
+    <!-- Inline result (shown after clicking Connect and test) -->
+    <div class="result-block result-error" id="resultError">
+      <strong>Connection saved, but the test failed.</strong> The token was rejected (401 Unauthorized). Check the token is correct and hasn't expired. The token is stored: you can test again from the row.
+    </div>
+    <div class="result-block result-success" id="resultSuccess">
+      <strong>Connected successfully.</strong> HubSpot responded and the token is valid.
+    </div>
+
+    <!-- Actions -->
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="handleSave()">Connect and test</button>
+      <div class="action-note">We'll connect and run a quick check that the token works.</div>
+      <button class="btn-cancel" onclick="window.location='01b-app-integrations-tab.html'">Cancel</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Nav hints -->
+<div style="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);font-size:11.5px;color:#94a3b8;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;z-index:400;">
+  &larr; <a href="10-connect-app-gmail.html" style="color:#6366f1;text-decoration:none;">Gmail modal (10)</a>
+  &nbsp;|&nbsp;
+  <a href="16-manage-multi-connect.html" style="color:#6366f1;text-decoration:none;">Manage Gmail (16) &rarr;</a>
+</div>
+
+<script>
+let saveCount = 0;
+let tokenVisible = false;
+
+function toggleToken() {
+  const input = document.getElementById('hsToken');
+  tokenVisible = !tokenVisible;
+  input.type = tokenVisible ? 'text' : 'password';
+}
+
+function handleSave() {
+  const tokenVal = document.getElementById('hsToken').value.trim();
+  const errorEl = document.getElementById('resultError');
+  const successEl = document.getElementById('resultSuccess');
+  errorEl.style.display = 'none';
+  successEl.style.display = 'none';
+  saveCount++;
+  // Alternate between error and success for demo purposes
+  if (saveCount % 2 === 1) {
+    errorEl.style.display = 'block';
+  } else {
+    successEl.style.display = 'block';
+  }
+}
+</script>
+</body>
+</html>

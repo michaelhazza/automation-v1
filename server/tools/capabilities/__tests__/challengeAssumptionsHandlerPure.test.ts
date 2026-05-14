@@ -3,8 +3,7 @@
  * Run via: npx tsx server/tools/capabilities/__tests__/challengeAssumptionsHandlerPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   validateChallengeAssumptionsOutput,
   parseChallengeAssumptionsOutput,
@@ -31,8 +30,8 @@ const VALID_PAYLOAD = {
 
 test('valid payload passes validation', () => {
   const r = validateChallengeAssumptionsOutput(VALID_PAYLOAD);
-  assert.equal(r.valid, true);
-  assert.deepEqual(r.errors, []);
+  expect(r.valid).toBe(true);
+  expect(r.errors).toEqual([]);
 });
 
 test('rejects payload with more than 5 items', () => {
@@ -41,8 +40,8 @@ test('rejects payload with more than 5 items', () => {
     overallRisk: 'low',
   };
   const r = validateChallengeAssumptionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('≤ 5')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('≤ 5'))).toBeTruthy();
 });
 
 test('rejects concern longer than 140 chars', () => {
@@ -51,8 +50,8 @@ test('rejects concern longer than 140 chars', () => {
     overallRisk: 'low',
   };
   const r = validateChallengeAssumptionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('≤ 140')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('≤ 140'))).toBeTruthy();
 });
 
 test('rejects invalid severity', () => {
@@ -61,7 +60,7 @@ test('rejects invalid severity', () => {
     overallRisk: 'low',
   };
   const r = validateChallengeAssumptionsOutput(payload);
-  assert.equal(r.valid, false);
+  expect(r.valid).toBe(false);
 });
 
 test('rejects invalid dimension', () => {
@@ -70,7 +69,7 @@ test('rejects invalid dimension', () => {
     overallRisk: 'low',
   };
   const r = validateChallengeAssumptionsOutput(payload);
-  assert.equal(r.valid, false);
+  expect(r.valid).toBe(false);
 });
 
 test('rejects overallRisk mismatch — items say high but risk says low', () => {
@@ -79,39 +78,39 @@ test('rejects overallRisk mismatch — items say high but risk says low', () => 
     overallRisk: 'low',
   };
   const r = validateChallengeAssumptionsOutput(payload);
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.some((e) => e.includes('overallRisk mismatch')));
+  expect(r.valid).toBe(false);
+  expect(r.errors.some((e) => e.includes('overallRisk mismatch'))).toBeTruthy();
 });
 
 test('rejects non-object payload', () => {
   const r = validateChallengeAssumptionsOutput('not an object');
-  assert.equal(r.valid, false);
+  expect(r.valid).toBe(false);
 });
 
 test('parseChallengeAssumptionsOutput parses valid JSON', () => {
   const payload = parseChallengeAssumptionsOutput(JSON.stringify(VALID_PAYLOAD));
-  assert.equal(payload.items.length, 1);
-  assert.equal(payload.overallRisk, 'high');
+  expect(payload.items.length).toBe(1);
+  expect(payload.overallRisk).toBe('high');
 });
 
 test('parseChallengeAssumptionsOutput throws on invalid JSON', () => {
-  assert.throws(() => parseChallengeAssumptionsOutput('not json'));
+  expect(() => parseChallengeAssumptionsOutput('not json')).toThrow();
 });
 
 test('computeOverallRisk returns high if any item is high', () => {
   const risk = computeOverallRisk([LOW_ITEM, HIGH_ITEM]);
-  assert.equal(risk, 'high');
+  expect(risk).toBe('high');
 });
 
 test('computeOverallRisk returns medium if any item is medium but none high', () => {
   const medItem = { ...LOW_ITEM, severity: 'medium' as const };
   const risk = computeOverallRisk([LOW_ITEM, medItem]);
-  assert.equal(risk, 'medium');
+  expect(risk).toBe('medium');
 });
 
 test('computeOverallRisk returns low if all items are low', () => {
   const risk = computeOverallRisk([LOW_ITEM, LOW_ITEM]);
-  assert.equal(risk, 'low');
+  expect(risk).toBe('low');
 });
 
 test('assembleChallengeAssumptionsPrompt includes briefText and confidence', () => {
@@ -121,8 +120,8 @@ test('assembleChallengeAssumptionsPrompt includes briefText and confidence', () 
     runtimeConfidence: 0.75,
     stakesDimensions: ['irreversibility', 'cost'],
   });
-  assert.ok(prompt.includes('Bulk update VIP contacts'));
-  assert.ok(prompt.includes('75%'));
-  assert.ok(prompt.includes('irreversibility'));
-  assert.ok(prompt.includes('cost'));
+  expect(prompt.includes('Bulk update VIP contacts')).toBeTruthy();
+  expect(prompt.includes('75%')).toBeTruthy();
+  expect(prompt.includes('irreversibility')).toBeTruthy();
+  expect(prompt.includes('cost')).toBeTruthy();
 });

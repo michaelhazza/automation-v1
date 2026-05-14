@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nav Restructure | Before and After</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.page-hdr {
+  padding: 24px 32px 0; display: flex; align-items: flex-start; justify-content: space-between;
+}
+.page-hdr h1 { font-size: 22px; font-weight: 800; color: var(--slate-900); margin: 0; }
+.page-hdr p { font-size: 13px; color: var(--slate-500); margin: 4px 0 0; }
+.compare-wrap {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
+  padding: 24px 32px;
+}
+.nav-mock {
+  background: #0f172a; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.20);
+}
+.nav-mock-label {
+  padding: 10px 16px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.nav-mock-label.before { color: #fbbf24; }
+.nav-mock-label.after { color: #86efac; }
+.nav-logo {
+  padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 14px; font-weight: 800; color: white; letter-spacing: -0.3px;
+}
+.nav-group {
+  padding: 10px 0 2px;
+}
+.nav-group-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: rgba(255,255,255,0.22);
+  padding: 0 16px 4px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px; font-size: 12px; color: rgba(255,255,255,0.7);
+  line-height: 1.3;
+}
+.nav-item.gone { color: rgba(255,255,255,0.25); text-decoration: line-through; }
+.nav-item .pill {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 4px; padding: 1px 5px; flex-shrink: 0;
+}
+.pill-removed { background: #fee2e2; color: #991b1b; }
+.pill-merged { background: #fef9c3; color: #713f12; }
+.pill-into { background: #dbeafe; color: #1e3a8a; }
+.pill-drawer { background: #ede9fe; color: #4c1d95; }
+.pill-org { background: #d1fae5; color: #064e3b; }
+.pill-kept { background: #f0fdf4; color: #065f46; }
+.after-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 16px; font-size: 12px; color: rgba(255,255,255,0.85);
+  line-height: 1.3;
+}
+.after-item .desc {
+  font-size: 10px; color: rgba(255,255,255,0.35); display: block; margin-top: 1px;
+}
+.after-item .pill-new {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 4px; padding: 1px 5px; flex-shrink: 0;
+  background: #d1fae5; color: #064e3b;
+}
+.after-item .badge-cnt {
+  margin-left: auto; background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+  border-radius: 8px; padding: 1px 6px; font-size: 10px; font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Stats row */
+.stats-row {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  padding: 0 32px 16px;
+}
+.stat-card {
+  background: white; border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; text-align: center;
+}
+.stat-card .val { font-size: 28px; font-weight: 800; }
+.stat-card .val.red { color: var(--red-600); }
+.stat-card .val.green { color: var(--emerald-600); }
+.stat-card .arrow { font-size: 18px; color: var(--slate-300); margin: 4px 0; }
+.stat-card .lbl { font-size: 11px; color: var(--slate-500); }
+
+/* Mapping table */
+.mapping-wrap { padding: 0 32px 32px; }
+.mapping-wrap h2 { font-size: 16px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.mapping-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mapping-table th {
+  background: var(--slate-800); color: white; padding: 8px 12px; text-align: left;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.mapping-table td { padding: 8px 12px; border-bottom: 1px solid var(--slate-100); vertical-align: top; }
+.mapping-table tr:last-child td { border-bottom: none; }
+.mapping-table tr:nth-child(even) td { background: var(--slate-50); }
+.mapping-table .page-name { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--indigo-700); }
+.mapping-table .route { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--slate-400); display: block; margin-top: 2px; }
+.tag {
+  display: inline-block; font-size: 10px; font-weight: 700; border-radius: 4px;
+  padding: 1px 6px; margin: 1px;
+}
+.tag-nav { background: var(--indigo-100); color: var(--indigo-700); }
+.tag-drawer { background: var(--violet-100); color: var(--violet-700); }
+.tag-folded { background: var(--amber-100); color: var(--amber-700); }
+.tag-tab { background: var(--sky-100); color: var(--sky-700); }
+.tag-removed { background: var(--red-100); color: var(--red-700); }
+.tag-system { background: var(--slate-200); color: var(--slate-600); }
+.tag-auth { background: var(--slate-200); color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="page-hdr">
+  <div>
+    <h1>Navigation restructure</h1>
+    <p>~92 pages in current codebase mapped to ~16 nav items. Click any screen link to view the prototype.</p>
+  </div>
+</div>
+
+<!-- Stats row -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="val red">92</div>
+    <div class="arrow">&#8595;</div>
+    <div class="val green">16</div>
+    <div class="lbl">Nav items</div>
+  </div>
+  <div class="stat-card">
+    <div class="val red">34</div>
+    <div class="arrow">&#8595;</div>
+    <div class="val green">0</div>
+    <div class="lbl">Duplicate surfaces</div>
+  </div>
+  <div class="stat-card">
+    <div class="val red">12</div>
+    <div class="arrow">&#8595;</div>
+    <div class="val green">5</div>
+    <div class="lbl">Admin-only standalone pages</div>
+  </div>
+  <div class="stat-card">
+    <div class="val red">8</div>
+    <div class="arrow">&#8595;</div>
+    <div class="val green">1</div>
+    <div class="lbl">HITL surfaces (check points)</div>
+  </div>
+  <div class="stat-card">
+    <div class="val red">4</div>
+    <div class="arrow">&#8595;</div>
+    <div class="val green">0</div>
+    <div class="lbl">Dedicated sub-detail pages</div>
+  </div>
+</div>
+
+<!-- Before / After nav comparison -->
+<div class="compare-wrap">
+
+  <!-- BEFORE -->
+  <div class="nav-mock">
+    <div class="nav-mock-label before">Before: current navigation (~92 pages, ~45 nav items)</div>
+    <div class="nav-logo">Automation OS</div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Core</div>
+      <div class="nav-item">Dashboard <span class="pill pill-merged">MERGED into board</span></div>
+      <div class="nav-item">Board <span class="pill pill-kept">KEPT</span></div>
+      <div class="nav-item">Inbox <span class="pill pill-kept">KEPT</span></div>
+      <div class="nav-item">Activity <span class="pill pill-merged">INTO Inbox</span></div>
+      <div class="nav-item">Goals <span class="pill pill-drawer">DRAWER</span></div>
+      <div class="nav-item">Reports <span class="pill pill-merged">INTO Board</span></div>
+      <div class="nav-item">Projects <span class="pill pill-merged">INTO Board</span></div>
+      <div class="nav-item">Open Tasks <span class="pill pill-merged">INTO Inbox</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Agents</div>
+      <div class="nav-item">Agents <span class="pill pill-kept">KEPT</span></div>
+      <div class="nav-item">Agent Chat <span class="pill pill-into">INTO Agent</span></div>
+      <div class="nav-item">Agent Run History <span class="pill pill-into">INTO Agent</span></div>
+      <div class="nav-item">Agent Triggers <span class="pill pill-into">INTO Agent</span></div>
+      <div class="nav-item">Agent Calendar <span class="pill pill-merged">INTO Calendar</span></div>
+      <div class="nav-item">Agent Mailbox <span class="pill pill-merged">INTO Inbox</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Admin Agents</div>
+      <div class="nav-item">Admin Agents <span class="pill pill-merged">INTO Agents</span></div>
+      <div class="nav-item">Admin Agent Edit <span class="pill pill-merged">INTO Agent Edit</span></div>
+      <div class="nav-item">Admin Skills <span class="pill pill-into">INTO Agent Edit</span></div>
+      <div class="nav-item">Admin Skill Edit <span class="pill pill-drawer">DRAWER in Agent</span></div>
+      <div class="nav-item">Skill Studio <span class="pill pill-drawer">DRAWER in Agent</span></div>
+      <div class="nav-item">Skill Analyzer <span class="pill pill-drawer">DRAWER in Agent</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Knowledge</div>
+      <div class="nav-item">Workspace Memory <span class="pill pill-merged">INTO Knowledge</span></div>
+      <div class="nav-item">Subaccount Knowledge <span class="pill pill-merged">INTO Knowledge</span></div>
+      <div class="nav-item">Org Memory <span class="pill pill-merged">INTO Knowledge</span></div>
+      <div class="nav-item">Memory Block Detail <span class="pill pill-drawer">DRAWER</span></div>
+      <div class="nav-item">Memory Review Queue <span class="pill pill-merged">INTO Inbox</span></div>
+      <div class="nav-item">Review Queue (Admin) <span class="pill pill-merged">INTO Inbox</span></div>
+      <div class="nav-item">Learned Rules <span class="pill pill-into">INTO Knowledge</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Automations</div>
+      <div class="nav-item">Automations <span class="pill pill-merged">INTO Automations</span></div>
+      <div class="nav-item">Admin Automations <span class="pill pill-merged">INTO Automations</span></div>
+      <div class="nav-item">Admin Automation Edit <span class="pill pill-merged">INTO Detail</span></div>
+      <div class="nav-item">Automation Execution <span class="pill pill-merged">INTO Detail</span></div>
+      <div class="nav-item">Execution Detail <span class="pill pill-merged">INTO Detail</span></div>
+      <div class="nav-item">Workflows Library <span class="pill pill-merged">INTO Automations</span></div>
+      <div class="nav-item">Workflow Studio <span class="pill pill-merged">INTO Automations</span></div>
+      <div class="nav-item">Workflow Run Detail <span class="pill pill-drawer">DRAWER</span></div>
+      <div class="nav-item">System Automations <span class="pill pill-merged">INTO Automations</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Calendar / Schedule</div>
+      <div class="nav-item">Schedule Calendar <span class="pill pill-merged">INTO Calendar</span></div>
+      <div class="nav-item">Subaccount Schedule Cal <span class="pill pill-merged">INTO Calendar</span></div>
+      <div class="nav-item">Scheduled Tasks <span class="pill pill-into">INTO Calendar</span></div>
+      <div class="nav-item">Scheduled Task Detail <span class="pill pill-drawer">DRAWER</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Integrations</div>
+      <div class="nav-item">Integrations + Credentials <span class="pill pill-merged">INTO Connections</span></div>
+      <div class="nav-item">Admin Health Findings <span class="pill pill-merged">INTO Connections</span></div>
+      <div class="nav-item">MCP Servers <span class="pill pill-into">INTO Connections</span></div>
+      <div class="nav-item">Connector Configs <span class="pill pill-into">INTO Connections</span></div>
+      <div class="nav-item">GHL OAuth Interstitial <span class="pill pill-removed">AUTH FLOW</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Org Settings</div>
+      <div class="nav-item">Org Settings (7 tabs) <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Admin Permission Sets <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Admin Action Log <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Org Agent Configs <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Org Approval Channels <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Spending / Budget <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Spend Ledger <span class="pill pill-into">INTO Manage Org</span></div>
+      <div class="nav-item">Teams Admin <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Admin Users <span class="pill pill-merged">INTO Manage Org</span></div>
+      <div class="nav-item">Profile Settings <span class="pill pill-removed">USER MENU</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Clients (Subaccounts)</div>
+      <div class="nav-item">Subaccount Blueprints <span class="pill pill-drawer">DRAWER</span></div>
+      <div class="nav-item">Subaccount Onboarding <span class="pill pill-drawer">DRAWER</span></div>
+      <div class="nav-item">Subaccount Skills <span class="pill pill-into">INTO Agent Edit</span></div>
+      <div class="nav-item">Subaccount Tags <span class="pill pill-into">INTO Manage Org</span></div>
+      <div class="nav-item">Subaccount Team <span class="pill pill-into">INTO Manage Org</span></div>
+      <div class="nav-item">Client Pulse Dashboard <span class="pill pill-removed">DEFERRED</span></div>
+      <div class="nav-item">Client Pulse Clients <span class="pill pill-removed">DEFERRED</span></div>
+      <div class="nav-item">Client Pulse Drilldown <span class="pill pill-removed">DEFERRED</span></div>
+      <div class="nav-item">Client Pulse Settings <span class="pill pill-removed">DEFERRED</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Run Traces</div>
+      <div class="nav-item">Agent Run Live <span class="pill pill-merged">INTO Run Trace</span></div>
+      <div class="nav-item">Run Trace Viewer <span class="pill pill-merged">INTO Run Trace</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">System (super-admin)</div>
+      <div class="nav-item">System Agents <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Agent Edit <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Automations <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Board Templates <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Engines <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Incidents <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Modules <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Org Templates <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Orgs <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System P&amp;L <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Settings <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Skills <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Skill Edit <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Task Queue <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">System Users <span class="pill pill-org">SYSTEM ONLY</span></div>
+      <div class="nav-item">Job Queue Dashboard <span class="pill pill-org">SYSTEM ONLY</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Auth / Onboarding (not in sidebar)</div>
+      <div class="nav-item gone">Login</div>
+      <div class="nav-item gone">Signup</div>
+      <div class="nav-item gone">Forgot password</div>
+      <div class="nav-item gone">Reset password</div>
+      <div class="nav-item gone">Accept invite</div>
+      <div class="nav-item gone">Onboarding wizard</div>
+      <div class="nav-item gone">Onboarding celebration</div>
+      <div class="nav-item gone">Config assistant</div>
+      <div class="nav-item gone">Config doc upload</div>
+      <div class="nav-item gone">Config session history</div>
+      <div class="nav-item gone">Org chart</div>
+      <div class="nav-item gone">Usage</div>
+      <div class="nav-item gone">Hierarchy templates</div>
+      <div class="nav-item gone">Brief detail</div>
+    </div>
+  </div>
+
+  <!-- AFTER -->
+  <div class="nav-mock">
+    <div class="nav-mock-label after">After: proposed navigation (16 items)</div>
+    <div class="nav-logo">Automation OS</div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Work</div>
+      <div class="after-item">
+        Home
+        <span class="desc">Operator daily landing: agents needing attention, recent runs, today's schedule</span>
+        <span class="badge-cnt">0</span>
+      </div>
+      <div class="after-item">
+        Inbox
+        <span class="desc">Tasks, approvals, HITL, failed runs, memory reviews</span>
+        <span class="badge-cnt" style="background:rgba(239,68,68,0.7);color:white;">7</span>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Agents</div>
+      <div class="after-item">
+        <div>
+          Agents
+          <span class="desc">List. Row click opens agent with Configure / Behaviour / Capabilities / Schedule / Budget / Runs</span>
+        </div>
+      </div>
+      <div class="after-item">
+        <div>
+          Run trace
+          <span class="desc">Live and historical run detail. Linked from agent Runs tab.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Intelligence</div>
+      <div class="after-item">
+        <div>
+          Knowledge
+          <span class="desc">Auto-memory, authored knowledge, memory blocks, baseline, board summary</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Automation</div>
+      <div class="after-item">
+        <div>
+          Automations
+          <span class="desc">All automations. Row click opens Definition / Run / History detail.</span>
+        </div>
+      </div>
+      <div class="after-item">
+        <div>
+          Calendar
+          <span class="desc">Scheduled runs. Scope filter pills: all clients or per-client.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Integrations</div>
+      <div class="after-item">
+        <div>
+          Connections
+          <span class="desc">One row per service. API key, OAuth, Web login, Cookie, Certificate.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Settings</div>
+      <div class="after-item">
+        <div>
+          Manage org
+          <span class="desc">General, Tags, Engines, Board Templates, Permissions, Spending, Health Audit</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group" style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.06);padding-top:10px;">
+      <div class="nav-group-label">System (super-admin shell)</div>
+      <div class="after-item">
+        <div>
+          Organisations
+          <span class="desc">Manage all orgs. Per-org admin: agents, automations, skills, engines, incidents, modules.</span>
+        </div>
+      </div>
+      <div class="after-item">
+        <div>
+          System settings
+          <span class="desc">Board templates, org templates, task queue, P&amp;L, users, health.</span>
+        </div>
+      </div>
+      <div class="after-item">
+        <div>
+          Skills registry
+          <span class="desc">Global skills library and skill analyzer (admin-only).</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-group" style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.06);padding-top:10px;opacity:0.5;">
+      <div class="nav-group-label">User menu (not sidebar)</div>
+      <div class="after-item"><div>Profile settings<span class="desc">Account, notifications, API tokens</span></div></div>
+      <div class="after-item"><div>Switch org<span class="desc">For multi-org users</span></div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Comprehensive mapping table -->
+<div class="mapping-wrap">
+  <h2>Full page mapping: every page accounted for</h2>
+  <table class="mapping-table">
+    <thead>
+      <tr>
+        <th>Page file</th>
+        <th>Route pattern</th>
+        <th>Category</th>
+        <th>Folded into</th>
+        <th>Method</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Work -->
+      <tr><td><span class="page-name">DashboardPage</span></td><td>/dashboard</td><td>Core</td><td>Board</td><td><span class="tag tag-folded">Merged</span> Board is the primary workspace</td></tr>
+      <tr><td><span class="page-name">WorkspaceBoardPage</span></td><td>/board</td><td>Core</td><td>Board</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">InboxPage</span></td><td>/inbox</td><td>Core</td><td>Inbox</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">ActivityPage</span></td><td>/activity</td><td>Core</td><td>Inbox</td><td><span class="tag tag-folded">Merged</span> Activity feed becomes Inbox tab</td></tr>
+      <tr><td><span class="page-name">OpenTaskView</span></td><td>/tasks</td><td>Core</td><td>Inbox</td><td><span class="tag tag-folded">Merged</span> Tasks tab in Inbox</td></tr>
+      <tr><td><span class="page-name">GoalsPage</span></td><td>/goals</td><td>Core</td><td>Board</td><td><span class="tag tag-drawer">Drawer</span> Goals panel within Board</td></tr>
+      <tr><td><span class="page-name">ReportsListPage</span></td><td>/reports</td><td>Core</td><td>Board</td><td><span class="tag tag-tab">Tab</span> Reports tab in Board</td></tr>
+      <tr><td><span class="page-name">ReportDetailPage</span></td><td>/reports/:id</td><td>Core</td><td>Board</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+      <tr><td><span class="page-name">ProjectsPage</span></td><td>/projects</td><td>Core</td><td>Board</td><td><span class="tag tag-tab">Tab</span> Projects tab in Board</td></tr>
+      <tr><td><span class="page-name">ProjectDetailPage</span></td><td>/projects/:id</td><td>Core</td><td>Board</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+      <tr><td><span class="page-name">PageProjectsPage</span></td><td>/page-projects</td><td>Core</td><td>Board</td><td><span class="tag tag-folded">Merged</span> Into Projects</td></tr>
+      <tr><td><span class="page-name">PageProjectDetailPage</span></td><td>/page-projects/:id</td><td>Core</td><td>Board</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+      <tr><td><span class="page-name">BriefDetailPage</span></td><td>/briefs/:id</td><td>Core</td><td>Board</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+
+      <!-- Agents -->
+      <tr><td><span class="page-name">AgentsPage</span></td><td>/agents</td><td>Agents</td><td>Agents</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">AdminAgentsPage</span></td><td>/admin/agents</td><td>Agents</td><td>Agents</td><td><span class="tag tag-folded">Merged</span> Admin controls inline (permission-gated)</td></tr>
+      <tr><td><span class="page-name">AdminAgentEditPage</span></td><td>/admin/agents/:id/edit</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-nav">Nav item</span> (row click opens)</td></tr>
+      <tr><td><span class="page-name">AgentChatPage</span></td><td>/agents/:id/chat</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-tab">Tab</span> Chat tab within agent detail</td></tr>
+      <tr><td><span class="page-name">AgentRunHistoryPage</span></td><td>/agents/:id/runs</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-tab">Tab</span> Runs tab within agent detail</td></tr>
+      <tr><td><span class="page-name">AgentTriggersPage</span></td><td>/agents/:id/triggers</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-tab">Tab</span> Schedule tab within agent detail</td></tr>
+      <tr><td><span class="page-name">AgentCalendarPage</span></td><td>/agents/:id/calendar</td><td>Agents</td><td>Calendar</td><td><span class="tag tag-folded">Merged</span> Calendar scope filter: per-agent</td></tr>
+      <tr><td><span class="page-name">AgentMailboxPage</span></td><td>/agents/:id/mailbox</td><td>Agents</td><td>Inbox</td><td><span class="tag tag-folded">Merged</span> Cross-agent unified Inbox</td></tr>
+      <tr><td><span class="page-name">AdminSkillsPage</span></td><td>/admin/skills</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-tab">Tab</span> Capabilities tab in agent detail</td></tr>
+      <tr><td><span class="page-name">AdminSkillEditPage</span></td><td>/admin/skills/:id/edit</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-drawer">Drawer</span> Skill edit drawer in Capabilities</td></tr>
+      <tr><td><span class="page-name">SkillStudioPage</span></td><td>/admin/skill-studio</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-drawer">Drawer</span> Tool definition sub-tab in skill drawer</td></tr>
+      <tr><td><span class="page-name">SkillAnalyzerPage</span></td><td>/admin/skill-analyzer</td><td>Agents</td><td>Skills registry</td><td><span class="tag tag-tab">Tab</span> In system Skills registry</td></tr>
+      <tr><td><span class="page-name">SubaccountSkillsPage</span></td><td>/subaccounts/:id/skills</td><td>Agents</td><td>Agent Edit</td><td><span class="tag tag-folded">Merged</span> Capabilities filter by client</td></tr>
+      <tr><td><span class="page-name">AgentRunLivePage</span></td><td>/agents/:id/runs/:id/live</td><td>Agents</td><td>Run Trace</td><td><span class="tag tag-nav">Nav item</span> (linked from Runs tab)</td></tr>
+      <tr><td><span class="page-name">RunTraceViewerPage</span></td><td>/agents/:id/runs/:id/trace</td><td>Agents</td><td>Run Trace</td><td><span class="tag tag-nav">Nav item</span> (same page, mode toggle)</td></tr>
+      <tr><td><span class="page-name">OrgChartPage</span></td><td>/org-chart</td><td>Agents</td><td>Agents</td><td><span class="tag tag-tab">Tab</span> Org chart view in Agents</td></tr>
+      <tr><td><span class="page-name">OrgAgentConfigsPage</span></td><td>/org/agent-configs</td><td>Agents</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Agent defaults in Manage Org</td></tr>
+
+      <!-- Knowledge -->
+      <tr><td><span class="page-name">SubaccountKnowledgePage</span></td><td>/subaccounts/:id/knowledge</td><td>Knowledge</td><td>Knowledge</td><td><span class="tag tag-nav">Nav item</span> (scope filter)</td></tr>
+      <tr><td><span class="page-name">WorkspaceMemoryPage</span></td><td>/workspace/memory</td><td>Knowledge</td><td>Knowledge</td><td><span class="tag tag-nav">Nav item</span> (scope filter)</td></tr>
+      <tr><td><span class="page-name">OrgMemoryPage</span></td><td>/org/memory</td><td>Knowledge</td><td>Knowledge</td><td><span class="tag tag-nav">Nav item</span> (scope filter: org)</td></tr>
+      <tr><td><span class="page-name">MemoryBlockDetailPage</span></td><td>/knowledge/blocks/:id</td><td>Knowledge</td><td>Knowledge</td><td><span class="tag tag-drawer">Drawer</span> Block detail drawer</td></tr>
+      <tr><td><span class="page-name">MemoryReviewQueuePage</span></td><td>/knowledge/review-queue</td><td>Knowledge</td><td>Inbox</td><td><span class="tag tag-folded">Merged</span> Reviews tab in Inbox</td></tr>
+      <tr><td><span class="page-name">ReviewQueuePage</span></td><td>/admin/review-queue</td><td>Knowledge</td><td>Inbox</td><td><span class="tag tag-folded">Merged</span> Reviews tab in Inbox</td></tr>
+      <tr><td><span class="page-name">LearnedRulesPage</span></td><td>/knowledge/rules</td><td>Knowledge</td><td>Knowledge</td><td><span class="tag tag-tab">Tab</span> Sub-tab in Knowledge</td></tr>
+
+      <!-- Automations -->
+      <tr><td><span class="page-name">AutomationsPage</span></td><td>/automations</td><td>Automations</td><td>Automations</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">AdminAutomationsPage</span></td><td>/admin/automations</td><td>Automations</td><td>Automations</td><td><span class="tag tag-folded">Merged</span> Admin controls inline (permission-gated)</td></tr>
+      <tr><td><span class="page-name">AdminAutomationEditPage</span></td><td>/admin/automations/:id/edit</td><td>Automations</td><td>Automation Detail</td><td><span class="tag tag-tab">Tab</span> Definition tab (inline edit)</td></tr>
+      <tr><td><span class="page-name">AutomationExecutionPage</span></td><td>/automations/:id/run</td><td>Automations</td><td>Automation Detail</td><td><span class="tag tag-tab">Tab</span> Run sandbox tab</td></tr>
+      <tr><td><span class="page-name">ExecutionDetailPage</span></td><td>/automations/:id/executions/:id</td><td>Automations</td><td>Automation Detail</td><td><span class="tag tag-drawer">Drawer</span> In History tab</td></tr>
+      <tr><td><span class="page-name">WorkflowsLibraryPage</span></td><td>/workflows</td><td>Automations</td><td>Automations</td><td><span class="tag tag-tab">Tab</span> Workflows tab</td></tr>
+      <tr><td><span class="page-name">WorkflowStudioPage</span></td><td>/workflows/studio</td><td>Automations</td><td>Automations</td><td><span class="tag tag-drawer">Drawer</span> Visual editor in workflow</td></tr>
+      <tr><td><span class="page-name">WorkflowRunDetailPage</span></td><td>/workflows/:id/runs/:id</td><td>Automations</td><td>Automations</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+      <tr><td><span class="page-name">SystemAutomationsPage</span></td><td>/system/automations</td><td>Automations</td><td>System settings</td><td><span class="tag tag-system">System shell</span></td></tr>
+      <tr><td><span class="page-name">PortalPage</span></td><td>/portal</td><td>Automations</td><td>Automations</td><td><span class="tag tag-tab">Tab</span> Portal submissions tab</td></tr>
+      <tr><td><span class="page-name">PortalLandingPage</span></td><td>/portal/public</td><td>Automations</td><td>Automations</td><td><span class="tag tag-nav">Public URL</span> External facing</td></tr>
+      <tr><td><span class="page-name">PortalExecutionPage</span></td><td>/portal/:id/run</td><td>Automations</td><td>Automations</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+      <tr><td><span class="page-name">PortalExecutionHistoryPage</span></td><td>/portal/:id/history</td><td>Automations</td><td>Automations</td><td><span class="tag tag-tab">Tab</span></td></tr>
+
+      <!-- Calendar -->
+      <tr><td><span class="page-name">ScheduleCalendarPage</span></td><td>/schedule</td><td>Calendar</td><td>Calendar</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">SubaccountScheduleCalendarPage</span></td><td>/subaccounts/:id/schedule</td><td>Calendar</td><td>Calendar</td><td><span class="tag tag-folded">Merged</span> Scope filter pill</td></tr>
+      <tr><td><span class="page-name">ScheduledTasksPage</span></td><td>/scheduled-tasks</td><td>Calendar</td><td>Calendar</td><td><span class="tag tag-tab">Tab</span> Scheduled tasks tab</td></tr>
+      <tr><td><span class="page-name">ScheduledTaskDetailPage</span></td><td>/scheduled-tasks/:id</td><td>Calendar</td><td>Calendar</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+
+      <!-- Connections -->
+      <tr><td><span class="page-name">IntegrationsAndCredentialsPage</span></td><td>/settings/integrations</td><td>Connections</td><td>Connections</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">AdminHealthFindingsPage</span></td><td>/admin/health-findings</td><td>Connections</td><td>Connections</td><td><span class="tag tag-tab">Tab</span> Issues tab</td></tr>
+      <tr><td><span class="page-name">McpServersPage</span></td><td>/settings/mcp</td><td>Connections</td><td>Connections</td><td><span class="tag tag-tab">Tab</span> MCP tab in Connections</td></tr>
+      <tr><td><span class="page-name">ConnectorConfigsPage</span></td><td>/settings/connectors</td><td>Connections</td><td>Connections</td><td><span class="tag tag-tab">Tab</span></td></tr>
+      <tr><td><span class="page-name">GhlOAuthInterstitialPage</span></td><td>/auth/ghl/callback</td><td>Auth flow</td><td>n/a</td><td><span class="tag tag-auth">Auth callback</span></td></tr>
+
+      <!-- Manage Org -->
+      <tr><td><span class="page-name">OrgSettingsPage</span></td><td>/org-settings</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-nav">Nav item</span></td></tr>
+      <tr><td><span class="page-name">AdminBoardConfigPage</span></td><td>/admin/board-config</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Board Templates tab</td></tr>
+      <tr><td><span class="page-name">AdminCategoriesPage</span></td><td>/admin/categories</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Tags tab</td></tr>
+      <tr><td><span class="page-name">AdminEnginesPage</span></td><td>/admin/engines</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Engines tab</td></tr>
+      <tr><td><span class="page-name">AdminPermissionSetsPage</span></td><td>/admin/permissions</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Permission Sets tab</td></tr>
+      <tr><td><span class="page-name">AdminActionLogPage</span></td><td>/admin/action-log</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Audit log tab</td></tr>
+      <tr><td><span class="page-name">AdminSettingsPage</span></td><td>/admin/settings</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-folded">Merged</span> Into Manage Org general</td></tr>
+      <tr><td><span class="page-name">OrgApprovalChannelsPage</span></td><td>/org/approval-channels</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Approval channels tab</td></tr>
+      <tr><td><span class="page-name">SpendingBudgetDetailPage</span></td><td>/spending/budgets/:id</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Spending tab</td></tr>
+      <tr><td><span class="page-name">SpendLedgerPage</span></td><td>/spending/ledger</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> In Spending tab</td></tr>
+      <tr><td><span class="page-name">UsagePage</span></td><td>/usage</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Usage tab</td></tr>
+      <tr><td><span class="page-name">TeamsAdminPage</span></td><td>/admin/teams</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Teams tab</td></tr>
+      <tr><td><span class="page-name">AdminUsersPage</span></td><td>/admin/users</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Members tab</td></tr>
+      <tr><td><span class="page-name">HierarchyTemplatesPage</span></td><td>/hierarchy-templates</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span></td></tr>
+      <tr><td><span class="page-name">SubaccountBlueprintsPage</span></td><td>/subaccounts/blueprints</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Client blueprints tab</td></tr>
+      <tr><td><span class="page-name">SubaccountTagsPage</span></td><td>/subaccounts/:id/tags</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-folded">Merged</span> Tags tab</td></tr>
+      <tr><td><span class="page-name">SubaccountTeamPage</span></td><td>/subaccounts/:id/team</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-folded">Merged</span> Teams tab</td></tr>
+      <tr><td><span class="page-name">AdminSubaccountsPage</span></td><td>/admin/subaccounts</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-tab">Tab</span> Clients tab</td></tr>
+      <tr><td><span class="page-name">AdminSubaccountDetailPage</span></td><td>/admin/subaccounts/:id</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-drawer">Drawer</span> Client detail drawer</td></tr>
+      <tr><td><span class="page-name">SubaccountOnboardingPage</span></td><td>/subaccounts/:id/onboarding</td><td>Manage Org</td><td>Manage Org</td><td><span class="tag tag-drawer">Drawer</span> Client onboarding drawer</td></tr>
+      <tr><td><span class="page-name">ProfileSettingsPage</span></td><td>/settings/profile</td><td>User</td><td>User menu</td><td><span class="tag tag-auth">User menu only</span></td></tr>
+
+      <!-- System shell -->
+      <tr><td><span class="page-name">SystemAgentsPage</span></td><td>/system/agents</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemAgentEditPage</span></td><td>/system/agents/:id</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemBoardTemplatesPage</span></td><td>/system/board-templates</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemEnginesPage</span></td><td>/system/engines</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemIncidentsPage</span></td><td>/system/incidents</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemModulesPage</span></td><td>/system/modules</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemOrganisationTemplatesPage</span></td><td>/system/org-templates</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemOrganisationsPage</span></td><td>/system/organisations</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemPnlPage</span></td><td>/system/pnl</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemSettingsPage</span></td><td>/system/settings</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemSkillsPage</span></td><td>/system/skills</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemSkillEditPage</span></td><td>/system/skills/:id</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemTaskQueuePage</span></td><td>/system/task-queue</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">SystemUsersPage</span></td><td>/system/users</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+      <tr><td><span class="page-name">JobQueueDashboardPage</span></td><td>/system/job-queue</td><td>System</td><td>System shell</td><td><span class="tag tag-system">System only</span></td></tr>
+
+      <!-- Client Pulse -->
+      <tr><td><span class="page-name">ClientPulseDashboardPage</span></td><td>/client-pulse</td><td>Client Pulse</td><td>Deferred</td><td><span class="tag tag-removed">Deferred</span> Analytics product, not in this consolidation</td></tr>
+      <tr><td><span class="page-name">ClientPulseClientsListPage</span></td><td>/client-pulse/clients</td><td>Client Pulse</td><td>Deferred</td><td><span class="tag tag-removed">Deferred</span></td></tr>
+      <tr><td><span class="page-name">ClientPulseDrilldownPage</span></td><td>/client-pulse/:id</td><td>Client Pulse</td><td>Deferred</td><td><span class="tag tag-removed">Deferred</span></td></tr>
+      <tr><td><span class="page-name">ClientPulseSettingsPage</span></td><td>/client-pulse/settings</td><td>Client Pulse</td><td>Deferred</td><td><span class="tag tag-removed">Deferred</span></td></tr>
+
+      <!-- Auth / onboarding (never in sidebar) -->
+      <tr><td><span class="page-name">LoginPage</span></td><td>/login</td><td>Auth</td><td>n/a</td><td><span class="tag tag-auth">Auth route</span></td></tr>
+      <tr><td><span class="page-name">SignupPage</span></td><td>/signup</td><td>Auth</td><td>n/a</td><td><span class="tag tag-auth">Auth route</span></td></tr>
+      <tr><td><span class="page-name">ForgotPasswordPage</span></td><td>/forgot-password</td><td>Auth</td><td>n/a</td><td><span class="tag tag-auth">Auth route</span></td></tr>
+      <tr><td><span class="page-name">ResetPasswordPage</span></td><td>/reset-password</td><td>Auth</td><td>n/a</td><td><span class="tag tag-auth">Auth route</span></td></tr>
+      <tr><td><span class="page-name">AcceptInvitePage</span></td><td>/accept-invite</td><td>Auth</td><td>n/a</td><td><span class="tag tag-auth">Auth route</span></td></tr>
+      <tr><td><span class="page-name">OnboardingWizardPage</span></td><td>/onboarding</td><td>Onboarding</td><td>n/a</td><td><span class="tag tag-auth">Onboarding flow</span></td></tr>
+      <tr><td><span class="page-name">OnboardingCelebrationPage</span></td><td>/onboarding/done</td><td>Onboarding</td><td>n/a</td><td><span class="tag tag-auth">Onboarding flow</span></td></tr>
+      <tr><td><span class="page-name">ConfigAssistantPage</span></td><td>/config-assistant</td><td>Onboarding</td><td>n/a</td><td><span class="tag tag-auth">Setup flow</span></td></tr>
+      <tr><td><span class="page-name">ConfigDocumentUploadPage</span></td><td>/config/upload</td><td>Onboarding</td><td>n/a</td><td><span class="tag tag-auth">Setup flow</span></td></tr>
+      <tr><td><span class="page-name">ConfigSessionHistoryPage</span></td><td>/config/history</td><td>Onboarding</td><td>n/a</td><td><span class="tag tag-auth">Setup flow</span></td></tr>
+      <tr><td><span class="page-name">subaccount/WorkflowRunPage</span></td><td>/subaccounts/:id/runs/:id</td><td>Automations</td><td>Automation Detail</td><td><span class="tag tag-drawer">Drawer</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

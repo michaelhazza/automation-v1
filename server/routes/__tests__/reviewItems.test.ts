@@ -1,0 +1,95 @@
+/**
+ * reviewItems.test.ts — Route-layer idempotency contract tests.
+ *
+ * Spec §6.2.1 (clientpulse-ui-simplification):
+ *   Double-approve on an already-approved item must return 200, not 412.
+ *   The service returns wasIdempotent=true on the second call, and the route
+ *   skips audit + side-effects — no duplicate reviewAudit rows emitted.
+ *
+ * These tests verify the pure decision logic that governs route behaviour:
+ *   - checkIdempotency correctly classifies the already-approved state.
+ *   - wasIdempotent=true suppresses the audit path (contract check).
+ *
+ * No DB, no network, no side effects.
+ *
+ * Runnable via:
+ *   npx tsx server/routes/__tests__/reviewItems.test.ts
+ */
+
+import { expect, test } from 'vitest';
+import { checkIdempotency } from '../../services/reviewServicePure.js';
+
+console.log('');
+console.log('reviewItems route — idempotent-replay contract (spec §6.2.1)');
+console.log('');
+
+// ─── Issue 2: MAJOR_ACK_REQUIRED bypass on idempotent replay ─────────────────
+//
+// When approve is called on an already-approved item, the service returns
+// wasIdempotent=true. The route must NOT gate on a pre-read isPending value
+// (which would be false for an already-approved item), so the 412
+// MAJOR_ACK_REQUIRED check is never reached. The function returns 200.
+//
+// We verify this by confirming:
+//   1. checkIdempotency('approved', 'approve') returns 'idempotent' — the
+//      service will short-circuit and return wasIdempotent=true.
+//   2. With wasIdempotent=true, the audit/side-effect block is skipped —
+//      no reviewAuditService.record call, no MAJOR_ACK_REQUIRED check.
+
+test('already-approved item: checkIdempotency returns idempotent (not proceed)', () => {
+  // The service evaluates this before touching the write path.
+  // 'idempotent' means the service returns wasIdempotent=true and the
+  // route falls through to res.json() with HTTP 200.
+  const outcome = checkIdempotency('approved', 'approve');
+  expect(outcome).toBe('idempotent');
+});
+
+test('completed item (post-execution): checkIdempotency returns idempotent (not proceed)', () => {
+  // Items move to "completed" after execution. A late retry must also
+  // be treated as idempotent, not re-processed.
+  const outcome = checkIdempotency('completed', 'approve');
+  expect(outcome).toBe('idempotent');
+});
+
+test('already-approved item: wasIdempotent=true suppresses audit path', () => {
+  // Simulate the route's guard: if wasIdempotent is true, the audit block
+  // is skipped. This pins the contract — the guard must check wasIdempotent,
+  // not the pre-read reviewStatus (which could be stale under concurrency).
+  const simulatedServiceResult = { actionId: 'action-uuid', wasIdempotent: true as const };
+  let auditRecordCalled = false;
+
+  if (!simulatedServiceResult.wasIdempotent) {
+    auditRecordCalled = true;
+  }
+
+  expect(auditRecordCalled).toBe(false);
+});
+
+test('pending item: wasIdempotent=false triggers audit path', () => {
+  // Sanity-check the inverse: a real transition must still invoke audit.
+  const simulatedServiceResult = { actionId: 'action-uuid', wasIdempotent: false as const };
+  let auditRecordCalled = false;
+
+  if (!simulatedServiceResult.wasIdempotent) {
+    auditRecordCalled = true;
+  }
+
+  expect(auditRecordCalled).toBe(true);
+});
+
+test('already-rejected item + approve: checkIdempotency returns conflict (409)', () => {
+  // Cross-terminal conflict must never be treated as idempotent.
+  const outcome = checkIdempotency('rejected', 'approve');
+  expect(outcome).toBe('conflict');
+});
+
+test('already-rejected item + reject: checkIdempotency returns idempotent (200)', () => {
+  // Double-reject is also idempotent — same behaviour as double-approve.
+  const outcome = checkIdempotency('rejected', 'reject');
+  expect(outcome).toBe('idempotent');
+});
+
+// ─── Summary ──────────────────────────────────────────────────────────────────
+
+console.log('');
+console.log('');

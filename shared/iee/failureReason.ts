@@ -29,6 +29,14 @@ export const FailureReason = z.enum([
   // eviction, orphan detection) from user-initiated cancellation. The
   // latter sets iee_runs.status='cancelled' instead.
   'worker_terminated',
+  // ExecutionBackend Adapter Contract addition (spec § 13.1.1 step 3).
+  // Written by the IEE adapter's `dispatch()` orphan-cleanup path: backend
+  // task was created but the parent agent_run had already moved past the
+  // delegation window (terminal via cancellation race, etc.) by the time
+  // the parent UPDATE ran. The adapter writes
+  // `iee_runs.status = 'cancelled', failureReason = 'parent_orphaned'` and
+  // throws `ParentRunNotDispatchable`. No SQL migration — text column.
+  'parent_orphaned',
   // Sprint 2 — P1.1 three-layer fail-closed data isolation additions.
   // See docs/improvements-roadmap-spec.md §P1.1 Layer 2 / Layer 3.
   'scope_violation',    // tenant boundary crossed — organisation / subaccount mismatch
@@ -46,6 +54,33 @@ export const FailureReason = z.enum([
   'decision_cancelled',             // run cancelled while decision step was in running/awaiting state
   'decision_invalid_edit',          // mid-run editor provided a chosenBranchId that is not valid
   'decision_skip_set_collision',    // downstream step found in running/completed state when it should be skipped (DAG bug)
+  // Workspace identity / email / calendar additions (agents-as-employees spec).
+  'workspace_identity_provisioning_failed',
+  'workspace_email_rate_limited',
+  'workspace_email_sending_disabled',
+  'workspace_provider_acl_denied',
+  'workspace_idempotency_collision',
+  // Workspace actor hierarchy additions (agents-as-employees spec §6.1).
+  'parent_actor_cycle_detected',
+  'workspace_mirror_write_failed',
+  // Workspace backend-swap guard (agents-as-employees spec E0).
+  // Returned by POST /workspace/configure when a different backend is already
+  // configured and non-archived identities exist — use /migrate instead.
+  'workspace_configure_requires_migration',
+  // Sandbox isolation additions (Spec B — sandbox-isolation §6 / §20.9).
+  // Each value maps to a terminal state in the sandbox execution lifecycle.
+  // See tasks/builds/sandbox-isolation/spec.md §13.1, §13.2, §20.9.
+  'sandbox_timeout',               // wall-clock ceiling tripped during sandbox execution
+  'sandbox_cost_ceiling',          // cost ceiling tripped during sandbox execution
+  'sandbox_output_invalid',        // output.json missing / malformed / schema-failed / over-size
+  'sandbox_harvest_failed',        // harvest pipeline could not write results after sandbox terminal
+  'sandbox_artefact_upload_failed',// artefact upload to object storage failed post-harvest
+  'sandbox_provider_unavailable',  // provider unreachable / ambiguous-terminal after backoff cap
+  'sandbox_credential_denied',     // credential broker refused issuance for this sandbox execution
+  'sandbox_input_rejected',        // preflight input validation failed — pre-row, no sandbox started
+  // IEE Browser on e2b additions (spec §8.4, §13.5).
+  'iee_browser_launch_disabled',   // dispatch-layer check: settings.status !== 'on' or rolloutApproved === false
+  'profile_harvest_failed',        // browser profile volume could not be snapshotted post-task
   'unknown',
 ]);
 
@@ -97,8 +132,8 @@ export class AuthRedirectError extends Error {
 export class EnvironmentError extends Error {
   readonly _tag = 'EnvironmentError' as const;
 }
-export class BudgetExceededError extends Error {
-  readonly _tag = 'BudgetExceededError' as const;
+export class ComputeBudgetExceededError extends Error {
+  readonly _tag = 'ComputeBudgetExceededError' as const;
   constructor(
     message: string,
     readonly scope: 'subaccount' | 'organisation' | 'system',

@@ -1,0 +1,4411 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-3rd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e0ed5-b39b-7bc0-8031-3779ab994a42
+--------
+user
+current changes
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 794ms:
+ M server/jobs/supportDraftReconciliationWorker.ts
+ M server/services/__tests__/supportDraftReconciliation.test.ts
+ M server/services/connectorPollingService.ts
+ M server/services/supportDraftDispatchService.ts
+ M server/services/supportDraftDispatchServicePure.ts
+ M server/services/supportDraftReconciliationPure.ts
+?? tasks/review-logs/_codex_dual_iter1_support-desk-canonical_2026-05-09T22-05-29Z.txt
+?? tasks/review-logs/_codex_dual_iter2_support-desk-canonical_2026-05-09T22-05-29Z.txt
+?? tasks/review-logs/_codex_dual_iter3_support-desk-canonical_2026-05-09T22-05-29Z.txt
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/jobs/supportDraftReconciliationWorker.ts server/services/connectorPollingService.ts server/services/supportDraftDispatchService.ts server/services/supportDraftDispatchServicePure.ts server/services/supportDraftReconciliationPure.ts server/services/__tests__/supportDraftReconciliation.test.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 698ms:
+diff --git a/server/jobs/supportDraftReconciliationWorker.ts b/server/jobs/supportDraftReconciliationWorker.ts
+index ca49ab4e..9bad4b22 100644
+--- a/server/jobs/supportDraftReconciliationWorker.ts
++++ b/server/jobs/supportDraftReconciliationWorker.ts
+@@ -58,6 +58,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
+           reconciliationAttemptCount: draft.reconciliationAttemptCount,
+           proposedBodyText: draft.proposedBodyText,
+           proposedVisibility: draft.proposedVisibility,
++          dispatchingStartedAt: draft.dispatchingStartedAt ?? null,
+         },
+         latestMessages: messages.map((m) => ({
+           id: m.id,
+diff --git a/server/services/__tests__/supportDraftReconciliation.test.ts b/server/services/__tests__/supportDraftReconciliation.test.ts
+index 18d45083..8fd19404 100644
+--- a/server/services/__tests__/supportDraftReconciliation.test.ts
++++ b/server/services/__tests__/supportDraftReconciliation.test.ts
+@@ -80,14 +80,75 @@ describe('decideOutcome', () => {
+     expect(resolved.messageId).toBe('msg-exact');
+   });
+ 
+-  it('returns resolve_sent when the draft body is a substring of the message body', () => {
++  it('does NOT bind on substring match — body must be a normalised exact match', () => {
++    // Substring fallback was removed once successful dispatches were routed
++    // through reconciliation, because a quoted reply or autoresponder repeat
++    // could otherwise bind the draft to the wrong message.
+     const msg = makeMessage({ bodyText: 'Hello — Thank you for contacting us. We will respond shortly.' });
+     const result = decideOutcome({
+       draft: makeDraft({ proposedBodyText: 'Thank you for contacting us.' }),
+       latestMessages: [msg],
+       attemptCount: 1,
+     });
++    expect(result.kind).toBe('retry_after_ms');
++  });
++
++  it('skips messages whose direction does not align with the draft visibility', () => {
++    // Public draft must bind to an outbound message — an inbound message with the
++    // same body (e.g. customer quoted the agent's prior reply) must not match.
++    const inboundEcho = makeMessage({
++      direction: 'inbound',
++      visibility: 'public',
++      bodyText: 'Thank you for contacting us.',
++    });
++    const result = decideOutcome({
++      draft: makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
++      latestMessages: [inboundEcho],
++      attemptCount: 0,
++    });
++    expect(result.kind).toBe('retry_after_ms');
++  });
++
++  it('skips messages older than the draft dispatchingStartedAt', () => {
++    // A pre-existing outbound message with the same body — e.g. a previous reply
++    // by another agent — must not bind to this dispatch attempt.
++    const dispatchedAt = new Date('2026-01-01T12:00:00Z');
++    const olderMatch = makeMessage({
++      direction: 'outbound',
++      visibility: 'public',
++      bodyText: 'Thank you for contacting us.',
++      createdAtExternal: new Date('2026-01-01T10:00:00Z'),
++    });
++    const result = decideOutcome({
++      draft: {
++        ...makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
++        dispatchingStartedAt: dispatchedAt,
++      },
++      latestMessages: [olderMatch],
++      attemptCount: 0,
++    });
++    expect(result.kind).toBe('retry_after_ms');
++  });
++
++  it('binds to a post-dispatch message that matches direction + visibility + normalised body', () => {
++    const dispatchedAt = new Date('2026-01-01T12:00:00Z');
++    const newMatch = makeMessage({
++      id: 'msg-post-dispatch',
++      direction: 'outbound',
++      visibility: 'public',
++      bodyText: '  Thank you   for contacting us. ',
++      createdAtExternal: new Date('2026-01-01T12:00:05Z'),
++    });
++    const result = decideOutcome({
++      draft: {
++        ...makeDraft({ proposedBodyText: 'Thank you for contacting us.', proposedVisibility: 'public' }),
++        dispatchingStartedAt: dispatchedAt,
++      },
++      latestMessages: [newMatch],
++      attemptCount: 0,
++    });
+     expect(result.kind).toBe('resolve_sent');
++    expect((result as { kind: 'resolve_sent'; messageId: string }).messageId).toBe('msg-post-dispatch');
+   });
+ 
+   it('returns retry_after_ms when no message matches and budget remains', () => {
+diff --git a/server/services/connectorPollingService.ts b/server/services/connectorPollingService.ts
+index 73ecb58b..505f18aa 100644
+--- a/server/services/connectorPollingService.ts
++++ b/server/services/connectorPollingService.ts
+@@ -700,6 +700,7 @@ async function phaseD_upsertTicketMessages(
+   connection: AnyConnection,
+   adapter: SupportIngestionAdapter,
+   touchedTicketExternalIds: string[],
++  agentExternalToId: Map<string, string>,
+ ): Promise<void> {
+   if (touchedTicketExternalIds.length === 0) return;
+ 
+@@ -754,6 +755,30 @@ async function phaseD_upsertTicketMessages(
+       async () => {
+         const orgDb = getOrgScopedDb('connectorPollingService.phaseD_upsertMessages');
+         for (const msg of messagesResult.rows) {
++          // Resolve author FK per polymorphic-FK CHECK constraint on
++          // canonical_ticket_messages (migration 0310): agent/bot messages MUST
++          // carry author_support_agent_id; customer/system messages must NOT.
++          let authorSupportAgentId: string | null = null;
++          if (msg.authorType === 'agent' || msg.authorType === 'bot') {
++            const externalId = msg.authorExternalId;
++            const resolved = externalId ? agentExternalToId.get(externalId) : undefined;
++            if (!resolved) {
++              console.warn(
++                `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION}`,
++                JSON.stringify({
++                  code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
++                  connectorConfigId,
++                  ticketExternalId,
++                  messageExternalId: msg.externalId,
++                  authorType: msg.authorType,
++                  reason: externalId ? 'unknown_agent_external_id' : 'missing_author_external_id',
++                }),
++              );
++              continue;
++            }
++            authorSupportAgentId = resolved;
++          }
++
+           await orgDb
+             .insert(canonicalTicketMessages)
+             .values({
+@@ -765,6 +790,7 @@ async function phaseD_upsertTicketMessages(
+               direction: msg.direction,
+               visibility: msg.visibility,
+               authorType: msg.authorType,
++              authorSupportAgentId,
+               bodyText: msg.bodyText,
+               bodyHtml: msg.bodyHtml ?? null,
+               attachments: msg.attachments ?? null,
+@@ -829,6 +855,7 @@ async function runSupportIngestionCycle(
+     connection,
+     adapter,
+     touchedExternalIds,
++    agentExternalToId,
+   );
+ 
+   // Advance the sync cursor to now so the next incremental cycle only fetches
+@@ -948,6 +975,7 @@ export async function pollSupportFullReconciliation(connectorConfigId: string):
+       connection as never,
+       supportAdapter,
+       touchedExternalIds,
++      agentExternalToId,
+     );
+   }
+ 
+diff --git a/server/services/supportDraftDispatchService.ts b/server/services/supportDraftDispatchService.ts
+index 45c92473..31277c2b 100644
+--- a/server/services/supportDraftDispatchService.ts
++++ b/server/services/supportDraftDispatchService.ts
+@@ -76,6 +76,25 @@ export async function proposeReply(
+     throw notFoundError('support.ticket.not_found');
+   }
+ 
++  // Load inbox agent_config to choose initial draft state per spec §8 / §934:
++  //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
++  //   autonomous → 'draft' (proceeds without the review queue gate)
++  //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
++  const [inboxRow] = await db
++    .select({ agentConfig: canonicalInboxes.agentConfig })
++    .from(canonicalInboxes)
++    .where(
++      and(
++        eq(canonicalInboxes.id, ticket.inboxId),
++        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
++      ),
++    )
++    .limit(1);
++  const inboxMode =
++    (inboxRow?.agentConfig as SupportInboxAgentConfig | null | undefined)?.mode ?? 'assisted';
++  const initialStatus: 'draft' | 'awaiting_review' =
++    inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
++
+   // Load any existing active draft for this (ticketId, runId, visibility)
+   const [existingDraft] = await db
+     .select({ status: canonicalTicketDrafts.status })
+@@ -121,7 +140,7 @@ export async function proposeReply(
+       proposedBodyText: input.body,
+       proposedVisibility: input.visibility,
+       proposedActions: input.proposedActions ?? null,
+-      status: 'draft',
++      status: initialStatus,
+       createdByAgentRunId: input.runId,
+       reconciliationAttemptCount: 0,
+       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+@@ -376,14 +395,31 @@ export async function approveDraft(
+     .limit(1);
+ 
+   if (existingAttempt?.attemptStatus === 'succeeded') {
+-    // Already dispatched successfully — short-circuit; treat draft as sent.
+-    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
++    // Already dispatched successfully on a prior attempt. The provider has
++    // acknowledged the send, but the canonical message row may not yet exist
++    // (or may already have been back-linked). Park in needs_reconciliation and
++    // let the back-link / reconciliation routine resolve to terminal `sent` —
++    // never fabricate a UUID for `sent_message_id` from the provider response id.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
+-      .where(eq(canonicalTicketDrafts.id, draftId));
+-    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
+-    return { status: 'sent', messageId: existingMessageId };
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
++      .where(
++        and(
++          eq(canonicalTicketDrafts.id, draftId),
++          inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review', 'dispatching']),
++        ),
++      );
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      idempotencyKey,
++      providerResponseId: existingAttempt.providerResponseId,
++    });
++    return { status: 'needs_reconciliation' };
+   }
+ 
+   // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
+@@ -428,7 +464,10 @@ export async function approveDraft(
+       replyId = result.replyId;
+     }
+ 
+-    // Mark the ledger row as succeeded
++    // Mark the ledger row as succeeded — providerResponseId carries the provider's
++    // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
++    // UUID is resolved later by webhook back-link or polling reconciliation (per spec
++    // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
+     await db
+       .update(actionAttempts)
+       .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
+@@ -439,14 +478,29 @@ export async function approveDraft(
+         ),
+       );
+ 
+-    const messageId = replyId || draft.id;
++    // Provider has acknowledged the send, but the canonical message row has not yet
++    // landed (ingest will create it via webhook or poll). Park the draft in
++    // needs_reconciliation so the back-link routine (or the reconciliation worker)
++    // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
++    // known. Marking `sent` here would either violate the FK on sent_message_id or
++    // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: messageId, updatedAt: sql`NOW()` })
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+-    logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, { draftId, messageId });
+-    return { status: 'sent', messageId };
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      providerResponseId: replyId,
++      transition: 'dispatching_to_needs_reconciliation_post_provider_ack',
++    });
++    return { status: 'needs_reconciliation' };
+   } catch (err: unknown) {
+     const adapterError = classifyAdapterError(err, config.connectorType, 'addReply');
+ 
+@@ -610,9 +664,14 @@ export async function manualResolveDraft(
+     }
+ 
+   } else if (action === 'retry_reconciliation') {
++    // Spec §1014: "resets the reconciliation budget and re-enqueues the draft
++    // for the §8.4 worker." The worker only processes drafts in
++    // `needs_reconciliation` status — keep the state, reset the attempt count,
++    // and preserve `dispatching_started_at` so the back-link timestamp match
++    // (which compares against the original send time) still works.
+     const result = await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
++      .set({ reconciliationAttemptCount: 0, updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+diff --git a/server/services/supportDraftDispatchServicePure.ts b/server/services/supportDraftDispatchServicePure.ts
+index 8d1a7898..109a7363 100644
+--- a/server/services/supportDraftDispatchServicePure.ts
++++ b/server/services/supportDraftDispatchServicePure.ts
+@@ -35,7 +35,10 @@ export type DraftStatus =
+  *   needs_reconciliation → failed          (manual resolve — give up)
+  *   needs_reconciliation → manually_marked_sent  (operator manually marks it sent)
+  *   needs_reconciliation → sent            (back-link route resolves)
+- *   needs_reconciliation → dispatching     (retry_reconciliation re-enqueues dispatch)
++ *   needs_reconciliation → dispatching     (boot recovery may re-promote stalled rows;
++ *                                           retry_reconciliation does NOT use this transition —
++ *                                           it preserves status and only resets attempt count
++ *                                           so the §8.4 worker re-processes the row)
+  *
+  * Explicit prohibition: dispatching → expired is blocked (expiry scanner must not
+  * touch in-flight drafts; they transition to needs_reconciliation instead).
+diff --git a/server/services/supportDraftReconciliationPure.ts b/server/services/supportDraftReconciliationPure.ts
+index cda7f488..66c74035 100644
+--- a/server/services/supportDraftReconciliationPure.ts
++++ b/server/services/supportDraftReconciliationPure.ts
+@@ -27,6 +27,20 @@ export type ReconciliationDecision =
+  *  2. Budget exhausted → surface_manual
+  *  3. Matching message found → resolve_sent
+  *  4. Otherwise → retry_after_ms (exponential backoff, capped at 1 hour)
++ *
++ * Match constraints (mirror §11.7 back-link semantics — see `findBackLinkCandidate`):
++ *   - Direction must align with the draft's visibility:
++ *       proposedVisibility = 'public'   → message direction = 'outbound'
++ *       proposedVisibility = 'internal' → message direction = 'internal_note'
++ *   - Visibility must match the draft's proposedVisibility.
++ *   - Message `createdAtExternal` must be at-or-after the draft's `dispatchingStartedAt`
++ *     when both are known. This prevents binding the draft to an unrelated older
++ *     message that happens to contain the same body text (quoted reply, autoresponder
++ *     repeat, etc.).
++ *   - Body comparison uses normalised whitespace (trim + collapse internal whitespace)
++ *     and requires exact equality after normalisation. Substring fallback is no longer
++ *     used because, with successful dispatches now routed through reconciliation, the
++ *     prior loose match could bind a draft to an unrelated earlier message.
+  */
+ export function decideOutcome(input: {
+   draft: {
+@@ -35,6 +49,7 @@ export function decideOutcome(input: {
+     reconciliationAttemptCount: number;
+     proposedBodyText: string;
+     proposedVisibility: string;
++    dispatchingStartedAt?: Date | null;
+   };
+   latestMessages: Array<{
+     id: string;
+@@ -59,12 +74,20 @@ export function decideOutcome(input: {
+   }
+ 
+   // 3. Check whether any landed message matches the draft's proposed body
+-  const proposedBody = input.draft.proposedBodyText;
++  //    under the constrained match criteria documented above.
++  const expectedDirection: 'outbound' | 'internal_note' =
++    input.draft.proposedVisibility === 'internal' ? 'internal_note' : 'outbound';
++  const expectedVisibility: 'public' | 'internal' =
++    input.draft.proposedVisibility === 'internal' ? 'internal' : 'public';
++  const dispatchedAt = input.draft.dispatchingStartedAt ?? null;
++  const normalisedProposed = normaliseBody(input.draft.proposedBodyText);
++
+   const match = input.latestMessages.find(
+     (msg) =>
+-      msg.bodyText === proposedBody ||
+-      msg.bodyText.includes(proposedBody) ||
+-      proposedBody.includes(msg.bodyText),
++      msg.direction === expectedDirection &&
++      msg.visibility === expectedVisibility &&
++      (dispatchedAt == null || msg.createdAtExternal.getTime() >= dispatchedAt.getTime()) &&
++      normaliseBody(msg.bodyText) === normalisedProposed,
+   );
+ 
+   if (match) {
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/jobs/supportDraftReconciliationWorker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/__tests__/supportDraftReconciliation.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --cached --stat; git diff --stat' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 601ms:
+ server/jobs/supportDraftReconciliationWorker.ts    |  1 +
+ .../__tests__/supportDraftReconciliation.test.ts   | 63 +++++++++++++++-
+ server/services/connectorPollingService.ts         | 28 +++++++
+ server/services/supportDraftDispatchService.ts     | 85 ++++++++++++++++++----
+ server/services/supportDraftDispatchServicePure.ts |  5 +-
+ server/services/supportDraftReconciliationPure.ts  | 31 +++++++-
+ 6 files changed, 194 insertions(+), 19 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: in the working copy of 'server/jobs/supportDraftReconciliationWorker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/__tests__/supportDraftReconciliation.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+2026-05-09T22:22:47.296161Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content server/services/supportDraftDispatchService.ts | Select-Object -First 180 | % { $script:i=0 } { $script:i++; '"'{0,4}: {1}' -f "'$script:i, $_ }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content server/services/supportDraftDispatchService.ts | Select-Object -First 180 | % { $script:i=0 } { $script:i++; '"'{0,4}: {1}' -f "'$script:i, $_ }' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content server/services/supportDraftDispatchService.ts | Select-Object -First 180 | % { $script:i=0 } { $script:i++; '"'{0,4}: {1}' -f "'$script:i, $_ }'` rejected: blocked by policy
+2026-05-09T22:22:51.469035Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+from pathlib import Path
+p=Path('server/services/supportDraftDispatchService.ts')
+for i,line in enumerate(p.read_text().splitlines(),1):
+    if i<=180:
+        print(f'{i:4}: {line}')
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+from pathlib import Path
+p=Path('server/services/supportDraftDispatchService.ts')
+for i,line in enumerate(p.read_text().splitlines(),1):
+    if i<=180:
+        print(f'{i:4}: {line}')
+'@ | python -" in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+from pathlib import Path
+p=Path('server/services/supportDraftDispatchService.ts')
+for i,line in enumerate(p.read_text().splitlines(),1):
+    if i<=180:
+        print(f'{i:4}: {line}')
+'@ | python -"` rejected: blocked by policy
+2026-05-09T22:22:55.231412Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path '"'server/services/supportDraftDispatchService.ts' | ForEach-Object { "'$i = $i + 1; if ($i -le 180) { Write-Output ($i.ToString() + '"': ' + "'$_) } }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path '"'server/services/supportDraftDispatchService.ts' | ForEach-Object { "'$i = $i + 1; if ($i -le 180) { Write-Output ($i.ToString() + '"': ' + "'$_) } }' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path '"'server/services/supportDraftDispatchService.ts' | ForEach-Object { "'$i = $i + 1; if ($i -le 180) { Write-Output ($i.ToString() + '"': ' + "'$_) } }'` rejected: blocked by policy
+2026-05-09T22:22:58.753361Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/services/supportDraftDispatchService.ts -Pattern "Load inbox|status: initialStatus|Already dispatched|needs_reconciliation|retry_reconciliation" -Context 3,3'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/services/supportDraftDispatchService.ts -Pattern "Load inbox|status: initialStatus|Already dispatched|needs_reconciliation|retry_reconciliation" -Context 3,3' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/services/supportDraftDispatchService.ts -Pattern "Load inbox|status: initialStatus|Already dispatched|needs_reconciliation|retry_reconciliation" -Context 3,3'` rejected: blocked by policy
+2026-05-09T22:23:02.185524Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"Load inbox\\|status: initialStatus\\|Already dispatched\\|retry_reconciliation\\|dispatching_to_needs\" -- server/services/supportDraftDispatchService.ts"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"Load inbox\\|status: initialStatus\\|Already dispatched\\|retry_reconciliation\\|dispatching_to_needs\" -- server/services/supportDraftDispatchService.ts" in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"Load inbox\\|status: initialStatus\\|Already dispatched\\|retry_reconciliation\\|dispatching_to_needs\" -- server/services/supportDraftDispatchService.ts"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --unified=0 -- server/services/supportDraftDispatchService.ts server/services/connectorPollingService.ts server/services/supportDraftReconciliationPure.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 467ms:
+diff --git a/server/services/connectorPollingService.ts b/server/services/connectorPollingService.ts
+index 73ecb58b..505f18aa 100644
+--- a/server/services/connectorPollingService.ts
++++ b/server/services/connectorPollingService.ts
+@@ -702,0 +703 @@ async function phaseD_upsertTicketMessages(
++  agentExternalToId: Map<string, string>,
+@@ -756,0 +758,24 @@ async function phaseD_upsertTicketMessages(
++          // Resolve author FK per polymorphic-FK CHECK constraint on
++          // canonical_ticket_messages (migration 0310): agent/bot messages MUST
++          // carry author_support_agent_id; customer/system messages must NOT.
++          let authorSupportAgentId: string | null = null;
++          if (msg.authorType === 'agent' || msg.authorType === 'bot') {
++            const externalId = msg.authorExternalId;
++            const resolved = externalId ? agentExternalToId.get(externalId) : undefined;
++            if (!resolved) {
++              console.warn(
++                `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION}`,
++                JSON.stringify({
++                  code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
++                  connectorConfigId,
++                  ticketExternalId,
++                  messageExternalId: msg.externalId,
++                  authorType: msg.authorType,
++                  reason: externalId ? 'unknown_agent_external_id' : 'missing_author_external_id',
++                }),
++              );
++              continue;
++            }
++            authorSupportAgentId = resolved;
++          }
++
+@@ -767,0 +793 @@ async function phaseD_upsertTicketMessages(
++              authorSupportAgentId,
+@@ -831,0 +858 @@ async function runSupportIngestionCycle(
++    agentExternalToId,
+@@ -950,0 +978 @@ export async function pollSupportFullReconciliation(connectorConfigId: string):
++      agentExternalToId,
+diff --git a/server/services/supportDraftDispatchService.ts b/server/services/supportDraftDispatchService.ts
+index 45c92473..31277c2b 100644
+--- a/server/services/supportDraftDispatchService.ts
++++ b/server/services/supportDraftDispatchService.ts
+@@ -78,0 +79,19 @@ export async function proposeReply(
++  // Load inbox agent_config to choose initial draft state per spec §8 / §934:
++  //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
++  //   autonomous → 'draft' (proceeds without the review queue gate)
++  //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
++  const [inboxRow] = await db
++    .select({ agentConfig: canonicalInboxes.agentConfig })
++    .from(canonicalInboxes)
++    .where(
++      and(
++        eq(canonicalInboxes.id, ticket.inboxId),
++        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
++      ),
++    )
++    .limit(1);
++  const inboxMode =
++    (inboxRow?.agentConfig as SupportInboxAgentConfig | null | undefined)?.mode ?? 'assisted';
++  const initialStatus: 'draft' | 'awaiting_review' =
++    inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
++
+@@ -124 +143 @@ export async function proposeReply(
+-      status: 'draft',
++      status: initialStatus,
+@@ -379,2 +398,5 @@ export async function approveDraft(
+-    // Already dispatched successfully — short-circuit; treat draft as sent.
+-    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
++    // Already dispatched successfully on a prior attempt. The provider has
++    // acknowledged the send, but the canonical message row may not yet exist
++    // (or may already have been back-linked). Park in needs_reconciliation and
++    // let the back-link / reconciliation routine resolve to terminal `sent` —
++    // never fabricate a UUID for `sent_message_id` from the provider response id.
+@@ -383,4 +405,18 @@ export async function approveDraft(
+-      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
+-      .where(eq(canonicalTicketDrafts.id, draftId));
+-    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
+-    return { status: 'sent', messageId: existingMessageId };
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
++      .where(
++        and(
++          eq(canonicalTicketDrafts.id, draftId),
++          inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review', 'dispatching']),
++        ),
++      );
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      idempotencyKey,
++      providerResponseId: existingAttempt.providerResponseId,
++    });
++    return { status: 'needs_reconciliation' };
+@@ -431 +467,4 @@ export async function approveDraft(
+-    // Mark the ledger row as succeeded
++    // Mark the ledger row as succeeded — providerResponseId carries the provider's
++    // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
++    // UUID is resolved later by webhook back-link or polling reconciliation (per spec
++    // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
+@@ -442 +481,6 @@ export async function approveDraft(
+-    const messageId = replyId || draft.id;
++    // Provider has acknowledged the send, but the canonical message row has not yet
++    // landed (ingest will create it via webhook or poll). Park the draft in
++    // needs_reconciliation so the back-link routine (or the reconciliation worker)
++    // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
++    // known. Marking `sent` here would either violate the FK on sent_message_id or
++    // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
+@@ -445 +489 @@ export async function approveDraft(
+-      .set({ status: 'sent', sentMessageId: messageId, updatedAt: sql`NOW()` })
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+@@ -448,2 +492,12 @@ export async function approveDraft(
+-    logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, { draftId, messageId });
+-    return { status: 'sent', messageId };
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      providerResponseId: replyId,
++      transition: 'dispatching_to_needs_reconciliation_post_provider_ack',
++    });
++    return { status: 'needs_reconciliation' };
+@@ -612,0 +667,5 @@ export async function manualResolveDraft(
++    // Spec §1014: "resets the reconciliation budget and re-enqueues the draft
++    // for the §8.4 worker." The worker only processes drafts in
++    // `needs_reconciliation` status — keep the state, reset the attempt count,
++    // and preserve `dispatching_started_at` so the back-link timestamp match
++    // (which compares against the original send time) still works.
+@@ -615 +674 @@ export async function manualResolveDraft(
+-      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
++      .set({ reconciliationAttemptCount: 0, updatedAt: now })
+diff --git a/server/services/supportDraftReconciliationPure.ts b/server/services/supportDraftReconciliationPure.ts
+index cda7f488..66c74035 100644
+--- a/server/services/supportDraftReconciliationPure.ts
++++ b/server/services/supportDraftReconciliationPure.ts
+@@ -29,0 +30,14 @@ export type ReconciliationDecision =
++ *
++ * Match constraints (mirror §11.7 back-link semantics — see `findBackLinkCandidate`):
++ *   - Direction must align with the draft's visibility:
++ *       proposedVisibility = 'public'   → message direction = 'outbound'
++ *       proposedVisibility = 'internal' → message direction = 'internal_note'
++ *   - Visibility must match the draft's proposedVisibility.
++ *   - Message `createdAtExternal` must be at-or-after the draft's `dispatchingStartedAt`
++ *     when both are known. This prevents binding the draft to an unrelated older
++ *     message that happens to contain the same body text (quoted reply, autoresponder
++ *     repeat, etc.).
++ *   - Body comparison uses normalised whitespace (trim + collapse internal whitespace)
++ *     and requires exact equality after normalisation. Substring fallback is no longer
++ *     used because, with successful dispatches now routed through reconciliation, the
++ *     prior loose match could bind a draft to an unrelated earlier message.
+@@ -37,0 +52 @@ export function decideOutcome(input: {
++    dispatchingStartedAt?: Date | null;
+@@ -62 +77,8 @@ export function decideOutcome(input: {
+-  const proposedBody = input.draft.proposedBodyText;
++  //    under the constrained match criteria documented above.
++  const expectedDirection: 'outbound' | 'internal_note' =
++    input.draft.proposedVisibility === 'internal' ? 'internal_note' : 'outbound';
++  const expectedVisibility: 'public' | 'internal' =
++    input.draft.proposedVisibility === 'internal' ? 'internal' : 'public';
++  const dispatchedAt = input.draft.dispatchingStartedAt ?? null;
++  const normalisedProposed = normaliseBody(input.draft.proposedBodyText);
++
+@@ -65,3 +87,4 @@ export function decideOutcome(input: {
+-      msg.bodyText === proposedBody ||
+-      msg.bodyText.includes(proposedBody) ||
+-      proposedBody.includes(msg.bodyText),
++      msg.direction === expectedDirection &&
++      msg.visibility === expectedVisibility &&
++      (dispatchedAt == null || msg.createdAtExternal.getTime() >= dispatchedAt.getTime()) &&
++      normaliseBody(msg.bodyText) === normalisedProposed,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U40 -- server/services/supportDraftDispatchService.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 496ms:
+diff --git a/server/services/supportDraftDispatchService.ts b/server/services/supportDraftDispatchService.ts
+index 45c92473..31277c2b 100644
+--- a/server/services/supportDraftDispatchService.ts
++++ b/server/services/supportDraftDispatchService.ts
+@@ -39,126 +39,145 @@ import { auditService } from './auditService.js';
+ function notFoundError(message: string): Error {
+   return Object.assign(new Error(message), { statusCode: 404, message });
+ }
+ 
+ function preflightError(message: string, errorCode: string): Error {
+   return Object.assign(new Error(message), { statusCode: 422, message, errorCode });
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // proposeReply
+ // ---------------------------------------------------------------------------
+ 
+ export async function proposeReply(
+   input: {
+     ticketId: string;
+     body: string;
+     visibility: 'public' | 'internal';
+     proposedActions?: SupportProposedActions;
+     runId: string;
+   },
+   principalCtx: PrincipalContext,
+ ): Promise<CanonicalTicketDraft> {
+   const db = getOrgScopedDb('supportDraftDispatchService.proposeReply');
+ 
+   // Load the ticket
+   const [ticket] = await db
+     .select()
+     .from(canonicalTickets)
+     .where(
+       and(
+         eq(canonicalTickets.id, input.ticketId),
+         eq(canonicalTickets.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!ticket) {
+     throw notFoundError('support.ticket.not_found');
+   }
+ 
++  // Load inbox agent_config to choose initial draft state per spec §8 / §934:
++  //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
++  //   autonomous → 'draft' (proceeds without the review queue gate)
++  //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
++  const [inboxRow] = await db
++    .select({ agentConfig: canonicalInboxes.agentConfig })
++    .from(canonicalInboxes)
++    .where(
++      and(
++        eq(canonicalInboxes.id, ticket.inboxId),
++        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
++      ),
++    )
++    .limit(1);
++  const inboxMode =
++    (inboxRow?.agentConfig as SupportInboxAgentConfig | null | undefined)?.mode ?? 'assisted';
++  const initialStatus: 'draft' | 'awaiting_review' =
++    inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
++
+   // Load any existing active draft for this (ticketId, runId, visibility)
+   const [existingDraft] = await db
+     .select({ status: canonicalTicketDrafts.status })
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+         eq(canonicalTicketDrafts.ticketId, input.ticketId),
+         eq(canonicalTicketDrafts.createdByAgentRunId, input.runId),
+         eq(canonicalTicketDrafts.proposedVisibility, input.visibility),
+         inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+       ),
+     )
+     .limit(1);
+ 
+   const plan = planSameRunSupersession({
+     existingDraft: existingDraft ?? null,
+     newProposal: { visibility: input.visibility },
+   });
+ 
+   if (plan.action === 'supersede_then_insert') {
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'superseded', updatedAt: sql`NOW()` })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.ticketId, input.ticketId),
+           eq(canonicalTicketDrafts.createdByAgentRunId, input.runId),
+           eq(canonicalTicketDrafts.proposedVisibility, input.visibility),
+           inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+         ),
+       );
+   }
+ 
+   const [inserted] = await db
+     .insert(canonicalTicketDrafts)
+     .values({
+       organisationId: principalCtx.organisationId,
+       subaccountId: principalCtx.subaccountId ?? null,
+       connectorConfigId: ticket.connectorConfigId,
+       ticketId: input.ticketId,
+       proposedBodyText: input.body,
+       proposedVisibility: input.visibility,
+       proposedActions: input.proposedActions ?? null,
+-      status: 'draft',
++      status: initialStatus,
+       createdByAgentRunId: input.runId,
+       reconciliationAttemptCount: 0,
+       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+     })
+     .returning();
+ 
+   return inserted;
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // approveDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function approveDraft(
+   draftId: string,
+   principalCtx: PrincipalContext,
+   options?: { reviewNotes?: string; overrideCollision?: boolean },
+ ): Promise<{ status: string; messageId?: string }> {
+   const db = getOrgScopedDb('supportDraftDispatchService.approveDraft');
+ 
+   // ── Phase 1: Preflight ───────────────────────────────────────────────────
+ 
+   const [draft] = await db
+     .select()
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!draft) {
+     throw notFoundError('support.draft.not_found');
+   }
+ 
+   // Idempotent: already processed
+   if (!['draft', 'awaiting_review'].includes(draft.status)) {
+     return { status: draft.status };
+@@ -339,151 +358,186 @@ export async function approveDraft(
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, reason: 'missing_connector_config' });
+     return { status: 'failed' };
+   }
+ 
+   const [connection] = await db
+     .select()
+     .from(integrationConnections)
+     .where(eq(integrationConnections.id, config.connectionId))
+     .limit(1);
+ 
+   const adapter = adapters[config.connectorType];
+ 
+   if (!connection || !adapter?.ticketing) {
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, reason: 'missing_adapter_or_connection' });
+     return { status: 'failed' };
+   }
+ 
+   // ── action_attempts ledger (§14.1 + OQ-3 closure: no native idempotency) ──
+   // Lookup-then-insert before the adapter call to prevent duplicate provider sends.
+   const actionType = draft.proposedVisibility === 'public' ? 'reply' : 'internal_note';
+ 
+   const [existingAttempt] = await db
+     .select()
+     .from(actionAttempts)
+     .where(
+       and(
+         eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+         eq(actionAttempts.idempotencyKey, idempotencyKey),
+       ),
+     )
+     .limit(1);
+ 
+   if (existingAttempt?.attemptStatus === 'succeeded') {
+-    // Already dispatched successfully — short-circuit; treat draft as sent.
+-    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
++    // Already dispatched successfully on a prior attempt. The provider has
++    // acknowledged the send, but the canonical message row may not yet exist
++    // (or may already have been back-linked). Park in needs_reconciliation and
++    // let the back-link / reconciliation routine resolve to terminal `sent` —
++    // never fabricate a UUID for `sent_message_id` from the provider response id.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
+-      .where(eq(canonicalTicketDrafts.id, draftId));
+-    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
+-    return { status: 'sent', messageId: existingMessageId };
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
++      .where(
++        and(
++          eq(canonicalTicketDrafts.id, draftId),
++          inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review', 'dispatching']),
++        ),
++      );
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      idempotencyKey,
++      providerResponseId: existingAttempt.providerResponseId,
++    });
++    return { status: 'needs_reconciliation' };
+   }
+ 
+   // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
+   if (!existingAttempt) {
+     await db
+       .insert(actionAttempts)
+       .values({
+         organisationId: principalCtx.organisationId,
+         connectorConfigId: draft.connectorConfigId,
+         idempotencyKey,
+         actionType,
+         attemptStatus: 'in_flight',
+         attemptedAt: new Date(),
+       })
+       .onConflictDoNothing();
+   }
+ 
+   try {
+     let replyId: string;
+ 
+     if (draft.proposedVisibility === 'public') {
+       const result = await adapter.ticketing.addReply(
+         connection,
+         ticket.externalId,
+         draft.proposedBodyText,
+         { idempotencyKey },
+       );
+       if (!result.success) {
+         throw new Error(result.error?.message ?? 'adapter returned success: false');
+       }
+       replyId = result.replyId;
+     } else {
+       const result = await adapter.ticketing.addInternalNote(
+         connection,
+         ticket.externalId,
+         draft.proposedBodyText,
+         { idempotencyKey },
+       );
+       if (!result.success) {
+         throw new Error(result.error?.message ?? 'adapter returned success: false');
+       }
+       replyId = result.replyId;
+     }
+ 
+-    // Mark the ledger row as succeeded
++    // Mark the ledger row as succeeded — providerResponseId carries the provider's
++    // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
++    // UUID is resolved later by webhook back-link or polling reconciliation (per spec
++    // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
+     await db
+       .update(actionAttempts)
+       .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
+       .where(
+         and(
+           eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+           eq(actionAttempts.idempotencyKey, idempotencyKey),
+         ),
+       );
+ 
+-    const messageId = replyId || draft.id;
++    // Provider has acknowledged the send, but the canonical message row has not yet
++    // landed (ingest will create it via webhook or poll). Park the draft in
++    // needs_reconciliation so the back-link routine (or the reconciliation worker)
++    // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
++    // known. Marking `sent` here would either violate the FK on sent_message_id or
++    // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: messageId, updatedAt: sql`NOW()` })
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+-    logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, { draftId, messageId });
+-    return { status: 'sent', messageId };
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      providerResponseId: replyId,
++      transition: 'dispatching_to_needs_reconciliation_post_provider_ack',
++    });
++    return { status: 'needs_reconciliation' };
+   } catch (err: unknown) {
+     const adapterError = classifyAdapterError(err, config.connectorType, 'addReply');
+ 
+     if (adapterError.retryable) {
+       // Leave the ledger row in 'in_flight' — reconciliation worker will update it.
+       await db
+         .update(canonicalTicketDrafts)
+         .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+         .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+       const boss = await getPgBoss();
+       await boss.send('support-draft-reconciliation', {
+         draftId,
+         organisationId: principalCtx.organisationId,
+       }, getJobConfig('support-draft-reconciliation'));
+       return { status: 'needs_reconciliation' };
+     }
+ 
+     // Terminal failure — mark ledger row failed
+     await db
+       .update(actionAttempts)
+       .set({ attemptStatus: 'failed' })
+       .where(
+         and(
+           eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+           eq(actionAttempts.idempotencyKey, idempotencyKey),
+         ),
+       );
+ 
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, errorCode: adapterError.code });
+     return { status: 'failed' };
+   }
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -573,83 +627,88 @@ export async function manualResolveDraft(
+   action: 'mark_sent' | 'mark_failed' | 'retry_reconciliation',
+   principalCtx: PrincipalContext,
+   options?: { notes?: string },
+ ): Promise<void> {
+   const db = getOrgScopedDb('supportDraftDispatchService.manualResolveDraft');
+   const now = new Date();
+ 
+   if (action === 'mark_sent') {
+     const result = await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'manually_marked_sent', updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+ 
+   } else if (action === 'mark_failed') {
+     const result = await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+ 
+   } else if (action === 'retry_reconciliation') {
++    // Spec §1014: "resets the reconciliation budget and re-enqueues the draft
++    // for the §8.4 worker." The worker only processes drafts in
++    // `needs_reconciliation` status — keep the state, reset the attempt count,
++    // and preserve `dispatching_started_at` so the back-link timestamp match
++    // (which compares against the original send time) still works.
+     const result = await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
++      .set({ reconciliationAttemptCount: 0, updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+     const boss = await getPgBoss();
+     await boss.send('support-draft-reconciliation', { organisationId: principalCtx.organisationId, draftId }, getJobConfig('support-draft-reconciliation'));
+   } else {
+     throw Object.assign(new Error('support.draft.invalid_action'), { statusCode: 422, message: 'support.draft.invalid_action' });
+   }
+ 
+   void options; // notes param reserved for future audit log integration
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // rejectDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function rejectDraft(
+   draftId: string,
+   principalCtx: PrincipalContext,
+   reason: string,
+ ): Promise<void> {
+   const db = getOrgScopedDb('supportDraftDispatchService.rejectDraft');
+ 
+   const [draft] = await db
+     .select({ status: canonicalTicketDrafts.status })
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+       ),
+     )
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+
+2026-05-09T22:23:14.035771Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U80 -- server/services/supportDraftDispatchService.ts | more'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U80 -- server/services/supportDraftDispatchService.ts | more' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U80 -- server/services/supportDraftDispatchService.ts | more'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U120 -- server/services/supportDraftDispatchService.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 504ms:
+diff --git a/server/services/supportDraftDispatchService.ts b/server/services/supportDraftDispatchService.ts
+index 45c92473..31277c2b 100644
+--- a/server/services/supportDraftDispatchService.ts
++++ b/server/services/supportDraftDispatchService.ts
+@@ -1,244 +1,263 @@
+ // supportDraftDispatchService — DB-coupled dispatch logic for support reply drafts.
+ // Spec: tasks/builds/support-desk-canonical/spec.md §8, §14.1, §14.7
+ //
+ // All DB access uses getOrgScopedDb(). Pure helpers live in supportDraftDispatchServicePure.ts.
+ // Preflight pure evaluator in supportDraftDispatchPreflightPure.ts.
+ 
+ import { eq, and, inArray, or, sql, notInArray, gt } from 'drizzle-orm';
+ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+ import {
+   canonicalTickets,
+   canonicalTicketDrafts,
+   canonicalSupportAgents,
+   connectorConfigs,
+   integrationConnections,
+   canonicalInboxes,
+   actionAttempts,
+ } from '../db/schema/index.js';
+ import type { CanonicalTicketDraft } from '../db/schema/canonicalTicketDrafts.js';
+ import type { PrincipalContext } from './principal/types.js';
+ import {
+   deriveActionIdempotencyKey,
+   planSameRunSupersession,
+ } from './supportDraftDispatchServicePure.js';
+ import { evaluatePreflight } from './supportDraftDispatchPreflightPure.js';
+ import type { SupportProposedActions } from '../../shared/types/supportProposedActions.js';
+ import type { SupportInboxAgentConfig } from '../../shared/types/supportInboxAgentConfig.js';
+ import { adapters } from '../adapters/index.js';
+ import { classifyAdapterError } from '../adapters/integrationAdapter.js';
+ import { getPgBoss } from '../lib/pgBossInstance.js';
+ import { getJobConfig } from '../config/jobConfig.js';
+ import { logger } from '../lib/logger.js';
+ import { SUPPORT_LOG_CODES } from '../../shared/types/supportObservability.js';
+ import { auditService } from './auditService.js';
+ 
+ // ---------------------------------------------------------------------------
+ // Internal error helpers
+ // ---------------------------------------------------------------------------
+ 
+ function notFoundError(message: string): Error {
+   return Object.assign(new Error(message), { statusCode: 404, message });
+ }
+ 
+ function preflightError(message: string, errorCode: string): Error {
+   return Object.assign(new Error(message), { statusCode: 422, message, errorCode });
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // proposeReply
+ // ---------------------------------------------------------------------------
+ 
+ export async function proposeReply(
+   input: {
+     ticketId: string;
+     body: string;
+     visibility: 'public' | 'internal';
+     proposedActions?: SupportProposedActions;
+     runId: string;
+   },
+   principalCtx: PrincipalContext,
+ ): Promise<CanonicalTicketDraft> {
+   const db = getOrgScopedDb('supportDraftDispatchService.proposeReply');
+ 
+   // Load the ticket
+   const [ticket] = await db
+     .select()
+     .from(canonicalTickets)
+     .where(
+       and(
+         eq(canonicalTickets.id, input.ticketId),
+         eq(canonicalTickets.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!ticket) {
+     throw notFoundError('support.ticket.not_found');
+   }
+ 
++  // Load inbox agent_config to choose initial draft state per spec §8 / §934:
++  //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
++  //   autonomous → 'draft' (proceeds without the review queue gate)
++  //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
++  const [inboxRow] = await db
++    .select({ agentConfig: canonicalInboxes.agentConfig })
++    .from(canonicalInboxes)
++    .where(
++      and(
++        eq(canonicalInboxes.id, ticket.inboxId),
++        eq(canonicalInboxes.organisationId, principalCtx.organisationId),
++      ),
++    )
++    .limit(1);
++  const inboxMode =
++    (inboxRow?.agentConfig as SupportInboxAgentConfig | null | undefined)?.mode ?? 'assisted';
++  const initialStatus: 'draft' | 'awaiting_review' =
++    inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
++
+   // Load any existing active draft for this (ticketId, runId, visibility)
+   const [existingDraft] = await db
+     .select({ status: canonicalTicketDrafts.status })
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+         eq(canonicalTicketDrafts.ticketId, input.ticketId),
+         eq(canonicalTicketDrafts.createdByAgentRunId, input.runId),
+         eq(canonicalTicketDrafts.proposedVisibility, input.visibility),
+         inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+       ),
+     )
+     .limit(1);
+ 
+   const plan = planSameRunSupersession({
+     existingDraft: existingDraft ?? null,
+     newProposal: { visibility: input.visibility },
+   });
+ 
+   if (plan.action === 'supersede_then_insert') {
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'superseded', updatedAt: sql`NOW()` })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.ticketId, input.ticketId),
+           eq(canonicalTicketDrafts.createdByAgentRunId, input.runId),
+           eq(canonicalTicketDrafts.proposedVisibility, input.visibility),
+           inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+         ),
+       );
+   }
+ 
+   const [inserted] = await db
+     .insert(canonicalTicketDrafts)
+     .values({
+       organisationId: principalCtx.organisationId,
+       subaccountId: principalCtx.subaccountId ?? null,
+       connectorConfigId: ticket.connectorConfigId,
+       ticketId: input.ticketId,
+       proposedBodyText: input.body,
+       proposedVisibility: input.visibility,
+       proposedActions: input.proposedActions ?? null,
+-      status: 'draft',
++      status: initialStatus,
+       createdByAgentRunId: input.runId,
+       reconciliationAttemptCount: 0,
+       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+     })
+     .returning();
+ 
+   return inserted;
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // approveDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function approveDraft(
+   draftId: string,
+   principalCtx: PrincipalContext,
+   options?: { reviewNotes?: string; overrideCollision?: boolean },
+ ): Promise<{ status: string; messageId?: string }> {
+   const db = getOrgScopedDb('supportDraftDispatchService.approveDraft');
+ 
+   // ── Phase 1: Preflight ───────────────────────────────────────────────────
+ 
+   const [draft] = await db
+     .select()
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!draft) {
+     throw notFoundError('support.draft.not_found');
+   }
+ 
+   // Idempotent: already processed
+   if (!['draft', 'awaiting_review'].includes(draft.status)) {
+     return { status: draft.status };
+   }
+ 
+   // Load ticket
+   const [ticket] = await db
+     .select()
+     .from(canonicalTickets)
+     .where(
+       and(
+         eq(canonicalTickets.id, draft.ticketId),
+         eq(canonicalTickets.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!ticket) {
+     throw notFoundError('support.ticket.not_found');
+   }
+ 
+   // Load inbox agentConfig
+   const [inbox] = await db
+     .select({ agentConfig: canonicalInboxes.agentConfig })
+     .from(canonicalInboxes)
+     .where(
+       and(
+         eq(canonicalInboxes.id, ticket.inboxId),
+         eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   // Resolve assignee agent kind when a human-assignee check is needed
+   let assigneeAgentKind: 'human' | 'bot' | null = null;
+   if (ticket.assigneeAgentId) {
+     const [assignee] = await db
+       .select({ agentKind: canonicalSupportAgents.agentKind })
+       .from(canonicalSupportAgents)
+       .where(
+         and(
+           eq(canonicalSupportAgents.id, ticket.assigneeAgentId),
+           eq(canonicalSupportAgents.organisationId, principalCtx.organisationId),
+         ),
+       )
+       .limit(1);
+     assigneeAgentKind = assignee?.agentKind ?? null;
+   }
+ 
+   // Check for a newer draft superseding this one (§8.1 check #7)
+   // A draft is "newer" if it was created after this draft's createdAt for the same
+   // (ticket, run, visibility) tuple and is in an active or post-dispatch state.
+   const [newerDraft] = await db
+     .select({ id: canonicalTicketDrafts.id })
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+         eq(canonicalTicketDrafts.ticketId, draft.ticketId),
+         eq(canonicalTicketDrafts.proposedVisibility, draft.proposedVisibility),
+         gt(canonicalTicketDrafts.createdAt, draft.createdAt),
+         inArray(canonicalTicketDrafts.status, ['awaiting_review', 'dispatching', 'needs_reconciliation', 'sent']),
+       ),
+     )
+     .limit(1);
+ 
+   const agentConfig = inbox?.agentConfig as SupportInboxAgentConfig | null | undefined;
+   const callerIsAutonomousAgent = principalCtx.type !== 'user';
+ 
+   const preflight = evaluatePreflight({
+     draftStatus: draft.status,
+     proposedVisibility: draft.proposedVisibility as 'public' | 'internal',
+     inboxMode: agentConfig?.mode ?? null,
+     ticketStatus: ticket.status,
+     customerContactId: ticket.canonicalContactId,
+     assigneeAgentId: ticket.assigneeAgentId,
+     lastHumanActivityAt: ticket.lastHumanActivityAt ?? null,
+     collisionWindowMinutes: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+     respectHumanAssignee: agentConfig?.collisionWindow?.respectHumanAssignee ?? true,
+     assigneeAgentKind,
+     hasNewerDraft: newerDraft !== undefined,
+     overrideCollision: options?.overrideCollision === true,
+     callerIsAutonomousAgent,
+@@ -259,431 +278,471 @@ export async function approveDraft(
+     throw preflightError('support.draft.preflight_failed', preflight.reason ?? 'unknown');
+   }
+ 
+   // Collision override: if the caller is a human and overrideCollision was set, write audit event (§8.6 #2)
+   // The pure evaluator already approved the request (ok=true) when override is valid.
+   if (options?.overrideCollision === true && !callerIsAutonomousAgent) {
+     const actorUserId = principalCtx.type === 'user' ? principalCtx.id : undefined;
+     await auditService.log({
+       organisationId: principalCtx.organisationId,
+       actorId: actorUserId,
+       actorType: 'user',
+       action: 'support.draft.collision_override',
+       entityType: 'canonical_ticket_drafts',
+       entityId: draft.id,
+       metadata: {
+         draftId: draft.id,
+         ticketId: draft.ticketId,
+         reviewNote: options.reviewNotes ?? null,
+         lastHumanActivityAt: ticket.lastHumanActivityAt ?? null,
+         minMinutesRequired: agentConfig?.collisionWindow?.minMinutesSinceHumanActivity ?? 30,
+       },
+     });
+   }
+ 
+   // ── Phase 2: Durable transition ─────────────────────────────────────────
+ 
+   const idempotencyKey = deriveActionIdempotencyKey({
+     connectorConfigId: draft.connectorConfigId,
+     ticketId: draft.ticketId,
+     actionType: draft.proposedVisibility === 'public' ? 'reply' : 'internal_note',
+     draftId: draft.id,
+   });
+ 
+   const reviewerUserId =
+     principalCtx.type === 'user' ? principalCtx.id : null;
+ 
+   const updated = await db
+     .update(canonicalTicketDrafts)
+     .set({
+       status: 'dispatching',
+       actionIdempotencyKey: idempotencyKey,
+       dispatchingStartedAt: sql`NOW()`,
+       reviewerUserId,
+       reviewedAt: sql`NOW()`,
+       reviewNotes: options?.reviewNotes ?? null,
+       updatedAt: sql`NOW()`,
+     })
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+       ),
+     )
+     .returning();
+ 
+   // First-commit-wins: if 0 rows returned, another process beat us
+   if (updated.length === 0) {
+     const [current] = await db
+       .select({ status: canonicalTicketDrafts.status, sentMessageId: canonicalTicketDrafts.sentMessageId })
+       .from(canonicalTicketDrafts)
+       .where(eq(canonicalTicketDrafts.id, draftId))
+       .limit(1);
+     return { status: current?.status ?? 'unknown', messageId: current?.sentMessageId ?? undefined };
+   }
+ 
+   // ── Phase 3: Adapter call ────────────────────────────────────────────────
+ 
+   const [config] = await db
+     .select()
+     .from(connectorConfigs)
+     .where(
+       and(
+         eq(connectorConfigs.id, draft.connectorConfigId),
+         eq(connectorConfigs.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!config?.connectionId) {
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, reason: 'missing_connector_config' });
+     return { status: 'failed' };
+   }
+ 
+   const [connection] = await db
+     .select()
+     .from(integrationConnections)
+     .where(eq(integrationConnections.id, config.connectionId))
+     .limit(1);
+ 
+   const adapter = adapters[config.connectorType];
+ 
+   if (!connection || !adapter?.ticketing) {
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, reason: 'missing_adapter_or_connection' });
+     return { status: 'failed' };
+   }
+ 
+   // ── action_attempts ledger (§14.1 + OQ-3 closure: no native idempotency) ──
+   // Lookup-then-insert before the adapter call to prevent duplicate provider sends.
+   const actionType = draft.proposedVisibility === 'public' ? 'reply' : 'internal_note';
+ 
+   const [existingAttempt] = await db
+     .select()
+     .from(actionAttempts)
+     .where(
+       and(
+         eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+         eq(actionAttempts.idempotencyKey, idempotencyKey),
+       ),
+     )
+     .limit(1);
+ 
+   if (existingAttempt?.attemptStatus === 'succeeded') {
+-    // Already dispatched successfully — short-circuit; treat draft as sent.
+-    const existingMessageId = existingAttempt.providerResponseId ?? draft.id;
++    // Already dispatched successfully on a prior attempt. The provider has
++    // acknowledged the send, but the canonical message row may not yet exist
++    // (or may already have been back-linked). Park in needs_reconciliation and
++    // let the back-link / reconciliation routine resolve to terminal `sent` —
++    // never fabricate a UUID for `sent_message_id` from the provider response id.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: existingMessageId, updatedAt: sql`NOW()` })
+-      .where(eq(canonicalTicketDrafts.id, draftId));
+-    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, { draftId, idempotencyKey, existingMessageId });
+-    return { status: 'sent', messageId: existingMessageId };
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
++      .where(
++        and(
++          eq(canonicalTicketDrafts.id, draftId),
++          inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review', 'dispatching']),
++        ),
++      );
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      idempotencyKey,
++      providerResponseId: existingAttempt.providerResponseId,
++    });
++    return { status: 'needs_reconciliation' };
+   }
+ 
+   // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
+   if (!existingAttempt) {
+     await db
+       .insert(actionAttempts)
+       .values({
+         organisationId: principalCtx.organisationId,
+         connectorConfigId: draft.connectorConfigId,
+         idempotencyKey,
+         actionType,
+         attemptStatus: 'in_flight',
+         attemptedAt: new Date(),
+       })
+       .onConflictDoNothing();
+   }
+ 
+   try {
+     let replyId: string;
+ 
+     if (draft.proposedVisibility === 'public') {
+       const result = await adapter.ticketing.addReply(
+         connection,
+         ticket.externalId,
+         draft.proposedBodyText,
+         { idempotencyKey },
+       );
+       if (!result.success) {
+         throw new Error(result.error?.message ?? 'adapter returned success: false');
+       }
+       replyId = result.replyId;
+     } else {
+       const result = await adapter.ticketing.addInternalNote(
+         connection,
+         ticket.externalId,
+         draft.proposedBodyText,
+         { idempotencyKey },
+       );
+       if (!result.success) {
+         throw new Error(result.error?.message ?? 'adapter returned success: false');
+       }
+       replyId = result.replyId;
+     }
+ 
+-    // Mark the ledger row as succeeded
++    // Mark the ledger row as succeeded — providerResponseId carries the provider's
++    // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
++    // UUID is resolved later by webhook back-link or polling reconciliation (per spec
++    // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
+     await db
+       .update(actionAttempts)
+       .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
+       .where(
+         and(
+           eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+           eq(actionAttempts.idempotencyKey, idempotencyKey),
+         ),
+       );
+ 
+-    const messageId = replyId || draft.id;
++    // Provider has acknowledged the send, but the canonical message row has not yet
++    // landed (ingest will create it via webhook or poll). Park the draft in
++    // needs_reconciliation so the back-link routine (or the reconciliation worker)
++    // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
++    // known. Marking `sent` here would either violate the FK on sent_message_id or
++    // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
+     await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'sent', sentMessageId: messageId, updatedAt: sql`NOW()` })
++      .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+-    logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, { draftId, messageId });
+-    return { status: 'sent', messageId };
++    const boss = await getPgBoss();
++    await boss.send('support-draft-reconciliation', {
++      draftId,
++      organisationId: principalCtx.organisationId,
++    }, getJobConfig('support-draft-reconciliation'));
++
++    logger.info(SUPPORT_LOG_CODES.ACTION_RETRY_IDEMPOTENT, {
++      draftId,
++      providerResponseId: replyId,
++      transition: 'dispatching_to_needs_reconciliation_post_provider_ack',
++    });
++    return { status: 'needs_reconciliation' };
+   } catch (err: unknown) {
+     const adapterError = classifyAdapterError(err, config.connectorType, 'addReply');
+ 
+     if (adapterError.retryable) {
+       // Leave the ledger row in 'in_flight' — reconciliation worker will update it.
+       await db
+         .update(canonicalTicketDrafts)
+         .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
+         .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+       const boss = await getPgBoss();
+       await boss.send('support-draft-reconciliation', {
+         draftId,
+         organisationId: principalCtx.organisationId,
+       }, getJobConfig('support-draft-reconciliation'));
+       return { status: 'needs_reconciliation' };
+     }
+ 
+     // Terminal failure — mark ledger row failed
+     await db
+       .update(actionAttempts)
+       .set({ attemptStatus: 'failed' })
+       .where(
+         and(
+           eq(actionAttempts.connectorConfigId, draft.connectorConfigId),
+           eq(actionAttempts.idempotencyKey, idempotencyKey),
+         ),
+       );
+ 
+     await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: sql`NOW()` })
+       .where(eq(canonicalTicketDrafts.id, draftId));
+ 
+     logger.error(SUPPORT_LOG_CODES.DRAFT_FAILED, { draftId, errorCode: adapterError.code });
+     return { status: 'failed' };
+   }
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // listDraftsForReview
+ // ---------------------------------------------------------------------------
+ 
+ export async function listDraftsForReview(
+   filter: { ticketId?: string },
+   principalCtx: PrincipalContext,
+ ): Promise<CanonicalTicketDraft[]> {
+   const db = getOrgScopedDb('supportDraftDispatchService.listDraftsForReview');
+   const conditions = [
+     eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+     or(
+       inArray(canonicalTicketDrafts.status, ['awaiting_review', 'needs_reconciliation']),
+       sql`${canonicalTicketDrafts.status} = 'dispatching' AND ${canonicalTicketDrafts.dispatchingStartedAt} < NOW() - INTERVAL '30 seconds'`,
+     ),
+   ];
+   if (filter.ticketId) {
+     conditions.push(eq(canonicalTicketDrafts.ticketId, filter.ticketId));
+   }
+   return db
+     .select()
+     .from(canonicalTicketDrafts)
+     .where(and(...conditions))
+     .orderBy(canonicalTicketDrafts.createdAt);
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // getDraftById
+ // ---------------------------------------------------------------------------
+ 
+ export async function getDraftById(
+   draftId: string,
+   principalCtx: PrincipalContext,
+ ): Promise<CanonicalTicketDraft> {
+   const db = getOrgScopedDb('supportDraftDispatchService.getDraftById');
+   const [draft] = await db
+     .select()
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+   if (!draft) {
+     throw notFoundError('support.draft.not_found');
+   }
+   return draft;
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // editDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function editDraft(
+   draftId: string,
+   proposedBodyText: string,
+   principalCtx: PrincipalContext,
+ ): Promise<CanonicalTicketDraft> {
+   const db = getOrgScopedDb('supportDraftDispatchService.editDraft');
+   const [updated] = await db
+     .update(canonicalTicketDrafts)
+     .set({ proposedBodyText, updatedAt: new Date() })
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+         inArray(canonicalTicketDrafts.status, ['draft', 'awaiting_review']),
+       ),
+     )
+     .returning();
+   if (!updated) {
+     throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+   }
+   return updated;
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // manualResolveDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function manualResolveDraft(
+   draftId: string,
+   action: 'mark_sent' | 'mark_failed' | 'retry_reconciliation',
+   principalCtx: PrincipalContext,
+   options?: { notes?: string },
+ ): Promise<void> {
+   const db = getOrgScopedDb('supportDraftDispatchService.manualResolveDraft');
+   const now = new Date();
+ 
+   if (action === 'mark_sent') {
+     const result = await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'manually_marked_sent', updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+ 
+   } else if (action === 'mark_failed') {
+     const result = await db
+       .update(canonicalTicketDrafts)
+       .set({ status: 'failed', updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+ 
+   } else if (action === 'retry_reconciliation') {
++    // Spec §1014: "resets the reconciliation budget and re-enqueues the draft
++    // for the §8.4 worker." The worker only processes drafts in
++    // `needs_reconciliation` status — keep the state, reset the attempt count,
++    // and preserve `dispatching_started_at` so the back-link timestamp match
++    // (which compares against the original send time) still works.
+     const result = await db
+       .update(canonicalTicketDrafts)
+-      .set({ status: 'dispatching', reconciliationAttemptCount: 0, dispatchingStartedAt: now, updatedAt: now })
++      .set({ reconciliationAttemptCount: 0, updatedAt: now })
+       .where(
+         and(
+           eq(canonicalTicketDrafts.id, draftId),
+           eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+           eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+         ),
+       )
+       .returning({ id: canonicalTicketDrafts.id });
+     if (result.length === 0) {
+       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
+     }
+     const boss = await getPgBoss();
+     await boss.send('support-draft-reconciliation', { organisationId: principalCtx.organisationId, draftId }, getJobConfig('support-draft-reconciliation'));
+   } else {
+     throw Object.assign(new Error('support.draft.invalid_action'), { statusCode: 422, message: 'support.draft.invalid_action' });
+   }
+ 
+   void options; // notes param reserved for future audit log integration
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // rejectDraft
+ // ---------------------------------------------------------------------------
+ 
+ export async function rejectDraft(
+   draftId: string,
+   principalCtx: PrincipalContext,
+   reason: string,
+ ): Promise<void> {
+   const db = getOrgScopedDb('supportDraftDispatchService.rejectDraft');
+ 
+   const [draft] = await db
+     .select({ status: canonicalTicketDrafts.status })
+     .from(canonicalTicketDrafts)
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+       ),
+     )
+     .limit(1);
+ 
+   if (!draft) {
+     throw notFoundError('support.draft.not_found');
+   }
+ 
+   // Idempotent: already in a terminal/rejected state (dispatching → rejected is forbidden)
+   if (['rejected', 'sent', 'failed', 'expired', 'superseded', 'dispatching'].includes(draft.status)) {
+     return;
+   }
+ 
+   const reviewerUserId =
+     principalCtx.type === 'user' ? principalCtx.id : null;
+ 
+   // Use notInArray to prevent race-condition overwrites of terminal states
+   await db
+     .update(canonicalTicketDrafts)
+     .set({
+       status: 'rejected',
+       reviewNotes: reason,
+       reviewerUserId,
+       reviewedAt: sql`NOW()`,
+       updatedAt: sql`NOW()`,
+     })
+     .where(
+       and(
+         eq(canonicalTicketDrafts.id, draftId),
+         eq(canonicalTicketDrafts.organisationId, principalCtx.organisationId),
+         notInArray(canonicalTicketDrafts.status, ['rejected', 'sent', 'failed', 'expired', 'superseded', 'dispatching']),
+       ),
+     );
+ 
+   logger.info(SUPPORT_LOG_CODES.DRAFT_REJECTED, { draftId, reason });
+ }
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U120 -- server/services/connectorPollingService.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 458ms:
+diff --git a/server/services/connectorPollingService.ts b/server/services/connectorPollingService.ts
+index 73ecb58b..505f18aa 100644
+--- a/server/services/connectorPollingService.ts
++++ b/server/services/connectorPollingService.ts
+@@ -583,438 +583,466 @@ async function phaseC_upsertTickets(
+           // Status mapping — unknown provider statuses are quarantined.
+           const status = ticket.status;
+           const externalMetadata: Record<string, unknown> = { ...(ticket.externalMetadata ?? {}) };
+           if (status === 'unknown_provider_status') {
+             externalMetadata['provider_status_raw'] = (ticket.externalMetadata?.['provider_status_raw']) ?? status;
+             console.warn(
+               `[ConnectorPolling] ${SUPPORT_LOG_CODES.STATUS_UNKNOWN_PROVIDER_STATUS}`,
+               JSON.stringify({ code: SUPPORT_LOG_CODES.STATUS_UNKNOWN_PROVIDER_STATUS, connectorConfigId, ticketExternalId: ticket.externalId }),
+             );
+           }
+ 
+           // Customer identity resolution.
+           const contactResolution = resolveByEmail(ticket.customerEmail, orgContacts);
+           if (contactResolution.emailMatchCount === 0 || contactResolution.emailMatchCount === 'multiple') {
+             console.info(
+               `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_CONTACT_UNMATCHED}`,
+               JSON.stringify({
+                 code: SUPPORT_LOG_CODES.INGEST_CONTACT_UNMATCHED,
+                 connectorConfigId,
+                 ticketExternalId: ticket.externalId,
+                 emailMatchCount: contactResolution.emailMatchCount,
+               }),
+             );
+           }
+ 
+           // Assignee resolution (externalId → canonical UUID).
+           const assigneeAgentId = ticket.assigneeAgentExternalId
+             ? (agentExternalToId.get(ticket.assigneeAgentExternalId) ?? null)
+             : null;
+ 
+           const upsertValues = {
+             organisationId: orgId,
+             connectorConfigId,
+             externalId: ticket.externalId,
+             inboxId,
+             customerEmail: ticket.customerEmail ?? null,
+             customerName: ticket.customerName ?? null,
+             customerExternalId: ticket.customerExternalId ?? null,
+             canonicalContactId: contactResolution.canonicalContactId ?? null,
+             status,
+             priority: ticket.priority,
+             subject: ticket.subject,
+             tags: ticket.tags ?? [],
+             category: ticket.category ?? null,
+             sourceChannel: ticket.sourceChannel,
+             openedAt: ticket.openedAt,
+             firstResponseAt: ticket.firstResponseAt ?? null,
+             lastCustomerMessageAt: ticket.lastCustomerMessageAt ?? null,
+             lastAgentMessageAt: ticket.lastAgentMessageAt ?? null,
+             closedAt: ticket.closedAt ?? null,
+             resolutionAt: ticket.resolutionAt ?? null,
+             slaDueAt: ticket.slaDueAt ?? null,
+             slaBreached: ticket.slaBreached ?? false,
+             slaPolicyExternalId: ticket.slaPolicyExternalId ?? null,
+             assigneeAgentId,
+             externalMetadata,
+             lastSyncedAt: new Date(),
+           };
+ 
+           const result = await orgDb
+             .insert(canonicalTickets)
+             .values(upsertValues)
+             .onConflictDoUpdate({
+               target: [canonicalTickets.connectorConfigId, canonicalTickets.externalId],
+               set: {
+                 inboxId,
+                 customerEmail: upsertValues.customerEmail,
+                 customerName: upsertValues.customerName,
+                 customerExternalId: upsertValues.customerExternalId,
+                 canonicalContactId: upsertValues.canonicalContactId,
+                 status: upsertValues.status,
+                 priority: upsertValues.priority,
+                 subject: upsertValues.subject,
+                 tags: upsertValues.tags,
+                 category: upsertValues.category,
+                 sourceChannel: upsertValues.sourceChannel,
+                 openedAt: upsertValues.openedAt,
+                 firstResponseAt: upsertValues.firstResponseAt,
+                 lastCustomerMessageAt: upsertValues.lastCustomerMessageAt,
+                 lastAgentMessageAt: upsertValues.lastAgentMessageAt,
+                 closedAt: upsertValues.closedAt,
+                 resolutionAt: upsertValues.resolutionAt,
+                 slaDueAt: upsertValues.slaDueAt,
+                 slaBreached: upsertValues.slaBreached,
+                 slaPolicyExternalId: upsertValues.slaPolicyExternalId,
+                 assigneeAgentId: upsertValues.assigneeAgentId,
+                 externalMetadata: upsertValues.externalMetadata,
+                 lastSyncedAt: upsertValues.lastSyncedAt,
+                 updatedAt: new Date(),
+               },
+             })
+             .returning({ id: canonicalTickets.id, externalId: canonicalTickets.externalId });
+ 
+           if (result.length === 0) {
+             // onConflictDoUpdate always returns rows — this branch is a safety net.
+             console.info(
+               `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_DUPLICATE_COLLAPSED}`,
+               JSON.stringify({ code: SUPPORT_LOG_CODES.INGEST_DUPLICATE_COLLAPSED, connectorConfigId, ticketExternalId: ticket.externalId }),
+             );
+           }
+         },
+       );
+ 
+       touchedExternalIds.push(ticket.externalId);
+     }
+   }
+ 
+   return touchedExternalIds;
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // Phase D — fetchTicketMessages per ticket touched in Phase C
+ // ---------------------------------------------------------------------------
+ 
+ async function phaseD_upsertTicketMessages(
+   orgId: string,
+   connectorConfigId: string,
+   connection: AnyConnection,
+   adapter: SupportIngestionAdapter,
+   touchedTicketExternalIds: string[],
++  agentExternalToId: Map<string, string>,
+ ): Promise<void> {
+   if (touchedTicketExternalIds.length === 0) return;
+ 
+   // Load ticket id map (externalId → canonical id + canonical ticket id) for FK resolution.
+   const ticketMap: Map<string, { id: string }> = new Map();
+   await withOrgTx(
+     { tx: db, organisationId: orgId, source: 'connectorPollingService.phaseD_loadTickets' },
+     async () => {
+       const orgDb = getOrgScopedDb('connectorPollingService.phaseD_loadTickets');
+       const rows = await orgDb
+         .select({ id: canonicalTickets.id, externalId: canonicalTickets.externalId })
+         .from(canonicalTickets)
+         .where(
+           and(
+             eq(canonicalTickets.connectorConfigId, connectorConfigId),
+             eq(canonicalTickets.organisationId, orgId),
+             inArray(canonicalTickets.externalId, touchedTicketExternalIds),
+           ),
+         );
+       for (const row of rows) {
+         ticketMap.set(row.externalId, { id: row.id });
+       }
+     },
+   );
+ 
+   for (const ticketExternalId of touchedTicketExternalIds) {
+     const ticketRow = ticketMap.get(ticketExternalId);
+     if (!ticketRow) continue;
+ 
+     let messagesResult: FetchSupportResult<CanonicalTicketMessageData>;
+     try {
+       messagesResult = await adapter.fetchTicketMessages(connection, ticketExternalId);
+     } catch (err) {
+       console.warn(
+         `[ConnectorPolling] ${SUPPORT_LOG_CODES.PROVIDER_POLL_PAGE_FAILED}`,
+         JSON.stringify({ code: SUPPORT_LOG_CODES.PROVIDER_POLL_PAGE_FAILED, connectorConfigId, ticketExternalId, phase: 'D', error: err instanceof Error ? err.message : String(err) }),
+       );
+       continue;
+     }
+ 
+     if (messagesResult.rateLimited) {
+       console.warn(
+         `[ConnectorPolling] ${SUPPORT_LOG_CODES.PROVIDER_RATE_LIMITED}`,
+         JSON.stringify({ code: SUPPORT_LOG_CODES.PROVIDER_RATE_LIMITED, connectorConfigId, ticketExternalId, phase: 'D' }),
+       );
+     }
+ 
+     if (messagesResult.rows.length === 0) continue;
+ 
+     await withOrgTx(
+       { tx: db, organisationId: orgId, source: 'connectorPollingService.phaseD_upsertMessages' },
+       async () => {
+         const orgDb = getOrgScopedDb('connectorPollingService.phaseD_upsertMessages');
+         for (const msg of messagesResult.rows) {
++          // Resolve author FK per polymorphic-FK CHECK constraint on
++          // canonical_ticket_messages (migration 0310): agent/bot messages MUST
++          // carry author_support_agent_id; customer/system messages must NOT.
++          let authorSupportAgentId: string | null = null;
++          if (msg.authorType === 'agent' || msg.authorType === 'bot') {
++            const externalId = msg.authorExternalId;
++            const resolved = externalId ? agentExternalToId.get(externalId) : undefined;
++            if (!resolved) {
++              console.warn(
++                `[ConnectorPolling] ${SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION}`,
++                JSON.stringify({
++                  code: SUPPORT_LOG_CODES.INGEST_CONTRACT_VIOLATION,
++                  connectorConfigId,
++                  ticketExternalId,
++                  messageExternalId: msg.externalId,
++                  authorType: msg.authorType,
++                  reason: externalId ? 'unknown_agent_external_id' : 'missing_author_external_id',
++                }),
++              );
++              continue;
++            }
++            authorSupportAgentId = resolved;
++          }
++
+           await orgDb
+             .insert(canonicalTicketMessages)
+             .values({
+               organisationId: orgId,
+               connectorConfigId,
+               ticketId: ticketRow.id,
+               ticketExternalId,
+               externalId: msg.externalId,
+               direction: msg.direction,
+               visibility: msg.visibility,
+               authorType: msg.authorType,
++              authorSupportAgentId,
+               bodyText: msg.bodyText,
+               bodyHtml: msg.bodyHtml ?? null,
+               attachments: msg.attachments ?? null,
+               createdAtExternal: msg.createdAtExternal,
+               externalMetadata: msg.externalMetadata ?? null,
+             })
+             .onConflictDoNothing();
+         }
+       },
+     );
+   }
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // runSupportIngestionCycle — orchestrates Phases A→D for a single connector
+ // ---------------------------------------------------------------------------
+ 
+ async function runSupportIngestionCycle(
+   connectorConfigId: string,
+   orgId: string,
+   connection: AnyConnection,
+   adapter: SupportIngestionAdapter,
+   configJson: Record<string, unknown>,
+ ): Promise<void> {
+   // Determine incremental cursor from configJson (same pattern used by other
+   // polling paths in this service).
+   const since = configJson['supportLastSyncCursor']
+     ? new Date(configJson['supportLastSyncCursor'] as string)
+     : undefined;
+ 
+   // Phase A — inboxes
+   const rawInboxes = await adapter.listInboxes(connection);
+   const inboxExternalToId = await phaseA_upsertInboxes(orgId, connectorConfigId, rawInboxes);
+ 
+   // Phase B — support agents
+   const rawAgents = await adapter.listSupportAgents(connection);
+   const agentExternalToId = await phaseB_upsertSupportAgents(orgId, connectorConfigId, rawAgents);
+ 
+   // Filter to active inboxes only (Phase C spec requirement).
+   const activeInboxes = rawInboxes.filter((i) => i.isActive);
+   const activeInboxExternalToId = new Map<string, string>();
+   for (const inbox of activeInboxes) {
+     const id = inboxExternalToId.get(inbox.externalId);
+     if (id) activeInboxExternalToId.set(inbox.externalId, id);
+   }
+ 
+   // Phase C — tickets
+   const touchedExternalIds = await phaseC_upsertTickets(
+     orgId,
+     connectorConfigId,
+     connection,
+     adapter,
+     activeInboxExternalToId,
+     agentExternalToId,
+     since,
+   );
+ 
+   // Phase D — messages
+   await phaseD_upsertTicketMessages(
+     orgId,
+     connectorConfigId,
+     connection,
+     adapter,
+     touchedExternalIds,
++    agentExternalToId,
+   );
+ 
+   // Advance the sync cursor to now so the next incremental cycle only fetches
+   // what changed since this run completed.
+   await db
+     .update(connectorConfigs)
+     .set({
+       configJson: {
+         ...(configJson as Record<string, unknown>),
+         supportLastSyncCursor: new Date().toISOString(),
+       },
+       updatedAt: new Date(),
+     })
+     .where(eq(connectorConfigs.id, connectorConfigId));
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // pollSupportFullReconciliation — full-page scan + tombstone pass
+ //
+ // Exported standalone function. NOT called automatically by the incremental
+ // cycle — invoke explicitly (e.g. from a maintenance job or operator command).
+ // ---------------------------------------------------------------------------
+ 
+ export async function pollSupportFullReconciliation(connectorConfigId: string): Promise<void> {
+   const [config] = await db
+     .select()
+     .from(connectorConfigs)
+     .where(eq(connectorConfigs.id, connectorConfigId));
+ 
+   if (!config) throw new Error(`Connector config ${connectorConfigId} not found`);
+ 
+   const adapter = adapters[config.connectorType];
+   if (
+     !adapter?.ingestion?.listInboxes ||
+     !adapter.ingestion.listSupportAgents ||
+     !adapter.ingestion.fetchTickets ||
+     !adapter.ingestion.fetchTicketMessages
+   ) {
+     throw new Error(`Adapter ${config.connectorType} does not support support ingestion`);
+   }
+ 
+   if (!config.connectionId) throw new Error('Connector config has no connection linked');
+ 
+   const connection = await integrationConnectionService.getDecryptedConnection(
+     null,
+     config.connectorType,
+     config.organisationId,
+     config.connectionId,
+   );
+ 
+   const orgId = config.organisationId;
+   const supportAdapter = adapter.ingestion as SupportIngestionAdapter;
+ 
+   // Phase A — inboxes (full refresh)
+   const rawInboxes = await supportAdapter.listInboxes(connection as never);
+   const inboxExternalToId = await phaseA_upsertInboxes(orgId, connectorConfigId, rawInboxes);
+ 
+   // Phase B — agents (full refresh)
+   const rawAgents = await supportAdapter.listSupportAgents(connection as never);
+   const agentExternalToId = await phaseB_upsertSupportAgents(orgId, connectorConfigId, rawAgents);
+ 
+   // Full-reconciliation ticket pass — fetch ALL pages (no `since` cursor).
+   const activeInboxes = rawInboxes.filter((i) => i.isActive);
+   const returnedExternalIds = new Set<string>();
+   let anyPartial = false;
+   let anyRateLimited = false;
+   let anyPageFailed = false;
+ 
+   for (const inbox of activeInboxes) {
+     const inboxId = inboxExternalToId.get(inbox.externalId);
+     if (!inboxId) continue;
+ 
+     let fetchResult: FetchSupportResult<CanonicalTicketData>;
+     try {
+       fetchResult = await supportAdapter.fetchTickets(
+         connection as never,
+         inbox.externalId,
+         // No `since` — full reconciliation fetches everything
+       );
+     } catch (err) {
+       anyPageFailed = true;
+       console.warn(
+         `[ConnectorPolling] ${SUPPORT_LOG_CODES.PROVIDER_POLL_PAGE_FAILED}`,
+         JSON.stringify({ code: SUPPORT_LOG_CODES.PROVIDER_POLL_PAGE_FAILED, connectorConfigId, inboxExternalId: inbox.externalId, phase: 'full-reconciliation', error: err instanceof Error ? err.message : String(err) }),
+       );
+       continue;
+     }
+ 
+     if (fetchResult.partial) anyPartial = true;
+     if (fetchResult.rateLimited) {
+       anyRateLimited = true;
+       console.warn(
+         `[ConnectorPolling] ${SUPPORT_LOG_CODES.PROVIDER_RATE_LIMITED}`,
+         JSON.stringify({ code: SUPPORT_LOG_CODES.PROVIDER_RATE_LIMITED, connectorConfigId, inboxExternalId: inbox.externalId, phase: 'full-reconciliation' }),
+       );
+     }
+     if (fetchResult.partial && fetchResult.error) {
+       anyPageFailed = true;
+     }
+ 
+     // Upsert tickets and track externalIds.
+     const touchedExternalIds = await phaseC_upsertTickets(
+       orgId,
+       connectorConfigId,
+       connection as never,
+       supportAdapter,
+       new Map([[inbox.externalId, inboxId]]),
+       agentExternalToId,
+       undefined, // no cursor — full scan
+     );
+     for (const id of touchedExternalIds) returnedExternalIds.add(id);
+ 
+     // Phase D — messages for tickets touched in this inbox's reconciliation.
+     await phaseD_upsertTicketMessages(
+       orgId,
+       connectorConfigId,
+       connection as never,
+       supportAdapter,
+       touchedExternalIds,
++      agentExternalToId,
+     );
+   }
+ 
+   // Tombstone pass — only when ALL preconditions hold.
+   if (anyPartial || anyRateLimited || anyPageFailed) {
+     console.warn(
+       '[ConnectorPolling] pollSupportFullReconciliation: skipping tombstone pass — preconditions not met',
+       JSON.stringify({ connectorConfigId, anyPartial, anyRateLimited, anyPageFailed }),
+     );
+     return;
+   }
+ 
+   if (returnedExternalIds.size === 0) return;
+ 
+   // Find tickets in the DB that were NOT returned by the provider — candidates for deletion.
+   let candidateExternalIds: string[] = [];
+   await withOrgTx(
+     { tx: db, organisationId: orgId, source: 'connectorPollingService.fullReconciliation_tombstone' },
+     async () => {
+       const orgDb = getOrgScopedDb('connectorPollingService.fullReconciliation_tombstone');
+       const dbTickets = await orgDb
+         .select({ externalId: canonicalTickets.externalId })
+         .from(canonicalTickets)
+         .where(
+           and(
+             eq(canonicalTickets.connectorConfigId, connectorConfigId),
+             eq(canonicalTickets.organisationId, orgId),
+             eq(canonicalTickets.providerDeleted, false),
+           ),
+         );
+       candidateExternalIds = dbTickets
+         .map((r) => r.externalId)
+         .filter((eid) => !returnedExternalIds.has(eid));
+     },
+   );
+ 
+   if (candidateExternalIds.length === 0) return;
+ 
+   // Tombstone the candidates.
+   await withOrgTx(
+     { tx: db, organisationId: orgId, source: 'connectorPollingService.fullReconciliation_applyTombstone' },
+     async () => {
+       const orgDb = getOrgScopedDb('connectorPollingService.fullReconciliation_applyTombstone');
+       await orgDb
+         .update(canonicalTickets)
+         .set({
+           providerDeleted: true,
+           deletedAtCanonical: new Date(),
+           deletionSource: 'provider_poll_observation',
+           updatedAt: new Date(),
+         })
+         .where(
+           and(
+             eq(canonicalTickets.connectorConfigId, connectorConfigId),
+             eq(canonicalTickets.organisationId, orgId),
+             inArray(canonicalTickets.externalId, candidateExternalIds),
+           ),
+         );
+     },
+   );
+ 
+   console.info(
+     `[ConnectorPolling] ${SUPPORT_LOG_CODES.TICKET_PROVIDER_DELETED}`,
+     JSON.stringify({
+       code: SUPPORT_LOG_CODES.TICKET_PROVIDER_DELETED,
+       connectorConfigId,
+       tombstonedCount: candidateExternalIds.length,
+     }),
+   );
+ }
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-09T22:23:26.921818Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"authorSupportAgentId\\|authorType: 'bot'\\|authorType.*bot\\|listSupportAgents\" -- server shared"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"authorSupportAgentId\\|authorType: 'bot'\\|authorType.*bot\\|listSupportAgents\" -- server shared" in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"authorSupportAgentId\\|authorType: 'bot'\\|authorType.*bot\\|listSupportAgents\" -- server shared"` rejected: blocked by policy
+2026-05-09T22:23:30.306739Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n authorSupportAgentId -- server shared'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n authorSupportAgentId -- server shared' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n authorSupportAgentId -- server shared'` rejected: blocked by policy
+2026-05-09T22:23:33.459954Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files *canonicalTicketMessages* *supportAgents*'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files *canonicalTicketMessages* *supportAgents*' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files *canonicalTicketMessages* *supportAgents*'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-index -- /dev/null server/db/schema/canonicalTicketMessages.ts' in C:\Files\Projects\automation-v1-3rd
+2026-05-09T22:23:37.378421Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.5 seconds
+Output:
+diff --git a/server/db/schema/canonicalTicketMessages.ts b/server/db/schema/canonicalTicketMessages.ts
+new file mode 100644
+index 00000000..685a4016
+--- /dev/null
++++ b/server/db/schema/canonicalTicketMessages.ts
+@@ -0,0 +1,108 @@
++// canonical_ticket_messages — Support Desk canonical message store.
++// Migration: 0310_canonical_ticket_messages.sql
++// Spec: tasks/builds/support-desk-canonical/spec.md §5.2
++//
++// One row per message synced from a helpdesk provider (e.g. Chatwoot).
++// Messages are immutable once created; redaction overwrites body content
++// but does NOT update a timestamp column (no updated_at by design).
++// Tenant-isolated via organisation_id RLS (org_isolation policy).
++//
++// ─── Polymorphic-FK split (risk R7 mitigation) ───────────────────────────────
++//
++// Two nullable author FK columns are used instead of one because the two
++// author types have asymmetric nullability rules that cannot be expressed
++// with a single FK:
++//
++//   author_contact_id      → canonical_contacts(id)
++//     Set when author_type = 'customer' AND a canonical contact match exists.
++//     May be NULL for customer messages that have not yet been matched to a
++//     canonical contact (e.g. first-contact emails before dedup resolves).
++//     Must be NULL for agent, bot, and system messages.
++//
++//   author_support_agent_id → canonical_support_agents(id)
++//     MUST be set (NOT NULL in practice) when author_type IN ('agent', 'bot').
++//     Every agent/bot message from the helpdesk provider has a known agent id;
++//     there is no "unmatched agent" scenario because we control agent sync.
++//     Must be NULL for customer and system messages.
++//
++// The asymmetry is intentional: do NOT collapse these into a single
++// "author_id + author_type" pattern. That pattern loses the FK referential
++// integrity guarantee that each column provides independently, and it makes
++// the "agent MUST have an agent FK" invariant unenforceable at the DB level.
++// The CHECK constraint (canonical_ticket_messages_author_fk_consistency)
++// encodes the full cross-column invariant in migration 0310.
++// ─────────────────────────────────────────────────────────────────────────────
++
++import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
++import { organisations } from './organisations.js';
++import { connectorConfigs } from './connectorConfigs.js';
++import { canonicalContacts } from './canonicalEntities.js';
++import { canonicalTickets } from './canonicalTickets.js';
++import { canonicalSupportAgents } from './canonicalSupportAgents.js';
++import { canonicalTicketDrafts } from './canonicalTicketDrafts.js';
++
++export const canonicalTicketMessages = pgTable(
++  'canonical_ticket_messages',
++  {
++    // identity
++    id:                       uuid('id').defaultRandom().primaryKey(),
++    organisationId:           uuid('organisation_id').notNull().references(() => organisations.id),
++    ticketId:                 uuid('ticket_id').notNull().references(() => canonicalTickets.id),
++    externalId:               text('external_id').notNull(),
++    connectorConfigId:        uuid('connector_config_id').notNull().references(() => connectorConfigs.id),
++
++    // denormalised — used in the three-column unique index to avoid a join
++    ticketExternalId:         text('ticket_external_id').notNull(),
++
++    // message attributes
++    direction:                text('direction').notNull().$type<'inbound' | 'outbound' | 'internal_note'>(),
++    visibility:               text('visibility').notNull().$type<'public' | 'internal'>(),
++    authorType:               text('author_type').notNull().$type<'customer' | 'agent' | 'bot' | 'system'>(),
++
++    // split author FKs — see module-level comment for the polymorphic-FK rationale
++    authorContactId:          uuid('author_contact_id').references(() => canonicalContacts.id),
++    authorSupportAgentId:     uuid('author_support_agent_id').references(() => canonicalSupportAgents.id),
++
++    // content
++    bodyText:                 text('body_text').notNull(),
++    bodyHtml:                 text('body_html'),
++    attachments:              jsonb('attachments').$type<Array<{
++      externalId: string;
++      filename: string;
++      providerUrl: string;
++      mimeType?: string;
++      size?: number;
++    }>>(),
++
++    // redaction
++    redacted:                 boolean('redacted').notNull().default(false),
++    redactedAtExternal:       timestamp('redacted_at_external', { withTimezone: true }),
++    redactedAtCanonical:      timestamp('redacted_at_canonical', { withTimezone: true }),
++
++    // timestamps (no updated_at — messages are immutable once created)
++    createdAtExternal:        timestamp('created_at_external', { withTimezone: true }).notNull(),
++    createdAt:                timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
++
++    // provenance — FK constraint and partial index added in migration 0311 (C4).
++    sourceDraftId:            uuid('source_draft_id').references(() => canonicalTicketDrafts.id),
++
++    // common
++    externalMetadata:         jsonb('external_metadata').$type<Record<string, unknown>>(),
++  },
++  (table) => ({
++    connectorTicketExternalUnique: uniqueIndex('canonical_ticket_messages_connector_ticket_external_unique').on(
++      table.connectorConfigId,
++      table.ticketExternalId,
++      table.externalId,
++    ),
++    orgTicketThreadIdx: index('canonical_ticket_messages_org_ticket_thread_idx').on(
++      table.organisationId,
++      table.ticketId,
++      table.createdAtExternal,
++      table.id,
++    ),
++  })
++);
++
++export type CanonicalTicketMessage = typeof canonicalTicketMessages.$inferSelect;
++export type NewCanonicalTicketMessage = typeof canonicalTicketMessages.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ exited 1 in 523ms:
+diff --git a/server/db/schema/canonicalTicketMessages.ts b/server/db/schema/canonicalTicketMessages.ts
+new file mode 100644
+index 00000000..685a4016
+--- /dev/null
++++ b/server/db/schema/canonicalTicketMessages.ts
+@@ -0,0 +1,108 @@
++// canonical_ticket_messages — Support Desk canonical message store.
++// Migration: 0310_canonical_ticket_messages.sql
++// Spec: tasks/builds/support-desk-canonical/spec.md §5.2
++//
++// One row per message synced from a helpdesk provider (e.g. Chatwoot).
++// Messages are immutable once created; redaction overwrites body content
++// but does NOT update a timestamp column (no updated_at by design).
++// Tenant-isolated via organisation_id RLS (org_isolation policy).
++//
++// ─── Polymorphic-FK split (risk R7 mitigation) ───────────────────────────────
++//
++// Two nullable author FK columns are used instead of one because the two
++// author types have asymmetric nullability rules that cannot be expressed
++// with a single FK:
++//
++//   author_contact_id      → canonical_contacts(id)
++//     Set when author_type = 'customer' AND a canonical contact match exists.
++//     May be NULL for customer messages that have not yet been matched to a
++//     canonical contact (e.g. first-contact emails before dedup resolves).
++//     Must be NULL for agent, bot, and system messages.
++//
++//   author_support_agent_id → canonical_support_agents(id)
++//     MUST be set (NOT NULL in practice) when author_type IN ('agent', 'bot').
++//     Every agent/bot message from the helpdesk provider has a known agent id;
++//     there is no "unmatched agent" scenario because we control agent sync.
++//     Must be NULL for customer and system messages.
++//
++// The asymmetry is intentional: do NOT collapse these into a single
++// "author_id + author_type" pattern. That pattern loses the FK referential
++// integrity guarantee that each column provides independently, and it makes
++// the "agent MUST have an agent FK" invariant unenforceable at the DB level.
++// The CHECK constraint (canonical_ticket_messages_author_fk_consistency)
++// encodes the full cross-column invariant in migration 0310.
++// ─────────────────────────────────────────────────────────────────────────────
++
++import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
++import { organisations } from './organisations.js';
++import { connectorConfigs } from './connectorConfigs.js';
++import { canonicalContacts } from './canonicalEntities.js';
++import { canonicalTickets } from './canonicalTickets.js';
++import { canonicalSupportAgents } from './canonicalSupportAgents.js';
++import { canonicalTicketDrafts } from './canonicalTicketDrafts.js';
++
++export const canonicalTicketMessages = pgTable(
++  'canonical_ticket_messages',
++  {
++    // identity
++    id:                       uuid('id').defaultRandom().primaryKey(),
++    organisationId:           uuid('organisation_id').notNull().references(() => organisations.id),
++    ticketId:                 uuid('ticket_id').notNull().references(() => canonicalTickets.id),
++    externalId:               text('external_id').notNull(),
++    connectorConfigId:        uuid('connector_config_id').notNull().references(() => connectorConfigs.id),
++
++    // denormalised — used in the three-column unique index to avoid a join
++    ticketExternalId:         text('ticket_external_id').notNull(),
++
++    // message attributes
++    direction:                text('direction').notNull().$type<'inbound' | 'outbound' | 'internal_note'>(),
++    visibility:               text('visibility').notNull().$type<'public' | 'internal'>(),
++    authorType:               text('author_type').notNull().$type<'customer' | 'agent' | 'bot' | 'system'>(),
++
++    // split author FKs — see module-level comment for the polymorphic-FK rationale
++    authorContactId:          uuid('author_contact_id').references(() => canonicalContacts.id),
++    authorSupportAgentId:     uuid('author_support_agent_id').references(() => canonicalSupportAgents.id),
++
++    // content
++    bodyText:                 text('body_text').notNull(),
++    bodyHtml:                 text('body_html'),
++    attachments:              jsonb('attachments').$type<Array<{
++      externalId: string;
++      filename: string;
++      providerUrl: string;
++      mimeType?: string;
++      size?: number;
++    }>>(),
++
++    // redaction
++    redacted:                 boolean('redacted').notNull().default(false),
++    redactedAtExternal:       timestamp('redacted_at_external', { withTimezone: true }),
++    redactedAtCanonical:      timestamp('redacted_at_canonical', { withTimezone: true }),
++
++    // timestamps (no updated_at — messages are immutable once created)
++    createdAtExternal:        timestamp('created_at_external', { withTimezone: true }).notNull(),
++    createdAt:                timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
++
++    // provenance — FK constraint and partial index added in migration 0311 (C4).
++    sourceDraftId:            uuid('source_draft_id').references(() => canonicalTicketDrafts.id),
++
++    // common
++    externalMetadata:         jsonb('external_metadata').$type<Record<string, unknown>>(),
++  },
++  (table) => ({
++    connectorTicketExternalUnique: uniqueIndex('canonical_ticket_messages_connector_ticket_external_unique').on(
++      table.connectorConfigId,
++      table.ticketExternalId,
++      table.externalId,
++    ),
++    orgTicketThreadIdx: index('canonical_ticket_messages_org_ticket_thread_idx').on(
++      table.organisationId,
++      table.ticketId,
++      table.createdAtExternal,
++      table.id,
++    ),
++  })
++);
++
++export type CanonicalTicketMessage = typeof canonicalTicketMessages.$inferSelect;
++export type NewCanonicalTicketMessage = typeof canonicalTicketMessages.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-index -- /dev/null server/db/schema/canonicalSupportAgents.ts' in C:\Files\Projects\automation-v1-3rd
+2026-05-09T22:23:41.274296Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.5 seconds
+Output:
+diff --git a/server/db/schema/canonicalSupportAgents.ts b/server/db/schema/canonicalSupportAgents.ts
+new file mode 100644
+index 00000000..c5812451
+--- /dev/null
++++ b/server/db/schema/canonicalSupportAgents.ts
+@@ -0,0 +1,32 @@
++import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
++import { organisations } from './organisations.js';
++import { connectorConfigs } from './connectorConfigs.js';
++import { subaccounts } from './subaccounts.js';
++import { integrationConnections } from './integrationConnections.js';
++
++export const canonicalSupportAgents = pgTable(
++  'canonical_support_agents',
++  {
++    id: uuid('id').defaultRandom().primaryKey(),
++    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
++    connectorConfigId: uuid('connector_config_id').notNull().references(() => connectorConfigs.id),
++    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
++    externalId: text('external_id').notNull(),
++    displayName: text('display_name').notNull(),
++    email: text('email'),
++    isActive: boolean('is_active').notNull().default(true),
++    agentKind: text('agent_kind').notNull().$type<'human' | 'bot'>(),
++    externalMetadata: jsonb('external_metadata').$type<Record<string, unknown>>(),
++    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
++    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
++    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
++    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
++  },
++  (table) => ({
++    connectorExternalUnique: uniqueIndex('canonical_support_agents_connector_external_unique').on(table.connectorConfigId, table.externalId),
++    orgKindActiveIdx: index('canonical_support_agents_org_kind_active_idx').on(table.organisationId, table.agentKind, table.isActive),
++  })
++);
++
++export type CanonicalSupportAgent = typeof canonicalSupportAgents.$inferSelect;
++export type NewCanonicalSupportAgent = typeof canonicalSupportAgents.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/db/schema/canonicalSupportAgents.ts', LF will be replaced by CRLF the next time Git touches it
+
+ exited 1 in 486ms:
+diff --git a/server/db/schema/canonicalSupportAgents.ts b/server/db/schema/canonicalSupportAgents.ts
+new file mode 100644
+index 00000000..c5812451
+--- /dev/null
++++ b/server/db/schema/canonicalSupportAgents.ts
+@@ -0,0 +1,32 @@
++import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
++import { organisations } from './organisations.js';
++import { connectorConfigs } from './connectorConfigs.js';
++import { subaccounts } from './subaccounts.js';
++import { integrationConnections } from './integrationConnections.js';
++
++export const canonicalSupportAgents = pgTable(
++  'canonical_support_agents',
++  {
++    id: uuid('id').defaultRandom().primaryKey(),
++    organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
++    connectorConfigId: uuid('connector_config_id').notNull().references(() => connectorConfigs.id),
++    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
++    externalId: text('external_id').notNull(),
++    displayName: text('display_name').notNull(),
++    email: text('email'),
++    isActive: boolean('is_active').notNull().default(true),
++    agentKind: text('agent_kind').notNull().$type<'human' | 'bot'>(),
++    externalMetadata: jsonb('external_metadata').$type<Record<string, unknown>>(),
++    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
++    sourceConnectionId: uuid('source_connection_id').references(() => integrationConnections.id),
++    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
++    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
++  },
++  (table) => ({
++    connectorExternalUnique: uniqueIndex('canonical_support_agents_connector_external_unique').on(table.connectorConfigId, table.externalId),
++    orgKindActiveIdx: index('canonical_support_agents_org_kind_active_idx').on(table.organisationId, table.agentKind, table.isActive),
++  })
++);
++
++export type CanonicalSupportAgent = typeof canonicalSupportAgents.$inferSelect;
++export type NewCanonicalSupportAgent = typeof canonicalSupportAgents.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/db/schema/canonicalSupportAgents.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -U80 -- server/jobs/supportDraftReconciliationWorker.ts server/services/supportDraftReconciliationPure.ts' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 469ms:
+diff --git a/server/jobs/supportDraftReconciliationWorker.ts b/server/jobs/supportDraftReconciliationWorker.ts
+index ca49ab4e..9bad4b22 100644
+--- a/server/jobs/supportDraftReconciliationWorker.ts
++++ b/server/jobs/supportDraftReconciliationWorker.ts
+@@ -1,140 +1,141 @@
+ // supportDraftReconciliationWorker.ts — pg-boss worker for draft reconciliation.
+ // Spec: tasks/builds/support-desk-canonical/spec.md §8, §11.8, §18 (R5)
+ //
+ // Handles the 'support-draft-reconciliation' queue.
+ // Fired when a canonical_ticket_draft enters needs_reconciliation status.
+ // Calls decideOutcome and acts on the decision: resolve, surface for manual
+ // review, or re-enqueue with exponential backoff.
+ 
+ import type PgBoss from 'pg-boss';
+ import { eq, and, desc } from 'drizzle-orm';
+ import { createWorker } from '../lib/createWorker.js';
+ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+ import { getPgBoss } from '../lib/pgBossInstance.js';
+ import { decideOutcome } from '../services/supportDraftReconciliationPure.js';
+ import { canonicalTicketDrafts } from '../db/schema/canonicalTicketDrafts.js';
+ import { canonicalTicketMessages } from '../db/schema/canonicalTicketMessages.js';
+ import { logger } from '../lib/logger.js';
+ import { SUPPORT_LOG_CODES } from '../../shared/types/supportObservability.js';
+ 
+ export interface SupportDraftReconciliationPayload {
+   organisationId: string;
+   draftId: string;
+ }
+ 
+ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
+   createWorker<SupportDraftReconciliationPayload>({
+     queue: 'support-draft-reconciliation',
+     boss,
+     handler: async (job) => {
+       const { draftId, organisationId } = job.data;
+       const db = getOrgScopedDb('supportDraftReconciliationWorker');
+ 
+       // 1. Load the draft — idempotent early exit if not found or wrong status
+       const [draft] = await db
+         .select()
+         .from(canonicalTicketDrafts)
+         .where(eq(canonicalTicketDrafts.id, draftId))
+         .limit(1);
+ 
+       if (!draft || draft.status !== 'needs_reconciliation') {
+         // Already resolved, failed, or gone — nothing to do
+         return;
+       }
+ 
+       // 2. Load recent outbound messages for the draft's ticket (last 20, newest first)
+       const messages = await db
+         .select()
+         .from(canonicalTicketMessages)
+         .where(eq(canonicalTicketMessages.ticketId, draft.ticketId))
+         .orderBy(desc(canonicalTicketMessages.createdAtExternal))
+         .limit(20);
+ 
+       // 3. Call decideOutcome (pure function)
+       const decision = decideOutcome({
+         draft: {
+           id: draft.id,
+           status: draft.status,
+           reconciliationAttemptCount: draft.reconciliationAttemptCount,
+           proposedBodyText: draft.proposedBodyText,
+           proposedVisibility: draft.proposedVisibility,
++          dispatchingStartedAt: draft.dispatchingStartedAt ?? null,
+         },
+         latestMessages: messages.map((m) => ({
+           id: m.id,
+           direction: m.direction,
+           visibility: m.visibility,
+           bodyText: m.bodyText,
+           createdAtExternal: m.createdAtExternal,
+         })),
+         attemptCount: draft.reconciliationAttemptCount,
+       });
+ 
+       // 4. Act on the decision
+       const now = new Date();
+ 
+       switch (decision.kind) {
+         case 'resolve_sent': {
+           const sentRows = await db
+             .update(canonicalTicketDrafts)
+             .set({
+               status: 'sent',
+               sentMessageId: decision.messageId,
+               reconciliationAttemptCount: draft.reconciliationAttemptCount + 1,
+               updatedAt: now,
+             })
+             .where(
+               and(
+                 eq(canonicalTicketDrafts.id, draftId),
+                 eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+               ),
+             )
+             .returning({ id: canonicalTicketDrafts.id });
+ 
+           if (sentRows.length === 0) {
+             logger.debug('support.draft.reconciliation_cas_miss', { draftId, organisationId });
+             break;
+           }
+ 
+           logger.info(SUPPORT_LOG_CODES.DRAFT_SENT, {
+             draftId,
+             organisationId,
+             sentMessageId: decision.messageId,
+           });
+           break;
+         }
+ 
+         case 'resolve_failed': {
+           const failedRows = await db
+             .update(canonicalTicketDrafts)
+             .set({
+               status: 'failed',
+               updatedAt: now,
+             })
+             .where(
+               and(
+                 eq(canonicalTicketDrafts.id, draftId),
+                 eq(canonicalTicketDrafts.status, 'needs_reconciliation'),
+               ),
+             )
+             .returning({ id: canonicalTicketDrafts.id });
+ 
+           if (failedRows.length === 0) {
+             logger.debug('support.draft.reconciliation_cas_miss', { draftId, organisationId });
+             break;
+           }
+ 
+           logger.warn(SUPPORT_LOG_CODES.DRAFT_FAILED, {
+             draftId,
+             organisationId,
+             reason: decision.reason,
+           });
+           break;
+         }
+ 
+         case 'surface_manual': {
+           // Do NOT change status — operator surface handles it.
+           // Increment attempt count and record the reconciliation timestamp.
+           await db
+             .update(canonicalTicketDrafts)
+             .set({
+               reconciliationAttemptCount: draft.reconciliationAttemptCount + 1,
+diff --git a/server/services/supportDraftReconciliationPure.ts b/server/services/supportDraftReconciliationPure.ts
+index cda7f488..66c74035 100644
+--- a/server/services/supportDraftReconciliationPure.ts
++++ b/server/services/supportDraftReconciliationPure.ts
+@@ -1,147 +1,170 @@
+ // supportDraftReconciliationPure.ts — Pure decision module for draft reconciliation.
+ // Spec: tasks/builds/support-desk-canonical/spec.md §7, §8.5, §11.8, §18
+ //
+ // No DB access, no async. All functions are deterministic given their inputs.
+ // The reconciliation worker (C11) and the webhook back-link routine (C9)
+ // both import from this module.
+ 
+ // ---------------------------------------------------------------------------
+ // Types
+ // ---------------------------------------------------------------------------
+ 
+ export type ReconciliationDecision =
+   | { kind: 'resolve_sent';   messageId: string }
+   | { kind: 'resolve_failed'; reason: string }
+   | { kind: 'retry_after_ms'; ms: number }
+   | { kind: 'surface_manual'; reason: string };
+ 
+ // ---------------------------------------------------------------------------
+ // decideOutcome
+ // ---------------------------------------------------------------------------
+ 
+ /**
+  * Decides what to do with a draft in `needs_reconciliation` state.
+  *
+  * Priority order:
+  *  1. Terminal draft status → resolve_failed (defensive; should not normally reach here)
+  *  2. Budget exhausted → surface_manual
+  *  3. Matching message found → resolve_sent
+  *  4. Otherwise → retry_after_ms (exponential backoff, capped at 1 hour)
++ *
++ * Match constraints (mirror §11.7 back-link semantics — see `findBackLinkCandidate`):
++ *   - Direction must align with the draft's visibility:
++ *       proposedVisibility = 'public'   → message direction = 'outbound'
++ *       proposedVisibility = 'internal' → message direction = 'internal_note'
++ *   - Visibility must match the draft's proposedVisibility.
++ *   - Message `createdAtExternal` must be at-or-after the draft's `dispatchingStartedAt`
++ *     when both are known. This prevents binding the draft to an unrelated older
++ *     message that happens to contain the same body text (quoted reply, autoresponder
++ *     repeat, etc.).
++ *   - Body comparison uses normalised whitespace (trim + collapse internal whitespace)
++ *     and requires exact equality after normalisation. Substring fallback is no longer
++ *     used because, with successful dispatches now routed through reconciliation, the
++ *     prior loose match could bind a draft to an unrelated earlier message.
+  */
+ export function decideOutcome(input: {
+   draft: {
+     id: string;
+     status: string;
+     reconciliationAttemptCount: number;
+     proposedBodyText: string;
+     proposedVisibility: string;
++    dispatchingStartedAt?: Date | null;
+   };
+   latestMessages: Array<{
+     id: string;
+     direction: string;
+     visibility: string;
+     bodyText: string;
+     createdAtExternal: Date;
+   }>;
+   attemptCount: number;
+   maxAttempts?: number; // default 5
+ }): ReconciliationDecision {
+   const maxAttempts = input.maxAttempts ?? 5;
+ 
+   // 1. Defensive: draft is already in a terminal state
+   if (input.draft.status === 'failed' || input.draft.status === 'expired') {
+     return { kind: 'resolve_failed', reason: 'draft_in_terminal_state' };
+   }
+ 
+   // 2. Budget exhausted — escalate to manual; NEVER auto-fail
+   if (input.attemptCount >= maxAttempts) {
+     return { kind: 'surface_manual', reason: 'max_attempts_exhausted' };
+   }
+ 
+   // 3. Check whether any landed message matches the draft's proposed body
+-  const proposedBody = input.draft.proposedBodyText;
++  //    under the constrained match criteria documented above.
++  const expectedDirection: 'outbound' | 'internal_note' =
++    input.draft.proposedVisibility === 'internal' ? 'internal_note' : 'outbound';
++  const expectedVisibility: 'public' | 'internal' =
++    input.draft.proposedVisibility === 'internal' ? 'internal' : 'public';
++  const dispatchedAt = input.draft.dispatchingStartedAt ?? null;
++  const normalisedProposed = normaliseBody(input.draft.proposedBodyText);
++
+   const match = input.latestMessages.find(
+     (msg) =>
+-      msg.bodyText === proposedBody ||
+-      msg.bodyText.includes(proposedBody) ||
+-      proposedBody.includes(msg.bodyText),
++      msg.direction === expectedDirection &&
++      msg.visibility === expectedVisibility &&
++      (dispatchedAt == null || msg.createdAtExternal.getTime() >= dispatchedAt.getTime()) &&
++      normaliseBody(msg.bodyText) === normalisedProposed,
+   );
+ 
+   if (match) {
+     return {
+       kind: 'resolve_sent',
+       messageId: match.id,
+     };
+   }
+ 
+   // 4. Exponential backoff — 30s * 2^n, capped at 1 hour
+   const ms = Math.min(30_000 * Math.pow(2, input.attemptCount), 3_600_000);
+   return { kind: 'retry_after_ms', ms };
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // findBackLinkCandidate
+ // ---------------------------------------------------------------------------
+ 
+ /** Normalise body text for comparison: trim and collapse internal whitespace. */
+ function normaliseBody(text: string): string {
+   return text.trim().replace(/\s+/g, ' ');
+ }
+ 
+ /**
+  * Finds a back-link candidate draft for a newly landed inbound/outbound message.
+  *
+  * Eligible drafts: status IN ('manually_marked_sent', 'sent') AND sent_message_id IS NULL.
+  *
+  * Match criteria:
+  *   - Direction aligns: outbound message → reply draft; internal_note message → internal_note draft
+  *   - Body text matches after normalisation (exact match on normalised text)
+  *
+  * Returns:
+  *   - unique match   → { match: { id }, ambiguous: false }
+  *   - multiple match → { match: null, ambiguous: true }
+  *   - no match       → { match: null, ambiguous: false }
+  */
+ export function findBackLinkCandidate(input: {
+   newlyLandedMessage: {
+     direction: string;
+     visibility: string;
+     bodyText: string;
+     createdAtExternal: Date;
+   };
+   candidateDrafts: Array<{
+     id: string;
+     proposedBodyText: string;
+     proposedVisibility: string;
+     status: string;
+     sentMessageId?: string | null;
+   }>;
+ }): { match: { id: string } | null; ambiguous: boolean } {
+   const { newlyLandedMessage, candidateDrafts } = input;
+ 
+   // Only consider drafts in eligible statuses with no back-link yet
+   const eligible = candidateDrafts.filter(
+     (d) =>
+       (d.status === 'manually_marked_sent' || d.status === 'sent') &&
+       (d.sentMessageId == null),
+   );
+ 
+   // Determine the expected draft visibility from the message direction
+   // outbound → public reply; internal_note → internal
+   const expectedVisibility: string =
+     newlyLandedMessage.direction === 'internal_note' ? 'internal' : 'public';
+ 
+   const normalisedMessageBody = normaliseBody(newlyLandedMessage.bodyText);
+ 
+   const matches = eligible.filter(
+     (d) =>
+       d.proposedVisibility === expectedVisibility &&
+       normaliseBody(d.proposedBodyText) === normalisedMessageBody,
+   );
+ 
+   if (matches.length === 1) {
+     return { match: { id: matches[0].id }, ambiguous: false };
+   }
+   if (matches.length > 1) {
+     return { match: null, ambiguous: true };
+   }
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/jobs/supportDraftReconciliationWorker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+2026-05-09T22:23:48.544597Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n findBackLinkCandidate'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n findBackLinkCandidate' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n findBackLinkCandidate'` rejected: blocked by policy
+2026-05-09T22:23:51.734656Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "cmd /c findstr /s /n /c:\"findBackLinkCandidate\" server\\*.ts"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "cmd /c findstr /s /n /c:\"findBackLinkCandidate\" server\\*.ts" in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "cmd /c findstr /s /n /c:\"findBackLinkCandidate\" server\\*.ts"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --name-only HEAD' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 536ms:
+server/jobs/supportDraftReconciliationWorker.ts
+server/services/__tests__/supportDraftReconciliation.test.ts
+server/services/connectorPollingService.ts
+server/services/supportDraftDispatchService.ts
+server/services/supportDraftDispatchServicePure.ts
+server/services/supportDraftReconciliationPure.ts
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: in the working copy of 'server/jobs/supportDraftReconciliationWorker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/__tests__/supportDraftReconciliation.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-index -- /dev/null server/adapters/integrationAdapter.ts' in C:\Files\Projects\automation-v1-3rd
+2026-05-09T22:24:03.327171Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.5 seconds
+Output:
+diff --git a/server/adapters/integrationAdapter.ts b/server/adapters/integrationAdapter.ts
+new file mode 100644
+index 00000000..7f90076e
+--- /dev/null
++++ b/server/adapters/integrationAdapter.ts
+@@ -0,0 +1,427 @@
++import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
++
++// ---------------------------------------------------------------------------
++// Adapter error classification — enables retry logic and observability
++// ---------------------------------------------------------------------------
++
++export interface AdapterError {
++  code: 'rate_limited' | 'auth_error' | 'not_found' | 'validation_error' | 'timeout' | 'provider_error' | 'unknown';
++  retryable: boolean;
++  message: string;
++}
++
++/** Classify an HTTP error into a structured AdapterError */
++export function classifyAdapterError(err: unknown, provider: string, action: string): AdapterError {
++  const axiosErr = err as { response?: { status?: number; data?: unknown }; code?: string; message?: string };
++  const status = axiosErr.response?.status;
++  const message = axiosErr.message ?? String(err);
++
++  if (axiosErr.code === 'ECONNABORTED' || axiosErr.code === 'ETIMEDOUT') {
++    return { code: 'timeout', retryable: true, message: `${provider} ${action} timed out: ${message}` };
++  }
++
++  if (status === 429) {
++    return { code: 'rate_limited', retryable: true, message: `${provider} ${action} rate limited` };
++  }
++  if (status === 401 || status === 403) {
++    return { code: 'auth_error', retryable: false, message: `${provider} ${action} auth failed: ${message}` };
++  }
++  if (status === 404) {
++    return { code: 'not_found', retryable: false, message: `${provider} ${action} not found: ${message}` };
++  }
++  if (status === 400 || status === 422) {
++    return { code: 'validation_error', retryable: false, message: `${provider} ${action} validation error: ${message}` };
++  }
++  if (status && status >= 500) {
++    return { code: 'provider_error', retryable: true, message: `${provider} ${action} server error (${status}): ${message}` };
++  }
++
++  return { code: 'unknown', retryable: false, message: `${provider} ${action} failed: ${message}` };
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — CRM
++// ---------------------------------------------------------------------------
++
++export interface CrmCreateContactInput {
++  name?: string;
++  email?: string;
++  phone?: string;
++  tags?: string[];
++  pipelineStage?: { pipelineId: string; stageId: string };
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — CRM
++// ---------------------------------------------------------------------------
++
++export interface CrmCreateContactResult {
++  contactId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Payments
++// ---------------------------------------------------------------------------
++
++export interface PaymentsCreateCheckoutInput {
++  amount: number;
++  currency?: string;
++  productName?: string;
++  successUrl: string;
++  cancelUrl: string;
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Payments
++// ---------------------------------------------------------------------------
++
++export interface PaymentsCreateCheckoutResult {
++  checkoutUrl: string;
++  sessionId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface PaymentsGetStatusResult {
++  status: 'pending' | 'completed' | 'failed' | 'expired';
++  success: boolean;
++  error?: AdapterError;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Ticketing
++// ---------------------------------------------------------------------------
++
++export interface TicketCreateInput {
++  subject: string;
++  previewText?: string;
++  status?: string;
++  priority?: string;
++  assignedTo?: string;
++  inboxId?: string;
++  customerEmail?: string;
++  tags?: string[];
++}
++
++export interface TicketUpdateInput {
++  subject?: string;
++  status?: string;
++  priority?: string;
++  assignedTo?: string | null;
++  tags?: string[];
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Ticketing
++// ---------------------------------------------------------------------------
++
++export interface TicketCreateResult {
++  ticketId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketUpdateResult {
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketReplyResult {
++  replyId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketData {
++  externalId: string;
++  subject: string;
++  status: 'active' | 'waiting' | 'closed' | 'resolved';
++  priority: 'low' | 'medium' | 'high' | 'urgent';
++  assignee?: string;
++  customerEmail?: string;
++  customerName?: string;
++  tags?: string[];
++  inboxId?: string;
++  createdAt?: Date;
++  updatedAt?: Date;
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Messaging
++// ---------------------------------------------------------------------------
++
++export interface MessageSendOptions {
++  blocks?: unknown[];
++  threadTs?: string;
++  unfurlLinks?: boolean;
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Messaging
++// ---------------------------------------------------------------------------
++
++export interface MessageSendResult {
++  messageId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface MessageChannelData {
++  externalId: string;
++  name: string;
++  type: 'channel' | 'dm' | 'group';
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Canonical entity types (used by ingestion interface)
++// ---------------------------------------------------------------------------
++
++export interface CanonicalAccountData {
++  externalId: string;
++  displayName: string;
++  status: 'active' | 'inactive' | 'suspended';
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalContactData {
++  externalId: string;
++  firstName?: string;
++  lastName?: string;
++  email?: string;
++  phone?: string;
++  tags?: string[];
++  source?: string;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalOpportunityData {
++  externalId: string;
++  name?: string;
++  stage?: string;
++  value?: number;
++  currency?: string;
++  status: 'open' | 'won' | 'lost' | 'abandoned';
++  stageEnteredAt?: Date;
++  stageHistory?: Array<{ stage: string; enteredAt: string; exitedAt?: string }>;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalConversationData {
++  externalId: string;
++  channel: 'sms' | 'email' | 'chat' | 'phone' | 'other';
++  status: 'active' | 'inactive' | 'closed';
++  messageCount: number;
++  lastMessageAt?: Date;
++  lastResponseTimeSeconds?: number;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalRevenueData {
++  externalId: string;
++  amount: number;
++  currency?: string;
++  type: 'one_time' | 'recurring' | 'refund';
++  status: 'pending' | 'completed' | 'failed' | 'refunded';
++  transactionDate?: Date;
++}
++
++// ---------------------------------------------------------------------------
++// Canonical entity types — Support Desk
++// ---------------------------------------------------------------------------
++
++export type SupportCanonicalStatus =
++  | 'open'
++  | 'pending_internal'
++  | 'waiting_on_customer'
++  | 'resolved'
++  | 'closed'
++  | 'unknown_provider_status';
++
++// The Exclude prevents mapping TO the quarantine value — it must be a fallthrough only
++export type SupportStatusMap = Record<string, Exclude<SupportCanonicalStatus, 'unknown_provider_status'>>;
++
++export interface CanonicalInboxData {
++  externalId: string;
++  name: string;
++  emailAddress?: string;
++  isActive: boolean;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalSupportAgentData {
++  externalId: string;
++  displayName: string;
++  email?: string;
++  agentKind: 'human' | 'bot';
++  isActive: boolean;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalTicketData {
++  externalId: string;
++  inboxExternalId: string;
++  customerEmail?: string;
++  customerName?: string;
++  customerExternalId?: string;
++  subject: string;
++  status: SupportCanonicalStatus;
++  priority: 'low' | 'medium' | 'high' | 'urgent';
++  assigneeAgentExternalId?: string;
++  tags?: string[];
++  category?: string;
++  sourceChannel: 'email' | 'chat' | 'form' | 'api';
++  openedAt: Date;
++  firstResponseAt?: Date;
++  lastCustomerMessageAt?: Date;
++  lastAgentMessageAt?: Date;
++  closedAt?: Date;
++  resolutionAt?: Date;
++  slaDueAt?: Date;
++  slaBreached?: boolean;
++  slaPolicyExternalId?: string;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalTicketMessageData {
++  externalId: string;
++  ticketExternalId: string;
++  direction: 'inbound' | 'outbound' | 'internal_note';
++  visibility: 'public' | 'internal';
++  authorType: 'customer' | 'agent' | 'bot' | 'system';
++  authorExternalId?: string;
++  bodyText: string;
++  bodyHtml?: string;
++  attachments?: Array<{
++    externalId: string;
++    filename: string;
++    providerUrl: string;
++    mimeType?: string;
++    size?: number;
++  }>;
++  createdAtExternal: Date;
++  externalMetadata?: Record<string, unknown>;
++}
++
++// Shared result wrapper for paginated ingestion methods
++export interface FetchSupportResult<T> {
++  rows: T[];
++  partial: boolean;        // true if any page failed before completion
++  error?: AdapterError;    // last page-level error, if partial=true
++  pagesCompleted?: number; // used by deletion-by-poll precondition check
++  rateLimited?: boolean;   // true if a 429 truncated the result set
++}
++
++// ---------------------------------------------------------------------------
++// Canonical Metric Data — returned by adapter computeMetrics()
++// ---------------------------------------------------------------------------
++
++export interface CanonicalMetricData {
++  metricSlug: string;
++  currentValue: number;
++  previousValue?: number;
++  periodStart?: Date;
++  periodEnd?: Date;
++  periodType: string;       // "rolling_7d", "rolling_30d", "daily"
++  aggregationType: string;  // "rate", "ratio", "count", "avg", "sum"
++  unit?: string;
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Normalised webhook event
++// ---------------------------------------------------------------------------
++
++export interface NormalisedEvent {
++  eventType: string;
++  accountExternalId: string;
++  entityType: 'contact' | 'opportunity' | 'conversation' | 'revenue' | 'account' | 'ticket' | 'message';
++  entityExternalId: string;
++  /** Provider-specific unique event ID for idempotency / deduplication */
++  externalEventId?: string;
++  data: Record<string, unknown>;
++  timestamp: Date;
++  sourceTimestamp?: Date;
++}
++
++// ---------------------------------------------------------------------------
++// Ingestion fetch options
++// ---------------------------------------------------------------------------
++
++export interface FetchOptions {
++  /** Only fetch records created/updated after this date */
++  since?: Date;
++  /** Maximum number of records to return */
++  limit?: number;
++}
++
++// ---------------------------------------------------------------------------
++// Integration Adapter — the contract every connector must implement.
++//
++// Each capability group is optional. An adapter implements only the groups
++// relevant to its integration type:
++//   - GHL:           crm + ingestion + webhook
++//   - Stripe:        payments
++//   - Teamwork Desk: ticketing + webhook
++//   - Slack:         messaging + webhook
++// ---------------------------------------------------------------------------
++
++export interface IntegrationAdapter {
++  supportedActions: string[];
++
++  /** Outbound CRM actions (e.g. GHL, HubSpot) */
++  crm?: {
++    createContact(connection: IntegrationConnection, fields: CrmCreateContactInput): Promise<CrmCreateContactResult>;
++  };
++
++  /** Outbound payment actions (e.g. Stripe) */
++  payments?: {
++    createCheckout(connection: IntegrationConnection, fields: PaymentsCreateCheckoutInput): Promise<PaymentsCreateCheckoutResult>;
++    getPaymentStatus(connection: IntegrationConnection, sessionId: string): Promise<PaymentsGetStatusResult>;
++  };
++
++  /** Outbound ticketing actions (e.g. Teamwork Desk, Zendesk, Freshdesk) */
++  ticketing?: {
++    createTicket(connection: IntegrationConnection, fields: TicketCreateInput): Promise<TicketCreateResult>;
++    updateTicket(connection: IntegrationConnection, ticketId: string, fields: TicketUpdateInput): Promise<TicketUpdateResult>;
++    addReply(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string; status?: string }): Promise<TicketReplyResult>;
++    addInternalNote(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string }): Promise<TicketReplyResult>;
++    resolveAttachment(connection: IntegrationConnection, ticketId: string, messageId: string, attachmentExternalId: string): Promise<{ url?: string; stream?: NodeJS.ReadableStream; mimeType?: string; success: boolean; error?: AdapterError }>;
++    getTicket(connection: IntegrationConnection, ticketId: string): Promise<TicketData>;
++  };
++
++  /** Outbound messaging actions (e.g. Slack) */
++  messaging?: {
++    sendMessage(connection: IntegrationConnection, channelId: string, text: string, options?: MessageSendOptions): Promise<MessageSendResult>;
++    listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]>;
++  };
++
++  /** Inbound data ingestion — fetch normalised entities from external platform */
++  ingestion?: {
++    listAccounts(connection: IntegrationConnection, config: Record<string, unknown>): Promise<CanonicalAccountData[]>;
++    fetchContacts(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]>;
++    fetchOpportunities(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalOpportunityData[]>;
++    fetchConversations(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalConversationData[]>;
++    fetchRevenue(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalRevenueData[]>;
++    validateCredentials(connection: IntegrationConnection): Promise<{ valid: boolean; error?: string }>;
++    /** Compute derived metrics from raw entities. Called after entity sync. */
++    computeMetrics?(
++      connection: IntegrationConnection,
++      accountExternalId: string,
++      entityCounts: { contacts: number; opportunities: number; conversations: number; revenue: number }
++    ): Promise<CanonicalMetricData[]>;
++    listInboxes?(connection: IntegrationConnection): Promise<CanonicalInboxData[]>;
++    listSupportAgents?(connection: IntegrationConnection): Promise<CanonicalSupportAgentData[]>;
++    fetchTickets?(connection: IntegrationConnection, inboxExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketData>>;
++    fetchTicketMessages?(connection: IntegrationConnection, ticketExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketMessageData>>;
++  };
++
++  /** Webhook handling — verify and normalise inbound webhook events */
++  webhook?: {
++    verifySignature(payload: Buffer, signature: string, secret: string): boolean;
++    normaliseEvent(rawEvent: unknown): NormalisedEvent | null;
++  };
++}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ exited 1 in 485ms:
+diff --git a/server/adapters/integrationAdapter.ts b/server/adapters/integrationAdapter.ts
+new file mode 100644
+index 00000000..7f90076e
+--- /dev/null
++++ b/server/adapters/integrationAdapter.ts
+@@ -0,0 +1,427 @@
++import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
++
++// ---------------------------------------------------------------------------
++// Adapter error classification — enables retry logic and observability
++// ---------------------------------------------------------------------------
++
++export interface AdapterError {
++  code: 'rate_limited' | 'auth_error' | 'not_found' | 'validation_error' | 'timeout' | 'provider_error' | 'unknown';
++  retryable: boolean;
++  message: string;
++}
++
++/** Classify an HTTP error into a structured AdapterError */
++export function classifyAdapterError(err: unknown, provider: string, action: string): AdapterError {
++  const axiosErr = err as { response?: { status?: number; data?: unknown }; code?: string; message?: string };
++  const status = axiosErr.response?.status;
++  const message = axiosErr.message ?? String(err);
++
++  if (axiosErr.code === 'ECONNABORTED' || axiosErr.code === 'ETIMEDOUT') {
++    return { code: 'timeout', retryable: true, message: `${provider} ${action} timed out: ${message}` };
++  }
++
++  if (status === 429) {
++    return { code: 'rate_limited', retryable: true, message: `${provider} ${action} rate limited` };
++  }
++  if (status === 401 || status === 403) {
++    return { code: 'auth_error', retryable: false, message: `${provider} ${action} auth failed: ${message}` };
++  }
++  if (status === 404) {
++    return { code: 'not_found', retryable: false, message: `${provider} ${action} not found: ${message}` };
++  }
++  if (status === 400 || status === 422) {
++    return { code: 'validation_error', retryable: false, message: `${provider} ${action} validation error: ${message}` };
++  }
++  if (status && status >= 500) {
++    return { code: 'provider_error', retryable: true, message: `${provider} ${action} server error (${status}): ${message}` };
++  }
++
++  return { code: 'unknown', retryable: false, message: `${provider} ${action} failed: ${message}` };
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — CRM
++// ---------------------------------------------------------------------------
++
++export interface CrmCreateContactInput {
++  name?: string;
++  email?: string;
++  phone?: string;
++  tags?: string[];
++  pipelineStage?: { pipelineId: string; stageId: string };
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — CRM
++// ---------------------------------------------------------------------------
++
++export interface CrmCreateContactResult {
++  contactId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Payments
++// ---------------------------------------------------------------------------
++
++export interface PaymentsCreateCheckoutInput {
++  amount: number;
++  currency?: string;
++  productName?: string;
++  successUrl: string;
++  cancelUrl: string;
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Payments
++// ---------------------------------------------------------------------------
++
++export interface PaymentsCreateCheckoutResult {
++  checkoutUrl: string;
++  sessionId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface PaymentsGetStatusResult {
++  status: 'pending' | 'completed' | 'failed' | 'expired';
++  success: boolean;
++  error?: AdapterError;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Ticketing
++// ---------------------------------------------------------------------------
++
++export interface TicketCreateInput {
++  subject: string;
++  previewText?: string;
++  status?: string;
++  priority?: string;
++  assignedTo?: string;
++  inboxId?: string;
++  customerEmail?: string;
++  tags?: string[];
++}
++
++export interface TicketUpdateInput {
++  subject?: string;
++  status?: string;
++  priority?: string;
++  assignedTo?: string | null;
++  tags?: string[];
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Ticketing
++// ---------------------------------------------------------------------------
++
++export interface TicketCreateResult {
++  ticketId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketUpdateResult {
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketReplyResult {
++  replyId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface TicketData {
++  externalId: string;
++  subject: string;
++  status: 'active' | 'waiting' | 'closed' | 'resolved';
++  priority: 'low' | 'medium' | 'high' | 'urgent';
++  assignee?: string;
++  customerEmail?: string;
++  customerName?: string;
++  tags?: string[];
++  inboxId?: string;
++  createdAt?: Date;
++  updatedAt?: Date;
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Typed action inputs — Messaging
++// ---------------------------------------------------------------------------
++
++export interface MessageSendOptions {
++  blocks?: unknown[];
++  threadTs?: string;
++  unfurlLinks?: boolean;
++}
++
++// ---------------------------------------------------------------------------
++// Outbound action result types — Messaging
++// ---------------------------------------------------------------------------
++
++export interface MessageSendResult {
++  messageId: string;
++  success: boolean;
++  error?: AdapterError;
++}
++
++export interface MessageChannelData {
++  externalId: string;
++  name: string;
++  type: 'channel' | 'dm' | 'group';
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Canonical entity types (used by ingestion interface)
++// ---------------------------------------------------------------------------
++
++export interface CanonicalAccountData {
++  externalId: string;
++  displayName: string;
++  status: 'active' | 'inactive' | 'suspended';
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalContactData {
++  externalId: string;
++  firstName?: string;
++  lastName?: string;
++  email?: string;
++  phone?: string;
++  tags?: string[];
++  source?: string;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalOpportunityData {
++  externalId: string;
++  name?: string;
++  stage?: string;
++  value?: number;
++  currency?: string;
++  status: 'open' | 'won' | 'lost' | 'abandoned';
++  stageEnteredAt?: Date;
++  stageHistory?: Array<{ stage: string; enteredAt: string; exitedAt?: string }>;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalConversationData {
++  externalId: string;
++  channel: 'sms' | 'email' | 'chat' | 'phone' | 'other';
++  status: 'active' | 'inactive' | 'closed';
++  messageCount: number;
++  lastMessageAt?: Date;
++  lastResponseTimeSeconds?: number;
++  externalCreatedAt?: Date;
++}
++
++export interface CanonicalRevenueData {
++  externalId: string;
++  amount: number;
++  currency?: string;
++  type: 'one_time' | 'recurring' | 'refund';
++  status: 'pending' | 'completed' | 'failed' | 'refunded';
++  transactionDate?: Date;
++}
++
++// ---------------------------------------------------------------------------
++// Canonical entity types — Support Desk
++// ---------------------------------------------------------------------------
++
++export type SupportCanonicalStatus =
++  | 'open'
++  | 'pending_internal'
++  | 'waiting_on_customer'
++  | 'resolved'
++  | 'closed'
++  | 'unknown_provider_status';
++
++// The Exclude prevents mapping TO the quarantine value — it must be a fallthrough only
++export type SupportStatusMap = Record<string, Exclude<SupportCanonicalStatus, 'unknown_provider_status'>>;
++
++export interface CanonicalInboxData {
++  externalId: string;
++  name: string;
++  emailAddress?: string;
++  isActive: boolean;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalSupportAgentData {
++  externalId: string;
++  displayName: string;
++  email?: string;
++  agentKind: 'human' | 'bot';
++  isActive: boolean;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalTicketData {
++  externalId: string;
++  inboxExternalId: string;
++  customerEmail?: string;
++  customerName?: string;
++  customerExternalId?: string;
++  subject: string;
++  status: SupportCanonicalStatus;
++  priority: 'low' | 'medium' | 'high' | 'urgent';
++  assigneeAgentExternalId?: string;
++  tags?: string[];
++  category?: string;
++  sourceChannel: 'email' | 'chat' | 'form' | 'api';
++  openedAt: Date;
++  firstResponseAt?: Date;
++  lastCustomerMessageAt?: Date;
++  lastAgentMessageAt?: Date;
++  closedAt?: Date;
++  resolutionAt?: Date;
++  slaDueAt?: Date;
++  slaBreached?: boolean;
++  slaPolicyExternalId?: string;
++  externalMetadata?: Record<string, unknown>;
++}
++
++export interface CanonicalTicketMessageData {
++  externalId: string;
++  ticketExternalId: string;
++  direction: 'inbound' | 'outbound' | 'internal_note';
++  visibility: 'public' | 'internal';
++  authorType: 'customer' | 'agent' | 'bot' | 'system';
++  authorExternalId?: string;
++  bodyText: string;
++  bodyHtml?: string;
++  attachments?: Array<{
++    externalId: string;
++    filename: string;
++    providerUrl: string;
++    mimeType?: string;
++    size?: number;
++  }>;
++  createdAtExternal: Date;
++  externalMetadata?: Record<string, unknown>;
++}
++
++// Shared result wrapper for paginated ingestion methods
++export interface FetchSupportResult<T> {
++  rows: T[];
++  partial: boolean;        // true if any page failed before completion
++  error?: AdapterError;    // last page-level error, if partial=true
++  pagesCompleted?: number; // used by deletion-by-poll precondition check
++  rateLimited?: boolean;   // true if a 429 truncated the result set
++}
++
++// ---------------------------------------------------------------------------
++// Canonical Metric Data — returned by adapter computeMetrics()
++// ---------------------------------------------------------------------------
++
++export interface CanonicalMetricData {
++  metricSlug: string;
++  currentValue: number;
++  previousValue?: number;
++  periodStart?: Date;
++  periodEnd?: Date;
++  periodType: string;       // "rolling_7d", "rolling_30d", "daily"
++  aggregationType: string;  // "rate", "ratio", "count", "avg", "sum"
++  unit?: string;
++  metadata?: Record<string, unknown>;
++}
++
++// ---------------------------------------------------------------------------
++// Normalised webhook event
++// ---------------------------------------------------------------------------
++
++export interface NormalisedEvent {
++  eventType: string;
++  accountExternalId: string;
++  entityType: 'contact' | 'opportunity' | 'conversation' | 'revenue' | 'account' | 'ticket' | 'message';
++  entityExternalId: string;
++  /** Provider-specific unique event ID for idempotency / deduplication */
++  externalEventId?: string;
++  data: Record<string, unknown>;
++  timestamp: Date;
++  sourceTimestamp?: Date;
++}
++
++// ---------------------------------------------------------------------------
++// Ingestion fetch options
++// ---------------------------------------------------------------------------
++
++export interface FetchOptions {
++  /** Only fetch records created/updated after this date */
++  since?: Date;
++  /** Maximum number of records to return */
++  limit?: number;
++}
++
++// ---------------------------------------------------------------------------
++// Integration Adapter — the contract every connector must implement.
++//
++// Each capability group is optional. An adapter implements only the groups
++// relevant to its integration type:
++//   - GHL:           crm + ingestion + webhook
++//   - Stripe:        payments
++//   - Teamwork Desk: ticketing + webhook
++//   - Slack:         messaging + webhook
++// ---------------------------------------------------------------------------
++
++export interface IntegrationAdapter {
++  supportedActions: string[];
++
++  /** Outbound CRM actions (e.g. GHL, HubSpot) */
++  crm?: {
++    createContact(connection: IntegrationConnection, fields: CrmCreateContactInput): Promise<CrmCreateContactResult>;
++  };
++
++  /** Outbound payment actions (e.g. Stripe) */
++  payments?: {
++    createCheckout(connection: IntegrationConnection, fields: PaymentsCreateCheckoutInput): Promise<PaymentsCreateCheckoutResult>;
++    getPaymentStatus(connection: IntegrationConnection, sessionId: string): Promise<PaymentsGetStatusResult>;
++  };
++
++  /** Outbound ticketing actions (e.g. Teamwork Desk, Zendesk, Freshdesk) */
++  ticketing?: {
++    createTicket(connection: IntegrationConnection, fields: TicketCreateInput): Promise<TicketCreateResult>;
++    updateTicket(connection: IntegrationConnection, ticketId: string, fields: TicketUpdateInput): Promise<TicketUpdateResult>;
++    addReply(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string; status?: string }): Promise<TicketReplyResult>;
++    addInternalNote(connection: IntegrationConnection, ticketId: string, body: string, options?: { idempotencyKey?: string }): Promise<TicketReplyResult>;
++    resolveAttachment(connection: IntegrationConnection, ticketId: string, messageId: string, attachmentExternalId: string): Promise<{ url?: string; stream?: NodeJS.ReadableStream; mimeType?: string; success: boolean; error?: AdapterError }>;
++    getTicket(connection: IntegrationConnection, ticketId: string): Promise<TicketData>;
++  };
++
++  /** Outbound messaging actions (e.g. Slack) */
++  messaging?: {
++    sendMessage(connection: IntegrationConnection, channelId: string, text: string, options?: MessageSendOptions): Promise<MessageSendResult>;
++    listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]>;
++  };
++
++  /** Inbound data ingestion — fetch normalised entities from external platform */
++  ingestion?: {
++    listAccounts(connection: IntegrationConnection, config: Record<string, unknown>): Promise<CanonicalAccountData[]>;
++    fetchContacts(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]>;
++    fetchOpportunities(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalOpportunityData[]>;
++    fetchConversations(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalConversationData[]>;
++    fetchRevenue(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalRevenueData[]>;
++    validateCredentials(connection: IntegrationConnection): Promise<{ valid: boolean; error?: string }>;
++    /** Compute derived metrics from raw entities. Called after entity sync. */
++    computeMetrics?(
++      connection: IntegrationConnection,
++      accountExternalId: string,
++      entityCounts: { contacts: number; opportunities: number; conversations: number; revenue: number }
++    ): Promise<CanonicalMetricData[]>;
++    listInboxes?(connection: IntegrationConnection): Promise<CanonicalInboxData[]>;
++    listSupportAgents?(connection: IntegrationConnection): Promise<CanonicalSupportAgentData[]>;
++    fetchTickets?(connection: IntegrationConnection, inboxExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketData>>;
++    fetchTicketMessages?(connection: IntegrationConnection, ticketExternalId: string, opts?: FetchOptions): Promise<FetchSupportResult<CanonicalTicketMessageData>>;
++  };
++
++  /** Webhook handling — verify and normalise inbound webhook events */
++  webhook?: {
++    verifySignature(payload: Buffer, signature: string, secret: string): boolean;
++    normaliseEvent(rawEvent: unknown): NormalisedEvent | null;
++  };
++}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-09T22:24:06.948685Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-tree -r --name-only HEAD server/adapters'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-tree -r --name-only HEAD server/adapters' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-tree -r --name-only HEAD server/adapters'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-index -- /dev/null server/services/supportDraftDispatchServicePure.ts' in C:\Files\Projects\automation-v1-3rd
+2026-05-09T22:24:10.885891Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.5 seconds
+Output:
+diff --git a/server/services/supportDraftDispatchServicePure.ts b/server/services/supportDraftDispatchServicePure.ts
+new file mode 100644
+index 00000000..109a7363
+--- /dev/null
++++ b/server/services/supportDraftDispatchServicePure.ts
+@@ -0,0 +1,152 @@
++// supportDraftDispatchServicePure.ts — Pure helpers for the support draft dispatch path.
++// Spec: tasks/builds/support-desk-canonical/spec.md §8, §14.1, §14.7
++//
++// No DB access, no async. All functions are deterministic given their inputs.
++// The reconciliation worker (C11), route layer, and tests all import from here.
++
++import { createHash } from 'node:crypto';
++
++// ---------------------------------------------------------------------------
++// DraftStatus
++// ---------------------------------------------------------------------------
++
++export type DraftStatus =
++  | 'draft'
++  | 'awaiting_review'
++  | 'dispatching'
++  | 'needs_reconciliation'
++  | 'manually_marked_sent'
++  | 'sent'
++  | 'rejected'
++  | 'failed'
++  | 'expired'
++  | 'superseded';
++
++// ---------------------------------------------------------------------------
++// isValidDraftStatusTransition
++// ---------------------------------------------------------------------------
++
++/**
++ * Returns true for every permitted transition in the state machine.
++ *
++ * Terminal states: sent, rejected, failed, expired, superseded, manually_marked_sent
++ * Post-terminal exceptions (the ONLY exits from terminal states):
++ *   manually_marked_sent → sent            (back-link route resolves the sent_message_id)
++ *   needs_reconciliation → failed          (manual resolve — give up)
++ *   needs_reconciliation → manually_marked_sent  (operator manually marks it sent)
++ *   needs_reconciliation → sent            (back-link route resolves)
++ *   needs_reconciliation → dispatching     (boot recovery may re-promote stalled rows;
++ *                                           retry_reconciliation does NOT use this transition —
++ *                                           it preserves status and only resets attempt count
++ *                                           so the §8.4 worker re-processes the row)
++ *
++ * Explicit prohibition: dispatching → expired is blocked (expiry scanner must not
++ * touch in-flight drafts; they transition to needs_reconciliation instead).
++ */
++export function isValidDraftStatusTransition(from: DraftStatus, to: DraftStatus): boolean {
++  switch (from) {
++    case 'draft':
++      return to === 'awaiting_review' || to === 'superseded' || to === 'dispatching' || to === 'expired';
++
++    case 'awaiting_review':
++      return to === 'dispatching' || to === 'rejected' || to === 'superseded' || to === 'expired';
++
++    case 'dispatching':
++      // dispatching → expired is explicitly forbidden
++      return to === 'sent' || to === 'needs_reconciliation' || to === 'failed';
++
++    case 'needs_reconciliation':
++      // The only non-terminal state that allows multiple exit paths (including
++      // retry_reconciliation which re-enters dispatching, and manual resolve paths)
++      return (
++        to === 'failed' ||
++        to === 'manually_marked_sent' ||
++        to === 'sent' ||
++        to === 'dispatching'
++      );
++
++    case 'manually_marked_sent':
++      // Back-link route can resolve the sent_message_id, flipping to sent
++      return to === 'sent';
++
++    // Terminal states with no exit
++    case 'sent':
++    case 'rejected':
++    case 'failed':
++    case 'expired':
++    case 'superseded':
++      return false;
++
++    default:
++      return false;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// deriveActionIdempotencyKey
++// ---------------------------------------------------------------------------
++
++/**
++ * Deterministic SHA-256 hex of `${connectorConfigId}:${ticketId}:${actionType}:${draftId}`.
++ * Same inputs always produce the same key; a different draftId yields a different key.
++ * Used to prevent duplicate dispatch of the same draft.
++ */
++export function deriveActionIdempotencyKey(input: {
++  connectorConfigId: string;
++  ticketId: string;
++  actionType: 'reply' | 'internal_note';
++  draftId: string;
++}): string {
++  const raw = `${input.connectorConfigId}:${input.ticketId}:${input.actionType}:${input.draftId}`;
++  return createHash('sha256').update(raw).digest('hex');
++}
++
++// ---------------------------------------------------------------------------
++// deriveInPlaceActionKey
++// ---------------------------------------------------------------------------
++
++/**
++ * Deterministic SHA-256 hex for in-place mutations (status/assignment/tag changes)
++ * that are NOT tied to a draft.
++ *
++ * Hash of `${connectorConfigId}:${ticketId}:${actionType}:${JSON.stringify(sortedPayload)}`
++ * where sortedPayload has its keys sorted deterministically.
++ */
++export function deriveInPlaceActionKey(input: {
++  connectorConfigId: string;
++  ticketId: string;
++  actionType: 'status_change' | 'assignment_change' | 'tag_change';
++  payload: Record<string, unknown>;
++}): string {
++  const sortedPayload = Object.fromEntries(
++    Object.keys(input.payload)
++      .sort()
++      .map((k) => [k, input.payload[k]]),
++  );
++  const raw = `${input.connectorConfigId}:${input.ticketId}:${input.actionType}:${JSON.stringify(sortedPayload)}`;
++  return createHash('sha256').update(raw).digest('hex');
++}
++
++// ---------------------------------------------------------------------------
++// planSameRunSupersession
++// ---------------------------------------------------------------------------
++
++/**
++ * Returns whether to supersede a prior draft before inserting the new one.
++ *
++ * 'supersede_then_insert' when existingDraft != null AND its status is in
++ *   ('draft', 'awaiting_review') — i.e. the prior draft is still pending review.
++ * 'insert_only' otherwise (no active prior draft, or prior draft is past review).
++ */
++export function planSameRunSupersession(input: {
++  existingDraft: { status: string } | null;
++  newProposal: { visibility: string };
++}): { action: 'insert_only' | 'supersede_then_insert' } {
++  if (
++    input.existingDraft !== null &&
++    (input.existingDraft.status === 'draft' || input.existingDraft.status === 'awaiting_review')
++  ) {
++    return { action: 'supersede_then_insert' };
++  }
++  return { action: 'insert_only' };
++}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+
+ exited 1 in 469ms:
+diff --git a/server/services/supportDraftDispatchServicePure.ts b/server/services/supportDraftDispatchServicePure.ts
+new file mode 100644
+index 00000000..109a7363
+--- /dev/null
++++ b/server/services/supportDraftDispatchServicePure.ts
+@@ -0,0 +1,152 @@
++// supportDraftDispatchServicePure.ts — Pure helpers for the support draft dispatch path.
++// Spec: tasks/builds/support-desk-canonical/spec.md §8, §14.1, §14.7
++//
++// No DB access, no async. All functions are deterministic given their inputs.
++// The reconciliation worker (C11), route layer, and tests all import from here.
++
++import { createHash } from 'node:crypto';
++
++// ---------------------------------------------------------------------------
++// DraftStatus
++// ---------------------------------------------------------------------------
++
++export type DraftStatus =
++  | 'draft'
++  | 'awaiting_review'
++  | 'dispatching'
++  | 'needs_reconciliation'
++  | 'manually_marked_sent'
++  | 'sent'
++  | 'rejected'
++  | 'failed'
++  | 'expired'
++  | 'superseded';
++
++// ---------------------------------------------------------------------------
++// isValidDraftStatusTransition
++// ---------------------------------------------------------------------------
++
++/**
++ * Returns true for every permitted transition in the state machine.
++ *
++ * Terminal states: sent, rejected, failed, expired, superseded, manually_marked_sent
++ * Post-terminal exceptions (the ONLY exits from terminal states):
++ *   manually_marked_sent → sent            (back-link route resolves the sent_message_id)
++ *   needs_reconciliation → failed          (manual resolve — give up)
++ *   needs_reconciliation → manually_marked_sent  (operator manually marks it sent)
++ *   needs_reconciliation → sent            (back-link route resolves)
++ *   needs_reconciliation → dispatching     (boot recovery may re-promote stalled rows;
++ *                                           retry_reconciliation does NOT use this transition —
++ *                                           it preserves status and only resets attempt count
++ *                                           so the §8.4 worker re-processes the row)
++ *
++ * Explicit prohibition: dispatching → expired is blocked (expiry scanner must not
++ * touch in-flight drafts; they transition to needs_reconciliation instead).
++ */
++export function isValidDraftStatusTransition(from: DraftStatus, to: DraftStatus): boolean {
++  switch (from) {
++    case 'draft':
++      return to === 'awaiting_review' || to === 'superseded' || to === 'dispatching' || to === 'expired';
++
++    case 'awaiting_review':
++      return to === 'dispatching' || to === 'rejected' || to === 'superseded' || to === 'expired';
++
++    case 'dispatching':
++      // dispatching → expired is explicitly forbidden
++      return to === 'sent' || to === 'needs_reconciliation' || to === 'failed';
++
++    case 'needs_reconciliation':
++      // The only non-terminal state that allows multiple exit paths (including
++      // retry_reconciliation which re-enters dispatching, and manual resolve paths)
++      return (
++        to === 'failed' ||
++        to === 'manually_marked_sent' ||
++        to === 'sent' ||
++        to === 'dispatching'
++      );
++
++    case 'manually_marked_sent':
++      // Back-link route can resolve the sent_message_id, flipping to sent
++      return to === 'sent';
++
++    // Terminal states with no exit
++    case 'sent':
++    case 'rejected':
++    case 'failed':
++    case 'expired':
++    case 'superseded':
++      return false;
++
++    default:
++      return false;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// deriveActionIdempotencyKey
++// ---------------------------------------------------------------------------
++
++/**
++ * Deterministic SHA-256 hex of `${connectorConfigId}:${ticketId}:${actionType}:${draftId}`.
++ * Same inputs always produce the same key; a different draftId yields a different key.
++ * Used to prevent duplicate dispatch of the same draft.
++ */
++export function deriveActionIdempotencyKey(input: {
++  connectorConfigId: string;
++  ticketId: string;
++  actionType: 'reply' | 'internal_note';
++  draftId: string;
++}): string {
++  const raw = `${input.connectorConfigId}:${input.ticketId}:${input.actionType}:${input.draftId}`;
++  return createHash('sha256').update(raw).digest('hex');
++}
++
++// ---------------------------------------------------------------------------
++// deriveInPlaceActionKey
++// ---------------------------------------------------------------------------
++
++/**
++ * Deterministic SHA-256 hex for in-place mutations (status/assignment/tag changes)
++ * that are NOT tied to a draft.
++ *
++ * Hash of `${connectorConfigId}:${ticketId}:${actionType}:${JSON.stringify(sortedPayload)}`
++ * where sortedPayload has its keys sorted deterministically.
++ */
++export function deriveInPlaceActionKey(input: {
++  connectorConfigId: string;
++  ticketId: string;
++  actionType: 'status_change' | 'assignment_change' | 'tag_change';
++  payload: Record<string, unknown>;
++}): string {
++  const sortedPayload = Object.fromEntries(
++    Object.keys(input.payload)
++      .sort()
++      .map((k) => [k, input.payload[k]]),
++  );
++  const raw = `${input.connectorConfigId}:${input.ticketId}:${input.actionType}:${JSON.stringify(sortedPayload)}`;
++  return createHash('sha256').update(raw).digest('hex');
++}
++
++// ---------------------------------------------------------------------------
++// planSameRunSupersession
++// ---------------------------------------------------------------------------
++
++/**
++ * Returns whether to supersede a prior draft before inserting the new one.
++ *
++ * 'supersede_then_insert' when existingDraft != null AND its status is in
++ *   ('draft', 'awaiting_review') — i.e. the prior draft is still pending review.
++ * 'insert_only' otherwise (no active prior draft, or prior draft is past review).
++ */
++export function planSameRunSupersession(input: {
++  existingDraft: { status: string } | null;
++  newProposal: { visibility: string };
++}): { action: 'insert_only' | 'supersede_then_insert' } {
++  if (
++    input.existingDraft !== null &&
++    (input.existingDraft.status === 'draft' || input.existingDraft.status === 'awaiting_review')
++  ) {
++    return { action: 'supersede_then_insert' };
++  }
++  return { action: 'insert_only' };
++}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --check' in C:\Files\Projects\automation-v1-3rd
+ succeeded in 525ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: in the working copy of 'server/jobs/supportDraftReconciliationWorker.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/__tests__/supportDraftReconciliation.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchService.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftDispatchServicePure.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/services/supportDraftReconciliationPure.ts', LF will be replaced by CRLF the next time Git touches it
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --no-index -- /dev/null server/adapters/teamworkDeskAdapter.ts' in C:\Files\Projects\automation-v1-3rd
+2026-05-09T22:24:58.633585Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.5 seconds
+Output:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+error: Could not access 'server/adapters/teamworkDeskAdapter.ts'
+
+ exited 1 in 467ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+error: Could not access 'server/adapters/teamworkDeskAdapter.ts'
+
+2026-05-09T22:25:02.755319Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files' in C:\Files\Projects\automation-v1-3rd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git ls-files'` rejected: blocked by policy
+codex
+The patch changes successful dispatches to rely on reconciliation/back-linking, but the existing back-link matching path does not consider the new `needs_reconciliation` state. This can leave successfully sent drafts unresolved longer than intended or escalated to manual review.
+
+Review comment:
+
+- [P2] Include reconciled drafts in webhook back-link matching — C:\Files\Projects\automation-v1-3rd\server\services\supportDraftDispatchService.ts:489-489
+  When a successful send is now parked as `needs_reconciliation`, the existing webhook back-link helper still only considers drafts in `sent` or `manually_marked_sent` with no `sentMessageId`. In webhook-first scenarios, the newly landed canonical message will therefore not back-link this draft despite the comment here relying on that route, leaving resolution to delayed reconciliation retries and potentially surfacing manual review unnecessarily. Update the back-link eligibility to include `needs_reconciliation` or avoid relying on that route for this state.
+2026-05-09T22:25:16.183241Z ERROR codex_core::session: failed to record rollout items: thread 019e0ed5-b3c8-73d2-9d55-19b510ffccd1 not found
+2026-05-09T22:25:16.253646Z ERROR codex_core::session: failed to record rollout items: thread 019e0ed5-b39b-7bc0-8031-3779ab994a42 not found
+The patch changes successful dispatches to rely on reconciliation/back-linking, but the existing back-link matching path does not consider the new `needs_reconciliation` state. This can leave successfully sent drafts unresolved longer than intended or escalated to manual review.
+
+Review comment:
+
+- [P2] Include reconciled drafts in webhook back-link matching — C:\Files\Projects\automation-v1-3rd\server\services\supportDraftDispatchService.ts:489-489
+  When a successful send is now parked as `needs_reconciliation`, the existing webhook back-link helper still only considers drafts in `sent` or `manually_marked_sent` with no `sentMessageId`. In webhook-first scenarios, the newly landed canonical message will therefore not back-link this draft despite the comment here relying on that route, leaving resolution to delayed reconciliation retries and potentially surfacing manual review unnecessarily. Update the back-link eligibility to include `needs_reconciliation` or avoid relying on that route for this state.

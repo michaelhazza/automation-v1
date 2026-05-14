@@ -1,0 +1,10 @@
+server/services/__tests__/visibilityPredicatePure.test.ts
+server/services/__tests__/workflowActionCallExecutorPure.test.ts
+server/services/__tests__/workspaceHealthServicePure.test.ts
+server/services/__tests__/workspaceMemoryService.test.ts
+server/services/__tests__/workspaceMemoryServicePure.test.ts
+server/services/crmQueryPlanner/__tests__/approvalCardGeneratorPure.test.ts
+server/services/crmQueryPlanner/__tests__/canonicalQueryRegistry.test.ts
+server/services/crmQueryPlanner/__tests__/crmQueryPlannerService.test.ts
+server/services/crmQueryPlanner/__tests__/hybridExecutor.test.ts
+server/services/crmQueryPlanner/__tests__/integration.test.ts

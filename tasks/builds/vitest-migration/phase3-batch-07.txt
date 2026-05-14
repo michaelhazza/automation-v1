@@ -1,0 +1,10 @@
+server/services/__tests__/briefArtefactCursorPure.test.ts
+server/services/__tests__/briefArtefactPaginationPure.test.ts
+server/services/__tests__/briefArtefactValidatorPure.test.ts
+server/services/__tests__/briefConversationWriterPostCommit.integration.test.ts
+server/services/__tests__/briefMessageHandlerPure.test.ts
+server/services/__tests__/briefVisibilityServicePure.test.ts
+server/services/__tests__/bundleSuggestionDismissalsPure.test.ts
+server/services/__tests__/canonicalDictionaryRendererPure.test.ts
+server/services/__tests__/canonicalDictionaryValidatorPure.test.ts
+server/services/__tests__/canonicalRegistryDriftPure.test.ts

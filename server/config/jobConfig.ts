@@ -212,6 +212,7 @@ export const JOB_CONFIG = {
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'slack-inbound__dlq',
     idempotencyStrategy: 'payload-key' as const,
   },
   // Sprint 2 P1.2 — capture a regression_cases row when a human rejects
@@ -260,6 +261,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'agent-briefing-update__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per run completion
   },
 
@@ -269,6 +271,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'memory-context-enrichment__dlq',
     idempotencyStrategy: 'singleton-key' as const, // dedup per conversation
   },
 
@@ -278,7 +281,41 @@ export const JOB_CONFIG = {
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
+    deadLetter: 'page-integration__dlq',
     idempotencyStrategy: 'payload-key' as const, // pageId + action
+  },
+
+  // ── Agentic Commerce — IEE worker round-trip (Chunk 11) ─────────────
+  // Three queues: request (worker→main), response (main→worker), completion (worker→main).
+  // agent-spend-request: worker emits; main app processes via proposeCharge.
+  //   payload-key: correlationId is the per-request dedup token.
+  // agent-spend-response: main app emits; worker picks up by correlationId.
+  //   Consumed by worker — no main-app handler. payload-key: correlationId.
+  // agent-spend-completion: worker emits after merchant form-fill; main app processes.
+  //   one-shot: one completion per executed row (idempotent via trigger + WHERE status='executed').
+  'agent-spend-request': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 45, // Must be processed within 30s deadline + margin
+    deadLetter: 'agent-spend-request__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-response': {
+    retryLimit: 1,
+    retryDelay: 2,
+    retryBackoff: false,
+    expireInSeconds: 35, // Response must reach worker within 30s window
+    deadLetter: 'agent-spend-response__dlq',
+    idempotencyStrategy: 'payload-key' as const, // correlationId
+  },
+  'agent-spend-completion': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120, // Completion is async from the 30s round-trip
+    deadLetter: 'agent-spend-completion__dlq',
+    idempotencyStrategy: 'one-shot' as const, // one per executed row
   },
 
   // ── IEE — Integrated Execution Environment (rev 6) ──────────────
@@ -317,6 +354,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'iee-cost-rollup-daily__dlq',
     idempotencyStrategy: 'one-shot' as const, // daily cron
   },
   // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
@@ -334,66 +372,91 @@ export const JOB_CONFIG = {
   },
 
   // ── Skill Analyzer (migration 0092) ─────────────────────────────
-  // One-shot: one job per analysis session. Retry safety handled by the
-  // handler itself (deletes results before re-processing). Max 1 retry
-  // with 5-minute delay — long enough for transient API failures to clear.
-  // expireInSeconds set to 3600 (60 min): with up to 50 skills × 180s
-  // per-skill timeout at concurrency 3, worst-case is ceil(50/3) × 180s
-  // ≈ 51 minutes (no-retry path). The one-shot retry-on-timeout is rare
-  // enough that sizing for it would be wasteful. 3600 gives ~18% headroom
-  // over the normal worst case.
+  // One-shot: one job per analysis session. Handler is crash-resumable —
+  // Stage 5 reads existing skill_analyzer_results rows and skips already-
+  // paid LLM calls, so a re-enqueue of the same jobId costs ~0 LLM spend.
+  //
+  // expireInSeconds is a circuit breaker for truly-dead workers, NOT a
+  // performance target. Every external call inside the handler has its own
+  // per-call timeout (OpenAI embeddings 30s, classify LLM 180s, Haiku
+  // routing inherits routeCall limits) so this outer cap only ever fires
+  // when something has genuinely gone catastrophically wrong (SIGKILL,
+  // OOM, hung fetch that somehow bypassed AbortSignal). 14400 (4 hours)
+  // gives ~2× headroom above the hard 500-candidate × 45s-observed-avg
+  // ceiling at concurrency 3 ≈ 7500s, without being so large that a
+  // truly-dead worker holds the queue slot indefinitely. If a user hits
+  // this cap they use the POST /resume endpoint — the handler picks up
+  // where the previous run left off.
+  //
+  // NOTE: callers MUST pass getJobConfig('skill-analyzer') to boss.send()
+  // so these options actually reach the queue. Prior to Apr 2026 the
+  // skill-analyzer enqueue site dropped the config and pg-boss applied
+  // its default 15-min expireIn, killing otherwise-healthy runs.
   'skill-analyzer': {
     retryLimit: 1,
     retryDelay: 300,
     retryBackoff: false,
-    expireInSeconds: 3600,
+    expireInSeconds: 14400,
     deadLetter: 'skill-analyzer__dlq',
     idempotencyStrategy: 'one-shot' as const,
   },
 
-  // ── Playbooks engine (multi-step automation, migration 0076) ────
-  // Spec: tasks/playbooks-spec.md §5.6 (concurrency) + §5.7 (watchdog).
+  // ── Workflows V1 — gate stall notifications (spec §5.3) ─────────
+  // Three delayed jobs per gate (24h, 72h, 7d). singletonKey deduplicates
+  // re-enqueues for the same gate+cadence. stale-fire guard in the handler
+  // provides durable safety even if cancel races.
+  'workflow-gate-stall-notify': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'workflow-gate-stall-notify__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-{gateId}-{cadence}
+  },
+
+  // ── Workflows engine (multi-step automation, migration 0076) ────
+  // Spec: tasks/workflows-spec.md §5.6 (concurrency) + §5.7 (watchdog).
   // Tick jobs are enqueued with singletonKey: runId so multiple step
   // completions collapse into one tick. Watchdog runs every 60s as
   // self-healing for missed ticks.
-  'playbook-run-tick': {
+  'workflow-run-tick': {
     retryLimit: 3,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 120,
-    deadLetter: 'playbook-run-tick__dlq',
+    deadLetter: 'workflow-run-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: runId
   },
-  'playbook-watchdog': {
+  'workflow-watchdog': {
     retryLimit: 1,
     retryDelay: 10,
     retryBackoff: false,
     expireInSeconds: 60,
-    deadLetter: 'playbook-watchdog__dlq',
+    deadLetter: 'workflow-watchdog__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep reads current state
   },
   // Async dispatch queue for prompt + agent_call step types. The engine
   // tick handler enqueues onto this; a worker picks it up and runs the
   // existing agentExecutionService.executeRun synchronously.
   // Spec §5.2 dispatch case + §5.5 idempotency keys.
-  'playbook-agent-step': {
+  'workflow-agent-step': {
     retryLimit: 2,
     retryDelay: 10,
     retryBackoff: true,
     expireInSeconds: 600,
-    deadLetter: 'playbook-agent-step__dlq',
-    idempotencyStrategy: 'singleton-key' as const, // playbook-step:<sr.id>:<attempt>
+    deadLetter: 'workflow-agent-step__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // workflow-step:<sr.id>:<attempt>
   },
   // ── Sprint 4 P3.1: Bulk parent completion check ───────────────────────────
   // When a bulk child completes, it enqueues a tick on the parent to
   // check whether all children are terminal. Uses singletonKey on the
   // parent runId so multiple child completions collapse into one check.
-  'playbook-bulk-parent-check': {
+  'workflow-bulk-parent-check': {
     retryLimit: 2,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 60,
-    deadLetter: 'playbook-bulk-parent-check__dlq',
+    deadLetter: 'workflow-bulk-parent-check__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
   },
 
@@ -405,6 +468,7 @@ export const JOB_CONFIG = {
     retryDelay: 30,
     retryBackoff: false,
     expireInSeconds: 55,
+    deadLetter: 'connector-polling-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const,
   },
   // Per-connection sync job: acquires a lease, runs the adapter, records
@@ -416,6 +480,344 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'connector-polling-sync__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+  },
+
+  // ── Workspace seat rollup (agents-as-employees D9) ──────────────
+  // Hourly sweep: counts active workspace identities per org and writes
+  // the result to org_subscriptions.consumed_seats. Each tick re-reads
+  // the current DB state so duplicate deliveries are a no-op.
+  'seat-rollup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'seat-rollup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Workspace identity migration (agents-as-employees E1) ────────
+  // Per-identity job dispatched by workspaceMigrationService.start().
+  // Provisions on the target backend, activates the new identity, then
+  // archives the source. retryLimit 5 with exponential backoff handles
+  // transient Google / SMTP failures. payload-key: migrationRequestId
+  // combined with actorId forms a deterministic idempotency token at
+  // the provisioning layer (provisioningRequestId = migrationRequestId:actorId).
+  'workspace.migrate-identity': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'workspace.migrate-identity__dlq',
+    idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
+  },
+
+  // ── System monitoring (G3: system-monitor-ingest queue) ─────────
+  'system-monitor-ingest': {
+    retryLimit: 3,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'system-monitor-ingest__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Subaccount Optimiser (F2) — daily per-subaccount scan ────────
+  // Runs the full 8-category optimiser scan for one subaccount. Scan
+  // re-reads current DB state each tick so retries are idempotent.
+  // expireInSeconds is a hard circuit-breaker; the handler has its own
+  // circuit-breaker at SCAN_FAILURE_CIRCUIT_BREAKER_THRESHOLD.
+  'optimiser-scan': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'optimiser-scan__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Pre-launch hardening D-P0-1 — GHL auto-start onboarding ─────
+  // Enqueued after subaccount creation from webhook/OAuth callback.
+  // singletonKey deduplicates on (organisationId, subaccountId) within
+  // a 5-minute window so webhook replay cannot double-start onboarding.
+  'ghl:auto-start-onboarding': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'ghl:auto-start-onboarding__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+
+  // ── Pre-launch hardening C-P0-2 — OAuth resume restart ───────────
+  // Enqueued after a successful OAuth token exchange when a pendingRunId
+  // was stored on the state nonce. singletonKey on runId deduplicates
+  // within a 60s window so double-click / callback retry cannot double-resume.
+  'run:resumeAfterOAuth': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'run:resumeAfterOAuth__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+
+  // ── auto-knowledge-retrieval — document summary generation ───────
+  // Enqueued after a new reference document version is written. Makes a
+  // cheap LLM call to produce a 2-3 sentence retrieval hint summary.
+  // one-shot: one job per version write; idempotency guard in the handler
+  // checks summaryGeneratedAt >= version.createdAt before calling the LLM.
+  'document:summarise': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'document:summarise__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // ── auto-knowledge-retrieval — document chunk + embed ────────────
+  // Enqueued after a new reference document version is written. Chunks the
+  // version content, embeds all chunks via OpenAI (outside tx), then
+  // atomically flips retrieval_version_id after count verification.
+  // retryLimit 3: embeddings are expensive; backoff gives transient API
+  // errors time to clear. expireInSeconds 300: embedding a large document
+  // can take several minutes across multiple API batches.
+  // one-shot: one job per version; handler's count-check + pointer-flip are
+  // idempotent on retry (ON CONFLICT DO NOTHING + idempotent UPDATE).
+  'document:chunk-embed': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'document:chunk-embed__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // ── auto-knowledge-retrieval — embedding-model upgrade sweep ─────
+  // Enqueued when the org's embedding model changes. Iterates documents
+  // where active_embedding_model != targetEmbeddingModel and re-embeds
+  // missing chunks under the new model, then atomically flips the pointer.
+  // fifo: sweep re-reads current DB state each run; retries are safe because
+  // ON CONFLICT DO NOTHING makes persistChunks idempotent and the pointer
+  // flip is guarded by a count-match check.
+  // expireInSeconds 600: up to 10 documents per invocation, each potentially
+  // requiring several API batches.
+  'document:reembed': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'document:reembed__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  // ── auto-knowledge-retrieval — deferred file durability flip ─────
+  // Chained after document:chunk-embed success. Verifies retrieval_version_id
+  // is non-null then flips execution_files.expiresAt to a far-future sentinel
+  // so the promoted file is never pruned by the maintenance cleanup sweep.
+  // retryLimit 5 with backoff: if retrieval_version_id is still null (embedding
+  // in progress), retries with exponential backoff give the chunk-embed job
+  // time to complete. Backoff series: 30 + 60 + 120 + 240 + 480 ≈ 930s total
+  // retry window. expireInSeconds must exceed the full series.
+  // one-shot: one job per promotion audit; idempotency guard in the handler
+  // checks expiresAt threshold before issuing the UPDATE.
+  'document:promotion-finalise': {
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 1200,
+    deadLetter: 'document:promotion-finalise__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // ── Support Desk — draft dispatch reconciliation (C11) ───────────
+  // Fired when a draft enters needs_reconciliation (dispatch stalled).
+  // Payload carries draftId + organisationId. The handler calls decideOutcome
+  // and either resolves the draft, surfaces it for manual review, or
+  // re-enqueues with exponential backoff. retryLimit 5 matches the
+  // max_attempts budget in decideOutcome. payload-key: draftId is the
+  // deterministic dedup token (one reconciliation sweep per draft per attempt).
+  'support-draft-reconciliation': {
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'support-draft-reconciliation__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+  },
+
+  // ── Phase 1 Showcase — Support Agent execution loop ─────────────────
+  // Triggered on schedule or Teamwork webhook. Processes one inbox at a
+  // time per (subaccount_id, inbox_id) advisory lock. Each tick is a
+  // full loop over open tickets; idempotency is enforced by the
+  // terminal-event predicate in list_open_tickets.
+  'support-agent-run': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'support-agent-run__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey = subaccountId:inboxId
+  },
+
+  // ── Phase 1 Showcase — run_artifacts retention sweep ────────────────
+  // Daily admin-bypass job that hard-deletes S3 objects + DB rows where
+  // retain_until < now(). Processes in pages of 100. Each tick re-reads
+  // the current DB state so duplicate deliveries are safe no-ops.
+  'run-artifacts-retention-sweep': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'run-artifacts-retention-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Phase 1 Showcase — Support Agent eval daily run ─────────────────
+  // Daily eval harness: runs classify + judge scoring over the fixture set
+  // and inserts one support_eval_runs row per org. singletonKey deduplicates
+  // per organisationId so concurrent cron ticks collapse into one run.
+  'support-eval-daily': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'support-eval-daily__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
+  },
+
+  // ── Operator Backend (Spec D) — four lifecycle queues ────────────────────
+  // operator-session-completed: terminal event from the vendor sandbox.
+  // Singleton key 'operator-session-task-terminal:${agentRunId}' guards duplicate emission.
+  'operator-session-completed': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'operator-session-completed__dlq',
+    idempotencyStrategy: 'one-shot' as const, // event_emitted_at IS NULL guard
+  },
+  // operator-session-dispatch-next-chain-link: enqueued by finaliser after completed checkpoint.
+  // Backoff retry: 1 min → 5 min → 15 min via startAfter.
+  'operator-session-dispatch-next-chain-link': {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+    deadLetter: 'operator-session-dispatch-next-chain-link__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: operator-continuation:${agentRunId}
+  },
+  // operator-session-progressed: step-boundary progress updates.
+  // Sole writer for last_progress_at + step_count on operator_runs.
+  'operator-session-progressed': {
+    retryLimit: 1,
+    retryDelay: 5,
+    retryBackoff: false,
+    expireInSeconds: 30,
+    deadLetter: 'operator-session-progressed__dlq',
+    idempotencyStrategy: 'fifo' as const, // greatest() guards monotonicity
+  },
+  // operator-task-profile-gc: 15-minute cron; reclaims stale gc_in_progress rows.
+  'operator-task-profile-gc': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'operator-task-profile-gc__dlq',
+    idempotencyStrategy: 'fifo' as const, // sweep re-reads current DB state
+  },
+
+  // ── operator-session-identity chunk 6 — token refresh ───────────────────
+  // Per-connection refresh job. singletonKey = ${connectionId}:${refreshBucketEpochSec}
+  // deduplicates rapid re-enqueues within the same 5-minute bucket.
+  // retryLimit 5 with exponential backoff handles transient provider errors;
+  // expireInSeconds 7200 (2h) gives ample headroom above the retry series.
+  'operator-session-refresh': {
+    retryLimit: 5,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 7200,
+    deadLetter: 'operator-session-refresh__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+    // singletonKey: ${connectionId}:${refreshBucketEpochSec}
+  },
+
+  // ── Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a) ─────
+  // sandbox-harvest-reconciliation: 5-minute cron sweep that finds sandbox_executions
+  // rows stuck in non-terminal states past their wall-clock-ceiling-plus-buffer
+  // and re-enqueues the harvest pipeline. fifo: reads current DB state each tick.
+  'sandbox-harvest-reconciliation': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 270,
+    deadLetter: 'sandbox-harvest-reconciliation__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  // sandbox-ceiling-monitor: per-execution tick job that checks wall-clock and
+  // estimated cost ceilings every monitorIntervalMs (default 5 s). Re-enqueues
+  // itself with singletonKey = sandboxExecutionId; exits cleanly on terminal.
+  // singleton-key: one in-flight monitor per execution; duplicates collapse.
+  'sandbox-ceiling-monitor': {
+    retryLimit: 1,
+    retryDelay: 5,
+    retryBackoff: false,
+    expireInSeconds: 30,
+    deadLetter: 'sandbox-ceiling-monitor__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+  },
+  // sandbox-wall-clock-kill: one-shot belt-and-braces. Scheduled at sandbox
+  // start with startAfter = wallClockMs + buffer. No-op if already terminal.
+  'sandbox-wall-clock-kill': {
+    retryLimit: 0,
+    retryDelay: 0,
+    retryBackoff: false,
+    expireInSeconds: 60,
+    deadLetter: 'sandbox-wall-clock-kill__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+  // sandbox-artefact-purge: triggered by run soft-delete event. Physically
+  // deletes artefacts from object storage; marks pointer rows purged.
+  // one-shot: one per run soft-delete; handler is idempotent on objectStorageState.
+  'sandbox-artefact-purge': {
+    retryLimit: 3,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'sandbox-artefact-purge__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+
+  // ── Spec B — Sandbox Isolation: retention-scoped pg-boss jobs (C11b) ─────
+  // All three are daily cron jobs scheduled at distinct UTC times to avoid
+  // contention. Each sweeps across all orgs; per-org failure is logged and
+  // iteration continues (maintenance-job pattern). Idempotency: cutoff-scoped —
+  // re-running with the same cutoff date is a no-op (matching rows already deleted).
+  // fifo: sweep re-reads current DB state each tick; duplicate delivery is safe.
+  //
+  // Cron schedule (set in queueService.ts):
+  //   sandbox-telemetry-prune  02:00 UTC — 90-day prune of sandbox_telemetry_events
+  //   sandbox-logs-prune       02:30 UTC — 90-day prune of sandbox_logs (incl. soft-deleted)
+  //   sandbox-egress-audit-prune 03:00 UTC — 180-day prune of sandbox_egress_audit
+  'sandbox-telemetry-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-telemetry-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  'sandbox-logs-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-logs-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+  },
+  'sandbox-egress-audit-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 1800,
+    deadLetter: 'sandbox-egress-audit-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
   },
 } as const;
 

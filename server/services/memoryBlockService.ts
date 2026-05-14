@@ -19,14 +19,17 @@
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { memoryBlocks, memoryBlockAttachments, subaccountAgents } from '../db/schema/index.js';
+import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
+import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
+import { assertVersionGate } from '../../shared/schemas/subaccount.js';
 import {
   decideUpsert,
   MEMORY_BLOCKS_PER_RUN_MAX,
   type MergeStrategy,
   type BlockConfidence,
 } from './memoryBlockUpsertPure.js';
+import { evaluateAutoExtractGate } from './memoryBlockGatePure.js';
 import {
   rankBlocksForInjection,
   type CandidateBlock,
@@ -36,6 +39,7 @@ import {
   BLOCK_RELEVANCE_THRESHOLD,
   BLOCK_RELEVANCE_TOP_K,
   BLOCK_TOKEN_BUDGET,
+  MEMORY_BLOCK_TIER2_BOOST,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
 
@@ -84,6 +88,7 @@ export async function getBlocksForAgent(
 ): Promise<MemoryBlockForPrompt[]> {
   const rows = await db
     .select({
+      id: memoryBlocks.id,
       name: memoryBlocks.name,
       content: memoryBlocks.content,
       permission: memoryBlockAttachments.permission,
@@ -105,6 +110,7 @@ export async function getBlocksForAgent(
     .orderBy(asc(memoryBlocks.name));
 
   return rows.map((r) => ({
+    id: r.id,
     name: r.name,
     content: r.content,
     permission: r.permission as 'read' | 'read_write',
@@ -219,6 +225,8 @@ export interface GetBlocksForInjectionParams {
   tokenBudget?: number;
   /** Pre-computed task context embedding. */
   embedding?: number[];
+  /** F1 §4 — agent domain for tier-2 baseline block selection. Use agentRoleToDomain(). */
+  agentDomain?: string;
 }
 
 /**
@@ -281,10 +289,45 @@ export async function getBlocksForInjection(
     embedding: params.embedding,
   });
 
+  // F1 §4 — Tier-2 baseline blocks: domain-scoped, active, scored just above
+  // the relevance threshold so they pass rankBlocksForInjection's filter.
+  const tier2BlockIds = new Set<string>();
+  let tier2Candidates: CandidateBlock[] = [];
+  if (params.agentDomain && params.subaccountId) {
+    const tier2Rows = await db
+      .select({
+        id: memoryBlocks.id,
+        name: memoryBlocks.name,
+        content: memoryBlocks.content,
+      })
+      .from(memoryBlocks)
+      .where(
+        and(
+          eq(memoryBlocks.organisationId, params.organisationId),
+          eq(memoryBlocks.subaccountId, params.subaccountId),
+          eq(memoryBlocks.tier, 2),
+          eq(memoryBlocks.status, ACTIVE_STATUS),
+          isNull(memoryBlocks.deletedAt),
+          sql`${memoryBlocks.appliesToDomains} @> ARRAY[${params.agentDomain}]::text[]`,
+        ),
+      );
+    tier2Candidates = tier2Rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      content: r.content,
+      score: BLOCK_RELEVANCE_THRESHOLD + MEMORY_BLOCK_TIER2_BOOST,
+      source: 'relevance' as const,
+      protected: false,
+    }));
+    for (const r of tier2Rows) {
+      tier2BlockIds.add(r.id);
+    }
+  }
+
   // Compose: rank combined set. Explicit blocks bypass eviction (handled in
   // the pure ranker by source='explicit'); relevance blocks share the budget.
   const ranked = rankBlocksForInjection(
-    [...explicitCandidates, ...relevantCandidates],
+    [...explicitCandidates, ...relevantCandidates, ...tier2Candidates],
     {
       threshold: BLOCK_RELEVANCE_THRESHOLD,
       topK: BLOCK_RELEVANCE_TOP_K,
@@ -293,14 +336,116 @@ export async function getBlocksForInjection(
   );
 
   return ranked.map((c) => ({
+    id: c.id,
     name: c.name,
     content: c.content,
     // Explicit blocks preserve their original permission; relevance blocks
     // are read-only by default (no mutation path outside explicit attachment).
     permission: permissionByBlockId.get(c.id) ?? 'read',
+    tier: tier2BlockIds.has(c.id) ? (2 as const) : undefined,
   }));
 }
 
+
+// ─── F1: Tier-1 baseline artefact loader ─────────────────────────────────────
+
+/**
+ * Return all active Tier-1 memory blocks for a sub-account, sorted by name
+ * ASC for hash-stable prefix caching.
+ *
+ * Returns an empty array when subaccountId is null (no sub-account context).
+ *
+ * Spec: docs/sub-account-baseline-artefacts-spec.md §4.
+ */
+export async function getTier1Blocks(
+  organisationId: string,
+  subaccountId: string | null,
+): Promise<Array<{ id: string; name: string; content: string; tier: 1 }>> {
+  if (!subaccountId) return [];
+  const rows = await db
+    .select({
+      id: memoryBlocks.id,
+      name: memoryBlocks.name,
+      content: memoryBlocks.content,
+      tier: memoryBlocks.tier,
+    })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.tier, 1),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    )
+    .orderBy(asc(memoryBlocks.name));
+
+  return rows.map((r) => ({ ...r, tier: 1 as const }));
+}
+
+/**
+ * F1 -> F2 contract (spec §6b). Returns the parsed voice/tone artefact when
+ * status='completed'; returns null for any other state. F2 imports this;
+ * F1 does not import F2.
+ */
+export async function getBaselineVoiceTone(
+  organisationId: string,
+  subaccountId: string,
+): Promise<BaselineVoiceTone | null> {
+  const [sub] = await db
+    .select({ status: subaccounts.baselineArtefactsStatus })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.id, subaccountId),
+        eq(subaccounts.organisationId, organisationId),
+        isNull(subaccounts.deletedAt),
+      ),
+    );
+  if (!sub) return null;
+
+  let status;
+  try {
+    status = assertVersionGate(sub.status, 1);
+  } catch {
+    return null;
+  }
+  if (status.tier1.voice_tone.status !== 'completed') return null;
+
+  const [block] = await db
+    .select({ content: memoryBlocks.content, updatedAt: memoryBlocks.updatedAt })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.name, 'baseline.voice_tone'),
+        eq(memoryBlocks.status, ACTIVE_STATUS),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  if (!block) return null;
+
+  try {
+    const parsed = JSON.parse(block.content) as Partial<BaselineVoiceTone>;
+    if (
+      !Array.isArray(parsed.descriptors) ||
+      !Array.isArray(parsed.example_sentences) ||
+      !Array.isArray(parsed.prohibited_phrases) ||
+      (parsed.formality_level !== 'casual' && parsed.formality_level !== 'neutral' && parsed.formality_level !== 'formal')
+    ) return null;
+    return {
+      descriptors: parsed.descriptors as string[],
+      example_sentences: parsed.example_sentences as string[],
+      prohibited_phrases: parsed.prohibited_phrases as string[],
+      formality_level: parsed.formality_level,
+      captured_at: block.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ─── Write path (skill handler) ──────────────────────────────────────────────
 
@@ -398,7 +543,7 @@ export async function createBlock(input: {
 }): Promise<MemoryBlock> {
   const autoAttach = input.autoAttach === true && !!input.subaccountId;
 
-  // eslint-disable-next-line prefer-const
+   
   let created!: MemoryBlock;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
   await db.transaction(async (tx) => {
@@ -632,7 +777,7 @@ export async function attachBlock(
 
 // ─── Phase D2 — playbook-driven upsert ───────────────────────────────────────
 
-export interface UpsertFromPlaybookParams {
+export interface UpsertFromWorkflowParams {
   organisationId: string;
   subaccountId: string;
   /** Memory Block label (matches the `name` column). */
@@ -643,7 +788,7 @@ export interface UpsertFromPlaybookParams {
   /** The playbookRun.id firing the binding. */
   sourceRunId: string;
   /** Slug of the playbook whose run is firing. */
-  playbookSlug: string;
+  workflowSlug: string;
   /** The agent that owns the write (typically the Configuration Assistant). */
   actorAgentId: string | null;
   /** 'low' on firstRunOnly bindings, 'normal' otherwise. */
@@ -656,9 +801,20 @@ export interface UpsertFromPlaybookParams {
    * — existing blocks keep whatever `autoAttach` they were created with.
    */
   autoAttach?: boolean;
+  /**
+   * F1 §3 — baseline artefact tier classification. Only Tier-1 (1) and
+   * Tier-2 (2) blocks reach this path; Tier-3 writes go to workspace memory.
+   * Persisted on the `create` path only.
+   */
+  tier?: 1 | 2 | null;
+  /**
+   * F1 §3 — domains this block applies to (Tier-2 only). Persisted on the
+   * `create` path only. Use null when the block has no domain restriction.
+   */
+  appliesToDomains?: string[] | null;
 }
 
-export type UpsertFromPlaybookResult =
+export type UpsertFromWorkflowResult =
   | { kind: 'created'; blockId: string; truncated: boolean }
   | { kind: 'updated'; blockId: string; truncated: boolean; mergeFallback: boolean }
   | { kind: 'skipped'; reason: 'hitl_overwrite'; blockId: string; previewContent: string }
@@ -666,7 +822,7 @@ export type UpsertFromPlaybookResult =
   | { kind: 'skipped'; reason: 'empty_output' };
 
 /**
- * Playbook-driven upsert. Called by `finaliseRun()` for each `knowledgeBinding`
+ * Workflow-driven upsert. Called by `finaliseRun()` for each `knowledgeBinding`
  * whose source step completed successfully. Applies:
  *   - the 10-per-run rate limit (§7.5)
  *   - the HITL overwrite rule against human-edited blocks (§7.5)
@@ -676,9 +832,9 @@ export type UpsertFromPlaybookResult =
  * wrapper only fetches the existing row, counts prior writes for the run,
  * and persists the decided outcome.
  */
-export async function upsertFromPlaybook(
-  params: UpsertFromPlaybookParams,
-): Promise<UpsertFromPlaybookResult> {
+export async function upsertFromWorkflow(
+  params: UpsertFromWorkflowParams,
+): Promise<UpsertFromWorkflowResult> {
   const {
     organisationId,
     subaccountId,
@@ -686,7 +842,7 @@ export async function upsertFromPlaybook(
     content,
     mergeStrategy,
     sourceRunId,
-    playbookSlug,
+    workflowSlug,
     actorAgentId,
     confidence,
   } = params;
@@ -720,20 +876,32 @@ export async function upsertFromPlaybook(
       ),
     );
 
+  // F1 §3 — baseline slug conflict: a block with the same name exists but
+  // lacks a tier classification, meaning it was created outside the baseline
+  // pipeline. Reject rather than silently overwrite the tier-less block.
+  if (
+    workflowSlug === 'baseline-artefacts-capture' &&
+    params.tier != null &&
+    existingRow &&
+    existingRow.tier == null
+  ) {
+    throw { statusCode: 409, errorCode: 'BASELINE_SLUG_CONFLICT' };
+  }
+
   const decision = decideUpsert({
     existing: existingRow
       ? {
           id: existingRow.id,
           content: existingRow.content,
           lastEditedByAgentId: existingRow.lastEditedByAgentId,
-          lastWrittenByPlaybookSlug: existingRow.lastWrittenByPlaybookSlug,
+          lastWrittenByWorkflowSlug: existingRow.lastWrittenByWorkflowSlug,
           sourceRunId: existingRow.sourceRunId,
         }
       : null,
     label,
     incomingContent: content,
     mergeStrategy,
-    playbookSlug,
+    workflowSlug,
     blocksUpsertedThisRun: Number(blocksUpsertedThisRun),
   });
 
@@ -764,9 +932,11 @@ export async function upsertFromPlaybook(
             isReadOnly: false,
             sourceRunId,
             lastEditedByAgentId: actorAgentId,
-            lastWrittenByPlaybookSlug: playbookSlug,
+            lastWrittenByWorkflowSlug: workflowSlug,
             confidence,
             autoAttach,
+            ...(params.tier != null ? { tier: params.tier } : {}),
+            ...(params.appliesToDomains != null ? { appliesToDomains: params.appliesToDomains } : {}),
           })
           .returning({ id: memoryBlocks.id });
 
@@ -776,8 +946,8 @@ export async function upsertFromPlaybook(
         await wvr({
           blockId: created.id,
           content: decision.content,
-          changeSource: 'playbook_upsert',
-          notes: `Created by playbook ${playbookSlug}`,
+          changeSource: 'workflow_upsert',
+          notes: `Created by playbook ${workflowSlug}`,
           tx,
         });
       });
@@ -788,6 +958,23 @@ export async function upsertFromPlaybook(
       return { kind: 'created', blockId: upsertCreatedId, truncated: decision.truncated };
     }
     case 'update': {
+      const gate = evaluateAutoExtractGate({
+        autoUpdateDisabled: existingRow!.autoUpdateDisabled,
+        contentUnchanged: existingRow!.content === decision.content,
+      });
+      if (gate.skipUpdate || gate.skipVersionInsert) {
+        if (gate.reason === 'override_locked') {
+          return {
+            kind: 'skipped',
+            reason: 'hitl_overwrite',
+            blockId: existingRow!.id,
+            previewContent: decision.content,
+          };
+        }
+        // no_change: merged content equals live body — nothing to persist.
+        return { kind: 'skipped', reason: 'empty_output' };
+      }
+
       let upsertUpdatedId!: string;
       const { writeVersionRow: wvrUpdate } = await import('./memoryBlockVersionService.js');
 
@@ -798,7 +985,7 @@ export async function upsertFromPlaybook(
             content: decision.content,
             sourceRunId,
             lastEditedByAgentId: actorAgentId,
-            lastWrittenByPlaybookSlug: playbookSlug,
+            lastWrittenByWorkflowSlug: workflowSlug,
             // Do not touch `confidence` on update — a previously-'low' block can
             // remain 'low' until a human saves it manually. Spec §8.4 last bullet.
             updatedAt: new Date(),
@@ -812,8 +999,8 @@ export async function upsertFromPlaybook(
         await wvrUpdate({
           blockId: updated.id,
           content: decision.content,
-          changeSource: 'playbook_upsert',
-          notes: `Updated by playbook ${playbookSlug}`,
+          changeSource: 'workflow_upsert',
+          notes: `Updated by playbook ${workflowSlug}`,
           tx,
         });
       });
@@ -852,6 +1039,23 @@ export async function getBlockMeta(
 ): Promise<{ name: string; ownerAgentId: string | null } | null> {
   const [row] = await db
     .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, orgId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  return row ?? null;
+}
+
+export async function getBlockById(
+  blockId: string,
+  orgId: string,
+): Promise<Pick<MemoryBlock, 'id' | 'source'> | null> {
+  const [row] = await db
+    .select({ id: memoryBlocks.id, source: memoryBlocks.source })
     .from(memoryBlocks)
     .where(
       and(

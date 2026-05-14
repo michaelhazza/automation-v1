@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { subscriptions } from './subscriptions.js';
@@ -25,6 +25,7 @@ export const orgSubscriptions = pgTable(
     stripeSubscriptionId: text('stripe_subscription_id'),
     isComped: boolean('is_comped').notNull().default(false),
     notes: text('notes'),
+    consumedSeats: integer('consumed_seats').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

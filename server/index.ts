@@ -19,6 +19,8 @@ import { routerJobService } from './services/routerJobService.js';
 import { queueService } from './services/queueService.js';
 import { initializePageIntegrationWorker } from './services/pageIntegrationWorker.js';
 import { initializePaymentReconciliationJob } from './services/paymentReconciliationJob.js';
+import { registerRateLimitCleanupJob } from './lib/rateLimitCleanupJob.js';
+import { registerOauthStateCleanupJob } from './lib/oauthStateCleanupJob.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
 import { getPgBoss, stopPgBoss } from './lib/pgBossInstance.js';
@@ -34,7 +36,7 @@ import organisationsRouter from './routes/organisations.js';
 import usersRouter from './routes/users.js';
 import enginesRouter from './routes/engines.js';
 import categoriesRouter from './routes/categories.js';
-import processesRouter from './routes/processes.js';
+import automationsRouter from './routes/automations.js';
 import executionsRouter from './routes/executions.js';
 import filesRouter from './routes/files.js';
 import systemUsersRouter from './routes/systemUsers.js';
@@ -57,6 +59,7 @@ import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
+import agentOverviewRouter from './routes/agentOverview.js';
 import memoryBlocksRouter from './routes/memoryBlocks.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
 import knowledgeRouter from './routes/knowledge.js';
@@ -64,16 +67,19 @@ import agentTriggersRouter from './routes/agentTriggers.js';
 import scheduledTasksRouter from './routes/scheduledTasks.js';
 import reviewItemsRouter from './routes/reviewItems.js';
 import actionsRouter from './routes/actions.js';
-import systemProcessesRouter from './routes/systemProcesses.js';
+import systemAutomationsRouter from './routes/systemAutomations.js';
 import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
+import credentialsRouter from './routes/credentials.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
-import playbookTemplatesRouter from './routes/playbookTemplates.js';
-import playbookRunsRouter from './routes/playbookRuns.js';
-import playbookStudioRouter from './routes/playbookStudio.js';
+import operatorSessionConnectionsRouter from './routes/operatorSessionConnections.js';
+import workflowTemplatesRouter from './routes/workflowTemplates.js';
+import workflowRunsRouter from './routes/workflowRuns.js';
+import workflowStudioRouter from './routes/workflowStudio.js';
+import workflowGatesRouter from './routes/workflowGates.js';
 import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
-import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
+import automationConnectionMappingsRouter from './routes/automationConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
 import workspaceHealthRouter from './routes/workspaceHealth.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
@@ -84,10 +90,17 @@ import agentExecutionLogRouter from './routes/agentExecutionLog.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
+import googleDriveRouter from './routes/integrations/googleDrive.js';
 import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+// Personal Assistant V1 — EA drafts CRUD + approval/reject/retry (Chunk 6)
+import eaDraftsRouter from './routes/eaDrafts.js';
+// Personal Assistant V1 — Voice profile CRUD + opt-out + reactivate (Chunk 13)
+import voiceProfilesRouter from './routes/voiceProfiles.js';
+// Personal Assistant V1 — Home-widget data endpoint (Chunk 14)
+import agentHomeWidgetsRouter from './routes/agentHomeWidgets.js';
 import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
 import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
@@ -109,6 +122,12 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+import operatorSessionsRouter from './routes/operatorSessions.js';
+import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import subaccountIeeBrowserSettingsRouter from './routes/subaccountIeeBrowserSettings.js';
+import adminIeeBrowserRolloutRouter from './routes/adminIeeBrowserRollout.js';
+import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
 import skillStudioRouter from './routes/skillStudio.js';
@@ -131,6 +150,7 @@ import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import crmQueryPlannerRouter from './routes/crmQueryPlanner.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
+import { postCommitEmitterMiddleware } from './middleware/postCommitEmitter.js';
 // Memory & Briefings Phase 1 — delivery channels route (S22)
 import deliveryChannelsRouter from './routes/deliveryChannels.js';
 // Memory & Briefings Phase 2 — clarifications route (S8)
@@ -148,13 +168,73 @@ import memoryInspectorRouter from './routes/memoryInspector.js';
 import portfolioRollupRouter from './routes/portfolioRollup.js';
 // Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
 import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
+// Memory improvements spec §4 Phase 1 — block sources / lineage route
+import memoryBlockSourcesRouter from './routes/memoryBlockSources.js';
+// Memory improvements spec §4 Phase 2/4 — memory utility dashboard route
+import memoryUtilityRouter from './routes/memoryUtility.js';
 import pulseRouter from './routes/pulse.js';
 // Universal Brief routes (Phase 2 + Phase 5)
 import briefsRouter from './routes/briefs.js';
+import sessionMessageRouter from './routes/sessionMessage.js';
 import briefConversationsRouter from './routes/conversations.js';
 import rulesRouter from './routes/rules.js';
+import { delegationOutcomesRouter } from './routes/delegationOutcomes.js';
 import referenceDocumentsRouter from './routes/referenceDocuments.js';
 import documentBundlesRouter from './routes/documentBundles.js';
+import externalDocumentReferencesRouter from './routes/externalDocumentReferences.js';
+import systemIncidentsRouter from './routes/systemIncidents.js';
+import { recordIncident } from './services/incidentIngestor.js';
+import { registerSystemIncidentNotifyWorker } from './services/systemIncidentNotifyJob.js';
+// Workspace identity routes (agents-as-employees)
+import workspaceRouter from './routes/workspace.js';
+import workspaceMailRouter from './routes/workspaceMail.js';
+import workspaceCalendarRouter from './routes/workspaceCalendar.js';
+import workspaceInboundWebhookRouter from './routes/workspaceInboundWebhook.js';
+import stripeAgentWebhookRouter from './routes/webhooks/stripeAgentWebhook.js';
+// Suggested action chip dispatch
+import suggestedActionsRouter from './routes/suggestedActions.js';
+// Thread Context — per-conversation living doc (Chunk A)
+import conversationThreadContextRouter from './routes/conversationThreadContext.js';
+// Sub-Account Optimiser — generic agent-output primitive (Chunk 1, migration 0267)
+import agentRecommendationsRouter from './routes/agentRecommendations.js';
+// Agentic Commerce — spend ledger, budgets, policies, approval channels (Chunks 12, 13)
+import spendingBudgetsRouter from './routes/spendingBudgets.js';
+import spendingPoliciesRouter from './routes/spendingPolicies.js';
+import agentChargesRouter from './routes/agentCharges.js';
+import approvalChannelsRouter from './routes/approvalChannels.js';
+// Workflows V1 Phase 2 — task event stream replay (Chunk 9)
+import taskEventStreamRouter from './routes/taskEventStream.js';
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+import assignableUsersRouter from './routes/assignableUsers.js';
+import teamsRouter from './routes/teams.js';
+// Workflows V1 Phase 2 — Ask form submit / skip / autofill (Chunk 12)
+import asksRouter from './routes/asks.js';
+// Workflows V1 Phase 2 — File viewer, diff, per-hunk revert (Chunk 13)
+import fileRevertRouter from './routes/fileRevert.js';
+// Workflows V1 Phase 2 — workflow drafts fetch + discard (Chunk 14b)
+import workflowDraftsRouter from './routes/workflowDrafts.js';
+// Pre-Launch Phase 2 — client-side error reporting
+import clientErrorsRouter from './routes/clientErrors.js';
+// F3 Baseline Capture — baseline status, manual entry, admin reset (Chunks 4A/4B)
+import baselinesRouter from './routes/baselines.js';
+// Consolidation Build C3 — recurring tasks aggregator
+import recurringTasksRouter from './routes/recurringTasks.js';
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+import scorecardsRouter from './routes/scorecards.js';
+import agentScorecardsRouter from './routes/agentScorecards.js';
+import benchRunsRouter from './routes/benchRuns.js';
+import governQualityRouter from './routes/governQuality.js';
+// Trust & Verification Layer Stage 3 — operator corrections
+import correctionsRouter from './routes/corrections.js';
+// Agent Workspace — presence SSE stream (Chunk 9)
+import agentPresenceStreamRouter from './routes/agentPresenceStream.js';
+// Phase 1 Showcase — run artifact read surface (Chunk 2)
+import runArtifactsRouter from './routes/runArtifacts.js';
+import runArtifactsFinalizeRouter from './routes/internal/runArtifactsFinalize.js';
+// Support Desk canonical substrate (C13)
+import supportRouter from './routes/support/index.js';
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+import personalSetupRouter from './routes/personalSetup.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -175,6 +255,13 @@ const httpServer = createServer(app);
 
 // Security middleware
 const isProduction = env.NODE_ENV === 'production';
+
+// Trust the first upstream proxy (load balancer / Nginx) in production so
+// that req.ip reflects the real client IP, not the proxy IP. Without this,
+// rate-limiter keys based on req.ip are the same for all users behind the LB.
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -225,6 +312,14 @@ app.use(cors({
 app.use(ghlWebhookRouter);
 app.use(teamworkWebhookRouter);
 app.use(slackWebhookRouter);
+app.use(workspaceInboundWebhookRouter);
+
+// Path-scoped tight JSON parser for /api/client-errors — applied BEFORE the
+// global 10MB parser so oversized payloads return 413 here instead of being
+// accepted. express.json() checks req._body and skips re-parsing once a body
+// has already been populated, so the global parser below is a no-op for this
+// path. ChatGPT-Round-1 Finding 3.
+app.use('/api/client-errors', express.json({ limit: '16kb' }));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -237,6 +332,11 @@ app.use(correlationMiddleware);
 // Subdomain resolution — must run before page serving routes
 app.use(subdomainResolution);
 
+// Post-commit websocket emit store — MUST be mounted AFTER org-tx middleware
+// (auth/org-tx is per-route; ALS binding is inherited by all async children
+// so enqueues inside withOrgTx flush after tx commits, not before).
+app.use(postCommitEmitterMiddleware);
+
 // Routes
 app.use(healthRouter);
 app.use(authRouter);
@@ -244,7 +344,7 @@ app.use(organisationsRouter);
 app.use(usersRouter);
 app.use(enginesRouter);
 app.use(categoriesRouter);
-app.use(processesRouter);
+app.use(automationsRouter);
 app.use(executionsRouter);
 app.use(filesRouter);
 app.use(systemUsersRouter);
@@ -267,6 +367,7 @@ app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
+app.use(agentOverviewRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
 app.use(deliveryChannelsRouter);
@@ -279,21 +380,27 @@ app.use(dropZoneRouter);
 app.use(memoryInspectorRouter);
 app.use(portfolioRollupRouter);
 app.use(memoryBlockVersionsRouter);
+app.use(memoryBlockSourcesRouter);
+app.use(memoryUtilityRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);
 app.use(reviewItemsRouter);
 app.use(actionsRouter);
-app.use(systemProcessesRouter);
+app.use(systemAutomationsRouter);
 app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
+app.use(credentialsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
-app.use(playbookTemplatesRouter);
-app.use(playbookRunsRouter);
-app.use(playbookStudioRouter);
+// operator-session-identity chunk 5 — AI Subscription management routes
+app.use(operatorSessionConnectionsRouter);
+app.use(workflowTemplatesRouter);
+app.use(workflowRunsRouter);
+app.use(workflowStudioRouter);
+app.use(workflowGatesRouter);
 app.use(subaccountOnboardingRouter);
-app.use(processConnectionMappingsRouter);
+app.use(automationConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -303,13 +410,18 @@ app.use(agentExecutionLogRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
+app.use(googleDriveRouter);
 app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(eaDraftsRouter);
+app.use(voiceProfilesRouter);
+app.use(agentHomeWidgetsRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
+// ghl/teamwork/slack/stripe-agent webhook routers mounted before body parsing (need raw body for HMAC)
+app.use(stripeAgentWebhookRouter);
 app.use(subaccountTagsRouter);
 app.use(subaccountSkillsRouter);
 app.use(orgMemoryRouter);
@@ -327,6 +439,12 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+app.use(operatorSessionsRouter);
+app.use(subaccountOperatorSettingsRouter);
+app.use(subaccountIeeBrowserSettingsRouter);
+app.use(adminIeeBrowserRolloutRouter);
+app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
 app.use(pulseRouter);
@@ -344,11 +462,56 @@ app.use(ghlRouter);
 app.use(geoAuditsRouter);
 // Universal Brief routes (Phase 2 + Phase 5)
 app.use(briefsRouter);
+app.use(sessionMessageRouter);
 app.use(briefConversationsRouter);
 app.use('/api/rules', rulesRouter);
 app.use(crmQueryPlannerRouter);
+app.use(delegationOutcomesRouter);
 app.use(referenceDocumentsRouter);
 app.use(documentBundlesRouter);
+app.use(externalDocumentReferencesRouter);
+app.use(systemIncidentsRouter);
+app.use(workspaceRouter);
+app.use(workspaceMailRouter);
+app.use(workspaceCalendarRouter);
+app.use(suggestedActionsRouter);
+app.use(conversationThreadContextRouter);
+// Sub-Account Optimiser — generic agent-output primitive (Chunk 1)
+app.use(agentRecommendationsRouter);
+// Agentic Commerce — spend ledger + budgets + policies + approval channels
+app.use(spendingBudgetsRouter);
+app.use(spendingPoliciesRouter);
+app.use(agentChargesRouter);
+app.use(approvalChannelsRouter);
+// Workflows V1 Phase 2 — task event stream replay (Chunk 9)
+app.use(taskEventStreamRouter);
+// Workflows V1 Phase 2 — assignable-users API + Teams CRUD (Chunk 10)
+app.use(assignableUsersRouter);
+app.use(teamsRouter);
+// Workflows V1 Phase 2 — Ask form submit / skip / autofill (Chunk 12)
+app.use(asksRouter);
+app.use(fileRevertRouter);
+app.use(workflowDraftsRouter);
+app.use(clientErrorsRouter);
+app.use(baselinesRouter);
+// Consolidation Build C3 — recurring tasks aggregator
+app.use(recurringTasksRouter);
+// Trust & Verification Layer Stage 2 — scorecards + agent attach/detach + bench
+app.use(scorecardsRouter);
+app.use(agentScorecardsRouter);
+app.use(benchRunsRouter);
+app.use(governQualityRouter);
+app.use(correctionsRouter);
+// Agent Workspace — presence SSE stream (Chunk 9)
+app.use(agentPresenceStreamRouter);
+// Phase 1 Showcase — run artifact read surface (Chunk 2)
+app.use(runArtifactsRouter);
+// Phase 1 Showcase — internal worker-to-S3 finalize route (Chunk 1, spec §6.1.4)
+app.use(runArtifactsFinalizeRouter);
+// Support Desk canonical substrate (C13) — subaccount-scoped per DEC-1 (pre-test-hardening T1)
+app.use('/api/subaccounts/:subaccountId/support', supportRouter);
+// Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
+app.use(personalSetupRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -371,12 +534,22 @@ app.use('/api', (req, res) => {
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
 import { ZodError } from 'zod';
+import { mapOperatorBackendErrorToHttp } from './services/operatorBackendErrors.js';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
+  let extraBody: Record<string, unknown> | null = null;
 
-  if (err instanceof ZodError) {
+  // Operator backend typed errors — checked before generic Error branch so
+  // the richer body (kind, current_state / cap, current, subaccount_id) is used.
+  const operatorMapped = mapOperatorBackendErrorToHttp(err);
+  if (operatorMapped) {
+    statusCode = operatorMapped.statusCode;
+    errorCode = operatorMapped.errorCode;
+    message = err instanceof Error ? err.message : String(err);
+    extraBody = operatorMapped.body;
+  } else if (err instanceof ZodError) {
     statusCode = 400;
     errorCode = 'validation_error';
     message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -405,17 +578,51 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     stack: err instanceof Error ? err.stack : undefined,
   });
 
+  if (statusCode >= 500) {
+    const e = err as Record<string, unknown> & { __incidentRecorded?: boolean };
+    if (!e.__incidentRecorded) {
+      e.__incidentRecorded = true;
+      recordIncident({
+        source: 'route',
+        summary: message,
+        errorCode,
+        stack: err instanceof Error ? err.stack : undefined,
+        correlationId,
+      });
+    }
+  }
+
   const isProduction = env.NODE_ENV === 'production';
   res.status(statusCode).json({
     error: {
       code: errorCode,
       message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+      ...(extraBody ?? {}),
     },
     correlationId,
   });
 });
 
 async function start() {
+  // Phase 3: webhook secret boot assertion (spec §6.3.1).
+  // Must run BEFORE any service initialisation so a misconfigured production
+  // process exits in milliseconds rather than after kicking off background workers,
+  // pg-boss queues, schedule reconciliation, or binding the HTTP port.
+  if (env.NODE_ENV === 'production' && !env.WEBHOOK_SECRET) {
+    throw new Error(
+      '[boot] WEBHOOK_SECRET is unset in production. Outbound webhooks would be unsigned and inbound callbacks would accept any token. Set WEBHOOK_SECRET to a long random string before booting in production.',
+    );
+  }
+  const { validateEncryptionKeyOrThrow } = await import('./services/connectionTokenValidation.js');
+  validateEncryptionKeyOrThrow();
+
+  // ChatGPT-Round-2 Finding 1 — fail fast if the security-audit sentinel
+  // organisation row is missing. Pre-auth events (auth.login.failure, etc.)
+  // depend on this row existing; without it, recordSecurityEvent silently
+  // swallows the FK violation and login-failure audit is lost.
+  const { validateSecurityAuditSentinelOrgOrThrow } = await import('./services/securityAuditSentinelValidation.js');
+  await validateSecurityAuditSentinelOrgOrThrow();
+
   await seedPermissions();
   await backfillOrgUserRoles();
   await agentService.scheduleAllProactiveSources();
@@ -426,37 +633,156 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     const boss = await getPgBoss();
     await startDlqMonitor(boss);
+    await registerSystemIncidentNotifyWorker(boss);
+    // Async-ingest worker — only registers when SYSTEM_INCIDENT_INGEST_MODE=async.
+    // Sync mode (the default) writes incidents inline in the calling process and
+    // has no consumer for this queue. Registering the worker unconditionally would
+    // cause the queue to drain even in sync mode, which is harmless but confusing.
+    //
+    // Always log the resolved mode so operators see the active path at boot,
+    // independent of whether the async branch executes. Useful when triaging
+    // "why is the queue empty?" without needing to grep env config.
+    const ingestMode = process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async' ? 'async' : 'sync';
+    logger.info('incident_ingest_mode', {
+      mode: ingestMode,
+      asyncWorkerRegistered: ingestMode === 'async',
+    });
+    if (process.env.SYSTEM_INCIDENT_INGEST_MODE === 'async') {
+      const { handleSystemMonitorIngest } = await import('./services/incidentIngestorAsyncWorker.js');
+      await boss.work(
+        'system-monitor-ingest',
+        { teamSize: 4, teamConcurrency: 1 },
+        async (job: { id: string; data: unknown }) => {
+          await handleSystemMonitorIngest(job.data as Parameters<typeof handleSystemMonitorIngest>[0]);
+        }
+      );
+      logger.info('async_incident_ingest_worker_registered');
+    }
   }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
-  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  await registerRateLimitCleanupJob();  // Phase 2C — TTL on rate_limit_buckets
+  await registerOauthStateCleanupJob(); // Pre-Launch Phase 1 — TTL on oauth_state_nonces (S-P0-1, S-P0-2)
+  // Workflow engine workers (tick + watchdog cron) — spec §5.2 + §5.7
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
-      const { playbookEngineService } = await import('./services/playbookEngineService.js');
-      await playbookEngineService.registerWorkers();
+      const { WorkflowEngineService } = await import('./services/workflowEngineService.js');
+      await WorkflowEngineService.registerWorkers();
     } catch (err) {
-      console.error('[boot] failed to register playbook engine workers', err);
+      console.error('[boot] failed to register workflow engine workers', err);
     }
   }
   // Skill Analyzer worker (migration 0092)
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();
-      const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
+      const { runSkillAnalyzerJobWithIncidentEmission } = await import('./jobs/skillAnalyzerJobWithIncidentEmission.js');
+      const { getRetryCount } = await import('./lib/jobErrors.js');
+      // Surface terminal failures to the System Monitor. pg-boss retry exhaustion
+      // also lands in skill-analyzer__dlq (covered by Phase 1's DLQ derivation),
+      // but emitting here too gives faster visibility for failures that happen
+      // on the FINAL retry attempt — without this wrap, the operator sees no
+      // signal until the DLQ row lands.
+      // The wrapper only emits an incident when retryCount >= retryLimit
+      // (terminal attempt). Earlier-attempt throws rethrow without emitting.
       await boss.work('skill-analyzer', async (job) => {
         const { jobId } = job.data as { jobId: string };
-        await processSkillAnalyzerJob(jobId);
+        const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
+        await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
       });
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // Execution-backend adapter registration (Execution Backend Adapter Contract
+  // spec § 8.3). Every adapter MUST be registered against
+  // `executionBackendRegistry` at boot, regardless of the queue backend in
+  // use, because `executeRun` resolves `executionBackendRegistry.resolve(id)`
+  // on every dispatch — including the three non-delegated adapters
+  // (`api`, `headless`, `claude-code`) which have no pg-boss dependency.
+  // Coupling registration to `JOB_QUEUE_BACKEND === 'pg-boss'` would render
+  // dispatch broken for ALL modes when an alternate queue backend is
+  // selected. Registration is therefore unconditional; the IEE event handler
+  // (which DOES require pg-boss) is attached separately in the pg-boss block
+  // below.
+  // Adapter registration is fatal at boot. Spec § 8.2 makes registration
+  // validation a boot-time safety boundary: adapters that fail validation
+  // never reach dispatch. If validation throws (capability violation,
+  // queue/storage drift, sandbox-requirement enum drift), letting the app
+  // continue to start would leave the registry partial or empty — every
+  // later `executionBackendRegistry.resolve(id)` would throw at runtime,
+  // so a 500 on every dispatch is strictly worse than crashing on boot
+  // with a clear log line. Mirrors the same fatal-on-failure contract as
+  // the other required boot dependencies above. Order matches spec § 8.3:
+  // `api`, `headless`, `claude-code`, `iee_browser`, `iee_dev` — order is
+  // log-output only; the registry is a map.
+  try {
+    const { executionBackendRegistry } = await import('./services/executionBackends/registry.js');
+    const { apiBackend } = await import('./services/executionBackends/apiBackend.js');
+    const { headlessBackend } = await import('./services/executionBackends/headlessBackend.js');
+    const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
+    const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
+    const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { operatorManagedBackend } = await import('./services/executionBackends/operatorManagedBackend.js');
+    executionBackendRegistry.register(apiBackend);
+    executionBackendRegistry.register(headlessBackend);
+    executionBackendRegistry.register(claudeCodeBackend);
+    executionBackendRegistry.register(ieeBrowserBackend);
+    executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(operatorManagedBackend);
+  } catch (err) {
+    console.error('[boot] failed to register execution backends', err);
+    throw err;
+  }
+
+  // Operator Backend pg-boss handlers (Spec D — operator_managed adapter)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionCompletedHandler } = await import('./jobs/operatorSessionCompletedHandler.js');
+      await registerOperatorSessionCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-completed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionDispatchNextChainLinkHandler } = await import('./jobs/operatorSessionDispatchNextChainLinkHandler.js');
+      await registerOperatorSessionDispatchNextChainLinkHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-dispatch-next-chain-link handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionProgressedHandler } = await import('./jobs/operatorSessionProgressedHandler.js');
+      await registerOperatorSessionProgressedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-progressed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorTaskProfileGcHandler } = await import('./jobs/operatorTaskProfileGcHandler.js');
+      await registerOperatorTaskProfileGcHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-task-profile-gc handler', err);
+    }
+  }
+
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
   // Consumes pg-boss events emitted by the worker after terminal iee_runs
-  // writes, and finalises the parent agent_runs row accordingly.
+  // writes, and finalises the parent agent_runs row accordingly. Boot
+  // ordering invariant: adapter registration above must complete BEFORE the
+  // handler attaches, because the handler resolves
+  // `finaliseAgentRunFromBackend` -> `executionBackendRegistry.resolve(id)`
+  // on every event and an unregistered id throws `BackendNotRegistered`.
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const boss = await getPgBoss();
@@ -465,6 +791,180 @@ async function start() {
     } catch (err) {
       console.error('[boot] failed to register iee-run-completed handler', err);
     }
+  }
+  // Workflow gate stall-notification worker (Workflows V1 §5.3)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const pgboss = await getPgBoss();
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler, crossOwnerApprovalTimeoutSweep } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { createWorker } = await import('./lib/createWorker.js');
+      await createWorker({
+        queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
+        boss: pgboss,
+        handler: async (job) => {
+          await workflowGateStallNotifyHandler(job as import('pg-boss').Job<import('./jobs/workflowGateStallNotifyJob.js').WorkflowGateStallNotifyPayload>);
+          await eaDraftStallResetHandler();
+          await crossOwnerApprovalTimeoutSweep();
+        },
+      });
+    } catch (err) {
+      console.error('[boot] failed to register workflow-gate-stall-notify worker', err);
+    }
+  }
+  // Document summarise worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentSummariseWorker } = await import('./jobs/documentSummariseJob.js');
+      registerDocumentSummariseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-summarise worker', err);
+    }
+  }
+  // Document chunk-embed worker (auto-knowledge-retrieval)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentChunkEmbedWorker } = await import('./jobs/documentChunkEmbedJob.js');
+      registerDocumentChunkEmbedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-chunk-embed worker', err);
+    }
+  }
+  // Document re-embed worker (auto-knowledge-retrieval — embedding-model upgrade sweep)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentReembedWorker } = await import('./jobs/documentReembedJob.js');
+      registerDocumentReembedWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-reembed worker', err);
+    }
+  }
+  // Document promotion-finalise worker (auto-knowledge-retrieval — deferred file durability flip)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerDocumentPromotionFinaliseWorker } = await import('./jobs/documentPromotionFinaliseJob.js');
+      registerDocumentPromotionFinaliseWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register document-promotion-finalise worker', err);
+    }
+  }
+  // Support draft reconciliation worker
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportDraftReconciliationWorker } = await import('./jobs/supportDraftReconciliationWorker.js');
+      registerSupportDraftReconciliationWorker(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-draft-reconciliation worker', err);
+    }
+  }
+  // Phase 1 Showcase — run-artifacts retention sweep (spec §6.1.2b)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerRunArtifactsRetentionSweepJob } = await import('./jobs/runArtifactsRetentionSweepJob.js');
+      await registerRunArtifactsRetentionSweepJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register run-artifacts-retention-sweep worker', err);
+    }
+  }
+  // Phase 1 Showcase — Support Agent run worker (spec §5.3.3, §5.3.7)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportAgentRunJob } = await import('./jobs/supportAgentRunJob.js');
+      registerSupportAgentRunJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-agent-run worker', err);
+    }
+  }
+  // Phase 1 Showcase — Support Agent eval daily worker (spec §5.5.4)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerSupportEvalDailyJob } = await import('./jobs/supportEvalDailyJob.js');
+      registerSupportEvalDailyJob(boss);
+    } catch (err) {
+      console.error('[boot] failed to register support-eval-daily worker', err);
+    }
+  }
+  // IEE browser — daily cost rollup (Chunk 15B)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerIeeBrowserDailyRollupJob } = await import('./jobs/ieeBrowserDailyRollupJob.js');
+      await registerIeeBrowserDailyRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register iee-browser daily rollup job', err);
+    }
+  }
+  // operator-session-identity chunk 6 — token refresh worker
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { createWorker } = await import('./lib/createWorker.js');
+      const { processOperatorSessionRefresh } = await import('./jobs/operatorSessionRefreshJob.js');
+      await createWorker({
+        queue: 'operator-session-refresh',
+        boss,
+        // Cross-org: payload carries only connectionId (no organisationId).
+        // The handler resolves org context via withAdminConnection then opens
+        // its own org-scoped tx. Opt out of createWorker's auto-transaction.
+        resolveOrgContext: () => null,
+        handler: processOperatorSessionRefresh,
+      });
+      logger.info('[boot] operator-session-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-refresh worker', err);
+    }
+  }
+  // Voice profile refresh (nightly cross-org scan)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { voiceProfileRefreshHandler, VOICE_PROFILE_REFRESH_JOB } = await import('./jobs/voiceProfileRefreshJob.js');
+      await boss.work(VOICE_PROFILE_REFRESH_JOB, async (job) => {
+        await voiceProfileRefreshHandler(job as import('pg-boss').Job<Record<string, never>>);
+      });
+      logger.info('[boot] voice-profile-refresh worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register voice-profile-refresh worker', err);
+    }
+  }
+  // Gmail inbox poll (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { gmailInboxPollHandler, GMAIL_INBOX_POLL_JOB } = await import('./jobs/gmailInboxPollJob.js');
+      await boss.work(GMAIL_INBOX_POLL_JOB, async (job) => {
+        await gmailInboxPollHandler(job as import('pg-boss').Job<import('./jobs/gmailInboxPollJob.js').GmailPollJobData>);
+      });
+      logger.info('[boot] gmail-inbox-poll worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register gmail-inbox-poll worker', err);
+    }
+  }
+  // Calendar lookahead (per-connection, triggered by pg-boss scheduler)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { calendarLookaheadHandler, CALENDAR_LOOKAHEAD_JOB } = await import('./jobs/calendarLookaheadJob.js');
+      await boss.work(CALENDAR_LOOKAHEAD_JOB, async (job) => {
+        await calendarLookaheadHandler(job as import('pg-boss').Job<import('./jobs/calendarLookaheadJob.js').CalendarLookaheadJobData>);
+      });
+      logger.info('[boot] calendar-lookahead worker registered');
+    } catch (err) {
+      console.error('[boot] failed to register calendar-lookahead worker', err);
+    }
+  }
+  // Support dispatch boot recovery (R5 mitigation — recover drafts stranded in dispatching)
+  try {
+    const { runSupportDispatchBootRecovery } = await import('./lib/supportDispatchBootRecovery.js');
+    await runSupportDispatchBootRecovery();
+  } catch (err) {
+    console.error('[boot] support dispatch boot recovery failed', err);
   }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
   // Only runs if migration_states records BOTH config and memory as completed.
@@ -512,6 +1012,19 @@ async function start() {
     console.error('[boot] system skill handler validation failed:', err);
     throw err;
   }
+  // Soft drift check between compile-time SYSTEM_AGENT_BY_SLUG (server/config/c.ts)
+  // and the active rows in system_agents. Warn-only — Phase B promotes this to
+  // a hard fail-fast invariant once code paths actively rely on registry/DB parity.
+  try {
+    const { validateSystemAgentRegistry } = await import('./services/systemAgentRegistryValidator.js');
+    await validateSystemAgentRegistry();
+  } catch (err) {
+    console.warn('[boot] system-agent registry drift check could not run:', err);
+  }
+
+  // Agent Workspace — files-snapshot cache invalidation subscribers (Chunk 5)
+  const { subscribeFilesSnapshotInvalidators } = await import('./services/agentOverviewAggregator.js');
+  subscribeFilesSnapshotInvalidators();
 
   initWebSocket(httpServer);
 

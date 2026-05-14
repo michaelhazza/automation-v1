@@ -1,9 +1,12 @@
 import { canonicalDataService } from './canonicalDataService.js';
+import { fromOrgId } from './principal/fromOrgId.js';
 import { orgMemoryService } from './orgMemoryService.js';
 import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
 import { db } from '../db/index.js';
+import { getBaselineForSubaccount, computeDelta, type MetricDelta } from './reportingAgent/baselineHelper.js';
+import { isBaselineMetricSlug } from '../../shared/constants/baselineMetrics.js';
 import {
   clientPulseHealthSnapshots,
   clientPulseChurnAssessments,
@@ -77,11 +80,12 @@ async function evaluateSignal(
   accountId: string,
   organisationId: string
 ): Promise<number> {
+  const principal = fromOrgId(organisationId);
   switch (signal.type) {
     case 'metric_trend': {
       if (!signal.metricSlug) return 50;
       const history = await canonicalDataService.getMetricHistoryBySlug(
-        accountId, signal.metricSlug, 'rolling_30d', (signal.periods ?? 3) * 2
+        principal, accountId, signal.metricSlug, 'rolling_30d', (signal.periods ?? 3) * 2
       );
       if (history.length < (signal.periods ?? 3)) return 50; // insufficient data
       const periods = signal.periods ?? 3;
@@ -98,7 +102,7 @@ async function evaluateSignal(
     }
     case 'metric_threshold': {
       if (!signal.metricSlug) return 50;
-      const metric = await canonicalDataService.getMetricValue(accountId, signal.metricSlug, 'rolling_30d', organisationId);
+      const metric = await canonicalDataService.getMetricValue(principal, accountId, signal.metricSlug, 'rolling_30d');
       if (!metric) return 50;
       const val = Number(metric.currentValue);
       if (signal.condition === 'below_value') {
@@ -110,19 +114,19 @@ async function evaluateSignal(
       return 50;
     }
     case 'staleness': {
-      const account = await canonicalDataService.getAccountById(accountId, organisationId);
+      const account = await canonicalDataService.getAccountById(principal, accountId);
       if (!account?.lastSyncAt) return 100; // no data = max staleness
       const daysSince = (Date.now() - account.lastSyncAt.getTime()) / (1000 * 60 * 60 * 24);
       const max = signal.maxDaysInactive ?? 14;
       return Math.min(100, Math.max(0, (daysSince / max) * 100));
     }
     case 'anomaly_count': {
-      const anomalies = await canonicalDataService.getRecentAnomalies(organisationId, 100);
+      const anomalies = await canonicalDataService.getRecentAnomalies(principal, 100);
       const accountAnomalies = anomalies.filter(a => a.accountId === accountId);
       return Math.min(100, accountAnomalies.length * 20);
     }
     case 'health_score_level': {
-      const snapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, organisationId);
+      const snapshot = await canonicalDataService.getLatestHealthSnapshot(principal, accountId);
       if (!snapshot) return 50;
       const threshold = signal.thresholdValue ?? 40;
       return snapshot.score < threshold ? Math.min(100, (threshold - snapshot.score) * 2) : 0;
@@ -159,13 +163,14 @@ export async function executeQuerySubaccountCohort(
     return { accounts: [], summary: 'No subaccounts match the specified filters.' };
   }
 
-  const allAccounts = await canonicalDataService.getAccountsByOrg(context.organisationId);
+  const principal = fromOrgId(context.organisationId);
+  const allAccounts = await canonicalDataService.getAccountsByOrg(principal);
   const matchingAccounts = allAccounts.filter(a => a.subaccountId && subaccountIds.includes(a.subaccountId));
 
   const results = [];
   for (const account of matchingAccounts) {
-    const healthSnapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
-    const metrics = await canonicalDataService.getMetricsByAccount(account.id, context.organisationId);
+    const healthSnapshot = await canonicalDataService.getLatestHealthSnapshot(principal, account.id);
+    const metrics = await canonicalDataService.getMetricsByAccount(principal, account.id);
 
     results.push({
       accountId: account.id,
@@ -266,7 +271,8 @@ export async function executeComputeHealthScore(
   const accountId = input.account_id as string;
   if (!accountId) return { error: 'account_id is required' };
 
-  const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
+  const principal = fromOrgId(context.organisationId);
+  const account = await canonicalDataService.getAccountById(principal, accountId);
   if (!account) return { error: `Account ${accountId} not found` };
 
   // Load factor definitions from org config
@@ -278,7 +284,7 @@ export async function executeComputeHealthScore(
   const sampleMetric = factors[0];
   if (sampleMetric) {
     const historyCount = await canonicalDataService.getMetricHistoryCount(
-      accountId, sampleMetric.metricSlug, sampleMetric.periodType ?? 'rolling_30d'
+      principal, accountId, sampleMetric.metricSlug, sampleMetric.periodType ?? 'rolling_30d'
     );
     if (historyCount < coldStartConfig.minimumDataPoints && !coldStartConfig.allowHeuristicScoring) {
       return {
@@ -293,12 +299,12 @@ export async function executeComputeHealthScore(
 
   // Compute each factor from canonical_metrics
   const factorResults: Array<{ factor: string; score: number; weight: number; metricSlug: string; rawValue: number | null; direction: 'positive' | 'negative' | 'neutral' }> = [];
-  let missingFactors: string[] = [];
+  const missingFactors: string[] = [];
   let factorsWithData = 0;
 
   for (const factor of factors) {
     const periodType = factor.periodType ?? 'rolling_30d';
-    const metric = await canonicalDataService.getMetricValue(accountId, factor.metricSlug, periodType, context.organisationId);
+    const metric = await canonicalDataService.getMetricValue(principal, accountId, factor.metricSlug, periodType);
 
     if (!metric) {
       missingFactors.push(factor.label);
@@ -331,7 +337,7 @@ export async function executeComputeHealthScore(
     : 0;
 
   // Trend from health snapshot history
-  const history = await canonicalDataService.getHealthHistory(accountId, 5, context.organisationId);
+  const history = await canonicalDataService.getHealthHistory(principal, accountId, 5);
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
   if (history.length >= 2) {
     const avgRecent = history.slice(0, 2).reduce((s, h) => s + h.score, 0) / 2;
@@ -345,8 +351,7 @@ export async function executeComputeHealthScore(
 
   // Write snapshot to the generic health_snapshots table (retained for
   // existing non-ClientPulse readers during the deprecation window).
-  const snapshot = await canonicalDataService.writeHealthSnapshot({
-    organisationId: context.organisationId,
+  const snapshot = await canonicalDataService.writeHealthSnapshot(principal, {
     accountId,
     score: compositeScore,
     factorBreakdown: factorResults.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })),
@@ -424,8 +429,10 @@ export async function executeDetectAnomaly(
   const threshold = metricOverride?.threshold ?? anomalyConfig.defaultThreshold;
   const windowDays = metricOverride?.windowDays ?? anomalyConfig.defaultWindowDays;
 
+  const principal = fromOrgId(context.organisationId);
+
   // Get current metric value
-  const currentMetric = await canonicalDataService.getMetricValue(accountId, metricSlug, 'rolling_30d', context.organisationId);
+  const currentMetric = await canonicalDataService.getMetricValue(principal, accountId, metricSlug, 'rolling_30d');
   if (!currentMetric) {
     return { anomalyDetected: false, reason: `Metric ${metricSlug} not found for account`, currentValue: null };
   }
@@ -433,7 +440,7 @@ export async function executeDetectAnomaly(
 
   // Get metric history for baseline
   const history = await canonicalDataService.getMetricHistoryBySlug(
-    accountId, metricSlug, 'rolling_30d',
+    principal, accountId, metricSlug, 'rolling_30d',
     Math.max(windowDays, anomalyConfig.minimumDataPoints)
   );
 
@@ -469,7 +476,7 @@ export async function executeDetectAnomaly(
     // Dedup: check for existing unacknowledged anomaly within dedup window
     const dedupWindowMinutes = anomalyConfig.dedupWindowMinutes ?? 60;
     const dedupCutoff = new Date(Date.now() - dedupWindowMinutes * 60 * 1000);
-    const recentAnomalies = await canonicalDataService.getRecentAnomalies(context.organisationId, 100);
+    const recentAnomalies = await canonicalDataService.getRecentAnomalies(principal, 100);
     const isDuplicate = recentAnomalies.some(a =>
       a.accountId === accountId &&
       a.metricName === metricSlug &&
@@ -488,8 +495,7 @@ export async function executeDetectAnomaly(
       };
     }
 
-    await canonicalDataService.writeAnomalyEvent({
-      organisationId: context.organisationId,
+    await canonicalDataService.writeAnomalyEvent(principal, {
       accountId,
       metricName: metricSlug,
       currentValue,
@@ -565,12 +571,13 @@ export async function executeComputeChurnRisk(
 
   const topDrivers = [...signalResults].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
 
-  const latestSnapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, context.organisationId);
+  const principal = fromOrgId(context.organisationId);
+  const latestSnapshot = await canonicalDataService.getLatestHealthSnapshot(principal, accountId);
 
   // Dual-write to client_pulse_churn_assessments (migration 0174, locked
   // contract (f)). Skips cleanly if the canonical account has no subaccount
   // linkage so legacy org-only accounts don't break the handler.
-  const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
+  const account = await canonicalDataService.getAccountById(principal, accountId);
   if (account?.subaccountId) {
     let assessmentId: string | null = null;
     try {
@@ -639,13 +646,15 @@ export async function executeGeneratePortfolioReport(
   const reportingPeriodDays = (input.reporting_period_days as number) ?? 7;
   const format = (input.format as string) ?? 'structured';
 
-  const accounts = await canonicalDataService.getAccountsByOrg(context.organisationId);
-  const anomalies = await canonicalDataService.getRecentAnomalies(context.organisationId, 50);
+  const principal = fromOrgId(context.organisationId);
+  const accounts = await canonicalDataService.getAccountsByOrg(principal);
+  const anomalies = await canonicalDataService.getRecentAnomalies(principal, 50);
   const orgInsights = await orgMemoryService.getInsightsForPrompt(context.organisationId);
 
   const accountHealthData = [];
+  const sinceOnboardingByAccountId = new Map<string, MetricDelta[]>();
   for (const account of accounts) {
-    const snapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
+    const snapshot = await canonicalDataService.getLatestHealthSnapshot(principal, account.id);
     accountHealthData.push({
       displayName: account.displayName,
       accountId: account.id,
@@ -653,6 +662,17 @@ export async function executeGeneratePortfolioReport(
       trend: snapshot?.trend ?? null,
       confidence: snapshot?.confidence ?? null,
     });
+
+    if (account.subaccountId) {
+      const baseline = await getBaselineForSubaccount(context.organisationId, account.subaccountId);
+      if (baseline) {
+        const rawMetrics = await canonicalDataService.getMetricsByAccount(principal, account.id);
+        const currentMetrics = rawMetrics
+          .filter((m) => isBaselineMetricSlug(m.metricSlug))
+          .map((m) => ({ slug: m.metricSlug as MetricDelta['slug'], numeric: parseFloat(m.currentValue) }));
+        sinceOnboardingByAccountId.set(account.id, computeDelta(baseline, currentMetrics));
+      }
+    }
   }
 
   const scoredAccounts = accountHealthData.filter(a => a.healthScore !== null);
@@ -683,6 +703,7 @@ export async function executeGeneratePortfolioReport(
       accountId: a.accountId,
       healthScore: a.healthScore,
       trend: a.trend,
+      sinceOnboarding: sinceOnboardingByAccountId.get(a.accountId) ?? null,
     })),
     activeAnomalies: criticalAnomalies.slice(0, 10).map(a => ({
       accountId: a.accountId,
@@ -695,6 +716,7 @@ export async function executeGeneratePortfolioReport(
       displayName: a.displayName,
       accountId: a.accountId,
       healthScore: a.healthScore,
+      sinceOnboarding: sinceOnboardingByAccountId.get(a.accountId) ?? null,
     })),
     baselineBuilding: coldStart.map(a => ({
       displayName: a.displayName,

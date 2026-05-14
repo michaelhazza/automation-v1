@@ -5,6 +5,9 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import * as referenceDocumentService from '../services/referenceDocumentService.js';
 import * as documentBundleService from '../services/documentBundleService.js';
+import * as documentDataSourceService from '../services/documentDataSourceService.js';
+import * as documentPromotionService from '../services/documentPromotionService.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
 
 const router = Router();
 
@@ -87,9 +90,15 @@ router.post(
       return;
     }
 
-    const attachTo = req.body?.attachTo
-      ? (JSON.parse(req.body.attachTo as string) as { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string })
-      : undefined;
+    let attachTo: { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string } | undefined;
+    if (req.body?.attachTo) {
+      try {
+        attachTo = JSON.parse(req.body.attachTo as string) as { subjectType: documentBundleService.AttachmentSubjectType; subjectId: string };
+      } catch {
+        res.status(400).json({ error: { code: 'invalid_json_input', message: 'attachTo field could not be parsed as JSON' } });
+        return;
+      }
+    }
     const bundleName = (req.body?.bundleName as string | undefined) ?? undefined;
 
     // Validate: bundleName requires >= 2 files
@@ -101,7 +110,12 @@ router.post(
     // Validate names array.
     let names: string[] = [];
     if (req.body?.names) {
-      names = Array.isArray(req.body.names) ? req.body.names : JSON.parse(req.body.names as string);
+      try {
+        names = Array.isArray(req.body.names) ? req.body.names : JSON.parse(req.body.names as string);
+      } catch {
+        res.status(400).json({ error: { code: 'invalid_json_input', message: 'names field could not be parsed as JSON' } });
+        return;
+      }
     }
     if (names.length > 0 && names.length !== files.length) {
       res.status(400).json({ error: 'names array length must match files array length', code: 'CACHED_CONTEXT_UPLOAD_NAMES_LENGTH_MISMATCH' });
@@ -189,6 +203,47 @@ router.post(
     }
 
     res.status(201).json({ documentIds, bundleId, autoAttachedTo });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/reference-documents/promote — promote an execution file to a reference document
+// ---------------------------------------------------------------------------
+router.post(
+  '/api/reference-documents/promote',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
+  asyncHandler(async (req, res) => {
+    const {
+      fileId, name, description,
+      subaccountId, agentId, scheduledTaskId, taskInstanceId
+    } = req.body as {
+      fileId?: string;
+      name?: string;
+      description?: string;
+      subaccountId?: string;
+      agentId?: string;
+      scheduledTaskId?: string;
+      taskInstanceId?: string;
+    };
+    if (!fileId || !name) {
+      res.status(400).json({ error: 'fileId and name are required' });
+      return;
+    }
+    const boss = await getPgBoss();
+    const result = await documentPromotionService.promoteFile({
+      fileId,
+      name,
+      description,
+      organisationId: req.orgId!,
+      subaccountId,
+      agentId,
+      scheduledTaskId,
+      taskInstanceId,
+      principalId: req.user?.id,
+      boss,
+    });
+    res.status(201).json(result);
   }),
 );
 
@@ -340,6 +395,72 @@ router.get(
       return;
     }
     res.json(versionRow);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/reference-documents/:id/mode — update retrieval mode
+// ---------------------------------------------------------------------------
+router.post(
+  '/api/reference-documents/:id/mode',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
+  asyncHandler(async (req, res) => {
+    const { mode } = req.body as { mode?: string };
+    const validModes = ['auto', 'always_available', 'reference_only'];
+    if (!mode || !validModes.includes(mode)) {
+      res.status(400).json({ error: `mode must be one of: ${validModes.join(', ')}` });
+      return;
+    }
+    await documentDataSourceService.changeDocumentMode({
+      documentId: req.params.id,
+      newMode: mode as 'auto' | 'always_available' | 'reference_only',
+      organisationId: req.orgId!,
+      actorUserId: req.user!.id,
+    });
+    res.status(204).send();
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/reference-documents/:id/links — link document to a scope
+// ---------------------------------------------------------------------------
+router.post(
+  '/api/reference-documents/:id/links',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId, scheduledTaskId, taskInstanceId } = req.body as {
+      subaccountId?: string;
+      agentId?: string;
+      scheduledTaskId?: string;
+      taskInstanceId?: string;
+    };
+    const link = await documentDataSourceService.linkDocumentToScope({
+      documentId: req.params.id,
+      organisationId: req.orgId!,
+      subaccountId,
+      agentId,
+      scheduledTaskId,
+      taskInstanceId,
+    });
+    res.status(201).json(link);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// DELETE /api/reference-documents/:id/links/:linkId — unlink document from scope
+// ---------------------------------------------------------------------------
+router.delete(
+  '/api/reference-documents/:id/links/:linkId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REFERENCE_DOCUMENTS_WRITE),
+  asyncHandler(async (req, res) => {
+    await documentDataSourceService.unlinkDocumentFromScope({
+      linkId: req.params.linkId,
+      organisationId: req.orgId!,
+    });
+    res.status(204).send();
   }),
 );
 

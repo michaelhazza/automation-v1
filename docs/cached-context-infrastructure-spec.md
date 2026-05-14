@@ -11,7 +11,7 @@
 |---|---|
 | 2026-04-22 | Initial spec after four external-review passes on the dev brief. |
 | 2026-04-22 | `spec-reviewer` loop — 2 iterations, 35 mechanical fixes, exited on two-consecutive-mechanical-only (see `tasks/review-logs/spec-review-final-cached-context-infrastructure-*.md`). |
-| 2026-04-23 | **UX revision** — product decision to reframe the user-facing noun to "documents + optional bundles" after mockup review surfaced complexity mismatch with the product's consumer-simple positioning. New §3.6 Attachment UX contract defines the canonical user flows. New `is_auto_created` column on `document_bundles` (§5.3); new `bundle_suggestion_dismissals` table (§5.12). Four mockups under `prototypes/cached-context/` are the canonical visual reference. Frontend design rules that this revision codifies live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). |
+| 2026-04-23 | **UX revision** — product decision to reframe the user-facing noun to "documents + optional bundles" after mockup review surfaced complexity mismatch with the product's consumer-simple positioning. New §3.6 Attachment UX contract defines the canonical user flows. New `is_auto_created` column on `document_bundles` (§5.3); new `bundle_suggestion_dismissals` table (§5.12). Four mockups under `_archive/prototypes/cached-context/` are the canonical visual reference. Frontend design rules that this revision codifies live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). |
 | 2026-04-23 | **ChatGPT spec review — round 1** applied. 13 additive invariant / clarification findings, all accepted. Material additions: order-independence UX invariant + determinism requirement on the bundle-suggestion heuristic (§3.6.4); three new invariants in §6.2 (unnamed bundle identity stability, promotion identity preservation, suggestBundle determinism); bundle-chip-as-single-attachment-unit invariant (§3.6.7); explicit snapshot-integrity fail-fast invariant (§6.4); budget enforcement split clarification (§6.5); cache-identity vs provider-cache-behaviour principle + hash glossary (§4.4); `degraded` semantics clarification (§4.6); naming-rule note on "bundle" vs "named bundle" (§3.6.1); unnamed bundle growth risk (§14 R11) + new deferred-work entry (§12.16). One mockup UI-copy line tightened in `mockup-upload-document.html`. Session log: `tasks/review-logs/chatgpt-spec-review-cached-context-infrastructure-2026-04-23T04-33-02Z.md`. |
 | 2026-04-23 | **Vocabulary unification** — "bundle" replaces the earlier "pack" vocabulary throughout the schema, services, routes, types, error codes, and prose. Single domain vocabulary across UI, backend, and docs — no translation layer. Table names: `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`. Services: `documentBundleService`, `bundleResolutionService`, `bundleUtilizationJob`. Method rename: `findOrCreateUnnamedBundle` (was `findOrCreateAutoPack`). Route namespace: `/api/document-bundles/*` and `/*/attached-bundles`. Conceptual split reframed: "named bundle" (`is_auto_created=false`, surfaced as `chipKind='bundle'`) vs "unnamed bundle" (`is_auto_created=true`, invisible to users, surfaced as `chipKind='document'` per contained doc). |
 | 2026-04-23 | **ChatGPT spec review — round 3** applied. 10 additive invariant / clarification findings, all accepted. Material additions: cross-tenant hash-identity invariant + `assembly_version` bump semantics (§4.4); snapshot isolation invariant (§6.3); indexed-lookup performance constraint on `suggestBundle` (§6.2 invariant #9); new `degraded_reason` diagnostic column on `agent_runs` (§4.6 + §5.8, with `'soft_warn' \| 'token_drift' \| 'cache_miss'` enum and precedence rule); HITL retry re-resolution invariant (§6.6 step 4 rewritten); strengthened §12.16 + R11 auto-bundle lifecycle wording from "should guard" to "must support future lifecycle management"; document-rename-doesn't-affect-identity invariant (§5.1); token-counts-computed-at-version-write invariant (§5.2); bundle-deletion wrapper-only semantics (§6.2 softDelete notes). One schema addition (`degraded_reason` column) — low-risk, additive, matches `run_outcome` pattern. Session log: `tasks/review-logs/chatgpt-spec-review-cached-context-infrastructure-2026-04-23T04-33-02Z.md`. |
@@ -106,7 +106,7 @@ This spec explicitly follows the conventions in `docs/spec-context.md`:
 
 This spec delivers a new execution-layer primitive for *explicitly attached* reference documents used by recurring and ad-hoc agent tasks. What ships:
 
-1. **A new primitive family: `reference_documents` + `document_bundles`.** User-uploaded reference material, versioned at the document level. Bundles are the backend attachment unit; they attach at three explicit surfaces: agent, task, or scheduled-task. No scope cascade — attachment is the only mechanism by which a bundle is loaded into a run. **User-facing framing.** Users attach individual *documents*; an unnamed bundle is created transparently per attachment. Users can optionally promote an unnamed bundle into a named bundle (via post-save suggestion or upload-time checkbox) for single-click reuse. See §3.6 for the full user-facing contract and the mockups under `prototypes/cached-context/`.
+1. **A new primitive family: `reference_documents` + `document_bundles`.** User-uploaded reference material, versioned at the document level. Bundles are the backend attachment unit; they attach at three explicit surfaces: agent, task, or scheduled-task. No scope cascade — attachment is the only mechanism by which a bundle is loaded into a run. **User-facing framing.** Users attach individual *documents*; an unnamed bundle is created transparently per attachment. Users can optionally promote an unnamed bundle into a named bundle (via post-save suggestion or upload-time checkbox) for single-click reuse. See §3.6 for the full user-facing contract and the mockups under `_archive/prototypes/cached-context/`.
 2. **Run-time bundle snapshots (`bundle_resolution_snapshots`).** At the start of every run, each attached bundle is resolved to an immutable snapshot `{ bundle_id, bundle_version, ordered_document_versions, document_serialized_bytes_hashes }` and persisted on the run. The snapshot captures the IDENTITY + INTEGRITY of the resolved prefix; the engine reads the snapshot to determine which pinned `reference_document_versions` rows to fetch, then re-hashes those rows on read to confirm the bytes match. Snapshots dedup per bundle via `UNIQUE(bundle_id, prefix_hash)` — cross-bundle reuse of the same hash is expected and flows through to the provider's cache layer.
 3. **Context assembly engine (`contextAssemblyEngine`).** A single engine every file-attached caller uses. Pipeline shape: `assemble → validate → (optional transform) → execute`. Deterministic ordering, versioned serialization format, single `cache_control` breakpoint at the end of the reference block, variable input appended after.
 4. **Canonical `ExecutionBudget`.** A unified budget struct `{ max_input_tokens, max_output_tokens, max_total_cost_usd, per_document_max_tokens, reserve_output_tokens, soft_warn_ratio, model_family, model_context_window }` resolved per invocation from three inputs (task config ∩ model-tier defaults ∩ org ceilings). Assembly-time breach dimensions (`max_input_tokens`, `per_document_cap`) route to HITL; `max_output_tokens` is the router's response cap; `max_total_cost_usd` is audit-only at assembly time — mid-flight cost enforcement belongs to the existing `runCostBreaker` primitive. Hard invariant at resolution time: `max_input_tokens + reserve_output_tokens ≤ model_context_window`.
@@ -223,7 +223,7 @@ Memory blocks continue unchanged. Universal Brief's contract is preserved exactl
 
 ### 3.6 Attachment UX — user-facing contract
 
-This section defines the canonical user-facing behaviour for attaching reference material. The rest of the spec (schema, services, routes) must respect the invariants declared here. The four mockups under `prototypes/cached-context/` are the visual source of truth; if the spec text and a mockup disagree on a UX question, the mockup wins.
+This section defines the canonical user-facing behaviour for attaching reference material. The rest of the spec (schema, services, routes) must respect the invariants declared here. The four mockups under `_archive/prototypes/cached-context/` are the visual source of truth; if the spec text and a mockup disagree on a UX question, the mockup wins.
 
 **Governing rule — applied throughout.** Frontend design principles for this project live in [`docs/frontend-design-principles.md`](frontend-design-principles.md). Any UI work generated from this spec must pass the pre-design checklist in that document before shipping. A rich backend does not justify a rich UI.
 
@@ -246,12 +246,12 @@ The four mockups below are the locked UX for v1. Change any of them and this sec
 
 | # | Mockup | Covers |
 |---|---|---|
-| 1 | [`prototypes/cached-context/mockup-attach-docs.html`](../prototypes/cached-context/mockup-attach-docs.html) | The hero attach flow. Unified picker (documents + bundles in one search). Context tabs for agent / task / scheduled-task. Post-save bundle suggestion card (§3.6.4). |
-| 2 | [`prototypes/cached-context/mockup-upload-document.html`](../prototypes/cached-context/mockup-upload-document.html) | Reusable multi-file upload modal. Opt-in "Group these documents as a bundle" checkbox. Context-aware auto-attach confirmation. |
-| 3 | [`prototypes/cached-context/mockup-bundle-detail.html`](../prototypes/cached-context/mockup-bundle-detail.html) | Named-bundle detail. Soft intro callout on first visits. "Attach to a task" primary action. Advanced details (size, model fit) collapsed. |
-| 4 | [`prototypes/cached-context/mockup-budget-breach-block.html`](../prototypes/cached-context/mockup-budget-breach-block.html) | HITL block UX rendering `HitlBudgetBlockPayload` (§4.5). Safety-critical information-dense exception. |
+| 1 | [`_archive/prototypes/cached-context/mockup-attach-docs.html`](../_archive/prototypes/cached-context/mockup-attach-docs.html) | The hero attach flow. Unified picker (documents + bundles in one search). Context tabs for agent / task / scheduled-task. Post-save bundle suggestion card (§3.6.4). |
+| 2 | [`_archive/prototypes/cached-context/mockup-upload-document.html`](../_archive/prototypes/cached-context/mockup-upload-document.html) | Reusable multi-file upload modal. Opt-in "Group these documents as a bundle" checkbox. Context-aware auto-attach confirmation. |
+| 3 | [`_archive/prototypes/cached-context/mockup-bundle-detail.html`](../_archive/prototypes/cached-context/mockup-bundle-detail.html) | Named-bundle detail. Soft intro callout on first visits. "Attach to a task" primary action. Advanced details (size, model fit) collapsed. |
+| 4 | [`_archive/prototypes/cached-context/mockup-budget-breach-block.html`](../_archive/prototypes/cached-context/mockup-budget-breach-block.html) | HITL block UX rendering `HitlBudgetBlockPayload` (§4.5). Safety-critical information-dense exception. |
 
-The landing page at [`prototypes/cached-context/index.html`](../prototypes/cached-context/index.html) groups these with rationale and the "what was cut and why" record from the pre-UX-revision mockup set.
+The landing page at [`_archive/prototypes/cached-context/index.html`](../_archive/prototypes/cached-context/index.html) groups these with rationale and the "what was cut and why" record from the pre-UX-revision mockup set.
 
 #### 3.6.3 Primary user flows
 
@@ -2162,7 +2162,7 @@ The router's public `routeCall()` gains two optional params (`prefixHash`, `cach
 
 ### 7.4 Client-side UI surfaces
 
-The v1 client scope is defined by the four mockups under `prototypes/cached-context/` (§3.6.2). Implementation touches:
+The v1 client scope is defined by the four mockups under `_archive/prototypes/cached-context/` (§3.6.2). Implementation touches:
 
 - **Agent / task / scheduled-task config pages** — existing pages gain a "Reference documents" section using the pattern in `mockup-attach-docs.html`. This includes the unified picker, the upload-modal trigger, and the post-save bundle-suggestion card. Backed by `/api/document-bundles/attach-documents`, `/api/document-bundles/suggest-bundle`, `/api/document-bundles/:id/promote`, `/api/bundle-suggestion-dismissals`, and the subject listings above.
 - **`Knowledge › Documents` page** — new standalone documents page. Standard CRUD list (pattern borrowed from `memory_blocks` page). Hosts the "Upload documents" button that opens the same upload modal in library-only context (§3.6.5 Flow C).
@@ -2300,6 +2300,30 @@ No service, route, or orchestrator path uses `withAdminConnection` or any RLS-by
 **Documented exception — `bundleUtilizationJob` (§6.7).** The hourly utilization sweep is a cross-tenant maintenance job and follows the codebase's accepted convention for such jobs: `withAdminConnection` + `SET LOCAL ROLE admin_role`, mirroring `memoryDedupJob`, `llmLedgerArchiveJob`, `securityEventsCleanupJob`, and `regressionReplayJob`. The job MUST write that explicit justification in its header comment (same pattern the existing jobs use).
 
 **Compliance allow-list mechanism.** `scripts/gates/verify-rls-contract-compliance.sh` today scans service files (`server/services/**`) and blocks direct-DB-access bypasses. For jobs (`server/jobs/**`), the same gate reads `scripts/gates/rls-bypass-allowlist.txt` — an explicit file of permitted cross-org-maintenance entry points. `server/jobs/bundleUtilizationJob.ts` MUST be added to that allow-list in the same PR that adds the job file, and the PR MUST include the same inline justification comment the other allow-listed jobs use. The allow-list file is listed in the file inventory (§13.10) as a modified config file. No other cached-context code path is permitted this carve-out.
+
+### 8.7 RLS Posture (Option B-lite)
+
+*(Added in pre-launch-hardening Phase 2 — CACHED-CTX-DOC decision. Architect resolution: schema-decisions.md § 12.)*
+
+**Why DB-layer subaccount RLS is intentionally not enforced on cached-context tables.**
+
+Migration `0213_fix_cached_context_rls.sql` deliberately dropped DB-layer *subaccount* RLS policies from `reference_documents`, `document_bundles`, `document_bundle_attachments`, `bundle_resolution_snapshots`, and `bundle_suggestion_dismissals`. Org-isolation policies remain in place and are enforced via FORCE ROW LEVEL SECURITY. The subaccount-level policies were removed because:
+
+1. **Cached context is by design cross-subaccount.** A bundle assembled from org-level documents should be reusable across all subaccounts in that org. DB-layer subaccount RLS would require every read to carry a subaccount context, but many read paths (org-level orchestration, cross-subaccount analytics, maintenance jobs) have no natural subaccount principal.
+
+2. **Service-layer filters are the chosen authority.** Every application read path that surfaces cached-context data to a specific subaccount filters by `subaccountId` at the service layer (`documentBundleService`, `bundleResolutionService`, `referenceDocumentService`). These filters enforce the intended isolation without the performance penalty of subaccount-scoped RLS on high-frequency read paths.
+
+3. **Option B-lite is documented as a first-class decision.** Calling this "deferred" would imply it will be revisited — it will only be revisited if a concrete cross-subaccount data-leak signal is observed post-launch.
+
+**What triggers reinstating DB-layer subaccount RLS:** A confirmed, reproducible case where service-layer filters failed to prevent a cross-subaccount read. Absent that signal, the Option B-lite posture is permanent for v1.
+
+**How future cached-context tables register.** A new table that stores data with subaccount semantics MUST either:
+- (a) Add a header comment in its creation migration explicitly naming "Option B-lite" and citing this section, OR
+- (b) Opt into DB-layer subaccount RLS in its migration, following the §8.1 template and adding a manifest entry in `rlsProtectedTables.ts`.
+
+Option (a) is the default. Option (b) is appropriate only when the table's read paths all carry a natural subaccount principal and the cross-subaccount reuse argument does not apply.
+
+**§5.12 BUNDLE-DISMISS-RLS amendment.** The `bundle_suggestion_dismissals` unique key was extended from 2 columns `(user_id, doc_set_hash)` to 3 columns `(organisation_id, user_id, doc_set_hash)` in migration `0231_bundle_dismiss_rls_unique.sql`. This closes the multi-org dismissal collision scenario: a user who belongs to multiple organisations dismissing the same doc-set hash in org A must not silently conflict with a dismissal record in org B. The service-layer upsert (`documentBundleService.ts`) was updated to match the 3-column conflict target.
 
 ---
 
@@ -2532,7 +2556,7 @@ Per `docs/spec-authoring-checklist.md §7`. Every deferred item here corresponds
 - **12.9 Automatic bundle summarisation on threshold breach.** Not supported in v1 — breach routes to HITL for operator decision. Summarisation would live in the assembly pipeline's `(optional transform)` slot (§4 of the brief), which is reserved but empty.
 - **12.10 Cross-tenant bundle sharing.** Tenants keep their own bundles. Platform-level reference material (standard disclaimers, common frameworks) is deferred.
 - **12.11 Parallel fan-out across multiple API calls.** Splitting a task across multiple parallel LLM calls (for token-count-over-budget workloads) is a separate concern.
-- **12.12 Bundle observability UI (admin-only).** Per-bundle utilization dashboard with tier-by-tier radial rings, usage explorer "bundle lens" with hit-rate trends / cost-split / ranking / per-tenant breakdown, and run-detail cache-attribution panel. These represent real backend capabilities the spec already ships at the query layer (§11), but their UI surfaces are deferred until a specific admin workflow needs them — at which point they go on a role-gated admin observability page, never on the primary user journey. See `docs/frontend-design-principles.md` for the governing rule. The pre-revision mockups in `prototypes/cached-context/index.html` document what was cut and why.
+- **12.12 Bundle observability UI (admin-only).** Per-bundle utilization dashboard with tier-by-tier radial rings, usage explorer "bundle lens" with hit-rate trends / cost-split / ranking / per-tenant breakdown, and run-detail cache-attribution panel. These represent real backend capabilities the spec already ships at the query layer (§11), but their UI surfaces are deferred until a specific admin workflow needs them — at which point they go on a role-gated admin observability page, never on the primary user journey. See `docs/frontend-design-principles.md` for the governing rule. The pre-revision mockups in `_archive/prototypes/cached-context/index.html` document what was cut and why.
 - **12.13 Admin editing of platform-default `model_tier_budget_policies`.** v1 seed rows are editable only via direct DB access. A system-admin-gated route is deferred.
 - **12.14 New-model-family backfill.** When a new `model_tier_budget_policies` row is added for a previously-unseen `modelFamily`, existing `reference_document_versions.tokenCounts` rows lack that key and assembly against that family would fail. v1 does not ship a backfill migration/job because v1 has a fixed three-family set (Sonnet / Opus / Haiku per §5.2). Adding a fourth family post-pilot is a deliberate operational step that MUST include: (a) a data migration that computes `tokenCounts[newFamily]` for every live `reference_document_versions` row via the Anthropic `countTokens` helper, and (b) a gate on the `model_tier_budget_policies` insert that refuses to activate until the backfill reports zero unfilled rows. Strict fail policy: `referenceDocumentService` throws `CACHED_CONTEXT_DOC_TOKEN_COUNT_MISSING` (500) if assembly encounters a missing `tokenCounts[modelFamily]` key at run time.
 - **12.15 Resolver-narrowed cache TTL.** v1 treats the caller's `ttl` hint as a pass-through. A future `model_tier_budget_policies.maxCacheTtl` column + resolver narrowing (`min(caller, orgCeiling, modelTier)`) is deferred — the adapter today supports only `'5m'` and `'1h'` values, so narrowing has small practical value until multi-tier TTLs land upstream.
@@ -2666,11 +2690,11 @@ These files are already on disk as of the 2026-04-23 UX revision. Listed here fo
 | File | Purpose |
 |---|---|
 | `docs/frontend-design-principles.md` | Governing UI rules (pre-design checklist, ship-by-default, defer-by-default, complexity budget, worked example for this feature). §3.6 references this as the authority for UI decisions. |
-| `prototypes/cached-context/index.html` | Landing page for the mockup set, concept-shift summary, iteration notes. |
-| `prototypes/cached-context/mockup-attach-docs.html` | §3.6.3 Flow A + §3.6.4 post-save suggestion. |
-| `prototypes/cached-context/mockup-upload-document.html` | §3.6.5 reusable upload modal. |
-| `prototypes/cached-context/mockup-bundle-detail.html` | §3.6.3 Flow E + bundle management. |
-| `prototypes/cached-context/mockup-budget-breach-block.html` | §3.6.3 Flow F + `HitlBudgetBlockPayload` (§4.5) rendering. |
+| `_archive/prototypes/cached-context/index.html` | Landing page for the mockup set, concept-shift summary, iteration notes. |
+| `_archive/prototypes/cached-context/mockup-attach-docs.html` | §3.6.3 Flow A + §3.6.4 post-save suggestion. |
+| `_archive/prototypes/cached-context/mockup-upload-document.html` | §3.6.5 reusable upload modal. |
+| `_archive/prototypes/cached-context/mockup-bundle-detail.html` | §3.6.3 Flow E + bundle management. |
+| `_archive/prototypes/cached-context/mockup-budget-breach-block.html` | §3.6.3 Flow F + `HitlBudgetBlockPayload` (§4.5) rendering. |
 
 ---
 

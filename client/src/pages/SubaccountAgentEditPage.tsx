@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -7,6 +7,23 @@ import TestPanel from '../components/runs/TestPanel';
 import Modal from '../components/Modal';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
+import { IdentityCard } from '../components/workspace/IdentityCard';
+import type { IdentityCardAction } from '../components/workspace/IdentityCard';
+import AgentActivityTab from '../components/agent/AgentActivityTab';
+import { SuspendIdentityDialog } from '../components/workspace/SuspendIdentityDialog';
+import { RevokeIdentityDialog } from '../components/workspace/RevokeIdentityDialog';
+import {
+  getAgentIdentity,
+  resumeAgentIdentity,
+  archiveAgentIdentity,
+  toggleAgentEmailSending,
+} from '../lib/api';
+import ExecutionTab from '../components/agent-config/ExecutionTab';
+import type { AllowedEnvironment } from '../components/agent-config/ExecutionTab';
+import GovernanceTab from '../components/agent-config/GovernanceTab';
+import ModelsIdentityTab from '../components/agent-config/ModelsIdentityTab';
+import IntegrationsTab from '../components/agent-config/IntegrationsTab';
+import { ModelAccessSection } from './govern/components/ModelAccessSection';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +49,10 @@ interface LinkDetail {
   catchUpPolicy: 'skip_missed' | 'enqueue_missed_with_cap';
   catchUpCap: number;
   maxConcurrentRuns: number;
+  controllerStyleAllowed: 'native_only' | 'native_and_operator';
+  allowedEnvironments: string[];
+  maxRiskTier: number;
+  requireApprovalAtTier: number;
   agent: {
     id: string;
     name: string;
@@ -42,10 +63,19 @@ interface LinkDetail {
     modelProvider: string;
     modelId: string;
     defaultSkillSlugs: string[];
+    workspaceActorId: string | null;
   };
 }
 
-type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs';
+type Tab = 'skills' | 'instructions' | 'budget' | 'scheduling' | 'beliefs' | 'identity' | 'activity' | 'execution' | 'governance' | 'models_identity' | 'integrations';
+
+interface AgentIdentity {
+  identityId: string;
+  emailAddress: string;
+  emailSendingEnabled: boolean;
+  status: string;
+  displayName: string;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,18 +98,57 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function SubaccountAgentEditPage({ user: _user }: { user: User }) {
   const { subaccountId, linkId } = useParams<{ subaccountId: string; linkId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [link, setLink] = useState<LinkDetail | null>(null);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>('skills');
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'skills';
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  const [showOnboardedBanner, setShowOnboardedBanner] = useState(
+    searchParams.get('newlyOnboarded') === '1',
+  );
+
+  // Identity tab state
+  const [identity, setIdentity] = useState<AgentIdentity | null>(null);
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [identityPending, setIdentityPending] = useState<IdentityCardAction | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  function extractApiError(e: unknown, fallback: string): string {
+    const err = e as { response?: { data?: { error?: { message?: string } | string; message?: string } }; message?: string };
+    const apiErr = err.response?.data?.error;
+    return (typeof apiErr === 'string' ? apiErr : apiErr?.message)
+      ?? err.response?.data?.message
+      ?? err.message
+      ?? fallback;
+  }
+
+  async function runIdentityAction(action: IdentityCardAction, fn: () => Promise<unknown>) {
+    if (!link) return;
+    setIdentityPending(action);
+    setIdentityError(null);
+    try {
+      await fn();
+      const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+      setIdentity(updated);
+    } catch (e: unknown) {
+      setIdentityError(extractApiError(e, 'Action failed'));
+    } finally {
+      setIdentityPending(null);
+    }
+  }
 
   // Per-section form state
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
   const [customInstructions, setCustomInstructions] = useState('');
   const [budget, setBudget] = useState({ tokenBudgetPerRun: 30000, maxToolCallsPerRun: 20, timeoutSeconds: 300, maxCostPerRunCents: '' as string | number });
   const [scheduling, setScheduling] = useState({ scheduleCron: '', scheduleEnabled: false, scheduleTimezone: 'UTC', concurrencyPolicy: 'skip_if_active' as LinkDetail['concurrencyPolicy'], catchUpPolicy: 'skip_missed' as LinkDetail['catchUpPolicy'], catchUpCap: 3, maxConcurrentRuns: 1 });
+  const [execution, setExecution] = useState<{ controllerStyleAllowed: 'native_only' | 'native_and_operator'; allowedEnvironments: AllowedEnvironment[] }>({ controllerStyleAllowed: 'native_only', allowedEnvironments: ['api_tool', 'headless', 'browser'] });
+  const [governance, setGovernance] = useState({ maxRiskTier: 3, requireApprovalAtTier: 4 });
 
   // Save state per section
   const [saving, setSaving] = useState<Tab | null>(null);
@@ -113,6 +182,14 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
           catchUpCap: detail.catchUpCap,
           maxConcurrentRuns: detail.maxConcurrentRuns,
         });
+        setExecution({
+          controllerStyleAllowed: detail.controllerStyleAllowed ?? 'native_only',
+          allowedEnvironments: (detail.allowedEnvironments ?? ['api_tool', 'headless', 'browser']) as AllowedEnvironment[],
+        });
+        setGovernance({
+          maxRiskTier: detail.maxRiskTier ?? 3,
+          requireApprovalAtTier: detail.requireApprovalAtTier ?? 4,
+        });
         setAvailableSkills(skillsRes.data ?? []);
       } catch (e: unknown) {
         const err = e as { response?: { data?: { error?: { message?: string } | string } }; message?: string };
@@ -125,6 +202,15 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     }
     load();
   }, [subaccountId, linkId]);
+
+  useEffect(() => {
+    if (activeTab !== 'identity' || !link) return;
+    setIdentityLoading(true);
+    getAgentIdentity(link.agentId)
+      .then((data: AgentIdentity) => setIdentity(data))
+      .catch(() => setIdentity(null))
+      .finally(() => setIdentityLoading(false));
+  }, [activeTab, link]);
 
   async function patch(tab: Tab, payload: Record<string, unknown>) {
     setSaving(tab);
@@ -146,6 +232,21 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
 
   const saveSkills = () => patch('skills', { skillSlugs });
   const saveInstructions = () => patch('instructions', { customInstructions: customInstructions || null });
+  const saveExecution = () => patch('execution', {
+    controllerStyleAllowed: execution.controllerStyleAllowed,
+    allowedEnvironments: execution.allowedEnvironments,
+    scheduleCron: scheduling.scheduleCron || null,
+    scheduleEnabled: scheduling.scheduleEnabled,
+    scheduleTimezone: scheduling.scheduleTimezone,
+    concurrencyPolicy: scheduling.concurrencyPolicy,
+    catchUpPolicy: scheduling.catchUpPolicy,
+    catchUpCap: Number(scheduling.catchUpCap),
+    maxConcurrentRuns: Number(scheduling.maxConcurrentRuns),
+  });
+  const saveGovernance = () => patch('governance', {
+    maxRiskTier: governance.maxRiskTier,
+    requireApprovalAtTier: governance.requireApprovalAtTier,
+  });
   const saveBudget = () => patch('budget', {
     tokenBudgetPerRun: Number(budget.tokenBudgetPerRun),
     maxToolCallsPerRun: Number(budget.maxToolCallsPerRun),
@@ -179,7 +280,13 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
     { id: 'instructions', label: 'Instructions' },
     { id: 'budget', label: 'Budget' },
     { id: 'scheduling', label: 'Scheduling' },
+    { id: 'execution', label: 'Execution' },
+    { id: 'governance', label: 'Governance' },
+    { id: 'models_identity', label: 'Models and Identity' },
+    { id: 'integrations', label: 'Integrations' },
     { id: 'beliefs', label: 'Beliefs' },
+    { id: 'identity', label: 'Identity' },
+    { id: 'activity', label: 'Activity' },
   ];
 
   return (
@@ -271,7 +378,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveSkills}
               disabled={saving === 'skills'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'skills' ? 'Saving…' : 'Save Skills'}
             </button>
@@ -300,7 +407,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveInstructions}
               disabled={saving === 'instructions'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'instructions' ? 'Saving…' : 'Save Instructions'}
             </button>
@@ -363,7 +470,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveBudget}
               disabled={saving === 'budget'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'budget' ? 'Saving…' : 'Save Budget'}
             </button>
@@ -463,7 +570,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
             <button
               onClick={saveScheduling}
               disabled={saving === 'scheduling'}
-              className="px-5 py-2 text-[13px] font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 border-0 cursor-pointer font-[inherit]"
+              className="btn btn-primary disabled:opacity-50"
             >
               {saving === 'scheduling' ? 'Saving…' : 'Save Scheduling'}
             </button>
@@ -472,9 +579,132 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
         </div>
       )}
 
+      {/* ── Execution tab ── */}
+      {activeTab === 'execution' && (
+        <ExecutionTab
+          controllerStyleAllowed={execution.controllerStyleAllowed}
+          allowedEnvironments={execution.allowedEnvironments}
+          isSystemAgent={false}
+          scheduling={scheduling}
+          saving={saving === 'execution'}
+          saved={saved === 'execution'}
+          onControllerStyleChange={v => setExecution(e => ({ ...e, controllerStyleAllowed: v }))}
+          onAllowedEnvironmentsChange={v => setExecution(e => ({ ...e, allowedEnvironments: v }))}
+          onSchedulingChange={setScheduling}
+          onSave={saveExecution}
+        />
+      )}
+
+      {/* ── Governance tab ── */}
+      {activeTab === 'governance' && (
+        <GovernanceTab
+          maxRiskTier={governance.maxRiskTier}
+          requireApprovalAtTier={governance.requireApprovalAtTier}
+          saving={saving === 'governance'}
+          saved={saved === 'governance'}
+          onMaxRiskTierChange={v => setGovernance(g => ({ ...g, maxRiskTier: v }))}
+          onRequireApprovalAtTierChange={v => setGovernance(g => ({ ...g, requireApprovalAtTier: v }))}
+          onSave={saveGovernance}
+        />
+      )}
+
+      {/* ── Models and Identity tab ── */}
+      {activeTab === 'models_identity' && (
+        <>
+          {subaccountId && (
+            <ModelAccessSection agentId={link.agentId} subaccountId={subaccountId} />
+          )}
+          <ModelsIdentityTab
+            modelProvider={link.agent.modelProvider}
+            modelId={link.agent.modelId}
+          />
+        </>
+      )}
+
+      {/* ── Integrations tab ── */}
+      {activeTab === 'integrations' && subaccountId && (
+        <IntegrationsTab subaccountId={subaccountId} />
+      )}
+
       {/* ── Beliefs tab ── */}
       {activeTab === 'beliefs' && subaccountId && linkId && (
         <BeliefsTab subaccountId={subaccountId} linkId={linkId} />
+      )}
+
+      {/* ── Identity tab ── */}
+      {activeTab === 'identity' && (
+        <>
+          {showOnboardedBanner && (
+            <div className="flex items-start justify-between gap-3 mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-[13px] text-green-800">
+              <span>Identity provisioned. Confirm signature and channel preferences below.</span>
+              <button
+                onClick={() => setShowOnboardedBanner(false)}
+                className="flex-shrink-0 text-green-600 hover:text-green-900 bg-transparent border-0 cursor-pointer p-0 leading-none"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {identityLoading && <div className="text-[13px] text-slate-400">Loading…</div>}
+          {!identityLoading && !identity && (
+            <div className="text-[13px] text-slate-500">
+              This agent has not been onboarded to the workplace yet.
+            </div>
+          )}
+          {!identityLoading && identity && link && (
+            <>
+              <IdentityCard
+                identity={{ ...identity, id: identity.identityId }}
+                actor={{ displayName: link.agent.name, agentRole: null }}
+                pendingAction={identityPending}
+                actionError={identityError}
+                onSuspend={() => { setIdentityError(null); setSuspendOpen(true); }}
+                onResume={() => runIdentityAction('resume', () => resumeAgentIdentity(link.agentId))}
+                onRevoke={() => { setIdentityError(null); setRevokeOpen(true); }}
+                onArchive={() => runIdentityAction('archive', () => archiveAgentIdentity(link.agentId))}
+                onToggleEmail={(enabled) => runIdentityAction('toggleEmail', () => toggleAgentEmailSending(link.agentId, enabled))}
+              />
+              <SuspendIdentityDialog
+                open={suspendOpen}
+                agentId={link.agentId}
+                agentName={identity.displayName}
+                onClose={() => setSuspendOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+              <RevokeIdentityDialog
+                open={revokeOpen}
+                agentId={link.agentId}
+                agentName={link.agent?.name ?? identity.displayName}
+                onClose={() => setRevokeOpen(false)}
+                onSuccess={async () => {
+                  const updated: AgentIdentity = await getAgentIdentity(link.agentId);
+                  setIdentity(updated);
+                }}
+              />
+            </>
+          )}
+        </>
+      )}
+      {/* ── Activity tab ── */}
+      {activeTab === 'activity' && (
+        link?.agent.workspaceActorId && subaccountId
+          ? (
+            <AgentActivityTab
+              agentId={link.agentId}
+              actorId={link.agent.workspaceActorId}
+              subaccountId={subaccountId}
+              agentName={link.agent.name}
+            />
+          )
+          : (
+            <div className="text-[13px] text-slate-500">
+              This agent has no workspace identity.
+            </div>
+          )
       )}
     </div>{/* end main content */}
 
@@ -630,8 +860,8 @@ function BeliefsTab({ subaccountId, linkId }: { subaccountId: string; linkId: st
             </div>
             <div className="text-[12px] text-slate-500">Saving sets source to "User Override" with confidence 1.0</div>
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setEditBelief(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg">Cancel</button>
-              <button type="button" onClick={handleEdit} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save Override</button>
+              <button type="button" onClick={() => setEditBelief(null)} className="btn btn-sm btn-secondary">Cancel</button>
+              <button type="button" onClick={handleEdit} className="btn btn-sm btn-primary">Save Override</button>
             </div>
           </div>
         </Modal>

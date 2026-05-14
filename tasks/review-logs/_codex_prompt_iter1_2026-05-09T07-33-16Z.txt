@@ -1,0 +1,57 @@
+You are reviewing a specification document for implementation-readiness. Your role is to surface concrete, mechanical issues a senior engineer would fix before approving the spec for build.
+
+The spec is at: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md`
+
+The spec is for a "Support Desk Canonical layer + Teamwork Desk validating implementation". Single-PR Major-class build. 1870 lines.
+
+The source brief is LOCKED v5.3 at `tasks/builds/support-desk-canonical/brief.md`. The brief locks 12 design invariants in §5, the canonical status enum in §6.1, and 14 decision defaults in §10. Findings that change brief-locked decisions are out of scope — those require operator amendment of the brief, not a spec change.
+
+The spec already names FIVE open questions (§22 OQ-1..OQ-5):
+- OQ-1: Foundry schema parity verification
+- OQ-2: Teamwork status vocabulary inventory
+- OQ-3: Teamwork native action-idempotency mechanism
+- OQ-4: Teamwork attachment auth + URL lifecycle
+- OQ-5: Provider-side deletion / redaction tombstone semantics
+
+Findings that propose work captured by an existing OQ should be skipped — the OQ already routes the gap correctly.
+
+Project framing context (do not propose work that contradicts these — they're locked at codebase level):
+- Pre-production. No live agency clients.
+- Testing posture: static_gates_primary, runtime_tests: pure_function_only. Vitest/E2E/playwright/supertest/frontend tests for non-pure code are forbidden.
+- Rollout model: commit_and_revert. No feature flags for migrations. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Mockups exist at `prototypes/support-desk-canonical/` and are the design source of truth. UI findings that contradict the mockups are out of scope.
+
+Please review the spec document and surface findings in the following structure for each issue:
+
+```
+FINDING: <short title>
+SECTION: <spec section heading or line range>
+TYPE: contradiction | drift | missing-contract | sequencing-bug | invariant-gap | ambiguity | typo | other
+SEVERITY: critical | important | minor | nit
+DESCRIPTION: <one paragraph — what's wrong>
+EVIDENCE: <quote the conflicting text or name the missing thing>
+SUGGESTED FIX: <one paragraph — minimum change to resolve>
+```
+
+Focus on:
+1. Internal contradictions (one section says X, another says not-X).
+2. File inventory drift (prose references a file/column/migration not in §18).
+3. Load-bearing claims without a named mechanism ("idempotent", "source of truth", "must" without enforcement).
+4. State machine closure gaps (transitions named but valid/forbidden set incomplete; post-terminal events).
+5. Missing examples on contracts.
+6. Schema/index drift (column referenced in prose but not in the table definition).
+7. Missing per-item verdicts (chunks/items without explicit BUILD/DEFER assignment).
+8. Sequencing bugs (chunk N depends on something created in chunk N+k).
+9. Invariants stated in one place but allowed to be violated elsewhere.
+10. Unnamed new primitives (mention of "new service X" without naming the file/function).
+
+Do NOT raise:
+- Adding tests beyond the pure-function set the spec already declares.
+- Adding feature flags or staged rollout.
+- Replacing existing primitives with new abstractions when the existing primitive fits.
+- Anything covered by OQ-1..OQ-5.
+- Brief-locked decisions (§5 invariants, §6.1 status enum, §10 14 defaults).
+
+Read the spec end-to-end. Then output findings in the format above. If you find no issues, say "No mechanical findings."

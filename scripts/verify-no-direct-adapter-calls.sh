@@ -92,6 +92,7 @@ fi
 
 if [ -z "$filtered_matches" ] || [ "$filtered_matches" = "" ]; then
   echo "verify-no-direct-adapter-calls: PASS — no direct adapter calls outside the router + whitelist."
+  echo "[GATE] no-direct-adapter-calls: violations=0"
   exit 0
 fi
 
@@ -109,4 +110,5 @@ echo "  context: { organisationId, sourceType, sourceId, featureTag, ... },"
 echo "  postProcess?: ..., abortSignal?: ...,"
 echo "}). See server/jobs/skillAnalyzerJob.ts for the analyzer migration"
 echo "pattern after it lands in P3."
+echo "[GATE] no-direct-adapter-calls: violations=1"
 exit 1

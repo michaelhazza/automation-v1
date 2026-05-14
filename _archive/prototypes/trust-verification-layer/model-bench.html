@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<!--
+  Trust Verification Layer — Model Bench (Round 4)
+
+  Round 2 changes:
+    - Mode switcher at top: Agent bench | Skill bench
+    - Test inputs section in Setup with three radio options:
+        Recent real runs (default) — preview table + Re-roll
+        Specific date range — date picker inputs
+        Paste in — textarea for 3-15 prompts
+    - Estimated cost shown before Run bench fires
+    - Skill bench mode: skill picker instead of full scorecard attach list
+    - All terminology updated (percentages, Pass mark, Quality check)
+    - "Approve as default" toast text updated to match brief spec
+
+  Round 3 changes:
+    - Recent real runs: replaced auto-pick-15 with multi-select table of last ~50 runs.
+      Columns: checkbox, relative timestamp, task summary, original cost.
+      Sort: newest first. Pre-tick the most recent 15 on load.
+      Control buttons: "Pick newest 15" / "Clear all" / counter footer.
+    - Paste-in: replaced textarea-per-line with vertical list of prompt cards.
+      Each card has label field, multi-line textarea, remove button.
+      "Add prompt" button at bottom. Footer counter shows prompts added.
+    - Cost estimates updated to include source: "(charged to this account's token budget)"
+
+  Round 4 changes:
+    - Paste-in: default prompt card count changed from 3 to 1. The "Add prompt" button
+      adds more. Reduces friction when user wants to paste a single prompt.
+
+  Three-state flow still visible: Setup / Running / Results tabs
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Bench | Trust Verification Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Mode switcher ── */
+  .mode-switcher {
+    display: inline-flex; border: 1px solid var(--slate-200); border-radius: 9px;
+    overflow: hidden; margin-bottom: 24px; background: var(--slate-50);
+  }
+  .mode-btn {
+    padding: 7px 20px; font-size: 13px; font-weight: 500; color: var(--slate-500);
+    border: none; background: transparent; cursor: pointer; transition: all 0.12s;
+  }
+  .mode-btn.active {
+    background: white; color: var(--indigo-700); font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); border-radius: 7px; margin: 2px;
+  }
+
+  /* ── State nav strip ── */
+  .bench-nav {
+    display: flex; gap: 0; border-bottom: 2px solid var(--slate-200);
+    margin-bottom: 28px;
+  }
+  .bench-nav-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 20px; font-size: 13.5px; font-weight: 500;
+    color: var(--slate-500); background: transparent;
+    border: none; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    cursor: pointer; transition: all 0.12s; white-space: nowrap;
+  }
+  .bench-nav-btn:hover { color: var(--slate-800); }
+  .bench-nav-btn.active { color: var(--indigo-600); border-bottom-color: var(--indigo-500); font-weight: 600; }
+  .bench-step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%;
+    font-size: 11px; font-weight: 700;
+    background: var(--slate-200); color: var(--slate-500); flex-shrink: 0;
+  }
+  .bench-nav-btn.active .bench-step-num { background: var(--indigo-600); color: white; }
+  .bench-nav-btn.done .bench-step-num { background: var(--emerald-500); color: white; }
+
+  /* ── Section card ── */
+  .bench-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 20px; overflow: hidden;
+  }
+  .bench-card-header {
+    padding: 13px 18px; border-bottom: 1px solid var(--border);
+    background: var(--slate-50); display: flex; align-items: center; justify-content: space-between;
+  }
+  .bench-card-header h3 { font-size: 13px; font-weight: 600; color: var(--slate-700); }
+  .bench-card-body { padding: 18px; }
+
+  .read-only-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--indigo-50); border: 1px solid var(--indigo-200);
+    border-radius: 8px; padding: 6px 12px;
+    font-size: 12.5px; font-weight: 500; color: var(--indigo-700);
+  }
+
+  /* ── Model chip multi-select ── */
+  .model-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .model-chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white; color: var(--slate-600);
+    cursor: pointer; transition: all 0.12s;
+  }
+  .model-chip.selected { border-color: var(--indigo-500); background: var(--indigo-50); color: var(--indigo-700); }
+  .model-chip-checkmark { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--slate-300); flex-shrink: 0; }
+  .model-chip.selected .model-chip-checkmark { background: var(--indigo-600); border-color: var(--indigo-600); }
+
+  /* ── Radio group ── */
+  .radio-group { display: flex; flex-direction: column; gap: 10px; }
+  .radio-option {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; border: 1.5px solid var(--slate-200); border-radius: 9px;
+    cursor: pointer; transition: all 0.12s;
+  }
+  .radio-option:hover { border-color: var(--indigo-300); background: var(--indigo-50); }
+  .radio-option.selected { border-color: var(--indigo-500); background: var(--indigo-50); }
+  .radio-dot {
+    width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--slate-300);
+    flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center;
+  }
+  .radio-option.selected .radio-dot { border-color: var(--indigo-600); }
+  .radio-option.selected .radio-dot::after { content:''; width:8px; height:8px; border-radius:50%; background: var(--indigo-600); display:block; }
+  .radio-label { font-size: 13px; font-weight: 600; color: var(--slate-800); }
+  .radio-hint { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+  .radio-extra { margin-top: 12px; display: none; }
+  .radio-option.selected .radio-extra { display: block; }
+
+  /* ── Multi-select runs table ── */
+  .runs-table { width: 100%; border-collapse: collapse; }
+  .runs-table th {
+    text-align: left; padding: 8px 10px; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400);
+    border-bottom: 1px solid var(--slate-200); background: var(--slate-50);
+  }
+  .runs-table td { padding: 8px 10px; font-size: 12px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); }
+  .runs-table tbody tr:last-child td { border-bottom: none; }
+  .runs-table tbody tr:hover { background: var(--indigo-50); cursor: pointer; }
+  .runs-table tbody tr.selected-row { background: #eef2ff; }
+  .runs-cb { width: 14px; height: 14px; cursor: pointer; accent-color: var(--indigo-600); }
+  .runs-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .runs-counter { font-size: 11.5px; color: var(--slate-500); margin-left: auto; }
+  .runs-counter strong { color: var(--indigo-700); font-weight: 700; }
+
+  /* ── Prompt cards ── */
+  .prompt-cards-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .prompt-card {
+    border: 1px solid var(--slate-200); border-radius: 10px; overflow: hidden; background: white;
+    position: relative;
+  }
+  .prompt-card-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--slate-100); background: var(--slate-50);
+  }
+  .prompt-card-label-input {
+    flex: 1; border: none; background: transparent; font-size: 12px; font-weight: 600;
+    color: var(--slate-700); outline: none;
+  }
+  .prompt-card-label-input::placeholder { color: var(--slate-400); }
+  .prompt-card-remove {
+    width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--slate-200);
+    background: white; color: var(--slate-400); cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .prompt-card-remove:hover { background: var(--red-50); color: var(--red-500); border-color: #fca5a5; }
+  .prompt-card textarea {
+    width: 100%; padding: 10px 12px; border: none; outline: none;
+    font-size: 12.5px; color: var(--slate-700); resize: vertical; min-height: 80px;
+    font-family: inherit; background: white; box-sizing: border-box; line-height: 1.5;
+  }
+  .prompt-footer-counter {
+    font-size: 12px; color: var(--slate-500); margin-top: 10px;
+  }
+  .prompt-footer-counter strong { color: var(--indigo-700); font-weight: 700; }
+
+  /* ── Preview table (kept for date-range preview) ── */
+  .preview-table { width: 100%; border-collapse: collapse; }
+  .preview-table th {
+    text-align: left; padding: 8px 10px; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--slate-400);
+    border-bottom: 1px solid var(--slate-200); background: var(--slate-50);
+  }
+  .preview-table td { padding: 9px 10px; font-size: 12px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); }
+  .preview-table tbody tr:last-child td { border-bottom: none; }
+
+  /* ── Scorecard preview ── */
+  .scorecard-preview { border: 1px solid var(--slate-200); border-radius: 8px; overflow: hidden; }
+  .spr-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; border-bottom: 1px solid var(--slate-100); font-size: 12.5px;
+  }
+  .spr-row:last-child { border-bottom: none; }
+  .spr-name { font-size: 12.5px; font-weight: 500; color: var(--slate-700); flex: 1; }
+  .spr-pass { font-size: 12px; color: var(--indigo-600); font-weight: 600; white-space: nowrap; }
+
+  /* ── Cost estimate banner ── */
+  .cost-estimate {
+    background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 9px;
+    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px; gap: 12px; flex-wrap: wrap;
+  }
+  .cost-estimate-label { font-size: 13px; color: var(--slate-600); }
+  .cost-estimate-value { font-size: 14px; font-weight: 700; color: var(--slate-800); }
+
+  /* ── Progress state ── */
+  .progress-table { width: 100%; border-collapse: collapse; }
+  .progress-table th {
+    text-align: left; padding: 9px 14px;
+    font-size: 10.5px; font-weight: 700; color: var(--slate-400);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--slate-200); background: var(--slate-50);
+  }
+  .progress-table td { padding: 13px 14px; font-size: 12.5px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); vertical-align: middle; }
+  .progress-table tbody tr:last-child td { border-bottom: none; }
+
+  .progress-bar-bg { width: 100%; height: 6px; background: var(--slate-100); border-radius: 3px; }
+  .progress-bar-fill { height: 100%; border-radius: 3px; background: var(--indigo-500); transition: width 0.3s; }
+  .progress-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .progress-bar-label { font-size: 11.5px; color: var(--slate-500); white-space: nowrap; min-width: 40px; text-align: right; }
+  .model-cell { font-size: 12.5px; font-weight: 600; color: var(--slate-800); }
+  .live-score { font-size: 13px; font-weight: 700; }
+  .live-score.good { color: var(--emerald-600); }
+  .live-score.warn { color: var(--amber-600); }
+  .live-score-label { font-size: 11px; color: var(--slate-400); }
+  .status-chip { font-size: 10.5px; font-weight: 600; border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
+  .status-scoring { background: var(--indigo-50); color: var(--indigo-600); border: 1px solid var(--indigo-200); }
+  .status-queued { background: var(--slate-100); color: var(--slate-400); border: 1px solid var(--slate-200); }
+
+  /* ── Results table ── */
+  .results-table { width: 100%; border-collapse: collapse; }
+  .results-table th {
+    text-align: left; padding: 9px 14px;
+    font-size: 10.5px; font-weight: 700; color: var(--slate-400);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    border-bottom: 2px solid var(--slate-200); background: var(--slate-50); white-space: nowrap;
+  }
+  .results-table td { padding: 14px 14px; font-size: 13px; color: var(--slate-700); border-bottom: 1px solid var(--slate-100); vertical-align: middle; }
+  .results-table tbody tr:last-child td { border-bottom: none; }
+  .results-table tbody tr.winner { background: var(--emerald-50); }
+  .winner-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--emerald-50); color: var(--emerald-700);
+    border: 1px solid #a7f3d0; border-radius: 4px; padding: 2px 7px;
+    font-size: 10.5px; font-weight: 700;
+  }
+
+  /* ── Regression risk pills ── */
+  .risk-pill {
+    display: inline-flex; align-items: center;
+    font-size: 10.5px; font-weight: 700;
+    border-radius: 4px; padding: 2px 8px; white-space: nowrap;
+  }
+  .risk-low    { background: var(--emerald-50); color: var(--emerald-700); border: 1px solid #a7f3d0; }
+  .risk-medium { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+  .risk-high   { background: var(--red-50); color: var(--red-700); border: 1px solid #fecaca; }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--slate-900); color: white;
+    font-size: 12.5px; font-weight: 500;
+    padding: 10px 16px; border-radius: 8px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25); z-index: 9999;
+    animation: toastIn 0.2s ease; max-width: 400px;
+  }
+  .toast.hidden { display: none; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ── Tab states ── */
+  .bench-state { display: none; }
+  .bench-state.active { display: block; }
+
+  /* ── Skill picker ── */
+  .skill-select { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--slate-200); font-size: 13px; outline: none; }
+  .skill-select:focus { border-color: var(--indigo-400); box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
+
+  .cost-summary {
+    display: flex; gap: 20px; padding: 12px 18px; background: var(--slate-50);
+    border-bottom: 1px solid var(--border); font-size: 12.5px; flex-wrap: wrap;
+  }
+  .cost-summary-item { display: flex; align-items: center; gap: 6px; }
+  .cost-summary-label { color: var(--slate-400); }
+  .cost-summary-value { font-weight: 700; color: var(--slate-700); }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar" id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'govern-quality.html');</script>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span>Govern</span>
+        <span style="color:#cbd5e1">/</span>
+        <span>Quality</span>
+        <span style="color:#cbd5e1">/</span>
+        <span class="topbar-breadcrumb-current">Model bench</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="govern-quality.html" class="btn btn-sm btn-secondary">Back to Quality</a>
+    </div>
+
+    <div class="page-body" style="max-width:900px;">
+      <div class="page-header" style="margin-bottom:16px;">
+        <h1>Model bench</h1>
+        <p>Compare candidate models on this agent to find the cheapest one that clears every quality check pass mark.</p>
+      </div>
+
+      <!-- Mode switcher -->
+      <div class="mode-switcher" id="mode-switcher">
+        <button class="mode-btn active" id="mode-agent" onclick="switchMode('agent')">Agent bench</button>
+        <button class="mode-btn" id="mode-skill" onclick="switchMode('skill')">Skill bench</button>
+      </div>
+
+      <!-- State navigation -->
+      <div class="bench-nav">
+        <button class="bench-nav-btn active" id="nav-setup" onclick="showState('setup', this)">
+          <span class="bench-step-num">1</span> Setup
+        </button>
+        <button class="bench-nav-btn" id="nav-running" onclick="showState('running', this)">
+          <span class="bench-step-num">2</span> Running
+        </button>
+        <button class="bench-nav-btn" id="nav-results" onclick="showState('results', this)">
+          <span class="bench-step-num">3</span> Results
+        </button>
+      </div>
+
+      <!-- =====================================================
+           STATE 1: Setup
+           ===================================================== -->
+      <div id="state-setup" class="bench-state active">
+
+        <!-- Agent context -->
+        <div class="bench-card">
+          <div class="bench-card-header"><h3>Agent</h3></div>
+          <div class="bench-card-body" style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
+            <div>
+              <div class="form-label" style="margin-bottom:6px;">Agent</div>
+              <span class="read-only-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Outreach Agent
+              </span>
+            </div>
+            <!-- Skill picker: skill bench only -->
+            <div id="skill-picker-wrap" style="display:none;">
+              <div class="form-label" style="margin-bottom:6px;">Skill to bench</div>
+              <select class="skill-select" style="width:240px;">
+                <option>Send email (Gmail)</option>
+                <option>Draft LinkedIn message</option>
+                <option>Enrich contact (Apollo)</option>
+                <option>Schedule meeting (Calendly)</option>
+              </select>
+              <div class="form-hint" style="margin-top:6px;">The bench invokes this skill N times per model, scored against all attached scorecards.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Candidate models -->
+        <div class="bench-card">
+          <div class="bench-card-header"><h3>Candidate models</h3></div>
+          <div class="bench-card-body">
+            <div class="model-chips">
+              <label class="model-chip selected" onclick="toggleChip(this)">
+                <div class="model-chip-checkmark"></div> Opus 4.7
+              </label>
+              <label class="model-chip selected" onclick="toggleChip(this)">
+                <div class="model-chip-checkmark"></div> Sonnet 4.6
+              </label>
+              <label class="model-chip selected" onclick="toggleChip(this)">
+                <div class="model-chip-checkmark"></div> Haiku 4.5
+              </label>
+              <label class="model-chip" onclick="toggleChip(this)">
+                <div class="model-chip-checkmark"></div> GPT-5.4
+              </label>
+            </div>
+            <div class="form-hint" style="margin-top:10px;">Each selected model will run the same task N times (configured below) and be scored by the judge model.</div>
+          </div>
+        </div>
+
+        <!-- Test inputs -->
+        <div class="bench-card">
+          <div class="bench-card-header">
+            <h3>Test inputs</h3>
+            <span style="font-size:11.5px;color:var(--slate-400);">What the bench runs each model against</span>
+          </div>
+          <div class="bench-card-body">
+            <div class="radio-group">
+
+              <!-- Option 1: Recent real runs (default) — multi-select table -->
+              <div class="radio-option selected" id="input-recent" onclick="selectInput('recent')">
+                <div class="radio-dot"></div>
+                <div style="flex:1;">
+                  <div class="radio-label">Recent real runs (recommended)</div>
+                  <div class="radio-hint">Select from the last 50 runs. Most recent 15 are pre-selected by default.</div>
+                  <div class="radio-extra">
+                    <div class="runs-controls" onclick="event.stopPropagation()">
+                      <button class="btn btn-xs btn-secondary" onclick="pickNewest15()">Pick newest 15</button>
+                      <button class="btn btn-xs btn-secondary" onclick="clearAllRuns()">Clear all</button>
+                      <div class="runs-counter"><strong id="runs-selected-count">15</strong> runs selected &middot; est. <strong id="runs-selected-cost">$1.80-$2.70</strong></div>
+                    </div>
+                    <div style="border:1px solid var(--slate-200);border-radius:8px;overflow:hidden;max-height:280px;overflow-y:auto;">
+                      <table class="runs-table" id="runs-table">
+                        <thead>
+                          <tr>
+                            <th style="width:32px;"></th>
+                            <th>When</th>
+                            <th>Task summary</th>
+                            <th style="white-space:nowrap;">Original cost</th>
+                          </tr>
+                        </thead>
+                        <tbody id="runs-rows">
+                          <!-- rows injected by JS -->
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Option 2: Date range -->
+              <div class="radio-option" id="input-daterange" onclick="selectInput('daterange')">
+                <div class="radio-dot"></div>
+                <div style="flex:1;">
+                  <div class="radio-label">Specific date range</div>
+                  <div class="radio-hint">Sample N runs from a chosen window. Useful for testing a known-good or known-bad period.</div>
+                  <div class="radio-extra">
+                    <div style="display:flex;gap:12px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+                      <div>
+                        <div class="form-label" style="margin-bottom:5px;">From</div>
+                        <input type="date" class="form-input" style="width:160px;" value="2026-04-01" onclick="event.stopPropagation()">
+                      </div>
+                      <div>
+                        <div class="form-label" style="margin-bottom:5px;">To</div>
+                        <input type="date" class="form-input" style="width:160px;" value="2026-04-30" onclick="event.stopPropagation()">
+                      </div>
+                      <div>
+                        <div class="form-label" style="margin-bottom:5px;">Sample up to</div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <input type="number" class="form-input" value="15" style="width:70px;" onclick="event.stopPropagation()">
+                          <span style="font-size:12px;color:var(--slate-500);">runs</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Option 3: Paste in — prompt cards -->
+              <div class="radio-option" id="input-paste" onclick="selectInput('paste')">
+                <div class="radio-dot"></div>
+                <div style="flex:1;">
+                  <div class="radio-label">Add prompts</div>
+                  <div class="radio-hint">Write or paste example prompts directly. Use this when the agent has no run history yet.</div>
+                  <div class="radio-extra" onclick="event.stopPropagation()">
+                    <div class="prompt-cards-list" id="prompt-cards"></div>
+                    <button class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="addPromptCard()">+ Add prompt</button>
+                    <div class="prompt-footer-counter" id="prompt-counter">
+                      <strong id="prompt-count">1</strong> prompt added &middot; est. <strong>$1.40-$2.10</strong> (charged to this account's token budget)
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Sample count + scorecard preview side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;" id="setup-bottom-grid">
+          <div class="bench-card" style="margin-bottom:0;">
+            <div class="bench-card-header"><h3>Sample count</h3></div>
+            <div class="bench-card-body">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <input type="number" id="sample-count" value="15" min="5" max="50" class="form-input" style="width:80px;font-size:16px;font-weight:700;text-align:center;" oninput="updateCostEstimate()">
+                <span style="font-size:13px;color:var(--slate-500);">runs per model</span>
+              </div>
+              <div class="form-hint" style="margin-top:8px;">Minimum 5 recommended for statistical significance.</div>
+            </div>
+          </div>
+
+          <div class="bench-card" style="margin-bottom:0;" id="scorecard-preview-card">
+            <div class="bench-card-header"><h3>Scorecards being tested</h3><span style="font-size:11px;color:var(--slate-400);">read-only</span></div>
+            <div class="bench-card-body" style="padding:0;">
+              <div class="scorecard-preview" style="border:none;border-radius:0;">
+                <div class="spr-row" style="background:var(--slate-50);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);">
+                  <div class="spr-name">Quality check</div><div class="spr-pass">Pass mark</div>
+                </div>
+                <div class="spr-row"><div class="spr-name">Tone match</div><div class="spr-pass">80%</div></div>
+                <div class="spr-row"><div class="spr-name">Hook strength</div><div class="spr-pass">70%</div></div>
+                <div class="spr-row"><div class="spr-name">Length discipline</div><div class="spr-pass">75%</div></div>
+                <div class="spr-row"><div class="spr-name">Factual grounding</div><div class="spr-pass">90%</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cost estimate -->
+        <div class="cost-estimate">
+          <div>
+            <div class="cost-estimate-label">Estimated cost to run bench</div>
+            <div class="cost-estimate-value" id="cost-estimate-value">$4.20 to $5.80</div>
+            <div style="font-size:11.5px;color:var(--slate-400);margin-top:3px;">Charged to this account's token budget</div>
+          </div>
+          <div style="font-size:12px;color:var(--slate-400);" id="cost-breakdown">3 models x 15 samples x judge model (Opus 4.7)</div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-primary" style="font-size:14px;padding:9px 24px;" onclick="goToRunning()">Run bench</button>
+          <span style="font-size:12px;color:var(--slate-400);">Estimated run time: 4 min.</span>
+        </div>
+
+      </div><!-- /state-setup -->
+
+      <!-- =====================================================
+           STATE 2: Running
+           ===================================================== -->
+      <div id="state-running" class="bench-state">
+
+        <div class="cost-summary" style="border:1px solid var(--border);border-radius:12px;margin-bottom:20px;">
+          <div class="cost-summary-item">
+            <span class="cost-summary-label">Samples run:</span>
+            <span class="cost-summary-value">31 / 45</span>
+          </div>
+          <div class="cost-summary-item">
+            <span class="cost-summary-label">Cost so far:</span>
+            <span class="cost-summary-value">$2.14</span>
+          </div>
+          <div class="cost-summary-item">
+            <span class="cost-summary-label">Est. remaining:</span>
+            <span class="cost-summary-value">~1m 40s</span>
+          </div>
+          <div style="margin-left:auto;">
+            <button class="btn btn-sm btn-secondary" style="color:var(--red-600);border-color:#fca5a5;" onclick="showState('results', document.getElementById('nav-results'))">Cancel</button>
+          </div>
+        </div>
+
+        <div class="bench-card">
+          <div class="bench-card-header"><h3>Progress per model</h3></div>
+          <div class="bench-card-body" style="padding:0;">
+            <table class="progress-table">
+              <thead>
+                <tr>
+                  <th>Model</th><th>Progress</th><th>Live mean score</th><th>Cost so far</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="model-cell">Opus 4.7</td>
+                  <td style="min-width:160px;">
+                    <div class="progress-bar-wrap">
+                      <div class="progress-bar-bg" style="flex:1;"><div class="progress-bar-fill" style="width:100%;background:var(--emerald-500);"></div></div>
+                      <span class="progress-bar-label">15 / 15</span>
+                    </div>
+                  </td>
+                  <td><div class="live-score good">88%</div><div class="live-score-label">all checks above pass mark</div></td>
+                  <td style="font-size:12.5px;color:var(--slate-600);">$1.82</td>
+                  <td><span class="status-chip" style="background:var(--emerald-50);color:var(--emerald-700);border:1px solid #a7f3d0;">Done</span></td>
+                </tr>
+                <tr>
+                  <td class="model-cell">Sonnet 4.6</td>
+                  <td>
+                    <div class="progress-bar-wrap">
+                      <div class="progress-bar-bg" style="flex:1;"><div class="progress-bar-fill" style="width:80%;"></div></div>
+                      <span class="progress-bar-label">12 / 15</span>
+                    </div>
+                  </td>
+                  <td><div class="live-score good">83%</div><div class="live-score-label">tracking above pass marks</div></td>
+                  <td style="font-size:12.5px;color:var(--slate-600);">$0.32</td>
+                  <td><span class="status-chip status-scoring">Scoring</span></td>
+                </tr>
+                <tr>
+                  <td class="model-cell">Haiku 4.5</td>
+                  <td>
+                    <div class="progress-bar-wrap">
+                      <div class="progress-bar-bg" style="flex:1;"><div class="progress-bar-fill" style="width:27%;background:var(--slate-300);"></div></div>
+                      <span class="progress-bar-label">4 / 15</span>
+                    </div>
+                  </td>
+                  <td><div class="live-score warn">68%</div><div class="live-score-label">Hook strength below pass mark</div></td>
+                  <td style="font-size:12.5px;color:var(--slate-600);">$0.02</td>
+                  <td><span class="status-chip status-queued">Queued</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <button class="btn btn-primary" onclick="showState('results', document.getElementById('nav-results'))">Skip to results (demo)</button>
+        </div>
+
+      </div><!-- /state-running -->
+
+      <!-- =====================================================
+           STATE 3: Results
+           ===================================================== -->
+      <div id="state-results" class="bench-state">
+
+        <!-- Summary cards -->
+        <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+          <div style="background:var(--emerald-50);border:1px solid #a7f3d0;border-radius:10px;padding:14px 18px;flex:1;min-width:200px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--emerald-600);margin-bottom:6px;">Recommended model</div>
+            <div style="font-size:18px;font-weight:800;color:var(--emerald-700);">Sonnet 4.6</div>
+            <div style="font-size:12px;color:var(--emerald-700);margin-top:4px;">Clears all pass marks at 40% lower cost than Opus 4.7</div>
+          </div>
+          <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:160px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--slate-400);margin-bottom:6px;">Total bench cost</div>
+            <div style="font-size:18px;font-weight:800;color:var(--slate-800);">$4.81</div>
+            <div style="font-size:12px;color:var(--slate-500);margin-top:4px;">3 models, 15 samples each</div>
+          </div>
+          <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 18px;flex:1;min-width:160px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--slate-400);margin-bottom:6px;">Completed</div>
+            <div style="font-size:18px;font-weight:800;color:var(--slate-800);">May 7 2026</div>
+            <div style="font-size:12px;color:var(--slate-500);margin-top:4px;">4m 12s to complete</div>
+          </div>
+        </div>
+
+        <div class="bench-card">
+          <div class="bench-card-header">
+            <h3>Results: Outreach Agent</h3>
+            <span style="font-size:11.5px;color:var(--slate-400);">Winner: cheapest model that clears all pass marks</span>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Mean score</th>
+                  <th>Variance</th>
+                  <th style="white-space:nowrap;">
+                    Regression risk
+                    <span title="Derived from observed score variance across the sample. High variance means inconsistent outputs and elevated risk of edge-case regressions." style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--slate-200);color:var(--slate-500);font-size:9px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle;font-style:normal;">?</span>
+                  </th>
+                  <th>Mean latency</th>
+                  <th>Cost / task</th>
+                  <th>Composite</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Winner -->
+                <tr class="winner">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-weight:700;font-size:13px;">Sonnet 4.6</span>
+                      <span class="winner-badge">Winner</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span style="font-size:14px;font-weight:700;color:var(--emerald-600);">85%</span>
+                    <div style="font-size:10.5px;color:var(--emerald-600);margin-top:2px;">all checks pass</div>
+                  </td>
+                  <td style="font-size:12px;color:var(--slate-500);">+/-4%</td>
+                  <td><span class="risk-pill risk-low">Low</span></td>
+                  <td style="font-size:12.5px;">1,840 ms</td>
+                  <td style="font-size:13px;font-weight:600;">$0.0087</td>
+                  <td style="font-size:12px;color:var(--emerald-600);font-weight:600;">Cheapest, clears all pass marks</td>
+                  <td>
+                    <button class="btn btn-sm btn-primary" onclick="approveModel('Sonnet 4.6')">Approve as default</button>
+                  </td>
+                </tr>
+                <!-- Opus -->
+                <tr>
+                  <td><span style="font-weight:700;font-size:13px;">Opus 4.7</span></td>
+                  <td>
+                    <span style="font-size:14px;font-weight:700;color:var(--emerald-600);">91%</span>
+                    <div style="font-size:10.5px;color:var(--emerald-600);margin-top:2px;">all checks pass</div>
+                  </td>
+                  <td style="font-size:12px;color:var(--slate-500);">+/-3%</td>
+                  <td><span class="risk-pill risk-medium">Medium</span></td>
+                  <td style="font-size:12.5px;">3,410 ms</td>
+                  <td style="font-size:13px;font-weight:600;">$0.0145</td>
+                  <td style="font-size:12px;color:var(--slate-400);font-style:italic;">Passes but 67% costlier than winner</td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" onclick="approveModel('Opus 4.7')">Approve as default</button>
+                  </td>
+                </tr>
+                <!-- Haiku — fails -->
+                <tr style="opacity:0.7;">
+                  <td><span style="font-weight:700;font-size:13px;color:var(--slate-500);">Haiku 4.5</span></td>
+                  <td>
+                    <span style="font-size:14px;font-weight:700;color:var(--red-500);">66%</span>
+                    <div style="font-size:10.5px;color:var(--red-600);margin-top:2px;">Hook strength: 63%</div>
+                  </td>
+                  <td style="font-size:12px;color:var(--slate-500);">+/-9%</td>
+                  <td><span class="risk-pill risk-high">High</span></td>
+                  <td style="font-size:12.5px;">620 ms</td>
+                  <td style="font-size:13px;font-weight:600;">$0.0006</td>
+                  <td style="font-size:12px;color:var(--red-500);font-style:italic;">Fails Hook strength pass mark (70%)</td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" disabled style="opacity:0.4;cursor:not-allowed;">Approve as default</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="padding:12px 16px;border-top:1px solid var(--slate-100);background:var(--slate-50);font-size:12px;color:var(--slate-500);">
+            Approving a model sets it as the agent default immediately. This bench result is saved to Bench history on Govern / Quality.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:4px;">
+          <button class="btn btn-secondary" onclick="showState('setup', document.getElementById('nav-setup'))">Run another bench</button>
+          <a href="govern-quality.html" class="btn btn-ghost">Back to Quality</a>
+        </div>
+
+      </div><!-- /state-results -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Toast -->
+<div class="toast hidden" id="approve-toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="approve-toast-text">Sonnet 4.6 set as default for this agent. Bench result saved.</span>
+</div>
+
+<script>
+var currentMode = 'agent';
+
+// ── Runs data (50 fake runs, newest first) ──────────────────────────────────
+var ALL_RUNS = (function() {
+  var tasks = [
+    'Cold outreach, NexGen SaaS — ICP match',
+    'Follow-up, Bright Media — awaiting decision',
+    'Re-engagement, DataFlow Inc — 90-day lapse',
+    'Intro, SkyHigh Cloud — referral mention',
+    'Nurture, Axiom Labs — trial expiry soon',
+    'Re-activation, Pulse Corp — churned 60d ago',
+    'Intro, GreenLeaf Tech — inbound enquiry',
+    'Follow-up, Summit Analytics — demo requested',
+    'Cold outreach, Vortex AI — LinkedIn match',
+    'Renewal reminder, TechStack Pro — Q2 contract',
+    'Personalised pitch, Orbis Consulting — ICP fit',
+    'Win-back, CloudBase Inc — competitor switch',
+    'Warm intro, DataMesh Labs — mutual contact',
+    'Cross-sell, Acme Corp — new product launch',
+    'Follow-up, Zenith Media — 2-week silence',
+    'Cold outreach, BrightPath SaaS — series B',
+    'Re-engagement, Atlas Digital — 45-day lapse',
+    'Intro, Quantum Dynamics — webinar attendee',
+    'Follow-up, Stellar CRM — trial user',
+    'Cold outreach, Apex Systems — job change trigger',
+  ];
+  var times = [
+    '2 hours ago', '4 hours ago', '6 hours ago', '9 hours ago',
+    '12 hours ago', '18 hours ago', '1 day ago', '1 day ago',
+    '2 days ago', '2 days ago', '2 days ago', '3 days ago',
+    '3 days ago', '4 days ago', '4 days ago', '5 days ago',
+    '5 days ago', '6 days ago', '6 days ago', '1 week ago',
+    '1 week ago', '1 week ago', '8 days ago', '8 days ago',
+    '9 days ago', '9 days ago', '10 days ago', '10 days ago',
+    '11 days ago', '11 days ago', '12 days ago', '12 days ago',
+    '13 days ago', '13 days ago', '2 weeks ago', '2 weeks ago',
+    '15 days ago', '15 days ago', '16 days ago', '16 days ago',
+    '17 days ago', '18 days ago', '19 days ago', '20 days ago',
+    '21 days ago', '22 days ago', '23 days ago', '24 days ago',
+    '25 days ago', '26 days ago',
+  ];
+  var costs = ['$0.004','$0.005','$0.006','$0.007','$0.008','$0.009'];
+  var rows = [];
+  for (var i = 0; i < 50; i++) {
+    rows.push({
+      id: i,
+      time: times[i] || ((i+1) + ' days ago'),
+      task: tasks[i % tasks.length],
+      cost: costs[i % costs.length],
+      selected: i < 15 // newest 15 pre-selected
+    });
+  }
+  return rows;
+})();
+
+function renderRunsTable() {
+  var tbody = document.getElementById('runs-rows');
+  tbody.innerHTML = ALL_RUNS.map(function(r) {
+    var cls = r.selected ? 'selected-row' : '';
+    return '<tr class="' + cls + '" onclick="toggleRun(' + r.id + ')">' +
+      '<td style="width:32px;text-align:center;"><input type="checkbox" class="runs-cb" ' + (r.selected ? 'checked' : '') + ' onclick="event.stopPropagation();toggleRun(' + r.id + ')"></td>' +
+      '<td style="color:var(--slate-500);">' + escHtml(r.time) + '</td>' +
+      '<td>' + escHtml(r.task) + '</td>' +
+      '<td style="white-space:nowrap;">' + r.cost + '</td>' +
+      '</tr>';
+  }).join('');
+  updateRunsCounter();
+}
+
+function toggleRun(id) {
+  ALL_RUNS[id].selected = !ALL_RUNS[id].selected;
+  renderRunsTable();
+}
+
+function pickNewest15() {
+  ALL_RUNS.forEach(function(r, i) { r.selected = i < 15; });
+  renderRunsTable();
+}
+
+function clearAllRuns() {
+  ALL_RUNS.forEach(function(r) { r.selected = false; });
+  renderRunsTable();
+}
+
+function updateRunsCounter() {
+  var count = ALL_RUNS.filter(function(r) { return r.selected; }).length;
+  var low = (count * 0.09).toFixed(2);
+  var high = (count * 0.14).toFixed(2);
+  document.getElementById('runs-selected-count').textContent = count;
+  document.getElementById('runs-selected-cost').textContent = '$' + low + '-$' + high;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Prompt cards ────────────────────────────────────────────────────────────
+var promptCount = 0;
+
+function addPromptCard(defaultLabel) {
+  promptCount++;
+  var label = defaultLabel || ('Prompt ' + promptCount);
+  var card = document.createElement('div');
+  card.className = 'prompt-card';
+  card.id = 'pcard-' + promptCount;
+  card.innerHTML =
+    '<div class="prompt-card-header">' +
+      '<input class="prompt-card-label-input" type="text" value="' + escHtml(label) + '" placeholder="Prompt label (optional)">' +
+      '<button class="prompt-card-remove" onclick="removePromptCard(\'' + card.id + '\')" title="Remove">&times;</button>' +
+    '</div>' +
+    '<textarea placeholder="Paste or type the prompt for this test case..." style="width:100%;padding:10px 12px;border:none;outline:none;font-size:12.5px;color:var(--slate-700);resize:vertical;min-height:80px;font-family:inherit;background:white;box-sizing:border-box;line-height:1.5;"></textarea>';
+  document.getElementById('prompt-cards').appendChild(card);
+  updatePromptCounter();
+}
+
+function removePromptCard(id) {
+  var el = document.getElementById(id);
+  if (el) el.remove();
+  updatePromptCounter();
+}
+
+function updatePromptCounter() {
+  var count = document.querySelectorAll('#prompt-cards .prompt-card').length;
+  document.getElementById('prompt-count').textContent = count;
+  var counter = document.getElementById('prompt-counter');
+  var plural = count === 1 ? 'prompt added' : 'prompts added';
+  counter.innerHTML = '<strong id="prompt-count">' + count + '</strong> ' + plural + ' &middot; est. <strong>$1.40-$2.10</strong> (charged to this account\'s token budget)';
+}
+
+// ── Mode and state ───────────────────────────────────────────────────────────
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('mode-agent').classList.toggle('active', mode === 'agent');
+  document.getElementById('mode-skill').classList.toggle('active', mode === 'skill');
+  document.getElementById('skill-picker-wrap').style.display = mode === 'skill' ? 'block' : 'none';
+}
+
+function showState(id, btn) {
+  ['setup','running','results'].forEach(function(s) {
+    document.getElementById('state-' + s).classList.remove('active');
+  });
+  document.getElementById('state-' + id).classList.add('active');
+  document.querySelectorAll('.bench-nav-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+}
+
+function goToRunning() {
+  document.getElementById('nav-setup').classList.add('done');
+  showState('running', document.getElementById('nav-running'));
+}
+
+function selectInput(type) {
+  ['recent','daterange','paste'].forEach(function(t) {
+    document.getElementById('input-' + t).classList.toggle('selected', t === type);
+  });
+  updateCostEstimate();
+}
+
+function updateCostEstimate() {
+  var count = parseInt(document.getElementById('sample-count').value) || 15;
+  var models = 3;
+  var low = (count * models * 0.09).toFixed(2);
+  var high = (count * models * 0.13).toFixed(2);
+  document.getElementById('cost-estimate-value').textContent = '$' + low + ' to $' + high;
+  document.getElementById('cost-breakdown').textContent = models + ' models x ' + count + ' samples x judge model (Opus 4.7)';
+}
+
+function toggleChip(label) {
+  label.classList.toggle('selected');
+  updateCostEstimate();
+}
+
+function approveModel(modelName) {
+  document.getElementById('approve-toast-text').textContent = modelName + ' set as default for this agent. Bench result saved.';
+  var t = document.getElementById('approve-toast');
+  t.classList.remove('hidden');
+  setTimeout(function() { t.classList.add('hidden'); }, 4500);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+renderRunsTable();
+addPromptCard('Prompt 1');
+</script>
+</body>
+</html>

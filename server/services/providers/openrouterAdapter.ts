@@ -53,7 +53,7 @@ const openrouterAdapter: LLMProviderAdapter = {
     const providerRequestId = response.headers.get('x-request-id') ?? '';
 
     if (!response.ok) {
-      let errorDetail = '';
+      let errorDetail: string;
       try {
         const err = await response.json() as { error?: { message?: string } };
         errorDetail = err?.error?.message ?? response.statusText;

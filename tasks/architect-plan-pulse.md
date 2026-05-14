@@ -3,7 +3,7 @@
 > **Status:** Draft · v1 plan for subagent-driven build (amended after first-pass decisions — see §0)
 > **Classification:** Major (new subsystem, replaces four existing pages in admin scope; portal keeps its own review queue)
 > **Scope lock:** Org + Subaccount scopes only. No per-user read state. History replaces ActivityPage with 301 redirects in admin scope. Major-lane ack threshold is org-configurable (defaults AUD $50/action, AUD $500/run). No ranking engine. WebSocket real-time. Pre-launch — delete the three admin-scope pages when Pulse ships; `ReviewQueuePage` survives on the portal route only. Per-subaccount retention override is in scope (UI on Manage Subaccount → Settings tab).
-> **Prototype:** `prototypes/pulse/index.html`
+> **Prototype:** `_archive/prototypes/pulse/index.html`
 > **Currency:** AUD v1, minor-units storage, multi-currency-ready schema. Display via `Intl.NumberFormat` with org's currency code.
 
 ---

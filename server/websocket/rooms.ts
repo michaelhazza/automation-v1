@@ -9,9 +9,10 @@
 import type { Socket } from 'socket.io';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, agentRuns, agentConversations, subaccounts, playbookRuns } from '../db/schema/index.js';
+import { executions, agentRuns, agentConversations, subaccounts, workflowRuns } from '../db/schema/index.js';
 import { orgUserRoles, permissionSetItems, systemAgents } from '../db/schema/index.js';
 import { resolveAgentRunVisibility } from '../lib/agentRunVisibility.js';
+import { handleJoinTask, handleLeaveTask } from './taskRoom.js';
 
 // UUID format check — reject malformed IDs early
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -182,6 +183,16 @@ export function handleConnection(socket: Socket): void {
     socket.leave(`conversation:${conversationId}`);
   });
 
+  // ── Join the system incidents room (system-admin only) ──────────────
+  socket.on('join:sysadmin', () => {
+    if (socket.data.user?.role !== 'system_admin') return;
+    socket.join('system:sysadmin');
+  });
+
+  socket.on('leave:sysadmin', () => {
+    socket.leave('system:sysadmin');
+  });
+
   // ── Join the system-wide LLM in-flight room (system-admin only) ─────
   // Spec tasks/llm-inflight-realtime-tracker-spec.md §7. The room carries
   // cross-tenant attribution fields — non-admin sockets are silently
@@ -196,23 +207,34 @@ export function handleConnection(socket: Socket): void {
     socket.leave('system:llm-inflight');
   });
 
-  // ── Join a playbook run room (validated against org ownership) ──────
-  socket.on('join:playbook-run', async (runId: unknown) => {
+  // ── Join a workflow run room (validated against org ownership) ──────
+  socket.on('join:workflow-run', async (runId: unknown) => {
     if (!isValidUUID(runId)) return;
     try {
-      const [run] = await db.select({ id: playbookRuns.id })
-        .from(playbookRuns)
-        .where(and(eq(playbookRuns.id, runId), eq(playbookRuns.organisationId, orgId)));
+      const [run] = await db.select({ id: workflowRuns.id })
+        .from(workflowRuns)
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, orgId)));
       if (!run) return;
-      socket.join(`playbook-run:${runId}`);
+      socket.join(`workflow-run:${runId}`);
     } catch {
       // DB error — silently reject
     }
   });
 
-  socket.on('leave:playbook-run', (runId: unknown) => {
+  socket.on('leave:workflow-run', (runId: unknown) => {
     if (!isValidUUID(runId)) return;
-    socket.leave(`playbook-run:${runId}`);
+    socket.leave(`workflow-run:${runId}`);
+  });
+
+  // ── Join a task room (validated against org ownership) ───────────────
+  socket.on('join:task', async (data: unknown) => {
+    const taskId = (data as { taskId?: unknown })?.taskId;
+    await handleJoinTask(socket, taskId);
+  });
+
+  socket.on('leave:task', async (data: unknown) => {
+    const taskId = (data as { taskId?: unknown })?.taskId;
+    handleLeaveTask(socket, taskId);
   });
 
   // Clean up on disconnect — Socket.IO auto-removes from all rooms

@@ -2,6 +2,7 @@ import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-c
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 import { scheduledTasks } from './scheduledTasks';
+import { integrationConnections } from './integrationConnections';
 
 export const agentDataSources = pgTable(
   'agent_data_sources',
@@ -13,7 +14,7 @@ export const agentDataSources = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     // Where to fetch data from
-    sourceType: text('source_type').notNull().$type<'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload'>(),
+    sourceType: text('source_type').notNull().$type<'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive'>(),
     // For r2/s3: the object key/path. For http_url/google_docs/dropbox: the full URL
     sourcePath: text('source_path').notNull(),
     // Optional HTTP headers — stored as AES-256-GCM encrypted JSON string (H-3)
@@ -28,10 +29,6 @@ export const agentDataSources = pgTable(
     cacheMinutes: integer('cache_minutes').notNull().default(60),
     // Sync mode: lazy = re-fetch on demand when cache expires; proactive = background polling
     syncMode: text('sync_mode').notNull().default('lazy').$type<'lazy' | 'proactive'>(),
-    // Loading mode: eager = rendered into the system prompt Knowledge Base block;
-    //               lazy  = manifest entry only, agent fetches on demand via read_data_source skill.
-    // Migration 0078. Default 'eager' for backward compatibility.
-    loadingMode: text('loading_mode').notNull().default('eager').$type<'eager' | 'lazy'>(),
     lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
     lastFetchStatus: text('last_fetch_status').$type<'ok' | 'error' | 'pending'>(),
     lastFetchError: text('last_fetch_error'),
@@ -46,6 +43,9 @@ export const agentDataSources = pgTable(
     // (enforced by a CHECK constraint in migration 0078).
     scheduledTaskId: uuid('scheduled_task_id')
       .references(() => scheduledTasks.id, { onDelete: 'cascade' }),
+    // External connection reference for google_drive and future connector-backed sources.
+    connectionId: uuid('connection_id')
+      .references(() => integrationConnections.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

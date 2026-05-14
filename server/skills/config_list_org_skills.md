@@ -2,7 +2,7 @@
 name: Config List Org Skills
 description: List available org-created skills with name and description.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

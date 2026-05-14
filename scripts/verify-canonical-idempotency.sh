@@ -19,7 +19,9 @@ for TABLE in $CANONICAL_TABLES; do
 done
 
 if [ "$FAIL" -eq 1 ]; then
+  echo "[GATE] canonical-idempotency: violations=1"
   exit 1
 fi
 
 echo "PASS: verify-canonical-idempotency"
+echo "[GATE] canonical-idempotency: violations=0"

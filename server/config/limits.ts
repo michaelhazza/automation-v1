@@ -59,14 +59,6 @@ export const MAX_READ_DATA_SOURCE_TOKENS_PER_CALL = 15000;
  */
 export const MAX_EAGER_BUDGET = 60000;
 
-/**
- * Maximum number of lazy manifest entries rendered INTO the system prompt's
- * "## Available Context Sources" block. Entries beyond this cap are still
- * accessible via read_data_source op='list' — the cap only affects inline
- * visibility in the prompt to keep runs with large manifests compact.
- */
-export const MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT = 25;
-
 // ── Model defaults ──────────────────────────────────────────────────────────
 
 // EXTRACTION_MODEL removed — internal extraction calls now use executionPhase: 'execution'
@@ -158,6 +150,14 @@ export const CONFLICT_CONFIDENCE_GAP = 0.2;
  * for the block to be eligible for relevance-based injection. (§5.2)
  */
 export const BLOCK_RELEVANCE_THRESHOLD = 0.65;
+
+/**
+ * Score boost added to Tier-2 baseline artefact candidates relative to
+ * BLOCK_RELEVANCE_THRESHOLD. Tier-2 blocks match by domain, not by
+ * embedding similarity — this puts them just above the threshold floor.
+ * F1 spec §4.
+ */
+export const MEMORY_BLOCK_TIER2_BOOST = 0.15;
 
 /** Default top-K blocks returned by relevance scoring. (§5.2) */
 export const BLOCK_RELEVANCE_TOP_K = 5;
@@ -477,6 +477,21 @@ export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 /** Max triggered agent runs per minute per workspace before suppression */
 export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
 
+/** Max external-source triggered runs per minute per owner user before suppression */
+export const MAX_EXTERNAL_TRIGGERED_RUNS_PER_MINUTE_PER_OWNER = 10;
+
+/** EA Calendar lookahead window (minutes). Per spec §10.5. */
+export const CALENDAR_LOOKAHEAD_MINUTES = 15;
+
+/** Gmail polling cadence in minutes. Per spec §10.4. */
+export const GMAIL_POLL_INTERVAL_MINUTES = 5;
+
+/** Calendar polling cadence in milliseconds (60s default). */
+export const CALENDAR_LOOKAHEAD_INTERVAL_MS = 60 * 1000;
+
+/** Calendar polling fallback in milliseconds when sustained 429s detected (5 min). */
+export const CALENDAR_LOOKAHEAD_FALLBACK_INTERVAL_MS = 5 * 60 * 1000;
+
 // ── Tracing limits (Section 7.7) ───────────────────────────────────────────
 
 /** Max spans emitted per agent run before helpers return no-ops */
@@ -633,7 +648,7 @@ export const PLAN_MODE_SKILL_COUNT_THRESHOLD = 15;
  */
 export const CRITIQUE_GATE_SHADOW_MODE = true;
 
-// ── Playbook agent_decision step ─────────────────────────────────────────────
+// ── Workflow agent_decision step ─────────────────────────────────────────────
 
 /**
  * Maximum number of times the engine will retry a decision step whose agent
@@ -671,6 +686,14 @@ export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;
  * keyed on userId. See spec §4.8 for Phase 2 Redis migration notes.
  */
 export const TEST_RUN_RATE_LIMIT_PER_HOUR = 10;
+
+// ── Pre-launch Phase 3 D.4/D.5 — GHL agency enrolment caps ────────────────
+
+/** Maximum GHL locations enrolled inline before deferring to the background pagination job. */
+export const MAX_GHL_LOCATIONS_TO_ENROL = 250;
+
+/** Maximum pages the background pagination job may process in a single run. */
+export const MAX_GHL_PAGES_PER_RUN = 200;
 
 // ── ClientPulse Session 2 — apiAdapter dispatch ────────────────────────────
 

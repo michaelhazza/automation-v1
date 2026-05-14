@@ -23,7 +23,7 @@
  *   npx tsx server/services/__tests__/hermesTier1Integration.test.ts
  */
 
-import { strict as assert } from 'node:assert';
+import { expect, test } from 'vitest';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import {
   computeProvenanceConfidence,
@@ -31,21 +31,6 @@ import {
   selectPromotedEntryType,
   type RunOutcome,
 } from '../workspaceMemoryServicePure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
 
 console.log('');
 console.log('Hermes Tier 1 — cross-phase interactions (§9.3.1):');
@@ -66,44 +51,44 @@ console.log('Hermes Tier 1 — cross-phase interactions (§9.3.1):');
 //      run. `preference` → 'observation'.
 
 test('scenario #1: breaker trip mid-run — budget_exceeded maps to failed', () => {
-  const status = computeRunResultStatus('budget_exceeded', true, false, true);
-  assert.equal(status, 'failed', 'budget_exceeded → failed');
+  const status = computeRunResultStatus('budget_exceeded', true, false);
+  expect(status).toBe('failed');
 });
 
 test('scenario #1: failed outcome force-demotes observation → issue', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(selectPromotedEntryType('observation', outcome), 'issue');
+  expect(selectPromotedEntryType('observation', outcome)).toBe('issue');
 });
 
 test('scenario #1: failed outcome force-demotes pattern → issue', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(selectPromotedEntryType('pattern', outcome), 'issue');
+  expect(selectPromotedEntryType('pattern', outcome)).toBe('issue');
 });
 
 test('scenario #1: failed outcome force-demotes decision → issue', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(selectPromotedEntryType('decision', outcome), 'issue');
+  expect(selectPromotedEntryType('decision', outcome)).toBe('issue');
 });
 
 test('scenario #1: failed outcome keeps issue → issue (reinforced)', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(selectPromotedEntryType('issue', outcome), 'issue');
+  expect(selectPromotedEntryType('issue', outcome)).toBe('issue');
 });
 
 test('scenario #1: failed outcome demotes preference → observation (signal preserved, no durable tier)', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(selectPromotedEntryType('preference', outcome), 'observation');
+  expect(selectPromotedEntryType('preference', outcome)).toBe('observation');
 });
 
 test('scenario #1: provenanceConfidence on failed outcome is 0.3', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
-  assert.equal(computeProvenanceConfidence(outcome), 0.3);
+  expect(computeProvenanceConfidence(outcome)).toBe(0.3);
 });
 
 test('scenario #1: non-issue scores dampened by 0.10 on failed outcome', () => {
   const outcome: RunOutcome = { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'cost_limit_exceeded' };
   const finalScore = scoreForOutcome(0.5, 'pattern', outcome);
-  assert.equal(finalScore, 0.4, 'pattern baseline 0.5 → 0.4');
+  expect(finalScore).toBe(0.4);
 });
 
 // ─── Scenario #4 — partial run with uncertainty (B + handoff) ─────────
@@ -114,29 +99,26 @@ test('scenario #1: non-issue scores dampened by 0.10 on failed outcome', () => {
 // neutral per §6.8.2).
 
 test('scenario #4: completed_with_uncertainty → partial', () => {
-  assert.equal(
-    computeRunResultStatus('completed_with_uncertainty', false, true, true),
-    'partial',
-  );
+  expect(computeRunResultStatus('completed_with_uncertainty', false, true)).toBe('partial');
 });
 
 test('scenario #4: partial outcome score modifier = +0.00 on all entry types', () => {
   const outcome: RunOutcome = { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null };
   for (const e of ['observation', 'decision', 'preference', 'issue', 'pattern'] as const) {
-    assert.equal(scoreForOutcome(0.5, e, outcome), 0.5, `entryType=${e}`);
+    expect(scoreForOutcome(0.5, e, outcome)).toBe(0.5);
   }
 });
 
 test('scenario #4: partial outcome keeps entryType unchanged', () => {
   const outcome: RunOutcome = { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null };
   for (const e of ['observation', 'decision', 'preference', 'issue', 'pattern'] as const) {
-    assert.equal(selectPromotedEntryType(e, outcome), e, `entryType=${e}`);
+    expect(selectPromotedEntryType(e, outcome)).toBe(e);
   }
 });
 
 test('scenario #4: partial provenance confidence = 0.5 (midpoint)', () => {
   const outcome: RunOutcome = { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null };
-  assert.equal(computeProvenanceConfidence(outcome), 0.5);
+  expect(computeProvenanceConfidence(outcome)).toBe(0.5);
 });
 
 // ─── Scenario #6 — legacy run renders cost correctly (A) ──────────────
@@ -155,7 +137,7 @@ test('scenario #6: legacy runs (runResultStatus=NULL) tolerated', () => {
   // input, it's only an output that callers write. Any legacy row with
   // runResultStatus=NULL simply doesn't trigger the new memory post-
   // processing, which is correct — the run already completed.
-  assert.ok(true, 'structurally true — cost path does not read runResultStatus');
+  expect(true).toBeTruthy();
 });
 
 // ─── Phase ordering invariants ──────────────────────────────────────
@@ -171,19 +153,17 @@ test('scenario #6: legacy runs (runResultStatus=NULL) tolerated', () => {
 // anyway.
 
 test('pure determinism: same inputs → same runResultStatus (write-once safe)', () => {
-  const a = computeRunResultStatus('failed', true, false, false);
-  const b = computeRunResultStatus('failed', true, false, false);
-  assert.equal(a, b, 'deterministic');
+  const a = computeRunResultStatus('failed', true, false);
+  const b = computeRunResultStatus('failed', true, false);
+  expect(a).toBe(b);
 });
 
 test('pure determinism: same inputs → same entryType', () => {
   const outcome: RunOutcome = { runResultStatus: 'success', trajectoryPassed: null, errorMessage: null };
   const a = selectPromotedEntryType('observation', outcome);
   const b = selectPromotedEntryType('observation', outcome);
-  assert.equal(a, b, 'deterministic');
+  expect(a).toBe(b);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

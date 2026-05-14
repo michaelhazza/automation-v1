@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sub-Account Optimiser · Suggestions card on sub-account overview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .annot-banner code { background: rgba(120,53,15,0.08); padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+
+  .shell { display: flex; min-height: 100vh; }
+  .nav { width: 220px; background: #0f172a; padding: 18px 0; flex-shrink: 0; }
+  .nav-brand { color: #fff; font-weight: 800; font-size: 14px; padding: 0 18px 18px; opacity: 0.9; letter-spacing: -0.2px; }
+  .nav-section { padding: 16px 18px 6px; font-size: 10.5px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 18px; color: #cbd5e1; font-size: 13px; border-left: 2px solid transparent;
+  }
+  .nav-item.active { background: rgba(99,102,241,0.16); color: #c7d2fe; border-left-color: #6366f1; }
+
+  .content { flex: 1; padding: 22px 32px 60px; max-width: 1100px; }
+
+  .sa-head {
+    display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;
+  }
+  .sa-crumbs { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+  .sa-crumbs a { color: #6366f1; }
+  .sa-head h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.4px; color: #0f172a; }
+  .sa-meta { font-size: 13px; color: #64748b; margin-top: 4px; }
+  .btn {
+    padding: 7px 14px; font-size: 12.5px; font-weight: 600; border-radius: 6px;
+    background: #fff; color: #334155; border: 1px solid #e2e8f0; cursor: pointer;
+  }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1.1fr; gap: 22px; margin-top: 22px; }
+
+  /* placeholders for surrounding widgets */
+  .ph-widget {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px;
+    color: #cbd5e1;
+  }
+  .ph-widget .ph-title { font-size: 14px; font-weight: 700; color: #cbd5e1; }
+  .ph-widget .ph-skel {
+    height: 9px; background: #f1f5f9; border-radius: 3px; margin-bottom: 8px;
+  }
+
+  /* ── the suggestions card ──────────────────────────────────── */
+  .sug-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px;
+  }
+  .sug-head {
+    display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;
+  }
+  .sug-head h2 { font-size: 15px; font-weight: 800; color: #0f172a; letter-spacing: -0.2px; }
+  .sug-head .sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+  .sug {
+    display: grid;
+    grid-template-columns: 8px 1fr 18px;
+    gap: 12px;
+    padding: 14px 0;
+    border-top: 1px solid #f1f5f9;
+  }
+  .sug:first-of-type { border-top: none; padding-top: 4px; }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; }
+  .dot.high { background: #b91c1c; }
+  .dot.med  { background: #d97706; }
+  .dot.low  { background: #94a3b8; }
+
+  .sug-body .sug-title {
+    font-size: 14px; font-weight: 600; color: #0f172a; line-height: 1.4;
+  }
+  .sug-body .sug-detail {
+    font-size: 13px; color: #475569; margin-top: 4px; line-height: 1.55;
+  }
+  .sug-body .sug-action {
+    margin-top: 8px;
+  }
+  .sug-action a {
+    font-size: 12.5px; font-weight: 600; color: #4f46e5;
+  }
+  .sug-action a:hover { text-decoration: underline; }
+
+  .dismiss {
+    background: transparent; border: none; cursor: pointer;
+    color: #cbd5e1; font-size: 16px; line-height: 1;
+    padding: 4px; border-radius: 4px; align-self: start; margin-top: 2px;
+  }
+  .dismiss:hover { color: #94a3b8; background: #f8fafc; }
+
+  .more-row {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid #f1f5f9;
+    text-align: center;
+  }
+  .more-row a {
+    font-size: 12.5px; font-weight: 600; color: #6366f1;
+  }
+  .more-row a:hover { text-decoration: underline; }
+
+  /* ── notes box ──────────────────────────────────────────────── */
+  .legend {
+    margin-top: 24px; padding: 14px 18px; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 10px; font-size: 12px; color: #78350f;
+  }
+  .legend h4 { font-size: 12px; font-weight: 800; margin-bottom: 6px; }
+  .legend ul { padding-left: 18px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  PROPOSED v2 · Suggestions card on the sub-account overview · plain language · top 3 shown · rest one click away
+</div>
+
+<div class="shell">
+
+  <aside class="nav">
+    <div class="nav-brand">Synthetos</div>
+    <div class="nav-section">Workspace</div>
+    <div class="nav-item">Pulse</div>
+    <div class="nav-item active">Sub-accounts</div>
+    <div class="nav-item">Agents</div>
+    <div class="nav-item">Workflows</div>
+    <div class="nav-item">Skills</div>
+    <div class="nav-section">Insights</div>
+    <div class="nav-item">Suggestions</div>
+    <div class="nav-item">Reports</div>
+    <div class="nav-item">Cost</div>
+    <div class="nav-section">System</div>
+    <div class="nav-item">Settings</div>
+  </aside>
+
+  <main class="content">
+
+    <div class="sa-head">
+      <div>
+        <div class="sa-crumbs"><a href="#">Sub-accounts</a> · Smith Dental</div>
+        <h1>Smith Dental</h1>
+        <div class="sa-meta">12 active agents · last run 9 minutes ago</div>
+      </div>
+      <button class="btn">Configuration Assistant</button>
+    </div>
+
+    <div class="two-col">
+
+      <!-- left: existing widgets -->
+      <div style="display: flex; flex-direction: column; gap: 18px;">
+        <div class="ph-widget">
+          <div class="ph-title">Activity</div>
+          <div style="margin-top: 12px;">
+            <div class="ph-skel" style="width: 80%;"></div>
+            <div class="ph-skel" style="width: 60%;"></div>
+            <div class="ph-skel" style="width: 70%;"></div>
+          </div>
+        </div>
+        <div class="ph-widget">
+          <div class="ph-title">Cost this month</div>
+          <div style="margin-top: 12px;">
+            <div class="ph-skel" style="width: 90%;"></div>
+            <div class="ph-skel" style="width: 65%;"></div>
+          </div>
+        </div>
+        <div class="ph-widget">
+          <div class="ph-title">Health score</div>
+          <div style="margin-top: 12px;">
+            <div class="ph-skel" style="width: 75%;"></div>
+            <div class="ph-skel" style="width: 55%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- right: the suggestions card -->
+      <div class="sug-card">
+
+        <div class="sug-head">
+          <div>
+            <h2>A few things to look at</h2>
+            <div class="sub">Updated this morning</div>
+          </div>
+        </div>
+
+        <!-- 1 -->
+        <div class="sug">
+          <div class="dot high"></div>
+          <div class="sug-body">
+            <div class="sug-title">Reporting Agent is spending more than expected</div>
+            <div class="sug-detail">It used $73 this month against a $50 budget. Same story last month.</div>
+            <div class="sug-action"><a href="#">Help me fix this →</a></div>
+          </div>
+          <button class="dismiss" title="Not now">×</button>
+        </div>
+
+        <!-- 2 -->
+        <div class="sug">
+          <div class="dot high"></div>
+          <div class="sug-body">
+            <div class="sug-title">An outreach workflow keeps needing your help</div>
+            <div class="sug-detail">8 of the last 12 runs got stuck on the email step and asked a person to step in.</div>
+            <div class="sug-action"><a href="#">Help me fix this →</a></div>
+          </div>
+          <button class="dismiss" title="Not now">×</button>
+        </div>
+
+        <!-- 3 -->
+        <div class="sug">
+          <div class="dot med"></div>
+          <div class="sug-body">
+            <div class="sug-title">Pulling contacts from GHL is slow</div>
+            <div class="sug-detail">Around 12 seconds here, around 3 seconds for your other clients.</div>
+            <div class="sug-action"><a href="#">Help me fix this →</a></div>
+          </div>
+          <button class="dismiss" title="Not now">×</button>
+        </div>
+
+        <div class="more-row">
+          <a href="recommendations-rollup.html">5 more suggestions for Smith Dental →</a>
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="legend">
+      <h4>What changed from v1</h4>
+      <ul>
+        <li><b>Plain language only.</b> No category slugs (no <code>agent.over_budget</code>, no <code>memory.low_citation_waste</code>). The operator never sees what the engine calls a finding internally.</li>
+        <li><b>Progressive disclosure.</b> Top 3 only. The other 5 are one click away if the operator wants them — most won't.</li>
+        <li><b>One action per row.</b> "Help me fix this →" is the primary path. The small × is the only secondary action. Acknowledge / category tags / timestamps removed — they were noise.</li>
+        <li><b>Numbers in human terms.</b> "$73 vs $50 budget", "12 seconds vs 3", "8 of the last 12". No p95s, no percentages of percentages.</li>
+        <li><b>Severity is a single dot.</b> Red / amber / grey. The ordering does most of the work; the dot is a quick visual cue, not a label.</li>
+      </ul>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

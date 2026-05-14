@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   buildPermissionMask,
   type PermissionMaskUserContext,
@@ -30,9 +29,9 @@ test('unlinked event (clarification/run.completed) — no entity → no edit', (
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canEdit, false);
-  assert.equal(mask.editHref, null);
+  expect(mask.canView).toBe(true);
+  expect(mask.canEdit).toBe(false);
+  expect(mask.editHref).toBe(null);
 });
 
 test('cross-org access — mask is empty for non-admins', () => {
@@ -43,8 +42,8 @@ test('cross-org access — mask is empty for non-admins', () => {
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, false);
-  assert.equal(mask.canEdit, false);
+  expect(mask.canView).toBe(false);
+  expect(mask.canEdit).toBe(false);
 });
 
 test('memory_entry with canManageWorkspace → view + edit', () => {
@@ -55,9 +54,9 @@ test('memory_entry with canManageWorkspace → view + edit', () => {
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canEdit, true);
-  assert.ok(mask.editHref);
+  expect(mask.canView).toBe(true);
+  expect(mask.canEdit).toBe(true);
+  expect(mask.editHref).toBeTruthy();
 });
 
 test('memory_entry without workspace-manage → view only when workspace.view held', () => {
@@ -68,9 +67,9 @@ test('memory_entry without workspace-manage → view only when workspace.view he
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canEdit, false);
-  assert.equal(mask.editHref, null);
+  expect(mask.canView).toBe(true);
+  expect(mask.canEdit).toBe(false);
+  expect(mask.editHref).toBe(null);
 });
 
 test('prompt / llm_request / action — canEdit always false', () => {
@@ -82,8 +81,8 @@ test('prompt / llm_request / action — canEdit always false', () => {
       runOrganisationId: RUN_ORG,
       runSubaccountId: RUN_SUB,
     });
-    assert.equal(mask.canEdit, false, `${type}: canEdit must be false`);
-    assert.equal(mask.editHref, null, `${type}: editHref must be null`);
+    expect(mask.canEdit, `${type}: canEdit must be false`).toBe(false);
+    expect(mask.editHref, `${type}: editHref must be null`).toBe(null);
   }
 });
 
@@ -95,8 +94,8 @@ test('canViewPayload is strictly tighter than canView — positive case', () => 
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canViewPayload, true);
+  expect(mask.canView).toBe(true);
+  expect(mask.canViewPayload).toBe(true);
 });
 
 test('canViewPayload false when canEditAgents false', () => {
@@ -107,8 +106,8 @@ test('canViewPayload false when canEditAgents false', () => {
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canViewPayload, false);
+  expect(mask.canView).toBe(true);
+  expect(mask.canViewPayload).toBe(false);
 });
 
 test('read-time recomputation: same entity, two different users → different masks', () => {
@@ -126,8 +125,8 @@ test('read-time recomputation: same entity, two different users → different ma
     ...runCtx,
     user: mkUser({ orgPermissions: new Set(['org.workspace.view']) }),
   });
-  assert.equal(withEdit.canEdit, true);
-  assert.equal(viewOnly.canEdit, false);
+  expect(withEdit.canEdit).toBe(true);
+  expect(viewOnly.canEdit).toBe(false);
 });
 
 test('system_admin has full mask on every editable entity type', () => {
@@ -148,8 +147,8 @@ test('system_admin has full mask on every editable entity type', () => {
       runOrganisationId: RUN_ORG,
       runSubaccountId: RUN_SUB,
     });
-    assert.equal(mask.canView, true, `${type}: system_admin canView`);
-    assert.equal(mask.canEdit, true, `${type}: system_admin canEdit`);
+    expect(mask.canView, `${type}: system_admin canView`).toBe(true);
+    expect(mask.canEdit, `${type}: system_admin canEdit`).toBe(true);
   }
 });
 
@@ -162,8 +161,8 @@ test('data_source: canEdit is always false (no per-item edit route)', () => {
     runOrganisationId: RUN_ORG,
     runSubaccountId: RUN_SUB,
   });
-  assert.equal(mask.canView, true);
-  assert.equal(mask.canEdit, false);
-  assert.equal(mask.editHref, null);
-  assert.ok(mask.viewHref, 'viewHref should point to knowledge page');
+  expect(mask.canView).toBe(true);
+  expect(mask.canEdit).toBe(false);
+  expect(mask.editHref).toBe(null);
+  expect(mask.viewHref, 'viewHref should point to knowledge page').toBeTruthy();
 });

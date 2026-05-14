@@ -1,9 +1,10 @@
-import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex, customType, numeric, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { workspaceMemoryEntries } from './workspaceMemories';
+import { scheduledTasks } from './scheduledTasks';
 
 // pgvector custom type — mirrors the convention in workspaceMemories.ts and
 // agentEmbeddings.ts.  Nullable here: embedding is populated asynchronously
@@ -28,7 +29,8 @@ export type MemoryBlockStatus = 'active' | 'draft' | 'pending_review' | 'rejecte
 export type MemoryBlockSource = 'manual' | 'auto_synthesised';
 // Phase 5 / W3a types
 export type MemoryBlockPriority = 'low' | 'medium' | 'high';
-export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion';
+// 'operator_correction' added in migration 0302 (Trust & Verification Layer Stage 3).
+export type MemoryBlockCapturedVia = 'manual_edit' | 'auto_synthesised' | 'user_triggered' | 'approval_suggestion' | 'operator_correction';
 export type MemoryBlockDeprecationReason = 'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted';
 
 // ---------------------------------------------------------------------------
@@ -60,15 +62,15 @@ export const memoryBlocks = pgTable(
     // so the Knowledge page can surface "review recommended". Reset to
     // 'normal' on any human save.
     confidence: text('confidence').notNull().default('normal').$type<'low' | 'normal'>(),
-    // Backlink to the playbookRun that last wrote this block; drives the
+    // Backlink to the WorkflowRun that last wrote this block; drives the
     // per-run rate limit (§7.5 — 10 blocks per run).
     sourceRunId: uuid('source_run_id'),
     // Null = last-edited by a human (Knowledge page). Non-null = last-edited
-    // by an agent/playbook. Drives the HITL overwrite rule (§7.5).
+    // by an agent/Workflow. Drives the HITL overwrite rule (§7.5).
     lastEditedByAgentId: uuid('last_edited_by_agent_id').references(() => agents.id),
-    // Slug of the playbook that last wrote this block. A playbook can freely
+    // Slug of the Workflow that last wrote this block. A Workflow can freely
     // rewrite its own blocks without tripping the HITL overwrite rule.
-    lastWrittenByPlaybookSlug: text('last_written_by_playbook_slug'),
+    lastWrittenByWorkflowSlug: text('last_written_by_workflow_slug'),
     // Phase G / spec §7.4 / G7.1 — when true, creating this block or linking
     // a new agent to the sub-account materialises read-only attachments for
     // every linked agent, tagged `source='auto_attach'`. Added in migration 0125.
@@ -111,6 +113,21 @@ export const memoryBlocks = pgTable(
     qualityScore: numeric('quality_score', { precision: 3, scale: 2 }).notNull().default('0.50'),
     capturedVia: text('captured_via').notNull().default('manual_edit').$type<MemoryBlockCapturedVia>(),
 
+    // F1 baseline artefacts (migration 0277, spec §3) — tier classification
+    // (1 = foundational, 2 = strategic) and domain-scoping for injection filtering.
+    tier: smallint('tier').$type<1 | 2>(),
+    appliesToDomains: text('applies_to_domains').array(),
+
+    // Consolidation C — Govern (migration 0286, spec §4.1, §6) — Edit-and-override
+    // marker. Auto-extraction pipeline skips BOTH the UPDATE and the version INSERT
+    // when true. Set by the manual override path; never touched by auto-extraction.
+    autoUpdateDisabled: boolean('auto_update_disabled').notNull().default(false),
+
+    // Auto Knowledge Retrieval Phase 1D (migration 0291, spec §4.2) — recurring-task
+    // scoped memory block. ON DELETE SET NULL so deleting the scheduled task does
+    // not cascade the block.
+    scheduledTaskId: uuid('scheduled_task_id').references(() => scheduledTasks.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -131,6 +148,14 @@ export const memoryBlocks = pgTable(
     activeIdx: index('memory_blocks_active_idx')
       .on(table.organisationId, table.subaccountId)
       .where(sql`${table.status} = 'active' AND ${table.deletedAt} IS NULL`),
+    // F1 baseline artefacts (migration 0277) — tier lookup for injection filtering.
+    tierIdx: index('memory_blocks_tier_idx')
+      .on(table.organisationId, table.subaccountId, table.tier)
+      .where(sql`${table.tier} IS NOT NULL`),
+    // Auto Knowledge Retrieval Phase 1D (migration 0291) — recurring-task scope lookup.
+    scheduledTaskIdx: index('memory_blocks_scheduled_task_idx')
+      .on(table.scheduledTaskId)
+      .where(sql`${table.scheduledTaskId} IS NOT NULL`),
   })
 );
 

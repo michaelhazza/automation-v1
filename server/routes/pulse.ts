@@ -19,7 +19,7 @@ router.get(
       orgId: req.orgId!,
       userId: req.user!.id,
     });
-    res.json(data);
+    res.json({ data, serverTimestamp: new Date().toISOString() });
   }),
 );
 

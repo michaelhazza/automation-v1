@@ -1,6 +1,9 @@
-import { eq, and, or, isNull, asc, max, desc } from 'drizzle-orm';
+import { eq, and, or, isNull, asc, max, desc, inArray, ne, sql as drizzleSql } from 'drizzle-orm';
+import * as fs from 'node:fs';
 import { db } from '../db/index.js';
-import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks } from '../db/schema/index.js';
+import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks, agentTriggers as agentTriggersTable, agentRuns, skills, subaccountAgents } from '../db/schema/index.js';
+import { computeAgentEtag } from '../lib/agentEtag.js';
+import { diffByIdentityKey } from '../lib/identityKeyDiff.js';
 import crypto from 'crypto';
 import { auditService } from './auditService.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -14,6 +17,58 @@ import { env } from '../lib/env.js';
 import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import { v4 as uuidv4 } from 'uuid';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
+
+// ---------------------------------------------------------------------------
+// Consolidation Build C1 — local type declarations
+// (Will be replaced by shared/types/build.ts exports in chunk C5)
+// ---------------------------------------------------------------------------
+
+export interface AgentPersonality {
+  traits: string[];
+  tone: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface AgentRunPreview {
+  id: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  costUsd: number;
+}
+
+export interface AgentFull {
+  id: string;
+  etag: string;
+  /** Runtime guard used by service; not exposed in API response */
+  isSystemManaged: boolean;
+  configure: {
+    name: string;
+    description: string;
+    roleTitle: string;
+    parentAgentId: string | null;
+    model: string;
+    outputSize: 'compact' | 'standard' | 'extended';
+    allowSubaccountModelOverride: boolean;
+    responseMode: 'balanced' | 'expressive' | 'precise' | 'highly_creative';
+  };
+  behaviour: {
+    briefingTemplate: string;
+    constraints: string[];
+  };
+  personality: AgentPersonality;
+  skills: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }>;
+  dataSources: Array<{ id: string; kind: string; ref: string; status: 'connected' | 'disconnected' | 'error' }>;
+  triggers: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>;
+  budget: { dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number };
+  runs: { last5: AgentRunPreview[]; total30d: number; cost30d: number };
+  /** Minimum 1. Agents with no revision history return 1 (not 0). */
+  agentRevisionCount: number;
+  lastRevisionEditedAt: string | null;
+  lastRevisionAuthor: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -112,7 +167,28 @@ function extractGoogleDocText(doc: GoogleDocsContent): string {
 // Fetch raw content from a data source
 // ---------------------------------------------------------------------------
 
+/**
+ * Thrown by fetchSourceContent when a source has sourceType === 'google_drive'.
+ * These sources are handled exclusively by the external document resolver
+ * pipeline in loadRunContextData and must not flow through the regular
+ * fetch / cache / error-status path.
+ */
+class ExternalDocSourceError extends Error {
+  constructor(sourceName: string) {
+    super(`google_drive source "${sourceName}" is handled by the external document resolver pipeline`);
+    this.name = 'ExternalDocSourceError';
+  }
+}
+
 async function fetchSourceContent(source: typeof agentDataSources.$inferSelect): Promise<string> {
+  if (source.sourceType === 'google_drive') {
+    // google_drive sources are resolved through externalDocumentResolverService
+    // in loadRunContextData and are filtered from the regular pool.
+    // Returning empty here prevents false lastFetchStatus='error' DB writes
+    // for sources that will be handled separately.
+    throw new ExternalDocSourceError(source.name);
+  }
+
   if (source.sourceType === 'http_url') {
     const headers: Record<string, string> = { Accept: 'text/plain, application/json, text/csv, */*' };
     if (source.sourceHeaders) {
@@ -349,6 +425,12 @@ export async function loadSourceContent(
         .where(eq(agentDataSources.id, source.id))
         .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
     } catch (err) {
+      if (err instanceof ExternalDocSourceError) {
+        // This source is handled by the external doc resolver pipeline.
+        // Return empty without marking the source as failed or sending admin alerts.
+        return { content: '', fetchOk: false, tokenCount: 0 };
+      }
+
       fetchOk = false;
       const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
 
@@ -408,7 +490,6 @@ export interface LoadedDataSource {
   contentType: string;
   tokenCount: number;
   sizeBytes: number;
-  loadingMode: 'eager' | 'lazy';
   priority: number;
   fetchOk: boolean;
   maxTokenBudget: number;
@@ -476,35 +557,6 @@ export async function fetchDataSourcesByScope(
       : source.subaccountAgentId ? 'subaccount'
       : 'agent';
 
-    // Lazy sources: emit manifest entry only; do NOT fetch content upfront.
-    // The read_data_source skill will call loadSourceContent on demand.
-    //
-    // Estimate sizeBytes from maxTokenBudget so the manifest's "~XKB" hint
-    // gives the agent a useful "should I bother reading this?" signal.
-    // The estimate uses ~4 chars/token (matching approxTokens) — it's a
-    // ceiling for the source, not the actual file size, but for the agent's
-    // decision-making "is this big enough to consume meaningful context?"
-    // it's the right heuristic. (pr-reviewer Major 2.)
-    if (source.loadingMode === 'lazy') {
-      const estimatedSize = source.maxTokenBudget * 4;
-      results.push({
-        id: source.id,
-        scope: resolvedScope,
-        name: source.name,
-        description: source.description,
-        content: '',
-        contentType: source.contentType,
-        tokenCount: 0,
-        sizeBytes: estimatedSize,
-        loadingMode: 'lazy',
-        priority: source.priority,
-        fetchOk: true,
-        maxTokenBudget: source.maxTokenBudget,
-      });
-      continue;
-    }
-
-    // Eager: fetch content now via the shared helper.
     const { content, fetchOk, tokenCount } = await loadSourceContent(source);
     results.push({
       id: source.id,
@@ -515,7 +567,6 @@ export async function fetchDataSourcesByScope(
       contentType: source.contentType,
       tokenCount,
       sizeBytes: Buffer.byteLength(content, 'utf8'),
-      loadingMode: 'eager',
       priority: source.priority,
       fetchOk,
       maxTokenBudget: source.maxTokenBudget,
@@ -547,11 +598,7 @@ export async function fetchAgentDataSources(
   fetchOk: boolean;
 }>> {
   const loaded = await fetchDataSourcesByScope({ agentId });
-  // Keep only eager sources for backwards compatibility — the old function
-  // always returned fully-loaded content. Lazy sources in the agent-chat
-  // surface would need a different UX, which is not part of this change.
   return loaded
-    .filter((s) => s.loadingMode === 'eager')
     .map((s) => ({
       id: s.id,
       name: s.name,
@@ -584,6 +631,25 @@ export const agentService = {
         includeInactive ? undefined : eq(agents.status, 'active'),
       ));
 
+    // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
+    const revisionStats = await db
+      .select({
+        agentId: agentPromptRevisions.agentId,
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(eq(agentPromptRevisions.organisationId, organisationId))
+      .groupBy(agentPromptRevisions.agentId);
+
+    const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
+    const authors = authorIds.length > 0
+      ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+      : [];
+    const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
+
     return rows.map((a) => ({
       id: a.id,
       name: a.name,
@@ -602,6 +668,10 @@ export const agentService = {
       agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      // INVARIANT-C5b-A: agents with zero revision rows return 1, never 0
+      agentRevisionCount: revisionMap.get(a.id)?.count ?? 1,
+      lastRevisionEditedAt: revisionMap.get(a.id)?.lastEditedAt ?? null,
+      lastRevisionAuthor: authorMap.get(revisionMap.get(a.id)?.lastAuthorId ?? '') ?? null,
     }));
   },
 
@@ -610,6 +680,26 @@ export const agentService = {
       .select()
       .from(agents)
       .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+
+    // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
+    const revisionStats = await db
+      .select({
+        agentId: agentPromptRevisions.agentId,
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(eq(agentPromptRevisions.organisationId, organisationId))
+      .groupBy(agentPromptRevisions.agentId);
+
+    const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
+    const authors = authorIds.length > 0
+      ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+      : [];
+    const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
+
     return rows.map((a) => ({
       id: a.id,
       name: a.name,
@@ -628,7 +718,32 @@ export const agentService = {
       agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      // INVARIANT-C5b-A: agents with zero revision rows return 1, never 0
+      agentRevisionCount: revisionMap.get(a.id)?.count ?? 1,
+      lastRevisionEditedAt: revisionMap.get(a.id)?.lastEditedAt ?? null,
+      lastRevisionAuthor: authorMap.get(revisionMap.get(a.id)?.lastAuthorId ?? '') ?? null,
     }));
+  },
+
+  async listOwnedByUser(organisationId: string, userId: string) {
+    return db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        slug: agents.slug,
+        status: agents.status,
+        ownerUserId: agents.ownerUserId,
+        systemAgentId: agents.systemAgentId,
+        isSystemManaged: agents.isSystemManaged,
+        createdAt: agents.createdAt,
+        updatedAt: agents.updatedAt,
+      })
+      .from(agents)
+      .where(and(
+        eq(agents.organisationId, organisationId),
+        eq(agents.ownerUserId, userId),
+        isNull(agents.deletedAt),
+      ));
   },
 
   async getAgent(id: string, organisationId: string) {
@@ -1005,11 +1120,14 @@ export const agentService = {
     const fileId = uuidv4();
     const storagePath = `agent-data-sources/${agentId}/${fileId}-${file.originalname}`;
 
+    // `validateMultipart` uses `multer.diskStorage` (spec §6.1) so files arrive
+    // on disk at `file.path`, not in `file.buffer`. Stream from disk.
     const s3 = getS3Client();
     await s3.send(new PutObjectCommand({
       Bucket: getBucketName(),
       Key: storagePath,
-      Body: file.buffer,
+      Body: fs.createReadStream(file.path),
+      ContentLength: file.size,
       ContentType: file.mimetype,
     }));
 
@@ -1022,15 +1140,15 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     }
   ) {
     const [agent] = await db
@@ -1049,14 +1167,14 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
-        loadingMode: data.loadingMode ?? 'eager',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1091,7 +1209,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
-      loadingMode: 'eager' | 'lazy';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
@@ -1129,7 +1246,6 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
-    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
     // file_upload is always static
     if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
       update.syncMode = data.syncMode;
@@ -1306,15 +1422,15 @@ export const agentService = {
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
-      sourcePath: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive';
+      sourcePath?: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
+      connectionId?: string;
     },
     actorUserId?: string
   ) {
@@ -1331,14 +1447,14 @@ export const agentService = {
         name: data.name,
         description: data.description,
         sourceType: data.sourceType,
-        sourcePath: data.sourcePath,
+        sourcePath: data.sourcePath ?? '',
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
-        loadingMode: data.loadingMode ?? 'eager',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
+        connectionId: data.connectionId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1360,7 +1476,6 @@ export const agentService = {
         scheduledTaskId,
         name: source.name,
         sourceType: source.sourceType,
-        loadingMode: source.loadingMode,
       },
     });
 
@@ -1378,7 +1493,6 @@ export const agentService = {
       sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
-      loadingMode: 'eager' | 'lazy';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
@@ -1410,7 +1524,6 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
-    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
     if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
       update.syncMode = data.syncMode;
     }
@@ -1568,8 +1681,7 @@ export const agentService = {
    * (pr-reviewer Major 4.)
    *
    * Caller passes display metadata (name / description / contentType /
-   * loadingMode / priority) so the row matches what the operator
-   * intended in the upload form.
+   * priority) so the row matches what the operator intended in the upload form.
    */
   async uploadScheduledTaskDataSourceFile(
     scheduledTaskId: string,
@@ -1579,7 +1691,6 @@ export const agentService = {
       name: string;
       description?: string;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
-      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
     },
@@ -1590,11 +1701,14 @@ export const agentService = {
     const fileId = uuidv4();
     const storagePath = `scheduled-task-data-sources/${scheduledTaskId}/${fileId}-${file.originalname}`;
 
+    // `validateMultipart` uses `multer.diskStorage` (spec §6.1) so files arrive
+    // on disk at `file.path`, not in `file.buffer`. Stream from disk.
     const s3 = getS3Client();
     await s3.send(new PutObjectCommand({
       Bucket: getBucketName(),
       Key: storagePath,
-      Body: file.buffer,
+      Body: fs.createReadStream(file.path),
+      ContentLength: file.size,
       ContentType: file.mimetype,
     }));
 
@@ -1612,7 +1726,6 @@ export const agentService = {
           sourcePath: storagePath,
           contentType: metadata.contentType ?? 'auto',
           syncMode: 'lazy', // file_upload is always static
-          loadingMode: metadata.loadingMode ?? 'eager',
           priority: metadata.priority ?? 0,
           maxTokenBudget: metadata.maxTokenBudget ?? 8000,
           cacheMinutes: 60,
@@ -1632,7 +1745,6 @@ export const agentService = {
           scheduledTaskId,
           name: source.name,
           sourceType: 'file_upload',
-          loadingMode: source.loadingMode,
           fileName: file.originalname,
           fileSizeBytes: file.size,
         },
@@ -1662,4 +1774,562 @@ export const agentService = {
   // ScheduledTaskDetailPage edit form yet. When the agent reassignment UI
   // lands, restore this method (it was a pure read with no side effects)
   // and re-add the GET /reassignment-preview route in scheduledTasks.ts.
+
+  // ---------------------------------------------------------------------------
+  // Consolidation Build — C1: Full agent payload + tab-scoped writes
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Retrieve the full agent payload used by the Build tab-editor UI.
+   * All arrays are ordered per INVARIANT-Q1-A (createdAt ASC, id ASC) to
+   * ensure deterministic ETag computation.
+   */
+  async getFull(agentId: string, orgId: string): Promise<AgentFull> {
+    const agentDataSourcesTable = agentDataSources;
+
+    const [rawAgent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
+
+    if (!rawAgent) throw { statusCode: 404, message: 'Agent not found', errorCode: 'AGENT_NOT_FOUND' };
+
+    // ── Skills (from defaultSkillSlugs joined to skills table) ──────────────
+    const slugs: string[] = (rawAgent.defaultSkillSlugs ?? []) as string[];
+    let skillRows: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }> = [];
+    if (slugs.length > 0) {
+      const rows = await db
+        .select({ id: skills.id, slug: skills.slug, name: skills.name, isActive: skills.isActive, createdAt: skills.createdAt })
+        .from(skills)
+        .where(inArray(skills.slug, slugs))
+        .orderBy(asc(skills.createdAt), asc(skills.id));
+      skillRows = rows.map((s) => ({
+        id: s.id,
+        key: s.slug,
+        name: s.name,
+        configJson: {},
+        status: s.isActive ? 'enabled' as const : 'disabled' as const,
+      }));
+    }
+
+    // ── Data Sources (org-level only: subaccountAgentId IS NULL, scheduledTaskId IS NULL) ─
+    const dataSources = await db
+      .select()
+      .from(agentDataSourcesTable)
+      .where(
+        and(
+          eq(agentDataSourcesTable.agentId, agentId),
+          drizzleSql`${agentDataSourcesTable.subaccountAgentId} IS NULL`,
+          drizzleSql`${agentDataSourcesTable.scheduledTaskId} IS NULL`,
+        )
+      )
+      .orderBy(asc(agentDataSourcesTable.createdAt), asc(agentDataSourcesTable.id));
+
+    // ── Triggers ─────────────────────────────────────────────────────────────
+    // agentTriggers has no direct agentId FK — triggers link to agents through
+    // subaccountAgents. We do a two-step query: find subaccountAgent IDs for
+    // this org-level agent, then fetch triggers scoped to those IDs.
+    const subaccountAgentRows = await db
+      .select({ id: subaccountAgents.id })
+      .from(subaccountAgents)
+      .where(and(eq(subaccountAgents.agentId, agentId), eq(subaccountAgents.organisationId, orgId)));
+
+    const saIds = subaccountAgentRows.map((sa) => sa.id);
+
+    const triggers = saIds.length > 0
+      ? await db
+          .select()
+          .from(agentTriggersTable)
+          .where(
+            and(
+              inArray(agentTriggersTable.subaccountAgentId, saIds),
+              isNull(agentTriggersTable.deletedAt),
+            )
+          )
+          .orderBy(asc(agentTriggersTable.createdAt), asc(agentTriggersTable.id))
+      : [];
+
+    // ── Last 5 runs + 30d stats ───────────────────────────────────────────────
+    const last5Runs = await db
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        startedAt: agentRuns.startedAt,
+        completedAt: agentRuns.completedAt,
+        durationMs: agentRuns.durationMs,
+        inputTokens: agentRuns.inputTokens,
+        outputTokens: agentRuns.outputTokens,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.agentId, agentId), eq(agentRuns.organisationId, orgId)))
+      .orderBy(desc(agentRuns.startedAt), desc(agentRuns.id))
+      .limit(5);
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [stats30d] = await db
+      .select({
+        total: drizzleSql<number>`CAST(COUNT(*) AS INT)`,
+        costUsd: drizzleSql<number>`COALESCE(SUM((${agentRuns.inputTokens} + ${agentRuns.outputTokens})::numeric / 1000000 * 3), 0)`,
+      })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.agentId, agentId),
+          eq(agentRuns.organisationId, orgId),
+          drizzleSql`${agentRuns.createdAt} >= ${thirtyDaysAgo.toISOString()}`,
+        )
+      );
+
+    // ── Budget ────────────────────────────────────────────────────────────────
+    // Phase 1: agent LLM budget caps have no backing schema yet. These fields
+    // are returned as null/zero and writes are accepted but not persisted.
+    // Budget cap enforcement is a Phase 2 feature. The spendingBudgets table
+    // is for agentic commerce spend (not LLM cost caps) and must not be
+    // misread as dailyCapUsd / monthlyCapUsd values.
+    const budget = {
+      dailyCapUsd: null as number | null,
+      monthlyCapUsd: null as number | null,
+      warnThresholdPct: 0,
+    };
+
+    // ── Revision stats ────────────────────────────────────────────────────────
+    const revisionStats = await db
+      .select({
+        count: drizzleSql<number>`COUNT(*)::int`,
+        lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
+        lastAuthorId: drizzleSql<string>`(ARRAY_AGG(${agentPromptRevisions.changedBy} ORDER BY ${agentPromptRevisions.createdAt} DESC))[1]`,
+      })
+      .from(agentPromptRevisions)
+      .where(and(eq(agentPromptRevisions.agentId, agentId), eq(agentPromptRevisions.organisationId, orgId)));
+
+    const revStat = revisionStats[0];
+    let revisionAuthor: string | null = null;
+    if (revStat?.lastAuthorId) {
+      const authorRows = await db
+        .select({ firstName: users.firstName, lastName: users.lastName })
+        .from(users)
+        .where(eq(users.id, revStat.lastAuthorId))
+        .limit(1);
+      revisionAuthor = authorRows.map(u => `${u.firstName} ${u.lastName}`.trim())[0] ?? null;
+    }
+
+    // ── Personality ───────────────────────────────────────────────────────────
+    const rawPersonality = (rawAgent as unknown as { personality?: unknown }).personality;
+    const personality: AgentPersonality = rawPersonality && typeof rawPersonality === 'object'
+      ? rawPersonality as AgentPersonality
+      : { traits: [], tone: '', description: '', enabled: false };
+
+    const configure = {
+      name: rawAgent.name,
+      description: rawAgent.description ?? '',
+      roleTitle: rawAgent.agentTitle ?? '',
+      parentAgentId: rawAgent.parentAgentId ?? null,
+      model: rawAgent.modelId,
+      outputSize: (['compact', 'standard', 'extended'].includes(rawAgent.outputSize) ? rawAgent.outputSize : 'standard') as 'compact' | 'standard' | 'extended',
+      allowSubaccountModelOverride: rawAgent.allowModelOverride,
+      responseMode: rawAgent.responseMode as 'balanced' | 'expressive' | 'precise' | 'highly_creative',
+    };
+
+    const behaviour = {
+      briefingTemplate: rawAgent.additionalPrompt ?? '',
+      constraints: [] as string[],
+    };
+
+    const etagPayload = {
+      configure,
+      behaviour,
+      personality,
+      skills: skillRows.map((s) => ({ id: s.id, key: s.key, configJson: s.configJson, status: s.status })),
+      dataSources: dataSources.map((d) => ({ id: d.id, kind: d.sourceType, ref: d.sourcePath, status: d.lastFetchStatus === 'ok' ? 'connected' as const : d.lastFetchStatus === 'error' ? 'error' as const : 'disconnected' as const })),
+      triggers: triggers.map((t) => ({ id: t.id, kind: 'event' as const, spec: t.eventFilter ?? {}, status: t.isActive ? 'active' as const : 'paused' as const })),
+      budget,
+    };
+
+    const etag = computeAgentEtag(etagPayload);
+
+    return {
+      id: rawAgent.id,
+      etag,
+      isSystemManaged: rawAgent.isSystemManaged,
+      configure,
+      behaviour,
+      personality,
+      skills: skillRows,
+      dataSources: dataSources.map((d) => ({
+        id: d.id,
+        kind: d.sourceType,
+        ref: d.sourcePath,
+        status: d.lastFetchStatus === 'ok' ? 'connected' as const : d.lastFetchStatus === 'error' ? 'error' as const : 'disconnected' as const,
+      })),
+      triggers: triggers.map((t) => ({
+        id: t.id,
+        kind: 'event' as const,
+        spec: t.eventFilter ?? {},
+        status: t.isActive ? 'active' as const : 'paused' as const,
+      })),
+      budget,
+      runs: {
+        last5: last5Runs.map((r) => ({
+          id: r.id,
+          status: r.status,
+          startedAt: r.startedAt?.toISOString() ?? '',
+          completedAt: r.completedAt?.toISOString() ?? null,
+          durationMs: r.durationMs ?? null,
+          costUsd: ((r.inputTokens + r.outputTokens) / 1_000_000) * 3,
+        })),
+        total30d: Number(stats30d?.total ?? 0),
+        cost30d: Number(stats30d?.costUsd ?? 0),
+      },
+      agentRevisionCount: revStat?.count ?? 1,
+      lastRevisionEditedAt: revStat?.lastEditedAt ?? null,
+      lastRevisionAuthor: revisionAuthor,
+    };
+  },
+
+  /** Guard: throws 403 if agent is system-managed and actor is not system_admin. */
+  _assertNotSystemManaged(agent: AgentFull, actorRole: string | undefined): void {
+    if (agent.isSystemManaged && actorRole !== 'system_admin') {
+      throw { statusCode: 403, message: 'System agent is read-only', errorCode: 'SYSTEM_AGENT_READ_ONLY' };
+    }
+  },
+
+  /** Guard: throws 409 if ETag doesn't match. */
+  _assertEtag(current: AgentFull, expectedEtag: string): void {
+    if (current.etag !== expectedEtag) {
+      throw { statusCode: 409, message: 'Agent has been modified since you last fetched it. Reload and retry.', errorCode: 'ETAG_MISMATCH', currentEtag: current.etag };
+    }
+  },
+
+  async patchConfigure(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentFull['configure']>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.name !== undefined) {
+      const trimmedName = patch.name.trim();
+      update.name = trimmedName;
+      // Slug update: derive new slug from name (idempotent within org)
+      const newSlug = makeSlug(trimmedName);
+      // Check for slug conflict (excluding current agent)
+      const [conflict] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.organisationId, orgId),
+            eq(agents.slug, newSlug),
+            ne(agents.id, agentId),
+            isNull(agents.deletedAt),
+          )
+        );
+      if (conflict) {
+        throw { statusCode: 409, message: `An agent with slug "${newSlug}" already exists`, errorCode: 'SLUG_CONFLICT' };
+      }
+      update.slug = newSlug;
+    }
+    if (patch.description !== undefined) update.description = patch.description;
+    if (patch.roleTitle !== undefined) update.agentTitle = patch.roleTitle;
+    if (patch.parentAgentId !== undefined) update.parentAgentId = patch.parentAgentId;
+    if (patch.model !== undefined) update.modelId = patch.model;
+    if (patch.outputSize !== undefined) update.outputSize = patch.outputSize;
+    if (patch.allowSubaccountModelOverride !== undefined) update.allowModelOverride = patch.allowSubaccountModelOverride;
+    if (patch.responseMode !== undefined) update.responseMode = patch.responseMode;
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchBehaviour(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentFull['behaviour']>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.briefingTemplate !== undefined) update.additionalPrompt = patch.briefingTemplate;
+    // Phase 1: constraints are not persisted (additionalPrompt is a single text field).
+    // If constraints are provided, they are accepted but not stored.
+    // Frontend sends only briefingTemplate in Phase 1.
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchPersonality(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<AgentPersonality>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const merged: AgentPersonality = {
+      ...current.personality,
+      ...patch,
+    };
+
+    await db.transaction(async (tx) => {
+      // personality column is added by migration 0286
+      await tx.execute(
+        drizzleSql`
+          UPDATE agents
+          SET personality = ${JSON.stringify(merged)}::jsonb, updated_at = NOW()
+          WHERE id = ${agentId} AND organisation_id = ${orgId}
+        `
+      );
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceSkills(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.skills, incoming, (s) => s.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some skills would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((s) => s.id),
+      };
+    }
+
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_skills_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedSkillIds: diff.silentlyRemoved.map((s) => s.id),
+          beforeCount: current.skills.length,
+          afterCount: incoming.length,
+        },
+      });
+    }
+
+    // Derive new slugs list from incoming (added + updated = all that remain)
+    const finalSlugs = incoming.map((s) => s.key);
+
+    await db.transaction(async (tx) => {
+      await tx.update(agents)
+        .set({ defaultSkillSlugs: finalSlugs, updatedAt: new Date() })
+        .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceDataSources(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; kind: string; ref: string; status: 'connected' | 'disconnected' | 'error' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const agentDataSourcesTable = agentDataSources;
+
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.dataSources, incoming, (d) => d.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some data sources would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((d) => d.id),
+      };
+    }
+
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_data_sources_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedDataSourceIds: diff.silentlyRemoved.map((d) => d.id),
+          beforeCount: current.dataSources.length,
+          afterCount: incoming.length,
+        },
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      // Delete removed sources
+      const toRemove = diff.silentlyRemoved.map((d) => d.id);
+      if (toRemove.length > 0) {
+        await tx.delete(agentDataSourcesTable).where(
+          and(
+            inArray(agentDataSourcesTable.id, toRemove),
+            eq(agentDataSourcesTable.agentId, agentId),
+          )
+        );
+      }
+      // Update existing rows (sourcePath / sourceType)
+      for (const d of diff.updated) {
+        await tx.update(agentDataSourcesTable)
+          .set({ sourcePath: d.ref, sourceType: d.kind as 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive', updatedAt: new Date() })
+          .where(and(eq(agentDataSourcesTable.id, d.id), eq(agentDataSourcesTable.agentId, agentId)));
+      }
+      // Insert new sources
+      for (const d of diff.added) {
+        await tx.insert(agentDataSourcesTable).values({
+          id: uuidv4(),
+          agentId,
+          name: d.ref,
+          sourceType: d.kind as 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload' | 'google_drive',
+          sourcePath: d.ref,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async replaceTriggers(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    incoming: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>,
+    options: { force?: boolean },
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    const diff = diffByIdentityKey(current.triggers, incoming, (t) => t.id);
+
+    if (!options.force && diff.silentlyRemoved.length > 0) {
+      throw {
+        statusCode: 409,
+        message: 'Some triggers would be removed. Pass force=true to confirm deletion.',
+        errorCode: 'IDENTITY_KEY_DELETION_BLOCKED',
+        removedIds: diff.silentlyRemoved.map((t) => t.id),
+      };
+    }
+
+    // Audit: log identity-key removals if force=true (spec §4.2 identity-key safeguard + DEVELOPMENT_GUIDELINES §8.20)
+    if (options.force && diff.silentlyRemoved.length > 0) {
+      await auditService.log({
+        action: 'agent_triggers_removed_by_identity_key',
+        organisationId: orgId,
+        entityType: 'agent',
+        entityId: agentId,
+        actorType: 'system',
+        metadata: {
+          removedCount: diff.silentlyRemoved.length,
+          removedTriggerIds: diff.silentlyRemoved.map((t) => t.id),
+          beforeCount: current.triggers.length,
+          afterCount: incoming.length,
+        },
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      // Soft-delete removed triggers
+      const toRemove = diff.silentlyRemoved.map((t) => t.id);
+      if (toRemove.length > 0) {
+        await tx.update(agentTriggersTable)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              inArray(agentTriggersTable.id, toRemove),
+              eq(agentTriggersTable.organisationId, orgId),
+            )
+          );
+      }
+      // Update existing
+      for (const t of diff.updated) {
+        await tx.update(agentTriggersTable)
+          .set({
+            isActive: t.status === 'active',
+            eventFilter: t.spec as Record<string, unknown>,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(agentTriggersTable.id, t.id), eq(agentTriggersTable.organisationId, orgId)));
+      }
+      // Phase 1: trigger creation is not supported at the org level. Triggers are
+      // subaccount-scoped (linked via subaccountAgentId, not agentId), so a trigger
+      // inserted here would be orphaned — it would not appear in getFull (which
+      // filters by subaccountAgentId) and would not fire (the trigger service fires
+      // by subaccountId). Until the Schedule tab is wired through the subaccount
+      // route, reject add operations with a clear error.
+      // See migration-gaps.md § "Triggers schema — no direct agentId column".
+      if (diff.added.length > 0) {
+        throw {
+          statusCode: 501,
+          message: 'Adding triggers via the org-level agent endpoint is not supported in Phase 1. Use the subaccount-scoped trigger routes.',
+          errorCode: 'TRIGGER_ADD_NOT_SUPPORTED',
+        };
+      }
+    });
+
+    return agentService.getFull(agentId, orgId);
+  },
+
+  async patchBudget(
+    agentId: string,
+    orgId: string,
+    expectedEtag: string,
+    patch: Partial<{ dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number }>,
+    actor: { role?: string },
+  ): Promise<AgentFull> {
+    // Phase 1: agent LLM budget caps have no backing schema yet.
+    // Patches are accepted (ETag / permission checks still apply) but not persisted.
+    // Phase 2 should add daily_cap_usd, monthly_cap_usd, warn_threshold_pct columns
+    // to agents and implement the read/write path.
+    void patch; // intentional no-op
+
+    const current = await agentService.getFull(agentId, orgId);
+    agentService._assertNotSystemManaged(current, actor.role);
+    agentService._assertEtag(current, expectedEtag);
+
+    return agentService.getFull(agentId, orgId);
+  },
 };

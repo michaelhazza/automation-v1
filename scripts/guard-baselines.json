@@ -18,5 +18,8 @@
   "reflection-loop-wired": 0,
   "tool-intent-convention": 0,
   "no-silent-failures": 10,
-  "principal-context-propagation": 4
+  "principal-context-propagation": 0,
+  "integration-reference": 26,
+  "architect-context": 0,
+  "derived-data-null-safety": 0
 }

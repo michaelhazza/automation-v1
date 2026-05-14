@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Organisation Templates (simplified, admin)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.5;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 28px 60px; }
+
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  .page-head .sub { font-size: 13px; color: #6b7280; margin-top: 4px; }
+  .page-head .admin-crumb {
+    display: inline-block; font-size: 11px; padding: 2px 7px;
+    background: #fef3c7; color: #92400e; border-radius: 3px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px;
+  }
+
+  .btn-primary {
+    padding: 8px 16px; font-size: 13px; font-weight: 600;
+    background: #4f46e5; color: #fff; border: 1px solid #4338ca;
+    border-radius: 6px; cursor: pointer;
+  }
+  .btn-primary:hover { background: #4338ca; }
+
+  table.orgtpl {
+    width: 100%; border-collapse: collapse;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;
+  }
+  table.orgtpl th {
+    text-align: left; padding: 12px 18px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;
+    background: #fafbfc; border-bottom: 1px solid #eef0f3; font-weight: 600;
+  }
+  table.orgtpl td {
+    padding: 14px 18px; border-bottom: 1px solid #f1f2f4; font-size: 13px;
+  }
+  table.orgtpl tr:last-child td { border-bottom: none; }
+  table.orgtpl tr:hover td { background: #fafbfc; }
+
+  .name-cell .name { font-weight: 600; font-size: 14px; }
+  .name-cell .desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
+  .status-cell {
+    font-size: 12px; color: #4b5563;
+  }
+  .status-cell .status-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .status-cell .status-pill.published { background: #ecfdf5; color: #065f46; }
+  .status-cell .status-pill.draft { background: #f3f4f6; color: #4b5563; }
+  .status-cell .version { color: #9ca3af; margin-left: 6px; }
+  .status-cell .created { display: block; font-size: 11px; color: #9ca3af; margin-top: 3px; }
+
+  .actions-cell a {
+    color: #4338ca; text-decoration: none; font-size: 12px; font-weight: 500;
+    margin-left: 12px;
+  }
+  .actions-cell a:first-child { margin-left: 0; }
+  .actions-cell a:hover { text-decoration: underline; }
+
+  .note {
+    margin-top: 16px; font-size: 12px; color: #6b7280; font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Existing page in main — NOT a new page. Route: <code>/system/organisation-templates</code> (SystemOrganisationTemplatesPage.tsx · Synthetos-admin only).
+  This mockup shows the simplified layout — 4 columns, Status + version + created collapsed. Operational-defaults editing lives on the org detail page.
+</div>
+
+<div class="container">
+  <div class="page-head">
+    <div>
+      <span class="admin-crumb">Synthetos admin</span>
+      <h1>Organisation Templates</h1>
+      <div class="sub">Shared templates that adopting orgs can base their ClientPulse config on.</div>
+    </div>
+    <button class="btn-primary">Import from Paperclip</button>
+  </div>
+
+  <table class="orgtpl">
+    <thead>
+      <tr>
+        <th style="width:40%;">Name</th>
+        <th style="width:15%;">Agents</th>
+        <th style="width:25%;">Status</th>
+        <th style="width:20%;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="name-cell">
+          <div class="name">GHL Agency Intelligence</div>
+          <div class="desc">Core template for GHL-integrated agencies · adopted by 12 orgs.</div>
+        </td>
+        <td>5 agents</td>
+        <td class="status-cell">
+          <span class="status-pill published">Published</span>
+          <span class="version">v3</span>
+          <span class="created">created 2 months ago</span>
+        </td>
+        <td class="actions-cell">
+          <a href="#">Preview</a>
+          <a href="#">Unpublish</a>
+        </td>
+      </tr>
+      <tr>
+        <td class="name-cell">
+          <div class="name">SaaS Founder Workspace</div>
+          <div class="desc">Template for SaaS founders with Stripe + Intercom + Segment · adopted by 4 orgs.</div>
+        </td>
+        <td>3 agents</td>
+        <td class="status-cell">
+          <span class="status-pill published">Published</span>
+          <span class="version">v1</span>
+          <span class="created">created 5 weeks ago</span>
+        </td>
+        <td class="actions-cell">
+          <a href="#">Preview</a>
+          <a href="#">Unpublish</a>
+        </td>
+      </tr>
+      <tr>
+        <td class="name-cell">
+          <div class="name">HubSpot Agency (experimental)</div>
+          <div class="desc">HubSpot CRM integration · no live adoptions.</div>
+        </td>
+        <td>4 agents</td>
+        <td class="status-cell">
+          <span class="status-pill draft">Draft</span>
+          <span class="version">v0.1</span>
+          <span class="created">created yesterday</span>
+        </td>
+        <td class="actions-cell">
+          <a href="#">Preview</a>
+          <a href="#">Publish</a>
+          <a href="#" style="color:#dc2626;">Delete</a>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    Operational-defaults editing (health factors, churn bands, intervention templates) lives on the org detail page — not on this template list.
+  </div>
+</div>
+
+</body>
+</html>

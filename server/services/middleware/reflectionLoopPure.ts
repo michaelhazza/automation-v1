@@ -37,7 +37,7 @@ export function parseVerdict(output: string): ReviewCodeVerdict | null {
   // Search the full string for any "Verdict ... (APPROVE|BLOCKED)" match.
   // The `g` flag + lastIndexOf semantics gives us the final verdict when
   // the output contains multiple candidates.
-  const pattern = /verdict[\s:*_\-]*?\b(approve|blocked)\b/gi;
+  const pattern = /verdict[\s:*_-]*?\b(approve|blocked)\b/gi;
   let match: RegExpExecArray | null;
   let last: RegExpExecArray | null = null;
   while ((match = pattern.exec(output)) !== null) {

@@ -83,6 +83,27 @@ export const EVENT_NAMES = [
   'llm.inflight.active_count',
   // §1 provisional 'started' row — concurrent-call reconciliation signal
   'llm.router.reconciliation_required',
+  // invoke_automation step telemetry (spec §5.9)
+  'workflow.step.automation.dispatched',
+  'workflow.step.automation.completed',
+  // F1 baseline artefacts — emitted once per tier-1/tier-2 block injected into context
+  'baseline_artefact.tier_loaded',
+  // F1 baseline artefacts — capture workflow lifecycle events
+  'artefact.capture.started',
+  'artefact.capture.completed',
+  'artefact.capture.skipped',
+  'artefact.capture.edited',
+  // F3 §4 — connector sync + baseline capture lifecycle
+  'connector.sync.complete',
+  'baseline.capture.triggered',
+  'baseline.capture.started',
+  'baseline.metric.captured',
+  'baseline.metric.unavailable',
+  'baseline.capture.succeeded',
+  'baseline.capture.retry_scheduled',
+  'baseline.capture.failed',
+  'baseline.manual.applied',
+  'baseline.admin_reset',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
@@ -128,6 +149,9 @@ export const TERMINATION_REASONS = [
   'timeout',
   'budget_exceeded',
   'pre_loop_exit',
+  // User-triggered cancel observed at the top of an outer-loop iteration
+  // (server/services/agentRunCancelService.ts).
+  'user_cancelled',
 ] as const;
 
 export type TerminationReason = (typeof TERMINATION_REASONS)[number];

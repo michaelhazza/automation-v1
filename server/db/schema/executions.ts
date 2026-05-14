@@ -1,9 +1,9 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
-import { processes } from './processes';
+import { automations } from './automations';
 import { users } from './users';
 import { subaccounts } from './subaccounts';
-import { workflowEngines } from './workflowEngines';
+import { automationEngines } from './automationEngines';
 
 export const executions = pgTable(
   'executions',
@@ -14,7 +14,7 @@ export const executions = pgTable(
       .references(() => organisations.id),
     processId: uuid('process_id')
       .notNull()
-      .references(() => processes.id),
+      .references(() => automations.id),
     triggeredByUserId: uuid('triggered_by_user_id')
       .references(() => users.id),
     subaccountId: uuid('subaccount_id')
@@ -40,7 +40,7 @@ export const executions = pgTable(
     resolvedConnections: jsonb('resolved_connections'), // Snapshot of connection mapping used (no tokens)
     resolvedConfig: jsonb('resolved_config'),           // Merged config (process default + subaccount overrides)
     engineId: uuid('engine_id')
-      .references(() => workflowEngines.id),           // Which engine actually ran this
+      .references(() => automationEngines.id),           // Which engine actually ran this
     triggerType: text('trigger_type').notNull().default('manual').$type<'manual' | 'agent' | 'scheduled' | 'webhook'>(),
     triggerSourceId: uuid('trigger_source_id'),         // ID of agent run, scheduled task run, etc.
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

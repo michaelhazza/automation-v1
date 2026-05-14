@@ -1,16 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
 import SignalPanel from '../components/clientpulse/drilldown/SignalPanel';
 import BandTransitionsTable from '../components/clientpulse/drilldown/BandTransitionsTable';
 import InterventionHistoryTable, { type InterventionRow } from '../components/clientpulse/drilldown/InterventionHistoryTable';
 import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
+import PendingHero from '../components/clientpulse/PendingHero';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
+import { usePendingIntervention } from '../hooks/usePendingIntervention';
 
 interface Props {
   user: User;
 }
+
+type PendingIntervention = {
+  reviewItemId: string;
+  actionTitle: string;
+  proposedAt: string;
+  rationale: string;
+};
 
 type Summary = {
   subaccount: { id: string; name: string };
@@ -18,6 +27,7 @@ type Summary = {
   healthScore: number | null;
   healthScoreDelta7d: number | null;
   lastAssessmentAt: string | null;
+  pendingIntervention: PendingIntervention | null;
 };
 
 type SignalsResponse = {
@@ -41,6 +51,12 @@ const WINDOW_DAYS = 90;
 export default function ClientPulseDrilldownPage(_: Props) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const { openConfigAssistant } = useConfigAssistantPopup();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const rawIntent = searchParams.get('intent');
+  const intent = rawIntent === 'approve' || rawIntent === 'reject' ? rawIntent : null;
+  const [staleIntent, setStaleIntent] = useState(false);
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [signals, setSignals] = useState<SignalsResponse | null>(null);
@@ -49,6 +65,8 @@ export default function ClientPulseDrilldownPage(_: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPropose, setShowPropose] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [showAllSignals, setShowAllSignals] = useState(false);
 
   const load = useCallback(async () => {
     if (!subaccountId) return;
@@ -73,9 +91,25 @@ export default function ClientPulseDrilldownPage(_: Props) {
     }
   }, [subaccountId]);
 
+  const { approve, reject, conflict: interventionConflict, error: interventionError } = usePendingIntervention({
+    onApproved: () => { load(); navigate(location.pathname, { replace: true }); },
+    onRejected: () => { load(); navigate(location.pathname, { replace: true }); },
+    onConflict: load,
+  });
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (loading || !intent) return;
+    if (!summary?.pendingIntervention) {
+      setStaleIntent(true);
+      navigate(location.pathname, { replace: true });
+    } else {
+      setStaleIntent(false);
+    }
+  }, [loading, intent, summary?.pendingIntervention, navigate, location.pathname]);
 
   const handleOpenConfigAssistant = () => {
     if (!summary) return;
@@ -89,6 +123,21 @@ export default function ClientPulseDrilldownPage(_: Props) {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-4">
+      {staleIntent && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-[13px] text-slate-600">
+          This item is no longer pending.
+        </p>
+      )}
+      <PendingHero
+        pendingIntervention={summary.pendingIntervention}
+        onApprove={approve}
+        onReject={reject}
+        conflict={interventionConflict}
+        error={interventionError}
+        autoFocusApprove={intent === 'approve'}
+        initialShowRejectInput={intent === 'reject'}
+      />
+
       <header className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -114,19 +163,48 @@ export default function ClientPulseDrilldownPage(_: Props) {
             >
               Propose intervention
             </button>
-            <button
-              onClick={handleOpenConfigAssistant}
-              className="px-4 py-2 rounded-md text-[13px] font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50"
-            >
-              Open Configuration Assistant
-            </button>
           </div>
         </div>
       </header>
 
-      <SignalPanel signals={signals.signals} lastUpdatedAt={signals.lastUpdatedAt} />
-      <BandTransitionsTable transitions={transitions.transitions} windowDays={WINDOW_DAYS} />
+      <div>
+        <SignalPanel
+          signals={showAllSignals ? signals.signals : signals.signals.slice(0, 5)}
+          lastUpdatedAt={signals.lastUpdatedAt}
+        />
+        {signals.signals.length > 5 && (
+          <button
+            onClick={() => setShowAllSignals(s => !s)}
+            className="mt-2 text-[12px] text-indigo-600 hover:underline"
+          >
+            {showAllSignals ? 'Show less' : `Show more (${signals.signals.length - 5} more)`}
+          </button>
+        )}
+      </div>
+
+      <div>
+        <BandTransitionsTable
+          transitions={historyExpanded ? transitions.transitions : transitions.transitions.slice(-3)}
+          windowDays={WINDOW_DAYS}
+        />
+        {transitions.transitions.length > 3 && (
+          <button
+            onClick={() => setHistoryExpanded(e => !e)}
+            className="mt-2 text-[12px] text-indigo-600 hover:underline"
+          >
+            {historyExpanded ? 'Hide history' : `Show history (${transitions.transitions.length - 3} more)`}
+          </button>
+        )}
+      </div>
+
       <InterventionHistoryTable rows={interventions} />
+
+      <p className="text-[12px] text-slate-500">
+        Need help interpreting this data?{' '}
+        <button onClick={handleOpenConfigAssistant} className="text-indigo-600 hover:underline">
+          Open Configuration Assistant
+        </button>
+      </p>
 
       {showPropose && (
         <ProposeInterventionModal

@@ -10,6 +10,7 @@ visibility: none
 - task_id: string (required) — ID of the task to reassign
 - assigned_agent_id: string (required) — ID of the agent to assign the task to
 - handoff_context: string — Context for the next agent — what you did, what they should do next
+- delegationScope: string (optional) — Delegation scope: `children` | `descendants` | `subaccount`. Default: adaptive. Any agent may reassign to its immediate parent regardless of `delegationScope` — this is the escalation path.
 
 ## Instructions
 

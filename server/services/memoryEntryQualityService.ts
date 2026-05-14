@@ -232,7 +232,6 @@ export interface UtilityAdjustmentSummary {
 export async function adjustFromUtility(subaccountId: string): Promise<UtilityAdjustmentSummary> {
   const started = Date.now();
   const now = new Date();
-  let scanned = 0;
   let boosted = 0;
   let reduced = 0;
   let skipped = 0;
@@ -257,7 +256,7 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
       ),
     );
 
-  scanned = entries.length;
+  const scanned = entries.length;
 
   for (const entry of entries) {
     const currentScore = entry.qualityScore ?? 0.5;

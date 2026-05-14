@@ -5,85 +5,56 @@
  *   npx tsx server/services/__tests__/ruleCapturePolicyPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   shouldAutoPauseRulePure,
   AUTO_PAUSE_CONFIDENCE_THRESHOLD,
 } from '../ruleCapturePolicyPure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 
 test('no origin + no confidence → active (not paused)', () => {
-  assert(!shouldAutoPauseRulePure({}), 'expected not paused');
+  expect(!shouldAutoPauseRulePure({}), 'expected not paused').toBeTruthy();
 });
 
 test('originatingArtefactId present → paused', () => {
-  assert(shouldAutoPauseRulePure({ originatingArtefactId: 'art-1' }), 'expected paused');
+  expect(shouldAutoPauseRulePure({ originatingArtefactId: 'art-1' }), 'expected paused').toBeTruthy();
 });
 
 test('empty-string originatingArtefactId → not paused (treated as absent)', () => {
-  assert(!shouldAutoPauseRulePure({ originatingArtefactId: '' }), 'expected not paused');
+  expect(!shouldAutoPauseRulePure({ originatingArtefactId: '' }), 'expected not paused').toBeTruthy();
 });
 
 test('null originatingArtefactId → not paused', () => {
-  assert(!shouldAutoPauseRulePure({ originatingArtefactId: null }), 'expected not paused');
+  expect(!shouldAutoPauseRulePure({ originatingArtefactId: null }), 'expected not paused').toBeTruthy();
 });
 
 test('confidence below threshold → paused', () => {
-  assert(shouldAutoPauseRulePure({ confidence: 0.5 }), 'expected paused');
-  assert(shouldAutoPauseRulePure({ confidence: 0.79 }), 'expected paused');
+  expect(shouldAutoPauseRulePure({ confidence: 0.5 }), 'expected paused').toBeTruthy();
+  expect(shouldAutoPauseRulePure({ confidence: 0.79 }), 'expected paused').toBeTruthy();
 });
 
 test('confidence exactly at threshold → NOT paused (threshold is exclusive lower bound)', () => {
-  assert(
-    !shouldAutoPauseRulePure({ confidence: AUTO_PAUSE_CONFIDENCE_THRESHOLD }),
-    'expected not paused at 0.8',
-  );
+  expect(!shouldAutoPauseRulePure({ confidence: AUTO_PAUSE_CONFIDENCE_THRESHOLD }), 'expected not paused at 0.8').toBeTruthy();
 });
 
 test('confidence above threshold → not paused', () => {
-  assert(!shouldAutoPauseRulePure({ confidence: 0.9 }), 'expected not paused');
-  assert(!shouldAutoPauseRulePure({ confidence: 1.0 }), 'expected not paused');
+  expect(!shouldAutoPauseRulePure({ confidence: 0.9 }), 'expected not paused').toBeTruthy();
+  expect(!shouldAutoPauseRulePure({ confidence: 1.0 }), 'expected not paused').toBeTruthy();
 });
 
 test('confidence null → no signal, not paused', () => {
-  assert(!shouldAutoPauseRulePure({ confidence: null }), 'expected not paused');
+  expect(!shouldAutoPauseRulePure({ confidence: null }), 'expected not paused').toBeTruthy();
 });
 
 test('originatingArtefactId takes precedence when confidence is high', () => {
-  assert(
-    shouldAutoPauseRulePure({ originatingArtefactId: 'art-1', confidence: 0.99 }),
-    'origin pauses even with high confidence',
-  );
+  expect(shouldAutoPauseRulePure({ originatingArtefactId: 'art-1', confidence: 0.99 }), 'origin pauses even with high confidence').toBeTruthy();
 });
 
 test('both signals fire together → paused (logical OR)', () => {
-  assert(
-    shouldAutoPauseRulePure({ originatingArtefactId: 'art-1', confidence: 0.3 }),
-    'both trigger pause',
-  );
+  expect(shouldAutoPauseRulePure({ originatingArtefactId: 'art-1', confidence: 0.3 }), 'both trigger pause').toBeTruthy();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

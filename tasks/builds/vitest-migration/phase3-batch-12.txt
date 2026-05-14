@@ -1,0 +1,10 @@
+server/services/__tests__/memoryBlockVersionServicePure.test.ts
+server/services/__tests__/memoryCitationDetectorPure.test.ts
+server/services/__tests__/memoryEntryQualityServicePure.test.ts
+server/services/__tests__/mergeFieldResolverPure.test.ts
+server/services/__tests__/mutateActiveToolsPreservingUniversal.test.ts
+server/services/__tests__/n8nImportServicePure.test.ts
+server/services/__tests__/onboardingStateServicePure.test.ts
+server/services/__tests__/operationalConfigSchemaPure.test.ts
+server/services/__tests__/orgConfigServiceReadPathPure.test.ts
+server/services/__tests__/orgOperationalConfigMigrationPure.test.ts

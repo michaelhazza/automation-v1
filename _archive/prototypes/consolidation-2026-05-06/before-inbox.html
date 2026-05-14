@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Inbox (4 pages)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { background: var(--slate-100); }
+.before-banner {
+  background: #fef9c3; border-bottom: 2px solid #ca8a04;
+  padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+  font-size: 14px; color: #92400e; font-weight: 600;
+}
+.before-banner a { color: #1d4ed8; font-weight: 700; margin-left: auto; font-size: 13px; }
+.page-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 24px; max-width: 1300px; margin: 0 auto;
+}
+.page-grid.three-col { grid-template-columns: repeat(3, 1fr); }
+.page-mockup {
+  background: white; border-radius: 8px; border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.page-mockup-header {
+  background: var(--slate-800); color: white; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.page-mockup-header .route { color: var(--slate-400); font-weight: 400; font-size: 10px; }
+.page-inner { padding: 12px; }
+.mini-topbar {
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  padding: 8px 12px; display: flex; align-items: center; gap: 8px; margin: -12px -12px 12px;
+}
+.mini-topbar h3 { font-size: 13px; font-weight: 700; color: var(--slate-800); margin: 0; flex: 1; }
+.mini-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.mini-tab {
+  padding: 5px 10px; font-size: 11px; color: var(--slate-500); cursor: default;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.mini-tab.active { color: var(--indigo-600); border-color: var(--indigo-600); font-weight: 600; }
+.mini-row {
+  display: flex; align-items: flex-start; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--slate-100); font-size: 11px; color: var(--slate-700);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-row .label { color: var(--slate-500); font-size: 10px; min-width: 70px; }
+.mini-section-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--slate-500); margin: 8px 0 4px;
+}
+.mini-btn {
+  display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+}
+.mini-btn-primary { background: var(--indigo-600); color: white; }
+.mini-btn-secondary { background: white; border: 1px solid var(--border); color: var(--slate-600); }
+.mini-btn-green { background: var(--emerald-600); color: white; }
+.mini-btn-red { background: var(--red-600); color: white; }
+.inbox-item {
+  border-left: 3px solid transparent; padding: 6px 8px; margin-bottom: 4px;
+  border-radius: 0 4px 4px 0; background: var(--slate-50); border: 1px solid var(--slate-100);
+}
+.inbox-item.unread { border-left-color: var(--indigo-500); background: #eef2ff; }
+.inbox-item.task { border-left-color: var(--indigo-500); }
+.inbox-item.review { border-left-color: var(--amber-400); background: #fffbeb; }
+.inbox-item.failed { border-left-color: var(--red-500); background: #fef2f2; }
+.q-item {
+  border: 1px solid var(--border); border-radius: 4px; padding: 8px;
+  margin-bottom: 6px;
+}
+.q-item.conflict { border-left: 3px solid var(--red-400); }
+.q-item.proposal { border-left: 3px solid var(--amber-400); }
+.q-item.clarification { border-left: 3px solid var(--blue-400); }
+.nav-impact {
+  margin: 0 24px 24px; background: white; border-radius: 8px; border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.nav-impact h3 { font-size: 14px; font-weight: 700; color: var(--slate-800); margin: 0 0 12px; }
+.impact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.impact-item { text-align: center; }
+.impact-item .big { font-size: 28px; font-weight: 700; color: var(--red-600); }
+.impact-item .arrow { font-size: 20px; color: var(--slate-400); margin: 4px 0; }
+.impact-item .small { font-size: 24px; font-weight: 700; color: var(--emerald-600); }
+.impact-item .lbl { font-size: 11px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+
+<div class="before-banner">
+  <span>CURRENT STATE</span>
+  <span style="font-weight:400;">4 separate pages replaced by Inbox</span>
+  <a href="inbox.html">View consolidated page &rarr;</a>
+</div>
+
+<div class="page-grid">
+
+  <!-- InboxPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      InboxPage
+      <span class="route">/inbox</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Inbox</h3>
+        <span class="badge badge-red" style="font-size:9px">5</span>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">All (5)</div>
+        <div class="mini-tab">Tasks</div>
+        <div class="mini-tab">Reviews</div>
+        <div class="mini-tab">Failed</div>
+      </div>
+      <div class="inbox-item unread task">
+        <div style="font-size:11px;font-weight:600">Review onboarding draft</div>
+        <div style="font-size:10px;color:var(--slate-500)">Content Agent · Acme Corp · 2h ago</div>
+      </div>
+      <div class="inbox-item review">
+        <div style="font-size:11px;font-weight:600">Approve email send</div>
+        <div style="font-size:10px;color:var(--slate-500)">Outreach Agent · Acme Corp · 4h ago</div>
+      </div>
+      <div class="inbox-item failed">
+        <div style="font-size:11px;font-weight:600">Run failed: CRM sync</div>
+        <div style="font-size:10px;color:var(--slate-500)">CRM Agent · Beta Inc · 5h ago</div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        InboxPage handles tasks, review approvals, and failed runs. Does NOT include memory review items (belief conflicts, block proposals). No HITL for clarification requests.
+      </div>
+    </div>
+  </div>
+
+  <!-- MemoryReviewQueuePage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      MemoryReviewQueuePage
+      <span class="route">/knowledge/review-queue</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Memory review queue</h3>
+        <span class="badge badge-amber" style="font-size:9px">3 pending</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:3px 6px;"><option>Status: pending</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:3px 6px;"><option>Type: all</option></select>
+      </div>
+      <div class="q-item conflict">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span class="badge badge-red" style="font-size:9px">Belief conflict</span>
+          <span style="font-size:10px;font-weight:600">Acme Corp stakeholder change</span>
+        </div>
+        <div style="font-size:9px;color:var(--slate-500);margin-bottom:4px;">New: "Sarah Mitchell is the decision-maker" / Existing: "Tom Chen is primary contact"</div>
+        <div style="display:flex;gap:4px;">
+          <span class="mini-btn mini-btn-green" style="font-size:9px">Accept new</span>
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">Keep existing</span>
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">Reject</span>
+        </div>
+      </div>
+      <div class="q-item proposal">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span class="badge badge-amber" style="font-size:9px">Block proposal</span>
+          <span style="font-size:10px;font-weight:600">client.acme.budget-cycle</span>
+        </div>
+        <div style="font-size:9px;color:var(--slate-500);margin-bottom:4px;">Agent proposes a new memory block for budget timing patterns.</div>
+        <div style="display:flex;gap:4px;">
+          <span class="mini-btn mini-btn-primary" style="font-size:9px">Approve</span>
+          <span class="mini-btn mini-btn-red" style="font-size:9px">Reject</span>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Memory-only queue. Separate nav item from InboxPage. Operator must check two places for pending actions.
+      </div>
+    </div>
+  </div>
+
+  <!-- ReviewQueuePage (admin) -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      ReviewQueuePage
+      <span class="route">/admin/review-queue</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Review queue (Admin)</h3>
+        <span class="badge badge-amber" style="font-size:9px">Admin only</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:3px 6px;"><option>Status: all</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:3px 6px;"><option>Type: all</option></select>
+        <select style="border:1px solid var(--border);border-radius:4px;font-size:10px;padding:3px 6px;"><option>Client: all</option></select>
+      </div>
+      <div class="q-item conflict">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span class="badge badge-red" style="font-size:9px">Belief conflict</span>
+          <span class="badge badge-slate" style="font-size:9px">Acme Corp</span>
+        </div>
+        <div style="font-size:10px;font-weight:600;margin-bottom:3px;">Stakeholder change: Sarah vs Tom</div>
+        <div style="display:flex;gap:4px;">
+          <span class="mini-btn mini-btn-green" style="font-size:9px">Approve</span>
+          <span class="mini-btn mini-btn-red" style="font-size:9px">Reject</span>
+        </div>
+      </div>
+      <div class="q-item clarification">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span class="badge badge-blue" style="font-size:9px">Clarification</span>
+          <span class="badge badge-slate" style="font-size:9px">Beta Inc</span>
+        </div>
+        <div style="font-size:10px;font-weight:600;margin-bottom:3px;">Agent asks: continue with old pricing?</div>
+        <div style="display:flex;gap:4px;">
+          <span class="mini-btn mini-btn-primary" style="font-size:9px">Yes</span>
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">No</span>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Separate admin page for reviewing agent-generated items. Overlaps with MemoryReviewQueuePage for belief conflicts and block proposals.
+      </div>
+    </div>
+  </div>
+
+  <!-- AgentMailboxPage -->
+  <div class="page-mockup">
+    <div class="page-mockup-header">
+      AgentMailboxPage
+      <span class="route">/agents/:id/mailbox</span>
+    </div>
+    <div class="page-inner">
+      <div class="mini-topbar">
+        <h3>Outreach Agent: Mailbox</h3>
+      </div>
+      <div class="mini-tabs">
+        <div class="mini-tab active">Pending</div>
+        <div class="mini-tab">Resolved</div>
+      </div>
+      <div class="mini-section-hdr">Pending HITL requests</div>
+      <div style="border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:6px;">
+        <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Approve email: "Follow-up re Q3 proposal"</div>
+        <div style="font-size:10px;color:var(--slate-500);margin-bottom:6px;">Outreach Agent wants to send an email to Sarah Mitchell at Acme Corp. Subject: Follow-up re Q3 proposal.</div>
+        <div style="display:flex;gap:6px;">
+          <span class="mini-btn mini-btn-green" style="font-size:9px">Approve</span>
+          <span class="mini-btn mini-btn-red" style="font-size:9px">Reject</span>
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">Edit and approve</span>
+        </div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:4px;padding:8px;">
+        <div style="font-size:11px;font-weight:600;margin-bottom:4px;">Clarification: which contact?</div>
+        <div style="font-size:10px;color:var(--slate-500);margin-bottom:6px;">Agent found two contacts with similar names. Which should be used for this outreach?</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">Sarah Mitchell (CTO)</span>
+          <span class="mini-btn mini-btn-secondary" style="font-size:9px">Sarah Miller (VP Sales)</span>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:var(--slate-50);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;color:var(--slate-500);">
+        Per-agent mailbox. Operator must visit each agent's mailbox separately to see all pending HITL items. No cross-agent unified view.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav-impact">
+  <h3>Navigation impact before consolidation</h3>
+  <div class="impact-grid">
+    <div class="impact-item">
+      <div class="big">4</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Pages (4 separate routes)</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">4</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">1</div>
+      <div class="lbl">Nav items to check for pending actions</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">No</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Yes</div>
+      <div class="lbl">Unified count badge across all HITL types</div>
+    </div>
+    <div class="impact-item">
+      <div class="big">Per-agent</div>
+      <div class="arrow">&#8595;</div>
+      <div class="small">Cross-agent</div>
+      <div class="lbl">Mailbox scope</div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--slate-500);margin:12px 0 0;">
+    The consolidated Inbox unifies all human-in-the-loop surfaces into a single feed: tasks (from InboxPage), approvals (from AgentMailboxPage), belief conflicts and block proposals (from MemoryReviewQueuePage and ReviewQueuePage), clarification requests, and failed run alerts. A single nav badge shows the total pending count. Filters (type/client/age) allow operators to narrow the view.
+  </p>
+</div>
+
+</body>
+</html>

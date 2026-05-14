@@ -75,7 +75,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const userId = req.userId!;
+    const userId = req.user!.id;
     const result = await resetToCanonical({
       blockId: req.params.blockId,
       organisationId: orgId,

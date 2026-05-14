@@ -40,18 +40,22 @@ jq() {
 # ── Suppression Comments ─────────────────────────────────────────────────────
 # Suppression uses a next-line directive. Place on the line ABOVE the violation.
 #
-# Pattern:
+# Pattern (legacy):
 #   // guard-ignore-next-line: <guard-id> reason="<explanation>"
 #
-# Example:
+# Example (legacy):
 #   // guard-ignore-next-line: no-db-in-routes reason="MCP transport requires direct DB access"
 #   import { db } from '../db/index.js';
 #
-# Same-line comments are also supported:
+# Same-line legacy format:
 #   import { db } from '../db/index.js'; // guard-ignore: no-db-in-routes reason="MCP transport"
+#
+# T1 token format (preferred for new suppressions):
+#   import { db } from '../db/index.js'; // guard-ignore <guard-id>: <ADR-id> <one-line rationale>
+#   Where <ADR-id> matches [0-9]{4}-[a-z0-9-]+
 
 # Check if a specific line in a file has a suppression comment for the given guard.
-# Checks: (1) same line for inline guard-ignore, (2) previous line for guard-ignore-next-line.
+# Checks: (1) same line for inline guard-ignore (legacy or T1), (2) previous line for guard-ignore-next-line.
 # Usage: is_suppressed <file> <line_number> <guard_id>
 # Returns 0 if suppressed, 1 if not.
 is_suppressed() {
@@ -59,9 +63,15 @@ is_suppressed() {
   local lineno="$2"
   local guard_id="$3"
 
-  # Check same line for inline suppression: guard-ignore: <id> reason="..."
   local current_line
   current_line=$(sed -n "${lineno}p" "$file" 2>/dev/null || true)
+
+  # T1 format: guard-ignore <guard-id>: <ADR-id matching \d{4}-[a-z0-9-]+> <rationale>
+  if echo "$current_line" | grep -qE "guard-ignore\s+${guard_id}:\s+[0-9]{4}-[a-z0-9-]+\s+\S"; then
+    return 0
+  fi
+
+  # Legacy same-line format: guard-ignore: <id> reason="..."
   if echo "$current_line" | grep -qE "guard-ignore:\s*${guard_id}\s+reason=\"[^\"]+\""; then
     return 0
   fi
@@ -127,6 +137,7 @@ emit_summary() {
   if [ "${GUARD_OUTPUT:-text}" != "json" ]; then
     echo ""
     echo "Summary: $files_scanned files scanned, $violations violations found"
+    echo "[GATE] ${GUARD_ID}: violations=${violations}"
   fi
 }
 

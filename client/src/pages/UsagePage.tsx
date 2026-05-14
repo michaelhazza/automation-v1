@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import { RunActivityChart } from '../components/ActivityCharts';
+import MemoryUtilityTab from './MemoryUtilityTab';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -192,7 +193,7 @@ function BudgetBar({ spent, limit, label }: { spent: number; limit: number | nul
 
 // ─── Tab bar ───────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'agents' | 'models' | 'runs' | 'routing' | 'iee';
+type Tab = 'overview' | 'agents' | 'models' | 'runs' | 'routing' | 'iee' | 'memory_utility';
 
 // ─── IEE row types — backed by /api/subaccounts/:id/iee/usage etc. ────────────
 interface IeeUsageRow {
@@ -222,7 +223,8 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
     { id: 'models',   label: 'Models' },
     { id: 'runs',     label: 'Runs' },
     { id: 'routing',  label: 'Routing' },
-    { id: 'iee',      label: 'IEE Execution' },
+    { id: 'iee',            label: 'IEE Execution' },
+    { id: 'memory_utility', label: 'Memory Utility' },
   ];
   return (
     <div className="flex gap-0.5 border-b border-slate-200 mb-6">
@@ -727,6 +729,8 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
           onFilterChange={setIeeFilters}
         />
       )}
+
+      {tab === 'memory_utility' && <MemoryUtilityTab />}
     </div>
   );
 }

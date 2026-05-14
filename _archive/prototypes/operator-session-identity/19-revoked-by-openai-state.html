@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<!--
+  Screen 19: AI Subscription detail — Revoked by OpenAI (provider-side) state (Round 13)
+  Brief Section 4.17: provider-side revocation is distinct from platform-side disable.
+  The OpenAI session/access was ended by OpenAI, not by the operator.
+  No "Allow agent use" toggle — credential is unusable until re-auth.
+  Primary action: "Sign in again" (re-auth the same account with OpenAI).
+  Secondary: "Transfer ownership" (if the original account holder has left).
+  Tertiary (danger): "Disconnect".
+  Distinct from screen 06 (Offboarding / Disabled — platform-side action).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatGPT Team (Sandbox) — Revoked by OpenAI | Connections | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.page-body { padding: 28px 32px; }
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+.detail-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.detail-card-head {
+  padding: 18px 22px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.detail-card-body { padding: 22px; }
+.detail-section-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #94a3b8; margin: 20px 0 10px;
+}
+.detail-section-label:first-child { margin-top: 0; }
+
+.conn-identity { display: flex; align-items: center; gap: 14px; }
+.conn-identity-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: #fef2f2; color: #b91c1c;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+}
+.conn-identity-name { font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.conn-identity-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.sidebar-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.sidebar-card h3 {
+  font-size: 12px; font-weight: 700; color: #475569;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 14px;
+}
+
+.action-btn-row { display: flex; flex-direction: column; gap: 8px; }
+.action-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  background: white; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: #334155;
+  text-align: left; width: 100%;
+  transition: border-color 0.12s, background 0.12s;
+  font-family: inherit;
+}
+.action-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+.action-btn.primary { background: #4f46e5; color: white; border-color: #4f46e5; font-weight: 600; }
+.action-btn.primary:hover { background: #4338ca; border-color: #4338ca; }
+.action-btn.danger { color: #dc2626; border-color: #fecaca; }
+.action-btn.danger:hover { background: #fef2f2; border-color: #fca5a5; }
+.action-btn .ab-icon { font-size: 14px; width: 18px; text-align: center; }
+
+/* Revoked banner: red, prominent */
+.revoked-banner {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 18px 20px;
+  background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 12px;
+  font-size: 13px; color: #991b1b; line-height: 1.55;
+  margin-bottom: 22px;
+}
+.revoked-banner-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: #fee2e2; border: 1px solid #fca5a5;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.revoked-banner-title { font-size: 14px; font-weight: 700; color: #7f1d1d; margin-bottom: 4px; }
+.revoked-banner-body { font-size: 13px; color: #991b1b; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="white"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill-opacity="0.9"/></svg>
+        </div>
+        <span class="sidebar-logo-text">Synthetos</span>
+      </div>
+    </div>
+    <div class="sidebar-client-switcher">
+      <div class="sidebar-client-dot"></div>
+      <span class="sidebar-client-name">Acme Corp</span>
+      <span class="sidebar-client-caret">&#9662;</span>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Team
+      </a>
+      <a class="sidebar-link active" href="01-connections-list.html">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connections
+      </a>
+      <a class="sidebar-link" href="#">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <a href="01-connections-list.html" style="color:#64748b;text-decoration:none;">Connections</a>
+        <span style="color:#cbd5e1;margin:0 4px;">/</span>
+        <span class="topbar-breadcrumb-current">ChatGPT Team (Sandbox)</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span style="font-size:11px;color:#64748b;background:#e0e7ff;padding:2px 8px;border-radius:12px;font-weight:600;">Org admin</span>
+      <div style="width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-left:6px;">SM</div>
+    </div>
+
+    <div class="page-body">
+      <!-- Back link -->
+      <div style="margin-bottom:18px;">
+        <a href="01-connections-list.html" style="font-size:13px;color:#6366f1;text-decoration:none;">&#8592; Connections</a>
+      </div>
+
+      <!-- Revoked-by-provider banner (PRIMARY signal on this screen) -->
+      <div class="revoked-banner">
+        <div class="revoked-banner-icon">&#128683;</div>
+        <div>
+          <div class="revoked-banner-title">OpenAI ended this session.</div>
+          <div class="revoked-banner-body">Your ChatGPT account is no longer connected. Sign in again with the same account, or transfer ownership to a different account.</div>
+        </div>
+      </div>
+
+      <div class="detail-layout">
+        <!-- Main column -->
+        <div>
+          <div class="detail-card">
+            <div class="detail-card-head">
+              <div class="conn-identity">
+                <div class="conn-identity-icon">
+                  <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                </div>
+                <div>
+                  <div class="conn-identity-name">ChatGPT Team (Sandbox)</div>
+                  <div class="conn-identity-badges">
+                    <span class="tier-badge tier-team">Team</span>
+                    <span class="usability-pill revoked-pill"><span class="dot"></span>Revoked by OpenAI</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="detail-card-body">
+              <div class="detail-section-label">Subscription details</div>
+
+              <div class="meta-row">
+                <div class="meta-label">Provider</div>
+                <div class="meta-value">OpenAI</div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-label">Plan</div>
+                <div class="meta-value"><span class="tier-badge tier-team">Team</span></div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-label">Status</div>
+                <div class="meta-value">
+                  <span class="usability-pill revoked-pill"><span class="dot"></span>Revoked by OpenAI</span>
+                </div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-label">Cause</div>
+                <div class="meta-value" style="color:#991b1b;">Provider-side. OpenAI ended the session. This is not a platform action.</div>
+              </div>
+
+              <div class="detail-section-label" style="margin-top:18px;">Ownership</div>
+
+              <div class="meta-row">
+                <div class="meta-label">Connected by</div>
+                <div class="meta-value" style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:22px;height:22px;border-radius:50%;background:#fef3c7;color:#b45309;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">JR</div>
+                  James R. (james@acmecorp.com)
+                </div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-label">Connected on</div>
+                <div class="meta-value">2 May 2026</div>
+              </div>
+              <div class="meta-row">
+                <div class="meta-label">Scope</div>
+                <div class="meta-value">Marketing subaccount</div>
+              </div>
+
+              <div class="detail-section-label" style="margin-top:18px;">Currently used by</div>
+              <div style="padding:12px 0;font-size:13px;color:#94a3b8;font-style:italic;">
+                No agents were using this subscription when access was revoked.
+              </div>
+
+              <!-- Audit footer -->
+              <div style="margin-top:18px;padding-top:14px;border-top:1px solid #f1f5f9;font-size:10.5px;color:#94a3b8;">
+                Audit event: <code style="font-family:monospace;background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:10px;">operator_session.revoked</code> (provider-side) &nbsp;&#183;&nbsp; 2 days ago
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div>
+          <div class="sidebar-card">
+            <h3>Actions</h3>
+            <div class="action-btn-row">
+              <!-- Primary: Sign in again (re-auth same account) -->
+              <button class="action-btn primary" onclick="doSignInAgain()" style="justify-content:space-between;">
+                <span style="display:flex;align-items:center;gap:10px;">
+                  <span class="ab-icon">&#8635;</span>
+                  Sign in again
+                </span>
+                <span class="admin-only-pill" style="background:rgba(79,70,229,0.15);border-color:rgba(79,70,229,0.2);color:white;">Org admin only</span>
+              </button>
+              <!-- Secondary: Transfer ownership -->
+              <button class="action-btn" onclick="doTransfer()">
+                <span class="ab-icon">&#8644;</span>
+                Transfer ownership
+              </button>
+              <!-- Tertiary: Disconnect -->
+              <button class="action-btn danger" onclick="doDisconnect()" style="justify-content:space-between;">
+                <span style="display:flex;align-items:center;gap:10px;">
+                  <span class="ab-icon">&#8856;</span>
+                  Disconnect
+                </span>
+                <span class="admin-only-pill" style="background:#fef2f2;border-color:#fecaca;color:#b91c1c;">Org admin only</span>
+              </button>
+            </div>
+            <!-- Note: no "Allow agent use" toggle — credential is unusable until re-auth -->
+          </div>
+
+          <div class="sidebar-card">
+            <h3>Status</h3>
+            <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="color:#64748b;">State</span>
+                <span class="usability-pill revoked-pill" style="font-size:11px;"><span class="dot"></span>Revoked by OpenAI</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="color:#64748b;">Plan</span>
+                <span class="tier-badge tier-team">Team</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="color:#64748b;">Revoked by</span>
+                <span style="color:#b91c1c;font-weight:500;font-size:12px;">OpenAI (provider)</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="color:#64748b;">Agent use</span>
+                <span style="color:#94a3b8;font-size:12px;font-style:italic;">Blocked until re-auth</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size:11.5px;color:#94a3b8;text-align:right;">
+            <a href="06-offboarding-state.html" style="color:#6366f1;text-decoration:none;">Compare: platform-side disable &rarr;</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nav hint -->
+      <div style="margin-top:14px;text-align:right;font-size:11.5px;color:#94a3b8;">
+        &larr; <a href="05-reauth-state.html" style="color:#6366f1;text-decoration:none;">Needs sign in state (05)</a>
+        &nbsp;&nbsp;
+        <a href="index.html" style="color:#6366f1;text-decoration:none;">Prototype index</a>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function doSignInAgain() { window.location.href = '20-sign-in-again-light.html'; }
+function doTransfer() {
+  alert('Transfer ownership: a confirmation dialog would appear here to select a new owner and re-auth under their account.');
+}
+function doDisconnect() { window.location.href = '15-disconnect-confirm.html'; }
+</script>
+</body>
+</html>

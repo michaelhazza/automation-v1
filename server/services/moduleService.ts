@@ -4,8 +4,8 @@ import {
   modules,
   subscriptions,
   orgSubscriptions,
-  playbookTemplates,
-  systemPlaybookTemplates,
+  workflowTemplates,
+  systemWorkflowTemplates,
 } from '../db/schema/index.js';
 import type { Module, NewModule } from '../db/schema/index.js';
 
@@ -142,8 +142,8 @@ class ModuleService {
   }
 
   async createModule(data: Omit<NewModule, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<Module> {
-    if (Array.isArray(data.onboardingPlaybookSlugs) && data.onboardingPlaybookSlugs.length > 0) {
-      await this.validateOnboardingPlaybookSlugs(data.onboardingPlaybookSlugs);
+    if (Array.isArray(data.onboardingWorkflowSlugs) && data.onboardingWorkflowSlugs.length > 0) {
+      await this.validateOnboardingWorkflowSlugs(data.onboardingWorkflowSlugs);
     }
     const now = new Date();
     const [row] = await db
@@ -166,10 +166,10 @@ class ModuleService {
       throw { statusCode: 404, message: 'Module not found' };
     }
 
-    // Phase F — §10.3: validate every slug in `onboardingPlaybookSlugs`
+    // Phase F — §10.3: validate every slug in `onboardingWorkflowSlugs`
     // resolves to a published system or org template before writing.
-    if (Array.isArray(data.onboardingPlaybookSlugs) && data.onboardingPlaybookSlugs.length > 0) {
-      await this.validateOnboardingPlaybookSlugs(data.onboardingPlaybookSlugs);
+    if (Array.isArray(data.onboardingWorkflowSlugs) && data.onboardingWorkflowSlugs.length > 0) {
+      await this.validateOnboardingWorkflowSlugs(data.onboardingWorkflowSlugs);
     }
 
     const [updated] = await db
@@ -186,30 +186,30 @@ class ModuleService {
    * published template (system or any org). Throws `invalid_slug: <slug>`
    * on the first unresolved slug so the admin sees the exact problem.
    */
-  private async validateOnboardingPlaybookSlugs(slugs: string[]): Promise<void> {
+  private async validateOnboardingWorkflowSlugs(slugs: string[]): Promise<void> {
     const deduped = Array.from(new Set(slugs));
     if (deduped.length === 0) return;
 
     // Collect slugs that resolve to a system template with a published version.
     const sysRows = await db
-      .select({ slug: systemPlaybookTemplates.slug })
-      .from(systemPlaybookTemplates)
+      .select({ slug: systemWorkflowTemplates.slug })
+      .from(systemWorkflowTemplates)
       .where(
         and(
-          inArray(systemPlaybookTemplates.slug, deduped),
-          isNull(systemPlaybookTemplates.deletedAt),
+          inArray(systemWorkflowTemplates.slug, deduped),
+          isNull(systemWorkflowTemplates.deletedAt),
         ),
       );
     const sysResolved = new Set(sysRows.map((r) => r.slug));
 
     // Collect slugs that resolve to at least one org template with a published version.
     const orgRows = await db
-      .select({ slug: playbookTemplates.slug })
-      .from(playbookTemplates)
+      .select({ slug: workflowTemplates.slug })
+      .from(workflowTemplates)
       .where(
         and(
-          inArray(playbookTemplates.slug, deduped),
-          isNull(playbookTemplates.deletedAt),
+          inArray(workflowTemplates.slug, deduped),
+          isNull(workflowTemplates.deletedAt),
         ),
       );
     const orgResolved = new Set(orgRows.map((r) => r.slug));

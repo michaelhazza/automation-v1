@@ -24,13 +24,92 @@ import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   subaccounts,
-  playbookRuns,
+  workflowRuns,
   memoryReviewQueue,
 } from '../db/schema/index.js';
 import { deliveryService, type DeliveryChannelConfig } from './deliveryService.js';
 import { logger } from '../lib/logger.js';
 
 export const PORTFOLIO_AUTO_ENABLE_THRESHOLD = 3;
+
+// ── Settings CRUD (for portfolioRollup.ts route) ──────────────────────────────
+
+export interface PortfolioRollupSettingsResult {
+  orgSubaccountId: string;
+  optIn: boolean;
+  deliveryChannels: Record<string, unknown>;
+}
+
+export async function getPortfolioRollupSettings(
+  organisationId: string,
+): Promise<PortfolioRollupSettingsResult | null> {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.organisationId, organisationId),
+        eq(subaccounts.isOrgSubaccount, true),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!orgSub) return null;
+
+  const settings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const portfolioConfig =
+    (settings.portfolioRollup as { optIn?: boolean; deliveryChannels?: unknown } | undefined) ?? {};
+
+  return {
+    orgSubaccountId: orgSub.id,
+    optIn: portfolioConfig.optIn ?? true,
+    deliveryChannels: (portfolioConfig.deliveryChannels as Record<string, unknown> | undefined) ?? {
+      email: true,
+      portal: false,
+      slack: false,
+    },
+  };
+}
+
+export async function updatePortfolioRollupSettings(
+  organisationId: string,
+  updates: { optIn?: boolean; deliveryChannels?: unknown },
+): Promise<PortfolioRollupSettingsResult | null> {
+  const [orgSub] = await db
+    .select({ id: subaccounts.id, settings: subaccounts.settings })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.organisationId, organisationId),
+        eq(subaccounts.isOrgSubaccount, true),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!orgSub) return null;
+
+  const existingSettings = (orgSub.settings as Record<string, unknown> | null) ?? {};
+  const nextSettings = {
+    ...existingSettings,
+    portfolioRollup: {
+      optIn: updates.optIn === undefined ? true : Boolean(updates.optIn),
+      deliveryChannels: updates.deliveryChannels ?? { email: true, portal: false, slack: false },
+    },
+  };
+
+  await db
+    .update(subaccounts)
+    .set({ settings: nextSettings, updatedAt: new Date() })
+    .where(and(eq(subaccounts.id, orgSub.id), eq(subaccounts.organisationId, organisationId)));
+
+  return {
+    orgSubaccountId: orgSub.id,
+    optIn: nextSettings.portfolioRollup.optIn,
+    deliveryChannels: nextSettings.portfolioRollup.deliveryChannels as Record<string, unknown>,
+  };
+}
 
 export type RollupKind = 'briefing' | 'digest';
 
@@ -104,20 +183,20 @@ export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRoll
   for (const sub of clientSubs) {
     const [run] = await db
       .select({
-        id: playbookRuns.id,
-        completedAt: playbookRuns.completedAt,
-        status: playbookRuns.status,
+        id: workflowRuns.id,
+        completedAt: workflowRuns.completedAt,
+        status: workflowRuns.status,
       })
-      .from(playbookRuns)
+      .from(workflowRuns)
       .where(
         and(
-          eq(playbookRuns.subaccountId, sub.id),
-          eq(playbookRuns.organisationId, input.organisationId),
-          eq(playbookRuns.playbookSlug, slug),
-          gte(playbookRuns.createdAt, windowStart),
+          eq(workflowRuns.subaccountId, sub.id),
+          eq(workflowRuns.organisationId, input.organisationId),
+          eq(workflowRuns.workflowSlug, slug),
+          gte(workflowRuns.createdAt, windowStart),
         ),
       )
-      .orderBy(desc(playbookRuns.createdAt))
+      .orderBy(desc(workflowRuns.createdAt))
       .limit(1);
 
     rollupRows.push({

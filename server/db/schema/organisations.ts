@@ -57,6 +57,28 @@ export const organisations = pgTable(
     // Per-org toggles for clarifying + sparring skills (Phase 4).
     clarifyingEnabled: boolean('clarifying_enabled').notNull().default(true),
     sparringEnabled: boolean('sparring_enabled').notNull().default(true),
+    // ── System org marker (migration 0223) ─────────────────────────────
+    // True only for the seeded System Operations org. A partial unique index
+    // in the migration enforces at-most-one. Non-sysadmin org-listing endpoints
+    // filter rows where isSystemOrg = true so the org is invisible to tenants.
+    isSystemOrg: boolean('is_system_org').notNull().default(false),
+    // ── Agentic Commerce (migration 0271) ───────────────────────────────
+    // How long shadow-mode agent_charges rows are retained before the
+    // retention purge job deletes them. Default 90 days. Consumed by the
+    // shadow charge retention purge job (spec §14, §17 Chunk 16).
+    shadowChargeRetentionDays: integer('shadow_charge_retention_days').notNull().default(90),
+    // ── Trust & Verification Layer (migration 0301) ──────────────────────
+    // Scorecard slugs mandated for all org-linked agents. Always-array;
+    // DB CHECK enforces jsonb_typeof = 'array'.
+    orgMandatoryScorecardSlugs: jsonb('org_mandatory_scorecard_slugs').notNull().default([]).$type<string[]>(),
+    // ── Execution Backend Adapter Contract (migration 0313) ───────────────
+    // Per-org backend routing preferences. Keys are backend IDs; values are
+    // opaque routing hints (e.g. region, tier). Schema-only in V1 — no Zod
+    // validator or resolver reads this column yet.
+    preferredBackends: jsonb('preferred_backends')
+      .notNull()
+      .default({})
+      .$type<Record<string, string>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

@@ -127,7 +127,7 @@ export function validateParsedField(
 export interface OutcomeParams {
   /** Parsed fields after validation has run. */
   parsed: ParsedConfigField[];
-  /** Playbook(s) Configuration Schema flattened. */
+  /** Workflow(s) Configuration Schema flattened. */
   schema: ConfigQuestion[];
   /** Confidence floor. Defaults to PARSE_CONFIDENCE_THRESHOLD. */
   threshold?: number;

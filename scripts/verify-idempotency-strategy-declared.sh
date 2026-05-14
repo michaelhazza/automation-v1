@@ -4,15 +4,15 @@
 #
 # Introduced by P0.2 Slice B of docs/improvements-roadmap-spec.md.
 #
-# Enforces the Execution Model contract: every entry in
-# server/config/actionRegistry.ts ACTION_REGISTRY must declare an
-# `idempotencyStrategy` field. This is the structural enforcement of the
-# at-least-once execution guarantee — handlers that don't declare a
-# strategy may be unsafe under retry.
+# Enforces the Execution Model contract: every entry in ACTION_REGISTRY must
+# declare an `idempotencyStrategy` field. This is the structural enforcement
+# of the at-least-once execution guarantee.
 #
-# The check counts entries (top-level keys in ACTION_REGISTRY) and counts
-# `idempotencyStrategy:` field occurrences within the registry literal.
-# If they don't match, at least one entry is missing the field.
+# Hardened in refactor-action-registry Chunk 2: the awk text-counting body
+# has been replaced by a TypeScript runtime-loading harness
+# (scripts/verify-idempotency-strategy-declared.ts) that loads the registry
+# directly from source via tsx and checks the invariant per-entry. No
+# `npm run build:server` step required (matches verify-risk-tier-assigned.ts).
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -25,85 +25,18 @@ GUARD_NAME="Action Registry idempotencyStrategy declared on every entry"
 source "$SCRIPT_DIR/lib/guard-utils.sh"
 
 VIOLATIONS=0
-FILES_SCANNED=0
+FILES_SCANNED=1
 
 emit_header "$GUARD_NAME"
 
-REGISTRY_FILE="$ROOT_DIR/server/config/actionRegistry.ts"
+gate_failed=0
+npx tsx "$ROOT_DIR/scripts/verify-idempotency-strategy-declared.ts" || gate_failed=1
 
-if [ ! -f "$REGISTRY_FILE" ]; then
-  echo "[GUARD] $GUARD_NAME: registry file not found at $REGISTRY_FILE — failing"
-  emit_summary 0 1
-  exit 1
-fi
-
-FILES_SCANNED=1
-
-# Count top-level entries: lines matching `^  <name>: {$` after the
-# `export const ACTION_REGISTRY = {` line.
-# We use awk to find the boundaries of the const declaration and count
-# entries within it.
-#
-# NOTE: This regex requires the opening brace on the same line as the entry
-# name. If an entry is ever reformatted as `some_action:\n    {` the count
-# will under-report and the gate may pass a missing idempotencyStrategy.
-# The TS-level test in server/config/__tests__/actionRegistry.test.ts
-# enforces the same invariant robustly; this shell gate is a fast pre-commit
-# belt to the test's suspenders.
-ENTRY_COUNT=$(awk '
-  /^export const ACTION_REGISTRY/ { inside=1; depth=0; next }
-  inside && /^\};?$/ { inside=0 }
-  inside && /^  [a-z_][a-zA-Z0-9_]*: \{$/ { count++ }
-  END { print count+0 }
-' "$REGISTRY_FILE")
-
-# Count idempotencyStrategy occurrences inside the registry literal
-# (excluding the interface declaration at the top of the file).
-STRATEGY_COUNT=$(awk '
-  /^export const ACTION_REGISTRY/ { inside=1; next }
-  inside && /^\};?$/ { inside=0 }
-  inside && /idempotencyStrategy:/ { count++ }
-  END { print count+0 }
-' "$REGISTRY_FILE")
-
-echo "  Entries:                $ENTRY_COUNT"
-echo "  idempotencyStrategy:    $STRATEGY_COUNT"
-
-if [ "$ENTRY_COUNT" -eq 0 ]; then
-  echo "[GUARD] $GUARD_NAME: zero entries detected — registry parse failed?"
-  emit_summary "$FILES_SCANNED" 1
-  exit 1
-fi
-
-if [ "$STRATEGY_COUNT" -lt "$ENTRY_COUNT" ]; then
-  MISSING=$((ENTRY_COUNT - STRATEGY_COUNT))
-  emit_violation "$GUARD_ID" "error" "server/config/actionRegistry.ts" "0" \
-    "$MISSING / $ENTRY_COUNT entries missing idempotencyStrategy field" \
-    "Add idempotencyStrategy: 'read_only' | 'keyed_write' | 'locked' to every ACTION_REGISTRY entry. See docs/improvements-roadmap-spec.md → Execution Model section for the contract."
+if [ "$gate_failed" -eq 1 ]; then
+  emit_violation "$GUARD_ID" "error" "server/config/actionRegistry" "0" \
+    "One or more entries missing or invalid idempotencyStrategy (see stderr above)" \
+    "Add idempotencyStrategy: 'read_only' | 'keyed_write' | 'locked' | 'state_based' to every ACTION_REGISTRY entry. See docs/improvements-roadmap-spec.md → Execution Model section."
   VIOLATIONS=$((VIOLATIONS + 1))
-
-  # Helpful: list which entries don't have the field.
-  echo ""
-  echo "  Entries missing idempotencyStrategy:"
-  awk '
-    /^export const ACTION_REGISTRY/ { inside=1; next }
-    inside && /^\};?$/ { inside=0 }
-    inside && /^  ([a-z_][a-zA-Z0-9_]*): \{$/ {
-      name = $1
-      gsub(":", "", name)
-      current_entry = name
-      found = 0
-      next
-    }
-    inside && /idempotencyStrategy:/ { found = 1 }
-    inside && /^  \},$/ {
-      if (current_entry != "" && !found) {
-        print "    - " current_entry
-      }
-      current_entry = ""
-      found = 0
-    }
-  ' "$REGISTRY_FILE"
 fi
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"

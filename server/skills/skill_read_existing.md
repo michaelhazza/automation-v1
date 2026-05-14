@@ -2,7 +2,7 @@
 name: Read Existing Skill
 description: Read current definition and instructions for a skill from system_skills or skills table.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

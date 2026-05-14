@@ -14,7 +14,9 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '../config/oauthProviders.js';
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
+import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
+import { logger } from '../lib/logger.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const router = Router();
@@ -28,11 +30,13 @@ router.get(
   '/api/integrations/oauth2/auth-url',
   authenticate,
   asyncHandler(async (req, res) => {
-    const { provider, subaccountId, scope: connectionScope, returnPath } = req.query as {
+    const { provider, subaccountId, scope: connectionScope, returnPath, resumeToken, conversationId } = req.query as {
       provider: string;
       subaccountId?: string;
       scope?: string;
       returnPath?: string;
+      resumeToken?: string;
+      conversationId?: string;
     };
 
     const isOrgLevel = connectionScope === 'org';
@@ -84,6 +88,15 @@ router.get(
         ? returnPath
         : null;
 
+    // Validate resumeToken is a non-empty opaque string (hex, no length constraint here)
+    const safeResumeToken = resumeToken && typeof resumeToken === 'string' && /^[a-f0-9]{64}$/.test(resumeToken)
+      ? resumeToken
+      : undefined;
+    // Validate conversationId is a UUID
+    const safeConversationId = conversationId && typeof conversationId === 'string' && /^[0-9a-f-]{36}$/.test(conversationId)
+      ? conversationId
+      : undefined;
+
     const state = jwt.sign(
       {
         provider,
@@ -92,6 +105,8 @@ router.get(
         connectionScope: isOrgLevel ? 'org' : 'subaccount',
         returnPath: safeReturnPath,
         nonce: crypto.randomUUID(),
+        ...(safeResumeToken ? { resumeToken: safeResumeToken } : {}),
+        ...(safeConversationId ? { conversationId: safeConversationId } : {}),
       },
       env.JWT_SECRET,
       { expiresIn: '10m' },
@@ -155,7 +170,15 @@ router.get(
       return res.redirect(`${appBase}/settings/integrations?error=missing_params`);
     }
 
-    let payload: { provider: string; subaccountId: string | null; organisationId: string; connectionScope?: string; returnPath?: string | null };
+    let payload: {
+      provider: string;
+      subaccountId: string | null;
+      organisationId: string;
+      connectionScope?: string;
+      returnPath?: string | null;
+      resumeToken?: string;
+      conversationId?: string;
+    };
     try {
       payload = jwt.verify(state, env.JWT_SECRET) as typeof payload;
     } catch {
@@ -244,8 +267,195 @@ router.get(
       return res.redirect(`${appBase}${redirectBase}?error=storage_failed`);
     }
 
+    // Popup / agent-resume flow: if the state contained a resumeToken, this
+    // was a popup-based connect triggered by an integration_card. Resume the
+    // blocked agent run server-side and render a self-closing popup page
+    // instead of the normal redirect.
+    if (payload.resumeToken) {
+      try {
+        await resumeFromIntegrationConnect({
+          resumeToken: payload.resumeToken,
+          organisationId,
+          conversationId: payload.conversationId,
+        });
+      } catch (err) {
+        // Non-fatal — the integration is connected, even if the run resume
+        // fails (e.g. token expired). The popup will still close.
+        console.warn('[OAuth] run resume failed after connect:', err);
+      }
+
+      // Target the app origin (NOT window.location.origin, which equals the API
+      // origin in split-origin deployments). The browser drops postMessage when
+      // targetOrigin ≠ opener origin, so a same-origin fallback would silently
+      // fail to notify the popup parent in split-origin setups.
+      let appOrigin: string | null;
+      try {
+        appOrigin = new URL(appBase).origin;
+      } catch {
+        appOrigin = null;
+      }
+      // If APP_BASE_URL is malformed, fall back to the same-origin behaviour
+      // (broken in split-origin deploys, but this is the pre-fix default).
+      const targetOriginExpr = appOrigin
+        ? JSON.stringify(appOrigin)
+        : 'window.location.origin';
+      return res.send(`<!DOCTYPE html>
+<html>
+<head><title>Connected</title></head>
+<body>
+<script>
+  try { window.opener && window.opener.postMessage({ type: 'oauth_success' }, ${targetOriginExpr}); } catch (e) {}
+  window.close();
+</script>
+<p>Connected! You may close this window.</p>
+</body>
+</html>`);
+    }
+
     return res.redirect(`${appBase}${redirectBase}?connected=${provider}`);
   }),
 );
+
+// ── NEW standalone handler — GHL agency OAuth only ────────────────────────
+// Separate route from /api/integrations/oauth2/callback.
+// GHL state = raw nonce (ghlOAuthStateStore); no JWT verification here.
+router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
+  const appBase = env.APP_BASE_URL;
+  const { code, state } = req.query as Record<string, string | undefined>;
+
+  // ghl.oauth.callback_failure logger helper — mandatory event per spec §5.9.
+  // orgId is null until the state nonce is consumed; companyId is null until
+  // the token exchange returns.
+  const logCallbackFailure = (
+    reason: string,
+    orgId: string | null,
+    companyId: string | null,
+  ): void => {
+    logger.warn('ghl.oauth.callback_failure', {
+      event: 'ghl.oauth.callback_failure',
+      provider: 'ghl',
+      orgId,
+      companyId,
+      locationId: null,
+      result: 'failure',
+      error: { code: reason, message: reason },
+    });
+  };
+
+  if (!code || !state) {
+    logCallbackFailure('invalid_callback', null, null);
+    return res.redirect(`${appBase}/onboarding?error=invalid_callback`);
+  }
+
+  const { consumeGhlOAuthState } = await import('../services/ghlOAuthStateStore.js');
+  const stateData = await consumeGhlOAuthState(state, { userAgent: req.get('user-agent') ?? null, ip: req.ip ?? null });
+  if (!stateData) {
+    // Expired, already consumed, and unknown nonces all return null (intentional —
+    // avoids an oracle that distinguishes the three cases). Log for observability.
+    logger.warn('oauth_state.consume_failed', {
+      event: 'oauth_state.consume_failed',
+      noncePrefix: typeof state === 'string' ? state.slice(0, 6) : 'unknown',
+      reason: 'expired_or_missing',
+    });
+    logCallbackFailure('invalid_state', null, null);
+    return res.redirect(`${appBase}/onboarding?error=invalid_state`);
+  }
+  const ghlOrgId = stateData.organisationId;
+
+  const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
+  const redirectUri = `${callbackBase}/api/oauth/callback`;
+
+  const { exchangeGhlAuthCode } = await import('../services/ghlAgencyOauthService.js');
+  const tokenData = await exchangeGhlAuthCode(code, redirectUri);
+  if (!tokenData) {
+    logCallbackFailure('token_exchange_failed', ghlOrgId, null);
+    return res.redirect(`${appBase}/onboarding?error=token_exchange_failed`);
+  }
+
+  const { validateAgencyTokenResponse, computeAgencyTokenExpiresAt, parseGhlScope } =
+    await import('../services/ghlAgencyOauthServicePure.js');
+
+  try {
+    validateAgencyTokenResponse(tokenData);
+  } catch {
+    logCallbackFailure('token_validation_failed', ghlOrgId, tokenData.companyId ?? null);
+    return res.redirect(`${appBase}/onboarding?error=token_validation_failed`);
+  }
+
+  const claimedAt = new Date();
+  const expiresAt = computeAgencyTokenExpiresAt(claimedAt, tokenData.expires_in);
+  const scope = parseGhlScope(tokenData.scope).join(' ');
+
+  const { connectorConfigService } = await import('../services/connectorConfigService.js');
+  let connection;
+  try {
+    connection = await connectorConfigService.upsertAgencyConnection({
+      orgId: ghlOrgId,
+      companyId: tokenData.companyId,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresAt,
+      scope,
+    });
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number };
+    if (e.statusCode === 409) {
+      logCallbackFailure('agency_already_installed', ghlOrgId, tokenData.companyId);
+      return res.redirect(`${appBase}/onboarding?error=agency_already_installed`);
+    }
+    logCallbackFailure('storage_failed', ghlOrgId, tokenData.companyId);
+    return res.redirect(`${appBase}/onboarding?error=storage_failed`);
+  }
+
+  logger.info('ghl.oauth.callback_success', {
+    event: 'ghl.oauth.callback_success',
+    provider: 'ghl',
+    orgId: ghlOrgId,
+    companyId: tokenData.companyId,
+    locationId: null,
+    result: 'success',
+    error: null,
+  });
+
+  // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
+  // even if enumeration fails. Hard timeout: 15s. GUC propagation and org-scoped
+  // tx context are handled inside enrolAgencyLocationsInOrgTx (S-P0-4 / AR-3.1 fix).
+  try {
+    const { enrolAgencyLocationsInOrgTx } = await import('../services/ghlAgencyOauthService.js');
+    await enrolAgencyLocationsInOrgTx(ghlOrgId, connection, `oauth_callback:${connection.id}`);
+  } catch (err) {
+    logger.warn('ghl.oauth.callback_enrol_failed', {
+      event: 'ghl.oauth.callback_enrol_failed',
+      provider: 'ghl',
+      orgId: ghlOrgId,
+      companyId: tokenData.companyId,
+      locationId: null,
+      result: 'failure',
+      error: { message: String(err) },
+    });
+  }
+
+  // C-P0-2: agent resume after OAuth.
+  // When the GHL OAuth flow was initiated with a pendingRunId (agent-triggered
+  // path), resume the blocked run via pg-boss after the token exchange succeeds.
+  if (stateData.pendingRunId) {
+    try {
+      const { enqueueResumeAfterOAuth } = await import('../jobs/resumeRunAfterOAuthJob.js');
+      await enqueueResumeAfterOAuth({ runId: stateData.pendingRunId, organisationId: ghlOrgId });
+    } catch (err) {
+      // Non-fatal — the OAuth connection is stored; the run resume failure is
+      // an independent concern and will surface via the incident monitor.
+      logger.warn('ghl.oauth.resume_enqueue_failed', {
+        event: 'ghl.oauth.resume_enqueue_failed',
+        orgId: ghlOrgId,
+        pendingRunId: stateData.pendingRunId,
+        error: { message: String(err) },
+      });
+    }
+  }
+
+  return res.redirect(`${appBase}/onboarding?connected=ghl`);
+}));
+// ── End GHL agency callback ───────────────────────────────────────────────
 
 export default router;

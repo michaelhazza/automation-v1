@@ -1,0 +1,71 @@
+Readiness review for `tasks/builds/pre-launch-phase-3/spec.md` follows. I focused on spec-internal contradictions, referenced-file drift, missing enforcement, and implementation blockers.
+
+1. **Section/lines:** §4.L5 lines 242-248, §3 lines 103-104  
+   **Problem:** The spec claims the optimiser cost gate will measure live cost in CI, but the referenced test is currently only a skipped placeholder with no implemented fixture, seeding, LLM run, or assertion.  
+   **Suggested fix:** Specify the concrete test implementation path and fixture/seeding mechanism, and add every required file to §3. If the existing placeholder is meant to become the measurement, the spec must say how it will compute and assert `$0.02/sa/day`.  
+   **Codex severity:** critical
+
+2. **Section/lines:** §4.L4 lines 225-232  
+   **Problem:** The requested `decideOutcomeMeasurement` assertion does not match the current pure helper contract: the helper has no `preSnapshot` input and can return `measure` without `postAssessment`.  
+   **Suggested fix:** Reconcile L4 with the actual helper shape in `server/jobs/measureInterventionOutcomeJobPure.ts`: either test the existing `postSnapshot`/metadata contract, or explicitly include the required production-code change and file inventory for making assessment mandatory.  
+   **Codex severity:** important
+
+3. **Section/lines:** §3 lines 110-112, §10 lines 403-406  
+   **Problem:** The file inventory points to non-existent or wrong test locations: `server/lib/__tests__/rateLimitKeys.test.ts` does not exist, the existing rate-limit key test is `server/services/__tests__/rateLimitKeysPure.test.ts`, and there is no `server/lib/__tests__/env.test.ts`.  
+   **Suggested fix:** Update the inventory and testing posture to the actual test files, or mark truly new test files as `[NEW]`. Remove claims about existing env tests unless the spec adds a new validator test file.  
+   **Codex severity:** important
+
+4. **Section/lines:** §3 line 112, §4.L2 line 181  
+   **Problem:** The spec says the L2 test uses a “jest-style spy via lightweight DI shim already used by `requireOrgPermission` tests,” but no `requireOrgPermission` test or middleware test directory appears to exist.  
+   **Suggested fix:** Specify the actual local test pattern to use, including how `recordSecurityEvent` will be injected or mocked under the repo’s current `tsx`/Vitest convention. Mark any new helper or test harness files in §3.  
+   **Codex severity:** important
+
+5. **Section/lines:** §4.L5 lines 247-248, §12 line 436  
+   **Problem:** “Merges are blocked” is a load-bearing claim without an enforcement mechanism; adding a workflow does not itself make the status required.  
+   **Suggested fix:** State the required-check/branch-protection mechanism, or weaken the done definition to “workflow runs and reports” until branch protection is configured. Also define behavior when required LLM/DB secrets are unavailable on PR events.  
+   **Codex severity:** important
+
+6. **Section/lines:** §4.L3 lines 207-209, §8 lines 354-355  
+   **Problem:** L3 contradicts itself: it says legitimate traffic is blocked only when “both buckets must trip together,” but the contract says either bucket tripping returns 429.  
+   **Suggested fix:** Correct the rationale to match the intended implementation: either bucket denial blocks the login attempt. Then justify false-positive risk under the stricter “either trips” behavior.  
+   **Codex severity:** important
+
+7. **Section/lines:** §10 line 403, §12 line 432  
+   **Problem:** L1 is launch-boundary security behavior, but the spec makes automated env validation tests optional and relies on manual prod-mode boot.  
+   **Suggested fix:** Make the fail-fast behavior a static gate test, preferably by extracting/importing a validator that can be tested without booting the whole app. List the test file in §3.  
+   **Codex severity:** important
+
+8. **Section/lines:** §3 lines 116-122, §11 lines 421-422, §12 lines 440-442  
+   **Problem:** `tasks/current-focus.md` is required by doc-sync/done definition but missing from the file inventory.  
+   **Suggested fix:** Add `tasks/current-focus.md` to §3 Docs with the exact expected update, or remove it from §11/§12 if it is not part of this implementation.  
+   **Codex severity:** important
+
+9. **Section/lines:** §13 lines 446-460  
+   **Problem:** The deferred-items section omits open items from the same pre-launch-phase-2 source cluster, including `CHATGPT-R1-6` and `CHATGPT-R1-8` in `tasks/todo.md`.  
+   **Suggested fix:** Add explicit per-item verdicts/triggers for omitted open items, or state a clear exclusion rule that explains why they are outside this spec’s reviewed deferred set.  
+   **Codex severity:** important
+
+10. **Section/lines:** §4.H4 lines 290-296, §3 line 122; referenced `operator-runbook.md`  
+   **Problem:** The spec says the runbook captures two or three triggers, while the existing runbook includes additional F3, DG-4, and CHATGPT-R1-4 entries.  
+   **Suggested fix:** Align §3 and §4.H4 with the actual runbook scope, or reduce the runbook to the spec-declared entries.  
+   **Codex severity:** minor
+
+11. **Section/lines:** Why section line 15, §4.H1-H3 lines 271-286  
+   **Problem:** The spec says “four stale `[OPEN]` / unresolved markers” but names five marker actions: items 21, 22, 24, REQ 14b-extra, and Hermes §6.8.  
+   **Suggested fix:** Correct the count and the “three already closed / one closes with L1” language so it matches the actual five marker updates.  
+   **Codex severity:** minor
+
+12. **Section/lines:** §2 lines 75 and 79, §4.H1-H3 lines 271-286  
+   **Problem:** AC-ADV-10 and D15 are marked “Hygiene only” in the verification table, but no corresponding hygiene action appears in §4.  
+   **Suggested fix:** Change those rows to “no action” if no marker update is intended, or add explicit hygiene tasks for their `tasks/todo.md` entries.  
+   **Codex severity:** minor
+
+13. **Section/lines:** §1 framing line 62  
+   **Problem:** The spec says fixes extend `verify-workspace-actor-coverage.yml`, but the actual CI change is a new optimiser cost-gate workflow.  
+   **Suggested fix:** Replace that primitive reference with the actual existing primitive being extended, or state that L5 introduces a new static gate workflow as an exception.  
+   **Codex severity:** minor
+
+14. **Section/lines:** §9 lines 389-391  
+   **Problem:** “Unique-constraint-to-HTTP mapping” is stale language for L4 because the item is a background job/no-op behavior, not an HTTP mapping.  
+   **Suggested fix:** Rename this subsection entry to job-level duplicate handling, or remove the HTTP wording for L4.  
+   **Codex severity:** nit

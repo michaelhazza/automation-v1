@@ -6,8 +6,13 @@
 #
 # Enforces that every slug in ACTION_CALL_ALLOWED_SLUGS resolves to a
 # registered handler — i.e. it appears in either:
-#   - server/config/actionRegistry.ts  (mutation actions)
-#   - server/services/skillExecutor.ts (read-only actions or direct handlers)
+#   - server/config/actionRegistry/*.ts  (mutation actions, post-refactor split)
+#   - server/services/skillExecutor.ts   (read-only actions or direct handlers)
+#
+# Note (refactor-action-registry, 2026-05-10): server/config/actionRegistry.ts
+# is now a 3-line re-export shim; the mutation entries live in per-domain
+# modules under server/config/actionRegistry/ (e.g. configuration.ts). This
+# gate scans that directory rather than the shim.
 #
 # A slug in the allowlist with no backing handler is a dead reference that
 # would cause a silent runtime failure when a playbook step tries to invoke it.
@@ -26,8 +31,8 @@ VIOLATIONS=0
 
 emit_header "$GUARD_NAME"
 
-ALLOWLIST_FILE="$ROOT_DIR/server/lib/playbook/actionCallAllowlist.ts"
-REGISTRY_FILE="$ROOT_DIR/server/config/actionRegistry.ts"
+ALLOWLIST_FILE="$ROOT_DIR/server/lib/workflow/actionCallAllowlist.ts"
+REGISTRY_DIR="$ROOT_DIR/server/config/actionRegistry"
 EXECUTOR_FILE="$ROOT_DIR/server/services/skillExecutor.ts"
 
 if [ ! -f "$ALLOWLIST_FILE" ]; then
@@ -35,7 +40,7 @@ if [ ! -f "$ALLOWLIST_FILE" ]; then
   emit_summary 0 1
   exit 1
 fi
-if [ ! -f "$REGISTRY_FILE" ] || [ ! -f "$EXECUTOR_FILE" ]; then
+if [ ! -d "$REGISTRY_DIR" ] || [ ! -f "$EXECUTOR_FILE" ]; then
   echo "[GUARD] $GUARD_NAME: required file(s) not found"
   emit_summary 0 1
   exit 1
@@ -61,13 +66,15 @@ while IFS= read -r slug; do
   in_registry=0
   in_executor=0
 
-  grep -qE "^\s+${slug}:" "$REGISTRY_FILE" 2>/dev/null && in_registry=1 || true
+  # Scan all per-domain registry modules for an entry-line match.
+  # Entry shape after refactor: either "  slug: { ..." or "  slug: defineX({...})".
+  grep -rqE "^\s+${slug}:" "$REGISTRY_DIR" 2>/dev/null && in_registry=1 || true
   grep -q "${slug}:" "$EXECUTOR_FILE" 2>/dev/null && in_executor=1 || true
 
   if [ "$in_registry" -eq 0 ] && [ "$in_executor" -eq 0 ]; then
     emit_violation "$GUARD_ID" "error" "$ALLOWLIST_FILE" "0" \
-      "Slug '${slug}' is in ACTION_CALL_ALLOWED_SLUGS but has no entry in actionRegistry.ts or skillExecutor.ts" \
-      "Add an entry for '${slug}' to server/config/actionRegistry.ts (mutations) or register it in skillExecutor.ts (reads)."
+      "Slug '${slug}' is in ACTION_CALL_ALLOWED_SLUGS but has no entry in server/config/actionRegistry/ or skillExecutor.ts" \
+      "Add an entry for '${slug}' to the relevant module under server/config/actionRegistry/ (mutations) or register it in skillExecutor.ts (reads)."
     MISSING_COUNT=$((MISSING_COUNT + 1))
     VIOLATIONS=$((VIOLATIONS + 1))
   fi

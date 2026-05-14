@@ -11,41 +11,6 @@ source "$SCRIPT_DIR/lib/guard-utils.sh"
 VIOLATIONS=0
 FILES_SCANNED=0
 
-# Whitelist (known exceptions — large route files with inline DB access that
-# pre-date the service extraction pattern; tracked for future refactoring)
-WHITELIST=(
-  "server/routes/mcp.ts"
-  "server/routes/webhooks/ghlWebhook.ts"
-  "server/routes/githubWebhook.ts"
-  "server/routes/webhooks.ts"
-  "server/routes/subaccounts.ts"
-  "server/routes/processes.ts"
-  "server/routes/agentPromptRevisions.ts"
-  "server/routes/processConnectionMappings.ts"
-  "server/routes/permissionSets.ts"
-  "server/routes/agentRuns.ts"
-  "server/routes/webhookAdapter.ts"
-  "server/routes/integrationConnections.ts"
-  "server/routes/agentTriggers.ts"
-  "server/routes/systemProcesses.ts"
-  "server/routes/subaccountEngines.ts"
-  "server/routes/systemExecutions.ts"
-  "server/routes/systemUsers.ts"
-  "server/routes/githubApp.ts"
-  "server/routes/portal.ts"
-  "server/routes/systemEngines.ts"
-  "server/routes/projects.ts"
-  "server/routes/llmUsage.ts"
-)
-
-is_whitelisted() {
-  local file="$1"
-  for w in "${WHITELIST[@]}"; do
-    [[ "$file" == *"$w" ]] && return 0
-  done
-  return 1
-}
-
 emit_header "$GUARD_NAME"
 
 while IFS= read -r line; do
@@ -53,7 +18,16 @@ while IFS= read -r line; do
   lineno=$(echo "$line" | cut -d: -f2)
   content=$(echo "$line" | cut -d: -f3-)
 
-  is_whitelisted "$file" && continue
+  # Check for a bare guard-ignore that mentions this guard but lacks required T1 shape or legacy shape
+  current_line=$(sed -n "${lineno}p" "$file" 2>/dev/null || true)
+  if echo "$current_line" | grep -qE "guard-ignore.*${GUARD_ID}" && ! is_suppressed "$file" "$lineno" "$GUARD_ID"; then
+    emit_violation "$GUARD_ID" "error" "$file" "$lineno" \
+      "Malformed guard-ignore: must be T1 format (guard-ignore ${GUARD_ID}: <ADR-id> <rationale>) or legacy (guard-ignore: ${GUARD_ID} reason=\"...\")" \
+      "Fix the suppression comment to match the required format"
+    VIOLATIONS=$((VIOLATIONS + 1))
+    continue
+  fi
+
   is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 
   emit_violation "$GUARD_ID" "warning" "$file" "$lineno" \

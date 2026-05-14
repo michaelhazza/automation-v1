@@ -1,11 +1,11 @@
-export * from './organisations';
+﻿export * from './organisations';
 export * from './users';
-export * from './workflowEngines';
-export * from './processCategories';
+export * from './automationEngines';
+export * from './automationCategories';
 export * from './subaccounts';
 export * from './subaccountCategories';
-export * from './processes';
-export * from './subaccountProcessLinks';
+export * from './automations';
+export * from './subaccountAutomationLinks';
 export * from './executions';
 export * from './executionPayloads';
 export * from './executionFiles';
@@ -52,21 +52,21 @@ export * from './actionResumeEvents';
 export * from './organisationSecrets';
 export * from './reviewAuditRecords';
 export * from './workspaceLimits';
-export * from './processConnectionMappings';
+export * from './automationConnectionMappings';
 export * from './projects';
 export * from './llmPricing';
 export * from './orgMarginConfigs';
-export * from './orgBudgets';
+export * from './orgComputeBudgets';
 export * from './llmRequests';
 export * from './llmRequestsArchive';
 export * from './llmInflightHistory';
 export * from './costAggregates';
-export * from './budgetReservations';
+export * from './computeReservations';
 export * from './hierarchyTemplates';
 export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
 export * from './systemHierarchyTemplateSlots';
-export * from './workflowRuns';
+export * from './flowRuns';
 export * from './auditEvents';
 export * from './pageProjects';
 export * from './pages';
@@ -105,9 +105,9 @@ export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
 
-// Playbooks — multi-step automation engine (migration 0076)
-export * from './playbookTemplates';
-export * from './playbookRuns';
+// Workflows — multi-step automation engine (migration 0076)
+export * from './workflowTemplates';
+export * from './workflowRuns';
 
 // Sprint 2 — P1.1 Layer 3 (migration 0082)
 export * from './toolCallSecurityEvents';
@@ -158,7 +158,7 @@ export * from './configHistory.js';
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
 
-// Portal Briefs — published playbook output for the portal card (migration 0123)
+// Portal Briefs — published workflow output for the portal card (migration 0123)
 export * from './portalBriefs.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
@@ -182,6 +182,9 @@ export * from './onboardingBundleConfigs.js';
 
 // Memory & Briefings spec Phase 5 — memory block version history (migration 0148)
 export * from './memoryBlockVersions.js';
+
+// Memory improvements spec §4 Phase 1 — synthesis lineage table (migration 0333)
+export * from './memoryBlockVersionSources.js';
 
 // Feature 2 — test-input fixtures for inline Run-Now test panel (migration 0153)
 export * from './agentTestFixtures.js';
@@ -217,6 +220,13 @@ export * from './userSettings.js';
 // (migrations 0202–0208; spec: docs/cached-context-infrastructure-spec.md)
 export * from './referenceDocuments.js';
 export * from './referenceDocumentVersions.js';
+
+// Auto Knowledge Retrieval Phase 1 — document chunk embeddings (migration 0289)
+export * from './referenceDocumentChunks.js';
+// Auto Knowledge Retrieval Phase 1 — document-to-data-source scope links (migration 0290)
+export * from './referenceDocumentDataSources.js';
+// Auto Knowledge Retrieval Phase 5A — promotion audit ledger (migration 0294)
+export * from './documentPromotionAudit.js';
 export * from './documentBundles.js';
 export * from './documentBundleMembers.js';
 export * from './documentBundleAttachments.js';
@@ -225,3 +235,118 @@ export * from './modelTierBudgetPolicies.js';
 
 // Cached Context Infrastructure Phase 2 — bundle suggestion dismissals (migration 0212)
 export * from './bundleSuggestionDismissals.js';
+
+// Paperclip Hierarchy — delegation outcomes telemetry table (migration 0217, renumbered from 0205 post-merge)
+export * from './delegationOutcomes.js';
+
+// System Monitoring Foundation — incident sink + audit log + suppressions (migration 0224)
+// BYPASSES RLS — all readers must be sysadmin-gated; see rlsProtectedTables.ts commentary.
+export * from './systemIncidents.js';
+export * from './systemIncidentEvents.js';
+export * from './systemIncidentSuppressions.js';
+export * from './systemMonitorHeuristicFires.js';
+export * from './systemMonitorBaselines.js';
+
+// Rate Limit Buckets — sliding-window rate-limit infrastructure (migration 0253)
+export * from './rateLimitBuckets';
+
+// Live External Document References — document cache + fetch audit log (migration 0262)
+export * from './documentCache';
+export * from './documentFetchEvents';
+
+// Conversation Thread Context — per-conversation living doc for agent tasks/approach/decisions (migration 0264)
+export * from './conversationThreadContext';
+
+// Sub-Account Optimiser — generic agent-output primitive (migration 0267)
+export * from './agentRecommendations';
+
+// Sub-Account Optimiser — cross-tenant peer-median view (migration 0277)
+// BYPASSES RLS — admin_role only; see rlsExclusions.ts for rationale.
+export * from './optimiserSkillPeerMedians';
+
+// Memory improvements spec §4 Phase 2 — 30-day utility MV (migration 0345)
+// BYPASSES RLS — multi-tenant MV; org-filtered at route layer (see rlsExclusions.ts).
+export * from './mvMemoryUtility30d.js';
+
+// GHL Agency OAuth — location token cache (migration 0269)
+export * from './connectorLocationTokens.js';
+
+// Workflows V1 — step gates + drafts (migration 0276)
+export * from './workflowStepGates.js';
+export * from './workflowDrafts.js';
+
+// Pre-Launch Hardening Phase 1 — Postgres-backed OAuth state nonces (migration 0277)
+export * from './oauthStateNonces.js';
+
+// Pre-Launch Hardening Phase 1 — Durable task event log (migration 0279)
+export * from './taskEvents.js';
+
+// Pre-Launch Hardening Phase 2 — Security audit trail (migration 0281)
+export * from './securityAuditEvents.js';
+
+// F3 Baseline Capture — baseline rows + per-metric rows (migrations 0280/0283)
+export * from './subaccountBaselines.js';
+export * from './subaccountBaselineMetrics.js';
+
+// Trust & Verification Layer — runtime check verdicts (migration 0296)
+export * from './runtimeCheckResults.js';
+
+
+// Trust & Verification Layer — Stage 2: scorecards + bench (migrations 0297-0300)
+export * from './scorecards.js';
+export * from './agentScorecardAttachments.js';
+export * from './scorecardJudgements.js';
+export * from './benchRuns.js';
+
+// Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
+export * from './agentObservations.js';
+export * from './ieeSessions.js';
+export * from './agentPresenceProjections.js';
+export * from './agentWorkingTimeRollups.js';
+export * from './agentWorkingTimeEventLedger.js';
+
+// Support Desk canonical tables — inboxes, support agents, tickets, messages, drafts (migrations 0307–0311)
+export * from './canonicalInboxes.js';
+export * from './canonicalSupportAgents.js';
+export * from './canonicalTickets.js';
+export * from './canonicalTicketMessages.js';
+export * from './canonicalTicketDrafts.js';
+
+// Support Desk action idempotency ledger (migration 0312)
+export * from './actionAttempts.js';
+
+// Phase 1 Showcase — run_artifacts customer-facing file delivery ledger (migration 0313)
+export * from './runArtifacts.js';
+
+// Support Agent eval harness (migration 0315)
+export * from './supportEvalRuns.js';
+
+// Pre-Test Hardening W3 — persistent webhook replay nonces (migration 0318 — renumbered from 0313 post-S2)
+export * from './webhookReplayNonces.js';
+
+// Operator Session — consent ledger and events (migrations 0325-0326)
+export * from './operatorSessionConsents.js';
+export * from './operatorSessionConsentEvents.js';
+
+// Personal Assistant V1 — EA drafts (migration 0327)
+export * from './eaDrafts.js';
+
+// Sandbox Isolation — five RLS-protected tables for untrusted Tier 4 code execution (migrations 0321–0323)
+export * from './sandboxExecutions.js';
+export * from './sandboxArtefacts.js';
+export * from './sandboxTelemetryEvents.js';
+export * from './sandboxEgressAudit.js';
+export * from './sandboxLogs.js';
+
+// Operator Backend — chain-link rows, task profiles, per-subaccount settings (migrations 0327–0329)
+export * from './operatorRuns.js';
+export * from './operatorTaskProfiles.js';
+export * from './subaccountOperatorSettings.js';
+
+// IEE Browser on e2b — session profiles, settings, warm sessions (migrations 0346–0350)
+export * from './ieeBrowserSessionProfiles.js';
+export * from './subaccountIeeBrowserSettings.js';
+export * from './browserWarmSessions.js';
+
+// Operator run files — per-run file artefact pointers (migration 0353)
+export * from './operatorRunFiles.js';

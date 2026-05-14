@@ -40,6 +40,17 @@ Every proposed change in this spec has: a clear contract, named files/surfaces, 
 
 ---
 
+## Shipping status (as of 2026-05-01)
+
+| Wave | State | Notes |
+|------|-------|-------|
+| W1 — naming + `invoke_automation` | **SHIPPED** | PR #186, migrations 0219-0222 |
+| W2 — Explore/Execute mode | **SCHEMA-ONLY** | Migration 0230 added `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, `system_skills.side_effects`. No services, routes, UI, or tests. |
+| W3 — context-assembly telemetry | **NOT STARTED** | No `context.assembly.complete` event in `server/lib/tracing.ts`; no emit in `agentExecutionService.ts`. |
+| W4 — heartbeat gate | **NOT STARTED** | Prep columns in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, event registry, and UI all pending. |
+
+---
+
 ## 1. Goals, non-goals, success criteria
 
 ### 1.1 Goals
@@ -153,7 +164,7 @@ This is the vocabulary every Part builds on. Reference section — skip to Part 
 
 ## 3a. UI surface decisions
 
-Every UI change in this spec has an accompanying mockup in [`prototypes/riley-observations/`](../prototypes/riley-observations/index.html). The mockup set was reviewed against [`docs/frontend-design-principles.md`](./frontend-design-principles.md) and deliberately trimmed — where a v1 UI surface was originally going to expose internal configuration, diagnostics, or aggregated metrics, those surfaces were cut or deferred to admin-only views.
+Every UI change in this spec has an accompanying mockup in [`_archive/prototypes/riley-observations/`](../_archive/prototypes/riley-observations/index.html). The mockup set was reviewed against [`docs/frontend-design-principles.md`](./frontend-design-principles.md) and deliberately trimmed — where a v1 UI surface was originally going to expose internal configuration, diagnostics, or aggregated metrics, those surfaces were cut or deferred to admin-only views.
 
 Design posture applied across every mockup, and binding on every section below:
 
@@ -167,16 +178,16 @@ Design posture applied across every mockup, and binding on every section below:
 
 | # | Mockup | Part | Primary user task | Surface type |
 |---|---|---|---|---|
-| 01 | [Sidebar post-rename](../prototypes/riley-observations/01-sidebar-post-rename.html) | 1 | Navigate to the right primitive | Existing sidebar, renamed labels + differentiated icons |
-| 02 | [Agent chat · Explore Mode](../prototypes/riley-observations/02-agent-chat-explore-mode.html) | 3 | Chat safely — see what will change before it runs | Existing chat page, new mode chip + approval card |
-| 03 | [Workflow Run Modal](../prototypes/riley-observations/03-workflow-run-modal-step2.html) | 3 | Pick a safety mode and run the Workflow | Existing `WorkflowRunModal`, new radio pair |
-| 04 | [Promote-to-Execute](../prototypes/riley-observations/04-promote-to-execute-prompt.html) | 3 | Decide whether to stop reviewing every action | New one-sentence modal |
-| 05 | [Step picker — "Call Automation"](../prototypes/riley-observations/05-workflow-studio-step-picker.html) | 2 | Add a step to the Workflow | Existing Studio step-type menu, new option |
-| 06 | [Automation picker + input mapping](../prototypes/riley-observations/06-automation-picker-drawer.html) | 2 | Pick an Automation and fill in its inputs | New drawer triggered from mock 05 |
-| 07 | [Failed step inline in run log](../prototypes/riley-observations/07-invoke-automation-run-detail.html) | 2 | Know what to do when something broke | Existing run log, one row — **no new run-detail page** |
-| 08 | [Workflows library](../prototypes/riley-observations/08-workflows-library.html) | 1 | Find or create a Workflow | Existing library, simplified |
-| 09 | [Automations library](../prototypes/riley-observations/09-automations-library.html) | 1 | Find or register an Automation | Existing library, simplified |
-| 10 | [Agent settings — safety + schedule](../prototypes/riley-observations/10-agent-config-page.html) | 3 + 4 | Set the agent's defaults | Existing `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section (~L1410–1531); existing `SubaccountAgentEditPage.tsx` (safety mode only) — **no new config page** |
+| 01 | [Sidebar post-rename](../_archive/prototypes/riley-observations/01-sidebar-post-rename.html) | 1 | Navigate to the right primitive | Existing sidebar, renamed labels + differentiated icons |
+| 02 | [Agent chat · Explore Mode](../_archive/prototypes/riley-observations/02-agent-chat-explore-mode.html) | 3 | Chat safely — see what will change before it runs | Existing chat page, new mode chip + approval card |
+| 03 | [Workflow Run Modal](../_archive/prototypes/riley-observations/03-workflow-run-modal-step2.html) | 3 | Pick a safety mode and run the Workflow | Existing `WorkflowRunModal`, new radio pair |
+| 04 | [Promote-to-Execute](../_archive/prototypes/riley-observations/04-promote-to-execute-prompt.html) | 3 | Decide whether to stop reviewing every action | New one-sentence modal |
+| 05 | [Step picker — "Call Automation"](../_archive/prototypes/riley-observations/05-workflow-studio-step-picker.html) | 2 | Add a step to the Workflow | Existing Studio step-type menu, new option |
+| 06 | [Automation picker + input mapping](../_archive/prototypes/riley-observations/06-automation-picker-drawer.html) | 2 | Pick an Automation and fill in its inputs | New drawer triggered from mock 05 |
+| 07 | [Failed step inline in run log](../_archive/prototypes/riley-observations/07-invoke-automation-run-detail.html) | 2 | Know what to do when something broke | Existing run log, one row — **no new run-detail page** |
+| 08 | [Workflows library](../_archive/prototypes/riley-observations/08-workflows-library.html) | 1 | Find or create a Workflow | Existing library, simplified |
+| 09 | [Automations library](../_archive/prototypes/riley-observations/09-automations-library.html) | 1 | Find or register an Automation | Existing library, simplified |
+| 10 | [Agent settings — safety + schedule](../_archive/prototypes/riley-observations/10-agent-config-page.html) | 3 + 4 | Set the agent's defaults | Existing `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section (~L1410–1531); existing `SubaccountAgentEditPage.tsx` (safety mode only) — **no new config page** |
 
 ### 3a.2 Decisions locked by the mockup pass
 
@@ -196,6 +207,8 @@ Anything not listed here that a future UI change introduces must pass the [front
 ---
 
 ## 4. Part 1 — Naming pass
+
+> **Status: SHIPPED** — PR #186, migrations 0219-0222. Full implementation including services, routes, and tests.
 
 Three-step ordered rename: clear the `workflow*` namespace, rename `processes → automations`, rename `playbooks → workflows`. All three steps ship in one PR. Each step produces a distinct commit that is green (tests pass, types compile) before the next step begins.
 
@@ -618,6 +631,8 @@ Architect pass runs `grep -rE "'playbook_|playbook_id|playbook_run_id|playbook_s
 
 ## 5. Part 2 — Workflows calling Automations (composition)
 
+> **Status: SHIPPED** — PR #186 (same PR as W1). `invoke_automation` step type including pure dispatcher, stateful service, schema validator, tracing events, and Studio UI.
+
 ### 5.1 Purpose
 
 A Workflow (native orchestration) should be able to invoke a registered Automation (external engine wrapper) as one of its steps. This is what makes the two-concept model feel like one coherent system from a user's perspective: they compose native and external capabilities in the same builder.
@@ -919,7 +934,7 @@ Future relaxation of rules 1–3 (e.g. allowing `invoke_workflow` steps, Automat
 
 ### 5.11 UI considerations
 
-Locked by the mockup pass (see §3a.2). Mockups: [05 step picker](../prototypes/riley-observations/05-workflow-studio-step-picker.html), [06 Automation picker](../prototypes/riley-observations/06-automation-picker-drawer.html), [07 failed step in run log](../prototypes/riley-observations/07-invoke-automation-run-detail.html).
+Locked by the mockup pass (see §3a.2). Mockups: [05 step picker](../_archive/prototypes/riley-observations/05-workflow-studio-step-picker.html), [06 Automation picker](../_archive/prototypes/riley-observations/06-automation-picker-drawer.html), [07 failed step in run log](../_archive/prototypes/riley-observations/07-invoke-automation-run-detail.html).
 
 - **Step-type menu:** the existing Workflow Studio step-type menu gains a new sibling option *"Call an Automation."* It is rendered alongside *"Run a skill"*, *"Ask the agent to decide"*, *"Wait"*, and *"Ask a person to review"* with no elevated visual treatment beyond a subtle highlight on first introduction. No separate "advanced" or "external" submenu.
 - **Automation picker drawer:** single right-side drawer. Shows a plain list of the user's Automations. The selected row expands inline to reveal the input-mapping fields — no dedicated picker → configure two-step flow.
@@ -942,6 +957,8 @@ Exact component file names and placement within `WorkflowStudioPage.tsx` / run-l
 ---
 
 ## 6. Part 3 — Explore Mode / Execute Mode
+
+> **Status: SCHEMA-ONLY** — Migration 0230 (from `pre-launch-hardening` build, not Riley) added `workflow_runs.safety_mode`, `subaccount_agents.portal_default_safety_mode`, and `system_skills.side_effects`. Services, routes, UI, and tests have not started. Note: this wave does NOT include skill-execution timing capture.
 
 ### 6.1 Purpose
 
@@ -1144,7 +1161,7 @@ Scheduled runs forcing `execute` is deliberate — review queues would pile up u
 
 ### 6.8 UI surfaces
 
-Locked by the mockup pass (see §3a.2). Mockups: [02 chat](../prototypes/riley-observations/02-agent-chat-explore-mode.html), [03 Run Modal](../prototypes/riley-observations/03-workflow-run-modal-step2.html), [04 Promote prompt](../prototypes/riley-observations/04-promote-to-execute-prompt.html), [10 agent settings](../prototypes/riley-observations/10-agent-config-page.html).
+Locked by the mockup pass (see §3a.2). Mockups: [02 chat](../_archive/prototypes/riley-observations/02-agent-chat-explore-mode.html), [03 Run Modal](../_archive/prototypes/riley-observations/03-workflow-run-modal-step2.html), [04 Promote prompt](../_archive/prototypes/riley-observations/04-promote-to-execute-prompt.html), [10 agent settings](../_archive/prototypes/riley-observations/10-agent-config-page.html).
 
 The mode is visible on every run surface. Not hidden, not collapsible.
 
@@ -1242,6 +1259,8 @@ Event registers in `server/lib/tracing.ts` alongside other run-lifecycle events.
 
 ## 7. Part 4 — Heartbeat activity-gate
 
+> **Status: NOT STARTED** — Two prep columns landed in migration 0230 (`subaccount_agents.last_meaningful_tick_at`, `ticks_since_last_meaningful_run`). Gate service, dispatcher, event registry, and UI all pending.
+
 ### 7.1 Purpose
 
 Portfolio Health Agent ticks every 4h unconditionally. Add a deterministic pre-dispatch gate that skips ticks when there's no signal. No LLM — just rules over data we already have. Cheap, predictable, debuggable.
@@ -1310,15 +1329,7 @@ ticks_since_last_meaningful_run >= heartbeat_min_ticks_before_mandatory_run
 
 Prevents permanent silence. If we've been skipping for 6 ticks (24h at 4h cadence), force a run on the next tick to check state regardless of delta. The first-tick branch keeps the §7.10 edge-1 behaviour ("always run first tick") mechanically derivable from the rule, rather than an exception layered on top.
 
-**Rule 3 — Explicit trigger**
-
-```
-any_user_initiated_check_queued = true
-```
-
-If a user has explicitly requested a check via the agent's config page ("Check now" button) or via API since the last tick, always run.
-
-**Rule 4 — State-flag**
+**Rule 3 — State-flag** *(renumbered from Rule 4 — Rule 3 "Explicit trigger" dropped from v1; see F21 in pre-launch-hardening-spec.md)*
 
 ```
 subaccount_has_requires_attention_flag = true
@@ -1345,10 +1356,10 @@ interface HeartbeatGateInput {
   };
 }
 
+// F21: 'explicit_trigger' dropped from v1 (Rule 3 removed).
 type HeartbeatGateReason =
   | 'event_delta'
   | 'time_threshold'
-  | 'explicit_trigger'
   | 'state_flag'
   | 'no_signal'
   | 'gate_error';
@@ -1397,7 +1408,7 @@ Flow:
    });
    ```
 
-6. If decision is `shouldRun: true` → dispatch. Update `last_tick_evaluated_at = now()` in the same transaction that enqueues the run. When the dispatched run subsequently produces "meaningful" output (definition deferred to architect per §12.17; recommendation: `status='completed'` AND at least one action proposed OR memory block written), the run-completion hook updates `last_meaningful_tick_at = now()` and resets `ticks_since_last_meaningful_run = 0` on `subaccount_agents`.
+6. If decision is `shouldRun: true` → dispatch. Update `last_tick_evaluated_at = now()` in the same transaction that enqueues the run. When the dispatched run subsequently produces "meaningful" output (F22 pinned definition: `status='completed' AND (actionProposedCount >= 1 OR memoryBlockWrittenCount >= 1)` — see `computeMeaningfulOutputPure` in `agentRunFinalizationServicePure.ts`), the run-completion hook updates `last_meaningful_tick_at = now()` and resets `ticks_since_last_meaningful_run = 0` on `subaccount_agents`.
 7. If decision is `shouldRun: false` → emit `heartbeat.tick.gated` telemetry, update `last_tick_evaluated_at = now()`, increment `ticks_since_last_meaningful_run += 1`, return.
 
 **Ownership of `last_meaningful_tick_at` / counter-reset writes.** The recommendation is to site these writes alongside the existing `agent_runs.completed_at` write — `server/services/agentRunFinalizationService.ts` is the candidate hook (it already handles terminal-state transitions for agent runs; see its docblock). Architect confirms during plan decomposition (see §12.17); if a different completion hook is used in the heartbeat-originated path, name it in the plan.
@@ -1447,7 +1458,7 @@ Operator dashboard (future work, not in v1): query this event type for a given a
 
 ### 7.9 UI surface
 
-Locked by the mockup pass (see §3a.2). Mockup: [10 agent settings](../prototypes/riley-observations/10-agent-config-page.html).
+Locked by the mockup pass (see §3a.2). Mockup: [10 agent settings](../_archive/prototypes/riley-observations/10-agent-config-page.html).
 
 **New field on the EXISTING Agent Edit page, not a new page.** Slots into the existing `AdminAgentEditPage.tsx` → "Schedule & Concurrency" section (existing heading at ~line 1410; existing heartbeat fields at ~lines 1420–1480). Builder session must `Edit` this file, not `Write` a new one.
 
@@ -1488,6 +1499,8 @@ System-admin only in v1. Agency-admin exposure follows after operational validat
 ---
 
 ## 8. Part 5 — Context-assembly telemetry
+
+> **Status: NOT STARTED** — No `context.assembly.complete` event registered in `server/lib/tracing.ts`, no emit in `agentExecutionService.ts`, no helper module.
 
 ### 8.1 Purpose
 

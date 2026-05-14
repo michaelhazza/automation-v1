@@ -37,7 +37,7 @@ router.post(
       rrule, timezone, scheduleTime, retryPolicy, tokenBudgetPerRun,
       endsAt, endsAfterRuns,
       // Phase B2 — SchedulePicker adoption (spec §5.4–§5.6).
-      taskSlug, createdByPlaybookSlug, firstRunAt, firstRunAtTz, runNow,
+      taskSlug, createdByWorkflowSlug, firstRunAt, firstRunAtTz, runNow,
     } = req.body;
 
     if (!title || !assignedAgentId || !rrule || !scheduleTime) {
@@ -54,7 +54,7 @@ router.post(
         endsAt: endsAt ? new Date(endsAt) : undefined,
         endsAfterRuns,
         taskSlug,
-        createdByPlaybookSlug,
+        createdByWorkflowSlug,
         firstRunAt: firstRunAt ? new Date(firstRunAt) : undefined,
         firstRunAtTz,
         runNow: runNow === true,
@@ -171,7 +171,7 @@ router.get(
 
 // Upload a file AND create the data source row in one atomic call.
 // Multipart fields: `file` (the upload), `name`, `description?`,
-// `contentType?`, `loadingMode?`, `priority?`, `maxTokenBudget?`.
+// `contentType?`, `priority?`, `maxTokenBudget?`.
 router.post(
   '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/upload',
   authenticate,
@@ -194,7 +194,6 @@ router.post(
         name,
         description: body.description,
         contentType: body.contentType as 'json' | 'csv' | 'markdown' | 'text' | 'auto' | undefined,
-        loadingMode: body.loadingMode as 'eager' | 'lazy' | undefined,
         priority: body.priority !== undefined ? Number(body.priority) : undefined,
         maxTokenBudget: body.maxTokenBudget !== undefined ? Number(body.maxTokenBudget) : undefined,
       },
@@ -214,10 +213,32 @@ router.post(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const {
       name, description, sourceType, sourcePath, sourceHeaders,
-      contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+      contentType, priority, maxTokenBudget, cacheMinutes,
+      connectionId,
     } = req.body;
-    if (!name || !sourceType || !sourcePath) {
-      res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+    if (!name || !sourceType) {
+      res.status(400).json({ error: 'Validation failed', details: 'name and sourceType are required' });
+      return;
+    }
+    if (sourceType === 'google_drive') {
+      if (!connectionId) {
+        res.status(400).json({ error: 'Validation failed', details: 'connectionId is required for google_drive sources' });
+        return;
+      }
+      const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
+      // Spec §5.3 — Drive connections are subaccount-scoped (also accept org-level rows).
+      const conn = await integrationConnectionService.getConnectionWithToken(connectionId, req.orgId!);
+      if (!conn || conn.providerType !== 'google_drive' || conn.connectionStatus !== 'active') {
+        res.status(422).json({ error: 'invalid_connection_id' });
+        return;
+      }
+      // The connection must be either org-level or owned by this caller's subaccount.
+      if (conn.subaccountId !== null && conn.subaccountId !== req.params.subaccountId) {
+        res.status(422).json({ error: 'invalid_connection_id' });
+        return;
+      }
+    } else if (!sourcePath) {
+      res.status(400).json({ error: 'Validation failed', details: 'sourcePath is required' });
       return;
     }
     const result = await agentService.addScheduledTaskDataSource(
@@ -225,7 +246,8 @@ router.post(
       req.orgId!,
       {
         name, description, sourceType, sourcePath, sourceHeaders,
-        contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+        contentType, priority, maxTokenBudget, cacheMinutes,
+        connectionId,
       },
       req.user?.id,
     );

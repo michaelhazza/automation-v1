@@ -1,0 +1,5 @@
+CLAUDE.md
+architecture.md
+docs/spec-authoring-checklist.md
+DEVELOPMENT_GUIDELINES.md
+KNOWLEDGE.md

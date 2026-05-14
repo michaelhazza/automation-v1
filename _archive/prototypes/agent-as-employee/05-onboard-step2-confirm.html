@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>05 — Onboard step 2: confirm · Riley</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 05 / 16 · <span class="muted">Onboard modal step 2 of 3</span> · <a href="04-onboard-step1-identity.html">← Step 1</a> · <a href="06-onboard-step3-progress.html">Next: step 3 →</a></div>
+
+<div class="appbar" style="opacity: 0.55;">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs"><span class="sep">/</span><span>Subaccounts / Acme Client Co. / Agents</span></span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+<div class="tabs" style="opacity: 0.55;"><a href="#" class="active">Agents</a></div>
+<div class="page" style="opacity: 0.55;"></div>
+
+<div class="modal-overlay">
+  <div class="modal" style="max-width: 640px;">
+
+    <div class="modal-head">
+      <div>
+        <h2>Onboard Riley to the workplace</h2>
+        <div class="step">Step 2 of 3 — Confirm</div>
+      </div>
+      <button class="modal-close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="step-bar">
+        <span class="step done"></span>
+        <span class="step current"></span>
+        <span class="step"></span>
+      </div>
+
+      <p style="font-size: 13px; color: var(--sl-700); margin: 0 0 12px;">You are about to onboard:</p>
+
+      <div style="border: 1px solid var(--sl-200); border-radius: 10px; padding: 16px; background: var(--sl-50);">
+        <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 14px;">
+          <span class="avatar avatar-lg avatar-agent">RI</span>
+          <div>
+            <div style="font-size: 16px; font-weight: 600; color: var(--sl-900);">Riley · Reporting agent</div>
+            <div class="text-md muted">Reports to <strong>Maya Lim</strong></div>
+          </div>
+        </div>
+
+        <table style="width: 100%; font-size: 12px;">
+          <tr><td style="padding: 4px 0; width: 110px; color: var(--sl-500);">Email</td><td style="padding: 4px 0;"><code>riley@acme.synthetos.io</code></td></tr>
+          <tr><td style="padding: 4px 0; color: var(--sl-500);">Send email</td><td style="padding: 4px 0;"><span class="pill pill-active"><span class="dot"></span>Enabled</span></td></tr>
+          <tr><td style="padding: 4px 0; color: var(--sl-500);">Backend</td><td style="padding: 4px 0;">Synthetos-native</td></tr>
+          <tr><td style="padding: 4px 0; color: var(--sl-500);">Seat</td><td style="padding: 4px 0;"><strong>1</strong> of 25 <span class="muted">(20 remaining after onboarding)</span></td></tr>
+        </table>
+      </div>
+
+      <div style="margin-top: 18px;">
+        <div style="font-size: 11px; font-weight: 600; color: var(--sl-500); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;">What happens when you click "Confirm &amp; onboard"</div>
+        <ul class="prov-list">
+          <li class="pending"><span class="icon">1</span><span class="label">Riley gets a workplace identity (mailbox, calendar)</span></li>
+          <li class="pending"><span class="icon">2</span><span class="label">Riley's photo and email show on the existing org chart card</span></li>
+          <li class="pending"><span class="icon">3</span><span class="label">The team can email <code style="font-size: 11px;">riley@acme.synthetos.io</code> and Riley can reply</span></li>
+          <li class="pending"><span class="icon">4</span><span class="label">1 active seat begins consuming</span></li>
+        </ul>
+      </div>
+
+      <div class="callout callout-info" style="margin-top: 14px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>Reversible. You can suspend or revoke at any time from Riley's Identity tab. Revoking preserves audit history under Riley's actor.</div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn btn-secondary">← Back</button>
+      <a href="06-onboard-step3-progress.html" class="btn btn-primary">Confirm &amp; onboard</a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

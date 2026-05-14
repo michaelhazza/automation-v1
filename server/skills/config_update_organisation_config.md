@@ -36,6 +36,7 @@ errors:
   - SUM_CONSTRAINT_VIOLATED
   - AGENT_REQUIRED_FOR_SENSITIVE
   - DRIFT_DETECTED   (on approval-execute if the config changed since proposal)
+visibility: basic
 ---
 
 # config_update_organisation_config

@@ -1,15 +1,33 @@
 /**
- * formatDuration.ts — Brain Tree OS adoption P3.
+ * formatDuration.ts
  *
- * Shared duration formatter. Hoisted from RunTraceViewerPage so multiple
- * consumers (session log card list, run trace viewer) use the same format.
+ * Shared duration formatter used across ClientPulse and run-trace surfaces.
  *
- * Spec: docs/brain-tree-os-adoption-spec.md §P3
+ * Contract:
+ *   null          → '—'
+ *   0–999 ms      → '0s'
+ *   1 000–59 999  → 'Ns'       (Math.floor seconds)
+ *   60 000–3 599 999 → 'Nm Ns' (Math.floor minutes + floor remaining seconds)
+ *   ≥ 3 600 000   → 'Nh Nm'   (Math.floor hours + floor remaining minutes)
  */
 
 export function formatDuration(ms: number | null): string {
-  if (ms == null) return '--';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
+  if (ms == null) return '—';
+
+  const totalSeconds = Math.floor(ms / 1000);
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+
+  if (totalMinutes < 60) {
+    const remainingSeconds = totalSeconds % 60;
+    return `${totalMinutes}m ${remainingSeconds}s`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
 }

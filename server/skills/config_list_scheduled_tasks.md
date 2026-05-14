@@ -2,7 +2,7 @@
 name: Config List Scheduled Tasks
 description: List scheduled tasks for a subaccount, showing assigned agent and schedule.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

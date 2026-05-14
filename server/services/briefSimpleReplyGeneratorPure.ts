@@ -21,7 +21,7 @@ function makeCannedResult(
     kind: 'structured',
     summary,
     entityType,
-    source: 'canonical',
+    source: 'stub',
     filtersApplied: [],
     columns: [
       { key: 'metric', label: 'Metric', type: 'string' },

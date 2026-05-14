@@ -6,13 +6,13 @@
 
 import path from 'path';
 import { promises as fs } from 'fs';
-import type { BrowserContext, Page, Locator } from 'playwright';
+import type { Page } from 'playwright';
 import {
   type ExecutionAction,
   BROWSER_ACTION_TYPES,
 } from '../../../shared/iee/actionSchema.js';
 import type { Observation } from '../../../shared/iee/observation.js';
-import { SafetyError, EnvironmentError } from '../../../shared/iee/failureReason.js';
+import { SafetyError } from '../../../shared/iee/failureReason.js';
 import { failure, FailureError } from '../../../shared/iee/failure.js';
 import type { BrowserTaskContract } from '../../../shared/iee/jobPayload.js';
 import type { StepExecutor, ActionResult } from '../loop/executionLoop.js';
@@ -113,7 +113,7 @@ export async function buildBrowserExecutor(
       'login-failure.png',
     );
 
-    let creds: Awaited<ReturnType<typeof getWebLoginConnectionForRun>> | null = null;
+    let creds: Awaited<ReturnType<typeof getWebLoginConnectionForRun>> | null;
     // Audit fix (Non-blocker #10): capture contentUrl + successSelector
     // separately so the login_test post-login validation block can use
     // them after `creds` is dropped by the finally clause.
@@ -184,13 +184,19 @@ export async function buildBrowserExecutor(
               screenshotArtifactId: persistedArtifactId,
             }
           : { message: err instanceof Error ? err.message.slice(0, 200) : String(err) };
+      // Phase 1 §4.6.1 — surface login exhaustion for 42 Macro runs in ops log
+      logger.warn('phase1.macro.login_failed', {
+        agentRunId: input.agentRunId ?? undefined,
+        ieeRunId: input.ieeRunId,
+        reason: err instanceof LoginFailedError ? 'login_failed_after_retries' : 'login_error',
+      });
       try { await context.close(); } catch { /* swallow */ }
       throw new FailureError(failure('auth_failure', 'login_failed', detail));
     } finally {
-      // Drop the reference. (We can't truly wipe a JS string, but losing
-      // the only reference allows GC and prevents accidental capture in
-      // the executor closure below.)
-      creds = null;
+      // Drop the reference — creds is not read after this block.
+      // (We can't truly wipe a JS string, but setting to null allows GC
+      // and prevents accidental capture in the executor closure below.)
+      creds = null; // eslint-disable-line no-useless-assignment
     }
 
     // T2 — login_test mode short-circuits here.
@@ -414,6 +420,18 @@ export async function buildBrowserExecutor(
         case 'extract': {
           const text = await page.evaluate(() => document.body?.innerText ?? '');
           const slice = text.slice(0, 4000);
+          // Phase 1 §4.6.1 — page structure change: no extractable content at all
+          if (slice.length === 0) {
+            logger.warn('phase1.macro.run_stuck', {
+              agentRunId: input.agentRunId ?? undefined,
+              ieeRunId: input.ieeRunId,
+              reason: 'page_structure_change',
+              query: action.query,
+            });
+            throw new FailureError(
+              failure('data_incomplete', 'page_structure_change', { ieeRunId: input.ieeRunId }),
+            );
+          }
           lastResult = `extracted ${slice.length} chars matching: ${action.query}`;
           return { output: { query: action.query, snippet: slice }, summary: lastResult };
         }

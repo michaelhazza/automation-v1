@@ -4,7 +4,7 @@
  * Extracted from agentRunFinalizationService.ts so the mapping + summary
  * helpers can be unit-tested without pulling in DB / env / websocket
  * dependencies at module load. The DB-touching entry points
- * (finaliseAgentRunFromIeeRun, reconcileStuckDelegatedRuns) remain in the
+ * (`finaliseAgentRunFromBackend`, `reconcileBackends`) remain in the
  * non-pure file and delegate to these helpers.
  *
  * Spec: docs/iee-delegation-lifecycle-spec.md §3, Appendix A.
@@ -79,6 +79,27 @@ export function buildSummaryFromIeeRun(run: SummaryInput): string {
   return summary;
 }
 
+// ---------------------------------------------------------------------------
+// F22 — Meaningful output definition (Phase 2 schema decisions spec § 4.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * A run is "meaningful" when status='completed' AND at least one action was
+ * proposed OR at least one memory block was written. Pure function; callers
+ * (run-completion hooks) supply the counts from DB queries.
+ *
+ * Rejected proposals count as meaningful — the proposal is the signal.
+ * Memory blocks soft-deleted after writing are still meaningful at write time.
+ */
+export function computeMeaningfulOutputPure(input: {
+  status: string;
+  actionProposedCount: number;
+  memoryBlockWrittenCount: number;
+}): boolean {
+  if (input.status !== 'completed') return false;
+  return input.actionProposedCount >= 1 || input.memoryBlockWrittenCount >= 1;
+}
+
 function formatObjectOutput(
   output: Record<string, unknown>,
   run: SummaryInput,
@@ -106,4 +127,18 @@ function formatObjectOutput(
   if (run.status === 'cancelled') return `IEE ${run.type} task cancelled`;
   const reason = run.failureReason ?? 'unknown';
   return `IEE ${run.type} task failed (${reason})`;
+}
+
+/**
+ * Map an `iee_runs.type` discriminator to the corresponding execution-backend
+ * id. The IEE event handler routes via this mapping when finalising a parent
+ * `agent_runs` row that has `backend_id IS NULL` (pre-cutover legacy rows) —
+ * see acceptance criterion §16 #14 in the Execution Backend Adapter Contract
+ * spec. Pure so the legacy-fallback contract has unit-level coverage without
+ * requiring a DB.
+ */
+export function deriveBackendIdFromIeeType(
+  ieeType: 'browser' | 'dev',
+): 'iee_browser' | 'iee_dev' {
+  return ieeType === 'browser' ? 'iee_browser' : 'iee_dev';
 }

@@ -40,6 +40,7 @@ export const reviewItems = pgTable(
     subaccountStatusIdx: index('review_items_subaccount_status_idx').on(table.subaccountId, table.reviewStatus),
     agentRunIdx: index('review_items_agent_run_idx').on(table.agentRunId),
     orgIdx: index('review_items_org_idx').on(table.organisationId),
+    orgStatusCreatedIdx: index('idx_review_items_org_status').on(table.organisationId, table.reviewStatus, table.createdAt),
   })
 );
 

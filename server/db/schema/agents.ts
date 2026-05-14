@@ -2,6 +2,16 @@ import { pgTable, uuid, text, integer, boolean, real, jsonb, timestamp, index, u
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { systemAgents } from './systemAgents';
+import { workspaceActors } from './workspaceActors';
+import { users } from './users';
+
+// Local type for the personality JSONB column (shared type ships in C5 via shared/types/build.ts)
+interface AgentPersonality {
+  traits: string[];
+  tone: string;
+  description: string;
+  enabled: boolean;
+}
 
 export const agents = pgTable(
   'agents',
@@ -65,6 +75,12 @@ export const agents = pgTable(
     // NULL = auto-detect from heuristics; 'complex' = always plan first;
     // 'simple' = never plan (even if heuristics trigger).
     complexityHint: text('complexity_hint').$type<'simple' | 'complex'>(),
+    workspaceActorId: uuid('workspace_actor_id').references(() => workspaceActors.id),
+    // User-owned-agents primitive (migration 0327): nullable FK to users.id ON DELETE RESTRICT.
+    // NULL = subaccount-owned agent (existing behaviour). Non-NULL = agent owned by a specific user.
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    // Consolidation Build C1 — personality configuration (migration 0286)
+    personality: jsonb('personality').notNull().default(sql`'{}'::jsonb`).$type<AgentPersonality>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -75,6 +91,9 @@ export const agents = pgTable(
     orgSlugUniq: uniqueIndex('agents_org_slug_uniq')
       .on(table.organisationId, table.slug)
       .where(sql`${table.deletedAt} IS NULL`),
+    ownerPersonalIdx: index('agents_personal_idx')
+      .on(table.organisationId, table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
   })
 );
 

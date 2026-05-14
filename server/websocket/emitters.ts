@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'crypto';
 import { getIO } from './index.js';
+import type { TaskEventEnvelope } from '../../shared/types/taskEvent.js';
 
 // ─── Observability counters ───────────────────────────────────────────────────
 
@@ -135,16 +136,16 @@ export function emitSubaccountUpdate(
   emitToRoom(`subaccount:${subaccountId}`, event, subaccountId, data);
 }
 
-// ─── Playbook run events ──────────────────────────────────────────────────────
+// ─── Workflow run events ──────────────────────────────────────────────────────
 // Spec: tasks/playbooks-spec.md §8.2. Per-run room with monotonic
 // sequence number plus a coarse subaccount-level event for dashboards.
 
-export function emitPlaybookRunUpdate(
+export function emitWorkflowRunUpdate(
   runId: string,
   event: string,
   data: Record<string, unknown>
 ): void {
-  emitToRoom(`playbook-run:${runId}`, event, runId, data);
+  emitToRoom(`workflow-run:${runId}`, event, runId, data);
 }
 
 // ─── Org-wide events ──────────────────────────────────────────────────────────
@@ -189,6 +190,29 @@ export function emitBriefArtefactUpdated(
   data: Record<string, unknown>,
 ): void {
   emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
+}
+
+// ─── System-admin incident events ────────────────────────────────────────────
+
+export function emitToSysadmin(
+  event: string,
+  entityId: string,
+  data: Record<string, unknown>
+): void {
+  emitToRoom('system:sysadmin', event, entityId, data);
+}
+
+// ─── Task execution event stream ─────────────────────────────────────────────
+// Spec: tasks/builds/workflows-v1-phase-2/spec.md Chunk 9.
+// Emits to the `task:${taskId}` room. The envelope is pre-assembled by
+// taskEventService so we emit it directly (not through buildEnvelope).
+
+export function emitTaskEvent(taskId: string, envelope: TaskEventEnvelope): void {
+  const io = getIO();
+  if (!io) return;
+  io.to(`task:${taskId}`).emit(envelope.type, envelope);
+  totalEventsEmitted++;
+  logStats();
 }
 
 // ─── Observability exports (for health endpoint or admin) ─────────────────────

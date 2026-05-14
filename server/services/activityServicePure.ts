@@ -1,0 +1,315 @@
+/**
+ * activityServicePure.ts — Pure (no DB / no env) helpers extracted from
+ * activityService.ts, exported for unit testing.
+ *
+ * Task 1.3 — Activity service additive fields + deterministic sort tiebreaker
+ * + partial-failure resilience.
+ *
+ * C1 (ui-consolidation-operate) — Activity API extension
+ * Adds: aggregateFilterOptions — faceted-search semantics per spec §4.1.
+ *
+ * INVARIANT (C1): filterOptions counts are computed from the FILTERED result set
+ * BEFORE pagination/cursor slicing. The aggregator runs over the already-RLS-filtered
+ * + cross-source-merged set — after each per-source fetcher has applied its tenancy/
+ * permission predicates and after the merge step has reconciled duplicates. It MUST NOT
+ * count rows directly off raw per-source fetches.
+ */
+
+// ---------------------------------------------------------------------------
+// TriggerType — internal DB-level type for agent_runs.run_type derivations and
+// executions.triggerType values.  Matches executions.triggerType + the derived
+// values for agent_runs.
+// ---------------------------------------------------------------------------
+
+export type TriggerType = 'manual' | 'scheduled' | 'webhook' | 'agent' | 'system';
+
+// ---------------------------------------------------------------------------
+// TriggerSource — spec §4.1 public-API enum for the triggerSource field.
+// Maps from internal TriggerType values to the canonical spec value-set.
+// ---------------------------------------------------------------------------
+
+export type TriggerSource = 'schedule' | 'event' | 'manual' | 'api' | 'retry' | 'unknown';
+
+/**
+ * Maps an internal TriggerType (or null) to the spec §4.1 TriggerSource enum.
+ *
+ * Mapping:
+ *   'scheduled' → 'schedule'
+ *   'webhook'   → 'event'
+ *   'manual'    → 'manual'
+ *   'agent'     → 'event'
+ *   'system'    → 'api'
+ *   null / anything else → 'unknown'
+ */
+export function mapInternalTriggerToSource(triggerType: TriggerType | null): TriggerSource {
+  switch (triggerType) {
+    case 'scheduled': return 'schedule';
+    case 'webhook':   return 'event';
+    case 'manual':    return 'manual';
+    case 'agent':     return 'event';
+    case 'system':    return 'api';
+    default:          return 'unknown';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// mapAgentRunTriggerType — pure derivation of triggerType from the
+// agent_runs table columns run_type and run_source.
+//
+// Rules (Task 1.3 spec §Contract changes):
+//   run_type='scheduled'                                       → 'scheduled'
+//   run_type='manual'                                          → 'manual'
+//   run_type='triggered' AND run_source IN ('sub_agent','handoff') → 'agent'
+//   run_type='triggered' AND run_source is anything else       → 'webhook'
+//   run_source null: fall back to run_type-only resolution
+//     (treat as webhook if triggered)
+// ---------------------------------------------------------------------------
+
+export function mapAgentRunTriggerType(
+  runType: string,
+  runSource: string | null,
+): TriggerType | null {
+  switch (runType) {
+    case 'scheduled':
+      return 'scheduled';
+    case 'manual':
+      return 'manual';
+    case 'triggered':
+      if (runSource === 'sub_agent' || runSource === 'handoff') return 'agent';
+      // null runSource or any other value → treat as webhook
+      return 'webhook';
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// addNullAdditiveFields — returns the additive fields for activity types that
+// do not carry run/user context (review_item, health_finding, inbox_item,
+// workflow_run).  Exported for unit testing.
+// ---------------------------------------------------------------------------
+
+export function addNullAdditiveFields(): {
+  triggeredByUserId: null;
+  triggeredByUserName: null;
+  triggerType: null;
+  /** C1 (ui-consolidation-operate): spec §4.1 name. Non-nullable; sources without
+   *  a recognised trigger kind emit 'unknown' per spec mandate. */
+  triggerSource: TriggerSource;
+  durationMs: null;
+  runId: null;
+} {
+  return {
+    triggeredByUserId: null,
+    triggeredByUserName: null,
+    triggerType: null,
+    triggerSource: 'unknown',
+    durationMs: null,
+    runId: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// sortActivityItems — deterministic sort with id DESC tiebreaker.
+//
+// Accepts a minimal shape (only the fields needed for sorting) so the pure
+// tests don't have to construct a full ActivityItem.
+// ---------------------------------------------------------------------------
+
+export type SortableItem = {
+  id: string;
+  status: string;
+  severity: string | null;
+  createdAt: string;
+};
+
+const SEVERITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+const STATUS_ORDER: Record<string, number> = {
+  attention_needed: 0,
+  failed: 1,
+  active: 2,
+  completed: 3,
+  cancelled: 4,
+};
+
+/**
+ * Tiebreaker: when two createdAt timestamps are equal, sort by id ASC
+ * (lexicographic — UUIDs generated by defaultRandom() are ordered by
+ * insertion time, so this gives a stable, consistent secondary ordering).
+ *
+ * DE-CR-8: spec §12 mandates `id ASC` within the same `created_at` for the
+ * activity feed, matching the cursor-pagination contract that walks the
+ * sequence in order.
+ */
+function idAsc(a: SortableItem, b: SortableItem): number {
+  if (a.id < b.id) return -1;
+  if (a.id > b.id) return 1;
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// FilterOptions aggregator — spec §4.1 faceted-search semantics
+//
+// INVARIANT (C1): When counting values for dimension D, ignore the active filter
+// on D but respect all other active filters. This means the counts for the `type`
+// facet ignore any active `type` filter, but still respect any active `actor`,
+// `subaccount`, `status`, `q`, and `scope` filters. The aggregator runs over the
+// FILTERED result set BEFORE pagination — it is called on the merged+filtered set
+// used to derive `items` for page 1, NOT on the post-cursor slice.
+// ---------------------------------------------------------------------------
+
+export type FilterOptionEntry = {
+  value: string;
+  label: string;
+  count: number;
+};
+
+export type FilterOptionsResult = {
+  type: FilterOptionEntry[];
+  status: FilterOptionEntry[];
+  actor: FilterOptionEntry[];
+  subaccount: FilterOptionEntry[];
+};
+
+/**
+ * Minimal shape required from an item for filter-option aggregation.
+ * A subset of ActivityItem — the aggregator does not need sort/severity fields.
+ */
+export type AggregableItem = {
+  id: string;
+  type: string;
+  status: string;
+  actor: string;
+  subaccountId: string | null;
+  subaccountName: string | null;
+  triggerType?: string | null;
+};
+
+export type AggregateFilters = {
+  type?: string[];
+  status?: string[];
+  actor?: string[];
+  subaccount?: string[];
+};
+
+/**
+ * Counts items by a key-extractor, returning entries sorted by count DESC then
+ * key ASC for stability.
+ */
+function countBy(items: AggregableItem[], key: (item: AggregableItem) => string): FilterOptionEntry[] {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const k = key(item);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({ value, label: value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/**
+ * Apply every dimension filter EXCEPT the one named in `excludeDimension`.
+ * Used to implement faceted-search semantics: counts for dimension D are taken
+ * over items that pass all OTHER active dimension filters.
+ *
+ * Within each dimension, multiple selected values are OR'd.
+ * Across dimensions, conditions are AND'd.
+ */
+function applyFiltersExcluding(
+  items: AggregableItem[],
+  filters: AggregateFilters,
+  excludeDimension: keyof AggregateFilters,
+): AggregableItem[] {
+  return items.filter((item) => {
+    if (excludeDimension !== 'type' && filters.type?.length) {
+      if (!filters.type.includes(item.type)) return false;
+    }
+    if (excludeDimension !== 'status' && filters.status?.length) {
+      if (!filters.status.includes(item.status)) return false;
+    }
+    if (excludeDimension !== 'actor' && filters.actor?.length) {
+      if (!filters.actor.includes(item.actor)) return false;
+    }
+    if (excludeDimension !== 'subaccount' && filters.subaccount?.length) {
+      const sid = item.subaccountId ?? 'unknown';
+      if (!filters.subaccount.includes(sid)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * aggregateFilterOptions — compute spec §4.1 filterOptions from the merged,
+ * RLS-filtered, pre-pagination item set.
+ *
+ * INVARIANT (C1): Faceted-search semantics. Counts for dimension D are computed
+ * over the subset of items that pass ALL active filters EXCEPT the filter on D.
+ * This means the user always sees non-zero counts for their currently-selected
+ * values (they can un-select) and counts that reflect what they'd get if they
+ * changed only that one dimension.
+ *
+ * @param items  The merged, RLS-filtered, pre-pagination item set.
+ * @param activeFilters  The dimension filters currently in effect (type, status, actor, subaccount).
+ */
+export function aggregateFilterOptions(
+  items: AggregableItem[],
+  activeFilters: AggregateFilters,
+): FilterOptionsResult {
+  const forType = applyFiltersExcluding(items, activeFilters, 'type');
+  const forStatus = applyFiltersExcluding(items, activeFilters, 'status');
+  const forActor = applyFiltersExcluding(items, activeFilters, 'actor');
+  const forSubaccount = applyFiltersExcluding(items, activeFilters, 'subaccount');
+
+  return {
+    type: countBy(forType, (i) => i.type),
+    status: countBy(forStatus, (i) => i.status),
+    actor: countBy(forActor, (i) => i.actor),
+    subaccount: countBy(forSubaccount, (i) => {
+      // Resolve subaccount identifier: prefer ID, fall back to 'unknown'
+      return i.subaccountId ?? 'unknown';
+    }).map((entry) => {
+      // Resolve a human-readable label: find the first item matching this subaccountId
+      const match = forSubaccount.find((i) => (i.subaccountId ?? 'unknown') === entry.value);
+      return {
+        ...entry,
+        label: match?.subaccountName ?? entry.value,
+      };
+    }),
+  };
+}
+
+export function sortActivityItems<T extends SortableItem>(
+  items: T[],
+  sort: string,
+): T[] {
+  return [...items].sort((a, b) => {
+    switch (sort) {
+      case 'newest': {
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return diff !== 0 ? diff : idAsc(a, b);
+      }
+      case 'oldest': {
+        const diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return diff !== 0 ? diff : idAsc(a, b);
+      }
+      case 'severity': {
+        const sa = SEVERITY_ORDER[a.severity ?? 'info'] ?? 3;
+        const sb = SEVERITY_ORDER[b.severity ?? 'info'] ?? 3;
+        if (sa !== sb) return sa - sb;
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return diff !== 0 ? diff : idAsc(a, b);
+      }
+      case 'attention_first':
+      default: {
+        const oa = STATUS_ORDER[a.status] ?? 5;
+        const ob = STATUS_ORDER[b.status] ?? 5;
+        if (oa !== ob) return oa - ob;
+        const sa = SEVERITY_ORDER[a.severity ?? 'info'] ?? 3;
+        const sb = SEVERITY_ORDER[b.severity ?? 'info'] ?? 3;
+        if (sa !== sb) return sa - sb;
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return diff !== 0 ? diff : idAsc(a, b);
+      }
+    }
+  });
+}

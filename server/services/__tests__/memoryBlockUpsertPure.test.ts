@@ -13,6 +13,7 @@
  * Spec: docs/onboarding-playbooks-spec.md §7.5 & §8.4.
  */
 
+import { expect, test } from 'vitest';
 import {
   decideUpsert,
   computeCombined,
@@ -22,25 +23,6 @@ import {
   MEMORY_BLOCKS_PER_RUN_MAX,
   type ExistingBlockView,
 } from '../memoryBlockUpsertPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
 
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -55,7 +37,7 @@ function makeExisting(overrides: Partial<ExistingBlockView> = {}): ExistingBlock
     id: 'block-1',
     content: 'existing',
     lastEditedByAgentId: 'agent-1',
-    lastWrittenByPlaybookSlug: 'onboarding',
+    lastWrittenByWorkflowSlug: 'onboarding',
     sourceRunId: 'run-prior',
     ...overrides,
   };
@@ -69,10 +51,10 @@ test('skips empty incoming content', () => {
     label: 'Facts',
     incomingContent: '   ',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 0,
   });
-  assertEqual(d.kind, 'skip_empty', 'empty kind');
+  expect(d.kind, 'empty kind').toBe('skip_empty');
 });
 
 test('skips when per-run rate limit reached', () => {
@@ -81,10 +63,10 @@ test('skips when per-run rate limit reached', () => {
     label: 'Facts',
     incomingContent: 'new value',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: MEMORY_BLOCKS_PER_RUN_MAX,
   });
-  assertEqual(d.kind, 'skip_rate_limited', 'rate limit kind');
+  expect(d.kind, 'rate limit kind').toBe('skip_rate_limited');
 });
 
 test('creates when no existing block', () => {
@@ -93,13 +75,13 @@ test('creates when no existing block', () => {
     label: 'Facts',
     incomingContent: 'hello',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 3,
   });
-  assert(d.kind === 'create', 'create kind');
+  expect(d.kind === 'create', 'create kind').toBeTruthy();
   if (d.kind === 'create') {
-    assertEqual(d.content, 'hello', 'create content');
-    assertEqual(d.truncated, false, 'not truncated');
+    expect(d.content, 'create content').toBe('hello');
+    expect(d.truncated, 'not truncated').toBe(false);
   }
 });
 
@@ -111,14 +93,14 @@ test('create truncates oversize incoming content from end', () => {
     label: 'Facts',
     incomingContent: incoming,
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 0,
   });
-  assert(d.kind === 'create', 'create kind');
+  expect(d.kind === 'create', 'create kind').toBeTruthy();
   if (d.kind === 'create') {
-    assertEqual(d.content.length, MEMORY_BLOCK_CONTENT_MAX, 'truncated to cap');
-    assertEqual(d.content.endsWith('TAIL'), true, 'tail preserved');
-    assertEqual(d.truncated, true, 'truncated flag set');
+    expect(d.content.length, 'truncated to cap').toEqual(MEMORY_BLOCK_CONTENT_MAX);
+    expect(d.content.endsWith('TAIL'), 'tail preserved').toBe(true);
+    expect(d.truncated, 'truncated flag set').toBe(true);
   }
 });
 
@@ -128,30 +110,30 @@ test('HITL skip when last edit was human and prior playbook differs', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: 'different-playbook',
+      lastWrittenByWorkflowSlug: 'different-workflow',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
-  assert(d.kind === 'skip_hitl_overwrite', 'hitl kind');
+  expect(d.kind === 'skip_hitl_overwrite', 'hitl kind').toBeTruthy();
 });
 
 test('HITL skip when last edit was human and prior playbook is null', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: null,
+      lastWrittenByWorkflowSlug: null,
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
-  assert(d.kind === 'skip_hitl_overwrite', 'hitl kind');
+  expect(d.kind === 'skip_hitl_overwrite', 'hitl kind').toBeTruthy();
 });
 
 test('HITL carve-out: same playbook may rewrite its own human-edited block', () => {
@@ -161,60 +143,60 @@ test('HITL carve-out: same playbook may rewrite its own human-edited block', () 
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: null,
-      lastWrittenByPlaybookSlug: 'onboarding',
+      lastWrittenByWorkflowSlug: 'onboarding',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
   // Per the spec (§7.5): "A playbook can freely rewrite blocks IT
   // previously wrote". So same-slug = update, not HITL.
-  assert(d.kind === 'update', 'update kind for same-slug rewrite');
+  expect(d.kind === 'update', 'update kind for same-slug rewrite').toBeTruthy();
 });
 
 test('no HITL skip when last edit was by an agent', () => {
   const d = decideUpsert({
     existing: makeExisting({
       lastEditedByAgentId: 'agent-1',
-      lastWrittenByPlaybookSlug: 'different',
+      lastWrittenByWorkflowSlug: 'different',
     }),
     label: 'Facts',
     incomingContent: 'new',
     mergeStrategy: 'replace',
-    playbookSlug: 'onboarding',
+    workflowSlug: 'onboarding',
     blocksUpsertedThisRun: 1,
   });
-  assert(d.kind === 'update', 'update kind');
+  expect(d.kind === 'update', 'update kind').toBeTruthy();
 });
 
 // ── Merge strategies ───────────────────────────────────────────────────────
 
 test('replace overwrites existing content', () => {
   const r = computeCombined('old', 'new', 'replace');
-  assertEqual(r.content, 'new', 'replace content');
-  assertEqual(r.truncated, false, 'replace not truncated');
-  assertEqual(r.mergeFallback, false, 'no merge fallback on replace');
+  expect(r.content, 'replace content').toBe('new');
+  expect(r.truncated, 'replace not truncated').toBe(false);
+  expect(r.mergeFallback, 'no merge fallback on replace').toBe(false);
 });
 
 test('append adds incoming after a newline', () => {
   const r = computeCombined('first', 'second', 'append');
-  assertEqual(r.content, 'first\nsecond', 'append joined');
+  expect(r.content, 'append joined').toBe('first\nsecond');
 });
 
 test('append starts from incoming when existing is empty', () => {
   const r = computeCombined('', 'only', 'append');
-  assertEqual(r.content, 'only', 'append skips newline when empty');
+  expect(r.content, 'append skips newline when empty').toBe('only');
 });
 
 test('append truncates to 2000 chars from the end', () => {
   const existing = 'A'.repeat(1500);
   const incoming = 'B'.repeat(1500);
   const r = computeCombined(existing, incoming, 'append');
-  assertEqual(r.content.length, MEMORY_BLOCK_CONTENT_MAX, 'trimmed to cap');
-  assertEqual(r.content.endsWith('B'.repeat(1500)), true, 'tail of incoming preserved');
-  assertEqual(r.truncated, true, 'truncated flag set');
+  expect(r.content.length, 'trimmed to cap').toEqual(MEMORY_BLOCK_CONTENT_MAX);
+  expect(r.content.endsWith('B'.repeat(1500)), 'tail of incoming preserved').toBe(true);
+  expect(r.truncated, 'truncated flag set').toBe(true);
 });
 
 test('merge combines two JSON objects', () => {
@@ -223,83 +205,76 @@ test('merge combines two JSON objects', () => {
     JSON.stringify({ b: 3, c: 4 }),
     'merge',
   );
-  assertEqual(r.mergeFallback, false, 'no fallback on valid objects');
-  assertEqual(JSON.parse(r.content), { a: 1, b: 3, c: 4 }, 'merged keys');
+  expect(r.mergeFallback, 'no fallback on valid objects').toBe(false);
+  expect(JSON.parse(r.content), 'merged keys').toEqual({ a: 1, b: 3, c: 4 });
 });
 
 test('merge falls back to replace on non-object existing content', () => {
   const r = computeCombined('not-json', JSON.stringify({ x: 1 }), 'merge');
-  assertEqual(r.mergeFallback, true, 'fallback set');
-  assertEqual(r.content, JSON.stringify({ x: 1 }), 'content is incoming');
+  expect(r.mergeFallback, 'fallback set').toBe(true);
+  expect(r.content, 'content is incoming').toEqual(JSON.stringify({ x: 1 }));
 });
 
 test('merge falls back to replace on non-object incoming content', () => {
   const r = computeCombined(JSON.stringify({ x: 1 }), 'not-json', 'merge');
-  assertEqual(r.mergeFallback, true, 'fallback set');
-  assertEqual(r.content, 'not-json', 'content is raw incoming');
+  expect(r.mergeFallback, 'fallback set').toBe(true);
+  expect(r.content, 'content is raw incoming').toBe('not-json');
 });
 
 test('merge falls back when incoming is a JSON array (not an object)', () => {
   const r = computeCombined(JSON.stringify({ x: 1 }), JSON.stringify([1, 2]), 'merge');
-  assertEqual(r.mergeFallback, true, 'array triggers fallback');
+  expect(r.mergeFallback, 'array triggers fallback').toBe(true);
 });
 
 // ── serialiseForBlock ──────────────────────────────────────────────────────
 
 test('serialiseForBlock passes strings through', () => {
-  assertEqual(serialiseForBlock('hello'), 'hello', 'string identity');
+  expect(serialiseForBlock('hello'), 'string identity').toBe('hello');
 });
 
 test('serialiseForBlock stringifies objects', () => {
   const s = serialiseForBlock({ a: 1 });
-  assertEqual(s.includes('"a"'), true, 'object stringified');
+  expect(s.includes('"a"'), 'object stringified').toBe(true);
 });
 
 test('serialiseForBlock handles null/undefined', () => {
-  assertEqual(serialiseForBlock(null), '', 'null → empty');
-  assertEqual(serialiseForBlock(undefined), '', 'undefined → empty');
+  expect(serialiseForBlock(null), 'null → empty').toBe('');
+  expect(serialiseForBlock(undefined), 'undefined → empty').toBe('');
 });
 
 test('serialiseForBlock handles numbers and booleans', () => {
-  assertEqual(serialiseForBlock(42), '42', 'number stringified');
-  assertEqual(serialiseForBlock(true), 'true', 'boolean stringified');
+  expect(serialiseForBlock(42), 'number stringified').toBe('42');
+  expect(serialiseForBlock(true), 'boolean stringified').toBe('true');
 });
 
 // ── getByPath ──────────────────────────────────────────────────────────────
 
 test('getByPath resolves top-level field', () => {
-  assertEqual(getByPath({ a: 1 }, 'a'), 1, 'top-level');
+  expect(getByPath({ a: 1 }, 'a'), 'top-level').toBe(1);
 });
 
 test('getByPath resolves nested dot path', () => {
-  assertEqual(getByPath({ a: { b: { c: 'deep' } } }, 'a.b.c'), 'deep', 'nested');
+  expect(getByPath({ a: { b: { c: 'deep' } } }, 'a.b.c'), 'nested').toBe('deep');
 });
 
 test('getByPath resolves array index', () => {
-  assertEqual(getByPath({ items: [10, 20, 30] }, 'items[1]'), 20, 'array index');
+  expect(getByPath({ items: [10, 20, 30] }, 'items[1]'), 'array index').toBe(20);
 });
 
 test('getByPath resolves mixed array + object path', () => {
-  assertEqual(
-    getByPath({ list: [{ id: 'a' }, { id: 'b' }] }, 'list[1].id'),
-    'b',
-    'mixed path',
-  );
+  expect(getByPath({ list: [{ id: 'a' }, { id: 'b' }] }, 'list[1].id'), 'mixed path').toBe('b');
 });
 
 test('getByPath returns undefined on missing field', () => {
-  assertEqual(getByPath({ a: 1 }, 'missing'), undefined, 'missing returns undefined');
+  expect(getByPath({ a: 1 }, 'missing'), 'missing returns undefined').toBe(undefined);
 });
 
 test('getByPath returns undefined on type mismatch', () => {
-  assertEqual(getByPath({ a: 1 }, 'a.b'), undefined, 'drilling into non-object');
+  expect(getByPath({ a: 1 }, 'a.b'), 'drilling into non-object').toBe(undefined);
 });
 
 test('getByPath returns undefined on index out of bounds', () => {
-  assertEqual(getByPath({ items: [1] }, 'items[5]'), undefined, 'oob index');
+  expect(getByPath({ items: [1] }, 'items[5]'), 'oob index').toBe(undefined);
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

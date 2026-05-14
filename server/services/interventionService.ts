@@ -67,7 +67,7 @@ export const interventionService = {
     bandAfter?: string;
     /** Phase 4 — mark failed-execution outcomes so cooldown still respects them. */
     executionFailed?: boolean;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const delta = data.healthScoreAfter != null && data.healthScoreBefore != null
       ? data.healthScoreAfter - data.healthScoreBefore
       : null;
@@ -84,24 +84,29 @@ export const interventionService = {
     const bandChanged =
       data.bandBefore != null && data.bandAfter != null && data.bandBefore !== data.bandAfter;
 
-    await db.insert(interventionOutcomes).values({
-      organisationId: data.organisationId,
-      interventionId: data.interventionId,
-      accountId: data.accountId,
-      interventionTypeSlug: data.interventionTypeSlug,
-      triggerEventId: data.triggerEventId,
-      runId: data.runId,
-      configVersion: data.configVersion,
-      healthScoreBefore: data.healthScoreBefore,
-      healthScoreAfter: data.healthScoreAfter,
-      outcome,
-      measuredAfterHours: data.measuredAfterHours ?? 24,
-      deltaHealthScore: delta,
-      bandBefore: data.bandBefore,
-      bandAfter: data.bandAfter,
-      bandChanged,
-      executionFailed: data.executionFailed ?? false,
-    } as typeof interventionOutcomes.$inferInsert);
+    const result = await db
+      .insert(interventionOutcomes)
+      .values({
+        organisationId: data.organisationId,
+        interventionId: data.interventionId,
+        accountId: data.accountId,
+        interventionTypeSlug: data.interventionTypeSlug,
+        triggerEventId: data.triggerEventId,
+        runId: data.runId,
+        configVersion: data.configVersion,
+        healthScoreBefore: data.healthScoreBefore,
+        healthScoreAfter: data.healthScoreAfter,
+        outcome,
+        measuredAfterHours: data.measuredAfterHours ?? 24,
+        deltaHealthScore: delta,
+        bandBefore: data.bandBefore,
+        bandAfter: data.bandAfter,
+        bandChanged,
+        executionFailed: data.executionFailed ?? false,
+      } as typeof interventionOutcomes.$inferInsert)
+      .onConflictDoNothing({ target: interventionOutcomes.interventionId });
+
+    return ((result as { rowCount?: number }).rowCount ?? 0) > 0;
   },
 
   // ── Account overrides ───────────────────────────────────────────────────

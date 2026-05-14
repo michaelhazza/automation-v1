@@ -2,7 +2,7 @@
 name: Config Create Subaccount
 description: Create a new subaccount (client workspace) with name and slug.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -15,11 +15,22 @@
  *     soft-deletes the source block. Both entities log Config History.
  */
 
-import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 import { db } from '../db/index.js';
-import { agentRuns, agents, memoryBlocks, workspaceMemoryEntries } from '../db/schema/index.js';
+import { agentRuns, agents, memoryBlocks, memoryBlockVersions, workspaceMemoryEntries } from '../db/schema/index.js';
+import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { configHistoryService } from './configHistoryService.js';
+import {
+  canonicaliseBody,
+  hashBody,
+  dbStatusToContract,
+  dbConfidenceToContract,
+  isOverrideAllowed,
+  type DbStatus,
+  type ContractStatus,
+} from './knowledgeOverridePure.js';
 
 /**
  * Phase D1 / §7 G6.2 — sanitise Tiptap HTML before persisting a Reference
@@ -116,7 +127,7 @@ export async function listInsights(
       runStartedAt: agentRuns.startedAt,
     })
     .from(workspaceMemoryEntries)
-    .leftJoin(agents, eq(agents.id, workspaceMemoryEntries.agentId))
+    .leftJoin(agents, and(eq(agents.id, workspaceMemoryEntries.agentId), isNull(agents.deletedAt)))
     .leftJoin(agentRuns, eq(agentRuns.id, workspaceMemoryEntries.agentRunId))
     .where(and(...conditions))
     .orderBy(desc(workspaceMemoryEntries.createdAt))
@@ -518,4 +529,374 @@ export async function demoteBlockToReference(
   });
 
   return { referenceId: createdRef.id };
+}
+
+// ---------------------------------------------------------------------------
+// Govern — Knowledge list + approve/reject/override (spec §4, §6)
+// ---------------------------------------------------------------------------
+
+export interface ListEntriesQuery {
+  organisationId: string;
+  scope: 'workspace' | 'org';
+  subaccountId?: string;
+  status?: ContractStatus[];
+  autoUpdateDisabled?: boolean;
+  q?: string;
+  cursor?: string | null;
+  limit: number;
+  sortKey: 'createdAt' | 'updatedAt' | 'confidence' | 'sourceAgent' | 'kind' | 'status';
+  sortDir: 'asc' | 'desc';
+  /** Source provenance filter — spec §13.4. */
+  source?: 'all' | 'corrections' | 'manual' | 'auto';
+}
+
+export interface KnowledgeEntryRow {
+  id: string;
+  kind: 'belief' | 'fact' | 'observation' | 'preference' | 'issue';
+  body: string;
+  confidence: number;
+  status: ContractStatus;
+  source: { runId: string; agentName: string; extractedAt: string };
+  subaccount: { id: string; name: string } | null;
+  autoUpdateDisabled: boolean;
+  lastEditedBy: { kind: 'auto' | 'manual'; userId: string | null; at: string } | null;
+  etag: string;
+  capturedVia: string;
+  capturedAt: string;
+}
+
+export interface ListEntriesResult {
+  rows: KnowledgeEntryRow[];
+  cursor: string | null;
+  filterOptions: Record<string, Array<{ value: string; label: string; count: number }>>;
+}
+
+function contractStatusToDb(cs: ContractStatus): DbStatus[] {
+  switch (cs) {
+    case 'in_use': return ['active'];
+    case 'pending_review': return ['draft', 'pending_review'];
+    case 'ignored': return ['rejected'];
+  }
+}
+
+export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesResult> {
+  const limit = Math.min(query.limit, 50);
+
+  const dbStatuses: DbStatus[] | undefined = query.status?.length
+    ? query.status.flatMap(contractStatusToDb)
+    : undefined;
+
+  let cursorPrimary: string | null = null;
+  let cursorId: string | null = null;
+  if (query.cursor) {
+    try {
+      const decoded = JSON.parse(
+        Buffer.from(query.cursor, 'base64url').toString('utf8'),
+      ) as { primary: string; id: string };
+      cursorPrimary = decoded.primary;
+      cursorId = decoded.id;
+    } catch {
+      // invalid cursor; start from beginning
+    }
+  }
+
+  const sortColMap: Record<ListEntriesQuery['sortKey'], string> = {
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    confidence: 'confidence',
+    sourceAgent: 'created_at',
+    kind: 'created_at',
+    status: 'status',
+  };
+  const sortCol = sortColMap[query.sortKey];
+  const dir = query.sortDir === 'asc' ? 'ASC' : 'DESC';
+
+  const resultRows = await db.execute(sql`
+    WITH base AS (
+      SELECT
+        mb.id::text AS id,
+        mb.content AS body,
+        mb.status,
+        mb.confidence,
+        mb.auto_update_disabled,
+        mb.updated_at,
+        mb.created_at,
+        mb.subaccount_id::text AS subaccount_id,
+        sa.name AS subaccount_name,
+        mb.last_edited_by_agent_id::text AS last_edited_agent_id,
+        mb.source_run_id::text AS source_run_id,
+        mb.captured_via,
+        mb.created_at AS captured_at
+      FROM memory_blocks mb
+      LEFT JOIN subaccounts sa ON sa.id = mb.subaccount_id AND sa.deleted_at IS NULL
+      WHERE mb.organisation_id = ${query.organisationId}::uuid
+        AND mb.deleted_at IS NULL
+        ${query.scope === 'workspace' && query.subaccountId
+          ? sql`AND mb.subaccount_id = ${query.subaccountId}::uuid`
+          : sql``}
+        ${dbStatuses?.length
+          ? sql`AND mb.status = ANY(${dbStatuses}::text[])`
+          : sql``}
+        ${query.autoUpdateDisabled !== undefined
+          ? sql`AND mb.auto_update_disabled = ${query.autoUpdateDisabled}`
+          : sql``}
+        ${query.q
+          ? sql`AND mb.content ILIKE ${'%' + query.q + '%'}`
+          : sql``}
+        ${query.source === 'corrections'
+          ? sql`AND mb.captured_via = 'operator_correction'`
+          : query.source === 'manual'
+          ? sql`AND mb.captured_via = 'manual_edit'`
+          : query.source === 'auto'
+          ? sql`AND mb.captured_via = 'auto_synthesised'`
+          : sql``}
+    ),
+    ordered AS (
+      SELECT * FROM base
+      ${cursorPrimary !== null && cursorId !== null
+        ? sql`WHERE (${sql.raw(sortCol)}, id) ${sql.raw(query.sortDir === 'asc' ? '>' : '<')} (${cursorPrimary}, ${cursorId})`
+        : sql``}
+      ORDER BY ${sql.raw(sortCol)} ${sql.raw(dir)}, id ${sql.raw(dir)}
+      LIMIT ${limit + 1}
+    ),
+    status_options AS (
+      SELECT status AS value, status AS label, COUNT(*)::int AS count
+      FROM base
+      GROUP BY status
+      ORDER BY count DESC, value ASC
+    )
+    SELECT
+      (SELECT json_agg(row_to_json(ordered.*)) FROM ordered) AS rows,
+      (SELECT json_agg(row_to_json(status_options.*)) FROM status_options) AS status_options
+  `);
+
+  const raw = (resultRows as unknown as Array<Record<string, unknown>>)[0] as {
+    rows: Array<{
+      id: string; body: string; status: string; confidence: string | null;
+      auto_update_disabled: boolean; updated_at: string; created_at: string;
+      subaccount_id: string | null; subaccount_name: string | null;
+      last_edited_agent_id: string | null;
+      source_run_id: string | null;
+      captured_via: string | null;
+      captured_at: string;
+    }> | null;
+    status_options: Array<{ value: string; label: string; count: number }> | null;
+  };
+
+  const allRows = raw.rows ?? [];
+  const hasMore = allRows.length > limit;
+  const pageRows = hasMore ? allRows.slice(0, limit) : allRows;
+
+  const lastRow = hasMore ? allRows[limit - 1] : null;
+  const nextCursor = lastRow
+    ? Buffer.from(
+        JSON.stringify({
+          primary: (lastRow as Record<string, unknown>)[sortCol] ?? lastRow.created_at,
+          id: lastRow.id,
+        }),
+        'utf8',
+      ).toString('base64url')
+    : null;
+
+  const rows: KnowledgeEntryRow[] = pageRows.map((r) => ({
+    id: r.id,
+    kind: 'observation' as const,
+    body: r.body,
+    confidence: dbConfidenceToContract(r.confidence as 'low' | 'normal' | null),
+    status: (() => {
+      try { return dbStatusToContract(r.status as DbStatus); }
+      catch { return 'pending_review' as ContractStatus; }
+    })(),
+    source: { runId: r.source_run_id ?? '', agentName: r.last_edited_agent_id ?? 'system', extractedAt: r.created_at },
+    subaccount: r.subaccount_id ? { id: r.subaccount_id, name: r.subaccount_name ?? r.subaccount_id } : null,
+    autoUpdateDisabled: r.auto_update_disabled,
+    lastEditedBy: null,
+    etag: r.updated_at,
+    capturedVia: r.captured_via ?? 'manual_edit',
+    capturedAt: r.captured_at,
+  }));
+
+  const rawStatusOpts = raw.status_options ?? [];
+  const statusOpts = rawStatusOpts.map((o) => {
+    let contractVal: ContractStatus;
+    try { contractVal = dbStatusToContract(o.value as DbStatus); }
+    catch { return null; }
+    return { value: contractVal, label: contractVal, count: o.count };
+  }).filter((o): o is NonNullable<typeof o> => o !== null);
+
+  return {
+    rows,
+    cursor: nextCursor,
+    filterOptions: { status: statusOpts },
+  };
+}
+
+export async function approveEntry(opts: {
+  organisationId: string;
+  blockId: string;
+  actorUserId: string | null;
+}): Promise<{ alreadyApplied: boolean }> {
+  const updated = await db
+    .update(memoryBlocks)
+    .set({ status: 'active', updatedAt: new Date() })
+    .where(and(
+      eq(memoryBlocks.id, opts.blockId),
+      eq(memoryBlocks.organisationId, opts.organisationId),
+      inArray(memoryBlocks.status, ['draft', 'pending_review']),
+      isNull(memoryBlocks.deletedAt),
+    ))
+    .returning({ id: memoryBlocks.id });
+  return { alreadyApplied: updated.length === 0 };
+}
+
+export async function rejectEntry(opts: {
+  organisationId: string;
+  blockId: string;
+  actorUserId: string | null;
+}): Promise<{ alreadyApplied: boolean }> {
+  const updated = await db
+    .update(memoryBlocks)
+    .set({ status: 'rejected', updatedAt: new Date() })
+    .where(and(
+      eq(memoryBlocks.id, opts.blockId),
+      eq(memoryBlocks.organisationId, opts.organisationId),
+      sql`${memoryBlocks.status} <> 'rejected'`,
+      isNull(memoryBlocks.deletedAt),
+    ))
+    .returning({ id: memoryBlocks.id });
+  return { alreadyApplied: updated.length === 0 };
+}
+
+export async function overrideEntry(opts: {
+  organisationId: string;
+  blockId: string;
+  body: string;
+  expectedEtag: string;
+  actorUserId: string | null;
+}): Promise<
+  | { ok: true; status: 'in_use'; etag: string; created: boolean }
+  | { ok: false; reason: 'state'; currentStatus: ContractStatus }
+  | { ok: false; reason: 'etag_mismatch'; currentEtag: string }
+  | { ok: false; reason: 'not_found' }
+> {
+  const canonical = canonicaliseBody(opts.body);
+  const bodyHash = hashBody(canonical);
+
+  // PTH-CGT-F1 defence-in-depth: ensure overrideEntry's advisory lock + version
+  // read + version insert + memory-block update all execute on the same real
+  // transaction handle. The advisory lock is acquired with pg_advisory_xact_lock
+  // (transaction-scoped, auto-released on commit/rollback) — but that semantic
+  // ONLY holds when the lock is acquired inside a real transaction. If a
+  // future caller invokes overrideEntry outside withOrgTx, getOrgScopedDb()
+  // would throw missing_org_context (safe failure mode), but the conditional
+  // here is an extra safety net: if ALS is established (the HTTP path),
+  // reuse the existing tx so we don't create a redundant savepoint; if ALS
+  // is absent (any non-HTTP caller), open our own db.transaction + set the
+  // GUC + run the override flow inside it. Either path satisfies the spec
+  // §V2 same-transaction requirement.
+  // PTH-CGT-R3-F2: use truthy check (matches deliveryService + scheduledTaskService).
+  // peekOrgTxContext() returns OrgTxContext | undefined in production but tests
+  // sometimes mock it as () => null. `!== undefined` would treat null as "ctx present"
+  // and incorrectly route to getOrgScopedDb (which throws missing_org_context). A
+  // truthy check treats both undefined and null as "no ctx".
+  const existingCtx = peekOrgTxContext();
+  return existingCtx
+    ? runOverrideInTx(getOrgScopedDb('knowledgeService.overrideEntry'), opts, canonical, bodyHash)
+    : db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${opts.organisationId}, true)`);
+        return runOverrideInTx(innerTx, opts, canonical, bodyHash);
+      });
+}
+
+async function runOverrideInTx(
+  tx: OrgScopedTx,
+  opts: { organisationId: string; blockId: string; expectedEtag: string; actorUserId: string | null },
+  canonical: string,
+  bodyHash: string,
+): Promise<
+  | { ok: true; status: 'in_use'; etag: string; created: boolean }
+  | { ok: false; reason: 'state'; currentStatus: ContractStatus }
+  | { ok: false; reason: 'etag_mismatch'; currentEtag: string }
+  | { ok: false; reason: 'not_found' }
+> {
+  // Serialise concurrent overrides on the same block via a per-block
+  // transaction-scoped advisory lock. hashtextextended maps blockId → int8
+  // deterministically; locks on distinct blockIds do NOT serialise each other.
+  // pg_advisory_xact_lock (NOT pg_advisory_lock) — released automatically on
+  // transaction commit/rollback, never leaks to the connection pool.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${opts.blockId}::text, 0))`);
+
+  const rows = await tx
+    .select({
+      id: memoryBlocks.id,
+      status: memoryBlocks.status,
+      updatedAt: memoryBlocks.updatedAt,
+    })
+    .from(memoryBlocks)
+    .where(and(
+      eq(memoryBlocks.id, opts.blockId),
+      eq(memoryBlocks.organisationId, opts.organisationId),
+      isNull(memoryBlocks.deletedAt),
+    ));
+  if (rows.length === 0) return { ok: false, reason: 'not_found' as const };
+
+  const row = rows[0];
+
+  if (!isOverrideAllowed(row.status as DbStatus)) {
+    return {
+      ok: false, reason: 'state' as const,
+      currentStatus: dbStatusToContract(row.status as DbStatus),
+    };
+  }
+
+  // INVARIANT I3: ETag mismatch → 412, not 409
+  const currentEtag = row.updatedAt.toISOString();
+  if (currentEtag !== opts.expectedEtag) {
+    return { ok: false, reason: 'etag_mismatch' as const, currentEtag };
+  }
+
+  // Insert version row; idempotent via partial unique index on (memory_block_id, body_hash).
+  // With the advisory lock held, concurrent overrides on the same block are serialised so the
+  // (memory_block_id, version) unique constraint is never violated by racing MAX(version) reads.
+  const inserted = await tx
+    .insert(memoryBlockVersions)
+    .values({
+      memoryBlockId: opts.blockId,
+      content: canonical,
+      version: sql`(COALESCE((SELECT MAX(version) FROM memory_block_versions WHERE memory_block_id = ${opts.blockId}::uuid), 0) + 1)`,
+      createdByUserId: opts.actorUserId,
+      changeSource: 'manual_edit',
+      bodyHash,
+    })
+    .onConflictDoNothing({ target: [memoryBlockVersions.memoryBlockId, memoryBlockVersions.bodyHash] })
+    .returning({ id: memoryBlockVersions.id });
+
+  const created = inserted.length > 0;
+
+  // Defence-in-depth: filter UPDATE on (id, organisationId) even though the SELECT above
+  // already verified the org. Belt-and-braces per DEVELOPMENT_GUIDELINES §1.
+  const [updated] = created
+    ? await tx
+        .update(memoryBlocks)
+        .set({ content: canonical, autoUpdateDisabled: true, updatedAt: new Date() })
+        .where(and(
+          eq(memoryBlocks.id, opts.blockId),
+          eq(memoryBlocks.organisationId, opts.organisationId),
+        ))
+        .returning({ updatedAt: memoryBlocks.updatedAt })
+    : await tx
+        .update(memoryBlocks)
+        .set({ autoUpdateDisabled: true, updatedAt: new Date() })
+        .where(and(
+          eq(memoryBlocks.id, opts.blockId),
+          eq(memoryBlocks.organisationId, opts.organisationId),
+        ))
+        .returning({ updatedAt: memoryBlocks.updatedAt });
+
+  return {
+    ok: true as const,
+    status: 'in_use' as const,
+    etag: updated.updatedAt.toISOString(),
+    created,
+  };
 }

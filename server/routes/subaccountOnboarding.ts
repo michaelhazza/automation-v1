@@ -18,11 +18,11 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/onboarding/owed',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const owed = await subaccountOnboardingService.listOwedOnboardingPlaybooks(
+    const owed = await subaccountOnboardingService.listOwedOnboardingWorkflows(
       req.orgId!,
       subaccountId,
     );
@@ -33,7 +33,7 @@ router.get(
 router.post(
   '/api/subaccounts/:subaccountId/onboarding/start',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
@@ -50,7 +50,7 @@ router.post(
       res.status(400).json({ error: 'runMode must be auto or supervised' });
       return;
     }
-    const { runId } = await subaccountOnboardingService.startOwedOnboardingPlaybook({
+    const { runId } = await subaccountOnboardingService.startOwedOnboardingWorkflow({
       organisationId: req.orgId!,
       subaccountId,
       slug,

@@ -1,7 +1,7 @@
 import { and, eq, or, isNull } from 'drizzle-orm';
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
-import { integrationConnections } from '../../db/schema/index.js';
+import { integrationConnections, agents, subaccountAgents } from '../../db/schema/index.js';
 import {
   loadIntegrationReference,
   normalizeCapabilitySlugs,
@@ -11,9 +11,15 @@ import {
   type ReferenceState,
   type SchemaMeta,
 } from '../../services/integrationReferenceService.js';
-import { listAgentCapabilityMaps } from '../../services/capabilityMapService.js';
+import { listAgentCapabilityMaps, matchCapability } from '../../services/capabilityMapService.js';
 import { systemSettingsService, SETTING_KEYS } from '../../services/systemSettingsService.js';
 import { logger } from '../../lib/logger.js';
+import type { RoutingContextV2, AddressParseKind } from '../../../shared/types/routingContext.js';
+import { authorise } from '../../services/crossOwnerDelegationAuthorisation.js';
+import {
+  detectNamedOwnerReference,
+  extractTrustedToolCallOwner,
+} from '../../services/crossOwnerDelegationAuthorisationPure.js';
 
 // ---------------------------------------------------------------------------
 // Per-run budget enforcement for capability-discovery skills
@@ -193,7 +199,7 @@ export async function executeListConnections(
   const budgetCheck = await incrementBudget(context, 'list_connections');
   if (budgetCheck.exhausted) return budgetExhaustedResponse('list_connections', budgetCheck.budget, budgetCheck.used);
 
-  const typed = input as ListConnectionsInput;
+  const typed = input as unknown as ListConnectionsInput;
 
   const orgId = typed.orgId ?? context.organisationId;
   if (!orgId) return { success: false, error: 'orgId is required (or must be resolvable from context)' };
@@ -290,6 +296,8 @@ export interface CheckCapabilityGapInput {
   orgId: string;
   subaccountId?: string;
   required_capabilities: RawCapabilityInput[];
+  /** Raw intent text. Parsed for @PA / @MyAssistant / @<DisplayName> address tokens. */
+  raw_intent_text?: string;
 }
 
 export type Availability = 'configured' | 'configurable' | 'unsupported' | 'unknown';
@@ -323,14 +331,90 @@ export interface CheckCapabilityGapOutput {
   reference_state: ReferenceState;
 }
 
+type ParsedAddress =
+  | { kind: 'matched'; agentId: string; agentName: string }
+  | { kind: 'not_found'; strippedToken: string }
+  | { kind: 'collision'; candidates: string[]; strippedToken: string }
+  | { kind: 'unsupported_cross_owner'; strippedToken: string }
+  | null; // null when no @token found
+
+/**
+ * Extracts the first @<token> from intentText and resolves it.
+ * Returns null when no @ token is present (not an error).
+ * @PA / @MyAssistant → agent WHERE slug='executive-assistant' AND owner_user_id=requesterUserId AND deleted_at IS NULL
+ * @<DisplayName>     → subaccount-scoped name lookup
+ * @<User>'s PA       → unsupported_cross_owner (logged only)
+ */
+async function parseAddressToken(
+  intentText: string,
+  requesterUserId: string,
+  organisationId: string,
+  subaccountId: string | null,
+): Promise<ParsedAddress> {
+  const match = intentText.match(/@([\w'.]+)/);
+  if (!match) return null;
+
+  const raw = match[1].trim();
+
+  // Detect unsupported cross-owner form: "@<something>'s PA" / "@<name>'s assistant"
+  if (/['']s\s+(pa|assistant)/i.test(raw)) {
+    logger.debug('capability_query.address_parse.unsupported_cross_owner', { raw });
+    return { kind: 'unsupported_cross_owner', strippedToken: raw };
+  }
+
+  // @PA or @MyAssistant → requester's own EA
+  if (/^(pa|myassistant)$/i.test(raw)) {
+    const rows = await db
+      .select({ id: agents.id, name: agents.name })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.organisationId, organisationId),
+          eq(agents.slug, 'executive-assistant'),
+          eq(agents.ownerUserId, requesterUserId),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (rows.length === 0) return { kind: 'not_found', strippedToken: raw };
+    return { kind: 'matched', agentId: rows[0].id, agentName: rows[0].name };
+  }
+
+  // @<DisplayName> — subaccount-scoped name lookup
+  const nameConditions = [
+    eq(agents.organisationId, organisationId),
+    eq(agents.name, raw),
+    isNull(agents.deletedAt),
+  ];
+  if (subaccountId) {
+    nameConditions.push(eq(subaccountAgents.subaccountId, subaccountId));
+  }
+
+  const nameRows = await db
+    .select({ id: agents.id, name: agents.name })
+    .from(agents)
+    .innerJoin(
+      subaccountAgents,
+      and(eq(subaccountAgents.agentId, agents.id), eq(subaccountAgents.isActive, true)),
+    )
+    .where(and(...nameConditions))
+    .limit(3);
+
+  if (nameRows.length === 0) return { kind: 'not_found', strippedToken: raw };
+  if (nameRows.length > 1) {
+    return { kind: 'collision', candidates: nameRows.map((r) => r.name), strippedToken: raw };
+  }
+  return { kind: 'matched', agentId: nameRows[0].id, agentName: nameRows[0].name };
+}
+
 export async function executeCheckCapabilityGap(
   input: Record<string, unknown>,
   context: SkillExecutionContext,
-): Promise<CheckCapabilityGapOutput | { success: false; error: string } | ReturnType<typeof budgetExhaustedResponse>> {
+): Promise<CheckCapabilityGapOutput | { success: false; error: string; clarifying_question?: string } | ReturnType<typeof budgetExhaustedResponse>> {
   const budgetCheck = await incrementBudget(context, 'check_capability_gap');
   if (budgetCheck.exhausted) return budgetExhaustedResponse('check_capability_gap', budgetCheck.budget, budgetCheck.used);
 
-  const typed = input as CheckCapabilityGapInput;
+  const typed = input as unknown as CheckCapabilityGapInput;
   if (!Array.isArray(typed.required_capabilities) || typed.required_capabilities.length === 0) {
     return { success: false, error: 'required_capabilities is required and must be non-empty' };
   }
@@ -356,6 +440,85 @@ export async function executeCheckCapabilityGap(
   const connections = 'connections' in connectionResult ? connectionResult.connections : [];
 
   const agentMaps = await listAgentCapabilityMaps(orgId, subaccountId);
+  const uniqueAgentMaps = agentMaps.filter(
+    (a, idx, arr) => arr.findIndex((b) => b.agentId === a.agentId) === idx,
+  );
+
+  // Security: discard any client-supplied target_owner_user_id (spec §5.4 untrusted-client invariant)
+  if ((typed as unknown as Record<string, unknown>).target_owner_user_id !== undefined) {
+    logger.debug('capability_query.routing.discard_client_target_owner', {
+      runId: context.runId,
+    });
+  }
+
+  const rawIntentText = typeof typed.raw_intent_text === 'string' ? typed.raw_intent_text : '';
+  let parsed: Awaited<ReturnType<typeof parseAddressToken>> = null;
+  if (rawIntentText) {
+    try {
+      parsed = await parseAddressToken(rawIntentText, context.userId ?? '', orgId, subaccountId);
+    } catch (err) {
+      logger.warn('capability_query.address_parse.db_error', {
+        runId: context.runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // parsed stays null — routing proceeds without address context
+    }
+  }
+
+  let addressedAgent: RoutingContextV2['addressed_agent'] = null;
+  let addressParseResult: RoutingContextV2['address_parse_result'] = 'not_found';
+
+  if (parsed !== null) {
+    if (parsed.kind === 'matched') {
+      addressedAgent = { id: parsed.agentId, score_boost: 0.15 };
+      addressParseResult = 'matched';
+    } else {
+      addressParseResult = parsed.kind as AddressParseKind;
+    }
+  }
+
+  let routingContext: RoutingContextV2 = {
+    organisationId: orgId,
+    subaccountId: subaccountId ?? '',
+    requester_user_id: context.userId ?? '',
+    raw_intent_text: rawIntentText,
+    normalised_intent_text: rawIntentText,
+    intent: rawIntentText,
+    addressed_agent: addressedAgent,
+    address_parse_result: addressParseResult,
+  };
+
+  // Chunk 3: derive target_owner_user_id via two-layer authorisation (spec §5.4).
+  // Only attempt cross-owner auth when there is evidence of cross-owner intent.
+  // Layer 1: possessive pattern in intent text. Layer 2: explicit target in tool-call payload.
+  const hasCrossOwnerSignal =
+    (rawIntentText ? detectNamedOwnerReference(rawIntentText) !== null : false) ||
+    extractTrustedToolCallOwner(typed as unknown as Record<string, unknown>) !== null;
+
+  if (hasCrossOwnerSignal) {
+    const delegationAuth = await authorise(routingContext, typed as unknown as Record<string, unknown>).catch(
+      () => ({
+        authorised: false as const,
+        clarifying_question: 'An error occurred. Please specify whose data this needs access to.',
+      }),
+    );
+
+    if (delegationAuth.authorised) {
+      routingContext = { ...routingContext, target_owner_user_id: delegationAuth.target_owner_user_id };
+    } else if ('clarifying_question' in delegationAuth) {
+      // Cross-owner intent detected but couldn't be resolved → surface clarifying question
+      return {
+        success: false as const,
+        error: 'cross_owner_clarification_required',
+        clarifying_question: delegationAuth.clarifying_question,
+      };
+    }
+  }
+  // If no cross-owner signal: proceed with routing, target_owner_user_id stays undefined
+
+  // Apply two-axis ownership filter + address boost (spec §5.2–§5.3)
+  const matchedCandidates = matchCapability(routingContext, uniqueAgentMaps);
+  const matchedAgentIds = new Set(matchedCandidates.map((m) => m.candidate.agentId));
 
   // 3. Evaluate per-capability availability
   const perCapability: PerCapabilityAvailability[] = [];
@@ -453,7 +616,7 @@ export async function executeCheckCapabilityGap(
     primitive: normalised.filter((n) => n.kind === 'primitive').map((n) => n.canonical_slug),
   };
 
-  function matchedByAgent(map: NonNullable<(typeof agentMaps)[number]['capabilityMap']>): { matched: string[]; missing: string[] } {
+  function matchedByAgent(map: NonNullable<(typeof uniqueAgentMaps)[number]['capabilityMap']>): { matched: string[]; missing: string[] } {
     const matched: string[] = [];
     const missing: string[] = [];
     const check = (kind: CapabilityKind, required: string[], have: string[]) => {
@@ -502,7 +665,8 @@ export async function executeCheckCapabilityGap(
 
   const candidateAgents: CandidateAgent[] = [];
 
-  for (const agent of agentMaps) {
+  for (const agent of uniqueAgentMaps) {
+    if (!matchedAgentIds.has(agent.agentId)) continue; // ownership axis filter
     if (!agent.capabilityMap) continue;
     const { matched, missing } = matchedByAgent(agent.capabilityMap);
     candidateAgents.push({
@@ -558,7 +722,7 @@ export async function executeCheckCapabilityGap(
     if (candidate.coverage !== 'full') continue;
 
     // Look up the source map for this candidate and reject if it's stale.
-    const agentRow = agentMaps.find((a) => a.agentId === candidate.agent_id);
+    const agentRow = uniqueAgentMaps.find((a) => a.agentId === candidate.agent_id);
     if (!agentRow?.capabilityMap) continue;
     if (isMapStaleVsReference(agentRow.capabilityMap)) continue;
     // Derive integration list from the candidate's matched list (those with 'integration:' prefix)

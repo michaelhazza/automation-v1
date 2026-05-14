@@ -13,89 +13,20 @@
  * The LLM call inside `extractRunInsights` is replaced with a test-double
  * via the `_routeCall` injection point so no provider config is required.
  *
- * Skips gracefully without DATABASE_URL; integration cases require a
- * seeded organisation + subaccount + agent.
- *
- * Runnable via:
- *   npx tsx server/services/__tests__/workspaceMemoryService.test.ts
+ * Skips gracefully without DATABASE_URL or NODE_ENV !== 'integration'.
+ * Relies on the canonical (org, subaccount, agent) seeded by
+ * scripts/seed-integration-fixtures.ts.
  */
 
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { RunOutcome } from '../workspaceMemoryServicePure.js';
 
-let passed = 0;
-let failed = 0;
+const SKIP_WMS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 
-async function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
+// runSummary long enough to pass the §6.8 short-summary guard (≥ 100 chars).
+const LONG_SUMMARY = 'Agent completed the requested task successfully without errors. ' +
+  'All configured steps executed in sequence. Client preferences were respected throughout.';
 
-console.log('\n--- workspaceMemoryService overrides ---');
-
-if (!process.env.DATABASE_URL) {
-  console.log('  SKIPPED — no DATABASE_URL');
-  console.log('');
-  process.exitCode = 0;
-  process.exit();
-}
-
-// ─── Test harness (real DB) ──────────────────────────────────────────
-
-const { drizzle } = await import('drizzle-orm/postgres-js');
-const postgres = (await import('postgres')).default;
-const { eq, and } = await import('drizzle-orm');
-const {
-  workspaceMemoryEntries,
-  agentRuns,
-  subaccounts,
-  agents,
-  organisations,
-} = await import('../../db/schema/index.js');
-
-const client = postgres(process.env.DATABASE_URL!);
-const db = drizzle(client);
-
-const [anchor] = await db
-  .select({
-    orgId:        organisations.id,
-    subaccountId: subaccounts.id,
-  })
-  .from(organisations)
-  .innerJoin(subaccounts, eq(subaccounts.organisationId, organisations.id))
-  .limit(1);
-
-if (!anchor) {
-  console.log('  SKIPPED — no organisation + subaccount seed');
-  await client.end();
-  process.exitCode = 0;
-  process.exit();
-}
-
-const [anchorAgent] = await db
-  .select({ id: agents.id })
-  .from(agents)
-  .where(eq(agents.organisationId, anchor.orgId))
-  .limit(1);
-
-if (!anchorAgent) {
-  console.log('  SKIPPED — no agent seed');
-  await client.end();
-  process.exitCode = 0;
-  process.exit();
-}
-
-const { workspaceMemoryService } = await import('../workspaceMemoryService.js');
-
-// ─── Test double for the LLM call ─────────────────────────────────────
-// Returns a single 'observation' entry so the short-summary guard passes
-// and `baseValues` has exactly one ADD row to assert against.
 function mockRouteCall(_params: unknown): Promise<{ content: string }> {
   return Promise.resolve({
     content: JSON.stringify({
@@ -109,131 +40,165 @@ function mockRouteCall(_params: unknown): Promise<{ content: string }> {
   });
 }
 
-// runSummary long enough to pass the §6.8 short-summary guard (≥ 100 chars).
-const LONG_SUMMARY = 'Agent completed the requested task successfully without errors. ' +
-  'All configured steps executed in sequence. Client preferences were respected throughout.';
+describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
+  let db: Awaited<typeof import('../../db/index.js')>['db'];
+  let client: Awaited<typeof import('../../db/index.js')>['client'];
+  let workspaceMemoryEntries: Awaited<typeof import('../../db/schema/index.js')>['workspaceMemoryEntries'];
+  let agentRuns: Awaited<typeof import('../../db/schema/index.js')>['agentRuns'];
+  let workspaceMemoryService: Awaited<typeof import('../workspaceMemoryService.js')>['workspaceMemoryService'];
+  let eq: Awaited<typeof import('drizzle-orm')>['eq'];
+  let and: Awaited<typeof import('drizzle-orm')>['and'];
 
-async function seedRun(): Promise<string> {
-  const [run] = await db
-    .insert(agentRuns)
-    .values({
-      organisationId: anchor!.orgId,
-      subaccountId:   anchor!.subaccountId,
-      agentId:        anchorAgent!.id,
-      runType:        'manual',
-      status:         'completed',
-      startedAt:      new Date(),
-      completedAt:    new Date(),
-    })
-    .returning({ id: agentRuns.id });
-  return run.id;
-}
+  // Canonical UUIDs from scripts/seed-integration-fixtures.ts. Pinning these
+  // (rather than `SELECT … LIMIT 1` to find any anchor) makes the suite robust
+  // against pollution from parallel integration tests that create their own
+  // throwaway orgs / subaccounts / agents.
+  const ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const AGENT_ID = '00000000-0000-0000-0000-000000000002';
 
-async function getWrittenRow(runId: string) {
-  const [row] = await db
-    .select({
-      isUnverified:         workspaceMemoryEntries.isUnverified,
-      provenanceConfidence: workspaceMemoryEntries.provenanceConfidence,
-    })
-    .from(workspaceMemoryEntries)
-    .where(
-      and(
-        eq(workspaceMemoryEntries.agentRunId, runId),
-        eq(workspaceMemoryEntries.subaccountId, anchor!.subaccountId),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
+  let orgId: string;
+  let subaccountId: string;
+  let agentId: string;
 
-// ─── Tests ────────────────────────────────────────────────────────────
+  beforeAll(async () => {
+    ({ db, client } = await import('../../db/index.js'));
+    const schema = await import('../../db/schema/index.js');
+    workspaceMemoryEntries = schema.workspaceMemoryEntries;
+    agentRuns = schema.agentRuns;
+    ({ eq, and } = await import('drizzle-orm'));
+    ({ workspaceMemoryService } = await import('../workspaceMemoryService.js'));
 
-// §6.7.1 override path: outcomeLearningService passes isUnverified=false so
-// retrieval filters keep including human-curated lessons.
-await test('override isUnverified=false honoured even on partial outcome', async () => {
-  const runId = await seedRun();
-  await workspaceMemoryService.extractRunInsights(
-    runId,
-    anchorAgent!.id,
-    anchor!.orgId,
-    anchor!.subaccountId,
-    LONG_SUMMARY,
-    { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
-    {
-      overrides: { isUnverified: false, provenanceConfidence: 0.7 },
-      _routeCall: mockRouteCall as any,
-    },
-  );
-  const row = await getWrittenRow(runId);
-  if (!row) throw new Error('row not found — extractRunInsights wrote nothing');
-  if (row.isUnverified !== false) {
-    throw new Error(`expected isUnverified=false, got ${row.isUnverified}`);
+    const [org] = await db
+      .select({ id: schema.organisations.id })
+      .from(schema.organisations)
+      .where(eq(schema.organisations.id, ORG_ID))
+      .limit(1);
+    if (!org) throw new Error(`Canonical org ${ORG_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
+
+    const [sub] = await db
+      .select({ id: schema.subaccounts.id })
+      .from(schema.subaccounts)
+      .where(and(eq(schema.subaccounts.organisationId, ORG_ID), eq(schema.subaccounts.slug, 'integration-test-subaccount')))
+      .limit(1);
+    if (!sub) throw new Error(`Canonical subaccount under ${ORG_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
+
+    const [agent] = await db
+      .select({ id: schema.agents.id })
+      .from(schema.agents)
+      .where(and(eq(schema.agents.id, AGENT_ID), eq(schema.agents.organisationId, ORG_ID)))
+      .limit(1);
+    if (!agent) throw new Error(`Canonical agent ${AGENT_ID} not seeded — run scripts/seed-integration-fixtures.ts`);
+
+    orgId = org.id;
+    subaccountId = sub.id;
+    agentId = agent.id;
+  });
+
+  afterAll(async () => {
+    if (client) {
+      await client.end();
+    }
+  });
+
+  async function seedRun(): Promise<string> {
+    const [run] = await db
+      .insert(agentRuns)
+      .values({
+        organisationId: orgId,
+        subaccountId,
+        agentId,
+        runType: 'manual',
+        status: 'completed',
+        startedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .returning({ id: agentRuns.id });
+    return run.id;
   }
-  if (row.provenanceConfidence !== 0.7) {
-    throw new Error(`expected provenanceConfidence=0.7, got ${row.provenanceConfidence}`);
+
+  async function getWrittenRow(runId: string) {
+    const [row] = await db
+      .select({
+        isUnverified: workspaceMemoryEntries.isUnverified,
+        provenanceConfidence: workspaceMemoryEntries.provenanceConfidence,
+      })
+      .from(workspaceMemoryEntries)
+      .where(
+        and(
+          eq(workspaceMemoryEntries.agentRunId, runId),
+          eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
+
+  test('override isUnverified=false honoured even on partial outcome', async () => {
+    const runId = await seedRun();
+    await workspaceMemoryService.extractRunInsights(
+      runId,
+      agentId,
+      orgId,
+      subaccountId,
+      LONG_SUMMARY,
+      { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+      {
+        overrides: { isUnverified: false, provenanceConfidence: 0.7 },
+        _routeCall: mockRouteCall as any,
+      },
+    );
+    const row = await getWrittenRow(runId);
+    expect(row, 'extractRunInsights wrote nothing').toBeTruthy();
+    expect(row!.isUnverified).toBe(false);
+    expect(row!.provenanceConfidence).toBe(0.7);
+  });
+
+  test('omitted overrides fall back to §6.7 defaults (partial → isUnverified=true, 0.5)', async () => {
+    const runId = await seedRun();
+    await workspaceMemoryService.extractRunInsights(
+      runId,
+      agentId,
+      orgId,
+      subaccountId,
+      LONG_SUMMARY,
+      { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+      {
+        _routeCall: mockRouteCall as any,
+      },
+    );
+    const row = await getWrittenRow(runId);
+    expect(row, 'extractRunInsights wrote nothing').toBeTruthy();
+    expect(row!.isUnverified).toBe(true);
+    expect(row!.provenanceConfidence).toBe(0.5);
+  });
+
+  test('success outcome default: isUnverified=false, confidence=0.7', async () => {
+    const runId = await seedRun();
+    await workspaceMemoryService.extractRunInsights(
+      runId,
+      agentId,
+      orgId,
+      subaccountId,
+      LONG_SUMMARY,
+      { runResultStatus: 'success', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
+      {
+        _routeCall: mockRouteCall as any,
+      },
+    );
+    const row = await getWrittenRow(runId);
+    expect(row, 'extractRunInsights wrote nothing').toBeTruthy();
+    expect(row!.isUnverified).toBe(false);
+    expect(row!.provenanceConfidence).toBe(0.7);
+  });
+
+  test('RunOutcome literal type-check — all runResultStatus values', () => {
+    const _variants: RunOutcome[] = [
+      { runResultStatus: 'success', trajectoryPassed: true, errorMessage: null },
+      { runResultStatus: 'success', trajectoryPassed: null, errorMessage: null },
+      { runResultStatus: 'success', trajectoryPassed: false, errorMessage: null },
+      { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null },
+      { runResultStatus: 'failed', trajectoryPassed: null, errorMessage: 'x' },
+    ];
+    expect(_variants.length).toBe(5);
+  });
 });
-
-// §6.7 defaults: partial run with no overrides → isUnverified=true, confidence=0.5.
-await test('omitted overrides fall back to §6.7 defaults (partial → isUnverified=true, 0.5)', async () => {
-  const runId = await seedRun();
-  await workspaceMemoryService.extractRunInsights(
-    runId,
-    anchorAgent!.id,
-    anchor!.orgId,
-    anchor!.subaccountId,
-    LONG_SUMMARY,
-    { runResultStatus: 'partial', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
-    {
-      _routeCall: mockRouteCall as any,
-    },
-  );
-  const row = await getWrittenRow(runId);
-  if (!row) throw new Error('row not found — extractRunInsights wrote nothing');
-  if (row.isUnverified !== true) {
-    throw new Error(`expected isUnverified=true (§6.7 default), got ${row.isUnverified}`);
-  }
-  if (row.provenanceConfidence !== 0.5) {
-    throw new Error(`expected provenanceConfidence=0.5 (§6.7 default), got ${row.provenanceConfidence}`);
-  }
-});
-
-// §6.7: success run default → isUnverified=false, confidence=0.7.
-await test('success outcome default: isUnverified=false, confidence=0.7', async () => {
-  const runId = await seedRun();
-  await workspaceMemoryService.extractRunInsights(
-    runId,
-    anchorAgent!.id,
-    anchor!.orgId,
-    anchor!.subaccountId,
-    LONG_SUMMARY,
-    { runResultStatus: 'success', trajectoryPassed: null, errorMessage: null } satisfies RunOutcome,
-    {
-      _routeCall: mockRouteCall as any,
-    },
-  );
-  const row = await getWrittenRow(runId);
-  if (!row) throw new Error('row not found');
-  if (row.isUnverified !== false) {
-    throw new Error(`expected isUnverified=false (success default), got ${row.isUnverified}`);
-  }
-  if (row.provenanceConfidence !== 0.7) {
-    throw new Error(`expected provenanceConfidence=0.7 (success default), got ${row.provenanceConfidence}`);
-  }
-});
-
-// Type-check pin: RunOutcome must accept all three enum values.
-await test('RunOutcome literal type-check — all runResultStatus values', () => {
-  const _variants: RunOutcome[] = [
-    { runResultStatus: 'success', trajectoryPassed: true,  errorMessage: null },
-    { runResultStatus: 'success', trajectoryPassed: null,  errorMessage: null },
-    { runResultStatus: 'success', trajectoryPassed: false, errorMessage: null },
-    { runResultStatus: 'partial', trajectoryPassed: null,  errorMessage: null },
-    { runResultStatus: 'failed',  trajectoryPassed: null,  errorMessage: 'x' },
-  ];
-  if (_variants.length !== 5) throw new Error('missing variants');
-});
-
-console.log(`\n  ${passed + failed} tests total; ${passed} passed, ${failed} failed`);
-await client.end();
-if (failed > 0) process.exit(1);

@@ -1,0 +1,46 @@
+You are reviewing iteration 2 of a draft specification document for implementation-readiness. Iteration 1 already fixed 16 mechanical defects (file-inventory drift, contract producer/consumer naming, terminal-state vocabulary, score-scale source-of-truth, ranked-source coverage, ask_initiator terminal path, substep_id correlation key naming, etc.).
+
+One AUTO-DECIDED item from iteration 1 is now BLOCKED awaiting operator/architect input and routed to `tasks/todo.md` as PA-V2-OP-S1: the schema strategy for `execution_files` vs a new `operator_run_files` table (the existing `execution_files` schema has none of the columns the file-event contract assumes). Do NOT re-raise this — it's tracked. The spec acknowledges this as §13 open question #1 explicitly marked BLOCKS CHUNK 7.
+
+Your job for iteration 2: re-review the spec from a fresh starting point. Look for:
+
+1. **Defects iteration 1 fixes might have INTRODUCED.** Iteration 1 added new service rows (crossOwnerDelegationRequestAssembler), new chunk-7 migration placeholder (0346), new §4.8 "Referenced existing primitives" sub-table, new event types in §4.6. Check whether §8 chunk sequencing now lists the new services in the right chunks; whether §11 self-consistency claims still hold; whether §9 execution-safety contracts still enumerate all paths.
+
+2. **Defects iteration 1 may have MISSED.** Run the same rubric pass:
+   - Contradictions between sections (same concept described two ways)
+   - Stale or retired language in prose after a section was rewritten
+   - Load-bearing claims without a named mechanism
+   - File inventory drift (prose mentions of paths not in §4)
+   - Schema overlaps without a source-of-truth statement
+   - Sequencing-ordering bugs (item A in chunk N depends on item B in chunk >N)
+   - Invariants stated in one place but not enforced elsewhere
+   - Missing per-item verdicts
+   - Concretely-unnamed new primitives
+
+3. **Cross-section consistency:**
+   - §5.4 CROSS_OWNER_DELEGATION_REQUEST — does its producer match §4.2's assembler service?
+   - §4.6 cross-owner pause-reason constants — referenced consistently in §5.6 and §9?
+   - §8 chunk sequencing — `crossOwnerDelegationRequestAssembler` should ship alongside the authorisation service in Chunk 3. Does the prose say so?
+   - §13 open question #1 — does the prose hold up to scrutiny (the placeholder migration 0346 in §4.1, the open-question entry in §13, the §9.3 allocator note)?
+
+Project context (do NOT re-derive from spec; use as ground truth):
+
+- Pre-production codebase: NO live users, NO staged rollouts, NO feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only, NO E2E tests, NO API contract tests.
+- Architecture: prefer existing primitives. No new abstractions duplicating existing primitives.
+
+Treat as OUT OF SCOPE — do NOT raise:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, predictive cost modelling, new abstractions duplicating existing primitives.
+- The execution_files schema decision (PA-V2-OP-S1) — already routed to operator.
+
+For each finding, give:
+1. A short title (one sentence).
+2. The exact section heading or line range.
+3. The defect (what's wrong).
+4. The minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say so explicitly — "no new findings, the spec is clean". Do not invent findings to fill space.
+
+The spec is:
+

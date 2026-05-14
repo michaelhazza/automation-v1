@@ -69,13 +69,13 @@ export function ApprovalCard({ artefact, isSuperseded, onApprove, onReject }: Ap
         <div className="flex gap-2 mt-3">
           <button
             onClick={() => onApprove?.(artefact.artefactId)}
-            className="flex-1 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium"
+            className="btn btn-primary btn-sm flex-1"
           >
             Approve
           </button>
           <button
             onClick={() => onReject?.(artefact.artefactId)}
-            className="flex-1 px-3 py-1.5 text-sm bg-white border border-gray-200 text-gray-700 rounded hover:bg-gray-50"
+            className="btn btn-secondary btn-sm flex-1"
           >
             Reject
           </button>

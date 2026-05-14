@@ -27,6 +27,7 @@ if [ -n "$VIOLATIONS" ]; then
   echo ""
   echo "The CRM query planner is read-only by design (spec §13.3 / §16.6)."
   echo "Use ghlReadHelpers for any new live-data access — never ghlAdapter write methods."
+  echo "[GATE] crm-query-planner-read-only: violations=1"
   exit 1
 fi
 
@@ -43,7 +44,9 @@ if [ -n "$ADAPTER_IMPORTS" ]; then
   echo "$ADAPTER_IMPORTS"
   echo ""
   echo "Use ghlReadHelpers (read-only surface) — not ghlAdapter directly."
+  echo "[GATE] crm-query-planner-read-only: violations=1"
   exit 1
 fi
 
 echo "PASS: verify-crm-query-planner-read-only"
+echo "[GATE] crm-query-planner-read-only: violations=0"

@@ -148,7 +148,7 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
         </div>
         <button
           onClick={() => { setShowAdd(true); setAddError(''); }}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-sm btn-primary"
         >
           + Add Team Member
         </button>
@@ -190,7 +190,7 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
                   <td className="px-4 py-3">
                     <button
                       onClick={() => setRemoveMemberId(m.userId)}
-                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors"
+                      className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
                     >
                       Remove
                     </button>
@@ -248,11 +248,11 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowAdd(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+            <button onClick={() => setShowAdd(false)} className="btn btn-sm btn-secondary">Cancel</button>
             <button
               onClick={handleAdd}
               disabled={addLoading || !addForm.email.trim() || !addForm.firstName.trim() || !addForm.lastName.trim()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer"
+              className="btn btn-sm btn-primary disabled:opacity-50"
             >
               {addLoading ? 'Creating...' : 'Create Member'}
             </button>
@@ -282,13 +282,13 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
               <div className="flex gap-2">
                 <button
                   onClick={handleCopyCredentials}
-                  className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+                  className="flex-1 btn btn-primary"
                 >
                   {copied ? 'Copied!' : 'Copy Login Instructions'}
                 </button>
                 <button
                   onClick={() => { setCreatedMember(null); setCopied(false); }}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer"
+                  className="btn btn-secondary"
                 >
                   Done
                 </button>

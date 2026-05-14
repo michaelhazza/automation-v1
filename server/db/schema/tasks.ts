@@ -1,8 +1,11 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import type { DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
-import { processes } from './processes';
+import { users } from './users';
+import { automations } from './automations';
 import { projects } from './projects';
 import { goals } from './goals';
 
@@ -26,8 +29,12 @@ export const tasks = pgTable(
     assignedAgentIds: jsonb('assigned_agent_ids').$type<string[]>().default([]),
     createdByAgentId: uuid('created_by_agent_id')
       .references(() => agents.id),
+    // Workflows V1 Phase 2 (P2) — task requester for approval pool resolution.
+    // Populated on task creation when a human user is the requester.
+    createdByUserId: uuid('created_by_user_id')
+      .references(() => users.id),
     processId: uuid('process_id')
-      .references(() => processes.id),
+      .references(() => automations.id),
     projectId: uuid('project_id')
       .references(() => projects.id),
     goalId: uuid('goal_id')
@@ -49,6 +56,19 @@ export const tasks = pgTable(
     isSubTask: boolean('is_sub_task').notNull().default(false),
     parentTaskId: uuid('parent_task_id'),
 
+    // ── Delegation tracking (Paperclip Hierarchy — migration 0215) ────────
+    // Populated by reassign_task when hierarchy is active.
+    delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
+
+    // ── System incident escalation (migration 0223) ─────────────────────
+    // When a system incident is escalated to an agent, the created task carries
+    // these two fields so the escalation can be traced back to the source row.
+    linkedEntityKind: text('linked_entity_kind'),
+    linkedEntityId: uuid('linked_entity_id'),
+
+    // Workflows V1 (migration 0270) — monotonic event sequence counter for workflow-task events
+    nextEventSeq: integer('next_event_seq').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -63,6 +83,11 @@ export const tasks = pgTable(
     goalIdx: index('tasks_goal_idx').on(table.goalId),
     // M-4: index for sub-task queries
     parentTaskIdx: index('tasks_parent_task_id_idx').on(table.parentTaskId),
+    // Workflows V1 (migration 0270) — sequence counter never goes negative
+    nextEventSeqNonneg: check(
+      'tasks_next_event_seq_nonneg',
+      sql`${table.nextEventSeq} >= 0`,
+    ),
   })
 );
 

@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccounts, organisations } from '../db/schema/index.js';
+import { subaccounts, organisations, subaccountUserAssignments } from '../db/schema/index.js';
 import { boardService } from './boardService.js';
 import { logger } from '../lib/logger.js';
 
@@ -76,6 +76,29 @@ export async function ensureOrgSubaccount(orgId: string, orgName: string) {
     }
     throw err;
   }
+}
+
+/**
+ * Return all active subaccounts the given user is assigned to.
+ * Used by the portal landing page to let users pick which subaccount to access.
+ */
+export async function getSubaccountsForUser(userId: string) {
+  return db
+    .select({
+      id: subaccounts.id,
+      name: subaccounts.name,
+      slug: subaccounts.slug,
+      status: subaccounts.status,
+    })
+    .from(subaccountUserAssignments)
+    .innerJoin(subaccounts, eq(subaccounts.id, subaccountUserAssignments.subaccountId))
+    .where(
+      and(
+        eq(subaccountUserAssignments.userId, userId),
+        eq(subaccounts.status, 'active'),
+        isNull(subaccounts.deletedAt),
+      ),
+    );
 }
 
 /**

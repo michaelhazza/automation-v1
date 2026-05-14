@@ -30,7 +30,7 @@ import {
 } from './subaccountOnboardingServicePure.js';
 import { logger } from '../lib/logger.js';
 
-const ONBOARDING_PLAYBOOK_SLUG = 'memory-briefings-onboarding';
+const ONBOARDING_WORKFLOW_SLUG = 'memory-briefings-onboarding';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -143,7 +143,7 @@ export async function markReady(input: MarkReadyInput): Promise<MarkReadyOutcome
       and(
         eq(subaccountOnboardingState.subaccountId, input.subaccountId),
         eq(subaccountOnboardingState.organisationId, input.organisationId),
-        eq(subaccountOnboardingState.playbookSlug, ONBOARDING_PLAYBOOK_SLUG),
+        eq(subaccountOnboardingState.workflowSlug, ONBOARDING_WORKFLOW_SLUG),
       ),
     );
 
@@ -168,7 +168,7 @@ async function loadState(subaccountId: string, organisationId: string): Promise<
       and(
         eq(subaccountOnboardingState.subaccountId, subaccountId),
         eq(subaccountOnboardingState.organisationId, organisationId),
-        eq(subaccountOnboardingState.playbookSlug, ONBOARDING_PLAYBOOK_SLUG),
+        eq(subaccountOnboardingState.workflowSlug, ONBOARDING_WORKFLOW_SLUG),
       ),
     )
     .limit(1);
@@ -222,14 +222,14 @@ async function persistResumeState(
     .values({
       organisationId,
       subaccountId,
-      playbookSlug: ONBOARDING_PLAYBOOK_SLUG,
+      workflowSlug: ONBOARDING_WORKFLOW_SLUG,
       status: 'in_progress',
       startedAt: now,
       resumeState: payload,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [subaccountOnboardingState.subaccountId, subaccountOnboardingState.playbookSlug],
+      target: [subaccountOnboardingState.subaccountId, subaccountOnboardingState.workflowSlug],
       set: {
         resumeState: payload,
         status: 'in_progress',

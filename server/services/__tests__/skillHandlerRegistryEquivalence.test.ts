@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="Uses dynamic await import('../skillExecutor.js') — gate regex only matches static 'from' imports; sibling is imported correctly"
 /**
  * skillHandlerRegistryEquivalence.test.ts — Phase 0 of skill-analyzer-v2.
  *
@@ -23,30 +24,17 @@
 // to placeholder values — this test is purely structural, it never hits the
 // DB or signs a JWT. ESM imports are hoisted, so we seed process.env *before*
 // a dynamic import pulls skillExecutor through the env-validated db module.
-await import('dotenv/config');
+import { expect, test } from 'vitest';
+
+import 'dotenv/config';
 process.env.DATABASE_URL ??= 'postgres://test-placeholder/unused';
 process.env.JWT_SECRET   ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM   ??= 'test-placeholder@example.com';
 
 const { SKILL_HANDLERS } = await import('../skillExecutor.js');
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Canonical handler key set (163 entries)
+// Canonical handler key set (203 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -69,11 +57,11 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'update_task',
   'read_inbox',
   'fetch_url',
-  'playbook_read_existing',
-  'playbook_validate',
-  'playbook_simulate',
-  'playbook_estimate_cost',
-  'playbook_propose_save',
+  'workflow_read_existing',
+  'workflow_validate',
+  'workflow_simulate',
+  'workflow_estimate_cost',
+  'workflow_propose_save',
   'send_email',
   'update_record',
   'request_approval',
@@ -168,7 +156,7 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'geo_llmstxt',
   'geo_compare',
   'generic_methodology',
-  // Phase A–G: Onboarding Playbooks config handlers
+  // Phase A–G: Onboarding Workflows config handlers
   'config_create_agent',
   'config_update_agent',
   'config_activate_agent',
@@ -197,14 +185,14 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'config_run_health_check',
   'config_preview_plan',
   'config_view_history',
-  'config_publish_playbook_output_to_portal',
-  'config_send_playbook_email_digest',
+  'config_publish_workflow_output_to_portal',
+  'config_send_workflow_email_digest',
   // Feature 3 — n8n Workflow Import
   'import_n8n_workflow',
-  // Phase 3 — Weekly Digest + Playbook Delivery
+  // Phase 3 — Weekly Digest + Workflow Delivery
   'weekly_digest_gather',
   'config_weekly_digest_gather',
-  'config_deliver_playbook_output',
+  'config_deliver_workflow_output',
   // ClientPulse session-1/2 additions (14 handlers folded in over multiple merges)
   'compute_staff_activity_pulse',
   'scan_integration_fingerprints',
@@ -220,6 +208,70 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'request_feature',
   'smart_skip_from_website',
   'canonical_dictionary',
+  // CRM Query Planner + deliberation handlers (added after initial 163-entry baseline)
+  'crm.query',
+  'ask_clarifying_questions',
+  'challenge_assumptions',
+  // System Monitoring Agent handlers (wired in via system-monitor handler registry sync)
+  'read_agent_run',
+  'read_baseline',
+  'read_connector_state',
+  'read_dlq_recent',
+  'read_heuristic_fires',
+  'read_incident',
+  'read_logs_for_correlation_id',
+  'read_recent_runs_for_agent',
+  'read_skill_execution',
+  'write_diagnosis',
+  'write_event',
+  // Tier-1 UI uplift — thread context handler (wired in with conversation thread context feature)
+  'update_thread_context',
+  // Subaccount Optimiser chunk 1 — agent-recommendations output primitive (PR #250)
+  'output.recommend',
+  // Agentic Commerce — spend-enabled skills (PR #255)
+  'pay_invoice',
+  'purchase_resource',
+  'subscribe_to_service',
+  'top_up_balance',
+  'issue_refund',
+  // Workflows V1 — orchestrator skill that dispatches a published workflow run (PR #258)
+  'workflow.run.start',
+  // Sub-account Optimiser stream 2 — 8 telemetry scan skills (PR #262)
+  'optimiser.scan_agent_budget',
+  'optimiser.scan_workflow_escalations',
+  'optimiser.scan_skill_latency',
+  'optimiser.scan_inactive_workflows',
+  'optimiser.scan_escalation_phrases',
+  'optimiser.scan_memory_citation',
+  'optimiser.scan_routing_uncertainty',
+  'optimiser.scan_cache_efficiency',
+  // Support Desk canonical handlers (PR #277)
+  'support.list_open_tickets',
+  'support.read_thread',
+  'support.propose_reply',
+  'support.add_internal_note',
+  'support.approve_draft',
+  'support.reject_draft',
+  'support.set_status',
+  'support.assign',
+  'support.tag',
+  'support.find_customer_history',
+  // Added in phase-1-showcase-mvps (PR #283)
+  'support.classify_ticket',
+  // Added in personal-assistant-v1 (PR #291) — Calendar action handlers
+  'calendar.list_events',
+  'calendar.get_event',
+  'calendar.find_free_slot',
+  'calendar.create_event',
+  'calendar.update_event',
+  'calendar.respond_to_invite',
+  // Added in personal-assistant-v1 (PR #291) — Slack action handlers
+  'slack.list_channels',
+  'slack.read_channel',
+  'slack.search_messages',
+  'slack.summarise_thread',
+  'slack.post_message',
+  'slack.post_dm',
 ];
 
 // ---------------------------------------------------------------------------
@@ -255,11 +307,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 163 keys', () => {
+test('SKILL_HANDLERS has exactly 216 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 163) {
+  if (count !== 216) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 163. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 216. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }
@@ -278,9 +330,6 @@ test('Every SKILL_HANDLERS entry is a function', () => {
 // ---------------------------------------------------------------------------
 
 console.log('');
-console.log(`skillHandlerRegistryEquivalence: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
-
 // Make this file a module so the top-level `await import()` used above
 // satisfies TS1375 (top-level await requires ESM module semantics).
 export {};

@@ -6,17 +6,57 @@
  */
 
 import crypto from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
+import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
 import { env } from '../lib/env.js';
+import { withBackoff } from '../lib/withBackoff.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
+import { getRefreshBufferMs } from './connectionTokenServicePure.js';
+import { getOrgTxContext } from '../instrumentation.js';
+import { auditEvent } from '../../shared/types/securityAuditEvents.js';
+import { AppError } from '../lib/errors.js';
+import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from './securityAuditService.js';
+
+export { validateEncryptionKeyOrThrow } from './connectionTokenValidation.js';
+
+// ─── Phase 3 D.3: principal-context discipline helpers ────────────────────────
+
+function trimmedStackTrace(): string {
+  return (new Error().stack ?? '').split('\n').slice(1, 6).join('\n');
+}
+
+let systemWorkerContextFlag = false;
+
+/**
+ * Set by worker bootstrap to indicate execution inside a pg-boss worker or
+ * known internal service. A null principal is only allowed inside verified
+ * system contexts (isSystemContext() === true).
+ */
+export function setSystemWorkerContext(active: boolean): void {
+  systemWorkerContextFlag = active;
+}
+
+function isSystemContext(): boolean {
+  return systemWorkerContextFlag;
+}
+
+/**
+ * Returns the current principal org ID from the ALS context:
+ *   - undefined: no ALS context active (suspicious — outside any withOrgTx)
+ *   - null:      ALS context present but org-less (system/worker flows)
+ *   - string:    the tenant org ID of the current request/job
+ */
+function getPrincipalOrgId(): string | null | undefined {
+  const ctx = getOrgTxContext();
+  if (ctx === undefined) return undefined;
+  return ctx.organisationId ?? null;
+}
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
-// Refresh tokens 5 minutes before they expire
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 // Current key version written into every new encrypted value.
 // To rotate: set TOKEN_ENCRYPTION_KEY to a new 64-char hex value, move the old
 // value to TOKEN_ENCRYPTION_KEY_V0, then bump this constant to 'k2'. Once all
@@ -133,11 +173,56 @@ export const connectionTokenService = {
     if (connection.authType !== 'oauth2') return connection;
     if (!connection.tokenExpiresAt) return connection;
 
+    // ─── Phase 3 D.3: principal-context discipline ────────────────────────────
+    const principalOrgId = getPrincipalOrgId();
+
+    if (principalOrgId === undefined) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.missingPrincipalContext,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, callerStack: trimmedStackTrace() },
+      });
+      throw new AppError({
+        code:       'MISSING_PRINCIPAL_CONTEXT',
+        statusCode: 500,
+        message:    'Principal context not set in ALS — refusing token refresh',
+        context:    { connectionId: connection.id, connectionOrgId: connection.organisationId },
+      });
+    }
+    // principalOrgId === null → system flow (pg-boss workers, internal services) — allowed if isSystemContext()
+    if (principalOrgId === null && !isSystemContext()) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.missingPrincipalContext,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, reason: 'null_principal_outside_system_context', callerStack: trimmedStackTrace() },
+      });
+      throw new AppError({
+        code:       'MISSING_PRINCIPAL_CONTEXT',
+        statusCode: 500,
+        message:    'Null principal outside system context — refusing token refresh',
+        context:    { connectionId: connection.id, connectionOrgId: connection.organisationId },
+      });
+    }
+    if (principalOrgId !== null && principalOrgId !== connection.organisationId) {
+      await recordSecurityEvent({
+        event:          auditEvent.security.crossTenantAttempt,
+        organisationId: SECURITY_AUDIT_SENTINEL_ORG_ID,
+        meta: { connectionId: connection.id, connectionOrgId: connection.organisationId, principalOrgId, attemptedOperation: 'token_refresh' },
+      });
+      throw new AppError({
+        code:       'CROSS_TENANT_TOKEN_REFRESH',
+        statusCode: 403,
+        message:    'Cross-tenant token refresh blocked',
+        context:    { connectionOrgId: connection.organisationId, principalOrgId },
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const expiresAt = new Date(connection.tokenExpiresAt).getTime();
     const now = Date.now();
 
-    // Token still valid with buffer
-    if (expiresAt > now + REFRESH_BUFFER_MS) return connection;
+    // Token still valid with per-provider buffer
+    if (expiresAt > now + getRefreshBufferMs(connection.providerType)) return connection;
 
     // Need to refresh
     if (!connection.refreshToken) {
@@ -240,8 +325,244 @@ export const connectionTokenService = {
         throw { statusCode: 400, message: 'Slack token refresh not yet implemented' };
       }
 
+      case 'stripe_agent': {
+        // Stripe Connect SPT rotation via platform-level secret key.
+        // Uses POST /v1/ephemeral_keys with Stripe-Account header set to the
+        // connected account ID. The 'refreshToken' stored on the connection row
+        // is the Stripe connected account ID (acct_...) — stable across refreshes.
+        // Bypasses per-connection clientIdEnc/clientSecretEnc/tokenUrl per §7.4.
+        const platformKey = process.env.STRIPE_PLATFORM_SECRET_KEY ?? '';
+        if (!platformKey) {
+          throw { statusCode: 500, message: 'STRIPE_PLATFORM_SECRET_KEY is not configured' };
+        }
+        const connectedAccountId = refreshToken;
+        const result = await withBackoff(
+          async () => {
+            const response = await fetch('https://api.stripe.com/v1/ephemeral_keys', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${platformKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Stripe-Account': connectedAccountId,
+                'Stripe-Version': '2024-06-20',
+              },
+              body: new URLSearchParams({
+                customer: connectedAccountId,
+              }),
+            });
+            if (!response.ok) {
+              const body = await response.text().catch(() => response.statusText);
+              throw { statusCode: response.status, message: `Stripe SPT refresh failed: ${body}` };
+            }
+            const data = await response.json() as { secret?: string; expires?: number };
+            if (!data.secret) {
+              throw { statusCode: 500, message: 'Stripe SPT refresh returned no secret' };
+            }
+            return data;
+          },
+          {
+            label: 'connectionTokenService.stripe_agent.refresh',
+            maxAttempts: 3,
+            isRetryable: (err: unknown) => {
+              const e = err as { statusCode?: number };
+              return typeof e.statusCode === 'number' && e.statusCode >= 500;
+            },
+            correlationId: connectedAccountId,
+            runId: 'spt_refresh',
+          },
+        );
+        return {
+          accessToken: result.secret!,
+          // refreshToken is the connected account ID — stable, pass it back unchanged
+          refreshToken: connectedAccountId,
+          expiresInSeconds: result.expires
+            ? Math.max(0, result.expires - Math.floor(Date.now() / 1000))
+            : 3600,
+        };
+      }
+
       default:
         throw { statusCode: 400, message: `Token refresh not supported for provider: ${provider}` };
+    }
+  },
+
+  /**
+   * Test connectivity for a connection by id (integration_connections OR mcp_server_configs).
+   * Spec §4.9: always returns 200, monotonic 10s timeout, structured error.code drawn from
+   * the closed enum { TIMEOUT, AUTH_FAILED, NETWORK_ERROR, PROVIDER_ERROR }.
+   *
+   * Connection-not-found is a routing error, not a test outcome — returns notFound:true
+   * so the route can map it to a 404 instead of a 200 with a fake code.
+   */
+  async testConnection(
+    { id, organisationId }: { id: string; organisationId: string },
+  ): Promise<
+    | {
+        status: 'ok' | 'failed';
+        latencyMs: number;
+        testedAt: string;
+        error?: { code: 'TIMEOUT' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR'; message: string };
+        capabilities?: string[];
+      }
+    | { notFound: true }
+  > {
+    const TIMEOUT_MS = 10_000;
+    const testedAt = new Date().toISOString();
+    const start = process.hrtime.bigint();
+
+    const elapsed = (): number =>
+      Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<'timeout'>(resolve => {
+      timeoutHandle = setTimeout(() => resolve('timeout'), TIMEOUT_MS);
+    });
+    const clearTimer = (): void => {
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+    };
+
+    try {
+      // Look up the connection — integration or MCP. Filter by (id, organisationId)
+      // in SQL (defence-in-depth per DEVELOPMENT_GUIDELINES §1) so the row never
+      // crosses tenant boundaries even if the request runs outside an RLS-scoped tx.
+      const [icRow] = await db.select()
+        .from(integrationConnections)
+        .where(and(
+          eq(integrationConnections.id, id),
+          eq(integrationConnections.organisationId, organisationId),
+        ))
+        .limit(1);
+
+      if (icRow) {
+        // Integration connection test
+        const testResult = await Promise.race<'ok' | 'timeout'>([
+          (async (): Promise<'ok'> => {
+            if (icRow.authType === 'api_key') {
+              if (!icRow.secretsRef) {
+                throw { authFailed: true, message: 'No API key configured.' };
+              }
+            } else if (icRow.authType === 'oauth2') {
+              const hasToken = !!(icRow.accessToken || icRow.refreshToken);
+              if (!hasToken) {
+                throw { authFailed: true, message: 'No OAuth token stored.' };
+              }
+              if (icRow.tokenExpiresAt && new Date(icRow.tokenExpiresAt) < new Date()) {
+                if (!icRow.refreshToken) {
+                  throw { authFailed: true, message: 'Access token expired and no refresh token available.' };
+                }
+              }
+            }
+            return 'ok';
+          })(),
+          timeoutPromise,
+        ]);
+
+        if (testResult === 'timeout') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      // Try MCP server config (same dual-filter pattern as above).
+      const [mcpRow] = await db.select()
+        .from(mcpServerConfigs)
+        .where(and(
+          eq(mcpServerConfigs.id, id),
+          eq(mcpServerConfigs.organisationId, organisationId),
+        ))
+        .limit(1);
+
+      if (mcpRow) {
+        if (mcpRow.transport === 'http' && mcpRow.endpointUrl) {
+          const testResult = await Promise.race<'ok' | 'timeout'>([
+            (async (): Promise<'ok'> => {
+              const response = await fetch(mcpRow.endpointUrl!, {
+                method: 'HEAD',
+                signal: AbortSignal.timeout(9_000),
+              });
+              if (response.status === 401 || response.status === 403) {
+                throw { authFailed: true, message: `MCP server returned ${response.status}.` };
+              }
+              if (!response.ok) {
+                throw { providerError: true, message: `MCP server returned ${response.status}.` };
+              }
+              return 'ok';
+            })(),
+            timeoutPromise,
+          ]);
+
+          if (testResult === 'timeout') {
+            return {
+              status: 'failed',
+              latencyMs: Math.round(elapsed()),
+              testedAt,
+              error: { code: 'TIMEOUT', message: 'Provider did not respond within 10s.' },
+            };
+          }
+
+          const capabilities = mcpRow.discoveredToolsJson
+            ? mcpRow.discoveredToolsJson.map(t => t.name)
+            : undefined;
+
+          return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt, capabilities };
+        }
+
+        // stdio or no endpoint URL — report status from last known state.
+        // lastError is upstream text; do not forward it (could leak secrets / URLs).
+        if (mcpRow.status === 'error') {
+          return {
+            status: 'failed',
+            latencyMs: Math.round(elapsed()),
+            testedAt,
+            error: { code: 'PROVIDER_ERROR', message: 'MCP server is in error state.' },
+          };
+        }
+
+        return { status: 'ok', latencyMs: Math.round(elapsed()), testedAt };
+      }
+
+      // Not in either table — routing error, surfaced as 404 by the route.
+      return { notFound: true };
+    } catch (err: unknown) {
+      const e = err as { authFailed?: boolean; providerError?: boolean; name?: string; message?: string };
+      // Map internal throw shapes onto the closed enum:
+      //   { authFailed: true }    → AUTH_FAILED  (missing/expired credentials, 401/403 from provider)
+      //   { providerError: true } → PROVIDER_ERROR (5xx, 4xx non-auth, malformed response)
+      //   AbortError / fetch network errors → NETWORK_ERROR
+      //   anything else → PROVIDER_ERROR (catch-all stays inside the closed enum)
+      let code: 'AUTH_FAILED' | 'NETWORK_ERROR' | 'PROVIDER_ERROR';
+      let message: string;
+      if (e.authFailed) {
+        code = 'AUTH_FAILED';
+        message = e.message ?? 'Authentication failed.';
+      } else if (
+        e.name === 'AbortError' ||
+        e.name === 'TypeError' ||
+        /(ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_|TLS|fetch failed)/i.test(e.message ?? '')
+      ) {
+        code = 'NETWORK_ERROR';
+        message = 'Network error contacting provider.';
+      } else {
+        code = 'PROVIDER_ERROR';
+        message = e.providerError ? (e.message ?? 'Provider error.') : 'Provider error.';
+      }
+      return {
+        status: 'failed',
+        latencyMs: Math.round(elapsed()),
+        testedAt,
+        error: { code, message },
+      };
+    } finally {
+      clearTimer();
     }
   },
 };

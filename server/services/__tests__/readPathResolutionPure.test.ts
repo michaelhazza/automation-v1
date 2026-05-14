@@ -7,29 +7,9 @@
  *   npx tsx server/services/__tests__/readPathResolutionPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { resolveReadPath, type ReadPathResolution } from '../readPathResolutionPure.js';
 import type { ActionDefinition } from '../../config/actionRegistry.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  const aJson = JSON.stringify(a);
-  const bJson = JSON.stringify(b);
-  if (aJson !== bJson) throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
-}
 
 /** Build a minimal ActionDefinition stub for testing. */
 function makeAction(overrides: Partial<ActionDefinition> = {}): ActionDefinition {
@@ -57,8 +37,8 @@ console.log('');
 
 test('action with readPath canonical resolves to canonical', () => {
   const result = resolveReadPath(makeAction({ readPath: 'canonical' }));
-  assertEqual(result.source, 'canonical', 'source');
-  assertEqual(result.rationale, undefined, 'rationale');
+  expect(result.source, 'source').toBe('canonical');
+  expect(result.rationale, 'rationale').toBe(undefined);
 });
 
 test('action with readPath liveFetch resolves to liveFetch with rationale', () => {
@@ -66,14 +46,14 @@ test('action with readPath liveFetch resolves to liveFetch with rationale', () =
     readPath: 'liveFetch',
     liveFetchRationale: 'Provider API — not yet migrated',
   }));
-  assertEqual(result.source, 'liveFetch', 'source');
-  assertEqual(result.rationale, 'Provider API — not yet migrated', 'rationale');
+  expect(result.source, 'source').toBe('liveFetch');
+  expect(result.rationale, 'rationale').toBe('Provider API — not yet migrated');
 });
 
 test('action with readPath none resolves to none', () => {
   const result = resolveReadPath(makeAction({ readPath: 'none' }));
-  assertEqual(result.source, 'none', 'source');
-  assertEqual(result.rationale, undefined, 'rationale');
+  expect(result.source, 'source').toBe('none');
+  expect(result.rationale, 'rationale').toBe(undefined);
 });
 
 test('action without readPath resolves to none', () => {
@@ -81,19 +61,15 @@ test('action without readPath resolves to none', () => {
   // Simulate a legacy entry that somehow has no readPath
   delete (action as any).readPath;
   const result = resolveReadPath(action);
-  assertEqual(result.source, 'none', 'source');
+  expect(result.source, 'source').toBe('none');
 });
 
 test('liveFetch without rationale returns undefined rationale', () => {
   const result = resolveReadPath(makeAction({ readPath: 'liveFetch' }));
-  assertEqual(result.source, 'liveFetch', 'source');
-  assertEqual(result.rationale, undefined, 'rationale');
+  expect(result.source, 'source').toBe('liveFetch');
+  expect(result.rationale, 'rationale').toBe(undefined);
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

@@ -16,7 +16,7 @@ interface DedupeEntry {
   expiresAt: number;
 }
 
-class WebhookDedupeStore {
+export class WebhookDedupeStore {
   private entries = new Map<string, DedupeEntry>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -50,6 +50,16 @@ class WebhookDedupeStore {
     }
 
     return false;
+  }
+
+  /**
+   * Read-only check: returns true if the event was previously successfully
+   * processed (i.e. isDuplicate was already called and marked it).
+   * Does NOT mark — safe to call before side effects without consuming the token.
+   */
+  hasBeenProcessed(eventId: string): boolean {
+    const existing = this.entries.get(eventId);
+    return !!(existing && existing.expiresAt > Date.now());
   }
 
   private cleanup(): void {

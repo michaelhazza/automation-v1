@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>10 — Sarah · Mailbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="proto-nav"><a href="index.html">← Catalogue</a> · 10 / 16 · <span class="muted">AgentMailboxPage (new) — same UI both backends, deep-links on Google</span> · <a href="09-agent-identity-tab.html">← Identity</a> · <a href="11-agent-calendar.html">Next: Calendar →</a></div>
+
+<div class="appbar">
+  <span class="logo">A</span>
+  <span class="product">Automation OS</span>
+  <span class="crumbs">
+    <span class="sep">/</span><a href="#">Acme Client Co.</a>
+    <span class="sep">/</span><a href="09-agent-identity-tab.html">Sarah</a>
+    <span class="sep">/</span><span style="color: var(--sl-900);">Mailbox</span>
+  </span>
+  <span class="right"><span class="user-pill"><span class="avatar">M</span><span>Maya Lim</span></span></span>
+</div>
+
+<div class="page" style="max-width: 1080px;">
+  <div class="page-header">
+    <div style="display: flex; gap: 14px; align-items: center;">
+      <a href="09-agent-identity-tab.html" class="text-sm" style="color: var(--sl-500); text-decoration: none;">← Sarah</a>
+      <span class="muted">/</span>
+      <h1 class="page-title">Mailbox</h1>
+      <span class="text-xs muted" style="margin-left: 8px;"><code>sarah@acme.synthetos.io</code></span>
+      <span class="backend-chip native"><span class="dot"></span>Synthetos-native</span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary btn-sm">Filter</button>
+      <button class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Compose
+      </button>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 0; border: 1px solid var(--sl-200); border-radius: 8px; overflow: hidden; margin-bottom: 14px; background: white; font-size: 12px;">
+    <a href="#" style="padding: 10px 16px; background: var(--sl-50); color: var(--sl-900); font-weight: 500; text-decoration: none; border-right: 1px solid var(--sl-200);">Inbox <span class="muted">(14)</span></a>
+    <a href="#" style="padding: 10px 16px; color: var(--sl-600); text-decoration: none; border-right: 1px solid var(--sl-200);">Sent <span class="muted">(38)</span></a>
+    <a href="#" style="padding: 10px 16px; color: var(--sl-600); text-decoration: none;">Threads I'm on <span class="muted">(51)</span></a>
+  </div>
+
+  <div class="card">
+    <table class="table">
+      <tbody>
+        <tr style="background: var(--indigo-50);">
+          <td style="width: 6px; padding: 0; background: var(--indigo-500);"></td>
+          <td style="width: 32px;"><span class="avatar avatar-sm avatar-human">ML</span></td>
+          <td style="padding-left: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <strong style="color: var(--sl-900);">Maya Lim</strong>
+              <span class="text-xs" style="color: var(--sl-500);">maya@acme.com</span>
+            </div>
+            <div style="margin-top: 2px;">
+              <strong style="font-size: 13px; color: var(--sl-900);">Re: Q2 attribution dashboard</strong>
+              <span class="text-sm muted"> — Sarah, can you re-run the LinkedIn cohort with a 30-day window? I want to compare against the email cohort before we lock the…</span>
+            </div>
+          </td>
+          <td style="width: 100px; text-align: right; vertical-align: top;" class="text-xs muted">29 Apr · 14:18</td>
+        </tr>
+
+        <tr style="background: var(--indigo-50);">
+          <td style="width: 6px; padding: 0; background: var(--indigo-500);"></td>
+          <td style="width: 32px;"><span class="avatar avatar-sm avatar-neutral">A</span></td>
+          <td style="padding-left: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <strong style="color: var(--sl-900);">Google Ads weekly</strong>
+              <span class="text-xs" style="color: var(--sl-500);">noreply@adwords.example</span>
+              <span class="pill" style="background: var(--sl-100); color: var(--sl-600); font-size: 10px;">automated</span>
+            </div>
+            <div style="margin-top: 2px;">
+              <strong style="font-size: 13px; color: var(--sl-900);">Your weekly report is ready</strong>
+              <span class="text-sm muted"> — Spend $2,847.32 · CPA $42.10 · Conversions 67. View the dashboard for the full breakdown…</span>
+            </div>
+          </td>
+          <td style="width: 100px; text-align: right; vertical-align: top;" class="text-xs muted">29 Apr · 12:04</td>
+        </tr>
+
+        <tr>
+          <td style="width: 6px; padding: 0;"></td>
+          <td style="width: 32px;"><span class="avatar avatar-sm avatar-agent">JO</span></td>
+          <td style="padding-left: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span style="color: var(--sl-700); font-weight: 500;">Johnny</span>
+              <span class="text-xs" style="color: var(--sl-500);">johnny@acme.synthetos.io</span>
+            </div>
+            <div style="margin-top: 2px;">
+              <span style="font-size: 13px; color: var(--sl-700);">Lead enrichment hand-off</span>
+              <span class="text-sm muted"> — Heya — passing the SaaS list over to you. 200 rows, see the shared folder. Ping me if anything's blocking…</span>
+            </div>
+          </td>
+          <td style="width: 100px; text-align: right; vertical-align: top;" class="text-xs muted">28 Apr · 17:02</td>
+        </tr>
+
+        <tr>
+          <td style="width: 6px; padding: 0;"></td>
+          <td style="width: 32px;"><span class="avatar avatar-sm avatar-human">JK</span></td>
+          <td style="padding-left: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span style="color: var(--sl-700); font-weight: 500;">Jamie Khouri</span>
+              <span class="text-xs" style="color: var(--sl-500);">jamie@partner.example</span>
+            </div>
+            <div style="margin-top: 2px;">
+              <span style="font-size: 13px; color: var(--sl-700);">Co-marketing data export</span>
+              <span class="text-sm muted"> — Hey Sarah, attaching the Q1 numbers from our side. Let me know if you want them in a different shape…</span>
+            </div>
+          </td>
+          <td style="width: 100px; text-align: right; vertical-align: top;" class="text-xs muted">28 Apr · 09:15</td>
+        </tr>
+
+        <tr>
+          <td style="width: 6px; padding: 0;"></td>
+          <td style="width: 32px;"><span class="avatar avatar-sm avatar-neutral">S</span></td>
+          <td style="padding-left: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span style="color: var(--sl-700); font-weight: 500;">Stripe</span>
+              <span class="text-xs" style="color: var(--sl-500);">no-reply@stripe.com</span>
+            </div>
+            <div style="margin-top: 2px;">
+              <span style="font-size: 13px; color: var(--sl-700);">Monthly receipt</span>
+              <span class="text-sm muted"> — Receipt #2025-04-2891 for Acme Client Co. — total $4,290.00…</span>
+            </div>
+          </td>
+          <td style="width: 100px; text-align: right; vertical-align: top;" class="text-xs muted">27 Apr · 03:00</td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 14px;">
+    <div class="card-head">
+      <div>
+        <h2>Same agent, Google backend</h2>
+        <div class="sub">Same UI shell. Recent activity preview — operator deep-links to Gmail for full client features.</div>
+      </div>
+      <span class="backend-chip google"><span class="dot"></span>Google Workspace</span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+
+      <div class="callout callout-info" style="margin: 14px 18px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div>This view shows the last 20 messages mirrored to Automation OS for audit. Operator clicks "Open in Gmail" for full mailbox features. Compose still goes through Automation OS so policy + audit + signing apply.</div>
+      </div>
+
+      <table class="table">
+        <tbody>
+          <tr>
+            <td style="width: 32px; padding-left: 18px;"><span class="avatar avatar-sm avatar-human">ML</span></td>
+            <td style="padding-left: 0;">
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <strong style="color: var(--sl-900);">Maya Lim</strong>
+                <span class="text-xs" style="color: var(--sl-500);">maya@clientco.com</span>
+              </div>
+              <div style="margin-top: 2px;">
+                <strong style="font-size: 13px; color: var(--sl-900);">Re: Q2 attribution dashboard</strong>
+              </div>
+            </td>
+            <td style="width: 130px; text-align: right; padding-right: 18px;">
+              <a href="https://mail.google.com/mail/u/0/#inbox" class="deep-link" target="_blank">
+                Open in Gmail
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="width: 32px; padding-left: 18px;"><span class="avatar avatar-sm avatar-agent">JO</span></td>
+            <td style="padding-left: 0;">
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="color: var(--sl-700); font-weight: 500;">Johnny</span>
+                <span class="text-xs" style="color: var(--sl-500);">johnny@clientco.com</span>
+              </div>
+              <div style="margin-top: 2px;">
+                <span style="font-size: 13px; color: var(--sl-700);">Lead enrichment hand-off</span>
+              </div>
+            </td>
+            <td style="width: 130px; text-align: right; padding-right: 18px;">
+              <a href="https://mail.google.com/mail/u/0/#inbox" class="deep-link" target="_blank">
+                Open in Gmail
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="callout callout-info" style="margin-top: 8px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    <div><strong>Both backends, same shell.</strong> Reads <code>workspace_messages</code> filtered by actor. On native, it's the only inbox. On Google, it's a thin recent-activity preview with deep-links to Gmail. Compose always goes through <code>workspaceEmailPipeline</code> — policy, signing, rate-limit, audit happen server-side regardless of backend.</div>
+  </div>
+</div>
+
+</body>
+</html>

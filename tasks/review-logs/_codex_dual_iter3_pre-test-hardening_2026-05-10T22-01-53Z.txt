@@ -1,0 +1,1286 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e13e9-4438-7792-9586-8ba1bea5ee57
+--------
+user
+current changes
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --stat; git diff --cached --stat' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 858ms:
+ M server/services/connectorConfigService.ts
+ M server/services/scheduledTaskService.ts
+?? tasks/review-logs/.codex-prompt-iter1-2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter1_pre-test-hardening_2026-05-10T21-40-40Z.txt
+?? tasks/review-logs/_codex_dual_iter2_pre-test-hardening_2026-05-10T21-55-09Z.txt
+?? tasks/review-logs/_codex_dual_iter3_pre-test-hardening_2026-05-10T22-01-53Z.txt
+ server/services/connectorConfigService.ts | 11 +++++
+ server/services/scheduledTaskService.ts   | 82 ++++++++++++++++++++++++-------
+ 2 files changed, 76 insertions(+), 17 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/services/connectorConfigService.ts server/services/scheduledTaskService.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 501ms:
+diff --git a/server/services/connectorConfigService.ts b/server/services/connectorConfigService.ts
+index 0357c097..264a43ed 100644
+--- a/server/services/connectorConfigService.ts
++++ b/server/services/connectorConfigService.ts
+@@ -1,3 +1,4 @@
++import { randomUUID } from 'crypto';
+ import { eq, and, ne, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+@@ -137,6 +138,12 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 — Teamwork connectors require a per-connector
++    // webhook URL token at creation time. The tokenised webhook route
++    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
++    // token; a null token means deliveries are silently dropped with 401.
++    // Migration 0314 backfills existing rows; this auto-generates for new ones.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -146,6 +153,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+ 
+@@ -165,6 +173,8 @@ export const connectorConfigService = {
+     pollIntervalMinutes?: number;
+     webhookSecret?: string;
+   }) {
++    // Pre-Test Hardening W3 — see `create` above for rationale.
++    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+     const [config] = await db
+       .insert(connectorConfigs)
+       .values({
+@@ -175,6 +185,7 @@ export const connectorConfigService = {
+         configJson: data.configJson ?? null,
+         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+         webhookSecret: data.webhookSecret ?? null,
++        webhookToken,
+       })
+       .returning();
+     return config;
+diff --git a/server/services/scheduledTaskService.ts b/server/services/scheduledTaskService.ts
+index 8bdc0aa6..7acdf579 100644
+--- a/server/services/scheduledTaskService.ts
++++ b/server/services/scheduledTaskService.ts
+@@ -1,4 +1,4 @@
+-import { eq, and, desc, isNull } from 'drizzle-orm';
++import { eq, and, desc, isNull, sql } from 'drizzle-orm';
+ import { db } from '../db/index.js';
+ import {
+   scheduledTasks,
+@@ -9,7 +9,7 @@ import { configHistoryService } from './configHistoryService.js';
+ import { taskService } from './taskService.js';
+ import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
+ import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
+-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
++import { getOrgTxContext, withOrgTx } from '../instrumentation.js';
+ 
+ // ---------------------------------------------------------------------------
+ // Scheduled Task Service — CRUD + occurrence firing + retry logic
+@@ -608,6 +608,40 @@ export const scheduledTaskService = {
+   // `pinned_version_unavailable` (422) when the pinned version no longer exists.
+ 
+   async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
++    // `fireOccurrence` is called from two surfaces:
++    //   (a) HTTP route handler — already inside the auth middleware's ALS tx
++    //       (`getOrgTxContext()` returns the tx with `app.organisation_id` set).
++    //   (b) `enqueueRunNow → setImmediate` — runs after the request tx has
++    //       finished, so ALS is empty and FORCE-RLS would silently no-op every
++    //       `scheduled_tasks` read/write below.
++    //
++    // For (b) we must open a self-contained org-scoped tx ourselves so that
++    // (i) FORCE-RLS sees `app.organisation_id` and lets us read the schedule,
++    // (ii) downstream `taskService.createTask(getOrgScopedDb(...))` works.
++    //
++    // We intentionally do NOT keep the tx open across `agentExecutionService.executeRun`
++    // — that call can take minutes. Instead the body re-opens short tx blocks as
++    // needed; this top-level wrapper exists only to set the ALS GUC so each block
++    // inherits it via `withOrgTx`.
++    if (getOrgTxContext()) {
++      // Already inside an ALS context — execute directly.
++      return this._fireOccurrenceBody(scheduledTaskId, organisationId);
++    }
++    // No active context — open one for the duration of fireOccurrence.
++    return db.transaction(async (outerTx) => {
++      await outerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
++      return withOrgTx(
++        {
++          tx: outerTx,
++          organisationId,
++          source: 'service:scheduledTaskService.fireOccurrence',
++        },
++        () => this._fireOccurrenceBody(scheduledTaskId, organisationId),
++      );
++    });
++  },
++
++  async _fireOccurrenceBody(scheduledTaskId: string, organisationId: string): Promise<void> {
+     const [st] = await db
+       .select()
+       .from(scheduledTasks)
+@@ -645,22 +679,36 @@ export const scheduledTaskService = {
+       : `${st.title} #${occurrence}`;
+ 
+     try {
+-      const tx = getOrgScopedDb('service:scheduledTaskService.runDue');
+-      const task = await taskService.createTask(
+-        {
+-          organisationId: st.organisationId,
+-          subaccountId: st.subaccountId!,
+-          data: {
+-            title: taskTitle,
+-            description: st.description ?? undefined,
+-            brief: st.brief ?? undefined,
+-            priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+-            status: 'inbox',
+-            assignedAgentId: st.assignedAgentId,
++      // taskService.createTask requires a caller-supplied tx (DEC-4). Open a
++      // short-lived tx so this createTask call works whether or not the caller
++      // already provided ALS context above. The `set_config` here is redundant
++      // when ALS is already set, but ensures the GUC is present unconditionally.
++      const task = await db.transaction(async (innerTx) => {
++        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
++        return withOrgTx(
++          {
++            tx: innerTx,
++            organisationId: st.organisationId,
++            subaccountId: st.subaccountId,
++            source: 'service:scheduledTaskService.fireOccurrence',
+           },
+-        },
+-        tx,
+-      );
++          () => taskService.createTask(
++            {
++              organisationId: st.organisationId,
++              subaccountId: st.subaccountId!,
++              data: {
++                title: taskTitle,
++                description: st.description ?? undefined,
++                brief: st.brief ?? undefined,
++                priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
++                status: 'inbox',
++                assignedAgentId: st.assignedAgentId,
++              },
++            },
++            innerTx,
++          ),
++        );
++      });
+ 
+       // Update the run with the task reference
+       await db.update(scheduledTaskRuns).set({
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/services/scheduledTaskService.ts | Select-Object -Skip 120' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 768ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/scheduledTaskService.ts -TotalCount 760 | Select-Object -Skip 560' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 842ms:
+          );
+          return nextInTz;
+        }
+      }
+
+      return nextInTz;
+    } catch (err) {
+      console.error('[ScheduledTask] Failed to compute next occurrence:', err);
+      return null;
+    }
+  },
+
+  async computeUpcomingOccurrences(
+    rruleStr: string,
+    timezone: string,
+    scheduleTime: string,
+    count: number
+  ): Promise<Date[]> {
+    try {
+      const RRule = await getRRule();
+      const rule = RRule.fromString(rruleStr);
+      const now = new Date();
+      const dates = rule.between(now, new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000), true).slice(0, count);
+
+      const [hours, minutes] = scheduleTime.split(':').map(Number);
+      return dates.map(d =>
+        zonedWallClockToUtc(
+          d.getUTCFullYear(),
+          d.getUTCMonth() + 1,
+          d.getUTCDate(),
+          hours,
+          minutes,
+          timezone
+        )
+      );
+    } catch {
+      return [];
+    }
+  },
+
+  // ƒ"?ƒ"?ƒ"? Fire Occurrence ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+  //
+  // Spec ¶õ5.4 ƒ?" scheduledƒÅ'workflow dispatch: when a scheduled task fires a
+  // workflow run (Chunk 15 scope), read `st.pinnedTemplateVersionId` from the
+  // scheduled task row and pass it as `pinnedTemplateVersionId` to
+  // WorkflowRunService.startRun. startRun honours the pin via
+  // WorkflowScheduleDispatchService.pickVersionForSchedule and throws
+  // `pinned_version_unavailable` (422) when the pinned version no longer exists.
+
+  async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
+    // `fireOccurrence` is called from two surfaces:
+    //   (a) HTTP route handler ƒ?" already inside the auth middleware's ALS tx
+    //       (`getOrgTxContext()` returns the tx with `app.organisation_id` set).
+    //   (b) `enqueueRunNow ƒÅ' setImmediate` ƒ?" runs after the request tx has
+    //       finished, so ALS is empty and FORCE-RLS would silently no-op every
+    //       `scheduled_tasks` read/write below.
+    //
+    // For (b) we must open a self-contained org-scoped tx ourselves so that
+    // (i) FORCE-RLS sees `app.organisation_id` and lets us read the schedule,
+    // (ii) downstream `taskService.createTask(getOrgScopedDb(...))` works.
+    //
+    // We intentionally do NOT keep the tx open across `agentExecutionService.executeRun`
+    // ƒ?" that call can take minutes. Instead the body re-opens short tx blocks as
+    // needed; this top-level wrapper exists only to set the ALS GUC so each block
+    // inherits it via `withOrgTx`.
+    if (getOrgTxContext()) {
+      // Already inside an ALS context ƒ?" execute directly.
+      return this._fireOccurrenceBody(scheduledTaskId, organisationId);
+    }
+    // No active context ƒ?" open one for the duration of fireOccurrence.
+    return db.transaction(async (outerTx) => {
+      await outerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+      return withOrgTx(
+        {
+          tx: outerTx,
+          organisationId,
+          source: 'service:scheduledTaskService.fireOccurrence',
+        },
+        () => this._fireOccurrenceBody(scheduledTaskId, organisationId),
+      );
+    });
+  },
+
+  async _fireOccurrenceBody(scheduledTaskId: string, organisationId: string): Promise<void> {
+    const [st] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(and(eq(scheduledTasks.id, scheduledTaskId), eq(scheduledTasks.organisationId, organisationId)));
+
+    if (!st || !st.isActive) return;
+
+    // Check end conditions
+    if (st.endsAfterRuns && st.totalRuns >= st.endsAfterRuns) {
+      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      return;
+    }
+    if (st.endsAt && new Date() > st.endsAt) {
+      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      return;
+    }
+
+    const occurrence = st.totalRuns + 1;
+
+    // Create the run record
+    const [run] = await db
+      .insert(scheduledTaskRuns)
+      .values({
+        scheduledTaskId: st.id,
+        occurrence,
+        status: 'pending',
+        scheduledFor: st.nextRunAt ?? new Date(),
+        createdAt: new Date(),
+      })
+      .returning();
+
+    // Create a task card on the board
+    const taskTitle = st.title.includes('#{n}')
+      ? st.title.replace('#{n}', String(occurrence))
+      : `${st.title} #${occurrence}`;
+
+    try {
+      // taskService.createTask requires a caller-supplied tx (DEC-4). Open a
+      // short-lived tx so this createTask call works whether or not the caller
+      // already provided ALS context above. The `set_config` here is redundant
+      // when ALS is already set, but ensures the GUC is present unconditionally.
+      const task = await db.transaction(async (innerTx) => {
+        await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
+        return withOrgTx(
+          {
+            tx: innerTx,
+            organisationId: st.organisationId,
+            subaccountId: st.subaccountId,
+            source: 'service:scheduledTaskService.fireOccurrence',
+          },
+          () => taskService.createTask(
+            {
+              organisationId: st.organisationId,
+              subaccountId: st.subaccountId!,
+              data: {
+                title: taskTitle,
+                description: st.description ?? undefined,
+                brief: st.brief ?? undefined,
+                priority: st.priority as 'low' | 'normal' | 'high' | 'urgent',
+                status: 'inbox',
+                assignedAgentId: st.assignedAgentId,
+              },
+            },
+            innerTx,
+          ),
+        );
+      });
+
+      // Update the run with the task reference
+      await db.update(scheduledTaskRuns).set({
+        taskId: task.id,
+        status: 'running',
+        startedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Find the subaccount agent link
+      const { subaccountAgents } = await import('../db/schema/index.js');
+      const [saLink] = await db
+        .select()
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, st.subaccountId!),
+            eq(subaccountAgents.agentId, st.assignedAgentId),
+            eq(subaccountAgents.isActive, true)
+          )
+        );
+
+      if (!saLink) {
+        await this.handleRunCompletion(run.id, 'failed', 'Agent not linked to subaccount or inactive');
+        return;
+      }
+
+      // Execute the agent run
+      const result = await agentExecutionService.executeRun({
+        agentId: st.assignedAgentId,
+        subaccountId: st.subaccountId,
+        subaccountAgentId: saLink.id,
+        organisationId: st.organisationId,
+        executionScope: 'subaccount',
+        runType: 'scheduled',
+        runSource: 'scheduler',
+        executionMode: 'api',
+        taskId: task.id,
+        // Dedupe concurrent triggers for the same occurrence (e.g. manual
+        // run-now while the scheduler also fires). The key is stable per
+        // (scheduledTask, occurrence) so a duplicate fireOccurrence is a no-op
+        // at the agent run layer.
+        idempotencyKey: `scheduled_task:${st.id}:${occurrence}`,
+        triggerContext: {
+          source: 'scheduled_task',
+          scheduledTaskId: st.id,
+          scheduledTaskRunId: run.id,
+          occurrence,
+        },
+      });
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/scheduledTaskService.ts -TotalCount 920 | Select-Object -Skip 760' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 776ms:
+
+      await db.update(scheduledTaskRuns).set({
+        agentRunId: result.runId,
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      if (result.status === 'completed') {
+        await this.handleRunCompletion(run.id, 'completed');
+      } else {
+        await this.handleRunCompletion(run.id, 'failed', result.summary ?? `Run ended with status: ${result.status}`);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await this.handleRunCompletion(run.id, 'failed', errMsg);
+    }
+
+    // Compute and store next occurrence
+    const nextRunAt = await this.computeNextOccurrence(st.rrule, st.timezone, st.scheduleTime);
+    await db.update(scheduledTasks).set({
+      lastRunAt: new Date(),
+      totalRuns: occurrence,
+      nextRunAt,
+      updatedAt: new Date(),
+    }).where(eq(scheduledTasks.id, st.id));
+  },
+
+  // ƒ"?ƒ"?ƒ"? Run Completion + Retry Logic ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+  async handleRunCompletion(
+    scheduledTaskRunId: string,
+    status: 'completed' | 'failed',
+    errorMessage?: string
+  ): Promise<void> {
+    const [run] = await db
+      .select()
+      .from(scheduledTaskRuns)
+      .where(eq(scheduledTaskRuns.id, scheduledTaskRunId));
+
+    if (!run) return;
+
+    if (status === 'completed') {
+      await db.update(scheduledTaskRuns).set({
+        status: 'completed',
+        completedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Reset consecutive failures
+      await db.update(scheduledTasks).set({
+        consecutiveFailures: 0,
+        updatedAt: new Date(),
+      }).where(eq(scheduledTasks.id, run.scheduledTaskId));
+
+      return;
+    }
+
+    // Failed ƒ?" check retry policy
+    const [st] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(eq(scheduledTasks.id, run.scheduledTaskId));
+
+    if (!st) return;
+
+    const policy = (st.retryPolicy as typeof DEFAULT_RETRY_POLICY) ?? DEFAULT_RETRY_POLICY;
+    const currentAttempt = run.attempt;
+
+    if (currentAttempt <= policy.maxRetries) {
+      // Retry: update status and will be picked up by retry handler
+      await db.update(scheduledTaskRuns).set({
+        status: 'retrying',
+        attempt: currentAttempt + 1,
+        errorMessage,
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Schedule retry with exponential backoff. `currentAttempt` is the
+      // attempt that just failed (>= 1), so `Math.pow(2, currentAttempt - 1)`
+      // yields 1, 2, 4, ƒ?İ on attempts 1, 2, 3 ƒ?" the first retry waits
+      // exactly `backoffMinutes`, the second waits 2x, etc.
+      const backoffMs = policy.backoffMinutes * 60 * 1000 * Math.pow(2, currentAttempt - 1);
+
+      // The in-process timer is the happy path. If the process restarts
+      // before the timer fires, reconcileRetryingRuns() (called from
+      // server bootstrap) will sweep `retrying` runs whose backoff has
+      // elapsed and re-queue them. Without that sweep, a restart between
+      // mark-retrying and timer-fire would strand the run permanently.
+      setTimeout(() => {
+        this.retryOccurrence(run.id).catch(err =>
+          console.error(`[ScheduledTask] Retry failed:`, err)
+        );
+      }, backoffMs);
+    } else {
+      // All retries exhausted
+      await db.update(scheduledTaskRuns).set({
+        status: 'failed',
+        errorMessage,
+        completedAt: new Date(),
+      }).where(eq(scheduledTaskRuns.id, run.id));
+
+      // Increment consecutive failures
+      const newConsecutive = st.consecutiveFailures + 1;
+      const updates: Record<string, unknown> = {
+        totalFailures: st.totalFailures + 1,
+        consecutiveFailures: newConsecutive,
+        updatedAt: new Date(),
+      };
+
+      // Auto-pause after N consecutive failures
+      if (newConsecutive >= policy.pauseAfterConsecutiveFailures) {
+        updates.isActive = false;
+        console.warn(`[ScheduledTask] Auto-paused ${st.id} after ${newConsecutive} consecutive failures`);
+      }
+
+      await db.update(scheduledTasks).set(updates).where(eq(scheduledTasks.id, st.id));
+    }
+  },
+
+  async retryOccurrence(scheduledTaskRunId: string): Promise<void> {
+    const [run] = await db
+      .select()
+      .from(scheduledTaskRuns)
+      .where(eq(scheduledTaskRuns.id, scheduledTaskRunId));
+
+    if (!run || run.status !== 'retrying') return;
+
+    // Re-fire the agent against the same task
+    const [st] = await db.select().from(scheduledTasks).where(eq(scheduledTasks.id, run.scheduledTaskId));
+    if (!st || !run.taskId) return;
+
+    const { subaccountAgents } = await import('../db/schema/index.js');
+    const [saLink] = await db
+      .select()
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.subaccountId, st.subaccountId!),
+          eq(subaccountAgents.agentId, st.assignedAgentId),
+          eq(subaccountAgents.isActive, true)
+        )
+      );
+
+    if (!saLink) {
+      await this.handleRunCompletion(run.id, 'failed', 'Agent not linked to subaccount (retry)');
+      return;
+    }
+
+    try {
+      await db.update(scheduledTaskRuns).set({ status: 'running', startedAt: new Date() }).where(eq(scheduledTaskRuns.id, run.id));
+
+      const result = await agentExecutionService.executeRun({
+        agentId: st.assignedAgentId,
+        subaccountId: st.subaccountId,
+        subaccountAgentId: saLink.id,
+        organisationId: st.organisationId,
+        executionScope: 'subaccount',
+        runType: 'scheduled',
+        runSource: 'scheduler',
+        executionMode: 'api',
+        taskId: run.taskId,
+        // Per-attempt idempotency key ƒ?" prevents a double-fired retry timer
+        // (in-process + reconciliation) from creating two agent runs.
+        idempotencyKey: `scheduled_task:${st.id}:${run.occurrence}:retry:${run.attempt}`,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/instrumentation.ts -TotalCount 220; Get-Content -Path server/lib/orgScopedDb.ts -TotalCount 200' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 703ms:
+/**
+ * Langfuse instrumentation ƒ?" singleton client + AsyncLocalStorage context propagation.
+ *
+ * Usage:
+ *   import { langfuse, withTrace, getActiveTrace, getTraceContext } from './instrumentation.js';
+ *
+ *   // Start a trace around a unit of work (pass run context for automatic metadata injection):
+ *   await withTrace(trace, { runId, orgId, subaccountId, agentId }, async () => {
+ *     // Use tracing helpers from server/lib/tracing.ts ƒ?" they pull context automatically.
+ *     const span = createSpan('agent.loop.iteration', { iteration: 0, phase: 'planning' });
+ *     // ... do work ...
+ *     span.end({ output: result });
+ *   });
+ *
+ * The AsyncLocalStorage makes getActiveTrace() / getTraceContext() work anywhere
+ * in the call stack without threading the trace object through every function signature.
+ */
+
+import { AsyncLocalStorage } from 'async_hooks';
+import { Langfuse } from 'langfuse';
+import type { LangfuseTraceClient } from 'langfuse';
+import { env } from './lib/env.js';
+import { MAX_SPANS_PER_RUN, MAX_EVENTS_PER_RUN } from './config/limits.js';
+
+// ---------------------------------------------------------------------------
+// Langfuse singleton ƒ?" no-ops automatically if keys are not configured
+// ---------------------------------------------------------------------------
+
+export const langfuse = new Langfuse({
+  publicKey:  env.LANGFUSE_PUBLIC_KEY  ?? '',
+  secretKey:  env.LANGFUSE_SECRET_KEY  ?? '',
+  baseUrl:    env.LANGFUSE_BASE_URL    ?? 'https://cloud.langfuse.com',
+  // Disable if keys not set ƒ?" SDK will no-op all calls
+  enabled: Boolean(env.LANGFUSE_PUBLIC_KEY && env.LANGFUSE_SECRET_KEY),
+  flushAt: 10,
+  flushInterval: 5000,
+});
+
+// ---------------------------------------------------------------------------
+// Trace context ƒ?" carries run metadata alongside the Langfuse trace
+// ---------------------------------------------------------------------------
+
+export interface TraceContext {
+  trace: LangfuseTraceClient;
+  runId: string;
+  orgId: string;
+  subaccountId?: string;
+  agentId?: string;
+  executionMode?: string;
+  /** Running count of spans emitted ƒ?" used for performance budget enforcement */
+  spanCount: number;
+  /** Running count of events emitted ƒ?" used for performance budget enforcement */
+  eventCount: number;
+  maxSpans: number;
+  maxEvents: number;
+  /** Whether an agent.loop.terminated event has been emitted (Section 15.4) */
+  loopTerminated: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// AsyncLocalStorage ƒ?" propagates trace context through async call stacks
+// ---------------------------------------------------------------------------
+
+const traceStorage = new AsyncLocalStorage<TraceContext>();
+
+/**
+ * Run `fn` inside an async context where tracing helpers can access the
+ * active trace and run metadata. The `runContext` fields are injected as
+ * default metadata on every span/event created within `fn`.
+ */
+export async function withTrace<T>(
+  trace: LangfuseTraceClient,
+  runContext: {
+    runId: string;
+    orgId: string;
+    subaccountId?: string;
+    agentId?: string;
+    executionMode?: string;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ctx: TraceContext = {
+    trace,
+    ...runContext,
+    spanCount: 0,
+    eventCount: 0,
+    maxSpans: MAX_SPANS_PER_RUN,
+    maxEvents: MAX_EVENTS_PER_RUN,
+    loopTerminated: false,
+  };
+  return traceStorage.run(ctx, fn);
+}
+
+/**
+ * Returns the active Langfuse trace for the current async context,
+ * or undefined if we're outside a `withTrace` block.
+ */
+export function getActiveTrace(): LangfuseTraceClient | undefined {
+  return traceStorage.getStore()?.trace;
+}
+
+/**
+ * Returns the full trace context (trace + run metadata + counters),
+ * or undefined if outside a `withTrace` block.
+ */
+export function getTraceContext(): TraceContext | undefined {
+  return traceStorage.getStore();
+}
+
+/**
+ * Run `fn` inside an existing trace context snapshot. Use this to preserve
+ * trace context across async boundaries (Promise.all, pg-boss handlers,
+ * event emitters) where AsyncLocalStorage context would otherwise be lost.
+ */
+export async function withTraceContext<T>(
+  ctx: TraceContext,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return traceStorage.run(ctx, fn);
+}
+
+/**
+ * Bind a function so it always runs in the current trace context, even when
+ * called later from a different async scope (e.g., event emitter callbacks).
+ * If no context is active, returns the function unchanged.
+ */
+export function bindTraceContext<T extends (...args: never[]) => unknown>(fn: T): T {
+  const ctx = traceStorage.getStore();
+  if (!ctx) return fn;
+  return ((...args: never[]) => traceStorage.run(ctx, () => fn(...args))) as unknown as T;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 P1.1 Layer 1 ƒ?" org-scoped transaction slot
+//
+// Every request and every pg-boss job runs inside an explicit Drizzle
+// transaction that has issued `SELECT set_config('app.organisation_id', $1)`
+// for the current tenant. The transaction handle lives here so every
+// service-layer DB access can read it without threading it through every
+// function signature.
+//
+// If a service-layer DB helper finds no active OrgTxContext, that is a
+// Layer A contract violation and MUST throw `failure('missing_org_context')`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal shape a drizzle transaction handle satisfies ƒ?" same as the
+ * top-level `db` object. We use `unknown` to avoid an import cycle with
+ * server/db/index.ts; consumers cast back to the Drizzle DB type via the
+ * `getCurrentOrgTx()` helper in server/lib/orgScopedDb.ts.
+ */
+export interface OrgTxContext {
+  /** The tenant-scoped Drizzle transaction handle. */
+  tx: unknown;
+  /** Organisation ID that `set_config('app.organisation_id', ƒ?İ)` was set to. */
+  organisationId: string;
+  /** Optional subaccount context, when the request/job is subaccount-scoped. */
+  subaccountId?: string | null;
+  /** Principal that initiated the work, when known (HTTP requests only). */
+  userId?: string;
+  /** Human-readable origin for debugging (e.g. "http:GET /api/tasks"). */
+  source: string;
+}
+
+const orgTxStorage = new AsyncLocalStorage<OrgTxContext>();
+
+/**
+ * Run `fn` inside an org-scoped transaction context. Typically called by
+ * `server/middleware/orgScoping.ts` for HTTP requests and by
+ * `server/lib/createWorker.ts` for pg-boss jobs.
+ */
+export async function withOrgTx<T>(ctx: OrgTxContext, fn: () => Promise<T>): Promise<T> {
+  return orgTxStorage.run(ctx, fn);
+}
+
+/**
+ * Returns the active org-scoped transaction context, or undefined when the
+ * caller is outside a `withOrgTx` block. Services that require a tx call
+ * `requireOrgTx()` instead so the missing-context failure is structured.
+ */
+export function getOrgTxContext(): OrgTxContext | undefined {
+  return orgTxStorage.getStore();
+}
+/**
+ * orgScopedDb ƒ?" Sprint 2 P1.1 Layer 1 service-layer DB helper.
+ *
+ * Every service-layer DB access MUST go through `getOrgScopedDb()` so that:
+ *
+ *   1. The query runs inside the org-scoped transaction opened by the
+ *      `orgScoping` HTTP middleware or the `createWorker` pg-boss wrapper,
+ *      which has already issued `SELECT set_config('app.organisation_id', ƒ?İ)`.
+ *   2. A service called outside any `withOrgTx(...)` block fails loudly with
+ *      `failure('missing_org_context')` (Layer A of the three-layer fail-closed
+ *      data isolation contract). This is the first line of defence; RLS policies
+ *      are the silent backup defence-in-depth if a code path bypasses the
+ *      service layer entirely.
+ *
+ * Non-org-scoped access paths (migrations, cron, admin tooling, boot-time
+ * system reads) MUST use `server/lib/adminDbConnection.ts::withAdminConnection`
+ * instead. That helper acquires a connection bound to the `admin_role`
+ * Postgres role which has BYPASSRLS and explicitly logs every invocation to
+ * `audit_events`.
+ *
+ * See `docs/improvements-roadmap-spec.md` ¶õP1.1 Layer 1 for the full contract.
+ */
+
+import { getOrgTxContext } from '../instrumentation.js';
+import type { OrgScopedTx } from '../db/index.js';
+import { throwFailure } from '../../shared/iee/failure.js';
+
+/**
+ * Return the drizzle transaction handle bound to the current org context.
+ * Throws `failure('missing_org_context')` when the caller is outside any
+ * `withOrgTx(...)` block.
+ *
+ * Use this inside services whenever you need to run a query. The returned
+ * handle has the same API as the top-level `db` object, so existing
+ * `db.select(...)`-style calls drop in by swapping the reference.
+ */
+export function getOrgScopedDb(source: string): OrgScopedTx {
+  const ctx = getOrgTxContext();
+  if (!ctx) {
+    throwFailure(
+      'missing_org_context',
+      `${source}: service-layer DB access reached without an active org-scoped transaction`,
+      { source },
+    );
+  }
+  return ctx.tx as OrgScopedTx;
+}
+
+/**
+ * Return the current organisation id the ALS tx is bound to, or throw
+ * `failure('missing_org_context')` if none is set. Use this when a service
+ * needs to read the tenant id for audit logging or cross-checks without
+ * trusting the input arguments.
+ */
+export function getOrgScopedOrgId(source: string): string {
+  const ctx = getOrgTxContext();
+  if (!ctx) {
+    throwFailure(
+      'missing_org_context',
+      `${source}: organisationId requested outside an org-scoped transaction`,
+      { source },
+    );
+  }
+  return ctx.organisationId;
+}
+
+/**
+ * Non-throwing peek at the active org context. Used by telemetry / tracing
+ * callers that want to enrich spans without affecting control flow when the
+ * context is absent (e.g. startup-time reads, test harnesses).
+ */
+export function peekOrgTxContext(): ReturnType<typeof getOrgTxContext> {
+  return getOrgTxContext();
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/services/scheduledTaskService.ts -Pattern "getOrgScopedDb|const tx =|await db" | Select-Object -First 80' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 829ms:
+
+server\services\scheduledTaskService.ts:108:    const [created] = await db
+server\services\scheduledTaskService.ts:165:    const [row] = await db
+server\services\scheduledTaskService.ts:211:    const rows = await db
+server\services\scheduledTaskService.ts:222:      await db
+server\services\scheduledTaskService.ts:272:    const [existing] = await db
+server\services\scheduledTaskService.ts:336:    const txResult: TxResult = await db.transaction(async (tx) => {
+server\services\scheduledTaskService.ts:414:    const [existing] = await db
+server\services\scheduledTaskService.ts:431:    const [deleted] = await db
+server\services\scheduledTaskService.ts:441:    const [existing] = await db
+server\services\scheduledTaskService.ts:456:    const [updated] = await db
+server\services\scheduledTaskService.ts:466:    const results = await db
+server\services\scheduledTaskService.ts:488:    const [st] = await db
+server\services\scheduledTaskService.ts:499:    const runs = await db
+server\services\scheduledTaskService.ts:620:    // (ii) downstream `taskService.createTask(getOrgScopedDb(...))` works.
+server\services\scheduledTaskService.ts:645:    const [st] = await db
+server\services\scheduledTaskService.ts:654:      await db.update(scheduledTasks).set({ isActive: false, updatedAt: 
+new Date() }).where(eq(scheduledTasks.id, st.id));
+server\services\scheduledTaskService.ts:658:      await db.update(scheduledTasks).set({ isActive: false, updatedAt: 
+new Date() }).where(eq(scheduledTasks.id, st.id));
+server\services\scheduledTaskService.ts:665:    const [run] = await db
+server\services\scheduledTaskService.ts:686:      const task = await db.transaction(async (innerTx) => {
+server\services\scheduledTaskService.ts:714:      await db.update(scheduledTaskRuns).set({
+server\services\scheduledTaskService.ts:722:      const [saLink] = await db
+server\services\scheduledTaskService.ts:762:      await db.update(scheduledTaskRuns).set({
+server\services\scheduledTaskService.ts:778:    await db.update(scheduledTasks).set({
+server\services\scheduledTaskService.ts:793:    const [run] = await db
+server\services\scheduledTaskService.ts:801:      await db.update(scheduledTaskRuns).set({
+server\services\scheduledTaskService.ts:807:      await db.update(scheduledTasks).set({
+server\services\scheduledTaskService.ts:816:    const [st] = await db
+server\services\scheduledTaskService.ts:828:      await db.update(scheduledTaskRuns).set({
+server\services\scheduledTaskService.ts:852:      await db.update(scheduledTaskRuns).set({
+server\services\scheduledTaskService.ts:872:      await 
+db.update(scheduledTasks).set(updates).where(eq(scheduledTasks.id, st.id));
+server\services\scheduledTaskService.ts:877:    const [run] = await db
+server\services\scheduledTaskService.ts:885:    const [st] = await 
+db.select().from(scheduledTasks).where(eq(scheduledTasks.id, run.scheduledTaskId));
+server\services\scheduledTaskService.ts:889:    const [saLink] = await db
+server\services\scheduledTaskService.ts:906:      await db.update(scheduledTaskRuns).set({ status: 'running', 
+startedAt: new Date() }).where(eq(scheduledTaskRuns.id, run.id));
+server\services\scheduledTaskService.ts:929:      await db.update(scheduledTaskRuns).set({ agentRunId: result.runId 
+}).where(eq(scheduledTaskRuns.id, run.id));
+server\services\scheduledTaskService.ts:950:    const retrying = await db
+server\services\scheduledTaskService.ts:958:      const [st] = await db
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/connectorConfigService.ts -TotalCount 230' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 741ms:
+import { randomUUID } from 'crypto';
+import { eq, and, ne, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
+import type { WorkspaceTenantConfig } from '../../shared/types/workspaceAdapterContract.js';
+
+export function buildWorkspaceTenantConfig(
+  subaccountName: string,
+  connectorConfig: { id: string; connectorType: string; configJson: unknown } | null,
+): WorkspaceTenantConfig {
+  const cfg = (connectorConfig?.configJson as Record<string, unknown> | null) ?? {};
+  const configDomain = typeof cfg.domain === 'string' && cfg.domain.length > 0 ? cfg.domain : null;
+
+  // Workspace `domain` resolution mirrors the GET /workspace summary route:
+  // per-subaccount override (configJson.domain) ƒÅ' NATIVE_EMAIL_DOMAIN ƒÅ' null.
+  // Returning `null` (rather than 'workspace.local') lets callers distinguish
+  // "no workspace configured" from "configured with the dev fallback".
+  // Read from process.env directly rather than the validated env module so that
+  // pure unit tests of this builder don't have to bootstrap the entire env Zod
+  // schema (which requires DATABASE_URL, EMAIL_FROM, ...).
+  const envDomain = typeof process.env.NATIVE_EMAIL_DOMAIN === 'string' && process.env.NATIVE_EMAIL_DOMAIN.length > 0
+    ? process.env.NATIVE_EMAIL_DOMAIN
+    : null;
+  const resolvedDomain = configDomain ?? envDomain;
+
+  const backend = connectorConfig?.connectorType === 'synthetos_native' || connectorConfig?.connectorType === 'google_workspace'
+    ? connectorConfig.connectorType
+    : null;
+
+  return {
+    backend,
+    connectorConfigId: connectorConfig?.id ?? null,
+    domain: resolvedDomain,
+    subaccountName,
+    defaultSignatureTemplate: typeof cfg.defaultSignatureTemplate === 'string' ? cfg.defaultSignatureTemplate : '',
+    discloseAsAgent: cfg.discloseAsAgent === true,
+    vanityDomain: typeof cfg.vanityDomain === 'string' ? cfg.vanityDomain : null,
+  };
+}
+
+type ConnectorInsert = typeof connectorConfigs.$inferInsert;
+type ConnectorType = ConnectorInsert['connectorType'];
+type ConnectorStatus = ConnectorInsert['status'];
+type SyncPhase = ConnectorInsert['syncPhase'];
+
+export const connectorConfigService = {
+  async listByOrg(organisationId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(eq(connectorConfigs.organisationId, organisationId));
+  },
+
+  async listBySubaccount(organisationId: string, subaccountId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(
+        and(
+          eq(connectorConfigs.organisationId, organisationId),
+          eq(connectorConfigs.subaccountId, subaccountId),
+        )
+      );
+  },
+
+  async get(id: string, organisationId: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (!config) throw { statusCode: 404, message: 'Connector config not found' };
+    return config;
+  },
+
+  async getByType(organisationId: string, connectorType: string) {
+    // Workspace connector types (synthetos_native, google_workspace) are
+    // subaccount-scoped after migration 0254 ƒ?" the unique index is
+    // (org_id, connector_type) WHERE connector_type IN ('crm', ...) only.
+    // Callers that need a workspace connector must use getBySubaccountAndType.
+    if (connectorType === 'synthetos_native' || connectorType === 'google_workspace') {
+      throw new Error(
+        `getByType does not support workspace connector type '${connectorType}'. ` +
+        'Use getBySubaccountAndType(organisationId, subaccountId, connectorType) instead.',
+      );
+    }
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType as ConnectorType)));
+    return config ?? null;
+  },
+
+  async getBySubaccountAndType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        eq(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ));
+    return config ?? null;
+  },
+
+  /**
+   * Returns the first connector config for this subaccount whose connectorType
+   * differs from the given `connectorType`. Used by the /configure guard to
+   * detect a backend-swap attempt before any identities have been migrated.
+   */
+  async getBySubaccountAndDifferentType(organisationId: string, subaccountId: string, connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.organisationId, organisationId),
+        eq(connectorConfigs.subaccountId, subaccountId),
+        ne(connectorConfigs.connectorType, connectorType as ConnectorType),
+      ))
+      .limit(1);
+    return config ?? null;
+  },
+
+  async getActiveByOrg(organisationId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.status, 'active')));
+  },
+
+  async create(organisationId: string, data: {
+    connectorType: string;
+    connectionId?: string;
+    configJson?: Record<string, unknown>;
+    pollIntervalMinutes?: number;
+    webhookSecret?: string;
+  }) {
+    // Pre-Test Hardening W3 ƒ?" Teamwork connectors require a per-connector
+    // webhook URL token at creation time. The tokenised webhook route
+    // `/api/webhooks/teamwork/:orgWebhookToken` resolves configs by this
+    // token; a null token means deliveries are silently dropped with 401.
+    // Migration 0314 backfills existing rows; this auto-generates for new ones.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+    const [config] = await db
+      .insert(connectorConfigs)
+      .values({
+        organisationId,
+        connectorType: data.connectorType as ConnectorType,
+        connectionId: data.connectionId ?? null,
+        configJson: data.configJson ?? null,
+        pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+        webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
+      })
+      .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'connector_config', entityId: config.id, organisationId,
+      snapshot: config as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
+
+    return config;
+  },
+
+  async createForSubaccount(organisationId: string, subaccountId: string, data: {
+    connectorType: string;
+    connectionId?: string;
+    configJson?: Record<string, unknown>;
+    pollIntervalMinutes?: number;
+    webhookSecret?: string;
+  }) {
+    // Pre-Test Hardening W3 ƒ?" see `create` above for rationale.
+    const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
+    const [config] = await db
+      .insert(connectorConfigs)
+      .values({
+        organisationId,
+        subaccountId,
+        connectorType: data.connectorType as ConnectorType,
+        connectionId: data.connectionId ?? null,
+        configJson: data.configJson ?? null,
+        pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+        webhookSecret: data.webhookSecret ?? null,
+        webhookToken,
+      })
+      .returning();
+    return config;
+  },
+
+  async update(id: string, organisationId: string, data: Partial<{
+    connectionId: string | null;
+    configJson: Record<string, unknown>;
+    status: ConnectorStatus;
+    pollIntervalMinutes: number;
+    webhookSecret: string | null;
+    syncPhase: SyncPhase;
+    lastSyncAt: Date;
+    lastSyncStatus: string;
+    lastSyncError: string | null;
+    configVersion: string;
+  }>) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
+    const [updated] = await db
+      .update(connectorConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))
+      .returning();
+    if (!updated) throw { statusCode: 404, message: 'Connector config not found' };
+    return updated;
+  },
+
+  async delete(id: string, organisationId: string) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-10T22:02:54.704716Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server/services/scheduledTaskService.ts | ForEach-Object { if($i -ge 628 -and $i -le 650){"$i`:$($_)"}; $i++ }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server/services/scheduledTaskService.ts | ForEach-Object { if($i -ge 628 -and $i -le 650){"$i`:$($_)"}; $i++ }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content server/services/scheduledTaskService.ts | ForEach-Object { if($i -ge 628 -and $i -le 650){"$i`:$($_)"}; $i++ }'` rejected: blocked by policy
+2026-05-10T22:02:58.602155Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python - <<'PY'
+from pathlib import Path
+for i,l in enumerate(Path('server/services/scheduledTaskService.ts').read_text().splitlines(),1):
+    if 628<=i<=650:
+        print(f'{i}:{l}')
+PY"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python - <<'PY'
+from pathlib import Path
+for i,l in enumerate(Path('server/services/scheduledTaskService.ts').read_text().splitlines(),1):
+    if 628<=i<=650:
+        print(f'{i}:{l}')
+PY" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "python - <<'PY'
+from pathlib import Path
+for i,l in enumerate(Path('server/services/scheduledTaskService.ts').read_text().splitlines(),1):
+    if 628<=i<=650:
+        print(f'{i}:{l}')
+PY"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" server\\services\\scheduledTaskService.ts | findstr \""'^628: ''^629: ''^630: ''^631: ''^632: ''^633: ''^634: ''^635: ''^636: ''^637: ''^638: ''^639: ''^640: ''^641: ''^642: ''^643: ''^644: ''^645: ''^646: ''^647: ''^648: ''^649: ''^650:"' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 764ms:
+628:      return this._fireOccurrenceBody(scheduledTaskId, organisationId);
+629:    }
+630:    // No active context ??? open one for the duration of fireOccurrence.
+631:    return db.transaction(async (outerTx) => {
+632:      await outerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
+633:      return withOrgTx(
+634:        {
+635:          tx: outerTx,
+636:          organisationId,
+637:          source: 'service:scheduledTaskService.fireOccurrence',
+638:        },
+639:        () => this._fireOccurrenceBody(scheduledTaskId, organisationId),
+640:      );
+641:    });
+642:  },
+644:  async _fireOccurrenceBody(scheduledTaskId: string, organisationId: string): Promise<void> {
+645:    const [st] = await db
+646:      .select()
+647:      .from(scheduledTasks)
+648:      .where(and(eq(scheduledTasks.id, scheduledTaskId), eq(scheduledTasks.organisationId, organisationId)));
+650:    if (!st || !st.isActive) return;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \"executeRun db.transaction\" server\\services\\scheduledTaskService.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 592ms:
+336:    const txResult: TxResult = await db.transaction(async (tx) => {
+622:    // We intentionally do NOT keep the tx open across `agentExecutionService.executeRun`
+631:    return db.transaction(async (outerTx) => {
+686:      const task = await db.transaction(async (innerTx) => {
+739:      const result = await agentExecutionService.executeRun({
+908:      const result = await agentExecutionService.executeRun({
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Select-String -Path server/db/schema/**/*.ts -Pattern "webhookToken" -CaseSensitive' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 700ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server\\db\\schema -Recurse -File | Select-String -Pattern \"webhookToken\"" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 719ms:
+
+server\db\schema\connectorConfigs.ts:40:    webhookToken: uuid('webhook_token'),
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-10T22:03:38.732029Z ERROR codex_core::session: failed to record rollout items: thread 019e13e9-450c-7d92-98a8-d6a4cccd1b20 not found
+codex
+The new scheduled-task scoping wrapper does not actually scope the main `db` queries to the transaction where the RLS GUC is set, so the target background path remains broken. It also introduces a long-lived transaction around agent execution.
+
+Full review comments:
+
+- [P1] Use the scoped transaction for fireOccurrence reads — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:645-648
+  When `fireOccurrence` is invoked from `enqueueRunNow -> setImmediate`, this wrapper sets `app.organisation_id` only on `outerTx`, but `_fireOccurrenceBody` immediately reads `scheduledTasks` through the top-level `db`. That query can run on a different pooled connection without the GUC, so under FORCE-RLS the schedule is not visible and the run-now path still returns without firing. The body needs to use the scoped transaction (or otherwise set the GUC on the same connection used for these reads/writes).
+
+- [P2] Do not keep the outer transaction open during agent runs — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:631-631
+  For the no-ALS path, this starts a transaction before calling `_fireOccurrenceBody` and only commits after the entire body returns, which includes `agentExecutionService.executeRun`. Scheduled agent runs can take minutes, so this holds a database connection in an open transaction for the whole run and also exposes `outerTx` to any downstream `getOrgScopedDb` calls during execution. This can exhaust the pool or hit idle-in-transaction timeouts when background run-now jobs are used.
+2026-05-10T22:03:38.816915Z ERROR codex_core::session: failed to record rollout items: thread 019e13e9-4438-7792-9586-8ba1bea5ee57 not found
+The new scheduled-task scoping wrapper does not actually scope the main `db` queries to the transaction where the RLS GUC is set, so the target background path remains broken. It also introduces a long-lived transaction around agent execution.
+
+Full review comments:
+
+- [P1] Use the scoped transaction for fireOccurrence reads — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:645-648
+  When `fireOccurrence` is invoked from `enqueueRunNow -> setImmediate`, this wrapper sets `app.organisation_id` only on `outerTx`, but `_fireOccurrenceBody` immediately reads `scheduledTasks` through the top-level `db`. That query can run on a different pooled connection without the GUC, so under FORCE-RLS the schedule is not visible and the run-now path still returns without firing. The body needs to use the scoped transaction (or otherwise set the GUC on the same connection used for these reads/writes).
+
+- [P2] Do not keep the outer transaction open during agent runs — C:\Files\Projects\automation-v1-2nd\server\services\scheduledTaskService.ts:631-631
+  For the no-ALS path, this starts a transaction before calling `_fireOccurrenceBody` and only commits after the entire body returns, which includes `agentExecutionService.executeRun`. Scheduled agent runs can take minutes, so this holds a database connection in an open transaction for the whole run and also exposes `outerTx` to any downstream `getOrgScopedDb` calls during execution. This can exhaust the pool or hit idle-in-transaction timeouts when background run-now jobs are used.

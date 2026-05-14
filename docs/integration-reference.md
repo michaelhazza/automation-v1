@@ -17,7 +17,7 @@ See `docs/orchestrator-capability-routing-spec.md` for the full design rationale
 
 ```yaml integration_reference_meta
 schema_version: "1.0.0"
-last_updated: "2026-04-17"
+last_updated: "2026-05-12"
 ```
 
 ---
@@ -55,12 +55,18 @@ read_capabilities:
   - slug: page_read
     aliases: [read_page, document_read, doc_read]
     description: Read pages or documents
+  - slug: spreadsheet_read
+    aliases: [read_spreadsheet, sheet_read, sheets_read, csv_read]
+    description: Read rows or cell data from a spreadsheet
   - slug: database_read
     aliases: [read_database, records_read, rows_read]
     description: Read records from a structured database
   - slug: channel_messages_read
     aliases: [read_channel, slack_messages_read, channel_history]
     description: Read messages from a chat channel
+  - slug: drive_read
+    aliases: [read_drive, google_drive_read, file_read]
+    description: Read files from a cloud storage provider (documents, spreadsheets, PDFs)
   - slug: subaccount_read
     aliases: [read_subaccount, location_read]
     description: Read subaccount/location metadata from a multi-tenant CRM
@@ -70,6 +76,24 @@ read_capabilities:
   - slug: organisation.config.history
     aliases: [pulse_config_history, config_audit_trail]
     description: Browse the config_history audit trail for ClientPulse operational_config changes
+  - slug: charge_list
+    aliases: [charges_read, list_charges, agent_charges_list]
+    description: List agent_charges ledger rows (settled + in-flight) for the authed org
+  - slug: charge_status
+    aliases: [charge_read, get_charge, charge_detail]
+    description: Read a single agent_charges ledger row by id (status + state-machine snapshot)
+  - slug: support_inbox_list
+    aliases: [list_inboxes, inbox_list, support_inboxes_read]
+    description: List support inboxes configured for the helpdesk integration
+  - slug: support_agent_list
+    aliases: [list_support_agents, support_agents_read, helpdesk_agents_list]
+    description: List support agents (human and bot) in the helpdesk system
+  - slug: support_ticket_list
+    aliases: [list_tickets, tickets_read, open_tickets_list]
+    description: List support tickets with filtering by status, inbox, assignee, or date range
+  - slug: support_ticket_thread_read
+    aliases: [read_ticket_thread, ticket_messages_read, thread_read]
+    description: Read the full message thread for a single support ticket
 
 write_capabilities:
   - slug: send_email
@@ -81,6 +105,24 @@ write_capabilities:
   - slug: create_event
     aliases: [event_create, calendar_event_create, schedule_event]
     description: Create a calendar event
+  - slug: calendar_event_create
+    aliases: [ea_calendar_create, calendar_create_gated]
+    description: Create new calendar events; review-gated via EA draft
+  - slug: calendar_event_update
+    aliases: [ea_calendar_update, calendar_update_gated]
+    description: Update existing calendar events; review-gated via EA draft
+  - slug: calendar_event_respond
+    aliases: [ea_calendar_respond, calendar_rsvp, calendar_accept_decline]
+    description: Accept/decline/tentatively accept calendar invitations; review-gated via EA draft
+  - slug: channel_post_message
+    aliases: [slack_channel_post, ea_slack_post, channel_message_send]
+    description: Post messages to Slack channels; always review-gated via EA draft
+  - slug: channel_search_messages
+    aliases: [slack_search, workspace_search_messages]
+    description: Workspace-wide Slack message search; requires search:read scope (paid plans only)
+  - slug: dm_send
+    aliases: [slack_dm_send, direct_message_send, ea_dm]
+    description: Send Slack DMs; auto-send to owner, review-gated to others
   - slug: create_contact
     aliases: [contact_create, add_contact, new_contact]
     description: Create a new contact in a CRM
@@ -117,6 +159,36 @@ write_capabilities:
   - slug: create_task
     aliases: [task_create, add_task, assign_task]
     description: Create a task on a CRM user's queue (ClientPulse Session 2 intervention primitive; distinct from the internal board task)
+  - slug: charge_create
+    aliases: [create_charge, agent_charge_create, charge_propose]
+    description: Propose an agent-driven charge through the charge router (gated by Spending Budget + Spending Policy; honours kill switch and shadow mode)
+  - slug: charge_refund
+    aliases: [refund_charge, agent_charge_refund, issue_refund_capability]
+    description: Issue a refund against a previously-succeeded agent charge (full or partial; subject to policy gating)
+  - slug: subscription_create
+    aliases: [create_subscription, agent_subscription_create, recurring_charge_create]
+    description: Create a recurring agent-driven charge (subscription / scheduled top-up) through the charge router
+  - slug: balance_topup
+    aliases: [topup_balance, agent_balance_topup, prepaid_topup]
+    description: Top up a prepaid balance (e.g. ad-spend account) via an agent-driven charge
+  - slug: support_reply_send
+    aliases: [send_support_reply, ticket_reply, reply_to_ticket]
+    description: Send a public reply to a support ticket via the helpdesk provider
+  - slug: support_internal_note_add
+    aliases: [add_internal_note, ticket_note, internal_note_post]
+    description: Add an internal (agent-only) note to a support ticket
+  - slug: support_ticket_assign
+    aliases: [assign_ticket, ticket_reassign, helpdesk_assign]
+    description: Assign or reassign a support ticket to a specific support agent
+  - slug: support_ticket_status_set
+    aliases: [set_ticket_status, ticket_resolve, ticket_close, ticket_reopen]
+    description: Change the status of a support ticket (e.g. open, resolved, closed)
+  - slug: support_ticket_tag_set
+    aliases: [tag_ticket, ticket_label, add_ticket_tag]
+    description: Add or remove tags on a support ticket
+  - slug: support_attachment_resolve
+    aliases: [resolve_attachment, fetch_attachment_url, ticket_attachment_read]
+    description: Resolve a signed/temporary URL for a ticket message attachment
 
 skills:
   - slug: classify_email
@@ -149,6 +221,54 @@ skills:
   - slug: crm.create_task
     aliases: [crm_create_task_skill, client_task_skill]
     description: ClientPulse intervention primitive — create a task on a CRM user's queue (Session 2; review-gated; idempotent; distinct from the internal board task skill)
+  - slug: pay_invoice
+    aliases: [invoice_pay_skill, pay_invoice_skill]
+    description: Agent-driven invoice payment via the charge router (Stripe SPT path; main-app execution; spec §9.x)
+  - slug: purchase_resource
+    aliases: [resource_purchase_skill, agent_purchase_skill]
+    description: Agent-driven purchase via the worker-hosted-form path (Stripe SPT delivered to IEE worker; spec §9.x)
+  - slug: subscribe_to_service
+    aliases: [subscription_create_skill, agent_subscribe_skill]
+    description: Agent-driven recurring subscription creation via the charge router (Stripe SPT; recurring agent_charges rows)
+  - slug: top_up_balance
+    aliases: [balance_topup_skill, agent_topup_skill]
+    description: Agent-driven prepaid balance top-up via the charge router (Stripe SPT; ad-spend / messaging credit / similar)
+  - slug: issue_refund
+    aliases: [refund_issue_skill, agent_refund_skill]
+    description: Agent-driven refund issuance against a previously-succeeded agent charge (Stripe SPT; respects refund-policy gating)
+  - slug: support.list_open_tickets
+    aliases: [list_open_tickets_skill, support_list_tickets]
+    description: List open tickets in a helpdesk inbox with priority and SLA context
+  - slug: support.read_thread
+    aliases: [read_ticket_thread_skill, support_read_messages]
+    description: Fetch the full message thread for a specific support ticket
+  - slug: support.propose_reply
+    aliases: [propose_reply_skill, support_draft_reply]
+    description: Generate an AI-proposed reply draft for a support ticket, routed to operator review
+  - slug: support.add_internal_note
+    aliases: [add_note_skill, support_internal_note]
+    description: Post an internal agent note on a support ticket (not visible to the customer)
+  - slug: support.approve_draft
+    aliases: [approve_draft_skill, support_approve_reply]
+    description: Approve a pending AI reply draft and dispatch it to the helpdesk provider
+  - slug: support.reject_draft
+    aliases: [reject_draft_skill, support_reject_reply]
+    description: Reject a pending AI reply draft with optional feedback notes
+  - slug: support.set_status
+    aliases: [set_ticket_status_skill, support_change_status]
+    description: Change the status of a support ticket (resolve, close, reopen)
+  - slug: support.assign
+    aliases: [assign_ticket_skill, support_reassign]
+    description: Assign or reassign a support ticket to a support agent
+  - slug: support.tag
+    aliases: [tag_ticket_skill, support_add_tag]
+    description: Add or remove tags on a support ticket
+  - slug: support.find_customer_history
+    aliases: [find_customer_history_skill, support_customer_lookup]
+    description: Look up a customer's full support and CRM history by email address
+  - slug: support.classify_ticket
+    aliases: [classify_ticket_skill, support_classify]
+    description: Classify a support ticket by intent, urgency, and recommended action without drafting a reply
 
 primitives:
   - slug: scheduled_run
@@ -172,6 +292,18 @@ primitives:
   - slug: config_history
     aliases: [audit_log, config_audit]
     description: Append-only audit log for config entity changes (version + snapshot + change_source)
+  - slug: spt_vault
+    aliases: [stripe_spt_vault, programmable_token_vault]
+    description: Stripe Programmable Token (SPT) storage primitive — short-lived, scoped, revocable per-sub-account credentials for agent-driven money movement
+  - slug: charge_router
+    aliases: [agent_charge_router, charge_routing]
+    description: Policy gate + state-machine + idempotency + advisory-lock-held capacity reads for agent-driven charges (spec §7)
+  - slug: spend_ledger
+    aliases: [agent_charge_ledger, agent_spend_ledger]
+    description: Append-only agent_charges ledger primitive — every spend attempt with full policy decision trace, idempotency key, and status lifecycle (DB-trigger-enforced append-only)
+  - slug: api_key_connection
+    aliases: [api_key, api_key_auth, key_based_connection]
+    description: API-key-based integration connection (static key stored in vault; no OAuth handshake required)
 ```
 
 ---
@@ -228,7 +360,7 @@ owner: platform-team
 ### Google Calendar
 
 ```yaml integration
-slug: google-calendar
+slug: google_calendar
 name: Google Calendar
 provider_type: oauth
 status: partial
@@ -237,6 +369,9 @@ read_capabilities:
   - calendar_read
 write_capabilities:
   - create_event
+  - calendar_event_create
+  - calendar_event_update
+  - calendar_event_respond
 skills_enabled: []
 primitives_required:
   - oauth_connection
@@ -250,16 +385,18 @@ setup_doc_link: null
 typical_use_cases:
   - Scheduled reporting on calendar load
   - Creating follow-up meetings after deals advance
+  - EA reads availability and creates or updates events with approval
 broadly_useful_patterns:
   - Meeting recap summaries
   - Calendar-based workload reporting
+  - EA-gated event creation and RSVP management
 known_gaps:
   - Attendee availability checks not yet exposed
   - Recurring event modification limited
 client_specific_patterns:
   - Meeting templates tied to a specific client's booking preferences
 implemented_since: "2026-03-01"
-last_verified: "2026-04-17"
+last_verified: "2026-05-12"
 owner: platform-team
 ```
 
@@ -275,6 +412,9 @@ read_capabilities:
   - channel_messages_read
 write_capabilities:
   - post_message
+  - channel_post_message
+  - channel_search_messages
+  - dm_send
 skills_enabled: []
 primitives_required:
   - oauth_connection
@@ -285,23 +425,27 @@ required_scopes:
   - channels:history
   - chat:write
   - groups:read
+  - im:write
+  - search:read
 setup_steps_summary: Install the Synthetos Slack app into your workspace and select channels to listen on.
 setup_doc_link: null
 typical_use_cases:
   - Alert channel notifications
   - Agent-initiated posts to client channels
   - Listening to specific channels for triggers
+  - EA posts or DMs with owner approval
 broadly_useful_patterns:
   - Agent alerts on exception events
   - Scheduled summary posts to channels
+  - EA-gated channel posts and DMs
 known_gaps:
-  - DM-level operations not yet supported
   - File upload API not yet wrapped
+  - channel_search_messages requires a paid Slack plan (search:read scope)
 client_specific_patterns:
   - Channel IDs unique to one workspace
   - Bot display names branded per agency
 implemented_since: "2026-02-15"
-last_verified: "2026-04-17"
+last_verified: "2026-05-12"
 owner: platform-team
 ```
 
@@ -392,6 +536,65 @@ last_verified: "2026-04-17"
 owner: platform-team
 ```
 
+### Stripe Agent (write-capable spend integration)
+
+```yaml integration
+slug: stripe_agent
+name: Stripe Agent
+provider_type: oauth
+status: partial
+visibility: public
+read_capabilities:
+  - charge_list
+  - charge_status
+write_capabilities:
+  - charge_create
+  - charge_refund
+  - subscription_create
+  - balance_topup
+skills_enabled:
+  - pay_invoice
+  - purchase_resource
+  - subscribe_to_service
+  - top_up_balance
+  - issue_refund
+primitives_required:
+  - oauth_connection
+  - webhook_receiver
+  - spt_vault
+  - charge_router
+  - spend_ledger
+auth_method: oauth2
+required_scopes:
+  - spt_issue
+  - charge_create
+  - charge_refund
+setup_steps_summary: Per-sub-account Stripe Programmable Tokens (SPT) connection for agent-driven money movement. SPT is short-lived, scoped, and revocable; renewals are automatic. Distinct from the read-only Stripe reporting integration.
+setup_doc_link: null
+typical_use_cases:
+  - Agent pays vendor invoices on a client's behalf
+  - Agent completes a one-shot purchase against a vendor's hosted checkout
+  - Agent activates a vendor subscription
+  - Agent tops up a prepaid balance or credits account
+  - Agent issues a refund against a prior charge
+broadly_useful_patterns:
+  - Per-sub-account spending budgets with hard ceilings and kill switch
+  - Shadow-mode policy rollout with explicit promotion approval
+  - Per-charge approval gates above operator-defined thresholds
+  - Append-only spend ledger with database-level lifecycle guards
+  - Idempotency at the charge-key layer prevents double-billing under retries
+client_specific_patterns:
+  - Allowlist of approved merchants per spending policy
+  - Per-currency policy rules (one currency per policy)
+known_gaps:
+  - Multi-currency-within-a-policy not supported (out of scope)
+  - Automatic FX not supported (out of scope)
+  - Customer-facing SPT issuance not supported (out of scope)
+implemented_since: "2026-05-04"
+last_verified: "2026-05-04"
+owner: platform-team
+```
+
 ### Monday.com
 
 ```yaml integration
@@ -469,9 +672,12 @@ required_scopes:
   - calendars.readonly
   - funnels.readonly
   - conversations.readonly
+  - conversations.write
   - conversations/message.readonly
   - businesses.readonly
   - saas/subscription.readonly
+  - companies.readonly
+  - payments/orders.readonly
 scope_behavior: |
   Expanded scopes (ClientPulse Phase 1, added 2026-04-18) apply to new OAuth
   authorisations only. Existing connections with the original 3-scope token
@@ -479,6 +685,13 @@ scope_behavior: |
   require the new scopes (funnels, calendars, users, locations, saas) gate
   themselves and mark observations `unavailable_missing_scope` when absent.
   Re-consent is surfaced via a pilot-stage banner (Phase 5 surface).
+  Module C (agency-level OAuth, spec: docs/ghl-module-c-oauth-spec.md): adds
+  companies.readonly (sub-account enumeration), conversations.write,
+  payments/orders.readonly. New installs use agency token (Company target,
+  userType=Company) with a separate per-location token cache
+  (connector_location_tokens table). Token model: one agency token per
+  (orgId, companyId) in connector_configs; location tokens minted on demand
+  via /oauth/locationToken and cached with 24h TTL + 5min refresh window.
 webhook_events:
   - ContactCreate
   - ContactUpdate
@@ -508,7 +721,7 @@ known_gaps:
 client_specific_patterns:
   - Subaccount IDs per agency client
 implemented_since: "2026-02-20"
-last_verified: "2026-04-19"
+last_verified: "2026-05-03"
 owner: platform-team
 ```
 
@@ -661,3 +874,154 @@ implemented_since: "2026-04-19"
 last_verified: "2026-04-19"
 owner: platform-team
 ```
+
+### Google Drive
+
+```yaml integration
+slug: google_drive
+name: Google Drive
+provider_type: oauth
+status: partial
+visibility: public
+read_capabilities:
+  - drive_read
+  - page_read
+  - spreadsheet_read
+write_capabilities: []
+skills_enabled: []
+primitives_required:
+  - oauth_connection
+auth_method: oauth2
+required_scopes:
+  - https://www.googleapis.com/auth/drive.readonly
+  - https://www.googleapis.com/auth/drive.metadata.readonly
+setup_steps_summary: Connect a Google account and approve Drive read-only access. Files are attached per-task via the Drive picker and resolved at run time.
+setup_doc_link: null
+typical_use_cases:
+  - Attach a Google Doc as live context for an agent run
+  - Reference a Sheets budget or data table during task execution
+  - Attach a PDF for the agent to read and summarise
+broadly_useful_patterns:
+  - Live document injection into agent context
+  - Spreadsheet data access at run time
+  - Cross-task document reuse via shared Drive files
+known_gaps:
+  - Write operations (create, update, delete files) not yet supported
+  - Folder-level browsing not exposed in picker V1
+  - PDF support requires pdf-parse dependency (deferred — see tasks/todo.md)
+  - Retry suppression is process-local; multi-instance retry storms possible at scale
+client_specific_patterns:
+  - Per-client Drive folders attached as agent data sources
+  - Task-specific document attachments (briefs, SOWs, reports)
+implemented_since: "2026-04-30"
+last_verified: "2026-05-01"
+owner: platform-team
+```
+
+### Teamwork Desk
+
+```yaml integration
+slug: teamwork
+name: Teamwork Desk
+provider_type: native
+status: fully_supported
+visibility: public
+read_capabilities:
+  - support_inbox_list
+  - support_agent_list
+  - support_ticket_list
+  - support_ticket_thread_read
+write_capabilities:
+  - support_reply_send
+  - support_internal_note_add
+  - support_ticket_assign
+  - support_ticket_status_set
+  - support_ticket_tag_set
+  - support_attachment_resolve
+skills_enabled:
+  - support.list_open_tickets
+  - support.read_thread
+  - support.propose_reply
+  - support.approve_draft
+  - support.reject_draft
+  - support.set_status
+  - support.assign
+  - support.tag
+  - support.find_customer_history
+  - support.add_internal_note
+  - support.classify_ticket
+primitives_required:
+  - api_key_connection
+  - webhook_receiver
+  - scheduled_run
+auth_method: api_key
+required_scopes: []
+webhook_events:
+  - ticket.created
+  - ticket.updated
+  - ticket.completed
+  - ticket.reopened
+  - ticket.deleted
+  - ticket.reply.created
+  - ticket.note.created
+  - ticket.assigned
+  - ticket.status_changed
+setup_steps_summary: Generate a Teamwork Desk API key, configure the per-org webhook URL (issued on connector create — shape `/api/webhooks/teamwork/{orgWebhookToken}` per pre-test-hardening DEC-2/W3) in Teamwork settings, and connect via the Synthetos integrations setup page. Token rotation runbook at `docs/runbooks/teamwork-webhook-token-rotation.md`.
+setup_doc_link: null
+typical_use_cases:
+  - AI-drafted reply queue with human approval gate
+  - Multi-inbox support automation across the agency
+  - Customer-history lookup spanning tickets, revenue, and accounts
+broadly_useful_patterns:
+  - Three-phase dispatch state machine with idempotency ledger (action_attempts)
+  - Polling Phase A→D with full-reconciliation tombstoning preconditions
+  - Webhook + polling convergent dual-path ingestion
+  - Canonical-layer support data isolated from provider vocabulary
+known_gaps:
+  - Foundry parity (OQ-1) deferred per operator override (SDC-OVERRIDE-1)
+  - Provider-side idempotency on addReply pending verification (SDC-ADV-2)
+client_specific_patterns:
+  - Inbox-level agent_config (mode autonomous/assisted/disabled, collision window thresholds)
+  - Per-inbox AI mode opt-ins (autonomous reply on waiting_on_customer)
+implemented_since: "2026-05-09"
+last_verified: "2026-05-11"
+owner: platform-team
+```
+
+---
+
+## GHL Agency vs Location Token Model
+
+GHL Module C introduces a two-tier token architecture that distinguishes agency-level operations from sub-account (location) operations.
+
+### Agency token
+
+- One token per `(orgId, ghlCompanyId)` pair, stored in `connector_configs` with `token_scope = 'agency'`.
+- Obtained via the standard OAuth flow using `userType=Company` in the initial authorization request, which targets the GHL Company (agency) level rather than a specific Location.
+- Used for operations that act on the agency itself: listing all sub-account locations (`GET /locations/search`) and fetching a single location's metadata.
+- Refreshed in place; invalid tokens are not soft-deleted — they surface as auth errors and trigger a reconnect prompt.
+
+### Location token
+
+- One token per `(orgId, locationId)`, stored in `connector_location_tokens` with a 24-hour TTL and a 5-minute proactive refresh window.
+- Minted on demand by calling `POST /oauth/locationToken` with the agency token, then cached.
+- Used for all sub-account-scoped adapter operations: contacts, opportunities, conversations, calendars, funnels, users, revenue, businesses, and sub-account metadata reads.
+- On a 401 response from GHL, the cached entry is soft-deleted (`deleted_at` set) so the next call triggers a fresh mint rather than a retry storm.
+
+### `getLocationToken` helper pattern
+
+The `getLocationToken` function in `locationTokenService` implements a four-step pattern for every location-scoped adapter call:
+
+1. **Cache hit** — return the valid cached token if `expires_at > now + 5 min`.
+2. **Mint** — call `POST /oauth/locationToken` if no valid cache entry exists; insert the result.
+3. **Refresh** — call `POST /oauth/locationToken` to renew if within the 5-minute refresh window.
+4. **401 soft-delete** — on a downstream 401, mark the cached token `deleted_at = now` so the next call re-mints cleanly.
+
+### Adapter method token routing
+
+| Token type | Methods |
+|------------|---------|
+| Agency token | `listLocations`, `getLocation` |
+| Location token | `getContacts`, `getOpportunities`, `getConversations`, `getCalendars`, `getFunnels`, `getUsers`, `getRevenue`, `getBusinesses`, `getLocationMetadata` |
+
+Nine adapter methods use location-scoped tokens; two use the agency token directly.

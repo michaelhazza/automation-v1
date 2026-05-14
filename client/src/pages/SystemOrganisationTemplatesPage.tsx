@@ -227,7 +227,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
         </div>
         <button
           onClick={() => setShowImport(true)}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors whitespace-nowrap"
+          className="btn btn-primary whitespace-nowrap"
         >
           + Import from Paperclip
         </button>
@@ -258,7 +258,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
             <div className="text-sm text-slate-500 mb-6">Import a Paperclip manifest to add company templates to the shared library.</div>
             <button
               onClick={() => setShowImport(true)}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              className="btn btn-primary"
             >
               + Import from Paperclip
             </button>
@@ -268,9 +268,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Name</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agents</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Published</th>
-                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Version</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Created</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
@@ -284,13 +282,11 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                       <div className="text-xs text-slate-500 mt-0.5 max-w-[280px] truncate">{t.description}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">{t.agentCount}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${t.isPublished ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
                       {t.isPublished ? 'Published' : 'Draft'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">v{t.version}</td>
                   <td className="px-4 py-3 text-[13px] text-slate-500">
                     {new Date(t.createdAt).toLocaleDateString()}
                   </td>
@@ -298,23 +294,19 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                     <div className="flex gap-2 items-center flex-wrap">
                       <button
                         onClick={() => handlePreview(t.id, t.name)}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-xs font-medium cursor-pointer transition-colors"
+                        className="btn btn-xs btn-secondary"
                       >
                         Preview
                       </button>
                       <button
                         onClick={() => handleTogglePublish(t.id, t.isPublished)}
-                        className={`px-2.5 py-1 border-0 rounded-md text-xs font-medium cursor-pointer transition-colors ${
-                          t.isPublished
-                            ? 'bg-orange-50 hover:bg-orange-100 text-orange-800'
-                            : 'bg-green-100 hover:bg-green-200 text-green-800'
-                        }`}
+                        className={`btn btn-xs ${t.isPublished ? 'btn-ghost text-orange-800 hover:bg-orange-50' : 'btn-success'}`}
                       >
                         {t.isPublished ? 'Unpublish' : 'Publish'}
                       </button>
                       <button
                         onClick={() => setDeleteId(t.id)}
-                        className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-xs font-medium cursor-pointer transition-colors"
+                        className="btn btn-xs btn-ghost text-red-600 hover:bg-red-50"
                       >
                         Delete
                       </button>
@@ -344,7 +336,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
+                    className="btn btn-secondary"
                   >
                     Choose file
                   </button>
@@ -376,11 +368,11 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                 <button
                   onClick={handleImportConfirm}
                   disabled={importing || !importManifest || !importName.trim()}
-                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${importing || !importManifest || !importName.trim() ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                  className="btn btn-primary disabled:bg-slate-400 disabled:cursor-default"
                 >
                   {importing ? 'Importing...' : 'Import'}
                 </button>
-                <button onClick={handleImportDone} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+                <button onClick={handleImportDone} className="btn btn-secondary">
                   Cancel
                 </button>
               </div>
@@ -435,7 +427,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
               </div>
               <button
                 onClick={handleImportDone}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                className="btn btn-primary"
               >
                 Done
               </button>
@@ -470,7 +462,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
           <div className="mt-4 flex justify-end">
             <button
               onClick={() => setPreviewTemplate(null)}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              className="btn btn-secondary"
             >
               Close
             </button>

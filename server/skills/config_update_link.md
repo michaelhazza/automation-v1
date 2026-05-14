@@ -1,8 +1,8 @@
 ---
 name: Config Update Link
-description: Update a subaccount agent link with any combination of override fields.
+description: Multi-field batch update for a subaccount agent link. Use only when updating two or more unrelated fields simultaneously. For single-purpose updates prefer the dedicated tools: config_set_link_skills (skill slugs), config_set_link_instructions (custom instructions), config_set_link_schedule (schedule/heartbeat), or config_set_link_limits (execution limits).
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<!--
+  R14: TaskHeader — chain-resumed operator task
+  ---------------------------------------------
+  Existing surface: client/src/components/openTask/TaskHeader.tsx
+
+  TaskHeader.tsx structure observed:
+    - Outer div: "flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white"
+    - Left: "flex items-center gap-3"
+      - h1: "text-[15px] font-semibold text-slate-900 truncate max-w-[320px]"
+      - status badge: "px-2 py-0.5 rounded-full text-[11px] font-medium {badgeColor}"
+        - green (running): "bg-green-100 text-green-700"
+        - amber (paused): "bg-amber-100 text-amber-700"
+        - red (stopped): "bg-red-100 text-red-700"
+      - optional: isDegraded badge "bg-orange-100 text-orange-700"
+    - Right: pause + stop buttons (canPauseStop)
+
+  Round 3 additions for chain-resume state:
+    - Status row adds: "Operator run, link 3 of ~12, ~4 hrs elapsed"
+    - "link 3 of ~12" has tooltip on hover
+    - Shown inline in same row as existing status badge — not a new row
+
+  This file shows the full OpenTaskView layout for context, zoomed focus on TaskHeader variants.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskHeader — Chain Link Status | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../consolidation-2026-05-06/_shared.css">
+<link rel="stylesheet" href="../operator-session-identity/_shared.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Component spec page layout ── */
+body { background: #f1f5f9; }
+.spec-page { max-width: 860px; margin: 0 auto; padding: 40px 32px; }
+.spec-title { font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.02em; }
+.spec-sub { font-size: 13px; color: #64748b; margin-bottom: 32px; line-height: 1.6; }
+
+.variant-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #64748b; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.variant-label::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+.variant-block { margin-bottom: 32px; }
+
+/* ── TaskHeader chrome (matches TaskHeader.tsx exactly) ── */
+.task-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid #e2e8f0;
+  background: white; border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.task-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.task-title-txt { font-size: 15px; font-weight: 600; color: #0f172a; truncate; max-width: 320px; }
+
+/* Status badges — matches TaskHeader.tsx badgeColor logic */
+.badge-running   { background: #dcfce7; color: #15803d; }
+.badge-amber     { background: #fef3c7; color: #92400e; }
+.badge-red       { background: #fee2e2; color: #b91c1c; }
+.badge-slate     { background: #f1f5f9; color: #475569; }
+.badge-indigo    { background: #eef2ff; color: #4338ca; }
+
+.status-badge {
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 500; white-space: nowrap; flex-shrink: 0;
+}
+
+/* Chain link indicator (NEW in R14) */
+.chain-link-indicator {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #64748b;
+  white-space: nowrap; flex-shrink: 0;
+  position: relative;
+}
+.chain-link-sep { color: #cbd5e1; }
+.chain-link-text {
+  color: #475569; cursor: default;
+  border-bottom: 1px dashed #cbd5e1;
+  padding-bottom: 1px;
+}
+/* Tooltip on chain link text */
+.chain-link-text .chain-tip {
+  display: none;
+  position: absolute; left: 0; top: 20px;
+  background: #1e293b; color: white;
+  font-size: 11px; font-weight: 500; line-height: 1.5;
+  padding: 6px 10px; border-radius: 7px; z-index: 20;
+  white-space: nowrap; min-width: 240px; max-width: 320px;
+  white-space: normal; width: 280px;
+  pointer-events: none;
+}
+.chain-link-text:hover .chain-tip { display: block; }
+
+/* Elapsed time inline */
+.elapsed-inline { font-size: 11px; color: #64748b; white-space: nowrap; flex-shrink: 0; }
+
+/* Action buttons (match TaskHeader.tsx) */
+.hdr-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 500;
+  border-radius: 6px; cursor: pointer; font-family: inherit;
+  white-space: nowrap; transition: background 0.1s;
+}
+.hdr-btn-pause { border: 1px solid #e2e8f0; color: #475569; background: white; }
+.hdr-btn-pause:hover { background: #f8fafc; }
+.hdr-btn-stop  { border: 1px solid #fecaca; color: #dc2626; background: white; margin-left: 6px; }
+.hdr-btn-stop:hover { background: #fef2f2; }
+
+.task-header-right { display: flex; align-items: center; flex-shrink: 0; }
+
+/* Dot animation */
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:0.5;transform:scale(0.85);} }
+.dot-pulse { width:7px;height:7px;border-radius:50%;background:#10b981;animation:pulse 1.5s infinite;display:inline-block;margin-right:3px; }
+
+/* Annotation box */
+.annotation-box {
+  background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px;
+  padding: 11px 14px; font-size: 12px; color: #78350f; line-height: 1.6;
+  margin-top: 10px;
+}
+.annotation-box strong { color: #92400e; }
+</style>
+</head>
+<body>
+<div class="spec-page">
+
+  <div class="spec-title">TaskHeader: Chain-link status</div>
+  <div class="spec-sub">
+    Component: <code>client/src/components/openTask/TaskHeader.tsx</code><br>
+    This screen shows three variants of TaskHeader for chain-resumed operator tasks, grounded against the actual TaskHeader.tsx structure (flex, gap-3, px-4 py-3, border-b border-slate-200, bg-white). The chain-link indicator is a new inline element added to the existing left-side flex row — no new rows, no new panels.
+  </div>
+
+  <!-- Variant A: Known chain estimate -->
+  <div class="variant-block">
+    <div class="variant-label">A — Chain running, estimate known (link 3 of ~12)</div>
+    <div class="task-header">
+      <div class="task-header-left">
+        <span class="task-title-txt">Year-end financial summary</span>
+
+        <!-- Existing status badge (green running) -->
+        <span class="status-badge badge-running">
+          <span class="dot-pulse"></span>
+          Operator running
+        </span>
+
+        <!-- NEW: chain link indicator, same row, subtle -->
+        <span class="chain-link-indicator">
+          <span class="chain-link-sep">&middot;</span>
+          <span class="chain-link-text">
+            link 3 of ~12
+            <span class="chain-tip">Long operator tasks run in chained sessions. This task is on session 3.</span>
+          </span>
+        </span>
+
+        <!-- NEW: elapsed, same row -->
+        <span class="chain-link-sep">&middot;</span>
+        <span class="elapsed-inline">~4 hrs elapsed</span>
+      </div>
+      <div class="task-header-right">
+        <button class="hdr-btn hdr-btn-pause">Pause</button>
+        <button class="hdr-btn hdr-btn-stop">Stop</button>
+      </div>
+    </div>
+    <div class="annotation-box">
+      "link 3 of ~12" uses a dashed underline to signal it is hoverable. Hovering shows a single-sentence tooltip: "Long operator tasks run in chained sessions. This task is on session 3." The estimate (~12) is computed; shown as approximate.
+    </div>
+  </div>
+
+  <!-- Variant B: Unknown chain estimate -->
+  <div class="variant-block">
+    <div class="variant-label">B — Chain running, estimate unknown (link 3 of --)</div>
+    <div class="task-header">
+      <div class="task-header-left">
+        <span class="task-title-txt">Year-end financial summary</span>
+
+        <span class="status-badge badge-running">
+          <span class="dot-pulse"></span>
+          Operator running
+        </span>
+
+        <span class="chain-link-indicator">
+          <span class="chain-link-sep">&middot;</span>
+          <span class="chain-link-text">
+            link 3 of
+            <span style="display:inline-block;position:relative;">
+              &nbsp;&#8212;
+              <span class="chain-tip" style="left:-40px;">Estimate available after the first chain handoff completes.</span>
+            </span>
+          </span>
+        </span>
+
+        <span class="chain-link-sep">&middot;</span>
+        <span class="elapsed-inline">~4 hrs elapsed</span>
+      </div>
+      <div class="task-header-right">
+        <button class="hdr-btn hdr-btn-pause">Pause</button>
+        <button class="hdr-btn hdr-btn-stop">Stop</button>
+      </div>
+    </div>
+    <div class="annotation-box">
+      When the estimate is unknown, "&#8212;" renders in place of a number. Hovering "&#8212;" shows: "Estimate available after the first chain handoff completes." Uses the same dashed-underline hover pattern. No number is invented.
+    </div>
+  </div>
+
+  <!-- Variant C: Chain completed -->
+  <div class="variant-block">
+    <div class="variant-label">C — Chain completed (6 of 6 links, task done)</div>
+    <div class="task-header">
+      <div class="task-header-left">
+        <span class="task-title-txt">Year-end financial summary</span>
+
+        <span class="status-badge badge-indigo">Completed</span>
+
+        <span class="chain-link-indicator">
+          <span class="chain-link-sep">&middot;</span>
+          <span style="font-size:11px;color:#64748b;">6 sessions &middot; 12 hrs 4 min total</span>
+        </span>
+      </div>
+      <div class="task-header-right">
+        <a href="c2-run-trace-timeline.html" style="font-size:12px;color:#6366f1;font-weight:500;text-decoration:none;">View full Run Trace &#8594;</a>
+      </div>
+    </div>
+    <div class="annotation-box">
+      Terminal state: chain indicator becomes plain text showing total sessions and total wall-clock. No tooltip needed. The "View full Run Trace" link replaces the action buttons.
+    </div>
+  </div>
+
+  <!-- Footer: vocabulary note -->
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;font-size:12px;color:#64748b;line-height:1.7;margin-top:4px;">
+    <strong style="color:#334155;">TaskHeader.tsx vocabulary inherited:</strong><br>
+    Outer: <code>flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white</code><br>
+    Status badges: <code>px-2 py-0.5 rounded-full text-[11px] font-medium</code> + colour classes per runStatus.<br>
+    Existing statusBadge text: <code>paused | stopped | running | Active</code>. New operator text: <code>Operator running</code>.<br>
+    Chain link indicator: new inline element in same left flex row, after status badge. No new DOM row.
+  </div>
+
+</div>
+</body>
+</html>

@@ -3,6 +3,8 @@
 --
 -- Spec: tasks/playbooks-spec.md (final, build-ready)
 --
+-- @rls-baseline: workflow_runs policy deferred to pre-prod-workflow-and-delegation branch (pre-prod-tenancy spec §0.4). Registry entry exists in server/config/rlsProtectedTables.ts as a registry-only deferral; the owning sister branch authors the canonical CREATE POLICY and removes this baseline entry when it lands.
+--
 -- Schema only — services, routes, engine, and UI ship in subsequent commits
 -- per §12.1 implementation order. Forward-only migration per project
 -- convention. Down migration kept at _down/0076_playbooks.sql for local

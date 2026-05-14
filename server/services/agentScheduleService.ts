@@ -1,6 +1,8 @@
 import { eq, and, isNull } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents } from '../db/schema/index.js';
+import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
+import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
@@ -14,12 +16,27 @@ import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
 
 // ---------------------------------------------------------------------------
+// Pure helper — exported for testability
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a deterministic stagger offset in minutes [0, 359] for a subaccount.
+ * Uses the first 4 hex chars of sha256(subaccountId) mod 360 to spread daily
+ * optimiser scans across a 6-hour window starting at 06:00 UTC.
+ */
+export function computeStaggerMinutes(subaccountId: string): number {
+  const hashHex = createHash('sha256').update(subaccountId).digest('hex');
+  return parseInt(hashHex.slice(0, 4), 16) % 360;
+}
+
+// ---------------------------------------------------------------------------
 // Agent Schedule Service — manages cron-based agent scheduling via pg-boss
 // ---------------------------------------------------------------------------
 
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
+const OPTIMISER_SCAN_QUEUE = 'optimiser-scan';
 // AGENT_ORG_RUN_QUEUE removed — org agents now run via AGENT_RUN_QUEUE through the org subaccount
 
 export const agentScheduleService = {
@@ -125,6 +142,7 @@ export const agentScheduleService = {
           taskId: data.taskId,
           handoffDepth: data.handoffDepth,
           parentRunId: data.sourceRunId,
+          handoffSourceRunId: data.sourceRunId,
           triggerContext: {
             type: 'handoff',
             sourceRunId: data.sourceRunId,
@@ -177,6 +195,41 @@ export const agentScheduleService = {
       },
     });
 
+    // ── Optimiser peer-medians nightly refresh ─────────────────────────
+    const PEER_MEDIANS_QUEUE = 'refresh_optimiser_peer_medians';
+    await pgboss.work(PEER_MEDIANS_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      const { refreshOptimiserPeerMediansJob } = await import('../jobs/refreshOptimiserPeerMedians.js');
+      await refreshOptimiserPeerMediansJob(job);
+    });
+    await pgboss.schedule(PEER_MEDIANS_QUEUE, '0 0 * * *', null, { tz: 'UTC' });
+
+    // ── Memory-utility MV nightly refresh ─────────────────────────────
+    const MEMORY_UTILITY_QUEUE = 'refresh_memory_utility_30d';
+    await pgboss.work(MEMORY_UTILITY_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      const { refreshMemoryUtility30dJob } = await import('../jobs/refreshMemoryUtility30dJob.js');
+      await refreshMemoryUtility30dJob(job);
+    });
+    await pgboss.schedule(MEMORY_UTILITY_QUEUE, '0 16 * * *', null, { tz: 'UTC' });
+
+    // ── Optimiser scan — daily per-subaccount scan ─────────────────────
+    // createWorker opens db.transaction + withOrgTx, satisfying the ALS
+    // requirement that getOrgScopedDb() reads inside runOptimiserScan.
+    await createWorker<{
+      subaccountId: string;
+      organisationId: string;
+      agentId: string;
+      subaccountAgentId: string;
+    }>({
+      queue: OPTIMISER_SCAN_QUEUE,
+      boss: pgboss,
+      concurrency: 1,
+      timeoutMs: 540_000, // 9 min hard ceiling — scan has its own circuit breaker
+      handler: async (job) => {
+        const { handleOptimiserScan } = await import('../jobs/runOptimiserScanJob.js');
+        await handleOptimiserScan(job);
+      },
+    });
+
     // ── Stale run cleanup — runs every 5 minutes ────────────────────────
     const STALE_CLEANUP_QUEUE = 'stale-run-cleanup';
     await pgboss.work(STALE_CLEANUP_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
@@ -203,27 +256,38 @@ export const agentScheduleService = {
     });
     await pgboss.schedule(STALE_CLEANUP_QUEUE, '*/5 * * * *');
 
-    // Register all active schedules
+    // Register all active schedules (non-optimiser SAs)
     await this.registerAllActiveSchedules();
+    // Self-heal optimiser schedules on startup (optimiser SAs use a separate queue)
+    await this.registerAllOptimiserSchedules();
   },
 
   /**
    * Register all active agent schedules from the database.
    */
   async registerAllActiveSchedules() {
+    // LEFT JOIN system_agents filtered to the optimiser slug so we can exclude those
+    // rows from AGENT_RUN_QUEUE registration. Optimiser SAs use OPTIMISER_SCAN_QUEUE
+    // and are re-registered at startup via registerOptimiserSchedule (called by the
+    // subaccount-create hook and backfill script). isNull(systemAgents.id) retains all
+    // non-optimiser rows (join miss → null id).
     const rows = await db
       .select({
         sa: subaccountAgents,
         agentStatus: agents.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
+      .leftJoin(
+        systemAgents,
+        and(eq(agents.systemAgentId, systemAgents.id), eq(systemAgents.slug, 'subaccount-optimiser')),
+      )
       .where(
         and(
           eq(subaccountAgents.scheduleEnabled, true),
           eq(subaccountAgents.isActive, true),
           eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
+          isNull(systemAgents.id), // exclude optimiser SAs — they use OPTIMISER_SCAN_QUEUE
         )
       );
 
@@ -246,6 +310,61 @@ export const agentScheduleService = {
     }
 
     logger.info(`[AgentScheduler] Registered ${registered} active schedules (includes org subaccount agents)`);
+  },
+
+  /**
+   * Startup self-heal for optimiser schedules. Sweeps all optimiser-enabled
+   * subaccounts and calls registerOptimiserSchedule for each, so pg-boss
+   * schedules are restored even after a pg-boss table wipe or environment reset.
+   *
+   * Mirrors registerAllActiveSchedules but for OPTIMISER_SCAN_QUEUE. Called from
+   * initialize() after the non-optimiser sweep.
+   */
+  async registerAllOptimiserSchedules() {
+    const [optimiserSystemAgent] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(eq(systemAgents.slug, 'subaccount-optimiser'))
+      .limit(1);
+
+    if (!optimiserSystemAgent) {
+      logger.warn('[AgentScheduler] Optimiser system agent not found — skipping startup optimiser sweep');
+      return;
+    }
+
+    const rows = await db
+      .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
+      .from(subaccountAgents)
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
+      .where(
+        and(
+          eq(subaccountAgents.scheduleEnabled, true),
+          eq(subaccountAgents.isActive, true),
+          eq(agents.status, 'active'),
+          eq(agents.systemAgentId, optimiserSystemAgent.id),
+        )
+      );
+
+    let newCount = 0;
+    let existingCount = 0;
+    let failedCount = 0;
+    for (const row of rows) {
+      try {
+        const result = await this.registerOptimiserSchedule(row.subaccountId, row.organisationId);
+        if (result.wasNew) newCount++;
+        else existingCount++;
+      } catch (err) {
+        logger.error(`[AgentScheduler] Failed to re-register optimiser schedule for subaccount ${row.subaccountId}`, { error: String(err) });
+        failedCount++;
+      }
+    }
+
+    logger.info('optimiser.startup.recovery_summary', {
+      totalOptimiserEnabled: rows.length,
+      schedulesRegistered: newCount,
+      schedulesSkipped: existingCount,
+      schedulesFailed: failedCount,
+    });
   },
 
   /**
@@ -315,6 +434,149 @@ export const agentScheduleService = {
     }
 
     return updated;
+  },
+
+  /**
+   * Register (or self-heal) the daily optimiser schedule for a subaccount.
+   *
+   * Invariant 14: this is the ONLY writer for (subaccount_agents × optimiser).
+   * Both the backfill script and the subaccount-create hook call this function.
+   * The INSERT ... ON CONFLICT DO NOTHING makes it safe to re-run idempotently.
+   *
+   * Schedule name: `${OPTIMISER_SCAN_QUEUE}:${subaccountAgentId}` (invariant 13).
+   * Cron: stagger offset [0,359] maps to a (minute, hour) pair in the 06:00–11:59
+   * UTC window: minute = offset % 60, hour = 6 + floor(offset / 60).
+   */
+  async registerOptimiserSchedule(subaccountId: string, organisationId: string): Promise<{
+    subaccountAgentId: string;
+    cron: string;
+    scheduleName: string;
+    wasNew: boolean;
+  }> {
+    // 1. Resolve the optimiser system_agents row by slug
+    const [systemAgent] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(eq(systemAgents.slug, 'subaccount-optimiser'))
+      .limit(1);
+
+    if (!systemAgent) {
+      throw { statusCode: 500, message: 'Optimiser system agent not found', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+    }
+
+    // 2. Resolve the subaccount to confirm it belongs to this org
+    const [subaccount] = await db
+      .select({ id: subaccounts.id, organisationId: subaccounts.organisationId })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
+      .limit(1);
+
+    if (!subaccount) {
+      throw { statusCode: 404, message: 'Subaccount not found', errorCode: 'SUBACCOUNT_NOT_FOUND' };
+    }
+
+    // 3. Resolve the agents row for this org that links to the system agent
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.systemAgentId, systemAgent.id),
+          eq(agents.organisationId, subaccount.organisationId),
+          isActive(agents),
+        )
+      )
+      .limit(1);
+
+    if (!agent) {
+      throw { statusCode: 500, message: 'Optimiser agent not found for organisation', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+    }
+
+    // 4. Compute staggered cron — offset in [0,359] spans 06:00–11:59 UTC
+    const offset = computeStaggerMinutes(subaccountId);
+    const minute = offset % 60;
+    const hour = 6 + Math.floor(offset / 60);
+    const cron = `${minute} ${hour} * * *`;
+
+    // 5. INSERT subaccount_agents ON CONFLICT DO NOTHING (idempotent)
+    const inserted = await db
+      .insert(subaccountAgents)
+      .values({
+        subaccountId,
+        agentId: agent.id,
+        organisationId: subaccount.organisationId,
+        scheduleCron: cron,
+        scheduleEnabled: true,
+        // Hardcoded UTC: subaccounts schema has no timezone column; spec §6 notes per-subaccount timezone is a future enhancement
+        scheduleTimezone: 'UTC',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning({ id: subaccountAgents.id });
+
+    let subaccountAgentId: string;
+    let wasNew: boolean;
+
+    if (inserted.length > 0) {
+      subaccountAgentId = inserted[0].id;
+      wasNew = true;
+    } else {
+      // Row already existed — fetch the existing id
+      const [existing] = await db
+        .select({ id: subaccountAgents.id, scheduleCron: subaccountAgents.scheduleCron, scheduleTimezone: subaccountAgents.scheduleTimezone })
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.subaccountId, subaccountId),
+            eq(subaccountAgents.agentId, agent.id),
+          )
+        )
+        .limit(1);
+
+      if (!existing) {
+        throw { statusCode: 500, message: 'Failed to resolve existing subaccount agent after conflict', errorCode: 'OPTIMISER_SCHEDULE_AGENT_MISSING' };
+      }
+
+      subaccountAgentId = existing.id;
+      wasNew = false;
+
+      // Self-heal: update DB if cron formula changed.
+      // Do NOT call updateSchedule() — it calls registerSchedule() which hardcodes AGENT_RUN_QUEUE.
+      // The pg-boss schedule is re-registered unconditionally below (step 6) on OPTIMISER_SCAN_QUEUE.
+      if (existing.scheduleCron !== cron) {
+        await db
+          .update(subaccountAgents)
+          .set({ scheduleCron: cron, scheduleEnabled: true, scheduleTimezone: 'UTC', updatedAt: new Date() })
+          .where(eq(subaccountAgents.id, subaccountAgentId));
+      }
+    }
+
+    // Optimiser uses a dedicated queue so jobs reach runOptimiserScan, not the LLM agent loop.
+    const scheduleName = `${OPTIMISER_SCAN_QUEUE}:${subaccountAgentId}`;
+
+    // 6. Register (or re-register) the pg-boss schedule on the optimiser-scan queue
+    const pgboss = await getPgBoss() as any;
+    await pgboss.schedule(
+      scheduleName,
+      cron,
+      {
+        subaccountAgentId,
+        agentId: agent.id,
+        subaccountId,
+        organisationId: subaccount.organisationId,
+      },
+      { tz: 'UTC' },
+    );
+
+    if (wasNew) {
+      logger.info('optimiser.schedule.registered', { subaccountId, cron, scheduleName });
+    } else {
+      logger.info('optimiser.schedule.skipped_duplicate', { subaccountId, cron, scheduleName });
+    }
+
+    return { subaccountAgentId, cron, scheduleName, wasNew };
   },
 
   /**

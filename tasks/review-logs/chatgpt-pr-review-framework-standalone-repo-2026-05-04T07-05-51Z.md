@@ -1,0 +1,167 @@
+# ChatGPT PR Review Session — framework-standalone-repo — 2026-05-04T07-05-51Z
+
+## Session Info
+- Branch: claude/framework-standalone-repo
+- PR: #257 — https://github.com/michaelhazza/automation-v1/pull/257
+- Mode: manual
+- Started: 2026-05-04T07:05:51Z
+- Phase: invoked from `finalisation-coordinator` (Phase 3 of three-coordinator pipeline)
+- Spec deviations (from `handoff-phase2.md`):
+  1. `sync.js` is JS-with-JSDoc (~1413 lines), not "TypeScript ~300 lines." Plan §1.1: no build step in framework repo.
+  2. `lastSubstitutionHash` is an additive optional field on FrameworkState (plan §1.11) for substitution-drift invariant; forward-migrates pre-2.2.0 state.json transparently.
+- REVIEW_GAP: `dual-reviewer` skipped in Phase 2 (Codex CLI unavailable). This `chatgpt-pr-review` pass is the primary second-opinion review.
+
+---
+
+## Round 1 — 2026-05-04
+
+**Note:** the operator's first attempt to upload the diff to ChatGPT-web returned a generic production-readiness checklist with no specific findings (ChatGPT explicitly asked to be sent the code). That round was treated as a no-op; the operator re-uploaded with a more direct prompt naming the primary file under review.
+
+### ChatGPT verdict
+
+> Not merge-ready yet. Main shape looks good, but I'd fix these before merge.
+
+Verdict text: 5 findings (F1–F5). Operator pasted the response in-session.
+
+### Findings + triage
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| F1 | Version drift: root `.claude/FRAMEWORK_VERSION` 2.1.0 vs `setup/portable/.claude/FRAMEWORK_VERSION` 2.2.0 | **partial accept** | Drift is intentional design (root reflects what is deployed in this repo; portable reflects what the bundle ships to consuming repos; root catches up at Phase C self-adoption). Fix: documentation, not version bump. Added a "Root vs portable bundle versioning" section to `.claude/CHANGELOG.md` explaining the separation. |
+| F2 | `AutomationOS` (no-space variant) leaks past forbidden-string scanner | **accept** | Confirmed: `setup/portable/.claude/agents/audit-runner.md` lines 30 and 83 contain `AutomationOS`, scanner only catches `Automation OS` (with space). Replaced both occurrences with `{{PROJECT_NAME}}` placeholder; added `AutomationOS` to `FORBIDDEN_STRINGS` in `scripts/build-portable-framework.ts`. |
+| F3 | Root changelog has no 2.2.0 entry | **partial accept** | Combined with F1 — same intentional separation. Same single fix (clarifying note in root CHANGELOG.md). |
+| F4 | Portable tests not wired into root CI/package scripts | **accept** | Confirmed: vitest config includes `**/__tests__/**/*.test.ts` only (portable tests are in `setup/portable/tests/`); CI workflow has no portable test invocation; no `test:portable-framework` script in `package.json`. Added script `"test:portable-framework": "node --import tsx --test setup/portable/tests/*.test.ts"`. Verified: 113/113 tests pass via `npm run test:portable-framework`. CI integration is a follow-up consideration, deferred. |
+| F5 | `build-portable-framework.ts` shells out to `zip` on POSIX without preflight | **accept** | Confirmed at line 178. Added `assertZipBinaryAvailable()` preflight before the spawn — clear error with installation hints (`apt-get install -y zip`, `apk add zip`, `brew install zip`) instead of cryptic ENOENT in minimal containers. |
+
+### Verification
+
+- `npm run lint -- scripts/build-portable-framework.ts` — 0 errors (726 pre-existing warnings unchanged).
+- `npm run typecheck` — clean (both root and server tsconfigs).
+- `npm run test:portable-framework` — 113 tests, 113 pass, 0 fail, duration 13.5s.
+
+### Round 1 verdict
+
+5/5 findings substantive (none rejected as misread). 3 fully accepted (F2, F4, F5), 2 accepted as documentation-only fixes (F1, F3 combined). Zero items deferred to `tasks/todo.md`. ChatGPT's review surfaced real gaps that pr-reviewer and adversarial-reviewer missed — F4 (test discoverability) and F5 (build robustness in minimal containers) are the kind of "is this actually shippable in CI" concerns that are out of scope for diff-only reviewers.
+
+### Files changed in Round 1
+
+- `.claude/CHANGELOG.md` — added "Root vs portable bundle versioning" subsection (F1+F3).
+- `setup/portable/.claude/agents/audit-runner.md` — replaced `AutomationOS` × 2 with `{{PROJECT_NAME}}` (F2).
+- `scripts/build-portable-framework.ts` — added `AutomationOS` to FORBIDDEN_STRINGS (F2); added `assertZipBinaryAvailable()` preflight on POSIX (F5).
+- `package.json` — added `test:portable-framework` script (F4). HITL-approved by operator before edit.
+
+---
+
+## Round 2 — 2026-05-04
+
+### ChatGPT verdict
+
+> Almost there. One more tightening pass before merge.
+>
+> No structural concerns anymore. This is now a hardening pass, not a redesign.
+
+7 findings (4 from Round 1 re-flagged, 3 new). Operator pasted the response in-session.
+
+### Findings + triage
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| 1 | Version authority still ambiguous (root vs portable dual authority) | **accept** (strengthen) | Round 1 doc note treated both as valid (which IS the dual-authority pattern ChatGPT flagged). Strengthened: portable is canonical; root is a deployment marker. Drift is bounded — deployment may lag, never exceed canonical. Updated `.claude/CHANGELOG.md` with explicit "Version authority — single source of truth" framing. |
+| 2 | Scanner string-based and brittle | **partial** | Modest expansion: added case variants (`automation-os`, `automation_os`, `automation_v1`, `automationV1`, lowercase / uppercase Synthetos) to FORBIDDEN_STRINGS in `scripts/build-portable-framework.ts`. Verified no false-positives against current bundle content. Deeper "positive validation" redesign (allow-listed patterns, structural rules) is an architecture call — deferred to `tasks/todo.md` for follow-up. |
+| 3 | Tests not enforced via CI | **accept** | Added `portable_framework_tests` job to `.github/workflows/ci.yml` invoking `npm run test:portable-framework`. Unconditional gate, runs on every PR (no `ready-to-merge` label gating, unlike unit_tests/integration_tests — the portable test suite is fast and the gate should fire early). |
+| 4 | Build script `zip` dependency unaddressed | **reject** (false positive) | Already fixed in Round 1 (commit `5e2163ce`, `scripts/build-portable-framework.ts:188-198` — `assertZipBinaryAvailable()` preflight with installation hints for apt/apk/brew). ChatGPT may have been working from a stale view of the diff. No action. |
+| 5 | Agent duplication guard (root vs portable) | **defer** | Routed to `tasks/todo.md`. Real concern but the long-term fix is Phase C self-adoption — at that point root becomes a sync.js output, dissolving the duplication question. Until Phase C, low priority. |
+| 6 | Manifest schema validation | **defer** | Routed to `tasks/todo.md`. Real concern; wants architect input on hand-rolled validator design + manifest schema versioning question. Too heavy for a Round 2 in-branch fix without architect step. |
+| 7 | Sync engine observability (dry-run summary, JSON report) | **defer** | Routed to `tasks/todo.md`. Polish, not blocker. Useful once the engine is invoked across many consumer repos. |
+
+### Verification
+
+- `npm run lint` — 0 errors (726 pre-existing warnings unchanged).
+- `npm run typecheck` — clean.
+- `npm run test:portable-framework` — 113/113 pass.
+- Scanner regression check: grep for new variants in `setup/portable/` returned 0 matches (no false-positives).
+
+### Round 2 verdict
+
+3 must-fix accepted (version authority strengthening, scanner expansion, CI gate), 1 rejected as false positive (zip preflight), 3 hardening items deferred to `tasks/todo.md`. Round 1 + Round 2 cumulative: 8 actioned, 1 rejected, 4 deferred — full triage trail preserved in this log + `tasks/todo.md`.
+
+### Files changed in Round 2
+
+- `.claude/CHANGELOG.md` — replaced "Root vs portable bundle versioning" with stronger "Version authority — single source of truth" (F1v2).
+- `scripts/build-portable-framework.ts` — expanded `FORBIDDEN_STRINGS` with case variants (F2v2).
+- `.github/workflows/ci.yml` — added `portable_framework_tests` job (F3v2).
+- `tasks/todo.md` — appended `## Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)` section with 4 items (F2 deeper redesign, F5, F6, F7).
+
+---
+
+## Round 3 — 2026-05-04 — LOOP CLOSED
+
+### ChatGPT verdict
+
+> Final pass: I'd close the ChatGPT loop. No new substantive blockers from the latest uploaded PR view. The key Round 2 items now look addressed.
+>
+> Recommendation: wait for portable_framework_tests to pass on GitHub, then merge.
+
+ChatGPT explicitly verified the Round 2 fixes:
+- CI is now wired (4 checks in `.github/workflows/ci.yml`).
+- Version authority is documented as portable-canonical / root deployment marker.
+- Portable tests cover adopt/sync/merge/settings/substitution/flags paths.
+- Sync engine has meaningful test coverage including CRLF and customisation handling.
+
+### Findings + triage
+
+| # | Finding | Triage | Action |
+|---|---|---|---|
+| 8 | Wording ambiguity in `.claude/CHANGELOG.md` — "This file is the source of truth" appears inside the root file but refers to `setup/portable/.claude/CHANGELOG.md` | **accept** | Named the canonical file explicitly: `setup/portable/.claude/CHANGELOG.md` is the source of truth. |
+
+### Round 3 verdict
+
+ChatGPT closed the loop on its own ("I'd close the ChatGPT loop"). One nit accepted and applied. The convergence pattern (Round 1 packaging/metadata → Round 2 hardening → Round 3 nit + close) is the canonical signal that the loop is genuinely converged, not artificially terminated.
+
+### Files changed in Round 3
+
+- `.claude/CHANGELOG.md` — F8 wording fix: "This file is the source of truth" → "`setup/portable/.claude/CHANGELOG.md` is the source of truth"; "this file" → "this file you are reading now" for the deployment marker.
+
+---
+
+## Cumulative review state (final)
+
+| Round | Findings | Actioned | Rejected (FP) | Deferred |
+|---|---|---|---|---|
+| 1 | 5 | 5 | 0 | 0 |
+| 2 | 7 | 3 | 1 | 3 |
+| 3 | 1 | 1 | 0 | 0 |
+| **Total** | **13** | **9** | **1** | **3** |
+
+**Final verdict:** chatgpt-pr-review LOOP CLOSED at Round 3 with explicit ChatGPT close recommendation + 1 wording nit applied.
+
+**Pre-merge condition:** wait for the `portable_framework_tests` CI job to pass on GitHub (gate added in Round 2 commit `7540ed08`).
+
+**Deferred items routed to** `tasks/todo.md § Deferred from chatgpt-pr-review — framework-standalone-repo (2026-05-04 round 2)`:
+1. Scanner positive-validation redesign beyond string blacklist (F2 deeper)
+2. Agent duplication guard root vs portable (F5)
+3. Manifest schema validation in sync.js (F6)
+4. Sync engine observability — dry-run summary / JSON report (F7)
+
+---
+
+## Final Summary
+
+**Doc-sync sweep verdicts** (per `docs/doc-sync.md` Investigation procedure — finalisation-coordinator pass, 2026-05-04):
+
+- KNOWLEDGE.md updated: yes (5 entries) — Version authority for parallel framework artefacts, chatgpt-pr-review re-flagging applied fix in next round, TDD on adversarial findings, adversarial-reviewer escalates pr-reviewer nits, defence-in-depth path-containment assertion. Appended by finalisation-coordinator (sub-agent did not extract patterns; cross-check filled the gap).
+- architecture.md updated: n/a — checked `setup/portable`, `sync.js`, `manifest.json`, `FRAMEWORK_VERSION`, `AutomationOS`, `assertWithinRoot`, `lastSubstitutionHash`, `--adopt`, `--check`, `--dry-run`, `--strict`, `--doctor`, `portable_framework_tests` against `architecture.md`; zero matches. The build is internal-framework scope (no service boundary, route, RLS, schema, agent-fleet, or key-files-per-domain change).
+- capabilities.md updated: n/a — no add / remove / rename of product capability, agency capability, skill, or integration in this PR.
+- integration-reference.md updated: n/a — no integration behaviour change, new scope, new skill, changed status, new write capability, new OAuth provider, new MCP preset, new capability slug, or new alias.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes — `CLAUDE.md` § *Framework version* rewritten to surface the canonical-vs-deployment distinction (root file is a deployment marker; `setup/portable/.claude/CHANGELOG.md` is the source of truth). `DEVELOPMENT_GUIDELINES.md` checked clean — no build-discipline / convention / RLS / migration rules touched.
+- frontend-design-principles.md updated: n/a — no UI patterns introduced.
+- CONTRIBUTING.md updated: n/a — no change to lint-suppression policy or contributor-conventions.
+- references/test-gate-policy.md updated: no — checked the new `npm run test:portable-framework` script against the forbidden list; not an umbrella command, not a whole-repo scanner — scoped runner for the 113 tests authored in this build, consistent with the "Targeted execution of unit tests authored for THIS change" allowed pattern. Policy doc remains accurate.
+- references/spec-review-directional-signals.md updated: n/a — not a spec-review session.
+- spec-context.md updated: n/a — not a spec-review session.
+- docs/decisions/ updated: no — version-authority pattern documented in KNOWLEDGE.md (per `decisions/README.md` rule "KNOWLEDGE first, ADR if the decision keeps coming up"). Promote to ADR if cited in future builds.
+- docs/context-packs/ updated: n/a — `architecture.md` section anchors unchanged.
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: yes — `setup/portable/.claude/FRAMEWORK_VERSION` advanced to 2.2.0 in Phase 2; `setup/portable/.claude/CHANGELOG.md` 2.2.0 entry extended at finalisation to record the chatgpt-pr-review hardening additions (`FORBIDDEN_STRINGS` AutomationOS + case variants, `assertZipBinaryAvailable` preflight, `test:portable-framework` script + `portable_framework_tests` CI gate, two `AutomationOS` leak fixes, version-authority cross-reference). Root `.claude/FRAMEWORK_VERSION` deliberately stays at 2.1.0 per the canonical-vs-deployment rule (root is a deployment marker; advances at Phase C self-adoption).
+
+**Verdict counts:** 5 yes, 1 no (substantiated), 7 n/a (substantiated). Total 13 verdicts — equal to the 13 registered docs in `docs/doc-sync.md`. Sweep complete; no blockers.
+

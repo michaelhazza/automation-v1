@@ -8,9 +8,12 @@
  */
 
 export interface MemoryBlockForPrompt {
+  id: string;
   name: string;
   content: string;
   permission: 'read' | 'read_write';
+  /** F1 §4 — set to 2 for Tier-2 baseline blocks injected via domain filter. */
+  tier?: 1 | 2 | null;
 }
 
 /**

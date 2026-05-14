@@ -5,26 +5,19 @@
  */
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
+import { z } from 'zod';
+import { authenticate, requireSubaccountPermission, requireOrgPermission, hasSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
+import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
+import { credentialBrokerService } from '../services/credentialBrokerService.js';
+import { listConnections, getConnectionUsage, disconnectConnection } from '../services/connectionsService.js';
+import { integrationConnectionService } from '../services/integrationConnectionService.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const router = Router();
-
-function sanitizeConnection(conn: typeof integrationConnections.$inferSelect) {
-  const { accessToken, refreshToken, secretsRef, ...rest } = conn;
-  return {
-    ...rest,
-    hasAccessToken: !!accessToken,
-    hasRefreshToken: !!refreshToken,
-    hasSecretsRef: !!secretsRef,
-  };
-}
 
 // List connections for a subaccount
 router.get(
@@ -33,10 +26,8 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const rows = await db.select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.subaccountId, subaccount.id));
-    res.json(rows.map(sanitizeConnection));
+    const rows = await integrationConnectionService.listSubaccountConnections(subaccount.id, req.orgId!);
+    res.json(rows);
   })
 );
 
@@ -53,27 +44,19 @@ router.post(
       throw { statusCode: 400, message: 'providerType and authType are required' };
     }
 
-    // Encrypt tokens before storage
-    const encryptedAccess = accessToken ? connectionTokenService.encryptToken(accessToken) : null;
-    const encryptedRefresh = refreshToken ? connectionTokenService.encryptToken(refreshToken) : null;
-    const encryptedSecret = secretsRef ? connectionTokenService.encryptToken(secretsRef) : null;
-
-    const [connection] = await db.insert(integrationConnections).values({
-      organisationId: req.orgId!,
-      subaccountId: subaccount.id,
+    const connection = await integrationConnectionService.createSubaccountConnection(subaccount.id, req.orgId!, {
       providerType,
       authType,
-      label: label ?? null,
-      displayName: displayName ?? null,
-      configJson: configJson ?? null,
-      accessToken: encryptedAccess,
-      refreshToken: encryptedRefresh,
-      tokenExpiresAt: tokenExpiresAt ? new Date(tokenExpiresAt) : null,
-      secretsRef: encryptedSecret,
-      connectionStatus: 'active',
-    }).returning();
+      label,
+      displayName,
+      configJson,
+      accessToken,
+      refreshToken,
+      tokenExpiresAt,
+      secretsRef,
+    });
 
-    res.status(201).json(sanitizeConnection(connection));
+    res.status(201).json(connection);
   })
 );
 
@@ -84,17 +67,21 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [connection] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
+    const connection = await integrationConnectionService.getSubaccountConnection(req.params.id, subaccount.id, req.orgId!);
 
     if (!connection) throw { statusCode: 404, message: 'Connection not found' };
-    res.json(sanitizeConnection(connection));
+    res.json(connection);
   })
 );
+
+/**
+ * PTH-CGT-R5-F3 — exported so the contract-pin test can import this exact
+ * schema rather than maintaining a mirror that drifts silently when the route
+ * changes. See server/routes/__tests__/integrationConnectionsValidation.test.ts.
+ */
+export const patchConnectionBodySchema = z.object({
+  connectionStatus: z.enum(['active', 'revoked', 'error']).optional(),
+}).passthrough();
 
 // Update connection (label, status, tokens)
 router.patch(
@@ -102,38 +89,24 @@ router.patch(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
+    const parsed = patchConnectionBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw { statusCode: 400, message: 'Invalid connectionStatus value', errorCode: 'connection.status_invalid' };
+    }
+
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
-
-    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
-
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-
-    if (req.body.label !== undefined) updates.label = req.body.label;
-    if (req.body.displayName !== undefined) updates.displayName = req.body.displayName;
-    if (req.body.connectionStatus !== undefined) updates.connectionStatus = req.body.connectionStatus;
-    if (req.body.configJson !== undefined) updates.configJson = req.body.configJson;
-
-    // Re-encrypt if new tokens provided
-    if (req.body.accessToken) updates.accessToken = connectionTokenService.encryptToken(req.body.accessToken);
-    if (req.body.refreshToken) updates.refreshToken = connectionTokenService.encryptToken(req.body.refreshToken);
-    if (req.body.tokenExpiresAt) updates.tokenExpiresAt = new Date(req.body.tokenExpiresAt);
-    if (req.body.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(req.body.secretsRef);
-
-    const [updated] = await db.update(integrationConnections)
-      .set(updates)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-      ))
-      .returning();
+    const updated = await integrationConnectionService.updateSubaccountConnection(req.params.id, subaccount.id, req.orgId!, {
+      label: req.body.label,
+      displayName: req.body.displayName,
+      connectionStatus: parsed.data.connectionStatus,
+      configJson: req.body.configJson,
+      accessToken: req.body.accessToken,
+      refreshToken: req.body.refreshToken,
+      tokenExpiresAt: req.body.tokenExpiresAt,
+      secretsRef: req.body.secretsRef,
+    });
     if (!updated) throw { statusCode: 404, message: 'Connection not found' };
-    res.json(sanitizeConnection(updated));
+    res.json(updated);
   })
 );
 
@@ -144,22 +117,17 @@ router.delete(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [existing] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id)
-      ));
 
-    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
-
-    // Revoke rather than hard delete — keeps audit trail
-    await db.update(integrationConnections)
-      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-      ));
+    const revoked = await credentialBrokerService.revoke({
+      organisationId: req.orgId!,
+      credentialId: req.params.id,
+      subaccountId: subaccount.id,
+    });
+    if (!revoked) {
+      // Connection not found in this subaccount scope — preserve the pre-broker
+      // 404 behaviour rather than returning success on a no-op delete.
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
 
     res.json({ success: true });
   })
@@ -173,15 +141,9 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [conn] = await db.select()
-      .from(integrationConnections)
-      .where(and(
-        eq(integrationConnections.id, req.params.id),
-        eq(integrationConnections.subaccountId, subaccount.id),
-        eq(integrationConnections.providerType, 'slack'),
-      ));
+    const conn = await integrationConnectionService.getSubaccountConnectionWithToken(req.params.id, subaccount.id, req.orgId!);
 
-    if (!conn) throw { statusCode: 404, message: 'Slack connection not found' };
+    if (!conn || conn.providerType !== 'slack') throw { statusCode: 404, message: 'Slack connection not found' };
     if (!conn.accessToken) throw { statusCode: 422, message: 'Slack connection has no token — reconnect first' };
 
     const token = connectionTokenService.decryptToken(conn.accessToken);
@@ -223,6 +185,127 @@ router.get(
 
     channels.sort((a, b) => a.name.localeCompare(b.name));
     res.json(channels);
+  })
+);
+
+// ── Govern surface: unified connections list (org scope) ─────────────────────
+
+router.get(
+  '/api/connections',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    const querySchema = z.object({
+      scope: z.enum(['workspace', 'org']).optional(),
+      subaccountId: z.string().uuid().optional(),
+      authMethod: z.enum(['oauth', 'api_key', 'web_login', 'mcp', 'cookie', 'ai_subscription']).optional(),
+      status: z.enum(['connected', 'expired', 'failed', 'pending']).optional(),
+      q: z.string().trim().min(1).max(200).optional(),
+    }).refine(
+      (q) => q.scope !== 'workspace' || !!q.subaccountId,
+      { message: 'subaccountId is required when scope=workspace', path: ['subaccountId'] },
+    );
+    const parsed = querySchema.safeParse({
+      scope: req.query.scope,
+      subaccountId: req.query.subaccountId,
+      authMethod: req.query.authMethod,
+      status: req.query.status,
+      q: req.query.q,
+    });
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid query parameter', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 50);
+    // Gate AI Subscription rows on OPERATOR_SESSION_VIEW. The permission is
+    // subaccount-scoped because AI Subscription rows are workspace-bound in V1
+    // (see connectionsService.ts: operator_session rows are skipped for
+    // scope=org and only appended when scope=workspace).
+    //
+    // - scope=workspace: check the per-subaccount permission against the
+    //   parsed subaccountId. Without the permission, AI Subscription rows are
+    //   omitted from the workspace view.
+    // - scope=org / undefined: operator_session rows are skipped downstream
+    //   regardless, so the flag is forced false here (no permission check
+    //   needed and no org-level proxy permission exists for this view).
+    const hasOperatorSessionView =
+      parsed.data.scope === 'workspace' && parsed.data.subaccountId
+        ? await hasSubaccountPermission(
+            req,
+            parsed.data.subaccountId,
+            SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW,
+          )
+        : false;
+    const result = await listConnections({
+      organisationId: req.orgId!,
+      scope: parsed.data.scope,
+      subaccountId: parsed.data.subaccountId,
+      provider: req.query.provider as string | undefined,
+      authMethod: parsed.data.authMethod,
+      status: parsed.data.status,
+      q: parsed.data.q,
+      cursor: (req.query.cursor as string) || null,
+      limit,
+      sortDir: req.query.sortDir === 'asc' ? 'asc' : 'desc',
+      hasOperatorSessionView,
+    });
+    res.json(result);
+  })
+);
+
+// GET usage impact for a connection (agents / workflows using it)
+router.get(
+  '/api/connections/:id/usage',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const usage = await getConnectionUsage(req.params.id, req.orgId!);
+    res.json(usage);
+  })
+);
+
+// POST disconnect a connection — delegates to per-kind revoke/delete per spec §4.10
+router.post(
+  '/api/connections/:id/disconnect',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const result = await disconnectConnection(req.params.id, req.orgId!);
+    if ('notFound' in result) {
+      throw { statusCode: 404, message: 'Connection not found' };
+    }
+    res.status(200).json({ success: true, alreadyDisconnected: result.alreadyDisconnected, kind: result.kind });
+  })
+);
+
+// POST test a connection — always returns 200 per spec §4.9
+router.post(
+  '/api/connections/:id/test',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.id)) {
+      res.status(400).json({ error: 'Invalid connection id' });
+      return;
+    }
+    const result = await connectionTokenService.testConnection({
+      id: req.params.id,
+      organisationId: req.orgId!,
+    });
+    if ('notFound' in result) {
+      res.status(404).json({ error: 'Connection not found' });
+      return;
+    }
+    res.status(200).json(result);
   })
 );
 

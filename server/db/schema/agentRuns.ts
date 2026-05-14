@@ -1,11 +1,15 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex, smallint } from 'drizzle-orm/pg-core';
+import type { ControllerStyle } from '../../../shared/types/controllerStyle.js';
+import type { PolicyEnvelopeSnapshot } from '../../../shared/types/policyEnvelope.js';
 import { sql } from 'drizzle-orm';
 import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
+import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 import { users } from './users';
+import { workspaceActors } from './workspaceActors';
 
 // ---------------------------------------------------------------------------
 // Agent Runs — logs of autonomous agent executions
@@ -20,6 +24,9 @@ export const agentRuns = pgTable(
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
+    // User-owned-agents primitive (migration 0327): copied from agent.ownerUserId at run start.
+    // NULL = subaccount-owned run (existing behaviour). Immutable once set.
+    ownerUserId: uuid('owner_user_id'),
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
@@ -34,10 +41,14 @@ export const agentRuns = pgTable(
     // 'iee_browser' / 'iee_dev' added rev 6 §9.1 — these route the run through
     // the Integrated Execution Environment (server/services/ieeExecutionService.ts)
     // instead of the standard API/headless tool dispatch.
-    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev'>(),
+    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev' | 'operator_managed'>(),
 
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
+
+    // Controller style for this run — resolved at run creation via controllerStyleResolver.
+    // 'native' = standard limits; 'operator' = elevated limits (spec §4.1.5).
+    controllerStyle: text('controller_style').notNull().default('native').$type<ControllerStyle>(),
 
     // How the run was sourced — explicit for observability and segmentation
     runSource: text('run_source').$type<'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system'>(),
@@ -68,7 +79,7 @@ export const agentRuns = pgTable(
       name: string;
       description: string | null;
       contentType: string;
-      loadingMode: 'eager' | 'lazy';
+      loadingMode?: 'eager' | 'lazy';
       sizeBytes: number;
       tokenCount: number;
       fetchOk: boolean;
@@ -86,8 +97,9 @@ export const agentRuns = pgTable(
     // — the run has been handed off to a delegated execution backend (currently
     // IEE; future: OpenClaw). Non-terminal. Detail lives on the backend row
     // (iee_runs). Transitions to a terminal value when the backend reaches its
-    // own terminal state, via finaliseAgentRunFromIeeRun.
-    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty'>(),
+    // own terminal state, via the registry orchestrator
+    // (`agentRunFinalizationService.finaliseAgentRunFromBackend`).
+    status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'delegated' | 'cancelling' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded' | 'awaiting_clarification' | 'waiting_on_clarification' | 'completed_with_uncertainty' | 'blocked_awaiting_integration' | 'paused_for_chain_continuation' | 'paused_chain_failure' | 'paused_budget_exceeded' | 'paused_wall_clock_exceeded'>(),
 
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
@@ -112,6 +124,9 @@ export const agentRuns = pgTable(
     // Migration 0137
     citedEntryIds: jsonb('cited_entry_ids').notNull().default([]).$type<string[]>(),
     hadUncertainty: boolean('had_uncertainty').notNull().default(false),
+
+    // B1 — injected workspace_memory_entries per run (migration 0334)
+    injectedEntryIds: jsonb('injected_entry_ids').$type<string[] | null>(),
 
     // Phase 8 / W3c — memory_block provenance trail (migration 0199)
     appliedMemoryBlockIds: jsonb('applied_memory_block_ids').notNull().default([]).$type<string[]>(),
@@ -155,10 +170,10 @@ export const agentRuns = pgTable(
     isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
-    // Playbooks reverse link (migration 0076) — set when this agent run was
-    // dispatched by a Playbooks step. Engine reads this in onAgentRunCompleted
+    // Workflows reverse link (migration 0076) — set when this agent run was
+    // dispatched by a Workflows step. Engine reads this in onAgentRunCompleted
     // to find the originating step run.
-    playbookStepRunId: uuid('playbook_step_run_id'),
+    workflowStepRunId: uuid('workflow_step_run_id'),
 
     // IEE Phase 0 denormalised reference (migration 0176). When the run
     // is delegated to an IEE worker, agentExecutionService writes the
@@ -186,6 +201,18 @@ export const agentRuns = pgTable(
     // default. See docs/routines-response-dev-spec.md §4.4 / §4.7.
     isTestRun: boolean('is_test_run').notNull().default(false),
 
+    // Integration block state — set when the run is paused waiting for an
+    // OAuth connection. Cleared on resume or expiry sweep.
+    // blockedReason: discriminator; currently only 'integration_required'.
+    // integrationResumeToken: sha256 hash of the plaintext bearer token that
+    //   unblocks this run. Plaintext lives only in agent_messages.meta.
+    // integrationDedupKey: sha256(toolName:runId:blockSequence) — prevents
+    //   double-blocking the same tool call on retry.
+    blockedReason: text('blocked_reason').$type<'integration_required' | null>(),
+    blockedExpiresAt: timestamp('blocked_expires_at', { withTimezone: true }),
+    integrationResumeToken: text('integration_resume_token'),
+    integrationDedupKey: text('integration_dedup_key'),
+
     // P3A: Principal model fields (migration 0164)
     principalType: text('principal_type').notNull().default('user').$type<'user' | 'service' | 'delegated'>(),
     principalId: text('principal_id').notNull().default(''),
@@ -212,6 +239,58 @@ export const agentRuns = pgTable(
     // degradedReason: diagnostic enum recorded alongside run_outcome='degraded' (§4.6)
     degradedReason: text('degraded_reason').$type<'soft_warn' | 'token_drift' | 'cache_miss'>(),
 
+    // Paperclip Hierarchy — delegation telemetry (migration 0216, renumbered from 0204 post-merge).
+    // All four columns are nullable: only populated on runs that participate
+    // in a delegation chain. Ships empty; no behaviour change in this chunk.
+    // `handoffSourceRunId` self-references `agent_runs.id`; the FK + ON DELETE
+    // SET NULL live in the migration (see 0216_agent_runs_delegation_telemetry.sql),
+    // NOT here. Declaring `.references(() => agentRuns.id, ...)` in Drizzle
+    // creates a circular type inference that bloats agentRuns to `any` once
+    // the table has enough columns — same reason `parentRunId` and
+    // `parentSpawnRunId` are plain `uuid(...)` declarations above.
+    delegationScope: text('delegation_scope').$type<DelegationScope>(),
+    hierarchyDepth: smallint('hierarchy_depth'),
+    delegationDirection: text('delegation_direction').$type<DelegationDirection>(),
+    handoffSourceRunId: uuid('handoff_source_run_id'),
+
+    // System monitoring — carries a request/job tracing ID into incident events
+    // so a system incident can be correlated back to the agent run that caused it.
+    correlationId: text('correlation_id'),
+    actorId: uuid('actor_id').references(() => workspaceActors.id),
+
+    // Policy Envelope snapshot — resolved at run start before any tool/LLM/IEE dispatch (INV-19).
+    // NULL = legacy run created before migration 0309. New runs always have this set.
+    policyEnvelopeSnapshot: jsonb('policy_envelope_snapshot').$type<PolicyEnvelopeSnapshot | null>(),
+
+    // Execution Backend Adapter Contract (migration 0313) — identifies which
+    // backend handled this run and the backend's own task/job identifier.
+    // NULL for runs executed before this migration or by backends that do not
+    // assign external task IDs. backendId is string | null (not narrowed to
+    // ExecutionBackendId) to keep the schema layer independent of contract types.
+    backendId: text('backend_id'),
+    backendTaskId: text('backend_task_id'),
+
+    // Operator Backend — consecutive chain-link dispatch-start failure counter
+    // (migration 0338). Reset to 0 on every successful dispatch. Sole writer
+    // is the dispatcher. Spec §3.4 / §3.17 item 1.
+    operatorChainFailureCount: integer('operator_chain_failure_count').notNull().default(0),
+
+    // Operator Backend — per-task budget extension accumulator (migration 0341).
+    // Written by the extend-budget route (additive, never reset). The dispatcher
+    // composes settings_snapshot.per_task_budget_cap_minutes as:
+    //   effectiveSettings.per_task_budget_cap_minutes + perTaskBudgetExtensionMinutes
+    // so extensions are scoped to this task only and never bleed into the
+    // subaccount-wide settings row. Spec §3.17.4.
+    perTaskBudgetExtensionMinutes: integer('per_task_budget_extension_minutes').notNull().default(0),
+
+    // Operator Backend — assigned user (migration 0342). Populated at run
+    // creation when a human user owns the task. The operator-task action
+    // routes (retry-chain-failure, extend-budget) authorise via
+    // "assigned user OR manager+" — the column is the data source for the
+    // assigned-user branch of that rule. ON DELETE SET NULL keeps run history
+    // intact when a user is removed. Spec §6.5b.
+    assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -231,10 +310,10 @@ export const agentRuns = pgTable(
     idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
     // Stale run cleanup query
     staleRunIdx: index('agent_runs_stale_run_idx').on(table.status, table.lastActivityAt),
-    // Playbooks reverse lookup (migration 0076)
-    playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
-      .on(table.playbookStepRunId)
-      .where(sql`${table.playbookStepRunId} IS NOT NULL`),
+    // Workflows reverse lookup (migration 0076)
+    workflowStepRunIdx: index('agent_runs_workflow_step_run_id_idx')
+      .on(table.workflowStepRunId)
+      .where(sql`${table.workflowStepRunId} IS NOT NULL`),
     // Brain Tree OS adoption P1 (migration 0095) — supports the
     // "latest handoff for this agent" lookup used by getLatestHandoffForAgent
     // and the seedFromPreviousRun read path. Partial so the index stays
@@ -256,6 +335,18 @@ export const agentRuns = pgTable(
     inflightOrgIdx: index('agent_runs_inflight_org_idx')
       .on(table.organisationId)
       .where(sql`${table.status} IN ('pending', 'running', 'delegated')`),
+    // Execution Backend Adapter Contract (migration 0313) — lookup by backend
+    // and dedup guard for (backend_id, backend_task_id) pairs.
+    backendIdIdx: index('agent_runs_backend_id_idx')
+      .on(table.backendId)
+      .where(sql`${table.backendId} IS NOT NULL`),
+    backendTaskUniqueIdx: uniqueIndex('agent_runs_backend_task_unique_idx')
+      .on(table.backendId, table.backendTaskId)
+      .where(sql`${table.backendTaskId} IS NOT NULL`),
+    // User-owned-agents primitive (migration 0327)
+    userOwnedIdx: index('agent_runs_user_owned_idx')
+      .on(table.organisationId, table.ownerUserId, table.startedAt)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
   })
 );
 

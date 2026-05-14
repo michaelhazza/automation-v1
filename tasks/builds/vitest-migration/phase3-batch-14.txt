@@ -1,0 +1,10 @@
+server/services/__tests__/readPathResolutionPure.test.ts
+server/services/__tests__/regressionCaptureServicePure.test.ts
+server/services/__tests__/resumeInvokeAutomationStepPure.test.ts
+server/services/__tests__/retrievalPipelinePure.test.ts
+server/services/__tests__/reviewServiceIdempotency.test.ts
+server/services/__tests__/reviewServicePure.test.ts
+server/services/__tests__/rls.context-propagation.test.ts
+server/services/__tests__/rlsPredicateSqlBuilderPure.test.ts
+server/services/__tests__/ruleCapturePolicyPure.test.ts
+server/services/__tests__/ruleDraftCandidatesPure.test.ts

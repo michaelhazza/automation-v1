@@ -7,32 +7,8 @@
  *   npx tsx server/services/__tests__/staleConnectorDetectorPure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import { computeStaleness, type ConnectorHealth } from '../workspaceHealth/detectors/staleConnectorDetectorPure.js';
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  const aJson = JSON.stringify(a);
-  const bJson = JSON.stringify(b);
-  if (aJson !== bJson) throw new Error(`${label} — expected ${bJson}, got ${aJson}`);
-}
-
-function assertTrue(value: boolean, label: string) {
-  if (!value) throw new Error(`${label} — expected truthy`);
-}
 
 const FIXED_NOW = new Date('2026-04-17T12:00:00.000Z');
 const POLL_INTERVAL = 60; // 60 minutes
@@ -59,26 +35,26 @@ console.log('');
 
 test('returns none when within interval', () => {
   const result = computeStaleness(makeHealth(), FIXED_NOW);
-  assertEqual(result.severity, 'none', 'severity');
-  assertEqual(result.reason, 'Healthy', 'reason');
+  expect(result.severity, 'severity').toBe('none');
+  expect(result.reason, 'reason').toBe('Healthy');
 });
 
 test('returns warning when 2-5× overdue', () => {
   // 3× overdue: 3 * 60 min = 180 min ago
   const lastSync = new Date(FIXED_NOW.getTime() - 3 * INTERVAL_MS);
   const result = computeStaleness(makeHealth({ lastSuccessfulSyncAt: lastSync }), FIXED_NOW);
-  assertEqual(result.severity, 'warning', 'severity');
-  assertTrue(result.reason.includes('3'), 'reason includes multiplier');
-  assertTrue(result.reason.includes('overdue'), 'reason includes overdue');
+  expect(result.severity, 'severity').toBe('warning');
+  expect(result.reason.includes('3'), 'reason includes multiplier').toBe(true);
+  expect(result.reason.includes('overdue'), 'reason includes overdue').toBe(true);
 });
 
 test('returns error when >5× overdue', () => {
   // 6× overdue
   const lastSync = new Date(FIXED_NOW.getTime() - 6 * INTERVAL_MS);
   const result = computeStaleness(makeHealth({ lastSuccessfulSyncAt: lastSync }), FIXED_NOW);
-  assertEqual(result.severity, 'error', 'severity');
-  assertTrue(result.reason.includes('6'), 'reason includes multiplier');
-  assertTrue(result.reason.includes('overdue'), 'reason includes overdue');
+  expect(result.severity, 'severity').toBe('error');
+  expect(result.reason.includes('6'), 'reason includes multiplier').toBe(true);
+  expect(result.reason.includes('overdue'), 'reason includes overdue').toBe(true);
 });
 
 test('returns error when never synced and past grace period', () => {
@@ -88,9 +64,9 @@ test('returns error when never synced and past grace period', () => {
     makeHealth({ lastSuccessfulSyncAt: null, createdAt: created }),
     FIXED_NOW,
   );
-  assertEqual(result.severity, 'error', 'severity');
-  assertTrue(result.reason.includes('Never synced'), 'reason includes Never synced');
-  assertTrue(result.reason.includes('48h ago'), 'reason includes 48h ago');
+  expect(result.severity, 'severity').toBe('error');
+  expect(result.reason.includes('Never synced'), 'reason includes Never synced').toBe(true);
+  expect(result.reason.includes('48h ago'), 'reason includes 48h ago').toBe(true);
 });
 
 test('returns none when never synced but within grace period', () => {
@@ -100,8 +76,8 @@ test('returns none when never synced but within grace period', () => {
     makeHealth({ lastSuccessfulSyncAt: null, createdAt: created }),
     FIXED_NOW,
   );
-  assertEqual(result.severity, 'none', 'severity');
-  assertEqual(result.reason, 'Within grace period', 'reason');
+  expect(result.severity, 'severity').toBe('none');
+  expect(result.reason, 'reason').toBe('Within grace period');
 });
 
 test('returns error when recent error and >5× overdue', () => {
@@ -116,9 +92,9 @@ test('returns error when recent error and >5× overdue', () => {
     }),
     FIXED_NOW,
   );
-  assertEqual(result.severity, 'error', 'severity');
-  assertTrue(result.reason.includes('Last sync error within 24h'), 'reason includes error context');
-  assertTrue(result.reason.includes('overdue'), 'reason includes overdue');
+  expect(result.severity, 'severity').toBe('error');
+  expect(result.reason.includes('Last sync error within 24h'), 'reason includes error context').toBe(true);
+  expect(result.reason.includes('overdue'), 'reason includes overdue').toBe(true);
 });
 
 test('edge case: exactly at 2× boundary returns none', () => {
@@ -126,7 +102,7 @@ test('edge case: exactly at 2× boundary returns none', () => {
   // The check is `elapsed > WARNING_MULTIPLIER * interval` so exactly 2× should be 'none'
   const lastSync = new Date(FIXED_NOW.getTime() - 2 * INTERVAL_MS);
   const result = computeStaleness(makeHealth({ lastSuccessfulSyncAt: lastSync }), FIXED_NOW);
-  assertEqual(result.severity, 'none', 'severity at exact 2× boundary');
+  expect(result.severity, 'severity at exact 2× boundary').toBe('none');
 });
 
 test('edge case: exactly at 5× boundary returns warning', () => {
@@ -134,13 +110,9 @@ test('edge case: exactly at 5× boundary returns warning', () => {
   // The check is `elapsed > ERROR_MULTIPLIER * interval` so exactly 5× should be 'warning'
   const lastSync = new Date(FIXED_NOW.getTime() - 5 * INTERVAL_MS);
   const result = computeStaleness(makeHealth({ lastSuccessfulSyncAt: lastSync }), FIXED_NOW);
-  assertEqual(result.severity, 'warning', 'severity at exact 5× boundary');
+  expect(result.severity, 'severity at exact 5× boundary').toBe('warning');
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  process.exit(1);
-}

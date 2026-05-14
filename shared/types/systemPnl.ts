@@ -206,7 +206,9 @@ export type InFlightSourceType =
   | 'process_execution'
   | 'system'
   | 'iee'
-  | 'analyzer';
+  | 'analyzer'
+  | 'sandbox_compute'
+  | 'sandbox_compute_correction';
 
 export type InFlightTerminalStatus =
   | 'success'

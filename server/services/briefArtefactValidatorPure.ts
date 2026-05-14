@@ -17,6 +17,7 @@ import type {
 export type ValidationError =
   | { code: 'invalid_schema'; path: string; expected: string; got: string }
   | { code: 'missing_required'; field: string }
+  | { code: 'invalid_format'; field: string; message: string }
   | { code: 'invalid_enum'; field: string; value: unknown; validValues: string[] }
   | { code: 'orphan_parent'; parentArtefactId: string }
   | { code: 'duplicate_tip'; chainRoot: string; tips: string[] }
@@ -37,13 +38,14 @@ export type ValidateChainResult = {
 // the contract file; these are local validation mirrors)
 // ---------------------------------------------------------------------------
 
-const VALID_KINDS = new Set(['structured', 'approval', 'error']);
+const VALID_KINDS = new Set(['structured', 'approval', 'approval_decision', 'error']);
+const VALID_DECISION_VALUES = new Set(['approve', 'reject']);
 const VALID_STATUSES = new Set<BriefArtefactStatus>(['final', 'pending', 'updated', 'invalidated']);
 const VALID_ENTITY_TYPES = new Set<BriefResultEntityType>([
   'contacts', 'opportunities', 'appointments', 'conversations',
   'revenue', 'tasks', 'runs', 'other',
 ]);
-const VALID_SOURCES = new Set<BriefResultSource>(['canonical', 'live', 'hybrid']);
+const VALID_SOURCES = new Set<BriefResultSource>(['canonical', 'live', 'hybrid', 'stub']);
 const VALID_TRUNCATION_REASONS = new Set<BriefTruncationReason>([
   'result_limit', 'cost_limit', 'time_limit',
 ]);
@@ -75,6 +77,22 @@ function checkEnum(
 ): void {
   if (value !== undefined && !validSet.has(value as string)) {
     errors.push({ code: 'invalid_enum', field, value, validValues: [...validSet] });
+  }
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireUuid(
+  errors: ValidationError[],
+  fieldName: string,
+  value: unknown,
+): void {
+  if (!value || typeof value !== 'string' || value.trim() === '') {
+    errors.push({ code: 'missing_required', field: fieldName });
+    return;
+  }
+  if (!UUID_REGEX.test(value)) {
+    errors.push({ code: 'invalid_format', field: fieldName, message: `${fieldName} must be a UUID` });
   }
 }
 
@@ -143,7 +161,7 @@ function requireBoolean(
 // ---------------------------------------------------------------------------
 
 function validateBase(errors: ValidationError[], obj: Record<string, unknown>): void {
-  requireString(errors, 'artefactId', obj['artefactId']);
+  requireUuid(errors, 'artefactId', obj['artefactId']);
   if (obj['status'] !== undefined) {
     checkEnum(errors, 'status', obj['status'], VALID_STATUSES as Set<string>);
   }
@@ -202,6 +220,15 @@ function validateError(errors: ValidationError[], obj: Record<string, unknown>):
   }
 }
 
+function validateApprovalDecision(errors: ValidationError[], obj: Record<string, unknown>): void {
+  requireString(errors, 'parentArtefactId', obj['parentArtefactId']);
+  requireString(errors, 'decision', obj['decision']);
+  checkEnum(errors, 'decision', obj['decision'], VALID_DECISION_VALUES);
+  if (obj['executionStatus'] !== undefined) {
+    checkEnum(errors, 'executionStatus', obj['executionStatus'], VALID_EXECUTION_STATUSES as Set<string>);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public: validateArtefactPure
 // ---------------------------------------------------------------------------
@@ -231,6 +258,7 @@ export function validateArtefactPure(artefact: unknown): ValidateArtefactResult 
     const kind = obj['kind'] as string;
     if (kind === 'structured') validateStructured(errors, obj);
     else if (kind === 'approval') validateApproval(errors, obj);
+    else if (kind === 'approval_decision') validateApprovalDecision(errors, obj);
     else if (kind === 'error') validateError(errors, obj);
   }
 

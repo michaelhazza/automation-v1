@@ -222,6 +222,6 @@ export async function scoreRunBlocks(params: ScoreBlocksParams): Promise<void> {
         );
     }
   } catch (err) {
-    logger.warn({ err, runId: params.runId }, 'scoreRunBlocks: failed, skipping');
+    logger.warn('scoreRunBlocks: failed, skipping', { err, runId: params.runId });
   }
 }

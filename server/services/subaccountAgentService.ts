@@ -1,10 +1,58 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
+import { isActive, assertActive } from '../lib/queryHelpers.js';
+import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
 import { logger } from '../lib/logger.js';
+
+// ─── Soft-delete defence-in-depth ──────────────────────────────────────────
+function assertNotSoftDeleted(record: { deletedAt: Date | null }, label: string): void {
+  if (record.deletedAt !== null) {
+    throw new Error(`soft_deleted_${label}_leak`);
+  }
+}
+
+// ─── Last-root invariant ────────────────────────────────────────────────────
+// Invariant: every subaccount that has ever had a root agent must always have
+// at least one active root (parent_subaccount_agent_id IS NULL AND is_active =
+// true). The partial unique index (migration 0214) enforces "at most one";
+// this helper enforces "at least one" at the service-layer mutation boundary.
+//
+// Transient 0-root states are allowed only during low-level transactional
+// flows that bypass these service methods (e.g. hierarchyTemplateService
+// .applyTemplate manages its own atomic swap). User-facing mutations that
+// flow through updateLink / unlinkAgent MUST keep at least one root alive.
+async function assertAnotherActiveRootExistsInSubaccount(
+  organisationId: string,
+  subaccountId: string,
+  excludeLinkId: string,
+): Promise<void> {
+  const others = await db
+    .select({ id: subaccountAgents.id })
+    .from(subaccountAgents)
+    .where(and(
+      eq(subaccountAgents.organisationId, organisationId),
+      eq(subaccountAgents.subaccountId, subaccountId),
+      isNull(subaccountAgents.parentSubaccountAgentId),
+      eq(subaccountAgents.isActive, true),
+      ne(subaccountAgents.id, excludeLinkId),
+    ))
+    .limit(1);
+
+  if (others.length === 0) {
+    throw {
+      statusCode: 409,
+      errorCode: 'last_root_protected',
+      message:
+        'Cannot deactivate, unlink, or re-parent the last active root agent of a subaccount. ' +
+        'Activate another root (parentSubaccountAgentId: null, isActive: true) before removing this one, ' +
+        'or apply a hierarchy template to atomically replace the tree.',
+    };
+  }
+}
 
 export const subaccountAgentService = {
   async listSubaccountAgents(organisationId: string, subaccountId: string) {
@@ -16,12 +64,26 @@ export const subaccountAgentService = {
         agentDescription: agents.description,
         agentIcon: agents.icon,
         agentStatus: agents.status,
+        workspaceIdentityStatus: workspaceIdentities.status,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
-      .where(and(eq(subaccountAgents.organisationId, organisationId), eq(subaccountAgents.subaccountId, subaccountId)));
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
+      .leftJoin(
+        workspaceIdentities,
+        and(
+          eq(workspaceIdentities.actorId, agents.workspaceActorId),
+          isNull(workspaceIdentities.archivedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.isActive, true),
+        ),
+      );
 
-    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({
+    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, workspaceIdentityStatus }) => ({
       id: link.id,
       agentId: link.agentId,
       subaccountId: link.subaccountId,
@@ -32,6 +94,11 @@ export const subaccountAgentService = {
       agentTitle: link.agentTitle,
       appliedTemplateId: link.appliedTemplateId,
       appliedTemplateVersion: link.appliedTemplateVersion,
+      // Heartbeat
+      heartbeatEnabled: link.heartbeatEnabled,
+      heartbeatIntervalHours: link.heartbeatIntervalHours,
+      heartbeatOffsetHours: link.heartbeatOffsetHours,
+      heartbeatOffsetMinutes: link.heartbeatOffsetMinutes,
       // Schedule & config
       scheduleCron: link.scheduleCron,
       scheduleEnabled: link.scheduleEnabled,
@@ -45,6 +112,7 @@ export const subaccountAgentService = {
       nextRunAt: link.nextRunAt,
       createdAt: link.createdAt,
       updatedAt: link.updatedAt,
+      workspaceIdentityStatus: workspaceIdentityStatus ?? null,
       agent: {
         id: link.agentId,
         name: agentName,
@@ -59,11 +127,12 @@ export const subaccountAgentService = {
   async linkAgent(organisationId: string, subaccountId: string, agentId: string) {
     // Verify agent belongs to this org
     const [agent] = await db
-      .select({ id: agents.id })
+      .select({ id: agents.id, deletedAt: agents.deletedAt })
       .from(agents)
-      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isActive(agents)));
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found in this organisation' };
+    assertActive(agent, 'Agent'); // defence-in-depth
 
     // Load full agent to get default skill slugs + heartbeat config
     const [fullAgent] = await db
@@ -137,6 +206,15 @@ export const subaccountAgentService = {
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
 
+    // Guard last-root invariant — cannot hard-delete the last active root.
+    if (link.parentSubaccountAgentId === null && link.isActive) {
+      await assertAnotherActiveRootExistsInSubaccount(
+        organisationId,
+        link.subaccountId,
+        link.id,
+      );
+    }
+
     await configHistoryService.recordHistory({
       entityType: 'subaccount_agent',
       entityId: link.id,
@@ -163,9 +241,11 @@ export const subaccountAgentService = {
         agentModelProvider: agents.modelProvider,
         agentModelId: agents.modelId,
         agentDefaultSkillSlugs: agents.defaultSkillSlugs,
+        agentWorkspaceActorId: agents.workspaceActorId,
+        agentDeletedAt: agents.deletedAt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(
         and(
           eq(subaccountAgents.id, linkId),
@@ -176,8 +256,9 @@ export const subaccountAgentService = {
       .limit(1);
 
     if (!row) throw { statusCode: 404, message: 'Agent link not found' };
+    assertNotSoftDeleted({ deletedAt: row.agentDeletedAt }, 'agent');
 
-    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs } = row;
+    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs, agentWorkspaceActorId } = row;
     return {
       id: link.id,
       agentId: link.agentId,
@@ -219,6 +300,7 @@ export const subaccountAgentService = {
         modelProvider: agentModelProvider,
         modelId: agentModelId,
         defaultSkillSlugs: (agentDefaultSkillSlugs ?? []) as string[],
+        workspaceActorId: agentWorkspaceActorId ?? null,
       },
     };
   },
@@ -243,6 +325,13 @@ export const subaccountAgentService = {
     timeoutSeconds?: number;
     maxCostPerRunCents?: number | null;
     maxLlmCallsPerRun?: number | null;
+    // Governance (spec §5.2.9). The Agent Config Governance tab posts these
+    // four fields; updateLink must persist them so the new tab can actually
+    // configure the link.
+    controllerStyleAllowed?: 'native_only' | 'native_and_operator';
+    allowedEnvironments?: ('api_tool' | 'headless' | 'browser' | 'terminal_repo')[];
+    maxRiskTier?: number;
+    requireApprovalAtTier?: number;
   }) {
     const [link] = await db
       .select()
@@ -250,6 +339,24 @@ export const subaccountAgentService = {
       .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
+
+    // Guard last-root invariant — if this link is currently an active root
+    // and the caller is trying to deactivate it or re-parent it (away from
+    // root status), require another active root to exist first.
+    const isCurrentlyActiveRoot = link.parentSubaccountAgentId === null && link.isActive;
+    const wouldDeactivate = data.isActive === false;
+    const wouldReparentAwayFromRoot =
+      'parentSubaccountAgentId' in data &&
+      data.parentSubaccountAgentId !== null &&
+      data.parentSubaccountAgentId !== undefined;
+
+    if (isCurrentlyActiveRoot && (wouldDeactivate || wouldReparentAwayFromRoot)) {
+      await assertAnotherActiveRootExistsInSubaccount(
+        organisationId,
+        link.subaccountId,
+        link.id,
+      );
+    }
 
     await configHistoryService.recordHistory({
       entityType: 'subaccount_agent',
@@ -281,6 +388,11 @@ export const subaccountAgentService = {
     if (data.timeoutSeconds !== undefined) update.timeoutSeconds = data.timeoutSeconds;
     if ('maxCostPerRunCents' in data) update.maxCostPerRunCents = data.maxCostPerRunCents ?? null;
     if ('maxLlmCallsPerRun' in data) update.maxLlmCallsPerRun = data.maxLlmCallsPerRun ?? null;
+    // Governance (spec §5.2.9)
+    if (data.controllerStyleAllowed !== undefined) update.controllerStyleAllowed = data.controllerStyleAllowed;
+    if (data.allowedEnvironments !== undefined) update.allowedEnvironments = data.allowedEnvironments;
+    if (data.maxRiskTier !== undefined) update.maxRiskTier = data.maxRiskTier;
+    if (data.requireApprovalAtTier !== undefined) update.requireApprovalAtTier = data.requireApprovalAtTier;
 
     if ('parentSubaccountAgentId' in data) {
       const parentId = data.parentSubaccountAgentId;
@@ -310,7 +422,7 @@ export const subaccountAgentService = {
         agentMasterPrompt: agents.masterPrompt,
       })
       .from(subaccountAgents)
-      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
       .where(and(
         eq(subaccountAgents.organisationId, organisationId),
         eq(subaccountAgents.subaccountId, subaccountId)
@@ -409,5 +521,85 @@ export const subaccountAgentService = {
     if (!source) throw { statusCode: 404, message: 'Data source not found' };
 
     await db.delete(agentDataSources).where(eq(agentDataSources.id, id));
+  },
+
+  /**
+   * Returns the systemAgent slug for the given agent, or null if the agent
+   * is not system-managed. Used to enforce per-slug linking restrictions.
+   */
+  async getAgentSystemSlug(agentId: string, organisationId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ systemAgentSlug: systemAgents.slug })
+      .from(agents)
+      .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
+    return row?.systemAgentSlug ?? null;
+  },
+
+  /**
+   * Returns true if the given subaccount is the org subaccount (isOrgSubaccount=true).
+   * Used to enforce that certain agents (e.g. configuration-assistant) can only
+   * be linked to the org subaccount.
+   */
+  async isOrgSubaccount(subaccountId: string, organisationId: string): Promise<boolean> {
+    const [sa] = await db
+      .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
+    return sa?.isOrgSubaccount ?? false;
+  },
+
+  async findLink(
+    linkId: string,
+    subaccountId: string,
+    agentId: string,
+  ): Promise<{ id: string; agentId: string; subaccountId: string } | undefined> {
+    const [row] = await db
+      .select({ id: subaccountAgents.id, agentId: subaccountAgents.agentId, subaccountId: subaccountAgents.subaccountId })
+      .from(subaccountAgents)
+      .where(and(
+        eq(subaccountAgents.id, linkId),
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.agentId, agentId),
+      ))
+      .limit(1);
+    return row;
+  },
+
+  async assertBelongsToSubaccount(subaccountAgentId: string, subaccountId: string): Promise<void> {
+    const [row] = await db
+      .select({ id: subaccountAgents.id })
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.id, subaccountAgentId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+        )
+      )
+      .limit(1);
+    if (!row) throw { statusCode: 404, message: 'subaccountAgent not found' };
+  },
+
+  async getAllowedSkillSlugs(agentId: string, subaccountId: string): Promise<string[] | null> {
+    try {
+      const [row] = await db
+        .select({ allowedSkillSlugs: subaccountAgents.allowedSkillSlugs })
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.agentId, agentId),
+            eq(subaccountAgents.subaccountId, subaccountId),
+          )
+        )
+        .limit(1);
+
+      if (row?.allowedSkillSlugs) {
+        return row.allowedSkillSlugs as string[];
+      }
+      return null;
+    } catch {
+      // Tolerate invalid UUID input or lookup failures
+      return null;
+    }
   },
 };

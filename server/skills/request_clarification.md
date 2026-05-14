@@ -1,6 +1,6 @@
 ---
 name: Request Clarification
-description: Route a real-time question to a named human (subaccount manager, agency owner, or client contact) via WebSocket and optionally pause the current step until they reply or the timeout fires.
+description: Route a real-time question mid-run to a named human role (subaccount manager, agency owner, or client contact) via WebSocket with urgency control, context snippet, and one-tap suggested replies. Use when a specific role must respond, not just the current user. For simple in-flight questions to the current user, use ask_clarifying_question instead.
 isActive: true
 visibility: basic
 ---

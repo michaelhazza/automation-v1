@@ -17,9 +17,7 @@ import { Router, Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticate } from '../middleware/auth.js';
 import { buildMcpServer } from '../mcp/mcpServer.js';
-import { db } from '../db/index.js';
-import { subaccountAgents } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { logger } from '../lib/logger.js';
 
 const router = Router();
@@ -37,24 +35,7 @@ router.all('/mcp', authenticate, async (req: Request, res: Response) => {
   let allowedSkillSlugs: string[] | null = null;
 
   if (agentId !== 'mcp-client' && subaccountId !== organisationId) {
-    try {
-      const [saLink] = await db
-        .select({ allowedSkillSlugs: subaccountAgents.allowedSkillSlugs })
-        .from(subaccountAgents)
-        .where(
-          and(
-            eq(subaccountAgents.agentId, agentId),
-            eq(subaccountAgents.subaccountId, subaccountId),
-          )
-        )
-        .limit(1);
-
-      if (saLink?.allowedSkillSlugs) {
-        allowedSkillSlugs = saLink.allowedSkillSlugs as string[];
-      }
-    } catch {
-      // If lookup fails (e.g. invalid UUID), proceed without filtering
-    }
+    allowedSkillSlugs = await subaccountAgentService.getAllowedSkillSlugs(agentId, subaccountId);
   }
 
   const server = await buildMcpServer({

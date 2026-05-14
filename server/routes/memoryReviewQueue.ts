@@ -13,9 +13,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import {
   listQueue,
   approveItem,
@@ -33,25 +31,13 @@ router.get(
     const orgId = req.orgId!;
     const { subaccountId } = req.params;
 
-    const [sa] = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, orgId),
-          isNull(subaccounts.deletedAt),
-        ),
-      )
-      .limit(1);
-
-    if (!sa) return res.status(404).json({ error: 'Subaccount not found' });
+    const subaccount = await resolveSubaccount(subaccountId, orgId);
 
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const itemType = typeof req.query.itemType === 'string' ? req.query.itemType : undefined;
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
 
-    const items = await listQueue(subaccountId, orgId, {
+    const items = await listQueue(subaccount.id, orgId, {
       status: status as 'pending' | 'approved' | 'rejected' | 'auto_applied' | 'expired' | undefined,
       itemType: itemType as 'belief_conflict' | 'block_proposal' | 'clarification_pending' | undefined,
       limit: Number.isFinite(limit) ? limit : undefined,
@@ -67,7 +53,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const userId = req.userId!;
+    const userId = req.user!.id;
     const { itemId } = req.params;
     const { acceptSide } = req.body ?? {};
 
@@ -91,7 +77,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const userId = req.userId!;
+    const userId = req.user!.id;
     const { itemId } = req.params;
 
     const item = await rejectItem({ itemId, organisationId: orgId, resolvedByUserId: userId });

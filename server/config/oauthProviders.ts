@@ -46,27 +46,30 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     tokenUrl: 'https://slack.com/api/oauth.v2.access',
     // chat:write.public — post to channels the bot hasn't been invited to
     // files:write       — attach report files
-    scopes: ['chat:write', 'chat:write.public', 'channels:read', 'users:read', 'files:write'],
+    scopes: ['chat:write', 'chat:write.public', 'channels:read', 'users:read', 'files:write',
+     'channels:history', 'im:write', 'im:history', 'mpim:history', 'search:read',
+     'groups:read', 'groups:history', 'mpim:read', 'app_mentions:read'],
   },
 
   ghl: {
     authUrl: 'https://marketplace.leadconnectorhq.com/oauth/chooselocation',
     tokenUrl: 'https://services.leadconnectorhq.com/oauth/token',
-    // ClientPulse signal ingestion requires scopes beyond the core CRM set (§12.2 Gap E).
-    // Endpoints that need scopes not present on an existing token gate themselves and
-    // mark observations `unavailable_missing_scope` — re-consent flow surfaces at Phase 5.
     scopes: [
       'contacts.readonly',
       'contacts.write',
       'opportunities.readonly',
+      'opportunities.write',
       'locations.readonly',
       'users.readonly',
       'calendars.readonly',
       'funnels.readonly',
       'conversations.readonly',
+      'conversations.write',
       'conversations/message.readonly',
       'businesses.readonly',
       'saas/subscription.readonly',
+      'companies.readonly',
+      'payments/orders.readonly',
     ],
   },
 
@@ -76,6 +79,24 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     // TODO: Teamwork Desk scopes must be configured before production use.
     // See https://apidocs.teamwork.com/docs/teamwork-rest-api for available scopes.
     scopes: [],
+  },
+
+  google_drive: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    // Forces refresh_token issuance even after the user has previously consented
+    extra: { access_type: 'offline', prompt: 'consent' },
+  },
+
+  google_calendar: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: [
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar.events',
+    ],
+    extra: { access_type: 'offline', prompt: 'consent' },
   },
 };
 

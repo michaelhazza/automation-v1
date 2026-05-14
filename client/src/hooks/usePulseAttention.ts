@@ -23,6 +23,7 @@ export interface PulseItem {
   agentName: string | null;
   createdAt: string;
   detailUrl: string;
+  resolvedUrl: string | null;
   actionType: string | null;
   runId: string | null;
 }
@@ -60,7 +61,9 @@ export function usePulseAttention({ scope, subaccountId }: UsePulseAttentionArgs
       setIsLoading(true);
       setError(null);
       const res = await api.get(url);
-      setData(res.data);
+      const payload: PulseAttentionResponse | null =
+        scope === 'org' ? res.data.data : res.data;
+      setData(payload);
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       const message = status === 403

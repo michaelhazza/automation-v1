@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { costAggregates, workspaceLimits, orgBudgets, agentRuns } from '../db/schema/index.js';
+import { costAggregates, workspaceLimits, orgComputeBudgets, agentRuns } from '../db/schema/index.js';
 import { sql, and, eq } from 'drizzle-orm';
 import type { LlmRequest } from '../db/schema/index.js';
 
@@ -14,6 +14,16 @@ import type { LlmRequest } from '../db/schema/index.js';
 //   - task_type (monthly)
 //   - provider (monthly)
 //   - rate-limit windows (minute, hour)
+//
+// NEW entityType values added in migration 0272 (agentic-commerce):
+//   - agent_spend_subaccount  (monthly + daily)
+//   - agent_spend_org         (monthly + daily)
+//   - agent_spend_run         (per-run)
+//
+// These new entityType values are owned exclusively by
+// server/services/agentSpendAggregateService.ts and MUST NOT be written here.
+// Per spec §6.1, LLM cost rollups and agent-spend rollups are kept in separate
+// parallel writers to prevent commingling.
 // ---------------------------------------------------------------------------
 
 export async function upsertAggregates(request: LlmRequest): Promise<void> {
@@ -22,11 +32,14 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
   const costRaw   = parseFloat(String(request.costRaw));
   const costMargin = parseFloat(String(request.costWithMargin));
 
+  const PLATFORM_SENTINEL = '00000000-0000-0000-0000-000000000001';
+
   const dimensions: Array<{
-    entityType: string;
-    entityId:   string;
-    periodType: string;
-    periodKey:  string;
+    entityType:     string;
+    entityId:       string;
+    periodType:     string;
+    periodKey:      string;
+    organisationId: string;
   }> = [];
 
   // Feature 2 §4.7 — test runs must not inflate P&L aggregates.
@@ -43,13 +56,13 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
 
   if (!isTestRun) {
     // Organisation
-    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'monthly', periodKey: request.billingMonth });
-    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'daily',   periodKey: request.billingDay });
+    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'monthly', periodKey: request.billingMonth, organisationId: request.organisationId });
+    dimensions.push({ entityType: 'organisation', entityId: request.organisationId, periodType: 'daily',   periodKey: request.billingDay,   organisationId: request.organisationId });
 
     // Subaccount
     if (request.subaccountId) {
-      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'monthly', periodKey: request.billingMonth });
-      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'daily',   periodKey: request.billingDay });
+      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'monthly', periodKey: request.billingMonth, organisationId: request.organisationId });
+      dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'daily',   periodKey: request.billingDay,   organisationId: request.organisationId });
     }
   } else {
     // Test run: skip org/subaccount aggregates but still write the per-run dimension
@@ -58,7 +71,7 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
 
   // Run (lifetime aggregate)
   if (request.runId) {
-    dimensions.push({ entityType: 'run', entityId: request.runId, periodType: 'run', periodKey: request.runId });
+    dimensions.push({ entityType: 'run', entityId: request.runId, periodType: 'run', periodKey: request.runId, organisationId: request.organisationId });
   }
 
   // Agent (monthly)
@@ -66,30 +79,33 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
     const agentKey = request.subaccountId
       ? `${request.subaccountId}:${request.agentName}`
       : request.agentName;
-    dimensions.push({ entityType: 'agent', entityId: agentKey, periodType: 'monthly', periodKey: request.billingMonth });
+    dimensions.push({ entityType: 'agent', entityId: agentKey, periodType: 'monthly', periodKey: request.billingMonth, organisationId: request.organisationId });
   }
 
-  // Task type (monthly, org-scoped)
+  // Task type (monthly, org-scoped) — platform-sentinel: entityId contains org prefix but the
+  // dim is shared infrastructure; use sentinel to avoid per-org RLS on a platform view.
   dimensions.push({
-    entityType: 'task_type',
-    entityId:   `${request.organisationId}:${request.taskType}`,
-    periodType: 'monthly',
-    periodKey:  request.billingMonth,
+    entityType:     'task_type',
+    entityId:       `${request.organisationId}:${request.taskType}`,
+    periodType:     'monthly',
+    periodKey:      request.billingMonth,
+    organisationId: PLATFORM_SENTINEL,
   });
 
   // Provider (monthly — enables per-provider spend dashboard)
-  dimensions.push({ entityType: 'provider', entityId: request.provider, periodType: 'monthly', periodKey: request.billingMonth });
+  dimensions.push({ entityType: 'provider', entityId: request.provider, periodType: 'monthly', periodKey: request.billingMonth, organisationId: PLATFORM_SENTINEL });
 
   // Platform-level (monthly)
-  dimensions.push({ entityType: 'platform', entityId: 'global', periodType: 'monthly', periodKey: request.billingMonth });
+  dimensions.push({ entityType: 'platform', entityId: 'global', periodType: 'monthly', periodKey: request.billingMonth, organisationId: PLATFORM_SENTINEL });
 
   // Execution phase (monthly — enables cost-per-phase analytics)
   if (request.executionPhase) {
     dimensions.push({
-      entityType: 'execution_phase',
-      entityId:   `${request.organisationId}:${request.executionPhase}`,
-      periodType: 'monthly',
-      periodKey:  request.billingMonth,
+      entityType:     'execution_phase',
+      entityId:       `${request.organisationId}:${request.executionPhase}`,
+      periodType:     'monthly',
+      periodKey:      request.billingMonth,
+      organisationId: PLATFORM_SENTINEL,
     });
   }
 
@@ -99,25 +115,28 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
   // Entity ID is the raw sourceType value so 'system' and 'analyzer' each
   // get their own row on the `By Source Type` tab per spec §11.5.
   dimensions.push({
-    entityType: 'source_type',
-    entityId:   request.sourceType,
-    periodType: 'monthly',
-    periodKey:  request.billingMonth,
+    entityType:     'source_type',
+    entityId:       request.sourceType,
+    periodType:     'monthly',
+    periodKey:      request.billingMonth,
+    organisationId: PLATFORM_SENTINEL,
   });
   dimensions.push({
-    entityType: 'source_type',
-    entityId:   request.sourceType,
-    periodType: 'daily',
-    periodKey:  request.billingDay,
+    entityType:     'source_type',
+    entityId:       request.sourceType,
+    periodType:     'daily',
+    periodKey:      request.billingDay,
+    organisationId: PLATFORM_SENTINEL,
   });
 
   // Feature tag (monthly — enables per-feature cost attribution).
   if (request.featureTag && request.featureTag !== 'unknown') {
     dimensions.push({
-      entityType: 'feature_tag',
-      entityId:   request.featureTag,
-      periodType: 'monthly',
-      periodKey:  request.billingMonth,
+      entityType:     'feature_tag',
+      entityId:       request.featureTag,
+      periodType:     'monthly',
+      periodKey:      request.billingMonth,
+      organisationId: PLATFORM_SENTINEL,
     });
   }
 
@@ -127,8 +146,8 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
     const minuteKey = request.createdAt.toISOString().slice(0, 16);
     // hour key: 'YYYY-MM-DDTHH'
     const hourKey = request.createdAt.toISOString().slice(0, 13);
-    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'minute', periodKey: minuteKey });
-    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'hour',   periodKey: hourKey });
+    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'minute', periodKey: minuteKey, organisationId: request.organisationId });
+    dimensions.push({ entityType: 'subaccount', entityId: request.subaccountId, periodType: 'hour',   periodKey: hourKey,   organisationId: request.organisationId });
   }
 
   // Upsert all dimensions in a single batch
@@ -141,6 +160,7 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
           entityId:            dim.entityId,
           periodType:          dim.periodType,
           periodKey:           dim.periodKey,
+          organisationId:      dim.organisationId,
           totalCostRaw:        String(costRaw),
           totalCostWithMargin: String(costMargin),
           totalCostCents:      costCents,
@@ -212,10 +232,10 @@ export async function checkAlertThresholds(
 
   const [orgBudget] = await db
     .select()
-    .from(orgBudgets)
-    .where(eq(orgBudgets.organisationId, organisationId));
+    .from(orgComputeBudgets)
+    .where(eq(orgComputeBudgets.organisationId, organisationId));
 
-  if (orgBudget?.monthlyCostLimitCents && orgBudget.monthlyCostLimitCents > 0) {
+  if (orgBudget?.monthlyComputeLimitCents && orgBudget.monthlyComputeLimitCents > 0) {
     const [agg] = await db
       .select()
       .from(costAggregates)
@@ -229,11 +249,11 @@ export async function checkAlertThresholds(
       );
 
     const spendCents = agg?.totalCostCents ?? 0;
-    const pct = Math.floor((spendCents / orgBudget.monthlyCostLimitCents) * 100);
+    const pct = Math.floor((spendCents / orgBudget.monthlyComputeLimitCents) * 100);
     const threshold = orgBudget.alertThresholdPct ?? 80;
 
     if (pct >= threshold) {
-      alerts.push({ type: 'org_monthly', entityId: organisationId, pct, limitCents: orgBudget.monthlyCostLimitCents, spendCents });
+      alerts.push({ type: 'org_monthly', entityId: organisationId, pct, limitCents: orgBudget.monthlyComputeLimitCents, spendCents });
     }
   }
 

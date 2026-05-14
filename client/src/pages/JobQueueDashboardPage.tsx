@@ -59,7 +59,7 @@ export default function JobQueueDashboardPage() {
   const fetchSummaries = useCallback(async () => {
     try {
       const res = await api.get('/api/system/job-queues');
-      setSummaries(res.data);
+      setSummaries(res.data.data);
     } catch (err) {
       console.error('Failed to fetch queue summaries:', err);
     } finally {

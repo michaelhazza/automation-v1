@@ -113,6 +113,7 @@ export async function executeLoadTool(
     return { success: false, error: 'tool_slug is required' };
   }
 
+  // reason: inline require avoids circular dependency at module load (same pattern as getRegisteredTools above).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getActionDefinition } = require('../../config/actionRegistry.js') as {
     getActionDefinition: (s: string) => unknown | undefined;

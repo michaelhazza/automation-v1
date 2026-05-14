@@ -2,7 +2,7 @@
 name: Weekly Digest Gather
 description: Aggregates the past 7 days of subaccount activity, memory events, KPI deltas, pending items, memory-health data (stub until S14), and next-week scheduled tasks for the Weekly Digest playbook.
 isActive: true
-visibility: internal
+visibility: basic
 ---
 
 ## Parameters

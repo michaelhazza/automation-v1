@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations.js';
 import { subaccounts } from './subaccounts.js';
 import { integrationConnections } from './integrationConnections.js';
@@ -9,7 +9,7 @@ export const connectorConfigs = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
     subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
-    connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom'>(),
+    connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom' | 'synthetos_native' | 'google_workspace'>(),
     connectionId: uuid('connection_id').references(() => integrationConnections.id),
     configJson: jsonb('config_json').$type<Record<string, unknown>>(),
     status: text('status').notNull().default('active').$type<'active' | 'error' | 'disconnected'>(),
@@ -20,11 +20,31 @@ export const connectorConfigs = pgTable(
     webhookSecret: text('webhook_secret'),
     syncPhase: text('sync_phase').notNull().default('backfill').$type<'backfill' | 'transition' | 'live'>(),
     configVersion: text('config_version'),
+    tokenScope: text('token_scope').notNull().default('agency').$type<'agency' | 'location'>(),
+    companyId: text('company_id'),
+    installedAt: timestamp('installed_at', { withTimezone: true }),
+    disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+    // Agency token columns — dedicated columns, not configJson (required for expiry queries)
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    scope: text('scope').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    // F3 §4 — readiness condition support (migration 0280).
+    // Both columns updated by connectorPollingService on every successful sync.
+    successfulPollCountTotal: integer('successful_poll_count_total').notNull().default(0),
+    firstQualifyingPollAt: timestamp('first_qualifying_poll_at', { withTimezone: true }),
+    // Pre-Test Hardening W3 — per-connector webhook URL token (migration 0319 — renumbered from 0314 post-S2 to clear collision with PR #283).
+    // Used to route incoming webhooks to exactly one connector without scanning all active configs.
+    // The partial UNIQUE index `connector_configs_webhook_token_unique (webhook_token) WHERE webhook_token IS NOT NULL`
+    // is declared in migration 0319 only — matches the SQL-only partial-index convention used by the
+    // two CRM/workspace-scoped uniques (see comment in the index block below).
+    webhookToken: uuid('webhook_token'),
   },
   (table) => ({
-    orgConnectorUnique: uniqueIndex('connector_configs_org_type_unique').on(table.organisationId, table.connectorType),
+    // connector_configs_org_type_unique dropped in migration 0254 and replaced with
+    // two partial unique indexes (CRM-scoped + workspace-scoped) expressed in SQL only.
     orgIdx: index('connector_configs_org_idx').on(table.organisationId),
     subaccountIdx: index('connector_configs_subaccount_idx').on(table.subaccountId),
     statusIdx: index('connector_configs_status_idx').on(table.status),

@@ -116,7 +116,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
         </div>
         <button
           onClick={() => { setShowInviteForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="btn btn-primary"
         >
           + Invite user
         </button>
@@ -176,13 +176,13 @@ export default function AdminUsersPage({ user }: { user: User }) {
           <div className="flex gap-2 justify-end">
             <button
               onClick={() => setShowInviteForm(false)}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer"
+              className="btn btn-secondary"
             >
               Cancel
             </button>
             <button
               onClick={handleInvite}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+              className="btn btn-primary"
             >
               Send invitation
             </button>

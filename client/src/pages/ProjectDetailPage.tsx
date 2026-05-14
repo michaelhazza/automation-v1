@@ -132,8 +132,8 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
                 </div>
               </div>
               <div className="flex gap-2 mt-2">
-                <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer">{saving ? 'Saving...' : 'Save'}</button>
-                <button onClick={() => setEditing(false)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button onClick={handleSave} disabled={saving} className="btn btn-sm btn-primary">{saving ? 'Saving...' : 'Save'}</button>
+                <button onClick={() => setEditing(false)} className="btn btn-sm btn-secondary">Cancel</button>
               </div>
             </div>
           ) : (
@@ -149,8 +149,8 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
           </span>
           {!editing && (
             <>
-              <button onClick={() => setEditing(true)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Edit</button>
-              <button onClick={() => setShowDelete(true)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Delete</button>
+              <button onClick={() => setEditing(true)} className="btn btn-sm btn-secondary">Edit</button>
+              <button onClick={() => setShowDelete(true)} className="btn btn-sm btn-danger">Delete</button>
             </>
           )}
         </div>

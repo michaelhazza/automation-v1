@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, real, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import type { HomeWidgetDeclaration } from '../../../shared/types/homeWidget.js';
 
 // ---------------------------------------------------------------------------
 // System Agents — platform-level agent definitions (our IP)
@@ -33,6 +34,12 @@ export const systemAgents = pgTable('system_agents', {
   // Org-visible skills suggested by default when org installs this agent
   defaultOrgSkillSlugs: jsonb('default_org_skill_slugs').$type<string[]>().default([]),
 
+  // ── Trust & Verification Layer (migration 0301) ──────────────────────────
+  // System-level scorecards applied to all agents built on this system agent.
+  defaultSystemScorecardSlugs: jsonb('default_system_scorecard_slugs').$type<string[]>().default([]),
+  // Org-visible scorecards suggested by default when org installs this agent.
+  defaultOrgScorecardSlugs: jsonb('default_org_scorecard_slugs').$type<string[]>().default([]),
+
   // Whether org admins can override model config
   allowModelOverride: boolean('allow_model_override').notNull().default(true),
 
@@ -57,6 +64,9 @@ export const systemAgents = pgTable('system_agents', {
   isPublished: boolean('is_published').notNull().default(false),
   version: integer('version').notNull().default(1),
   status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
+
+  // Home-widget declaration (HomeWidgetDeclaration shape). NULL = not surfaced to home zone.
+  homeWidget: jsonb('home_widget').$type<HomeWidgetDeclaration | null>(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

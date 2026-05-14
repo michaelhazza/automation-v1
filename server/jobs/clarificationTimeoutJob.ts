@@ -28,7 +28,6 @@ export interface ClarificationTimeoutSummary {
 export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeoutSummary> {
   const started = Date.now();
   const now = new Date();
-  let scanned = 0;
   let expired = 0;
   let runsFlagged = 0;
   let failed = 0;
@@ -51,7 +50,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
       ),
     );
 
-  scanned = pending.length;
+  const scanned = pending.length;
 
   for (const row of pending) {
     try {

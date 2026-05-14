@@ -1,0 +1,2431 @@
+# System Agents v7.1 Migration — Implementation Spec
+
+**Status:** Draft
+**Date:** 2026-04-26
+**Author:** Main session (Opus 4.7)
+**Source brief:** `docs/automation-os-system-agents-v7.1-migration-brief.md`
+**Predecessor brief:** `docs/automation-os-system-agents-brief-v6.md`
+**Branch:** `claude/audit-system-agents-46kTN` (branched off `main` at `b5fcb314`)
+**Build slug:** `system-agents-v7-1-migration`
+**Class:** Major (new schema + new tables + new agents + runtime contracts spanning seed + middleware + executor + verification gates)
+
+---
+
+## Table of contents
+
+1. Framing & philosophy
+2. Scope & non-goals
+3. Existing primitives — reuse / extend / invent
+4. File inventory (single source of truth)
+5. Migration order (mandatory)
+6. Phase 1 — Schema migration (partial-unique indexes + idempotency table)
+7. Phase 2 — Skill files & classification
+8. Phase 3 — Action registry extensions
+9. Phase 4 — Skill executor: handlers, manager guard, side-effect wrapper
+10. Phase 5 — Agent file changes (7 new + 13 reparents + finance rescope)
+11. Phase 6 — Retire `client-reporting-agent`
+12. Phase 7 — Env vars + manifest regeneration
+13. Phase 8 — Seed-script orphan cleanup + verification gates + assertions
+14. Phase 9 — Local-dev reset paths + rollback
+15. Contracts (data shapes crossing service boundaries)
+16. Permissions / RLS posture for new tenant-scoped tables
+16A. Execution-safety contracts (idempotency / retry / concurrency / state machine)
+17. Execution model (sync / async / inline / queued)
+18. Logging contract for new skills
+19. Phase sequencing — dependency graph
+20. Acceptance criteria
+21. Deferred items
+22. Out of scope
+23. Testing posture
+24. Cross-references
+
+---
+
+## 1. Framing & philosophy
+
+This migration moves the Automation OS company roster from the v6 flat-under-Orchestrator structure to the v7.1 three-tier structure (Orchestrator → 4 Heads + admin-ops + strategic-intelligence + portfolio-health → workers), and turns five v7.1 organisational invariants into runtime/build-time contracts:
+
+1. **Active-row uniqueness** for soft-deletable system rows (so iterative dev resets don't accumulate duplicates).
+2. **Cross-run idempotency for write skills** (so retried jobs don't duplicate invoices, emails, or CRM writes).
+3. **Side-effect classification** for skills (so reads can fail-soft while writes hard-block on missing config).
+4. **Manager allowlist** for the four department-head agents (so managers cannot drift into worker execution).
+5. **Agent ↔ skill contract completeness** as a build-time gate (so an agent never references a skill that has no handler at runtime).
+
+**Framing assumptions** (consistent with `docs/spec-context.md` 2026-04-16):
+- Pre-production. Wiping system-agent state in the dev DB is acceptable.
+- No live users. No staged rollout. No feature flags for any of these changes.
+- Static gates and tsx pure-function tests only. No new vitest / supertest / E2E suites.
+- Rapid evolution: prefer extending existing primitives over inventing new ones.
+- This spec sets the contract; the migration is the only rollout vehicle (no flag-gated dual-write).
+
+**Why this is one spec, not several.** The five invariants are coupled: the schema migration is a hard prerequisite for the local-dev reset; the action-registry extensions are consumed by both the manager guard and the side-effect wrapper; the new agents reference new skills which reference new handlers which reference the new action-registry fields. Splitting into five PRs creates merge ordering hazards with no benefit at this stage.
+
+**Post-main-merge audit (2026-04-27).** This spec was originally drafted on 2026-04-26 against `main` at SHA `b5fcb314`. The 87-commit pre-launch-hardening sprint subsequently merged into `main`, advancing it to SHA `a87f45ef` and introducing migrations 0228–0232, a new RLS canonical pattern, the `rlsBoundaryGuard` runtime/dev-time guard, and a mandatory §10 Execution-safety contracts section in `docs/spec-authoring-checklist.md`. The spec was audited against the new state and updated:
+- Migration renumbered from `0228` → `0233` (next free number; renumber again before merge per `DEVELOPMENT_GUIDELINES.md` §6.2).
+- RLS policy rewritten to canonical post-0227 shape (`<table>_org_isolation` naming, `DROP POLICY IF EXISTS` first, `USING` + `WITH CHECK` clauses, three-clause null-safe predicate).
+- New §16.4 multi-tenant safety checklist (per `DEVELOPMENT_GUIDELINES.md` §9, 8 items).
+- New §16.5 RLS runtime guard call-site posture (`assertRlsAwareWrite` for raw-SQL writes; Drizzle typed writes auto-Proxy-guarded).
+- New §16A Execution-safety contracts (idempotency posture, retry classification, concurrency guard, terminal event guarantee, no-silent-partial, unique-to-HTTP mapping, state-machine closure).
+- New §15.5 source-of-truth precedence subsection (per checklist §3 update).
+- §6.4 down-migration policy updated — ships as a no-op stub per emerging convention from migrations 0228–0231.
+
+---
+
+## 2. Scope & non-goals
+
+### In scope
+
+- Schema migration `0233_system_agents_v7_1.sql` — partial-unique indexes on `system_agents.slug` and `agents.(organisation_id, slug)` `WHERE deleted_at IS NULL`, plus the new `skill_idempotency_keys` table. (Renumbered from `0228` after main absorbed migrations 0228–0232 from the pre-launch hardening sprint; renumber again before merge if main advances further per `DEVELOPMENT_GUIDELINES.md` §6.2.)
+- 14 new skill files in `server/skills/<slug>.md` + classification updates + visibility application.
+- Action-registry extensions: `sideEffectClass`, `idempotency` block, `directExternalSideEffect`, `managerAllowlistMember` flag.
+- Skill-executor extensions: 14 new handlers, manager-role guard, side-effect-class wrapper, cross-run idempotency wrapper.
+- 7 new `companies/automation-os/agents/<slug>/AGENTS.md` folders.
+- 13 reparent edits + `finance-agent` skill list rescope + `update_financial_record` removal.
+- Retirement of `client-reporting-agent/` folder.
+- 2 new env vars in `server/lib/env.ts` + `.env.example`.
+- Manifest JSON regenerated to v7.1 with all 22 agents.
+- Seed-script orphan cleanup + cascade soft-delete + post-seed hierarchy assertion.
+- New verification script `scripts/verify-agent-skill-contracts.ts` (or extension to existing seed pre-flight).
+- Foundational-skill self-containment assertion in the existing visibility verifier.
+- Local-dev Path A SQL + the recommended migration order.
+
+### Out of scope (covered in §22)
+
+- Deeper hierarchy plumbing from v7.1 Appendix E (`parentAgentId` on `SkillExecutionContext`, scope param on `config_list_agents`, parent-scoping in `spawn_sub_agents`/`reassign_task`) — see §22.
+- Real Stripe / Xero integration for admin-ops handlers — handlers stub at first.
+- Master prompts for the 4 manager agents and 3 new workers — written from v7.1 §10–§14, §21, §29 in the same PR but the prompt drafting is a copy/adapt task, not an architectural decision the spec gates on.
+- Content/SEO + Social Media merge investigation (v7.1 Appendix F) — explicitly deferred.
+
+---
+
+## 3. Existing primitives — reuse / extend / invent
+
+Per the spec-authoring checklist §1, every new primitive must justify why reuse and extension were both insufficient. The following table records that decision for each piece this spec adds:
+
+| Brief proposes | Codebase has | Decision | Why |
+|---|---|---|---|
+| `skill_idempotency_keys` table for cross-run dedup | `actions.idempotencyKey` (unique on `(subaccount_id, idempotency_key)`) — keyed on `(runId, toolCallId, argsHash)`; scoped to a single tool-call within a run | **Extend with new sibling table** | `actions.idempotencyKey` is a **per-tool-call within-run** key; replays inside the same run hit it. Cross-run replay (the same `send_invoice` for the same `(engagement_id, period)` triggered by two different runs from the queue retry layer) is a different scope and needs a different keyspace. Reusing `actions` would conflate the two — a different `runId` produces a different key today, so the dedup never fires. The new table is small, owns its own keyspace, and the wrapper composes with `proposeAction` rather than replacing it. |
+| `sideEffectClass: 'read' \| 'write'` on registry | `idempotencyStrategy: 'read_only' \| 'keyed_write' \| 'locked'` already on every entry | **Extend registry, don't repurpose** | `idempotencyStrategy` documents the retry-safety contract; the brief's `sideEffectClass` documents the on-failure UX (fail-soft return-warning vs hard-block return-`{status:'blocked'}`). They overlap but are not the same axis: a `read_only` skill could still be `sideEffectClass: 'read'` (Stripe revenue read) or `'none'` (workspace memory read). Two fields keep both contracts explicit. The wrapper reads `sideEffectClass`; the proposeAction layer reads `idempotencyStrategy`. |
+| `directExternalSideEffect: bool` on registry | implicit via `mcp.annotations.openWorldHint` + `actionCategory: 'api'` + `defaultGateLevel: 'review'` | **New explicit flag** | The manager guard's "no direct external side effects from a manager" rule (§4.11.5 of the brief) needs a single boolean to read at allowlist-check time, not a 3-field heuristic. We add it explicitly; existing fields stay as-is. |
+| Manager-role allowlist guard | `proposeActionMiddleware` already runs as the universal pre-tool hook | **Extend the middleware** | The hook already sees every tool call with full context including the agent row. We add a single conditional: when the resolved agent's `agentRole === 'manager'`, the call passes a three-condition deny composition (allowlist + `directExternalSideEffect` + `sideEffectClass !== 'none'`) and returns `{ action: 'block', reason: 'manager_role_violation' \| 'manager_direct_external_side_effect' \| 'manager_indirect_side_effect_class' }` — see §9.4 for the exact deny logic. No new middleware, no new pipeline position. |
+| Cross-run idempotency wrapper | `executeWithActionAudit` in `skillExecutor.ts` already wraps every auto-gated skill | **Extend the wrapper** | The wrapper is the single chokepoint every audited skill call passes through. We add: before `lockForExecution`, if the skill declares `idempotency.keyShape`, attempt a first-writer-wins INSERT on `skill_idempotency_keys`; on conflict, read the prior `response_payload` and return it verbatim. Existing wrapper behaviour for non-declaring skills is unchanged. |
+| `list_my_subordinates` skill | no equivalent exists; `read_workspace` is unrelated; `config_list_agents` is admin-tool-scoped | **New foundational skill** | Required by every manager agent's delegation flow. Foundational because it reads `system_agents` directly, declares no external integration, and is invokable from any agent. Goes in `APP_FOUNDATIONAL_SKILLS`. |
+| `agentRole: 'manager'` on system_agents | `agentRole text` column already exists; `portfolio-health-agent` uses `role: analyst` | **Reuse the column** | No schema change. The four department heads land with `role: manager` in their `AGENTS.md` frontmatter; `companyParser.toSystemAgentRows` already passes `agentRole` through to the seed row. |
+| Manifest regeneration script | none today | **New small script** | Index-only manifest is human-edited today and drift is the dominant failure mode. A 30-line `scripts/regenerate-company-manifest.ts` walks the agent folders and emits the JSON; it is wired as a pre-flight check in the seed so drift fails the seed loudly. Cheaper than maintaining the manifest by hand. |
+| Pre-flight `scripts/verify-agent-skill-contracts.ts` | `preflightVerifySkillVisibility` (existing) covers visibility only; no contract-completeness check today | **New script + wired into seed** | Extends the existing pre-flight model; covers an orthogonal failure class (handler-missing-but-frontmatter-references-it) that visibility doesn't catch. |
+
+Anything else this spec touches reuses an existing primitive without modification (`policyEngineService`, `actionService.proposeAction`, `withBackoff`, `TripWire`, `runCostBreaker`, `failure() + FailureReason enum`, `withOrgTx`, `RLS_PROTECTED_TABLES` manifest, `verify-rls-coverage.sh`, `tsx + static-gate test convention`).
+
+---
+
+## 4. File inventory (single source of truth)
+
+Every file the implementation touches. Prose elsewhere in this spec must reference one of these entries — if a section names a file that isn't here, the spec has drifted and the inventory is the authoritative anchor.
+
+### 4.1 Migrations (1 new + 1 down stub)
+
+| Path | Purpose |
+|------|---------|
+| `migrations/0233_system_agents_v7_1.sql` | Partial-unique-index swap on `system_agents.slug` + `agents.(organisation_id, slug)`; create `skill_idempotency_keys` table + RLS policy (canonical post-0227 shape: `<table>_org_isolation`, `DROP POLICY IF EXISTS` first, `USING` + `WITH CHECK`) + supporting indexes |
+| `migrations/_down/0233_system_agents_v7_1.sql` | **NEW** — No-op reversal stub with explanatory header (matches the emerging convention from migrations 0228–0231 in main). Operational rollback is via §14 Path A re-seed; the partial indexes are forward-compatible with the v6 state. |
+
+### 4.2 Schema files (3 modified, 1 new)
+
+| Path | Change |
+|------|--------|
+| `server/db/schema/systemAgents.ts` | Replace full `uniqueIndex` on `slug` with partial unique `WHERE deleted_at IS NULL` |
+| `server/db/schema/agents.ts` | Replace `agents_org_slug_uniq` partial unique (already partial) — confirm WHERE-clause matches new migration |
+| `server/db/schema/skillIdempotencyKeys.ts` | **NEW** — Drizzle schema for `skill_idempotency_keys` |
+| `server/db/schema/index.ts` | Re-export the new schema |
+
+### 4.3 RLS manifest (1 modified)
+
+| Path | Change |
+|------|--------|
+| `server/config/rlsProtectedTables.ts` | Append `skill_idempotency_keys` entry pointing at migration `0233` |
+
+### 4.4 Skill files (14 new, 1 deleted)
+
+New (in `server/skills/`):
+`list_my_subordinates.md`, `generate_invoice.md`, `send_invoice.md`, `reconcile_transactions.md`, `chase_overdue.md`, `process_bill.md`, `track_subscriptions.md`, `prepare_month_end.md`, `discover_prospects.md`, `draft_outbound.md`, `score_lead.md`, `book_meeting.md`, `score_nps_csat.md`, `prepare_renewal_brief.md`.
+
+Deleted: `server/skills/update_financial_record.md`.
+
+### 4.5 Skill classification (1 modified)
+
+| Path | Change |
+|------|--------|
+| `scripts/lib/skillClassification.ts` | Add `list_my_subordinates` to `APP_FOUNDATIONAL_SKILLS` |
+
+### 4.6 Action registry (1 modified)
+
+| Path | Change |
+|------|--------|
+| `server/config/actionRegistry.ts` | (a) Extend `ActionDefinition` interface with `sideEffectClass`, `idempotency`, `directExternalSideEffect`, `managerAllowlistMember`. (b) Add 14 new `ACTION_REGISTRY` entries. (c) Remove `update_financial_record` entry. (d) Add `provider` parameter + Hunter routing to `enrich_contact` entry. |
+
+### 4.7 Skill executor (1 modified)
+
+| Path | Change |
+|------|--------|
+| `server/services/skillExecutor.ts` | (a) Add 14 handler entries to `SKILL_HANDLERS`. (b) Extend `executeWithActionAudit` with the cross-run idempotency wrapper (only when `idempotency.keyShape` is declared) and the side-effect-class fail-soft / must-block branches. (c) Remove `update_financial_record` handler + worker-adapter case. |
+
+### 4.8 Pre-tool middleware (1 modified)
+
+| Path | Change |
+|------|--------|
+| `server/services/middleware/proposeAction.ts` | Add manager-role guard with three-condition deny composition (allowlist membership + `directExternalSideEffect` + `sideEffectClass !== 'none'`) — returns `{ action: 'block', reason: <one of 'manager_role_violation' \| 'manager_direct_external_side_effect' \| 'manager_indirect_side_effect_class'> }`. See §9.4 for the deny logic and reason ordering. |
+
+### 4.9 Universal-skill list (review only)
+
+| Path | Change |
+|------|--------|
+| `server/config/universalSkills.ts` | Reviewed — no change. Universal skills (`ask_clarifying_question`, `request_clarification`, `read_workspace`, `web_search`, `read_codebase`, `search_agent_history`, `read_priority_feed`) remain the same. New foundational skill `list_my_subordinates` is **not** universal — it's only available where wired (managers + Orchestrator). |
+
+### 4.10 Env config (2 modified)
+
+| Path | Change |
+|------|--------|
+| `server/lib/env.ts` | Add `GOOGLE_PLACES_API_KEY` + `HUNTER_API_KEY` (both `z.string().optional()`) |
+| `.env.example` | Add both vars under a `# Lead discovery (SDR Agent)` heading |
+
+### 4.11 Hunter / Places provider plumbing (2 new)
+
+| Path | Purpose |
+|------|---------|
+| `server/services/leadDiscovery/hunterProvider.ts` | **NEW** — Hunter `domain-search` + `email-finder` client; in-memory LRU keyed on domain; fail-soft on 402/429 |
+| `server/services/leadDiscovery/googlePlacesProvider.ts` | **NEW** — Places `text-search` + `place-details` client; same fail-soft posture |
+
+(Both files stub when their env var is absent — handlers return `{ status: 'not_configured' }` rather than throw.)
+
+### 4.11a Domain-handler service modules (3 new)
+
+Per §9.1, the 14 new handler implementations live in dedicated service modules (no `server/skills/handlers/` folder convention exists in the codebase).
+
+| Path | Handlers it owns |
+|------|-------------------|
+| `server/services/adminOpsService.ts` | **NEW** — `executeGenerateInvoice`, `executeSendInvoice`, `executeReconcileTransactions`, `executeChaseOverdue`, `executeProcessBill`, `executeTrackSubscriptions`, `executePrepareMonthEnd` |
+| `server/services/sdrService.ts` | **NEW** — `executeDiscoverProspects`, `executeDraftOutbound`, `executeScoreLead`, `executeBookMeeting` |
+| `server/services/retentionSuccessService.ts` | **NEW** — `executeScoreNpsCsat`, `executePrepareRenewalBrief` |
+| `server/tools/config/configSkillHandlersPure.ts` | **MODIFIED** — append `executeListMySubordinates` (reuses existing `computeDescendantIds`) |
+
+### 4.11b pg-boss cleanup job (1 new)
+
+Per §17, the daily cleanup of expired `skill_idempotency_keys` rows runs as a queued job.
+
+| Path | Purpose |
+|------|---------|
+| `server/jobs/skillIdempotencyKeysCleanupJob.ts` | **NEW** — daily worker that deletes rows where `expires_at < NOW()`. Permanent-class rows never match. |
+| `server/jobs/index.ts` | **MODIFIED** — register the new job in the worker fan-out |
+
+### 4.11c Pure helpers + unit tests (2 new pure modules, 2 new test files)
+
+| Path | Purpose |
+|------|---------|
+| `server/services/skillIdempotencyKeysPure.ts` | **NEW** — `hashKeyShape(keyShape, input)`, `ttlClassToExpiresAt(class)` pure helpers consumed by the wrapper extension in §9.3 |
+| `server/services/middleware/managerGuardPure.ts` | **NEW** — `isManagerAllowlisted(skill, agentRole, perAgentReads)` pure helper consumed by §9.4 |
+| `server/services/__tests__/skillIdempotencyKeysPure.test.ts` | **NEW** — tsx pure-function tests for `hashKeyShape` + `ttlClassToExpiresAt` + `canonicaliseForHash` (per §8.1.1) + `assertHandlerInvokedWithClaim` test-mode invariant per §16A.1 |
+| `server/services/__tests__/managerGuardPure.test.ts` | **NEW** — tsx pure-function tests for `isManagerAllowlisted` (allowed bundle, denied worker skill, per-manager declared read pass-through, `directExternalSideEffect` reject, `sideEffectClass !== 'none'` indirect-side-effect reject per §9.4) |
+
+### 4.12 Agent files (7 new, 13 modified, 1 deleted)
+
+New folders under `companies/automation-os/agents/<slug>/AGENTS.md`:
+`head-of-product-engineering`, `head-of-growth`, `head-of-client-services`, `head-of-commercial`, `admin-ops-agent`, `retention-success-agent`, `sdr-agent`.
+
+Modified (single-line `reportsTo:` switch + skill-list edits where noted):
+`business-analyst`, `dev`, `qa`, `knowledge-management-agent` (→ `head-of-product-engineering`);
+`social-media-agent`, `ads-management-agent`, `email-outreach-agent`, `content-seo-agent` (→ `head-of-growth`);
+`support-agent`, `onboarding-agent` (→ `head-of-client-services`);
+`finance-agent` (→ `head-of-commercial`; **also** drop `update_financial_record` from `skills:` list);
+`crm-pipeline-agent` (→ `head-of-commercial`).
+
+Deleted: `companies/automation-os/agents/client-reporting-agent/` (entire folder).
+
+Unchanged: `orchestrator`, `strategic-intelligence-agent`, `portfolio-health-agent`.
+
+### 4.13 Manifest JSON (1 modified, 1 new script)
+
+| Path | Change |
+|------|--------|
+| `companies/automation-os/automation-os-manifest.json` | Regenerate to `version: "7.1.0"`, all 22 agents, updated `description` + `masterBrief` |
+| `scripts/regenerate-company-manifest.ts` | **NEW** — walks `companies/automation-os/agents/*/AGENTS.md`, emits the JSON. Wired as a seed pre-flight that fails on drift. |
+
+### 4.14 Seed pipeline (1 modified)
+
+| Path | Change |
+|------|--------|
+| `scripts/seed.ts` | (a) Extend pre-flight: invoke new `verify-agent-skill-contracts.ts` + the manifest-regenerator drift check. (b) Phase 2/3 — orphan-soft-delete + cascade soft-delete to `agents` + deactivate matching `subaccount_agents`. (c) Post-Phase-3 hierarchy assertion (one root, no cycles, depth ≤ 3, all parents non-deleted). |
+
+### 4.15 Verification scripts (1 new, 1 modified)
+
+| Path | Change |
+|------|--------|
+| `scripts/verify-agent-skill-contracts.ts` | **NEW** — parses every `companies/automation-os/agents/*/AGENTS.md`, asserts each `skills:` slug exists in `server/skills/`, in `ACTION_REGISTRY`, and in `SKILL_HANDLERS`. Also asserts: (a) every `.md` skill file is referenced by at least one agent OR carries `reusable: true` frontmatter; (b) every skill in `APP_FOUNDATIONAL_SKILLS` has no external integration in its registry entry. Exit 1 on any miss. |
+| `scripts/verify-skill-visibility.ts` (existing) | Extend to cover the foundational-skill self-containment assertion (item (b) above) — keeps the visibility gate's coverage with the contracts gate's |
+
+### 4.16 Documentation (3 modified)
+
+| Path | Change |
+|------|--------|
+| `architecture.md` § "Key files per domain" | Add row for `companies/automation-os/agents/<slug>/AGENTS.md` (system-agent definitions) + `skill_idempotency_keys` to the RLS-protected list |
+| `tasks/current-focus.md` | Update in-flight pointer to this spec / branch |
+| `docs/capabilities.md` | Append the 7 new agents to the customer-facing roster (Marketing-and-sales-ready terms — no LLM provider names) |
+
+### 4.17 Build artefacts (per CLAUDE.md task convention)
+
+| Path | Purpose |
+|------|---------|
+| `tasks/builds/system-agents-v7-1-migration/plan.md` | Architect-emitted plan (one chunk per phase) |
+| `tasks/builds/system-agents-v7-1-migration/progress.md` | Per-session progress (cross-session handoff) |
+
+---
+
+## 5. Migration order (mandatory)
+
+The phase order below is **load-bearing**. Reordering causes silent failures (the Path A reset fails on the second attempt because the partial-unique index isn't in place; the seed pre-flight aborts because skills declared in `AGENTS.md` have no handler). Do not parallelise across phases without re-reading this section.
+
+| Order | Phase | Why it must come first/next | Failure mode if skipped |
+|-------|-------|------------------------------|--------------------------|
+| 1 | **Phase 1 — Schema migration** (§6) | Partial-unique indexes are required before §14 Path A; `skill_idempotency_keys` is required before any new write skill writes a row. | Path A reset hits unique-constraint violation; idempotency wrapper can't write. |
+| 2 | **Phase 2 — Skill files + classification + visibility** (§7) | Pre-flight (`preflightVerifySkillVisibility` + new `verify-agent-skill-contracts.ts`) reads these. | Seed aborts. |
+| 3 | **Phase 3 — Action registry** (§8) | Handlers in §9 reference registry entries; manager-guard in §9 reads `managerAllowlistMember`; idempotency wrapper reads `idempotency.keyShape`; side-effect wrapper reads `sideEffectClass`. | Handlers throw "unknown action type"; guard never triggers; wrapper no-ops. |
+| 4 | **Phase 4 — Skill executor extensions** (§9) | Agent files in §10 reference handlers via skills list; without handler entries, agent-skill contract gate fails. | Pre-flight gate aborts seed. |
+| 5 | **Phase 5 — Agent file changes** (§10) + **Phase 6 — Retire `client-reporting-agent`** (§11) | Combined in one PR step because they're the same file-system operation class. Pre-flight gate now passes (skills + handlers + registry all aligned). | n/a — all upstream prerequisites in place. |
+| 6 | **Phase 7 — Env vars + manifest regeneration** (§12) | Manifest pre-flight check in seed reads the regenerated JSON; env vars consumed by the new Hunter / Places providers. | Seed pre-flight reports manifest drift; providers fail at runtime when handlers are first invoked (graceful — they return `{ status: 'not_configured' }`). |
+| 7 | **Phase 8 — Seed-script changes + verification gates** (§13) | Cannot land before Phases 1–7 because the new gates would fire prematurely against an inconsistent state. | Seed aborts during dev iteration. |
+| 8 | **Phase 9 — Local-dev reset** (§14) | Final step — exercises every prior phase end-to-end on the dev DB. | n/a (this is the validation step). |
+
+> **Single-PR vs multi-PR.** Phases 1–8 land in a single PR. Phase 9 is a local-dev step the reviewer or merger runs once after merge — it touches no committed files. Splitting Phases 1–8 across PRs creates the merge-order hazards called out in §1; the framing assumption (`pre_production: yes`, `staged_rollout: never_for_this_codebase_yet`) makes a single PR the cheaper option.
+
+---
+
+## 6. Phase 1 — Schema migration
+
+### 6.1 Migration file
+
+**Path:** `migrations/0233_system_agents_v7_1.sql`
+
+The migration does three things, in this order, in a single transaction:
+
+1. **Drop the existing full-unique indexes and replace with partial uniques** scoped to `WHERE deleted_at IS NULL`.
+2. **Create the `skill_idempotency_keys` table** with primary key, indexes, and `ENABLE ROW LEVEL SECURITY`.
+3. **Create the matching RLS policy** keyed on `current_setting('app.organisation_id', true)` — same shape as every other tenant-isolated table, per `architecture.md §1155`.
+
+```sql
+-- migrations/0233_system_agents_v7_1.sql
+-- v7.1 system-agents migration: active-row uniqueness + cross-run idempotency table.
+
+BEGIN;
+
+-- (1a) system_agents.slug — replace full unique with partial unique
+DROP INDEX IF EXISTS system_agents_slug_idx;
+CREATE UNIQUE INDEX system_agents_slug_active_idx
+  ON system_agents (slug)
+  WHERE deleted_at IS NULL;
+
+-- (1b) agents.(organisation_id, slug) — confirm partial-unique posture.
+-- The index is already declared partial in server/db/schema/agents.ts
+-- (`agents_org_slug_uniq` with WHERE deleted_at IS NULL). This block is
+-- defensive: drop-and-recreate to guarantee shape parity in any DB that
+-- predates the partial declaration.
+DROP INDEX IF EXISTS agents_org_slug_uniq;
+CREATE UNIQUE INDEX agents_org_slug_active_uniq
+  ON agents (organisation_id, slug)
+  WHERE deleted_at IS NULL;
+
+-- (2) skill_idempotency_keys — cross-run replay dedup for write skills
+CREATE TABLE skill_idempotency_keys (
+  subaccount_id     uuid       NOT NULL,
+  organisation_id   uuid       NOT NULL,
+  skill_slug        text       NOT NULL,
+  key_hash          text       NOT NULL,
+  request_hash      text       NOT NULL,
+  response_payload  jsonb      NOT NULL DEFAULT '{}'::jsonb,
+  status            text       NOT NULL DEFAULT 'in_flight'
+                                CHECK (status IN ('in_flight', 'completed', 'failed')),
+  created_at        timestamptz NOT NULL DEFAULT NOW(),
+  expires_at        timestamptz NULL,  -- NULL = never expires (financial)
+  PRIMARY KEY (subaccount_id, skill_slug, key_hash)
+);
+
+CREATE INDEX skill_idempotency_keys_expires_at_idx
+  ON skill_idempotency_keys (expires_at)
+  WHERE expires_at IS NOT NULL;
+
+CREATE INDEX skill_idempotency_keys_org_idx
+  ON skill_idempotency_keys (organisation_id);
+
+ALTER TABLE skill_idempotency_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE skill_idempotency_keys FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS skill_idempotency_keys_org_isolation ON skill_idempotency_keys;
+CREATE POLICY skill_idempotency_keys_org_isolation ON skill_idempotency_keys
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+COMMIT;
+```
+
+**Why include `organisation_id`** (not just `subaccount_id`):
+- The RLS policy needs an org column to match the manifest pattern in `rlsProtectedTables.ts`. Every other RLS-protected table is keyed on `current_setting('app.organisation_id', true)`. Adding `organisation_id` keeps the new table consistent with the existing convention and lets `verify-rls-coverage.sh` recognise it.
+- It is denormalised relative to `subaccount_id` — handlers must populate both. The wrapper (§9) does this from `SkillExecutionContext`.
+
+**Policy shape rationale (post-pre-launch-hardening canonical pattern, see migration `0227_rls_hardening_corrective.sql`):**
+- `DROP POLICY IF EXISTS` first so the migration is idempotent and safe to re-run after a dev reset.
+- Naming convention `<table>_org_isolation` matches every post-0227 migration; `verify-rls-coverage.sh` recognises this name.
+- `WITH CHECK` clause is **mandatory** — without it, INSERTs that bypass `USING` (e.g. a row with mismatched `organisation_id`) succeed silently. The hardening sweep added this guard to all post-0227 policies.
+- Three-clause `USING` / `WITH CHECK` predicate (NOT NULL, non-empty, equality cast) defends against the edge case where `app.organisation_id` is unset — without the null/empty guards the `::uuid` cast fails with a misleading error rather than rejecting the row cleanly.
+
+**Why `status` is a CHECK column, not an enum type:** lower migration risk — no `CREATE TYPE` required; pre-prod doesn't yet justify schema-level enum churn. The wrapper writes `'in_flight'` first, then updates to `'completed'` or `'failed'`.
+
+**Why `DROP INDEX … CREATE UNIQUE INDEX` is safe inside `BEGIN;…COMMIT;` (no constraint-less window):** Postgres MVCC means concurrent readers see a snapshot consistent with the pre-COMMIT state until the transaction commits — they never see a moment where the old index is dropped but the new one is missing. The drop and create take an `ACCESS EXCLUSIVE` lock for the duration of the migration transaction, blocking concurrent writers; pre-prod single-DB with no concurrent writers makes this lock window operationally invisible. A `CREATE INDEX CONCURRENTLY` alternative is **rejected** here because `CONCURRENTLY` is not permitted inside a transaction block (Postgres documented limitation), which would force splitting the migration across two transaction boundaries — losing atomicity for the schema change. Single-transaction is the correct posture for pre-prod; the `CONCURRENTLY` pattern reappears post-`live_users: yes` flip when concurrent-writer downtime becomes operationally significant.
+
+### 6.2 Drizzle schema additions
+
+**`server/db/schema/skillIdempotencyKeys.ts`** (NEW):
+
+```ts
+import { pgTable, uuid, text, jsonb, timestamp, primaryKey, index } from 'drizzle-orm/pg-core';
+
+export const skillIdempotencyKeys = pgTable('skill_idempotency_keys', {
+  subaccountId: uuid('subaccount_id').notNull(),
+  organisationId: uuid('organisation_id').notNull(),
+  skillSlug: text('skill_slug').notNull(),
+  keyHash: text('key_hash').notNull(),
+  requestHash: text('request_hash').notNull(),
+  responsePayload: jsonb('response_payload').notNull().default({}),
+  status: text('status').notNull().default('in_flight').$type<'in_flight' | 'completed' | 'failed'>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.subaccountId, table.skillSlug, table.keyHash] }),
+  expiresAtIdx: index('skill_idempotency_keys_expires_at_idx').on(table.expiresAt),
+  orgIdx: index('skill_idempotency_keys_org_idx').on(table.organisationId),
+}));
+
+export type SkillIdempotencyKey = typeof skillIdempotencyKeys.$inferSelect;
+export type NewSkillIdempotencyKey = typeof skillIdempotencyKeys.$inferInsert;
+```
+
+**`server/db/schema/index.ts`** (MODIFIED): re-export the new module.
+
+**`server/db/schema/systemAgents.ts`** (MODIFIED): replace the full `uniqueIndex('system_agents_slug_idx').on(table.slug)` with:
+
+```ts
+slugActiveIdx: uniqueIndex('system_agents_slug_active_idx')
+  .on(table.slug)
+  .where(sql`${table.deletedAt} IS NULL`),
+```
+
+**`server/db/schema/agents.ts`** (MODIFIED — confirm only): the existing `agents_org_slug_uniq` declaration is already partial. The migration's defensive drop-and-recreate ensures a clean DB shape; the schema file changes only its index name to `agents_org_slug_active_uniq` to match.
+
+### 6.3 RLS manifest entry
+
+**`server/config/rlsProtectedTables.ts`** (MODIFIED) — append:
+
+```ts
+{
+  tableName: 'skill_idempotency_keys',
+  schemaFile: 'skillIdempotencyKeys.ts',
+  policyMigration: '0233_system_agents_v7_1.sql',
+  rationale: 'Cross-run idempotency keys for write skills — request payload hashes can encode customer PII (email recipient hashes, invoice amounts, contact updates).',
+},
+```
+
+`verify-rls-coverage.sh` passes because the migration creates the policy in the same file. `verify-rls-session-var-canon.sh` passes because the policy uses `app.organisation_id` (the canonical session var). `verify-rls-protected-tables.sh` passes because (a) `skill_idempotency_keys` is on the manifest, and (b) the table is not in `scripts/rls-not-applicable-allowlist.txt`.
+
+### 6.4 Down-migration
+
+A `migrations/_down/0233_system_agents_v7_1.sql` ships as a **no-op stub** with a header comment explaining that the migration is purely additive and forward-compatible — rolling back to pre-0233 leaves the partial indexes in place (they coexist with v6 row state) and dropping the new `skill_idempotency_keys` table is unsafe because in-flight idempotency rows may exist. Operational rollback is via §14 Path A re-seed.
+
+This matches the emerging convention from migrations 0228–0231 in main, which all ship `_down/` companions even when the reversal is a no-op or documentation-only.
+
+### 6.5 Verification (run after migration)
+
+- `psql $DATABASE_URL -c "\d+ system_agents"` shows `system_agents_slug_active_idx` as a partial unique with `WHERE deleted_at IS NULL`.
+- `psql $DATABASE_URL -c "\d+ agents"` shows `agents_org_slug_active_uniq` as the partial unique.
+- `psql $DATABASE_URL -c "\d+ skill_idempotency_keys"` shows the table + RLS enabled (`Row security: ENABLED, FORCED`).
+- `psql $DATABASE_URL -c "\d skill_idempotency_keys"` shows policy `skill_idempotency_keys_org_isolation` with both `USING` and `WITH CHECK` clauses present.
+- `npm run typecheck` passes (Drizzle schema parses).
+- `bash scripts/verify-rls-coverage.sh` passes.
+- `bash scripts/verify-rls-protected-tables.sh` passes.
+- `bash scripts/verify-rls-session-var-canon.sh` passes.
+- `bash scripts/verify-migration-sequencing.sh` passes (no out-of-order migrations).
+
+---
+
+## 7. Phase 2 — Skill files + classification + visibility
+
+### 7.1 New skill files (14 — flat list under `server/skills/`)
+
+All 14 skill files use the existing skill-frontmatter shape (copy-paste-then-edit from a peer like `server/skills/draft_post.md`). The only structural variation is `visibility:` (set per the classification rule below). Frontmatter fields used: `name`, `description`, `isActive: true`, `visibility`. Body sections: `## Parameters`, `## Instructions`.
+
+| # | Slug | Used by | Visibility | One-line purpose |
+|---|------|---------|------------|------------------|
+| 1 | `list_my_subordinates` | Orchestrator + 4 manager heads | `none` | Returns the agent's subtree (children only by default; scope=`children`/`descendants`). Reads `system_agents` directly. |
+| 2 | `generate_invoice` | admin-ops-agent | `basic` | Build invoice from engagement record + billing schedule; returns structured invoice + idempotency key. |
+| 3 | `send_invoice` | admin-ops-agent | `basic` | Deliver invoice via configured channel (Stripe / email). Stubs to `{ status: 'not_configured' }` if no provider. |
+| 4 | `reconcile_transactions` | admin-ops-agent | `basic` | Match Stripe payouts against accounting records; surface mismatches as a structured diff. |
+| 5 | `chase_overdue` | admin-ops-agent | `basic` | Draft a dunning communication for a specific invoice + dunning step. Returns text + recommended channel. |
+| 6 | `process_bill` | admin-ops-agent | `basic` | Record an inbound bill / expense; emits a `review`-gated approval for human sign-off. |
+| 7 | `track_subscriptions` | admin-ops-agent | `basic` | Pull current SaaS subscription state, flag renewals/cancellations within a configurable window. |
+| 8 | `prepare_month_end` | admin-ops-agent | `basic` | Aggregate revenue + expenses + reconciliation status into a month-end close package. |
+| 9 | `discover_prospects` | sdr-agent | `basic` | Google Places caller — returns SMB prospects matching geo + vertical + size criteria. Fail-soft on missing `GOOGLE_PLACES_API_KEY`. |
+| 10 | `draft_outbound` | sdr-agent | `basic` | Draft a 1:1 outbound message (cold email / LinkedIn) for a prospect; returns text + tone score. |
+| 11 | `score_lead` | sdr-agent | `basic` | Score a lead's qualification fit using stated criteria; returns structured score + rationale. |
+| 12 | `book_meeting` | sdr-agent | `basic` | Book a meeting on a configured calendar provider; idempotent on `(prospect_email, requested_slot)`. |
+| 13 | `score_nps_csat` | retention-success-agent | `basic` | Aggregate NPS/CSAT signals, classify trend, surface at-risk segments. |
+| 14 | `prepare_renewal_brief` | retention-success-agent | `basic` | Draft a renewal/QBR prep doc from account state + churn-risk + recent reports. |
+
+### 7.2 Skill classification update
+
+**`scripts/lib/skillClassification.ts`** (MODIFIED) — add `list_my_subordinates` to `APP_FOUNDATIONAL_SKILLS`:
+
+```ts
+export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
+  // ... existing entries ...
+  'list_my_subordinates',  // NEW — manager-bundle delegation primitive
+]);
+```
+
+The other 13 new skills default to BUSINESS-VISIBLE (`visibility: basic`) and need no classification entry.
+
+### 7.3 Visibility application
+
+After creating the 14 files, run:
+
+```bash
+npx tsx scripts/apply-skill-visibility.ts
+```
+
+This bulk-applies the `visibility:` field per `classifySkill(slug)`. The seed pre-flight (`preflightVerifySkillVisibility`) will then pass.
+
+### 7.4 Foundational-skill self-containment assertion (NEW)
+
+Extend `scripts/verify-skill-visibility.ts` (existing) so it additionally asserts:
+
+> Every skill in `APP_FOUNDATIONAL_SKILLS` declares no external integration in its `ACTION_REGISTRY` entry — i.e. `actionCategory !== 'api'` AND `mcp.annotations.openWorldHint === false` AND `directExternalSideEffect !== true`.
+
+This catches the failure mode where someone adds a skill to the foundational set that needs an env var or external API at runtime — a classification bug, not an integration bug.
+
+`list_my_subordinates` reads `system_agents` directly — fine. Other foundational skills (`read_workspace`, `write_workspace`, `update_memory_block`, `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable`, `spawn_sub_agents`, `request_approval`, `triage_intake`, `read_data_source`, `playbook_*`) are also internal-only — fine.
+
+### 7.5 Hunter / Places provider extensions (per SDR brief)
+
+#### 7.5.1 `enrich_contact` enhancement
+
+**`server/config/actionRegistry.ts`** (MODIFIED — `enrich_contact` entry):
+
+- Add `provider` parameter to `parameterSchema`: `provider: z.enum(['default', 'hunter']).optional().describe('Enrichment provider — default uses configured org provider; "hunter" forces Hunter.io routing')`.
+- Handler in `SKILL_HANDLERS` reads `input.provider`. When `'hunter'`, routes to the new `hunterProvider.ts` (§7.5.3).
+
+#### 7.5.2 `discover_prospects` skill — new
+
+**`server/services/leadDiscovery/googlePlacesProvider.ts`** (NEW):
+
+- Exports `searchPlaces(input: { query, location, radius, type, limit })` returning `{ places: PlaceSummary[] }`.
+- Calls Google Places `text-search` + (optional) `place-details`.
+- In-memory LRU keyed on the request hash, 24h TTL.
+- Fail-soft: returns `{ status: 'not_configured', warning: 'GOOGLE_PLACES_API_KEY not set' }` when env absent. Returns `{ status: 'transient_error', warning: '...' }` on 429/5xx.
+
+#### 7.5.3 Hunter provider — new
+
+**`server/services/leadDiscovery/hunterProvider.ts`** (NEW):
+
+- Exports `domainSearch(domain)` and `emailFinder({ domain, firstName, lastName })`.
+- Calls Hunter.io `/v2/domain-search` + `/v2/email-finder`.
+- In-memory LRU keyed on domain, 24h TTL.
+- Fail-soft on 402 (quota) / 429 (rate limit): returns `{ status: 'transient_error', warning, data: null }` rather than throw.
+
+Both providers depend on the env vars added in §12 (`GOOGLE_PLACES_API_KEY`, `HUNTER_API_KEY`).
+
+### 7.6 Removed skill file
+
+`server/skills/update_financial_record.md` — **delete** (pre-production; the v7.1 finance rescope drops this skill entirely; the registry entry + worker-adapter case are removed in §8 / §9).
+
+### 7.7 Verification
+
+- `ls server/skills/*.md | wc -l` — expect previous count + 14 new − 1 removed = previous + 13.
+- `npx tsx scripts/apply-skill-visibility.ts` is idempotent; second run produces no changes.
+- `npx tsx scripts/seed.ts --dry-run` (if dry-run flag exists) or `npm run seed` against the dev DB completes the pre-flight without errors.
+- `bash scripts/verify-skill-visibility.ts` exits 0 (extended foundational-skill self-containment assertion passes).
+
+---
+
+## 8. Phase 3 — Action registry extensions
+
+### 8.1 Interface extensions
+
+**`server/config/actionRegistry.ts`** (MODIFIED — `ActionDefinition` interface):
+
+```ts
+/**
+ * v7.1 — Side-effect class governs **external blast-radius** only.
+ *
+ * Internal DB writes (e.g. `create_task`, `update_task`, board edits) are NOT
+ * external side effects and are classified `'none'` regardless of how many
+ * rows they mutate. Internal-write safety is provided by RLS + transaction
+ * boundaries (`withOrgTx`), not by `sideEffectClass`.
+ *
+ *  - 'read'  : may call external read-only API (Stripe / Xero / Google Places /
+ *              Hunter / etc.). No mutation of external state. May still hit a
+ *              quota — see `directExternalSideEffect` for the manager guard.
+ *  - 'write' : mutates external state (sends email/invoice, books meeting,
+ *              files invoice in accounting). Wrapper enforces precondition
+ *              check + `{ status: 'blocked' }` before any side effect runs.
+ *  - 'none'  : no external blast radius. Internal-only (DB reads, DB writes,
+ *              workspace updates, foundational delegation primitives).
+ */
+export type SideEffectClass = 'read' | 'write' | 'none';
+
+export interface IdempotencyContract {
+  /**
+   * Field names from `parameterSchema` that combine to form the dedup key.
+   *
+   * **Field-resolution semantics** (consumed by `hashKeyShape` in §4.11c):
+   *  - **Dot-path support.** Nested fields are addressed via dot notation —
+   *    e.g. `'customer.id'` resolves `input.customer.id`. Arrays are
+   *    addressed positionally (`'recipients.0.email'`); for unordered set
+   *    semantics, the handler must canonicalise the array before invoking
+   *    the wrapper.
+   *  - **Missing-field rule.** If any field listed in `keyShape` cannot be
+   *    resolved on the input (`undefined` after dot-path traversal), the
+   *    wrapper throws `IdempotencyKeyShapeError` BEFORE the INSERT — never
+   *    silently includes `undefined` in the hash. The handler is responsible
+   *    for surfacing this as `{ status: 'blocked', reason: 'missing_idempotency_key_field', requires: [<field>] }`.
+   *  - **Optional fields.** A field that is legitimately optional MUST NOT
+   *    appear in `keyShape`. If two requests differ only in an optional
+   *    field, they collide intentionally on the same key.
+   *  - **Canonicalisation.** The hash inputs are extracted and serialised via
+   *    `canonicaliseForHash(value)` (defined in §8.1.1) — NOT raw
+   *    `JSON.stringify(input)`. This guarantees stable hashes across JSON
+   *    key reorderings, default-field omissions, and primitive normalisations.
+   */
+  keyShape: string[];
+  /** Persistence scope. 'subaccount' = the default for tenant-scoped skills. */
+  scope: 'subaccount' | 'org';
+  /**
+   * TTL class — drives `expires_at` in skill_idempotency_keys via the canonical
+   * constant table in §8.1.1. The wrapper resolves the TTL via
+   * `ttlClassToExpiresAt(class)` (pure helper in `skillIdempotencyKeysPure.ts`,
+   * §4.11c) and the cleanup job consumes the same helper. Both must read from
+   * the same constant — no per-call-site literals.
+   *  - 'permanent' (financial, audit-trail-required) → expires_at = NULL
+   *  - 'long' (CRM / commitments / scheduled-meetings) → 30 days
+   *  - 'short' (communications) → 14 days
+   */
+  ttlClass: 'permanent' | 'long' | 'short';
+
+  /**
+   * v7.1 — Stale-claim takeover eligibility (per §16A.8).
+   *
+   * The wrapper reclaims an `in_flight` row whose `created_at` is older than
+   * `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 min). This is safe ONLY when the
+   * skill's worst-case successful runtime (preconditions + side effect +
+   * terminal write) sits comfortably below that threshold — otherwise a
+   * legitimately slow handler can be reclaimed mid-execution and the side
+   * effect can fire twice (the original handler completes its terminal
+   * UPDATE against a now-reclaimed row → 0 rows updated → silent no-op,
+   * while the reclaimer separately fires its own side effect).
+   *
+   * Two settings:
+   *  - `'disabled'` (**safe default — see registry-default rule below**): never
+   *    reclaimed; an `in_flight` row owns the key until cleanup or manual
+   *    intervention. Use for any handler whose worst-case runtime is ≥ 5 min
+   *    OR is unbounded (e.g. waits on a human-in-the-loop callback). Replays
+   *    of the same key while `status = 'in_flight'` always return
+   *    `{ status: 'in_flight' }`.
+   *  - `'eligible'`: worst-case runtime < 50% of
+   *    IDEMPOTENCY_CLAIM_TIMEOUT_MS (i.e. < 5 min). Reclaim permitted per
+   *    §16A.8. The 50% margin protects against latency spikes. Enabling
+   *    requires explicit per-skill justification (see registry-default rule
+   *    below).
+   *
+   * **Registry-default rule (mandatory).** Any new write-class skill that
+   * does NOT explicitly declare `reclaimEligibility` is treated by the
+   * pre-flight (`scripts/verify-agent-skill-contracts.ts`) as if it had
+   * declared `'disabled'`, AND the omission is a hard load failure — the
+   * pre-flight refuses to start the seed until the field is declared.
+   * Declaring `'eligible'` further requires either (a) a runtime-budget
+   * comment in the registry entry pointing at the worst-case path, or
+   * (b) a `// reclaimEligibility justification:` comment on the same line
+   * recording the rationale (linkable in the implementing PR review). The
+   * point of the friction: a future contributor cannot accidentally inherit
+   * `'eligible'` and silently reintroduce the double-fire class of bugs
+   * (§16A.8).
+   */
+  reclaimEligibility: 'eligible' | 'disabled';
+}
+
+export interface ActionDefinition {
+  // ... existing fields preserved ...
+
+  /**
+   * v7.1 — UX semantics on failure or missing config.
+   *  - 'read'  : on missing config / transient failure, return
+   *              { status: 'not_configured' | 'transient_error', warning, data: null }.
+   *              Never throw. fail-soft.
+   *  - 'write' : on missing config / validation failure, return
+   *              { status: 'blocked', reason } BEFORE any side effect.
+   *              Partial success returns { status: 'partial', completed_steps, remaining_steps }
+   *              and surfaces a board task with explicit recovery instructions.
+   *  - 'none'  : neither — pure internal operation (most foundational skills).
+   * Enforced by the executeWithActionAudit wrapper (§9.3).
+   */
+  sideEffectClass: SideEffectClass;
+
+  /**
+   * v7.1 — Cross-run idempotency contract. When present, the wrapper hashes
+   * the inputs per `keyShape` and acquires a row in skill_idempotency_keys
+   * before executing. Replays return the cached `response_payload` verbatim.
+   * Read-only skills MUST omit this field.
+   */
+  idempotency?: IdempotencyContract;
+
+  /**
+   * v7.1 — Manager guard hint. When true, this skill's handler may itself
+   * call an external system (Stripe, Gmail, GitHub, Anthropic, etc.).
+   * The manager-role guard rejects any skill where this is true, regardless
+   * of allowlist membership. Defaults to inferred-from-`mcp.openWorldHint`
+   * when omitted, but explicit declaration is preferred for clarity.
+   */
+  directExternalSideEffect?: boolean;
+
+  /**
+   * v7.1 — Manager allowlist membership. When true, this skill is permitted
+   * for managers as part of the universal+delegation bundle or the manager's
+   * declared per-domain reads. Foundational skills (universal bundle +
+   * delegation bundle) carry this flag; per-manager domain reads (e.g.
+   * `read_revenue` for the CRO) are added at agent-load time, not here.
+   */
+  managerAllowlistMember?: boolean;
+}
+```
+
+### 8.1.1 Canonicalisation rules + TTL constant table (single source of truth)
+
+#### Hash canonicalisation (`canonicaliseForHash`)
+
+`request_hash` and `key_hash` MUST both be derived from canonical-JSON serialisations — never raw `JSON.stringify(input)`. Without canonicalisation, two semantically-identical requests produce different hashes (false `idempotency_collision`) and two semantically-different requests can collide silently.
+
+The canonicalisation function lives in `server/services/skillIdempotencyKeysPure.ts` (§4.11c) alongside `hashKeyShape` and `ttlClassToExpiresAt`. Contract:
+
+```ts
+/**
+ * Canonical JSON serialisation for stable hashing.
+ *
+ * Rules (applied recursively):
+ *  1. Object keys sorted lexicographically (ASCII, case-sensitive).
+ *  2. `undefined` values are OMITTED entirely (never serialised as null).
+ *  3. Default-equal values that the schema layer would have stripped are
+ *     OMITTED (the wrapper passes `parameterSchema.parse(input)` first so
+ *     Zod defaults are materialised — canonicalisation then runs on the
+ *     parsed value, which has explicit defaults present and undefineds gone).
+ *  4. Numbers normalised: `-0` → `0`; `NaN` / `±Infinity` → throws (these
+ *     are never valid in idempotency keys).
+ *  5. Strings normalised via NFC Unicode normalisation.
+ *  6. Arrays preserved in order — handlers that need set semantics
+ *     pre-sort before the wrapper runs.
+ */
+export function canonicaliseForHash(value: unknown): string;
+```
+
+The existing `hashActionArgs` utility in `server/services/skillExecutor.ts` is the consumer — it must be extended to call `canonicaliseForHash(input)` before SHA-256, not `JSON.stringify(input)`. This is a Phase 4 change, called out alongside the wrapper extension in §9.3.1.
+
+#### TTL constant table
+
+A single constant map governs all TTL conversions. Both the wrapper (`ttlClassToExpiresAt` in §4.11c) and the cleanup job (`skillIdempotencyKeysCleanupJob.ts` per §16.3) read from this table:
+
+| `ttlClass` | `expires_at` | Rationale |
+|------------|--------------|-----------|
+| `'permanent'` | `NULL` (never expires) | Financial / audit-trail rows. Cleanup job's `WHERE expires_at IS NOT NULL AND expires_at < NOW()` predicate skips them. |
+| `'long'` | `NOW() + INTERVAL '30 days'` | CRM updates, scheduled commitments, meetings. 30 days covers a typical reschedule / dispute window. |
+| `'short'` | `NOW() + INTERVAL '14 days'` | Outbound communications (drafts, replies). 14 days covers a typical reply / bounce window. |
+
+Implementation pin:
+
+```ts
+// server/services/skillIdempotencyKeysPure.ts
+const TTL_DURATIONS_MS = {
+  permanent: null,                 // sentinel → expires_at = NULL
+  long:  30 * 24 * 60 * 60 * 1000, // 30 days
+  short: 14 * 24 * 60 * 60 * 1000, // 14 days
+} as const;
+
+export function ttlClassToExpiresAt(cls: IdempotencyContract['ttlClass']): Date | null {
+  const ms = TTL_DURATIONS_MS[cls];
+  return ms === null ? null : new Date(Date.now() + ms);
+}
+```
+
+Adding a new TTL class requires (a) a spec amendment to this table, (b) a constant entry in `TTL_DURATIONS_MS`, and (c) a CHECK-constraint extension on `IdempotencyContract['ttlClass']`. No literal `expires_at` arithmetic is permitted at any other call site.
+
+### 8.2 New ACTION_REGISTRY entries (14)
+
+Each new entry follows the standard shape. The fields that vary across the 14 are summarised in this table; the full Zod `parameterSchema` and per-skill rationale belong in the implementation PR, not in this spec.
+
+| Slug | actionCategory | sideEffectClass | defaultGateLevel | idempotencyStrategy | directExternalSideEffect | idempotency.keyShape (write only) | idempotency.ttlClass | idempotency.reclaimEligibility | managerAllowlistMember |
+|------|----------------|-----------------|------------------|---------------------|--------------------------|-----------------------------------|----------------------|--------------------------------|------------------------|
+| `list_my_subordinates` | worker | none | auto | read_only | false | (n/a — read) | (n/a) | (n/a) | **true** |
+| `generate_invoice` | worker | write | review | keyed_write | false | `[engagement_id, billing_period_start, billing_period_end]` | permanent | eligible | false |
+| `send_invoice` | api | write | review | locked | true | `[invoice_id]` | permanent | eligible | false |
+| `reconcile_transactions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `chase_overdue` | api | write | review | locked | true | `[invoice_id, dunning_step]` | long | eligible | false |
+| `process_bill` | worker | write | review | keyed_write | false | `[external_bill_id, amount, due_date]` | permanent | eligible | false |
+| `track_subscriptions` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `prepare_month_end` | worker | write | review | keyed_write | false | `[period_start, period_end]` | permanent | eligible | false |
+| `discover_prospects` | api | read | auto | read_only | true | (n/a — read) | (n/a) | (n/a) | false |
+| `draft_outbound` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `score_lead` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `book_meeting` | api | write | review | locked | true | `[prospect_email, requested_slot]` | long | eligible | false |
+| `score_nps_csat` | worker | none | auto | read_only | false | (n/a) | (n/a) | (n/a) | false |
+| `prepare_renewal_brief` | worker | none | auto | read_only | false | (n/a — output is a draft) | (n/a) | (n/a) | false |
+
+**Reclaim-eligibility rationale.** All 8 write skills above stub at first to non-Stripe / non-Xero / non-Gmail providers and have worst-case runtimes well below 5 minutes (the 50% safety margin against `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 min`); each is therefore explicitly declared `'eligible'` with a runtime-budget annotation in the registry source per the §8.1 registry-default rule. When real provider integration lands, the spec amendment that wires Stripe / Xero / Gmail MUST re-evaluate this column per skill — any skill whose worst-case runtime grows past 5 min must move to `'disabled'` or implement a heartbeat (deferred to that amendment).
+
+**Default for new skills.** Per the §8.1 registry-default rule, any future write-class skill added in a follow-up spec MUST declare `reclaimEligibility` explicitly. The pre-flight (`scripts/verify-agent-skill-contracts.ts`, §13.2) refuses to start the seed if the field is omitted; the safe-by-default stance is `'disabled'`, and `'eligible'` requires an explicit per-skill runtime-budget annotation. This protects against a future contributor inheriting `'eligible'` by accident and reintroducing the double-fire class of bugs (§16A.8).
+
+Notes on the table:
+- `defaultGateLevel: review` everywhere a write touches an external system or a financial record. Matches v7.1 §5 gate model.
+- `discover_prospects` and `track_subscriptions` are reads even though `directExternalSideEffect: true` — the flag describes whether the handler can hit an external API, not whether the operation mutates external state. The manager guard rejects on this flag specifically because a "read" that calls a quota'd API still shouldn't run from a manager.
+- `book_meeting` `idempotencyStrategy: 'locked'` because the calendar provider's own dedup is a secondary safety net, not the primary; we want a pg-side guarantee.
+- `chase_overdue` `keyShape` includes `dunning_step` so the same invoice can be chased multiple times across the dunning ladder, but each step fires once.
+
+### 8.3 Existing-entry modifications
+
+#### `enrich_contact` (per §7.5.1):
+- Add `provider` to `parameterSchema`.
+- No `idempotency` block (per existing `idempotencyStrategy: 'keyed_write'` — already covered at the actions-table layer; cross-run replay is rare for enrichment and the LRU cache in the provider absorbs it).
+- `sideEffectClass: 'write'` (writes enrichment back to the CRM).
+
+#### Universal-bundle skills (already in registry):
+- Add `managerAllowlistMember: true` to: `read_workspace`, `write_workspace`, `move_task`, `update_task`, `request_approval`, `add_deliverable`, `create_task`, `list_my_subordinates`, `spawn_sub_agents`, `reassign_task`.
+- Other universal skills (`ask_clarifying_question`, `request_clarification`, `web_search`, `read_codebase`, `search_agent_history`, `read_priority_feed`) — set `managerAllowlistMember: true` only for the ones the manager bundle explicitly includes (`read_codebase` for the CTO is per-manager, not universal-allowlist; `web_search` is universal already and stays so but is also OK for managers — set true for clarity).
+
+#### Side-effect-class backfill (existing entries):
+- For every entry already in `ACTION_REGISTRY`, add `sideEffectClass`. Defaults inferred:
+  - `actionCategory === 'api'` AND `mcp.annotations.readOnlyHint === false` → `'write'`.
+  - `actionCategory === 'api'` AND `mcp.annotations.readOnlyHint === true` → `'read'`.
+  - `actionCategory === 'worker'` AND no external write → `'none'`.
+  - `actionCategory === 'worker'` AND DB writes (e.g. `create_task`, `update_task`) → `'none'` (DB-internal write is not the contract — `sideEffectClass: 'write'` is reserved for external-blast-radius writes).
+
+> **Why backfill is in scope.** The wrapper in §9.3 reads `sideEffectClass` for every audited skill. Without backfill, existing skills hit `undefined` and the wrapper either no-ops (silent) or throws (loud). Backfill is mechanical (~50 entries), low-risk, and the new TypeScript field is non-optional so the compiler enforces completeness.
+
+#### Removed entry:
+- `update_financial_record` — delete entirely.
+
+### 8.4 Verification
+
+- `npx tsc --noEmit` passes (`sideEffectClass` is required so any missing entry fails).
+- `bash scripts/verify-action-registry-zod.sh` passes.
+- `bash scripts/verify-idempotency-strategy-declared.sh` passes.
+- `bash scripts/verify-skill-read-paths.sh` passes (every new write skill declares `readPath`).
+
+---
+
+## 9. Phase 4 — Skill executor: handlers, manager guard, side-effect wrapper
+
+### 9.1 New handler entries (14)
+
+**`server/services/skillExecutor.ts`** (MODIFIED — `SKILL_HANDLERS` map). All 14 handlers route through `executeWithActionAudit` (per the existing convention for auto-gated skills) so the action-audit row is written and the §9.3 wrapper extensions take effect.
+
+```ts
+// Inside SKILL_HANDLERS:
+
+list_my_subordinates: async (input, context) => {
+  return executeWithActionAudit('list_my_subordinates', input, context, () =>
+    executeListMySubordinates(input, context)
+  );
+},
+
+generate_invoice: async (input, context) => {
+  requireSubaccountContext(context, 'generate_invoice');
+  return executeWithActionAudit('generate_invoice', input, context, () =>
+    executeGenerateInvoice(input, context)
+  );
+},
+// ... 12 more, same shape ...
+```
+
+Each handler implementation lives in a dedicated module under `server/services/` (no new `server/skills/handlers/` folder — that path doesn't exist in the codebase; we follow the existing pattern of co-locating related handlers in a service file). Suggested groupings:
+
+| Module | Handlers |
+|--------|----------|
+| `server/services/configSkillHandlersPure.ts` (existing) — extend | `executeListMySubordinates` (reads `system_agents` via existing `computeDescendantIds`) |
+| `server/services/adminOpsService.ts` (NEW) | `executeGenerateInvoice`, `executeSendInvoice`, `executeReconcileTransactions`, `executeChaseOverdue`, `executeProcessBill`, `executeTrackSubscriptions`, `executePrepareMonthEnd` |
+| `server/services/sdrService.ts` (NEW) | `executeDiscoverProspects`, `executeDraftOutbound`, `executeScoreLead`, `executeBookMeeting` |
+| `server/services/retentionSuccessService.ts` (NEW) | `executeScoreNpsCsat`, `executePrepareRenewalBrief` |
+
+Stub semantics:
+- Handlers that wrap external providers (`send_invoice`, `reconcile_transactions`, `chase_overdue`, `track_subscriptions`, `discover_prospects`, `book_meeting`) — when the relevant provider is not configured, return `{ status: 'not_configured', warning, data: null }` for `sideEffectClass: 'read'` skills, or `{ status: 'blocked', reason: 'provider_not_configured', requires: ['STRIPE_API_KEY' | ...] }` for `sideEffectClass: 'write'` skills.
+- Handlers that synthesise text via the LLM (`draft_outbound`, `prepare_renewal_brief`, `prepare_month_end`) — call `routeCall` from `llmRouter.ts` with the agent's configured model. No new infrastructure.
+
+**Principal-context propagation (per `scripts/verify-principal-context-propagation.sh`):** any handler in the three new service modules that calls `canonicalDataService.<method>(...)` MUST pass `fromOrgId(context.organisationId, context.subaccountId)` as the first argument (the gate is now call-site granular, A1b post-hardening). Handlers that do NOT touch `canonicalDataService` need no annotation. Handlers that import `canonicalDataService` solely for type references (no invocation) declare `// @principal-context-import-only — reason: <one-sentence>` at the top of the file (matches the convention applied to `actionRegistry.ts` in main).
+
+### 9.2 `executeListMySubordinates` (the only foundational new handler)
+
+Builds on the existing `computeDescendantIds` utility in `server/tools/config/configSkillHandlersPure.ts`. Inputs:
+
+```ts
+parameterSchema: z.object({
+  scope: z.enum(['children', 'descendants']).optional().default('children'),
+})
+```
+
+Returns:
+
+```ts
+{
+  success: true,
+  scope: 'children' | 'descendants',
+  agents: Array<{
+    slug: string;
+    name: string;
+    title: string | null;
+    role: string | null;          // 'manager' | 'analyst' | etc., or null
+    isActive: boolean;
+  }>,
+}
+```
+
+Logic:
+1. From `context.agentId`, look up the corresponding `system_agents` row by `agentSystemId`.
+2. Resolve children via `system_agents.parent_system_agent_id = <self>` (children) or descendants via DFS up to depth 3.
+3. Filter by `deleted_at IS NULL` and `status = 'active'`.
+
+The skill is `sideEffectClass: 'none'` and `idempotencyStrategy: 'read_only'` — no idempotency-key writes, no audit-row write beyond the one `executeWithActionAudit` already emits.
+
+### 9.3 `executeWithActionAudit` extensions
+
+The wrapper sits at `server/services/skillExecutor.ts:1881`. Two extensions:
+
+#### 9.3.1 Cross-run idempotency (when `idempotency.keyShape` is declared)
+
+Inserted **before** `actionService.lockForExecution` and **after** `proposeAction` returns `auto`-approved status:
+
+```ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
+const def = getActionDefinition(actionType);
+if (def?.idempotency) {
+  const requestHash = hashActionArgs(input);  // existing utility — see canonicalisation rule below
+  const keyHash = hashKeyShape(def.idempotency.keyShape, input);  // NEW pure helper
+
+  // First-writer-wins INSERT — raw SQL because Drizzle's typed `.insert()`
+  // cannot express `RETURNING xmax = 0 AS is_first_writer`. Per §16.5,
+  // raw-SQL writes to RLS-protected tables must call `assertRlsAwareWrite`
+  // immediately before the write or `verify-rls-protected-tables.sh`
+  // flags the call site as an advisory violation.
+  assertRlsAwareWrite('skill_idempotency_keys');
+  const insertResult = await db.execute(sql`
+    INSERT INTO skill_idempotency_keys
+      (subaccount_id, organisation_id, skill_slug, key_hash, request_hash, status, expires_at)
+    VALUES (
+      ${context.subaccountId},
+      ${context.organisationId},
+      ${actionType},
+      ${keyHash},
+      ${requestHash},
+      'in_flight',
+      ${ttlClassToExpiresAt(def.idempotency.ttlClass)}
+    )
+    ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
+    RETURNING xmax = 0 AS is_first_writer
+  `);
+
+  let isFirstWriter = (insertResult.rows[0] as { is_first_writer?: boolean })?.is_first_writer === true;
+
+  if (!isFirstWriter) {
+    // Read existing row
+    const [existing] = await db.select()
+      .from(skillIdempotencyKeys)
+      .where(and(
+        eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+        eq(skillIdempotencyKeys.skillSlug, actionType),
+        eq(skillIdempotencyKeys.keyHash, keyHash),
+      ))
+      .limit(1);
+
+    if (existing.requestHash !== requestHash) {
+      createEvent('skill.error', { skillName: actionType, reason: 'idempotency_collision' }, { level: 'ERROR' });
+      return { status: 'idempotency_collision', error: 'Same idempotency key with different request hash' };
+    }
+
+    if (existing.status === 'completed') {
+      createEvent('skill.idempotency.hit', { skillName: actionType, key_hash: keyHash });
+      return existing.responsePayload;
+    }
+
+    if (existing.status === 'in_flight') {
+      // Stale-claim takeover (§16A.8) — if the prior writer crashed mid-execution,
+      // its `in_flight` row would otherwise deadlock the key forever. After
+      // IDEMPOTENCY_CLAIM_TIMEOUT_MS the next caller may reclaim by issuing a
+      // state-based UPDATE with the fresh `request_hash`. The UPDATE's
+      // `WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL '...'`
+      // predicate is the concurrency guard — only one of N racing reclaimers
+      // wins (the rest see 0 rows updated and re-poll the row).
+      //
+      // SAFETY GATE: takeover runs ONLY for `reclaimEligibility: 'eligible'`
+      // skills (per §8.1 + §16A.8 budget rule). For `'disabled'` skills, an
+      // `in_flight` row is owned indefinitely until cleanup or manual
+      // intervention — protects against double-firing the side effect when a
+      // legitimately slow handler is reclaimed mid-execution.
+      const reclaimEligible = def.idempotency.reclaimEligibility === 'eligible';
+      const ageMs = Date.now() - new Date(existing.createdAt).getTime();
+
+      if (!reclaimEligible) {
+        // Disabled-reclaim path — surface the stuck row to operators (rate-limited per §18.1)
+        // and return in_flight with a generous retry hint.
+        if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
+          createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_reclaim_disabled', key_hash: keyHash, age_ms: ageMs });
+        }
+        return {
+          status: 'in_flight',
+          message: 'Another caller is processing this idempotent request (reclaim disabled for this skill)',
+          retryable_after_ms: 5000,
+        };
+      }
+
+      if (ageMs >= IDEMPOTENCY_CLAIM_TIMEOUT_MS) {
+        const reclaim = await db.update(skillIdempotencyKeys)
+          .set({ createdAt: new Date(), requestHash, responsePayload: {} })
+          .where(and(
+            eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+            eq(skillIdempotencyKeys.skillSlug, actionType),
+            eq(skillIdempotencyKeys.keyHash, keyHash),
+            eq(skillIdempotencyKeys.status, 'in_flight'),
+            lt(skillIdempotencyKeys.createdAt, new Date(Date.now() - IDEMPOTENCY_CLAIM_TIMEOUT_MS)),
+          ))
+          .returning({ id: skillIdempotencyKeys.subaccountId });
+        if (reclaim.length === 1) {
+          createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_reclaimed', key_hash: keyHash, age_ms: ageMs });
+          // Reclaimer proceeds AS the first writer — fall through to the success path
+          isFirstWriter = true;
+        } else {
+          // Another reclaimer beat us; fall through to a polling re-read
+          createEvent('skill.warn', { skillName: actionType, reason: 'in_flight_claim_lost_reclaim', key_hash: keyHash });
+          return { status: 'in_flight', message: 'Another caller reclaimed this in_flight request', retryable_after_ms: 1000 };
+        }
+      } else {
+        // Genuinely concurrent — caller should retry shortly
+        return {
+          status: 'in_flight',
+          message: 'Another caller is processing this idempotent request',
+          retryable_after_ms: Math.max(1000, IDEMPOTENCY_CLAIM_TIMEOUT_MS - ageMs),
+        };
+      }
+    }
+
+    // status === 'failed' — terminal per §16A.7. Same-key retry is rejected here;
+    // caller must mint a NEW idempotency key (typically by changing the
+    // `keyShape`-resolved tuple — e.g. bump `dunning_step` for `chase_overdue`).
+    if (existing.status === 'failed') {
+      return { status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' };
+    }
+  }
+
+  // First writer wins (or successful reclaimer) — proceed with execution;
+  // write response_payload + status='completed' on success.
+  //
+  // §16A.1 test-mode invariant: assert the handler is only invoked under a
+  // held claim. No-op in production; throws SideEffectBeforeClaimError in
+  // test mode if the wrapper somehow reached this branch with isFirstWriter
+  // === false (defence-in-depth against future-regression of the
+  // "no external side-effect before claim" rule).
+  assertHandlerInvokedWithClaim(isFirstWriter);
+}
+```
+
+**Constants** (defined alongside `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts`):
+
+```ts
+/**
+ * After this much time, an `in_flight` claim is presumed crashed and may be
+ * reclaimed by the next caller — BUT ONLY for skills with
+ * `idempotency.reclaimEligibility: 'eligible'` per §8.1.
+ *
+ * Per §16A.8 budget rule: any `'eligible'` skill's worst-case successful
+ * runtime MUST be < 50% of this value (i.e. < 5 minutes for the 10-minute
+ * default). The 50% margin protects against latency spikes — without it, a
+ * legitimately slow handler running close to the timeout could be reclaimed
+ * mid-execution and double-fire its external side effect.
+ *
+ * Skills whose worst-case runtime cannot be bounded under this budget MUST
+ * declare `reclaimEligibility: 'disabled'` (per §16A.8 step 5) — the wrapper
+ * skips the takeover branch and surfaces stuck rows via `skill.warn` with
+ * `reason: 'in_flight_reclaim_disabled'` instead.
+ *
+ * Adjusting this value is a spec amendment — too short causes legitimate
+ * eligible handlers to be reclaimed mid-execution; too long worsens the
+ * deadlock-on-crash window for `'disabled'` skills.
+ */
+export const IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
+```
+
+The reclaim path replaces both `created_at` (proves the new claim's age) and `request_hash` (the reclaimer's request becomes authoritative — the original caller's request is presumed lost with the crashed worker). `response_payload` is reset to `{}` so a stale partial result cannot leak.
+
+**Canonicalisation reminder** — `hashActionArgs(input)` in §8.1.1 MUST canonicalise the input before hashing (sorted keys, undefined-stripped, NFC-normalised primitives). Without canonicalisation, two callers sending semantically-identical payloads with different key orderings produce different `request_hash` values and the wrapper falsely returns `idempotency_collision` instead of the cached payload.
+
+After the executor runs, the wrapper persists the result. The terminal UPDATE includes the **mandatory** `WHERE status = 'in_flight'` predicate per §16A.7 (state machine closure) — this prevents post-terminal corruption and provides the optimistic concurrency guard:
+
+```ts
+if (def?.idempotency && isFirstWriter) {
+  const updateResult = await db.update(skillIdempotencyKeys)
+    .set({
+      responsePayload: result,
+      status: resultObj?.success ? 'completed' : 'failed',
+    })
+    .where(and(
+      eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+      eq(skillIdempotencyKeys.skillSlug, actionType),
+      eq(skillIdempotencyKeys.keyHash, keyHash),
+      eq(skillIdempotencyKeys.status, 'in_flight'),  // §16A.7 — terminal-only-from-in_flight invariant
+    ))
+    .returning({ status: skillIdempotencyKeys.status });
+
+  if (updateResult.length === 0) {
+    // Lost the terminal race — another path already wrote completed/failed.
+    // Read the winning row, emit observability event, return its payload.
+    createEvent('skill.warn', {
+      skillName: actionType,
+      reason: 'terminal_race_lost',
+      key_hash: keyHash,
+    });
+    const [winner] = await db.select()
+      .from(skillIdempotencyKeys)
+      .where(and(
+        eq(skillIdempotencyKeys.subaccountId, context.subaccountId),
+        eq(skillIdempotencyKeys.skillSlug, actionType),
+        eq(skillIdempotencyKeys.keyHash, keyHash),
+      ))
+      .limit(1);
+    return winner.responsePayload;
+  }
+}
+```
+
+The `.update()` call uses Drizzle's typed builder, which is auto-Proxy-guarded by `getOrgScopedDb` — no explicit `assertRlsAwareWrite` needed for this path.
+
+#### 9.3.2 Side-effect-class wrapper (`sideEffectClass`)
+
+Inserted **before** the executor runs, **after** action-record creation:
+
+```ts
+if (def?.sideEffectClass === 'write') {
+  // Validate config presence — handler-specific; the wrapper provides
+  // a hook the handler can implement via a thin "checkPreconditions" function.
+  // If not configured, return { status: 'blocked', reason } before any side effect.
+  const preconditions = await checkSkillPreconditions(actionType, input, context);
+  if (preconditions.status === 'blocked') {
+    createEvent('skill.blocked', {
+      skillName: actionType, reason: preconditions.reason, provider: preconditions.provider, requires: preconditions.requires,
+    }, { level: 'INFO' });
+    return preconditions;  // { status: 'blocked', reason, provider, requires }
+  }
+}
+
+if (def?.sideEffectClass === 'read') {
+  // Read skills run normally; if the handler returns { status: 'not_configured' | 'transient_error' },
+  // the wrapper logs skill.warn and propagates the structured warning unchanged.
+}
+```
+
+The `checkSkillPreconditions` hook is a small new function that dispatches per skill (similar to the existing executor pattern). Most write skills only need to confirm an env var or integration-connection row exists.
+
+#### 9.3.3 Failure-mode logging
+
+Per §18 logging contract:
+- Read fail-soft → `skill.warn` (WARN level).
+- Expected blocked write (config missing, validation failed) → `skill.blocked` (INFO level — never paged).
+- Hard failure / contract violation → `skill.error` (ERROR level — paged).
+- Idempotency cache hit → `skill.idempotency.hit`.
+- Idempotency collision → `skill.error` with `reason: 'idempotency_collision'`.
+
+### 9.4 Manager-role guard (in `proposeActionMiddleware`)
+
+**`server/services/middleware/proposeAction.ts`** (MODIFIED) — extend the existing pre-tool middleware. The check runs **after** scope validation and **before** `proposeAction()`:
+
+```ts
+// Manager-role guard (v7.1) ---------------------------------------------
+const agentRole = await resolveAgentRole(context.agentId);  // reads system_agents.agent_role via cache
+if (agentRole === 'manager') {
+  const def = getActionDefinition(toolSlug);
+  const allowed =
+    def?.managerAllowlistMember === true ||
+    isPerManagerDeclaredRead(toolSlug, context.agentId);
+
+  // Three independent reject conditions — any one trips the guard:
+  //  (a) Skill is not on the manager allowlist (universal+delegation bundle
+  //      OR the per-manager declared reads).
+  //  (b) Skill's handler may itself call an external system
+  //      (`directExternalSideEffect: true`) — closes the direct-call leak.
+  //  (c) Skill has any external blast radius (`sideEffectClass !== 'none'`) —
+  //      closes the **indirect** leak where a "safe" manager-allowed skill
+  //      could internally invoke a write skill (e.g. a manager-callable
+  //      worker-tier skill that itself calls `send_invoice`).
+  //      All 14 manager-allowlisted skills carry `sideEffectClass: 'none'`
+  //      per §8.2; this check is an enforcement floor, not a behaviour change.
+  const denyReason =
+    !allowed ? 'manager_role_violation' :
+    def?.directExternalSideEffect === true ? 'manager_direct_external_side_effect' :
+    (def?.sideEffectClass ?? 'none') !== 'none' ? 'manager_indirect_side_effect_class' :
+    null;
+
+  if (denyReason !== null) {
+    await writeSecurityEvent({
+      ...auditFields,
+      decision: 'deny',
+      reason: denyReason,
+    });
+    return { action: 'block', reason: denyReason };
+  }
+}
+```
+
+`isPerManagerDeclaredRead(toolSlug, agentId)` is a small lookup that resolves the manager's `defaultSystemSkillSlugs` (from `system_agents`) and returns true iff `toolSlug` is in that list. This lets per-manager domain reads (e.g. `read_codebase` for the CTO, `read_revenue` for the CRO) pass even though they are not universally `managerAllowlistMember: true`.
+
+The three-condition deny composition (allowlist + `directExternalSideEffect` + `sideEffectClass !== 'none'`) closes both the **direct** leak (manager calls Stripe directly) and the **indirect** leak (manager calls an internal skill that itself calls Stripe). Adding a new manager-allowlisted skill with `sideEffectClass: 'read'` or `'write'` is a deliberate decision and requires the spec author to justify the carveout in the registry entry.
+
+The guard returns `{ action: 'block', reason: <one of the three deny reasons above> }` via the existing middleware-block surface — `'manager_role_violation'` for non-allowlisted skills, `'manager_direct_external_side_effect'` for skills whose handler itself calls an external system, or `'manager_indirect_side_effect_class'` for skills with any external blast radius. The agent observes the block as a normal denial regardless of the specific reason; no exception is thrown.
+
+### 9.5 Worker-adapter case removal
+
+In `registerAdapter('worker', ...)` (top of `skillExecutor.ts`), the `case 'update_financial_record'` line is removed. The handler `executeFinancialRecordUpdateApproved` is also removed from the file (it has no other call sites). If `tsc` reports the function as unused, this is the expected effect of the v7.1 finance rescope.
+
+### 9.6 Verification
+
+- `npm run typecheck` passes.
+- `npm run lint` passes.
+- `bash scripts/verify-no-silent-failures.sh` passes (the new wrapper paths emit structured logs, not silent returns).
+- `bash scripts/verify-principal-context-propagation.sh` passes — every `canonicalDataService.<method>(` call site in the new service modules (`adminOpsService.ts`, `sdrService.ts`, `retentionSuccessService.ts`) passes a `fromOrgId(...)` first argument or the file declares `// @principal-context-import-only`.
+- `bash scripts/verify-rls-protected-tables.sh` passes — both raw-SQL writes to `skill_idempotency_keys` are guarded: the wrapper INSERT in §9.3.1 and the cleanup-job DELETE in §16.3 each call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the write.
+- Manual test: invoke `draft_post` from a `head-of-growth` test run → wrapper returns `{ action: 'block', reason: 'manager_role_violation' }`.
+- Manual test: invoke `send_invoice` twice with the same `invoice_id` (per §8.2 — `send_invoice.keyShape = [invoice_id]`) → second call returns the cached payload with `skill.idempotency.hit` log. (Confirm against the registry table — `generate_invoice` uses `[engagement_id, billing_period_start, billing_period_end]`; do not mix them.)
+- Manual test: race two terminal UPDATEs on the same idempotency row → losing path's `WHERE status = 'in_flight'` returns 0 rows; logger emits `skill.warn` with `reason: 'terminal_race_lost'`; both callers receive the winner's payload (per §16A.3 + §16A.7).
+
+---
+
+## 10. Phase 5 — Agent file changes (7 new + 13 reparents + finance rescope)
+
+### 10.1 Seven new `AGENTS.md` folders
+
+Path shape: `companies/automation-os/agents/<slug>/AGENTS.md`. Frontmatter follows the existing pattern (e.g. `companies/automation-os/agents/orchestrator/AGENTS.md`). The four department heads share the same shape; admin-ops and the two new workers vary by skill list and gate.
+
+#### 10.1.1 `head-of-product-engineering`
+
+```yaml
+---
+name: Head of Product Engineering
+title: CTO — Coordinates the build pipeline (BA → Dev → QA → KM)
+slug: head-of-product-engineering
+role: manager
+reportsTo: orchestrator
+model: claude-sonnet-4-6
+temperature: 0.3
+maxTokens: 8192
+schedule: on-demand
+gate: auto
+tokenBudget: 9000
+maxToolCalls: 12
+skills:
+  - read_workspace
+  - write_workspace
+  - list_my_subordinates
+  - spawn_sub_agents
+  - reassign_task
+  - create_task
+  - move_task
+  - update_task
+  - add_deliverable
+  - request_approval
+  - read_codebase
+---
+```
+
+Body: master prompt encoding the manager pattern (vet → decompose → pick subordinate → delegate → aggregate → report) per master brief §10. The prompt drafting itself is implementation work, not spec scope (per §2 out-of-scope).
+
+#### 10.1.2 `head-of-growth`
+
+Same shape; `reportsTo: orchestrator`; skills add `read_campaigns`, `read_analytics` (drop `read_codebase`).
+
+#### 10.1.3 `head-of-client-services`
+
+Same shape; `reportsTo: orchestrator`; skills are the manager bundle only (no per-domain reads beyond the bundle).
+
+#### 10.1.4 `head-of-commercial`
+
+Same shape; `reportsTo: orchestrator`; skills add `read_revenue`, `read_crm`.
+
+#### 10.1.5 `admin-ops-agent`
+
+```yaml
+---
+name: Admin-Ops Agent
+title: Back-office operations — invoicing, AR/AP, reconciliation, month-end
+slug: admin-ops-agent
+role: staff
+reportsTo: orchestrator
+model: claude-sonnet-4-6
+temperature: 0.2
+maxTokens: 4096
+schedule: on-demand
+gate: review
+tokenBudget: 25000
+maxToolCalls: 20
+skills:
+  - read_workspace
+  - write_workspace
+  - read_revenue
+  - read_expenses
+  - generate_invoice
+  - send_invoice
+  - reconcile_transactions
+  - chase_overdue
+  - process_bill
+  - track_subscriptions
+  - prepare_month_end
+  - send_email
+  - request_approval
+  - move_task
+  - update_task
+  - add_deliverable
+---
+```
+
+Body per master brief §14 — includes "Must not" rules about payment initiation and accounting-record direct edits.
+
+#### 10.1.6 `retention-success-agent`
+
+```yaml
+---
+name: Retention/Success Agent
+title: Proactive retention, churn-risk scoring, NPS/CSAT, renewal prep, client reporting
+slug: retention-success-agent
+role: worker
+reportsTo: head-of-client-services
+model: claude-sonnet-4-6
+temperature: 0.3
+maxTokens: 4096
+schedule: on-demand
+gate: review
+tokenBudget: 25000
+maxToolCalls: 20
+skills:
+  - read_workspace
+  - write_workspace
+  - move_task
+  - update_task
+  - add_deliverable
+  - request_approval
+  - detect_churn_risk
+  - score_nps_csat
+  - prepare_renewal_brief
+  - draft_report
+  - deliver_report
+  - send_email
+---
+```
+
+Body per master brief §21. **`detect_churn_risk`** is correct. `detect_churn_risk` (engagement-signal scorer, wired to crm-pipeline-agent and retention-success-agent) and `compute_churn_risk` (portfolio-level churn model, wired to portfolio-health-agent only) are two distinct existing skills with different runtime paths — confirmed in master brief Appendix A.
+
+#### 10.1.7 `sdr-agent`
+
+```yaml
+---
+name: SDR Agent
+title: Outbound prospecting, lead qualification, meeting booking
+slug: sdr-agent
+role: worker
+reportsTo: head-of-commercial
+model: claude-sonnet-4-6
+temperature: 0.4
+maxTokens: 4096
+schedule: on-demand
+gate: review
+tokenBudget: 25000
+maxToolCalls: 20
+skills:
+  - read_workspace
+  - write_workspace
+  - move_task
+  - update_task
+  - add_deliverable
+  - request_approval
+  - discover_prospects
+  - web_search
+  - enrich_contact
+  - draft_outbound
+  - score_lead
+  - book_meeting
+  - send_email
+  - update_crm
+---
+```
+
+Body: standard worker pattern. Boundary statement vs Email Outreach (per master brief §1): SDR handles 1:1 prospecting with reply handling; Email Outreach handles nurture, broadcast, newsletter sequences.
+
+### 10.2 Thirteen reparents
+
+Edit one line in each existing `companies/automation-os/agents/<slug>/AGENTS.md` — `reportsTo:` switches from `orchestrator` to the new T2 head. No body changes.
+
+| Agent slug | New `reportsTo` |
+|-----------|-----------------|
+| `business-analyst` | `head-of-product-engineering` |
+| `dev` | `head-of-product-engineering` |
+| `qa` | `head-of-product-engineering` |
+| `knowledge-management-agent` | `head-of-product-engineering` |
+| `social-media-agent` | `head-of-growth` |
+| `ads-management-agent` | `head-of-growth` |
+| `email-outreach-agent` | `head-of-growth` |
+| `content-seo-agent` | `head-of-growth` |
+| `support-agent` | `head-of-client-services` |
+| `onboarding-agent` | `head-of-client-services` |
+| `finance-agent` | `head-of-commercial` |
+| `crm-pipeline-agent` | `head-of-commercial` |
+
+(Twelve listed; the thirteenth is the `finance-agent` skill drop in §10.3.)
+
+Unchanged:
+- `orchestrator` (T1, `reportsTo: null`).
+- `strategic-intelligence-agent` (T2 staff, `reportsTo: orchestrator` — already correct).
+- `portfolio-health-agent` (special, `reportsTo: null`).
+
+### 10.3 Finance Agent rescope
+
+`companies/automation-os/agents/finance-agent/AGENTS.md` — two edits in the same diff:
+
+1. `reportsTo: orchestrator` → `reportsTo: head-of-commercial`.
+2. Remove `update_financial_record` from the `skills:` list. The skill file itself was deleted in §7.6; the registry entry was removed in §8.3.
+
+The body of the prompt should be reviewed for AR/AP/reconciliation references and trimmed to revenue analytics + anomaly detection per master brief §1 (this is a prompt edit, captured here so the implementing PR doesn't miss it; full new prompt content is out-of-scope per §2).
+
+### 10.4 Verification
+
+- `ls companies/automation-os/agents/` — exactly 22 folders post-§11 (16 existing − 1 retired + 7 new = 22).
+- `bash scripts/verify-agent-skill-contracts.ts` (new — see §13) passes.
+- All `AGENTS.md` files parse via `parseCompanyFolder` without warnings.
+
+---
+
+## 11. Phase 6 — Retire `client-reporting-agent`
+
+### 11.1 Folder removal
+
+Delete the entire folder: `companies/automation-os/agents/client-reporting-agent/`.
+
+### 11.2 Skill files NOT deleted
+
+`server/skills/draft_report.md` and `server/skills/deliver_report.md` are preserved. They are now wired into `retention-success-agent` (§10.1.6). No changes to those skill files.
+
+### 11.3 DB cleanup
+
+Handled by §13 (seed orphan cleanup) and §14 (Path A reset). Nothing to do at the file level beyond the folder deletion.
+
+### 11.4 Stale references
+
+Search for the slug across the repo and update any non-code references (docs, comments) that name `client-reporting-agent`:
+
+```bash
+rg -l '\bclient-reporting-agent\b'
+```
+
+The only expected non-code hits are: `companies/automation-os/automation-os-manifest.json` (regenerated in §12), `docs/automation-os-system-agents-brief-v6.md` (predecessor — no edit), and any `tasks/builds/*/progress.md` files (no edit). If any active source file references the slug, that's a missed reparent — investigate before continuing.
+
+---
+
+## 12. Phase 7 — Env vars + manifest regeneration
+
+### 12.1 Env config
+
+**`server/lib/env.ts`** (MODIFIED) — add to the Zod schema:
+
+```ts
+// Lead discovery (SDR Agent)
+GOOGLE_PLACES_API_KEY: z.string().optional(),
+HUNTER_API_KEY: z.string().optional(),
+```
+
+**`.env.example`** (MODIFIED) — add:
+
+```
+# Lead discovery (SDR Agent)
+GOOGLE_PLACES_API_KEY=
+HUNTER_API_KEY=
+```
+
+Both are optional. Handlers in `googlePlacesProvider.ts` and `hunterProvider.ts` (§7.5) gracefully degrade when absent.
+
+### 12.2 Manifest regeneration
+
+#### 12.2.1 New script
+
+**`scripts/regenerate-company-manifest.ts`** (NEW) — walks `companies/automation-os/agents/*/AGENTS.md`, parses frontmatter via the existing `parseCompanyFolder`, and emits `companies/automation-os/automation-os-manifest.json` with shape:
+
+```json
+{
+  "_comment": "INDEX ONLY — generated by scripts/regenerate-company-manifest.ts. Do not hand-edit.",
+  "parserVersion": "1.0.0",
+  "company": {
+    "name": "Automation OS",
+    "description": "The platform's own agent company — a 22-agent team spanning product development, customer operations, growth, finance, back-office operations, and portfolio health.",
+    "slug": "automation-os",
+    "schema": "agentcompanies/v1",
+    "version": "7.1.0",
+    "sourceOfTruth": "companies/automation-os/agents/<slug>/AGENTS.md",
+    "seedScript": "scripts/seed.ts",
+    "masterBrief": "docs/automation-os-system-agents-master-brief-v7.1.md",
+    "agents": [ /* 22 entries with slug, name, title, reportsTo, model, schedule, gate, phase */ ]
+  }
+}
+```
+
+The script has two modes:
+- `npx tsx scripts/regenerate-company-manifest.ts` — write the file.
+- `npx tsx scripts/regenerate-company-manifest.ts --check` — exit 1 if the on-disk JSON differs from the regenerated output. Used as a seed pre-flight in §13.
+
+#### 12.2.2 Manifest content
+
+Driven by the regenerator — no hand-edited values to track here. The script reads frontmatter and emits the manifest. The `description`, `version`, and `masterBrief` fields are constants in the script itself (one-line edits when v7.2 lands).
+
+### 12.3 Verification
+
+- `npx tsx scripts/regenerate-company-manifest.ts` writes the JSON; `git diff` shows expected content.
+- Re-running is idempotent; second run produces no diff.
+- `npx tsx scripts/regenerate-company-manifest.ts --check` exits 0 immediately after a write; non-zero if a stray hand-edit drifts the file.
+
+---
+
+## 13. Phase 8 — Seed-script orphan cleanup + verification gates + assertions
+
+### 13.1 Pre-flight extensions in `scripts/seed.ts`
+
+The existing `preflightVerifySkillVisibility()` function runs before Phase 1. Add two more pre-flight calls to its sibling sequence:
+
+1. **`preflightVerifyAgentSkillContracts()`** (NEW) — calls into `scripts/verify-agent-skill-contracts.ts`.
+2. **`preflightVerifyManifestDrift()`** (NEW) — calls `regenerate-company-manifest.ts --check`.
+
+Pre-flight order:
+
+```ts
+await preflightVerifySkillVisibility();      // existing
+await preflightVerifyAgentSkillContracts();  // NEW
+await preflightVerifyManifestDrift();        // NEW
+```
+
+Any failure aborts the seed with a clear error referencing the gate that fired.
+
+### 13.2 New verification script
+
+**`scripts/verify-agent-skill-contracts.ts`** (NEW) — single-file script. Logic:
+
+1. **Read agent-skill universe.** Walk `companies/automation-os/agents/*/AGENTS.md`. Parse frontmatter via `parseFrontmatter` from `companyParser.ts`. Collect the union of all `skills:` slugs.
+2. **Read the action registry.** Import `ACTION_REGISTRY` from `server/config/actionRegistry.ts`.
+3. **Read the handler registry.** Import `SKILL_HANDLERS` from `server/services/skillExecutor.ts`.
+4. **Read the skill-file inventory.** `readdir('server/skills/')`, filter `.md`.
+5. **Assertions** (all violations collected, then printed at end; exit 1 if any):
+   - For every slug in the agent-skill universe:
+     - The corresponding `server/skills/<slug>.md` exists with valid frontmatter (incl. `visibility:`).
+     - The slug exists as a key in `ACTION_REGISTRY`.
+     - The slug exists as a key in `SKILL_HANDLERS`.
+   - For every `.md` file in `server/skills/`:
+     - It is referenced by at least one agent's `skills:` list, **OR** its frontmatter declares `reusable: true`.
+   - For every slug in `APP_FOUNDATIONAL_SKILLS`:
+     - Its `ACTION_REGISTRY` entry has `actionCategory !== 'api'`, `mcp.annotations.openWorldHint === false`, `directExternalSideEffect !== true`.
+   - For every slug whose `ACTION_REGISTRY` entry has `sideEffectClass === 'write'`:
+     - The entry declares `idempotency.reclaimEligibility` explicitly (one of `'eligible' | 'disabled'`). A missing field is a hard fail — the pre-flight refuses the seed until it is declared. **There is no implicit default at the wrapper layer; the safe-default `'disabled'` is enforced via the pre-flight refusing the omission, NOT via the wrapper silently treating omission as eligible.** This guarantees a future contributor cannot accidentally inherit `'eligible'` (per §8.1 registry-default rule).
+     - If the entry declares `'eligible'`, the `actionRegistry.ts` source line MUST carry either a runtime-budget annotation comment OR a `reclaimEligibility justification:` comment on the same line. Enforced by a regex check against the source file (the script reads `actionRegistry.ts` as text in addition to importing it).
+
+Exit 0 on no violations.
+
+### 13.3 Phase 2/3 orphan cleanup in `scripts/seed.ts`
+
+Append a new step in `phase3_playbookAuthor()` (so Playbook Author is in scope before the cleanup runs).
+
+```ts
+// After the Playbook Author upsert, before returning:
+
+// v7.1 — Orphan cleanup: soft-delete any system_agents row whose slug is
+// no longer in (parsed.agents.slug ∪ 'workflow-author'). Cascade soft-delete
+// to the matching `agents` rows and deactivate `subaccount_agents`.
+
+const expectedSlugs = new Set([
+  ...parsed.agents.map((a) => a.slug),
+  'workflow-author',
+]);
+
+// Identify orphans
+const orphanSlugs = await db
+  .select({ slug: systemAgents.slug, id: systemAgents.id })
+  .from(systemAgents)
+  .where(and(
+    isNull(systemAgents.deletedAt),
+    not(inArray(systemAgents.slug, [...expectedSlugs])),
+  ));
+
+if (orphanSlugs.length > 0) {
+  log(`  [cleanup] soft-deleting ${orphanSlugs.length} orphan system_agents row(s): ${orphanSlugs.map((o) => o.slug).join(', ')}`);
+
+  // Soft-delete orphan system_agents rows
+  await db
+    .update(systemAgents)
+    .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+    .where(and(
+      isNull(systemAgents.deletedAt),
+      not(inArray(systemAgents.slug, [...expectedSlugs])),
+    ));
+
+  // Cascade soft-delete to agents rows that reference orphan system_agents
+  const orphanIds = orphanSlugs.map((o) => o.id);
+  await db
+    .update(agents)
+    .set({ deletedAt: new Date(), status: 'inactive', updatedAt: new Date() })
+    .where(and(
+      isNull(agents.deletedAt),
+      eq(agents.isSystemManaged, true),
+      inArray(agents.systemAgentId, orphanIds),
+    ));
+
+  // Deactivate subaccount_agents linking to those agents (uses is_active boolean)
+  const orphanAgentIds = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.isSystemManaged, true), inArray(agents.systemAgentId, orphanIds)));
+
+  if (orphanAgentIds.length > 0) {
+    await db
+      .update(subaccountAgents)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(inArray(subaccountAgents.agentId, orphanAgentIds.map((a) => a.id)));
+  }
+}
+```
+
+This is idempotent: if no orphans exist, the loop is a no-op.
+
+### 13.4 Post-Phase-3 hierarchy assertion
+
+Append to `phase3_playbookAuthor()` after the orphan cleanup:
+
+```ts
+// v7.1 — Hierarchy assertions (master brief §3 + §6)
+const all = await db
+  .select({
+    id: systemAgents.id,
+    slug: systemAgents.slug,
+    parentId: systemAgents.parentSystemAgentId,
+  })
+  .from(systemAgents)
+  .where(isNull(systemAgents.deletedAt));
+
+// Build slug → row map
+const bySlug = new Map(all.map((r) => [r.slug, r]));
+const byId = new Map(all.map((r) => [r.id, r]));
+
+// Assertion 1: exactly one root in the business team (orchestrator).
+// portfolio-health-agent and workflow-author are exempt (special).
+const businessRoots = all.filter(
+  (r) =>
+    r.parentId === null &&
+    r.slug !== 'portfolio-health-agent' &&
+    r.slug !== 'workflow-author',
+);
+if (businessRoots.length !== 1 || businessRoots[0].slug !== 'orchestrator') {
+  throw new Error(
+    `[hierarchy] expected exactly one business-team root 'orchestrator'; found ${businessRoots.length}: ${businessRoots.map((r) => r.slug).join(', ')}`,
+  );
+}
+
+// Assertion 2: no cycles, depth ≤ 3 from any leaf.
+for (const row of all) {
+  if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+  let cur = row;
+  let hops = 0;
+  while (cur.parentId !== null) {
+    if (hops >= 3) {
+      throw new Error(`[hierarchy] depth > 3 from leaf '${row.slug}' — chain exceeds Orchestrator → Head → Worker`);
+    }
+    const parent = byId.get(cur.parentId);
+    if (!parent) {
+      throw new Error(`[hierarchy] '${cur.slug}' references non-existent or soft-deleted parent ${cur.parentId}`);
+    }
+    cur = parent;
+    hops += 1;
+  }
+}
+
+// Assertion 3: every non-root non-special agent has a non-null parent.
+for (const row of all) {
+  if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+  if (row.parentId === null) {
+    throw new Error(`[hierarchy] '${row.slug}' has parent_system_agent_id = NULL but is not a designated root`);
+  }
+}
+
+// Assertion 4: every T3 worker has exactly one parent and that parent is in
+// the allowed-parents set (T1 Orchestrator OR a T2 department head OR a T2
+// direct-report-of-Orchestrator that owns workers — see set definition
+// below). This catches the misconfiguration class where two `AGENTS.md` files
+// declare ownership of the same worker via overlapping implicit
+// `subordinates:` lists, or where a worker accidentally gets parented to
+// another T3 (creating a 4-tier chain that Assertion 2 would catch but with
+// a less specific error).
+for (const row of all) {
+  if (row.slug === 'orchestrator' || row.slug === 'portfolio-health-agent' || row.slug === 'workflow-author') continue;
+  const parent = byId.get(row.parentId!);
+  if (!parent) continue; // already reported by Assertion 2
+
+  // The parent must itself be either the Orchestrator (T1) OR a T2 agent
+  // that legitimately owns workers. Note: not all entries below carry
+  // `role: 'manager'` — admin-ops-agent is `role: 'staff'` (per §10.1.5)
+  // because its primary mode is staff-execution, but it sits in T2 as a
+  // direct report of Orchestrator and owns no subordinates of its own
+  // currently. It is included here as a future-proofing allowance for the
+  // case where admin-ops grows worker subordinates without a spec
+  // amendment to this assertion.
+  const ALLOWED_T1_T2_PARENTS = new Set([
+    'orchestrator',                  // T1 (sole)
+    'head-of-product-engineering',   // T2 manager
+    'head-of-growth',                // T2 manager
+    'head-of-client-services',       // T2 manager
+    'head-of-commercial',            // T2 manager
+    'admin-ops-agent',               // T2 staff direct report (see comment above)
+    'strategic-intelligence-agent',  // T2 direct report of Orchestrator
+  ]);
+  if (!ALLOWED_T1_T2_PARENTS.has(parent.slug)) {
+    throw new Error(
+      `[hierarchy] worker '${row.slug}' is parented to '${parent.slug}', which is not in the allowed T1/T2 parent set. ` +
+      `A worker (T3) must report directly to the Orchestrator or a T2 agent listed in ALLOWED_T1_T2_PARENTS.`,
+    );
+  }
+}
+
+log('  [ok]   hierarchy assertions: 1 root, no cycles, depth ≤ 3, all parents present, every worker has exactly one parent in ALLOWED_T1_T2_PARENTS');
+```
+
+Failure aborts the seed with a clear error.
+
+### 13.5 Verification
+
+- `npm run seed` against a fresh dev DB completes Phases 1–6 with the new pre-flights green.
+- Manually deleting an agent folder and re-running `npm run seed` triggers `preflightVerifyAgentSkillContracts` (because the deleted agent's skills are still referenced from the manifest) — gate fires loudly.
+- Manually editing `automation-os-manifest.json` and re-running `npm run seed` triggers `preflightVerifyManifestDrift` (because regen would produce different output).
+- After a full wipe + reseed, `select count(*) from system_agents where deleted_at is null` returns **23** (22 v7.1 agents + Playbook Author). Manual check after §14.
+
+---
+
+## 14. Phase 9 — Local-dev reset paths + rollback
+
+### 14.1 Path A (recommended) — soft-delete state, re-seed
+
+Fastest, cleanest, FK-safe. No seed-script changes required after Phase 8. **Prerequisite:** the `0233` migration from §6 must already be applied — without it, soft-deleted rows still occupy the slug under the old full-unique index and re-seed fails on a unique-constraint violation.
+
+```bash
+# 1. All file-on-disk changes from Phases 2–7 are merged on the working branch.
+
+# 2. Apply the schema migration:
+npm run migrate
+
+# 3. Wipe the system-agent surface in the dev DB, FK-safely:
+psql $DATABASE_URL <<'SQL'
+BEGIN;
+
+-- Deactivate subaccount-level activations linked to system-managed agents
+UPDATE subaccount_agents
+   SET is_active = false, updated_at = NOW()
+ WHERE agent_id IN (
+   SELECT id FROM agents WHERE is_system_managed = true
+ );
+
+-- Soft-delete org-level rows linked to system_agents
+UPDATE agents
+   SET deleted_at = NOW(), updated_at = NOW()
+ WHERE is_system_managed = true AND deleted_at IS NULL;
+
+-- Soft-delete the authoritative system_agents rows (incl. Playbook Author)
+UPDATE system_agents
+   SET deleted_at = NOW(), status = 'inactive', updated_at = NOW()
+ WHERE deleted_at IS NULL;
+
+COMMIT;
+SQL
+
+# 4. Re-seed. Phases 1–6 of seed.ts run; Phase 3's orphan cleanup is a no-op
+#    because everything in this run is fresh.
+npm run seed
+
+# 5. Verify
+psql $DATABASE_URL -c "
+  SELECT count(*) FROM system_agents WHERE deleted_at IS NULL;
+  -- expect: 23 (22 v7.1 + workflow-author)
+"
+psql $DATABASE_URL -c "
+  SELECT slug FROM system_agents
+  WHERE parent_system_agent_id = (
+    SELECT id FROM system_agents WHERE slug = 'orchestrator' AND deleted_at IS NULL
+  )
+  AND deleted_at IS NULL
+  ORDER BY slug;
+  -- expect: 6 rows: head-of-product-engineering, head-of-growth, head-of-client-services,
+  -- head-of-commercial, admin-ops-agent, strategic-intelligence-agent
+"
+```
+
+The seed will recreate all 22 v7.1 agents + Playbook Author = 23 fresh rows in `system_agents` (the soft-deleted rows are ignored by the `isNull(deletedAt)` filters in `phase2_systemAgents` and `phase3_playbookAuthor`), set `parentSystemAgentId` correctly across all three tiers, and reactivate them in the Synthetos Workspace subaccount via Phase 5.
+
+Existing `agent_runs` rows continue to satisfy the FK because the `agents` rows they reference are still present (just soft-deleted). User passwords are preserved by the seed (`upsertUser` deliberately omits `passwordHash` on update). Integration-connection placeholders use `onConflictDoNothing` and won't be re-overwritten.
+
+> **Why not `DELETE`?** `agent_runs.agent_id` references `agents.id` with no cascade. A hard delete on a populated dev DB raises a foreign-key violation and rolls the whole transaction back — Path A then silently fails. Soft-delete is the only correct choice.
+
+### 14.2 Path B — full DB reset
+
+Heavier hammer. Use only if other schema drifts you want to clear are present.
+
+```bash
+dropdb $DB_NAME && createdb $DB_NAME
+npm run migrate
+npm run seed
+```
+
+You lose any local UI-created data (custom agents, custom prompts, etc.). Acceptable in pre-production but unnecessary if Path A is sufficient.
+
+### 14.3 Path C — already implemented as Phase 8
+
+The migration brief mentioned this as a deferred path; this spec lands it as Phase 8. After §13, `npm run seed` alone reaches the same end state — no manual SQL required. Path A remains documented for the migration moment because it lets the operator clearly observe the soft-delete + reseed transition; the seed-script orphan cleanup is the long-term mechanism.
+
+### 14.4 Rollback
+
+Even pre-prod, keep an exit:
+
+```bash
+# 1. Revert the branch
+git checkout main
+git branch -D claude/audit-system-agents-46kTN  # or your branch
+
+# 2. Run the same wipe SQL (Path A step 3) and re-seed from main
+psql $DATABASE_URL < <( /* same wipe SQL as §14.1 step 3 */ )
+npm run seed
+```
+
+The seed is idempotent against any prior agent state, so reverting the file changes and re-seeding is a clean rollback. Custom (non-system-managed) agents in the dev org are protected by the existing `existingCustomAgents` guard in `activateBaselineSystemAgents` (Phase 5).
+
+> **Note on the `0233` migration in rollback:** the partial-unique indexes are forward-compatible with the v6 state — a v6 seed against a DB with the partial indexes works correctly because no soft-deleted rows yet exist. The `_down/0233_system_agents_v7_1.sql` reversal file ships as a no-op (per emerging convention — see migration 0228's `_down`); rolling back to pre-0233 is achieved by leaving the partial indexes in place and re-seeding via Path A.
+
+---
+
+## 15. Contracts (data shapes crossing service boundaries)
+
+### 15.1 `skill_idempotency_keys` row
+
+| Field | Type | Producer | Consumer | Nullability / default |
+|-------|------|----------|----------|------------------------|
+| `subaccount_id` | uuid | `executeWithActionAudit` wrapper | wrapper (replay path) | NOT NULL |
+| `organisation_id` | uuid | wrapper | RLS policy | NOT NULL |
+| `skill_slug` | text | wrapper | wrapper | NOT NULL — equals registry slug |
+| `key_hash` | text | wrapper | wrapper | NOT NULL — SHA-256 hex of canonicalised key tuple per registry `idempotency.keyShape` |
+| `request_hash` | text | wrapper | wrapper | NOT NULL — SHA-256 hex of full request payload |
+| `response_payload` | jsonb | wrapper (post-execute) | wrapper (replay) | DEFAULT `'{}'::jsonb` until first writer completes |
+| `status` | text CHECK | wrapper | wrapper | DEFAULT `'in_flight'`; transitions to `'completed'` or `'failed'` |
+| `created_at` | timestamptz | wrapper | telemetry | DEFAULT `NOW()` |
+| `expires_at` | timestamptz | wrapper | cleanup job | NULL (permanent) / NOW()+30d (long) / NOW()+14d (short) |
+
+**Worked example — `send_invoice`:**
+
+```json
+{
+  "subaccount_id": "f8b0c5b8-...",
+  "organisation_id": "0f3a-...",
+  "skill_slug": "send_invoice",
+  "key_hash": "e3b0c44...:invoice-INV-2026-04-001",
+  "request_hash": "a1b2c3...full-payload-hash",
+  "response_payload": {
+    "success": true,
+    "invoice_id": "INV-2026-04-001",
+    "delivered_at": "2026-04-26T14:22:00Z",
+    "channel": "stripe"
+  },
+  "status": "completed",
+  "created_at": "2026-04-26T14:21:58Z",
+  "expires_at": null
+}
+```
+
+### 15.2 Manager-role-violation block response
+
+Returned by `proposeActionMiddleware` as the `PreToolResult.action: 'block'` payload. The `reason` field is one of three values, ordered by §9.4's deny composition:
+
+```ts
+{
+  action: 'block',
+  reason:
+    | 'manager_role_violation'                // Skill is not on the manager allowlist (and not a per-manager declared read).
+    | 'manager_direct_external_side_effect'   // Skill is allowlisted but `directExternalSideEffect: true` — the handler itself calls an external system.
+    | 'manager_indirect_side_effect_class',   // Skill is allowlisted with `directExternalSideEffect: false` but `sideEffectClass !== 'none'` — closes the indirect leak where a "safe" manager-allowed skill internally invokes a write skill.
+  details: {
+    skill: 'draft_post',
+    agent_role: 'manager',
+    agent_slug: 'head-of-growth',
+  }
+}
+```
+
+The agent observes this as a denied tool call regardless of the specific reason — no exception is thrown. Manager prompts are written to expect this surface and route the work to a worker via `reassign_task` instead. The three reasons exist so audit logs distinguish allowlist drift (`manager_role_violation`) from contract drift (`*_side_effect_*`) when investigating manager-side denials.
+
+### 15.3 Side-effect-class `blocked` response
+
+Returned by `executeWithActionAudit` when `sideEffectClass: 'write'` and preconditions fail:
+
+```ts
+{
+  status: 'blocked',
+  reason: 'provider_not_configured' | 'validation_failed' | 'auth_missing',
+  provider: 'stripe' | 'gmail' | 'hunter' | 'google_places' | null,
+  requires?: ['STRIPE_API_KEY', 'STRIPE_WEBHOOK_SECRET'],
+}
+```
+
+### 15.4 Side-effect-class `partial` response
+
+Returned by handlers that touch multiple resources and can land in an intermediate state:
+
+```ts
+{
+  status: 'partial',
+  completed_steps: ['stripe_invoice_created'],
+  remaining_steps: ['email_delivered'],
+  recovery: 'A board task has been created at <task_id> with explicit recovery instructions.',
+}
+```
+
+The wrapper auto-creates the recovery task via the existing `taskService.createTask` primitive when it sees `status: 'partial'`.
+
+### 15.5 Source-of-truth precedence (per `docs/spec-authoring-checklist.md` §3)
+
+For every fact represented in more than one place, the winning representation is pinned below. This prevents the implementation from making inconsistent choices when two representations disagree.
+
+| Fact | Representations | Winner | Read path |
+|------|-----------------|--------|-----------|
+| Whether a skill side effect has executed | `actions.idempotencyKey` (within-run) **and** `skill_idempotency_keys.status = 'completed'` (cross-run) | **`skill_idempotency_keys`** for cross-run replay; **`actions.idempotencyKey`** for within-run dedup | The wrapper checks `skill_idempotency_keys` first; only on a miss does it cascade to the existing within-run `actions` dedup. |
+| The cached response payload of a completed skill | `skill_idempotency_keys.response_payload` (canonical) **and** the agent's transient run-loop memory | **`skill_idempotency_keys.response_payload`** | The wrapper short-circuits on cache hit and returns the persisted payload — never the agent's in-memory state. |
+| An agent's parent in the hierarchy | `system_agents.reportsTo` (text slug at the `companies/automation-os/` level) **and** `system_agents.parentSystemAgentId` (uuid FK at the DB level) | **`system_agents.parentSystemAgentId`** (DB) at runtime; `reportsTo` (text) is the seed-time source-of-truth | At runtime, queries always resolve via the FK; seed (Phase 8) is the only writer of the FK and derives it from the `reportsTo` slug. |
+| Active vs deleted system-agent row | `system_agents.deleted_at IS NULL` **and** `subaccount_agents.is_active = true` | **`system_agents.deleted_at IS NULL`** | A row is "active" iff its system-agent ancestor is non-deleted; `subaccount_agents.is_active` is a per-subaccount activation toggle (a non-deleted system agent may still be inactive in a given subaccount). |
+| Skill side-effect classification | `actions.idempotencyStrategy` (legacy enum, per-skill) **and** `actions.sideEffectClass` (new field, this spec §8) | **`sideEffectClass`** is authoritative for the v7.1 wrapper; `idempotencyStrategy` is unchanged for backward compatibility but no longer the canonical signal | The wrapper reads `sideEffectClass` exclusively; `idempotencyStrategy` is left in place for any pre-existing handlers that key off it. |
+
+---
+
+## 16. Permissions / RLS posture for new tenant-scoped tables
+
+### 16.1 `skill_idempotency_keys`
+
+The only new tenant-scoped table. Posture per the four checklist items in `docs/spec-authoring-checklist.md` §4:
+
+1. **RLS policy in same migration that creates the table** — yes, see §6.1 (`CREATE POLICY skill_idempotency_keys_org_isolation`, with both `USING` and `WITH CHECK` clauses per the post-pre-launch-hardening canonical pattern).
+2. **Entry in `server/config/rlsProtectedTables.ts`** — yes, see §6.3.
+3. **Route-level guard** — n/a; the table is never accessed via HTTP. Read/write only by the in-process `executeWithActionAudit` wrapper, which runs inside `withOrgTx` (the agent execution path is already principal-scoped per `architecture.md §1116`).
+4. **Principal-scoped context** — yes, by inheritance: agent execution runs inside `withPrincipalContext` which sets `app.organisation_id`. The wrapper does not need to manage the session var explicitly.
+
+### 16.2 No new HTTP routes
+
+This spec adds no new HTTP routes. All new behaviour is reachable only via the agent skill-execution path, which is already gated by:
+- Authentication (existing JWT middleware).
+- `requirePermission(key)` per route.
+- `resolveSubaccount` for subaccount-scoped agents.
+- `withOrgTx` for the org-scoped DB session.
+
+No new permission keys are introduced.
+
+### 16.3 No new HTTP-accessible operations
+
+The cleanup of expired `skill_idempotency_keys` rows runs as a daily pg-boss job (registered in `server/jobs/index.ts`). This is a backend job, not an HTTP route — same posture as every other ledger-cleanup job in the codebase.
+
+**Batched-delete pattern (mandatory).** The cleanup job deletes in batches of 1,000 rows per iteration, looping until the predicate returns 0 rows. This avoids a single massive `DELETE WHERE expires_at < NOW()` that could acquire a long table-level lock when the expires-at backlog accumulates (e.g. after a multi-day outage of the cleanup job, or after a TTL reduction migration that retroactively shortens long-class to short-class).
+
+The job uses `db.execute(sql\`...\`)` for the DELETE rather than Drizzle's typed `.delete()` because the `IN (SELECT ... LIMIT N)` index-aware batching pattern is awkward to express through Drizzle's typed builder without losing the index on `(expires_at)`. Because this is a raw-SQL write to an RLS-protected table, the job MUST call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the DELETE per `server/lib/rlsBoundaryGuard.ts` — otherwise `verify-rls-protected-tables.sh` flags the call site as an advisory violation:
+
+```ts
+// server/jobs/skillIdempotencyKeysCleanupJob.ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
+const BATCH_SIZE = 1000;
+let totalDeleted = 0;
+let batchCount = 0;
+const start = Date.now();
+
+while (true) {
+  assertRlsAwareWrite('skill_idempotency_keys');
+  const deleted = await db.execute(sql`
+    DELETE FROM skill_idempotency_keys
+    WHERE (subaccount_id, skill_slug, key_hash) IN (
+      SELECT subaccount_id, skill_slug, key_hash
+        FROM skill_idempotency_keys
+       WHERE expires_at IS NOT NULL AND expires_at < NOW()
+       LIMIT ${BATCH_SIZE}
+    )
+  `);
+  const rowCount = (deleted.rowCount ?? 0);
+  totalDeleted += rowCount;
+  batchCount += 1;
+  log.info({ tag: 'skill_idempotency_keys.cleanup.batch', batch: batchCount, rows: rowCount });
+  if (rowCount < BATCH_SIZE) break;  // drained
+}
+
+log.info({ tag: 'skill_idempotency_keys.cleanup.complete', total: totalDeleted, batches: batchCount, duration_ms: Date.now() - start });
+```
+
+A safety cap of 10,000 batches per job invocation prevents a runaway loop in pathological conditions; the next-day run picks up any remaining backlog. Permanent-class rows (`expires_at IS NULL`) are never matched and are unaffected.
+
+### 16.4 Multi-tenant safety checklist (per `DEVELOPMENT_GUIDELINES.md` §9)
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| Org-scoped at the table level | ✅ | §6.1 (`organisation_id NOT NULL`), §6.3 (manifest entry), §6.1 (canonical org-isolation policy in migration `0233`) |
+| Org-scoped at the query level | ✅ | §9 wrapper: every `SELECT`/`INSERT`/`UPDATE` on `skill_idempotency_keys` filters on `(subaccount_id, skill_slug, key_hash)` and runs inside `withOrgTx`; `organisation_id` is denormalised and validated via `WITH CHECK` |
+| Service-layer mediated | ✅ | All access flows through `server/services/skillExecutor.ts` and (for cleanup) `server/jobs/skillIdempotencyKeysCleanupJob.ts`; no route file imports the table |
+| Subaccount-resolved | ✅ | Inherited from agent execution context — `executeWithActionAudit` runs after `resolveSubaccount` has populated the principal context |
+| Gates green | ✅ | §6.5 verification list (rls-coverage + rls-protected-tables + rls-session-var-canon + migration-sequencing) |
+| Background jobs follow admin/org tx pattern | ✅ | `skillIdempotencyKeysCleanupJob` mirrors `memoryDedupJob.ts` — admin connection for iteration, raw-SQL DELETE guarded per-batch by `assertRlsAwareWrite('skill_idempotency_keys')` (§16.3) |
+| New table has principal-scoped context | ✅ | Inherits agent execution context (§16.1 item 4) |
+| Down-migration shipped (no-op stub) | ✅ | §6.4 |
+
+### 16.5 RLS runtime guard call-site posture
+
+The cross-run idempotency wrapper in `executeWithActionAudit` (§9) writes to `skill_idempotency_keys` via raw `.execute(sql\`...\`)` because Drizzle's typed `.insert()` does not expose the `xmax = 0 AS is_first_writer` pattern needed for the first-writer-wins INSERT. Per `server/lib/rlsBoundaryGuard.ts`, raw-SQL writes to RLS-protected tables must call `assertRlsAwareWrite('skill_idempotency_keys')` immediately before the write or `verify-rls-protected-tables.sh` will flag the call site as an advisory violation.
+
+The wrapper code in `server/services/skillExecutor.ts` therefore does:
+
+```ts
+import { assertRlsAwareWrite } from '../lib/rlsBoundaryGuard.js';
+
+// ... inside executeWithActionAudit, before the first-writer-wins INSERT:
+assertRlsAwareWrite('skill_idempotency_keys');
+const result = await tx.execute(sql`
+  INSERT INTO skill_idempotency_keys ...
+  ON CONFLICT (subaccount_id, skill_slug, key_hash) DO NOTHING
+  RETURNING xmax = 0 AS is_first_writer
+`);
+```
+
+The cleanup job (per §16.3) ALSO uses raw `db.execute(sql\`...\`)` — the index-aware `IN (SELECT ... LIMIT N)` batching pattern is awkward to express through Drizzle's typed `.delete()` without losing the `(expires_at)` index. The cleanup job therefore calls `assertRlsAwareWrite('skill_idempotency_keys')` immediately before each batch DELETE inside the loop. Both raw-SQL write paths (the wrapper INSERT here in §9.3.1 and the cleanup DELETE in §16.3) are explicitly listed as `assertRlsAwareWrite` call sites in the v7.1 advisory log.
+
+---
+
+## 16A. Execution-safety contracts (per `docs/spec-authoring-checklist.md` §10)
+
+Mandatory section for any spec that introduces external-side-effect writes or state-machine rows. Pinned for `skill_idempotency_keys` and the side-effect-class wrapper.
+
+### 16A.0 Idempotency guarantees summary (audit-friendly consolidation)
+
+Single read-once block consolidating the guarantees that the rest of §16A and §§8.1, 8.1.1, 8.2, 9.3.1, 9.4, 13.2, 16.3, 18, 18.1, 21 each establish. Use this section as the entry point for audits, onboarding, and incident-response runbook lookups — every guarantee below is enforced by code or a static gate referenced in the matching paragraph.
+
+| Guarantee | What it says | Where it lives | Where it is enforced |
+|-----------|--------------|----------------|----------------------|
+| **Key uniqueness scope** | An idempotency key is unique per `(subaccount_id, skill_slug, key_hash)` triple. Cross-subaccount, cross-skill, cross-shape callers cannot collide. | §16.1 schema, §16A.1 row 1 | Composite primary key + `ON CONFLICT DO NOTHING` in §9.3.1; RLS policy in §6.1 enforces the subaccount column. |
+| **Hash determinism** | `key_hash` and `request_hash` are derived via `canonicaliseForHash` (sorted keys, undefined-stripped, NFC-normalised primitives) before SHA-256 — never raw `JSON.stringify`. | §8.1.1 | `hashActionArgs` extension in §9.3.1; pure-function unit test in `skillIdempotencyKeysPure.test.ts` (AC #27). |
+| **Claim semantics (first-writer-wins)** | The first INSERT-RETURNING-xmax succeeds; concurrent INSERTs see 0-rows-returned and become losers. The winner runs the side effect; losers either replay the cached payload or wait. | §16A.1 row 1, §16A.3 row 1, §9.3.1 | `ON CONFLICT DO NOTHING RETURNING xmax = 0` in the §9.3.1 wrapper. |
+| **No external side effect before claim** | The wrapper invokes the side-effect-bearing handler ONLY inside the `if (isFirstWriter)` branch (after a successful first-writer claim or §16A.8 reclaim). Handlers must not perform external side effects in any other code path. | §16A.1 mandatory ordering invariant, §8.10 of `DEVELOPMENT_GUIDELINES.md` | `verify-no-direct-adapter-calls.sh` (static gate) + `assertHandlerInvokedWithClaim` (test-mode runtime gate, §16A.1 + AC #37). |
+| **Reclaim rules** | Stale-claim takeover runs only for `reclaimEligibility: 'eligible'` skills, only when `created_at` is older than `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 min), and only via a state-based UPDATE that one and only one reclaimer can win. `'disabled'` skills never reclaim. New skills default to `'disabled'` (registry-default rule, §8.1). | §16A.8 + §8.1 + §8.2 rationale | §13.2 pre-flight refuses missing field; §9.3.1 wrapper gates the takeover UPDATE on `reclaimEligibility === 'eligible'` (AC #29, #35, #36). |
+| **Terminal failure behaviour (failed = terminal)** | `status = 'failed'` rows are immutable for that key. Same-key replay returns `{ status: 'previous_failure' }`. Operators recover via re-dispatch with regenerated key (preferred) OR explicit row deletion + runbook log (last resort). In-place mutation is forbidden. | §16A.7 failed-rows clause + operator recovery path | Wrapper's `WHERE status = 'in_flight'` predicate refuses any other transition (AC #25, #31). |
+| **Side-effect ordering guarantee** | The wrapper persists the state-claim BEFORE invoking the handler, then persists the terminal state AFTER the handler returns — never the inverse. This is the §8.10 race-claim ordering rule applied to this table. | §16A.1 mandatory ordering invariant + §16A.4 terminal event guarantee | §9.3.1 wrapper code path; reinforced by the `assertHandlerInvokedWithClaim` test hook. |
+| **State-machine closure** | `status` is one of `{'in_flight', 'completed', 'failed'}`. Allowed transitions: `(insert) → in_flight`; `in_flight → completed`; `in_flight → failed`. No back-transitions; no cross-terminal transitions. | §16A.7 | DB CHECK constraint (AC #25) + wrapper's `WHERE status = 'in_flight'` predicate on every terminal UPDATE. |
+| **TTL + cleanup** | TTL classes (`'permanent' → NULL`, `'long' → 30d`, `'short' → 14d`) are governed by a single constant map. Cleanup job batches DELETEs at 1k rows per pass with a 10k-batch safety cap; permanent rows never match. | §8.1.1 TTL constant table + §16.3 | `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts`; `assertRlsAwareWrite` per cleanup batch (AC #22, #32). |
+
+**How to extend this table.** Adding a new guarantee — or relaxing one — requires a row here AND a reference to the section that establishes it AND a reference to the gate that enforces it. A guarantee with no enforcement is a documentation lie; the table is the contract that the rest of §16A delivers on.
+
+### 16A.1 Idempotency posture
+
+| Operation | Posture | Mechanism |
+|-----------|---------|-----------|
+| `skill_idempotency_keys` first-writer INSERT | **key-based** | Composite primary key `(subaccount_id, skill_slug, key_hash)`. Unique constraint at the DB level; `ON CONFLICT DO NOTHING RETURNING xmax = 0 AS is_first_writer` decides who runs the side effect. |
+| `skill_idempotency_keys` terminal UPDATE (`in_flight` → `completed`/`failed`) | **state-based** | `UPDATE ... WHERE status = 'in_flight'` — 0 rows updated = another writer terminated us, treat as a no-op. |
+| `skill_idempotency_keys` stale-claim takeover (eligible skills only) | **time-based + state-based + skill-gated** | Per §16A.8 — `UPDATE ... WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL 'IDEMPOTENCY_CLAIM_TIMEOUT_MS'`, gated on `def.idempotency.reclaimEligibility === 'eligible'`. 0 rows updated = another reclaimer beat us; one-and-only-one wins. Skills declared `'disabled'` skip this branch entirely (per §16A.8 step 5). |
+| Skill side-effect execution (the actual `send_invoice`, `send_email`, etc. call) | **non-idempotent (intentional)** | The external provider may or may not be idempotent — we cannot assume. The guarded boundary is the `skill_idempotency_keys` row above; the wrapper guarantees the side effect runs at most once per `(subaccount_id, skill_slug, key_hash)` tuple across runs. |
+| `system_agents` / `agents` upsert during seed | **state-based** | `WHERE slug = ? AND deleted_at IS NULL` (with the §6.1 partial unique index providing the race-claim ordering). |
+
+**Mandatory ordering invariant (no side effect before claim).** No external side effect — no API call, no email sent, no payment initiated, no calendar booking, nothing observable beyond a DB write — may execute until the wrapper holds a successful first-writer claim (or a successful reclaim per §16A.8). The §9.3.1 wrapper enforces this by routing the side-effect-bearing handler call **after** the INSERT-RETURNING-xmax check and **inside** the `if (isFirstWriter)` branch. Handlers themselves MUST NOT perform external side effects in any other code path (e.g. precondition validation, parameter coercion). The pre-side-effect precondition check (§9.3.2 `checkSkillPreconditions`) is internal-only — it inspects env vars, integration-row presence, and input validity, never the external provider.
+
+A handler that breaks this invariant — e.g. by issuing a Stripe API call inside its precondition check — defeats the cross-run guarantee and silently re-fires side effects on every replay. `verify-no-direct-adapter-calls.sh` (existing gate) enforces this for HTTP-bearing adapters; new providers (Stripe, Hunter, Google Places, Xero) join the gate's adapter list as part of Phase 4.
+
+**Runtime test-mode contract (mandatory).** The static gate above is necessary but not sufficient — a handler can still issue a side effect inline through a non-adapter code path the gate doesn't see. To give the invariant runtime teeth without introducing a new test framework (`testing_posture: static_gates_primary` + `runtime_tests: pure_function_only` per `docs/spec-context.md`), the wrapper exposes a single test-mode predicate consumed by the existing pure-function harness:
+
+```ts
+// server/services/skillExecutor.ts (NEW pure helper + error class, exported for tests)
+
+/**
+ * Thrown by `assertHandlerInvokedWithClaim` in test mode when the wrapper
+ * reached a side-effect-bearing handler invocation without holding a
+ * first-writer claim or successful reclaim. Production callers never see it
+ * — the assertion is a no-op outside `NODE_ENV === 'test'`.
+ */
+export class SideEffectBeforeClaimError extends Error {
+  readonly name = 'SideEffectBeforeClaimError' as const;
+  constructor(message: string) { super(message); }
+}
+
+/**
+ * Test-mode-only assertion. The wrapper calls this at the top of the
+ * side-effect-bearing handler-invocation branch (inside `if (isFirstWriter)`)
+ * with `process.env.NODE_ENV === 'test'` gating the throw.
+ *
+ * In test mode, if `claimed === false` (i.e. the wrapper called the handler
+ * without first holding a successful first-writer claim or successful
+ * reclaim), throws `SideEffectBeforeClaimError`. In production this is a
+ * no-op — the static `if (isFirstWriter)` branch is the live guard.
+ *
+ * This is the test hook that prevents silent regression of the "no external
+ * side-effect before claim" invariant. Pure (no DB / network / FS), so it
+ * fits the existing `runtime_tests: pure_function_only` posture.
+ */
+export function assertHandlerInvokedWithClaim(claimed: boolean): void {
+  if (process.env.NODE_ENV === 'test' && !claimed) {
+    throw new SideEffectBeforeClaimError(
+      'Wrapper invoked side-effect-bearing handler without holding a first-writer claim or successful reclaim',
+    );
+  }
+}
+```
+
+Pure-function test (`skillIdempotencyKeysPure.test.ts`, NOT a new framework — same tsx harness as the rest of §23):
+
+1. Mock the wrapper's claim-acquisition step to return `isFirstWriter = false` and the handler-invocation closure to call `assertHandlerInvokedWithClaim(false)` directly. Assert `SideEffectBeforeClaimError` is thrown.
+2. Mock the same with `isFirstWriter = true`. Assert no throw.
+3. With `process.env.NODE_ENV !== 'test'`, repeat case (1). Assert no throw (production no-op behaviour).
+
+The wrapper's call site (per §9.3.1) becomes:
+
+```ts
+if (isFirstWriter) {
+  assertHandlerInvokedWithClaim(isFirstWriter); // test-mode invariant teeth
+  const result = await handler(input, context);
+  // ... terminal UPDATE ...
+}
+```
+
+Passing `isFirstWriter` rather than the literal `true` keeps the assertion meaningful: if a future refactor re-orders the `if` check or factors the handler call into a branch where `isFirstWriter` is mutable, the assertion catches it. A literal `true` would silently pass through any such regression.
+
+Any code path that reaches a side-effect-bearing handler invocation **without** routing through `if (isFirstWriter)` is a contract violation — the test hook catches the regression in unit tests; the static `verify-no-direct-adapter-calls.sh` gate catches the adapter-direct-call class. Together they form a defence-in-depth pair against the highest-impact invariant in this spec.
+
+### 16A.2 Retry classification
+
+| Operation | Class | Notes |
+|-----------|-------|-------|
+| `executeWithActionAudit` cross-run wrapper | **guarded** | The first-writer-wins INSERT and the state-based terminal UPDATE form the guard. Callers retry freely. |
+| Skill handlers' external calls (provider HTTP) | **unsafe** | Wrapped by the guarded boundary above — caller bears no retry risk because the wrapper short-circuits on replay. |
+| `system_agents` upsert in `seed.ts` | **safe** | Drizzle upsert + partial unique index; no external side effect. |
+| Side-effect-class write blocked by `requires` precondition | **safe** | Returns `{ status: 'blocked' }`; no state mutation; freely retryable. |
+| `skillIdempotencyKeysCleanupJob` deletion of expired rows | **safe** | DELETE is idempotent at the row level; running twice produces the same end state. |
+
+### 16A.3 Concurrency guard for racing writes
+
+| Race scenario | Guard | Losing-caller response |
+|---------------|-------|------------------------|
+| Two queue retries fire `send_invoice` for the same `(engagement_id, period)` simultaneously | First-writer-wins INSERT on `skill_idempotency_keys` (`ON CONFLICT DO NOTHING RETURNING xmax = 0`) | Loser reads the existing row; if `status = 'in_flight'` and the row's age is below `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (10 minutes) the loser surfaces `{ status: 'in_flight', retryable_after_ms }` and the caller polls; if the row's age is at-or-above the threshold the loser attempts the §16A.8 stale-claim takeover; if `status = 'completed'` returns cached `response_payload` immediately and emits `skill.idempotency.hit`. |
+| First writer crashes mid-execution; second caller arrives 11 minutes later (skill `reclaimEligibility: 'eligible'`) | Stale-claim takeover via state-based UPDATE: `WHERE status = 'in_flight' AND created_at < NOW() - INTERVAL '<TIMEOUT>'` | Reclaimer wins the UPDATE → becomes the new first writer (emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'`). Concurrent reclaimers see 0-rows-updated and re-poll; `skill.warn` with `reason: 'in_flight_claim_lost_reclaim'`. |
+| Same scenario, but skill `reclaimEligibility: 'disabled'` (handler runtime is genuinely long / unbounded) | Takeover branch is skipped entirely per §16A.8 step 5 — no reclaim attempted, the original `in_flight` row remains owner | Caller receives `{ status: 'in_flight', retryable_after_ms: 5000 }`; wrapper emits `skill.warn` with `reason: 'in_flight_reclaim_disabled'` (rate-limited 1/min per `(skill, subaccount)` per §18.1). Manual DB cleanup or row TTL expiry is the recovery path — see §21 for the deferred heartbeat-extending takeover variant. |
+| Two callers race the terminal UPDATE (`in_flight` → `completed` vs `failed`) | `UPDATE ... WHERE status = 'in_flight'` returning row count | 0-rows-updated = the other path won; logger emits `skill.warn` with `reason: 'terminal_race_lost'`, return the winner's row contents to the caller. |
+| Two seed runs hit `system_agents.slug` for the same active row | Partial unique index `system_agents_slug_active_idx` | Drizzle upsert handles it via `ON CONFLICT DO UPDATE` — no caller-visible failure. |
+| Same `key_hash` arrives with a **mismatched** `request_hash` (idempotency collision) | `request_hash` stored on the existing row; wrapper compares before returning cached payload | Wrapper returns `{ status: 'idempotency_collision' }`; emits `skill.error` with both hashes; caller surfaces as a structured failure (does not retry). |
+
+### 16A.4 Terminal event guarantee
+
+The skill execution chain emits exactly one terminal event per `(runId, toolCallId)` tuple:
+- `skill.success` — handler returned `{ status: 'ok' }`.
+- `skill.blocked` — handler returned `{ status: 'blocked' }` (expected, not paged).
+- `skill.error` — handler threw or returned `{ status: 'error' }`.
+
+Post-terminal prohibition: once a terminal event is emitted for a `(runId, toolCallId)` tuple, no further events with that correlation key may be emitted (per `docs/pre-launch-hardening-invariants.md §7.7`). The cross-run idempotency wrapper does NOT emit a fresh terminal event on a cache hit — it emits `skill.idempotency.hit` (non-terminal observability event) and returns the prior terminal payload to the caller.
+
+### 16A.5 No-silent-partial-success
+
+Skill handlers that can partially complete (e.g. `discover_prospects` returns 12 of 50 candidates because a rate limit hit) emit `{ status: 'partial', returned, expected, reason }`. The wrapper persists this as `status = 'completed'` on `skill_idempotency_keys` (the cross-run guard's contract is "the side effect ran"); the per-call status discrimination is in the response payload, not the idempotency row. Replay of a `partial` result returns the same partial payload — never a fresh attempt at the missing elements.
+
+### 16A.6 Unique-constraint-to-HTTP mapping
+
+| Constraint | Trigger | Mapping |
+|------------|---------|---------|
+| `skill_idempotency_keys_pkey` (composite PK) | First-writer INSERT during normal operation | Not bubbled — the `ON CONFLICT DO NOTHING` clause turns the violation into a 0-rows return; wrapper handles it inline. |
+| `system_agents_slug_active_idx` | Two seeds racing the same slug | Not bubbled — Drizzle upsert's `ON CONFLICT DO UPDATE` handles it. |
+| `agents_org_slug_active_uniq` | Same as above | Same as above. |
+| `skill_idempotency_keys_pkey` with mismatched `request_hash` | Idempotency collision (different request, same key) | Wrapper returns `{ status: 'idempotency_collision' }` to the agent; agent surfaces as a structured failure response (no HTTP boundary involved — the table is never accessed via HTTP). |
+
+No HTTP routes touch these tables, so no HTTP status codes are issued. The agent-execution path consumes the wrapper's structured response directly.
+
+### 16A.7 State machine closure — `skill_idempotency_keys.status`
+
+**Status set is closed.** Adding a new value requires a spec amendment + a CHECK constraint extension migration.
+
+| From → To | Allowed | Mechanism |
+|-----------|---------|-----------|
+| (insert) → `in_flight` | ✅ | First-writer INSERT (§16A.1) |
+| `in_flight` → `completed` | ✅ | Wrapper terminal UPDATE on handler success |
+| `in_flight` → `failed` | ✅ | Wrapper terminal UPDATE on handler exception or `{ status: 'error' }` |
+| `in_flight` → `in_flight` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `completed` → `completed` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `failed` → `failed` | ✅ (no-op idempotent retry) | Same-state writes always allowed |
+| `completed` → `failed` | ❌ FORBIDDEN | Terminal corruption — would erase a successful side effect's record. Wrapper's `WHERE status = 'in_flight'` predicate refuses the UPDATE. |
+| `failed` → `completed` | ❌ FORBIDDEN | Same reason — would silently overwrite a recorded failure. Wrapper's predicate refuses the UPDATE. |
+| Any → `in_flight` (after a terminal) | ❌ FORBIDDEN | Cannot demote terminal state. Wrapper's predicate refuses the UPDATE. |
+
+**Execution-record requirement:** before any terminal-state write, the wrapper must hold a row produced by the first-writer INSERT (`is_first_writer = true`) **or** a successful stale-claim reclaim per §16A.8. A losing first-writer never attempts a terminal UPDATE — it reads and returns the existing row.
+
+**Concurrency guard predicate (mandatory):** every terminal UPDATE includes `WHERE status = 'in_flight'`. 0-rows-updated is observable and emits `skill.warn` with `reason: 'terminal_race_lost'`.
+
+**Failed rows are terminal.** A row in `status = 'failed'` MUST NOT be retried under the same `(subaccount_id, skill_slug, key_hash)` tuple. The wrapper's same-key replay returns `{ status: 'previous_failure', error: 'Prior attempt failed; submit a new idempotency key to retry' }`. Callers that legitimately need to retry must mint a NEW key — typically by changing one of the `keyShape`-resolved fields (e.g. `chase_overdue` bumps `dunning_step`, `send_invoice` requires a new `invoice_id`). This rule prevents silent re-attempts of a side effect that the previous run determined was unsafe (validation rejected, recipient bounced, downstream provider rejected).
+
+**Operator recovery path (mandatory).** Operators handling an incident on a failed-row case have exactly two sanctioned paths — no in-place row mutation, no manual UPDATE to flip `status`:
+
+1. **Re-dispatch with a regenerated key.** The first-line path. Re-dispatch the originating skill call from the agent or queue with a `keyShape` field changed such that the resolver mints a fresh `key_hash` (per the per-skill rules above — `dunning_step++` for `chase_overdue`; new `invoice_id` for `send_invoice`; new `(period_start, period_end)` window for `prepare_month_end`; etc.). The wrapper opens a fresh `in_flight` row and the side effect runs cleanly. The original `failed` row is left in place as the audit trail.
+2. **Manual override via row deletion.** Last-resort path. If field-mutation is impossible (e.g. the `keyShape` is a single immutable provider ID and the failure was a transient provider outage now resolved), an operator with DB access may `DELETE FROM skill_idempotency_keys WHERE subaccount_id = $sa AND skill_slug = $slug AND key_hash = $kh AND status = 'failed'` to clear the row. The next replay then opens a fresh `in_flight` row. **This MUST be logged as an incident-response action** (operator runbook entry naming the row, the original failure reason, and the justification for re-dispatch) — silent deletes are a multi-tenant safety violation.
+
+**Forbidden during incident response:**
+- Direct UPDATE flipping `status` from `failed` to `in_flight` or `completed` (the §16A.7 transition matrix forbids it; the wrapper's `WHERE status = 'in_flight'` predicate would refuse the next terminal write anyway, leaving the row in a corrupt state).
+- "Fixing" the row's `request_hash` or `response_payload` in place to bypass the `previous_failure` branch.
+- Bulk-clearing `failed` rows by date — operators delete one row at a time with explicit justification.
+
+The point of this clause: incidents create pressure to "just clear it" — without an explicit sanctioned path the operator improvises and breaks invariants. The two paths above are the only safe options; the rest are explicitly forbidden.
+
+`skill_idempotency_keys` is intentionally **not** wired through `shared/stateMachineGuards.ts` (which is scoped to `agent_run | workflow_run | workflow_step_run` per its current implementation). The optimistic predicate in the wrapper provides equivalent enforcement for this narrower table; integrating with the shared guard module is deferred until a fourth state machine kind is added (which would justify the abstraction).
+
+### 16A.8 Stale-claim takeover (`in_flight` deadlock recovery)
+
+A first writer that crashes mid-execution leaves its `in_flight` row owning the idempotency key indefinitely. Without a takeover path, every subsequent same-key replay returns `{ status: 'in_flight' }` forever — the side effect can never be retried and the deadlock can only be cleared by a manual DB DELETE.
+
+**Per-skill eligibility gate (mandatory).** The takeover path runs ONLY when the resolved skill's `IdempotencyContract.reclaimEligibility === 'eligible'` (per §8.1). Skills declared `'disabled'` skip the takeover branch entirely and always return `{ status: 'in_flight', retryable_after_ms: <bounded> }` for any same-key replay while the row remains `in_flight`. This is the safety wall against the "slow-but-still-running handler" failure mode: a handler whose worst-case runtime approaches or exceeds `IDEMPOTENCY_CLAIM_TIMEOUT_MS` would otherwise be reclaimed mid-execution and re-fire its external side effect when the original eventually completes.
+
+**Eligibility budget.** A skill MAY declare `reclaimEligibility: 'eligible'` only when its worst-case successful runtime is < 50% of `IDEMPOTENCY_CLAIM_TIMEOUT_MS` (i.e. < 5 minutes). The 50% margin protects against latency spikes (provider slowness, cold starts, temporary network jitter). A skill whose runtime cannot be bounded under this budget MUST declare `'disabled'` until a heartbeat-extending takeover variant is added (deferred — see §21).
+
+**Takeover protocol** (implemented in §9.3.1, runs only for `reclaimEligibility === 'eligible'`):
+
+1. The losing first-writer reads the existing row.
+2. If `existing.status === 'in_flight'` AND `(NOW() - existing.created_at) >= IDEMPOTENCY_CLAIM_TIMEOUT_MS` AND the resolved skill's `idempotency.reclaimEligibility === 'eligible'`, the losing writer attempts a state-based UPDATE:
+   ```sql
+   UPDATE skill_idempotency_keys
+      SET created_at = NOW(),
+          request_hash = $newRequestHash,
+          response_payload = '{}'::jsonb
+    WHERE subaccount_id = $sa AND skill_slug = $slug AND key_hash = $kh
+      AND status = 'in_flight'
+      AND created_at < NOW() - INTERVAL '<IDEMPOTENCY_CLAIM_TIMEOUT_MS> ms'
+   ```
+3. If 1 row updated → reclaimer becomes the new first writer; emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'` and proceeds with execution.
+4. If 0 rows updated → another reclaimer beat us; we re-poll and surface `{ status: 'in_flight', retryable_after_ms: 1000 }` to the caller.
+5. If `reclaimEligibility === 'disabled'` → skip steps 2–4 entirely; return `{ status: 'in_flight', retryable_after_ms: 5000 }` regardless of `created_at` age. The deadlock-recovery path for these skills is manual DB intervention OR the cleanup job (when the row's `expires_at` is reached). The wrapper logs `skill.warn` with `reason: 'in_flight_reclaim_disabled'` once per (skill, subaccount) per minute (rate-limited per §18.1) so operators can surface chronically stuck rows.
+
+**Constants.**
+- `IDEMPOTENCY_CLAIM_TIMEOUT_MS = 10 * 60 * 1000` (10 minutes — the upper bound for any `reclaimEligibility: 'eligible'` skill's worst-case runtime, per the 50% budget rule above). Defined alongside `TTL_DURATIONS_MS` in `skillIdempotencyKeysPure.ts` (§4.11c).
+
+**Why a state-based UPDATE, not a DELETE-then-INSERT:** the row keeps its primary key + composite uniqueness — concurrent reclaimers cannot both succeed because only one UPDATE matches the `created_at < NOW() - INTERVAL` predicate. A DELETE-then-INSERT would race two callers into a double-INSERT.
+
+**Why the `request_hash` is replaced:** the original caller's request is presumed lost with the crashed worker. The reclaimer's request is now authoritative; subsequent same-key callers will see the reclaimer's hash and either match (replay) or collide (`idempotency_collision`).
+
+**Why `response_payload` is reset to `{}`:** prevents a stale partial result from a half-completed prior attempt leaking into the reclaimed row's eventual `completed`/`failed` write.
+
+**Operational note.** The 10-minute window is intentionally generous — too aggressive a takeover would interrupt a legitimately long-running `'eligible'` handler. The 50% budget rule means `'eligible'` skills must comfortably finish within 5 minutes; the extra 5 minutes is the safety margin against latency spikes. For handlers that need genuinely long runtimes, the answer is `reclaimEligibility: 'disabled'`, NOT loosening the timeout. Tightening or extending the constant itself requires a spec amendment + a redeploy.
+
+**Telemetry.** Three new event sub-tags route through `skill.warn` (per §18):
+- `reason: 'in_flight_claim_reclaimed'` — successful takeover; includes `age_ms`.
+- `reason: 'in_flight_claim_lost_reclaim'` — lost a takeover race; non-paged.
+- `reason: 'in_flight_reclaim_disabled'` — caller hit an `in_flight` row for a `reclaimEligibility: 'disabled'` skill past the timeout; surfaces a chronically stuck row for operator review. Rate-limited to 1/min per `(skill, subaccount)` per §18.1.
+
+A sustained rate of any of these tags indicates upstream worker instability, a chronically misconfigured handler, or (for the third tag) operational debt that needs manual cleanup — investigate before paging the on-call.
+
+---
+
+## 17. Execution model
+
+Per `docs/spec-authoring-checklist.md` §5, this spec must pick the execution model explicitly for each cross-boundary operation it introduces.
+
+| Operation | Model | Why |
+|-----------|-------|-----|
+| Skill handler invocation (all 14 new) | **Inline / synchronous** | Existing convention — `executeWithActionAudit` runs synchronously inside the agent loop. No new pg-boss job rows. |
+| `skill_idempotency_keys` write | **Inline / synchronous** | First-writer-wins INSERT must complete before the side effect runs; cannot be enqueued. |
+| `skill_idempotency_keys` cleanup | **Queued (pg-boss daily)** | Durable, survives restarts. New job `skillIdempotencyKeysCleanupJob` registered in `server/jobs/index.ts`. Runs once per day; deletes rows where `expires_at < NOW()` in **batches of 1,000** (per §16.3) with a 10,000-batch per-invocation safety cap to prevent runaway loops. Permanent-class rows (`expires_at IS NULL`) are never matched. |
+| `regenerate-company-manifest.ts --check` (pre-flight) | **Inline / synchronous** | Pre-flight runs before Phase 1 of `seed.ts`. Aborts on drift. |
+| `verify-agent-skill-contracts.ts` (pre-flight) | **Inline / synchronous** | Same as above. |
+| Manager-role guard | **Inline / synchronous** | Per-tool-call middleware. Inherits the existing pre-tool middleware execution model. |
+
+**No prompt-partition / cache-tier work** in this spec. The agent prompts for the 7 new agents inherit the existing prompt-assembly model (system prompt → org overlay → run-time context). No partition changes.
+
+---
+
+## 18. Logging contract for new skills
+
+Every new skill handler must emit structured logs at the standard tag points (the existing logging infra treats tagged logs as metrics). All tags are pre-existing in the codebase except `skill.idempotency.hit` (new), which is consumed by the wrapper.
+
+| Event | Tag | Required fields | Level |
+|-------|-----|------------------|-------|
+| Skill invoked | `skill.invoke` | `slug`, `agent_slug`, `subaccount_id`, `idempotency_key` (where applicable) | INFO |
+| External call started | `skill.external.start` | `slug`, `provider` (`google_places`, `hunter`, `stripe`, `xero`, etc.), `endpoint` | INFO |
+| External call succeeded | `skill.external.success` | `slug`, `provider`, `latency_ms`, `result_count` (where applicable) | INFO |
+| Read fail-soft (transient error or missing config) | `skill.warn` | `slug`, `reason`, `provider`, `retryable: bool` | **WARN** |
+| Expected blocked write (config missing, validation failed, auth missing) | `skill.blocked` | `slug`, `reason`, `provider`, `requires` | **INFO** (never paged) |
+| Hard failure (write skill that should have blocked but didn't, or any contract violation) | `skill.error` | `slug`, `reason`, full context | **ERROR** (paged) |
+| Idempotency hit (replay returned cached result) | `skill.idempotency.hit` | `slug`, `key_hash` | INFO |
+| Idempotency collision (same key, different request hash) | `skill.error` | `slug`, `reason: 'idempotency_collision'`, both hashes | **ERROR** (paged) |
+| Stale-claim takeover (per §16A.8 — successful reclaim) | `skill.warn` | `slug`, `reason: 'in_flight_claim_reclaimed'`, `key_hash`, `age_ms` | WARN |
+| Stale-claim takeover lost to a concurrent reclaimer | `skill.warn` | `slug`, `reason: 'in_flight_claim_lost_reclaim'`, `key_hash` | WARN |
+| Reclaim-disabled skill stuck `in_flight` past timeout (per §16A.8 step 5) | `skill.warn` | `slug`, `reason: 'in_flight_reclaim_disabled'`, `key_hash`, `age_ms` | WARN (rate-limited 1/min per `(skill, subaccount)` per §18.1) |
+
+Fail-soft on a **read** skill emits `skill.warn`. An *expected* blocked write (the §15.3 must-block path — config missing, no auth, validation rejected) emits `skill.blocked` at INFO level. Only contract violations and unexpected failures emit `skill.error`. The split prevents the alerting layer from paging on every "Stripe API key not configured" event during local dev.
+
+### 18.1 Rate-based observability thresholds (advisory)
+
+The pre-prod alerting layer is intentionally permissive (no PagerDuty integration, no SLO budgets), but the spec pins thresholds so the production posture is encoded once and not rediscovered later. Each threshold is a per-`(skill, subaccount)` ratio over a 5-minute trailing window unless noted.
+
+| Signal | Threshold | Action when breached | Why this number |
+|--------|-----------|----------------------|------------------|
+| `skill.idempotency.hit` rate (`hits / total invocations`) | **> 5% sustained over 5 min** | Investigate as possible loop or retry storm — agent is calling the same skill with the same key repeatedly. | Healthy replay rate from queue retries is < 1%; > 5% indicates a misconfigured agent loop or a cron-style pattern hitting the wrapper. |
+| `skill.blocked` rate (`blocked / total invocations`) | **> 30% over 5 min, per (skill, subaccount)** | Promote individual events from INFO to WARN at the alerting layer; do NOT page. The pattern indicates a chronically misconfigured tenant (no Stripe key, no Hunter key, etc.) — surface to the customer-success queue, not the on-call. | INFO floods otherwise hide signal noise from less-misconfigured tenants. |
+| `skill.error` (any single occurrence) | **paged immediately** | The split between `blocked` (expected) and `error` (unexpected) means every `skill.error` is a contract violation. | Emitting `error` is itself the alert signal — there is no rate threshold. |
+| `skill.warn` rate with `reason: 'terminal_race_lost'` | **> 1/min sustained** | Investigate concurrent caller pattern — likely a bug in the agent's queue-retry semantics. | A single occasional terminal-race-loss is benign; sustained means two queue lanes are duplicating work. |
+| `skill.warn` rate with `reason: 'in_flight_claim_reclaimed'` | **> 1/hour sustained per skill** | Investigate worker stability — handlers are crashing mid-execution often enough to leave stale claims for the takeover path to clean up. | Reclaims should be exceptional (worker death, deploy mid-flight). Sustained reclaims indicate an upstream worker or handler bug. |
+| `skill.warn` rate with `reason: 'in_flight_reclaim_disabled'` | **any sustained occurrence > 1/hour per skill** | Manual intervention required — a `reclaimEligibility: 'disabled'` skill has rows stuck `in_flight` past timeout. Either the prior worker died (manual DB DELETE) or the handler is genuinely unbounded and the skill needs heartbeat support (deferred). | The takeover path is intentionally off for these skills, so chronically stuck rows must be operator-visible — sustained signal indicates either crash damage or unmet runtime budgets. |
+
+**`skill.blocked` flood protection (mandatory, not advisory).** The wrapper rate-limits the **logging** of `skill.blocked` per `(skill, subaccount)` to **at most 1 emit per minute**, with subsequent in-window emits suppressed and a single suppression-summary line emitted at minute close. Without this, a tenant with a missing `STRIPE_API_KEY` and a per-second cron loop produces 3,600 INFO lines per hour per skill — drowning structured-log search and inflating storage cost.
+
+The rate-limit primitive is the existing in-process LRU pattern used by `googlePlacesProvider.ts` and `hunterProvider.ts` (per §7.5). Implementation lives alongside the wrapper in `server/services/skillExecutor.ts`; no new infrastructure.
+
+These thresholds are advisory until `docs/spec-context.md` flips `live_users: yes`. At that point the alerting layer wires them into the routing layer (Slack channel for WARN, PagerDuty for ERROR). Pinning them now means the wiring step is mechanical, not a fresh design pass.
+
+---
+
+## 19. Phase sequencing — dependency graph
+
+| Phase | Schema introduces | Code introduces | Code modifies | Schema referenced by code |
+|-------|-------------------|-----------------|---------------|----------------------------|
+| 1 | `system_agents_slug_active_idx`, `agents_org_slug_active_uniq`, `skill_idempotency_keys`, RLS policy | — | `systemAgents.ts`, `agents.ts`, `index.ts`, `rlsProtectedTables.ts` | `skill_idempotency_keys` (used in Phase 4) |
+| 2 | — | 14 skill `.md` files (no code) | `scripts/lib/skillClassification.ts`, `scripts/verify-skill-visibility.ts` | — |
+| 3 | — | — | `server/config/actionRegistry.ts` (interface + 14 entries + backfill + `update_financial_record` removal) | — |
+| 4 | — | `server/services/leadDiscovery/{hunter,googlePlaces}Provider.ts`, `server/services/{adminOpsService,sdrService,retentionSuccessService}.ts` | `server/services/skillExecutor.ts` (handlers + wrapper extensions), `server/services/middleware/proposeAction.ts` (manager guard) | `skill_idempotency_keys` |
+| 5 | — | 7 new `AGENTS.md` folders | 13 existing `AGENTS.md` files (`reportsTo:` line); `finance-agent` skill drop | — |
+| 6 | — | — | (delete `client-reporting-agent/` folder) | — |
+| 7 | — | `scripts/regenerate-company-manifest.ts` | `server/lib/env.ts`, `.env.example`, `companies/automation-os/automation-os-manifest.json` | — |
+| 8 | — | `scripts/verify-agent-skill-contracts.ts` | `scripts/seed.ts` (pre-flight + orphan cleanup + hierarchy assertion) | `system_agents`, `agents`, `subaccount_agents` (cleanup); `skill_idempotency_keys` schema referenced for typecheck |
+| 9 | — | — (operations only) | — | — |
+
+**No backward dependencies.** Every "code referenced by" arrow points forward. Phase 4 reads the `skill_idempotency_keys` table created in Phase 1; that's the only cross-phase data dependency, and the order is correct.
+
+**No orphaned deferrals.** Items mentioned as "deferred" in §22 are listed in §22 as Out-of-Scope, not buried in prose.
+
+**No phase-boundary contradictions.** Phase 1 introduces all schema; subsequent phases are code-only.
+
+---
+
+## 20. Acceptance criteria
+
+The migration is complete when **all** of the following hold. Numbered for traceability against the migration brief §7.
+
+1. **22 agent folders.** `companies/automation-os/agents/` contains exactly 22 folders. `client-reporting-agent` is absent. The 7 new folders (`head-of-product-engineering`, `head-of-growth`, `head-of-client-services`, `head-of-commercial`, `admin-ops-agent`, `retention-success-agent`, `sdr-agent`) are present.
+2. **Reparents applied.** Every `AGENTS.md` `reportsTo:` matches master brief §6.
+3. **Skill files synced.** `server/skills/` contains the 14 new skill files; `update_financial_record.md` is deleted.
+4. **Foundational classification.** `scripts/lib/skillClassification.ts` lists `list_my_subordinates` in `APP_FOUNDATIONAL_SKILLS`.
+5. **Registry + handlers.** `server/config/actionRegistry.ts` and `server/services/skillExecutor.ts` register all 14 new skills with `sideEffectClass`, `idempotency.keyShape` (where applicable), and `directExternalSideEffect` populated; `update_financial_record` is removed from both.
+6. **Env vars.** `server/lib/env.ts` and `.env.example` include `GOOGLE_PLACES_API_KEY` and `HUNTER_API_KEY`.
+7. **Seed completes clean.** `npm run seed` succeeds with all three pre-flights green: visibility, agent-skill contracts, manifest drift.
+8. **Active-row count.** After Path A reset + reseed, `select count(*) from system_agents where deleted_at is null` returns **23** (22 + Playbook Author).
+9. **Roots.** `select count(*) from system_agents where parent_system_agent_id is null and slug not in ('portfolio-health-agent', 'workflow-author') and deleted_at is null` returns **1** (Orchestrator only).
+10. **Direct reports of Orchestrator.** `select slug from system_agents where parent_system_agent_id = (select id from system_agents where slug = 'orchestrator' and deleted_at is null) and deleted_at is null` returns exactly **6** rows: `head-of-product-engineering`, `head-of-growth`, `head-of-client-services`, `head-of-commercial`, `admin-ops-agent`, `strategic-intelligence-agent`.
+11. **Subaccount activations.** The Synthetos Workspace subaccount has `subaccount_agents` rows for all 21 subaccount-scoped agents (everything except `portfolio-health-agent`, which goes to the org subaccount).
+12. **Agent ↔ skill contract.** `npx tsx scripts/verify-agent-skill-contracts.ts` exits 0; every skill in every `AGENTS.md` resolves to a `.md` file, an `ACTION_REGISTRY` entry, and a `SKILL_HANDLERS` handler.
+13. **Hierarchy invariants.** Post-seed assertion passes: exactly one business-team root (Orchestrator), no cycles, depth ≤ 3, all parents non-deleted (§13.4 logic).
+14. **Side-effect classification.** Every new write skill has `sideEffectClass: 'write'` in its registry entry; the `executeWithActionAudit` wrapper enforces fail-soft vs must-block by class.
+15. **Idempotency wiring.** Every new write skill declares `idempotency.keyShape` AND `idempotency.reclaimEligibility` in its registry entry; manual replay test invoking `send_invoice` twice with the same `invoice_id` (per §8.2 — `send_invoice.keyShape = [invoice_id]`) confirms second invocation returns cached result. (`generate_invoice` is a separate skill with `keyShape = [engagement_id, billing_period_start, billing_period_end]` — do not conflate.)
+16. **Manager guard.** Manual test: invoking `draft_post` from a `head-of-growth` test run returns `{ action: 'block', reason: 'manager_role_violation' }`.
+17. **Manifest JSON.** `companies/automation-os/automation-os-manifest.json` is at `version: "7.1.0"` with all 22 agents listed, `reportsTo` matching frontmatter, and `masterBrief` pointing at `docs/automation-os-system-agents-master-brief-v7.1.md`.
+18. **Foundational-skill self-containment.** Every skill in `APP_FOUNDATIONAL_SKILLS` declares no external integration in its registry entry (verified by extended `verify-skill-visibility.ts`).
+19. **No orphan skills.** Every skill `.md` file in `server/skills/` is referenced by at least one agent's `AGENTS.md` `skills:` list **OR** carries `reusable: true` in its own frontmatter.
+20. **No orphan agents.** Every active `system_agents` row except `orchestrator`, `portfolio-health-agent`, and `workflow-author` has a non-null `parent_system_agent_id` referencing another active row.
+21. **Active-row uniqueness.** `\d+ system_agents` shows `system_agents_slug_active_idx` and `\d+ agents` shows `agents_org_slug_active_uniq` — both as `WHERE (deleted_at IS NULL)` partial uniques.
+22. **RLS coverage.** `bash scripts/verify-rls-coverage.sh` exits 0; `skill_idempotency_keys` is in `RLS_PROTECTED_TABLES` and has a matching `CREATE POLICY` in `0233`. `bash scripts/verify-rls-protected-tables.sh` also exits 0 (schema-vs-registry diff finds no unregistered tenant table; both raw-SQL write-path advisory checks pass — the §9.3.1 wrapper INSERT and the §16.3 cleanup-job DELETE each call `assertRlsAwareWrite('skill_idempotency_keys')`).
+23. **Principal-context propagation.** `bash scripts/verify-principal-context-propagation.sh` exits 0 — every `canonicalDataService` call site in the new service modules passes a PrincipalContext-shaped first argument, or the file declares `@principal-context-import-only`.
+24. **Migration sequencing.** `bash scripts/verify-migration-sequencing.sh` exits 0 — migration `0233_system_agents_v7_1.sql` is correctly numbered and the `_down/` reversal stub exists.
+25. **State-machine closure.** `skill_idempotency_keys.status` CHECK constraint is in place (`status IN ('in_flight','completed','failed')`); manual psql probe inserting `'completed'` directly fails with `23514 check_violation`; manual UPDATE attempting `completed → failed` returns 0 rows (the wrapper's `WHERE status = 'in_flight'` predicate refuses the transition per §16A.7).
+26. **Static gates.** `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` (relevant set) exit 0.
+27. **Hash canonicalisation.** `hashActionArgs` calls `canonicaliseForHash` (per §8.1.1) before SHA-256; pure-function unit test in `skillIdempotencyKeysPure.test.ts` proves two inputs with reordered keys / explicit `undefined` fields / NFC-equivalent strings produce identical hashes.
+28. **`keyShape` field-resolution.** Pure-function unit test proves: dot-path resolution works (`'customer.id'` reads `input.customer.id`); a missing `keyShape` field throws `IdempotencyKeyShapeError` before INSERT (no `undefined` reaches the hash).
+29. **Stale-claim takeover.** Manual test: insert a row with `status = 'in_flight'` and `created_at = NOW() - INTERVAL '11 minutes'`, replay the same skill; reclaim succeeds and emits `skill.warn` with `reason: 'in_flight_claim_reclaimed'`. Repeating with `created_at = NOW() - INTERVAL '5 minutes'` (under the 10-minute threshold) returns `{ status: 'in_flight', retryable_after_ms: > 0 }` without reclaim.
+30. **Manager indirect-side-effect block.** Manual test: invoke a hypothetical manager-allowlisted skill carrying `sideEffectClass: 'read'` from a manager — wrapper returns `{ action: 'block', reason: 'manager_indirect_side_effect_class' }`. (The 14 manager-allowlisted skills in §8.2 are all `sideEffectClass: 'none'`, so this AC requires constructing a test-only registry entry.)
+31. **Failed-row terminal-rule.** Manual test: same `(subaccount_id, skill_slug, key_hash)` after `status = 'failed'` returns `{ status: 'previous_failure' }`; mutating one `keyShape`-resolved field to mint a new `key_hash` succeeds in opening a fresh `in_flight` row.
+32. **Cleanup batching.** Manual test: insert 5,000 rows with `expires_at < NOW()`; run cleanup job; verify (a) `skill_idempotency_keys.cleanup.batch` log emits ≥ 5 times (≥ 5 batches at 1k each), (b) `skill_idempotency_keys.cleanup.complete` log includes accurate `total` and `batches` counts, (c) permanent-class rows (`expires_at IS NULL`) untouched.
+33. **`skill.blocked` rate-limiting.** Manual test: invoke a write skill 10 times in a 60-second window with `STRIPE_API_KEY` unset; verify only 1 `skill.blocked` log line emitted, suppression-summary line at minute close indicates 9 suppressed.
+34. **Worker-parent assertion.** Manual test: edit the seed to parent `dev` to `qa` (a T3-to-T3 chain); seed aborts with the `[hierarchy]` error from Assertion 4 in §13.4.
+35. **Reclaim eligibility declared.** Every write-class skill in §8.2 has `idempotency.reclaimEligibility` set to either `'eligible'` or `'disabled'`; the seed pre-flight (extension to `verify-agent-skill-contracts.ts` per §13.2) refuses to load a write-class skill whose registry entry omits the field. **Manual test:** delete the `reclaimEligibility:` line from one of the 8 write-skill registry entries (e.g. `send_invoice`); `npx tsx scripts/verify-agent-skill-contracts.ts` exits 1 with a hard-fail message naming the skill and the missing field. Restore. **Justification check:** delete the runtime-budget comment alongside an `'eligible'` declaration; the script also exits 1, naming the skill and the missing comment annotation.
+36. **Reclaim-disabled in_flight surfacing.** Manual test: register a test-only write skill with `reclaimEligibility: 'disabled'`, insert an `in_flight` row with `created_at = NOW() - INTERVAL '15 minutes'`, replay the same key — wrapper returns `{ status: 'in_flight', retryable_after_ms: 5000 }` (no reclaim attempted) and emits exactly one `skill.warn` with `reason: 'in_flight_reclaim_disabled'` per minute (rate-limited per §18.1).
+37. **No-side-effect-before-claim test hook.** Pure-function test in `skillIdempotencyKeysPure.test.ts` (per §16A.1 runtime test-mode contract): (a) `assertHandlerInvokedWithClaim(false)` with `NODE_ENV='test'` throws `SideEffectBeforeClaimError`; (b) `assertHandlerInvokedWithClaim(true)` with `NODE_ENV='test'` returns silently; (c) `assertHandlerInvokedWithClaim(false)` with `NODE_ENV='production'` returns silently (production no-op). The wrapper's `if (isFirstWriter)` branch in §9.3.1 calls `assertHandlerInvokedWithClaim(isFirstWriter)` immediately before invoking the handler.
+38. **Failed-row operator recovery path.** Manual test: insert a `failed` row for `chase_overdue` at `(invoice_id=I1, dunning_step=1)`; (a) replay same key → `{ status: 'previous_failure' }` (per AC #31); (b) re-dispatch with `dunning_step=2` → fresh `in_flight` row opens cleanly (operator path 1, sanctioned); (c) `DELETE` the original `failed` row and replay `(I1, 1)` → fresh `in_flight` row opens cleanly (operator path 2, last-resort, requires runbook log per §16A.7); (d) `UPDATE skill_idempotency_keys SET status = 'in_flight' WHERE ...` against the failed row → on subsequent terminal write the wrapper's `WHERE status = 'in_flight'` predicate succeeds but a `skill.warn` with `reason: 'terminal_race_lost'` should NOT be emitted spuriously — verify the row's audit trail is now corrupt and forbidden per §16A.7 (this case demonstrates why direct UPDATE is forbidden, not a recommended path).
+
+---
+
+## 21. Deferred items
+
+### Deferred-from-this-spec
+
+- **Master prompts for the 4 manager agents and 3 new workers.** Drafted in the implementing PR per master brief §10–§14, §21, §29. Each prompt encodes the manager pattern (vet → decompose → pick subordinate → delegate → aggregate → report) for the heads, and the standard worker pattern for the others. Reason: prompt drafting is implementation work, not architectural decision.
+- **Stripe / Xero real integration for admin-ops handlers.** Handlers stub at first (per §9.1); real provider plumbing is its own piece of work. Reason: provider integration scope spans OAuth flows, webhook handlers, and reconciliation logic far beyond the v7.1 migration's blast radius. **Note:** the spec amendment that wires real providers MUST re-evaluate `idempotency.reclaimEligibility` per skill (per §8.2 rationale block) — any handler whose worst-case runtime grows past 5 minutes (50% of `IDEMPOTENCY_CLAIM_TIMEOUT_MS`) must move to `'disabled'` or implement heartbeat support.
+- **Heartbeat-extending takeover variant for `reclaimEligibility: 'disabled'` skills.** A future enhancement where the wrapper periodically `UPDATE`s `created_at = NOW()` from inside the running handler so the takeover-timeout window slides forward as long as the worker is alive — letting genuinely long-running handlers participate in stale-claim recovery without the double-fire risk of the current binary `'eligible' / 'disabled'` switch. Out of scope for v7.1: no current skill needs runtime > 5 minutes, and the heartbeat needs a separate concurrency contract (cooperative cancellation, deadline propagation) that is its own design problem.
+- **Master brief sections 14–22 + Appendices A–F.** ~~Pending capture.~~ Resolved — user provided full master brief; `docs/automation-os-system-agents-master-brief-v7.1.md` rewritten with all 22 agents + Appendices A–F.
+- **Content/SEO + Social Media merge investigation.** Master brief Appendix F flags this for evaluation based on combined skill count and context-window impact. Out-of-scope here.
+
+### Deferred-from-master-brief
+
+- **Hierarchy infrastructure plumbing from v7.1 Appendix E** — `parentAgentId` on `SkillExecutionContext`, scope param on `config_list_agents`, parent-scoping in `spawn_sub_agents` / `reassign_task` for child-only delegation routing. Tracked at `docs/hierarchical-delegation-dev-brief.md`. **NOT** the same as the manager-role guard in §9.4 (which IS in scope and lands in this migration).
+- **Workstream B (`canonical_prospect_profiles` extension)** for the SDR agent. If unshipped when SDR goes live in Phase 5, the prospect-profile write at the SDR handler stubs with a TODO and proceeds. Reason: Workstream B is a separate canonical-data spec; not a blocker.
+
+> The deferred items above are listed here, not buried in prose elsewhere in the spec, per `docs/spec-authoring-checklist.md` §7.
+
+---
+
+## 22. Out of scope
+
+- Deeper hierarchy enforcement plumbing from v7.1 Appendix E (see §21).
+- Content/SEO + Social Media merge investigation (v7.1 Appendix F).
+- The actual master prompts for the 4 manager agents and 3 new workers (see §21).
+- Admin-Ops Stripe/Xero real integration (see §21).
+- New HTTP routes, new permission keys, new auth surfaces.
+- New frontend / UI changes — this spec is backend-only.
+- New test categories (vitest, supertest, E2E) — testing posture is `static_gates_primary` per `docs/spec-context.md`.
+- Feature flags or staged rollout — pre-prod, single-PR landing.
+- Backwards-compatibility shims — pre-prod allows breaking changes.
+
+---
+
+## 23. Testing posture
+
+Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`):
+
+- **Static gates** (binding): `npm run typecheck`, `npm run lint`, all `scripts/verify-*.sh` referenced in §6.5 / §7.7 / §8.4 / §9.6 / §13.5.
+- **Pure-function unit tests** (recommended): tsx tests for the new pure helpers introduced in this spec — `hashKeyShape`, `ttlClassToExpiresAt`, `canonicaliseForHash` (per §8.1.1), `assertHandlerInvokedWithClaim` (per §16A.1 — test-mode invariant teeth for "no external side-effect before claim"), the manager-allowlist resolver. Land in `server/services/__tests__/skillIdempotencyKeysPure.test.ts` and `server/services/__tests__/managerGuardPure.test.ts`. Convention: `.test.ts` next to the pure module.
+- **Manual end-to-end tests** (one-off, recorded in PR description):
+  - Manager-guard happy path + violation path (one of each).
+  - Idempotency replay test — `send_invoice` twice; verify cached payload.
+  - Pre-flight gate fires when `client-reporting-agent` folder is restored without restoring the registry entry.
+- **NO new vitest / jest / playwright / supertest suites.** Per framing assumption.
+
+---
+
+## 24. Cross-references
+
+- **Master brief:** `docs/automation-os-system-agents-master-brief-v7.1.md` (complete — all 22 agents + Appendices A–F).
+- **Migration brief:** ~~`docs/automation-os-system-agents-v7.1-migration-brief.md`~~ — deleted in the 2026-04-27 cleanup; structural decisions absorbed into this spec and the master brief.
+- **Predecessor master brief:** ~~`docs/automation-os-system-agents-brief-v6.md`~~ — deleted in the 2026-04-27 cleanup; superseded by master brief v7.1.
+- **Spec context:** `docs/spec-context.md` (framing assumptions consumed by `spec-reviewer`).
+- **Spec-authoring checklist:** `docs/spec-authoring-checklist.md` (§§0–10; this spec self-checked against the updated 10-section checklist post-pre-launch-hardening).
+- **Development guidelines:** `DEVELOPMENT_GUIDELINES.md` (§6 Migration discipline, §8.7 State/Lifecycle invariants, §8.10 Race-claim ordering, §8.11 Idempotency keys, §9 Multi-tenant safety checklist).
+- **Pre-launch hardening invariants:** `docs/pre-launch-hardening-invariants.md` — §7.7 post-terminal event prohibition is referenced by §16A.4.
+- **RLS canonical pattern reference:** migration `0227_rls_hardening_corrective.sql` — the `<table>_org_isolation` naming, `DROP POLICY IF EXISTS` first, three-clause `USING` + `WITH CHECK` predicate that this spec's §6.1 follows.
+- **RLS runtime guard:** `server/lib/rlsBoundaryGuard.ts` — `assertRlsAwareWrite` is called from the §9 wrapper per §16.5.
+- **Architecture:** `architecture.md` § "Row-Level Security — Three-Layer Fail-Closed Data Isolation", § "Canonical RLS session variables (hard rule)", § "Key files per domain".
+- **Lead-discovery dev brief:** `docs/dev-briefs/sdr-lead-discovery.md` — referenced by master brief §1 and migration brief §5. **Not present on disk at spec-authoring time** (2026-04-26). The §7.5 / §8.2 plumbing for `discover_prospects` + Hunter / Places providers is fully specified in this spec without it; if the implementing PR encounters open questions on the SDR provider plumbing, surface them to the user rather than blocking on the missing dev brief.
+- **Hierarchy infrastructure dev brief (deferred):** `docs/hierarchical-delegation-dev-brief.md`.
+- **Seed pipeline:** `scripts/seed.ts`.
+- **Skill classification:** `scripts/lib/skillClassification.ts`.
+- **Action registry:** `server/config/actionRegistry.ts`.
+- **Skill handler dispatch:** `server/services/skillExecutor.ts` (`SKILL_HANDLERS`, `executeWithActionAudit`).
+- **Pre-tool middleware:** `server/services/middleware/proposeAction.ts`.
+- **RLS manifest:** `server/config/rlsProtectedTables.ts`.
+- **Universal-skills list:** `server/config/universalSkills.ts`.

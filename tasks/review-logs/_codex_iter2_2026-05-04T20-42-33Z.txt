@@ -1,0 +1,9 @@
+The documentation changes introduce implementation guidance that would violate core baseline invariants around active-row uniqueness and terminal retry handling. These are actionable spec defects that should be corrected before implementation follows this plan.
+
+Full review comments:
+
+- [P2] Enforce one active baseline across versions — C:\Files\Projects\automation-v1\docs\baseline-capture-spec.md:388-388
+  The stated invariant is one active baseline per sub-account, but the proposed unique index includes `baseline_version`, so it still permits two non-reset rows for the same sub-account when their versions differ (for example, an admin reset or stale job creates version 2 before version 1 is marked `reset`). That would leave multiple active baselines and make “current baseline” selection ambiguous; the invariant needs a constraint/check that is unique on the active `subaccount_id` itself, not just per version.
+
+- [P2] Keep terminal failed baselines out of retry pickup — C:\Files\Projects\automation-v1\docs\baseline-capture-spec.md:235-235
+  Including `failed` rows in the retry pickup contradicts the state machine: `failed` is used for non-retryable errors and exhausted retry budgets, with manual entry as the recovery path. If the cron re-picks `failed` rows with a previous attempt count, exhausted baselines can be re-enqueued indefinitely instead of staying terminal for manual correction.

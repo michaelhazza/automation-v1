@@ -3,8 +3,7 @@
  * Run via: npx tsx client/src/components/brief-artefacts/__tests__/ApprovalCardPure.test.ts
  */
 
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   deriveIsDisabled,
   deriveRiskContainerStyle,
@@ -18,31 +17,31 @@ import {
 // ---------------------------------------------------------------------------
 
 test('is not disabled for pending status and not superseded', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'pending' }, false), false);
+  expect(deriveIsDisabled({ executionStatus: 'pending' }, false)).toBe(false);
 });
 
 test('is disabled when superseded', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'pending' }, true), true);
+  expect(deriveIsDisabled({ executionStatus: 'pending' }, true)).toBe(true);
 });
 
 test('is disabled when executionStatus is completed', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'completed' }, false), true);
+  expect(deriveIsDisabled({ executionStatus: 'completed' }, false)).toBe(true);
 });
 
 test('is disabled when executionStatus is running', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'running' }, false), true);
+  expect(deriveIsDisabled({ executionStatus: 'running' }, false)).toBe(true);
 });
 
 test('is not disabled when executionStatus is failed and not superseded', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'failed' }, false), false);
+  expect(deriveIsDisabled({ executionStatus: 'failed' }, false)).toBe(false);
 });
 
 test('is disabled when both superseded and completed', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'completed' }, true), true);
+  expect(deriveIsDisabled({ executionStatus: 'completed' }, true)).toBe(true);
 });
 
 test('treats undefined isSuperseded as falsy', () => {
-  assert.equal(deriveIsDisabled({ executionStatus: 'pending' }), false);
+  expect(deriveIsDisabled({ executionStatus: 'pending' })).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -50,15 +49,15 @@ test('treats undefined isSuperseded as falsy', () => {
 // ---------------------------------------------------------------------------
 
 test('returns low risk style for low', () => {
-  assert.equal(deriveRiskContainerStyle('low'), RISK_BORDER_STYLES.low);
+  expect(deriveRiskContainerStyle('low')).toBe(RISK_BORDER_STYLES.low);
 });
 
 test('returns medium risk style for medium', () => {
-  assert.equal(deriveRiskContainerStyle('medium'), RISK_BORDER_STYLES.medium);
+  expect(deriveRiskContainerStyle('medium')).toBe(RISK_BORDER_STYLES.medium);
 });
 
 test('returns high risk style for high', () => {
-  assert.equal(deriveRiskContainerStyle('high'), RISK_BORDER_STYLES.high);
+  expect(deriveRiskContainerStyle('high')).toBe(RISK_BORDER_STYLES.high);
 });
 
 // ---------------------------------------------------------------------------
@@ -66,15 +65,15 @@ test('returns high risk style for high', () => {
 // ---------------------------------------------------------------------------
 
 test('returns null for zero affected records', () => {
-  assert.equal(deriveAffectedLabel(0), null);
+  expect(deriveAffectedLabel(0)).toBe(null);
 });
 
 test('returns singular label for one record', () => {
-  assert.equal(deriveAffectedLabel(1), 'Affects 1 record');
+  expect(deriveAffectedLabel(1)).toBe('Affects 1 record');
 });
 
 test('returns plural label for multiple records', () => {
-  assert.equal(deriveAffectedLabel(5), 'Affects 5 records');
+  expect(deriveAffectedLabel(5)).toBe('Affects 5 records');
 });
 
 // ---------------------------------------------------------------------------
@@ -83,12 +82,12 @@ test('returns plural label for multiple records', () => {
 
 test('RISK_BORDER_STYLES covers all risk levels', () => {
   for (const level of ['low', 'medium', 'high'] as const) {
-    assert.ok(RISK_BORDER_STYLES[level], `missing border style for ${level}`);
+    expect(RISK_BORDER_STYLES[level], `missing border style for ${level}`).toBeTruthy();
   }
 });
 
 test('RISK_BADGE_STYLES covers all risk levels', () => {
   for (const level of ['low', 'medium', 'high'] as const) {
-    assert.ok(RISK_BADGE_STYLES[level], `missing badge style for ${level}`);
+    expect(RISK_BADGE_STYLES[level], `missing badge style for ${level}`).toBeTruthy();
   }
 });

@@ -2,7 +2,7 @@
 name: Config Run Health Check
 description: Run workspace health audit and return findings (missing skills, broken schedules, etc.).
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

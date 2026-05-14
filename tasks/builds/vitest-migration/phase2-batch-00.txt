@@ -1,0 +1,10 @@
+client/src/components/brief-artefacts/__tests__/ApprovalCardPure.test.ts
+client/src/components/brief-artefacts/__tests__/StructuredResultCardPure.test.ts
+client/src/hooks/__tests__/usePendingIntervention.test.ts
+server/config/__tests__/jobConfigInvariant.test.ts
+server/jobs/__tests__/llmInflightHistoryCleanupJobPure.test.ts
+server/jobs/__tests__/llmStartedRowSweepJobPure.test.ts
+server/jobs/__tests__/skillAnalyzerJobIncidentEmission.integration.test.ts
+server/lib/__tests__/agentRunEditPermissionMaskPure.test.ts
+server/lib/__tests__/agentRunVisibilityPure.test.ts
+server/lib/__tests__/derivedDataMissingLog.test.ts

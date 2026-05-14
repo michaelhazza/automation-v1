@@ -1,9 +1,14 @@
 // ---------------------------------------------------------------------------
 // Worker bootstrap. Spec §4.4.
 // Initialises pg-boss + Drizzle, registers handlers, returns shutdown.
+//
+// Emits a single `iee.worker.boot_timing` log line at the end of bootstrap
+// with a phase-by-phase breakdown so cold-start latency is measurable in
+// production. Runbook: references/iee-worker-timing.md.
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
+import { performance } from 'perf_hooks';
 import PgBoss from 'pg-boss';
 import { db, client } from './db.js';
 import { env } from './config/env.js';
@@ -20,6 +25,14 @@ export async function bootstrap(): Promise<BootstrapResult> {
   const workerInstanceId = randomUUID();
   setBaseLogContext({ workerInstanceId });
 
+  // Captures Node + tsx + module-load cost incurred BEFORE bootstrap() ran,
+  // including any synchronous top-level module initialisation (top-level
+  // await, side-effectful imports) executed before bootstrap() entry. If
+  // nodeBootMs spikes after a refactor, suspect a newly-added expensive
+  // top-level import.
+  const nodeBootMs = Math.round(process.uptime() * 1000);
+  const tBootstrapStart = performance.now();
+
   // Same connection options as the main app's pgBossInstance
   const boss = new PgBoss({
     connectionString: env.DATABASE_URL,
@@ -33,7 +46,9 @@ export async function bootstrap(): Promise<BootstrapResult> {
     logger.error('iee.worker.boss_error', { error: String(err) });
   });
 
+  const tBeforeBossStart = performance.now();
   await boss.start();
+  const tAfterBossStart = performance.now();
   setPersistenceBoss(boss);
 
   // ── Playwright version consistency check (audit Blocker #5) ─────────────
@@ -84,6 +99,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  const tAfterPlaywrightCheck = performance.now();
 
   // ── Compat check (§4.4.5) ───────────────────────────────────────────────
   try {
@@ -98,6 +114,17 @@ export async function bootstrap(): Promise<BootstrapResult> {
   } catch {
     // Non-fatal — main path is the boss client which has its own validation
   }
+  const tAfterDbCompatCheck = performance.now();
+
+  const bootstrapTotalMs = Math.round(tAfterDbCompatCheck - tBootstrapStart);
+  logger.info('iee.worker.boot_timing', {
+    nodeBootMs,
+    bossStartMs: Math.round(tAfterBossStart - tBeforeBossStart),
+    playwrightCheckMs: Math.round(tAfterPlaywrightCheck - tAfterBossStart),
+    dbCompatCheckMs: Math.round(tAfterDbCompatCheck - tAfterPlaywrightCheck),
+    bootstrapTotalMs,
+    processToReadyMs: nodeBootMs + bootstrapTotalMs,
+  });
 
   let stopping = false;
   const shutdown = async () => {

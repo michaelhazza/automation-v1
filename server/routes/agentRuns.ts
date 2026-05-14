@@ -1,16 +1,27 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { z } from 'zod';
+import { authenticate, requireOrgPermission, requireSystemAdmin, hasOrgPermission } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentRunCancelService } from '../services/agentRunCancelService.js';
+import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import { agentRuns } from '../db/schema/index.js';
-import { eq, and, gte, sql, inArray, count } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
+import { mapAgentRunToTestResult } from '../services/agentTestRunMapperPure.js';
+import { ControllerStyleNotAllowedForAgentError } from '../services/controllerStyleResolver.js';
+import { logger } from '../lib/logger.js';
+import { runTraceService, InvalidRunTraceCursorError } from '../services/runTraceService.js';
+import type { RunTraceEventType } from '../../shared/types/runTraceEvent.js';
+import {
+  resolveAgentRunVisibility,
+  type AgentRunVisibilityRun,
+  type AgentRunVisibilityUser,
+} from '../lib/agentRunVisibility.js';
+import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
+import { runTraceProjectionForViewer } from '../services/runTracePure.js';
 
 const router = Router();
 
@@ -24,10 +35,11 @@ router.post(
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
     // guard-ignore-next-line: input-validation reason="body fields are all optional; execution service validates agentId/subaccountId via DB lookup before running"
-    const { taskId, idempotencyKey, executionMode } = req.body as {
+    const { taskId, idempotencyKey, executionMode, controllerStyle } = req.body as {
       taskId?: string;
       idempotencyKey?: string;
       executionMode?: 'api' | 'claude-code';
+      controllerStyle?: string;
     };
 
     // Find the subaccount agent link
@@ -42,25 +54,43 @@ router.post(
     const effectiveIdempotencyKey = idempotencyKey ??
       `manual:${agentId}:${subaccountId}:${req.user!.id}:${taskId ?? 'heartbeat'}:${Math.floor(Date.now() / 10000)}`;
 
-    const result = await agentExecutionService.executeRun({
-      agentId,
-      subaccountId,
-      subaccountAgentId: saLink.id,
-      organisationId: req.orgId!,
-      executionScope: 'subaccount',
-      runType: 'manual',
-      executionMode: executionMode ?? 'api',
-      runSource: 'manual',
-      taskId,
-      idempotencyKey: effectiveIdempotencyKey,
-      triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
-      // Plumb the initiating user through to SkillExecutionContext.userId
-      // so user-scoped tools (Playbook Studio propose_save) can enforce
-      // ownership. Review finding #3.
-      userId: req.user!.id,
-    });
+    try {
+      const result = await agentExecutionService.executeRun({
+        agentId,
+        subaccountId,
+        subaccountAgentId: saLink.id,
+        organisationId: req.orgId!,
+        executionScope: 'subaccount',
+        runType: 'manual',
+        executionMode: executionMode ?? 'api',
+        runSource: 'manual',
+        taskId,
+        idempotencyKey: effectiveIdempotencyKey,
+        triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
+        // Plumb the initiating user through to SkillExecutionContext.userId
+        // so user-scoped tools (Workflow Studio propose_save) can enforce
+        // ownership. Review finding #3.
+        userId: req.user!.id,
+        controllerStyle,
+      });
 
-    res.json(result);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ControllerStyleNotAllowedForAgentError) {
+        logger.warn('foundation.controller_style.rejected', {
+          agentId,
+          subaccountId,
+          organisationId: req.orgId!,
+          requestedControllerStyle: controllerStyle,
+        });
+        res.status(422).json({
+          errorCode: err.errorCode,
+          message: err.message,
+        });
+        return;
+      }
+      throw err;
+    }
   })
 );
 
@@ -159,14 +189,155 @@ router.get(
   })
 );
 
+// ─── List agent runs by agentId ───────────────────────────────────────────────
+//
+// User-owned-run visibility (spec §3.6 + lib/agentRunVisibility.ts):
+//   - Owner sees the row metadata.
+//   - Admin sees the row metadata.
+//   - Non-owner non-admin: row excluded entirely.
+//
+// triggerContext is INTENTIONALLY OMITTED from this list response
+// (chatgpt-pr-review R2 F3). It may carry external-source payload / PII —
+// callers that need full per-run content go through the existing Run Trace
+// detail endpoint (`GET /api/agent-runs/:id/trace`), which owns content
+// visibility for both user-owned and subaccount-owned runs.
+
+router.get(
+  '/api/agent-runs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const agentId = req.query.agentId as string | undefined;
+    const limit = Math.min(Number(req.query.limit ?? 20), 50);
+    if (!agentId) {
+      res.status(400).json({ error: 'agentId query parameter is required' });
+      return;
+    }
+    const rows = await agentActivityService.listRunsByAgentId({
+      agentId,
+      orgId: req.orgId!,
+      limit,
+    });
+
+    const role = req.user?.role ?? 'user';
+    const isAdmin = role === 'system_admin' || role === 'org_admin';
+    const requesterId = req.user!.id;
+
+    // Filter per-row using the user-owned-run privacy contract. All rows
+    // returned are metadata-only — `triggerContextRedacted: true` signals
+    // to clients that full content is available via the Run Trace detail
+    // endpoint, gated by its own visibility rules.
+    const runs = rows.flatMap((row) => {
+      if (!row.ownerUserId) {
+        // Subaccount-owned (legacy) run — visible to anyone with AGENTS_CHAT.
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      if (row.ownerUserId === requesterId) {
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      if (isAdmin) {
+        const { ownerUserId: _ownerUserId, ...publicRow } = row;
+        void _ownerUserId;
+        return [{ ...publicRow, triggerContextRedacted: true as const }];
+      }
+      // Non-owner, non-admin — exclude entirely.
+      return [];
+    });
+
+    res.json({ runs });
+  }),
+);
+
 // ─── Get single run detail ────────────────────────────────────────────────────
 
 router.get(
   '/api/agent-runs/:id',
   authenticate,
   asyncHandler(async (req, res) => {
+    if (req.query.shape === 'test') {
+      const hasPermission = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_VIEW);
+      if (!hasPermission) {
+        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+        return;
+      }
+      const run = await agentActivityService.getRunForTestShape(req.params.id, req.orgId!);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      res.json(mapAgentRunToTestResult(run));
+      return;
+    }
     const run = await agentActivityService.getRunDetail(req.params.id, req.orgId!);
     res.json(run);
+  })
+);
+
+// ─── Run-trace events: role-aware masking projection (spec §4.8) ──────────────
+//
+// Returns the toolCallsLog for a run with masking applied per the caller's role.
+// Cache-Control: private, no-store — role-aware masking projection — must not
+// be shared-cacheable across roles or users; prevents future infra (CDN, edge
+// cache) from leaking masked/unmasked content across role boundaries.
+
+router.get(
+  '/api/agent-runs/:id/trace-events',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    // Verify run exists and belongs to this org before serving trace data.
+    const runId = req.params.id;
+    const { run: runRow, toolCallsLog: rawToolCallsLog, skillEvents } =
+      await agentActivityService.getTraceEventsData(runId, req.orgId!);
+    if (!runRow) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    const toolCallsLog = (Array.isArray(rawToolCallsLog) ? rawToolCallsLog : []) as Array<{
+      tool?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+      output?: unknown;
+      durationMs?: number;
+      iteration?: number;
+    }>;
+
+    // Narrow payload's runtime shape to the field linkToolCallsToEventIds reads.
+    const eventRowsForLink = skillEvents.map((r) => ({
+      id: r.id,
+      eventType: r.eventType,
+      payload:
+        typeof r.payload === 'object' && r.payload !== null && 'skillSlug' in r.payload
+          ? { skillSlug: String((r.payload as { skillSlug: unknown }).skillSlug) }
+          : null,
+    }));
+
+    const role: string = req.user?.role ?? 'user';
+    const { projectForRole, linkToolCallsToEventIds } = await import('../services/agentRunMessageServicePure.js');
+    const eventIdsByPosition = linkToolCallsToEventIds(toolCallsLog, eventRowsForLink);
+    const projected = projectForRole(toolCallsLog, role, eventIdsByPosition);
+
+    // Cache-Control: private, no-store — role-aware masking projection — must not
+    // be shared-cacheable across roles or users; prevents future infra (CDN, edge
+    // cache) from leaking masked/unmasked content across role boundaries.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ data: projected });
+  })
+);
+
+// ─── Delegation graph for a run (paperclip-hierarchy §7.2) ──────────────────
+
+router.get(
+  '/api/agent-runs/:id/delegation-graph',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { buildForRun } = await import('../services/delegationGraphService.js');
+    const graph = await buildForRun(req.params.id, req.orgId!);
+    res.json(graph);
   })
 );
 
@@ -323,17 +494,8 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
-    const [result] = await db
-      .select({ count: count() })
-      .from(agentRuns)
-      .where(and(
-        eq(agentRuns.organisationId, req.orgId!),
-        inArray(agentRuns.status, [...IN_FLIGHT_RUN_STATUSES]),
-        eq(agentRuns.isSubAgent, false),
-        eq(agentRuns.isTestRun, false),
-      ));
-
-    res.json({ runningAgents: Number(result?.count ?? 0) });
+    const liveCount = await agentActivityService.getLiveRunCount(req.orgId!);
+    res.json({ runningAgents: liveCount });
   })
 );
 
@@ -352,7 +514,7 @@ router.get(
       sinceDays: sinceDays ? Number(sinceDays) : undefined,
     });
 
-    res.json(stats);
+    res.json({ data: stats, serverTimestamp: new Date().toISOString() });
   })
 );
 
@@ -366,39 +528,11 @@ router.get(
     const { subaccountId, sinceDays } = req.query;
     const days = Math.min(Number(sinceDays ?? 14), 90);
 
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-
-    const conditions = [
-      gte(agentRuns.createdAt, since),
-      eq(agentRuns.organisationId, req.orgId!),
-    ] as ReturnType<typeof eq>[];
-    if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId as string));
-
-    const rows = await db
-      .select({
-        date: sql<string>`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`,
-        completed: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
-        failed: sql<number>`count(*) filter (where ${agentRuns.status} = 'failed')::int`,
-        timeout: sql<number>`count(*) filter (where ${agentRuns.status} = 'timeout' or ${agentRuns.status} = 'budget_exceeded')::int`,
-        other: sql<number>`count(*) filter (where ${agentRuns.status} not in ('completed','failed','timeout','budget_exceeded'))::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(agentRuns)
-      .where(and(...conditions))
-      .groupBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`)
-      .orderBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`);
-
-    // Fill in missing days with zeros
-    const result: Array<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }> = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const found = rows.find(r => r.date === dateStr);
-      result.push(found ?? { date: dateStr, completed: 0, failed: 0, timeout: 0, other: 0, total: 0 });
-    }
-
+    const result = await agentActivityService.getDailyActivity(
+      req.orgId!,
+      days,
+      subaccountId as string | undefined,
+    );
     res.json(result);
   })
 );
@@ -444,6 +578,28 @@ router.get('/api/system/agent-activity', authenticate, requireSystemAdmin, async
   res.json(runs);
 }));
 
+// ─── User-triggered cancel ────────────────────────────────────────────────────
+//
+// Best-effort stop. Sets agent_runs.status='cancelling'. The in-process loop
+// (non-IEE) reads status at the top of each iteration and exits cleanly; the
+// IEE worker observes the cancelled iee_runs row via its per-step ownership
+// check and exits via the existing 'ownership_lost' path. Idempotent — calling
+// on an already-terminal run is a no-op.
+
+router.post(
+  '/api/agent-runs/:runId/cancel',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const result = await agentRunCancelService.cancelRun(
+      req.orgId!,
+      req.params.runId,
+      req.user!.id,
+    );
+    res.json({ ok: true, ...result });
+  }),
+);
+
 router.get('/api/system/agent-activity/stats', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { sinceDays } = req.query;
   const stats = await agentActivityService.getStats({
@@ -451,5 +607,182 @@ router.get('/api/system/agent-activity/stats', authenticate, requireSystemAdmin,
   });
   res.json(stats);
 }));
+
+// ─── Resume a blocked agent run after OAuth integration connect ───────────────
+// The client calls this after receiving oauth_success from the popup, OR it is
+// called server-side by the OAuth callback when state.resumeToken is present.
+
+router.post(
+  '/api/agent-runs/resume-from-integration',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT),
+  asyncHandler(async (req, res) => {
+    const { resumeToken, conversationId } = req.body as { resumeToken?: string; conversationId?: string };
+    if (!resumeToken || typeof resumeToken !== 'string' || !/^[a-f0-9]{64}$/.test(resumeToken)) {
+      // Mirror the validation applied at the OAuth callback path: tokens are
+      // 32-byte hex (64 chars). Anything else is a forged or malformed token —
+      // reject with 400 before hashing so we never store partial state.
+      throw Object.assign(new Error('resumeToken required'), { statusCode: 400, errorCode: 'INVALID_TOKEN' });
+    }
+    const result = await resumeFromIntegrationConnect({
+      resumeToken,
+      organisationId: req.orgId!,
+      conversationId,
+    });
+    res.json({ ...result, conversationId: conversationId ?? '' });
+  }),
+);
+
+// ─── Phase 1 — Run artifacts: list metadata (spec §4.5.2, §6.1.5) ───────────
+//
+// Visibility parity with /api/run-artifacts/:id/download and /signed-url:
+// listing artifact metadata (display names, IDs, hashes, sizes) leaks the same
+// surface as those routes, so it must clear the same gate. Org `AGENTS_VIEW`
+// alone is insufficient for system-managed runs and runs the user otherwise
+// cannot see in the run trace.
+router.get(
+  '/api/agent-runs/:runId/artifacts',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { runId } = req.params;
+    const orgId = req.orgId!;
+
+    const runRow = await agentActivityService.getRunWithAgentInfo(runId);
+
+    if (!runRow) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    const visibilityRun: AgentRunVisibilityRun = {
+      organisationId: runRow.organisationId,
+      subaccountId: runRow.subaccountId,
+      executionScope: runRow.executionScope,
+      isSystemRun: Boolean(runRow.systemAgentId),
+    };
+
+    const userCtx = await buildUserContextForRun(req, {
+      id: runRow.id,
+      organisationId: runRow.organisationId,
+      subaccountId: runRow.subaccountId,
+      executionScope: runRow.executionScope,
+    });
+
+    const visibilityUser: AgentRunVisibilityUser = {
+      id: userCtx.id,
+      role: userCtx.role,
+      organisationId: userCtx.organisationId,
+      orgPermissions: userCtx.orgPermissions,
+    };
+
+    const visibility = resolveAgentRunVisibility(visibilityRun, visibilityUser);
+    if (!visibility.canView) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const { listForRun } = await import('../services/fileDeliveryService.js');
+    const raw = await listForRun(runId, orgId);
+    // Strip internal S3 fields before sending to client.
+    const artifacts = raw.map(({ storageKey: _sk, storageRegion: _sr, ...pub }) => pub);
+    res.json({ artifacts });
+  }),
+);
+
+// ─── Run Trace: unified event stream (spec §4.4.3) ────────────────────────────
+//
+// GET /api/agent-runs/:runId/trace
+// Read-only (INV-10). Returns unified events across eight source ledger tables
+// with cursor pagination, late-event marking, and policy envelope embedding.
+
+const runTraceQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  eventTypes: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val
+        ? val.split(',').map((s) => s.trim()).filter(Boolean) as RunTraceEventType[]
+        : undefined,
+    ),
+  sinceTimestamp: z.string().datetime().optional(),
+  untilTimestamp: z.string().datetime().optional(),
+  toolSlug: z.string().optional(),
+});
+
+router.get(
+  '/api/agent-runs/:runId/trace',
+  authenticate,
+  // The run trace exposes per-run LLM metadata, tool decisions, review
+  // decisions, and the policy envelope snapshot — strictly more sensitive
+  // than delegation-graph/chain. Require AGENTS_VIEW so it sits at the same
+  // permission bar as /api/agent-activity (run listings).
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const parsed = runTraceQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: { code: 'INVALID_QUERY_PARAMS', message: 'Invalid query parameters' },
+        details: parsed.error.flatten(),
+      });
+      return;
+    }
+
+    const { cursor, limit, eventTypes, sinceTimestamp, untilTimestamp, toolSlug } = parsed.data;
+
+    try {
+      const result = await runTraceService.query(
+        {
+          runId: req.params.runId,
+          cursor,
+          limit,
+          eventTypes,
+          sinceTimestamp,
+          untilTimestamp,
+          toolSlug,
+        },
+        req.orgId!,
+      );
+
+      // Route-layer viewer projection (spec §5.4 — second of two layers).
+      //
+      // getRunOwnerUserId returns three states:
+      //   - string  — run is owned by a specific user
+      //   - null    — run is subaccount-owned (no per-user owner)
+      //   - undefined — run does not exist or belongs to a different org
+      // The undefined case MUST NOT collapse to null — the projection treats
+      // ownerUserId===null as "no privacy boundary, return all events". A
+      // failed owner lookup is failed closed (404) instead.
+      const ownerLookup = await agentActivityService.getRunOwnerUserId(
+        req.params.runId,
+        req.orgId!,
+      );
+      if (ownerLookup === undefined) {
+        res.status(404).json({
+          errorCode: 'RUN_NOT_FOUND',
+          message: 'Run not found in this organisation.',
+        });
+        return;
+      }
+      const projected = runTraceProjectionForViewer(req.user!.id, {
+        ownerUserId: ownerLookup,
+        events: result.events as unknown as import('../services/runTracePure.js').ProjectableEvent[],
+      });
+
+      res.json({ ...result, events: projected.events });
+    } catch (err) {
+      if (err instanceof InvalidRunTraceCursorError) {
+        res.status(400).json({
+          errorCode: err.errorCode,
+          message: err.message,
+        });
+        return;
+      }
+      throw err;
+    }
+  }),
+);
 
 export default router;

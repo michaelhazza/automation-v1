@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Configuration Assistant · chat (simplified)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    background: #f5f6f8; color: #1a1d23; font-size: 14px; line-height: 1.55;
+  }
+  .annot-banner {
+    background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+    color: #78350f; padding: 8px 16px; font-size: 12px; text-align: center; font-weight: 500;
+  }
+  .container {
+    max-width: 760px; margin: 32px auto; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+    display: grid; grid-template-rows: auto 1fr auto; min-height: 640px;
+  }
+
+  .chat-head {
+    padding: 14px 20px; border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+    background: #fafbfc;
+  }
+  .chat-head h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
+  .chat-head .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .chat-head .close { font-size: 22px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 6px; }
+
+  .context-strip {
+    padding: 10px 20px; background: #eef2ff; font-size: 12px; color: #3730a3;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .chat-body {
+    padding: 20px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  .msg { max-width: 78%; }
+  .msg.user { align-self: flex-end; background: #4f46e5; color: #fff; padding: 10px 14px; border-radius: 12px 12px 2px 12px; font-size: 13px; }
+  .msg.assistant { align-self: flex-start; background: #f3f4f6; color: #1a1d23; padding: 10px 14px; border-radius: 12px 12px 12px 2px; font-size: 13px; }
+  .msg.assistant p { margin-bottom: 6px; }
+  .msg.assistant p:last-child { margin-bottom: 0; }
+
+  .conf-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 12px 14px; margin-top: 6px; font-size: 13px;
+  }
+  .conf-card .ctitle {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: #6b7280; font-weight: 600; margin-bottom: 6px;
+  }
+  .conf-card .diff { font-family: "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.6; }
+  .conf-card .diff .before { color: #6b7280; text-decoration: line-through; }
+  .conf-card .diff .after { color: #065f46; font-weight: 600; }
+  .conf-card .conf-actions {
+    margin-top: 10px; display: flex; gap: 6px;
+  }
+  .conf-actions .btn-apply {
+    padding: 6px 12px; font-size: 12px; font-weight: 600; background: #4f46e5; color: #fff;
+    border: 1px solid #4338ca; border-radius: 5px; cursor: pointer;
+  }
+  .conf-actions .btn-cancel {
+    padding: 6px 12px; font-size: 12px; background: #fff; color: #4b5563;
+    border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer;
+  }
+
+  .sensitive-note {
+    font-size: 12px; color: #92400e; background: #fef3c7;
+    padding: 6px 10px; border-radius: 4px; margin-top: 8px;
+    border: 1px solid #fde68a;
+  }
+
+  .starters {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
+  }
+  .starter-chip {
+    font-size: 12px; padding: 6px 12px; background: #fff; border: 1px solid #d1d5db;
+    border-radius: 16px; cursor: pointer; color: #4b5563;
+  }
+  .starter-chip:hover { border-color: #4338ca; color: #4338ca; }
+
+  .chat-footer {
+    padding: 14px 20px; border-top: 1px solid #e5e7eb; background: #fafbfc;
+  }
+  .input-row { display: flex; gap: 8px; }
+  .input-row input {
+    flex: 1; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 13px; font-family: inherit;
+  }
+  .input-row input:focus { outline: none; border-color: #4338ca; }
+  .input-row button {
+    padding: 9px 14px; background: #4f46e5; color: #fff;
+    border: 1px solid #4338ca; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="annot-banner">
+  Configuration Assistant chat (simplified) · minimised-state pill removed, Undo / View-in-settings / See-history buttons dropped.
+  Shipped affordances remain: Apply / Open review queue / Cancel request.
+</div>
+
+<div class="container">
+  <div class="chat-head">
+    <div>
+      <h2>Configuration Assistant</h2>
+      <div class="sub">Change any ClientPulse setting in plain language.</div>
+    </div>
+    <button class="close">×</button>
+  </div>
+
+  <div class="context-strip">
+    Scope: Smith Dental org · 2 leaf overrides from GHL Agency Intelligence template.
+  </div>
+
+  <div class="chat-body">
+    <div class="msg assistant">
+      Hi — ask me anything about your ClientPulse config. I'll show you a preview before anything changes. Low-risk edits apply immediately; sensitive changes go to review.
+      <div class="starters">
+        <span class="starter-chip">Make the At Risk threshold stricter</span>
+        <span class="starter-chip">Add SMS to my intervention options</span>
+        <span class="starter-chip">Why did Smith Dental drop?</span>
+      </div>
+    </div>
+
+    <div class="msg user">Make the At Risk threshold stricter — I want more clients flagged earlier.</div>
+
+    <div class="msg assistant">
+      <p>Got it. The current At Risk band is <strong>20–39</strong>. I'll shift the upper bound down so clients enter At Risk sooner.</p>
+
+      <div class="conf-card">
+        <div class="ctitle">Proposed change · churn_bands.at_risk</div>
+        <div class="diff">
+          upper: <span class="before">39</span> → <span class="after">44</span><br>
+          lower: 20 (unchanged)
+        </div>
+        <div class="conf-actions">
+          <button class="btn-apply">Apply</button>
+          <button class="btn-cancel">Cancel</button>
+        </div>
+      </div>
+      <p style="margin-top:6px;">This is a low-risk change — I can apply it directly.</p>
+    </div>
+
+    <div class="msg user">Also lower the alert threshold so I get pinged earlier.</div>
+
+    <div class="msg assistant">
+      <p>Lowering the alert threshold is a <strong>sensitive</strong> change — it could trigger a lot of alerts. I'll route this through review.</p>
+
+      <div class="conf-card">
+        <div class="ctitle">Proposed change · alert_limits.operator_alert_threshold</div>
+        <div class="diff">
+          score: <span class="before">30</span> → <span class="after">40</span>
+        </div>
+        <div class="sensitive-note">
+          Sensitive change — routed to review queue. You'll get a confirmation once Ben approves.
+        </div>
+        <div class="conf-actions">
+          <button class="btn-apply">Open review queue →</button>
+          <button class="btn-cancel">Cancel request</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chat-footer">
+    <div class="input-row">
+      <input type="text" placeholder="Ask a question or describe a change…">
+      <button>Send</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

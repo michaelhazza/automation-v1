@@ -19,7 +19,6 @@ const EnvSchema = z.object({
 
   // pg-boss / concurrency
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
-  IEE_BROWSER_CONCURRENCY: z.coerce.number().int().positive().default(1),
   IEE_DEV_CONCURRENCY:     z.coerce.number().int().positive().default(2),
 
   // Heartbeat / reconciliation (§13.3)
@@ -28,11 +27,6 @@ const EnvSchema = z.object({
 
   // Reservation TTL (§13.6.1.a) — must match server-side IEE_RESERVATION_TTL_MINUTES
   IEE_RESERVATION_TTL_MINUTES: z.coerce.number().int().positive().default(15),
-
-  // Runtime cost pricing (§11.3.4) — defaults to 0 in dev so test runs don't pollute reporting
-  IEE_COST_CPU_USD_PER_SEC:    z.coerce.number().nonnegative().default(0),
-  IEE_COST_MEM_USD_PER_GB_HR:  z.coerce.number().nonnegative().default(0),
-  IEE_COST_FLAT_USD_PER_RUN:   z.coerce.number().nonnegative().default(0),
 
   // Session corruption recovery (§13.6)
   IEE_SESSION_TTL_DAYS:        z.coerce.number().int().positive().default(30),
@@ -44,9 +38,6 @@ const EnvSchema = z.object({
 
   // System prompt knobs
   IEE_NO_PROGRESS_THRESHOLD: z.coerce.number().int().positive().default(3),
-
-  // Queue depth periodic logger (reviewer round 4 #5)
-  IEE_QUEUE_METRICS_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });

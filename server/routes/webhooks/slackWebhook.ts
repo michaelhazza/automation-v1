@@ -5,6 +5,7 @@ import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import * as slackConversationService from '../../services/slackConversationService.js';
 import type { SlackInboundPayload } from '../../jobs/slackInboundJob.js';
+import { recordIncident } from '../../services/incidentIngestor.js';
 
 const router = Router();
 
@@ -80,6 +81,14 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
     }
   } catch (err) {
     console.error('[Slack Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    await recordIncident({
+      source: 'route',
+      summary: 'Slack webhook DB lookup failed',
+      fingerprintOverride: 'webhook:slack:db_lookup_failed',
+      severity: 'medium',
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.type },
+    });
     res.status(500).json({ error: 'Internal error' });
     return;
   }
@@ -118,22 +127,8 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
     const orgId = config.organisationId;
 
     if (eventType === 'app_mention' && slackEvent) {
-      // @mention in a channel — create conversation and enqueue job
-      const threadTs = (slackEvent.thread_ts ?? slackEvent.ts) as string;
-      const channelId = slackEvent.channel as string;
-      const workspaceId = (event.team_id ?? '') as string;
-      const text = (slackEvent.text ?? '') as string;
-      const slackUserId = (slackEvent.user ?? '') as string;
-
-      const existing = await slackConversationService.resolveConversation({
-        workspaceId, channelId, threadTs, orgId,
-      });
-
-      if (!existing) {
-        // New conversation — agent resolution would match @AgentName to an agent
-        // For now, log the intent. Full agent resolution requires parsing the mention.
-        console.info(`[Slack Webhook] app_mention in ${channelId}, thread ${threadTs}`);
-      }
+      // V1 no-op per spec §10.2 — full agent resolution deferred to a later phase
+      return;
     } else if (eventType === 'message' && slackEvent) {
       const channelType = slackEvent.channel_type as string | undefined;
       const threadTs = slackEvent.thread_ts as string | undefined;
@@ -175,6 +170,16 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
     }
   } catch (err) {
     console.error('[Slack Webhook] Error processing event:', err instanceof Error ? err.message : err);
+    const orgId = config?.organisationId;
+    await recordIncident({
+      source: 'route',
+      summary: 'Slack webhook event processing failed',
+      fingerprintOverride: 'webhook:slack:handler_failed',
+      severity: 'medium',
+      organisationId: orgId ?? null,
+      stack: err instanceof Error ? err.stack : undefined,
+      errorDetail: { eventType: (event as Record<string, unknown>)?.type },
+    });
   }
 }));
 

@@ -9,6 +9,7 @@
  *   npx tsx server/services/__tests__/agentBeliefServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   normalizeKey,
   normalizeValueForComparison,
@@ -28,34 +29,9 @@ import {
   type MergeConfig,
 } from '../agentBeliefServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(condition: boolean, label: string) {
-  if (!condition) throw new Error(label);
-}
-
 function assertEqual<T>(actual: T, expected: T, label: string) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-}
-
-function assertClose(actual: number, expected: number, tolerance: number, label: string) {
-  if (Math.abs(actual - expected) > tolerance) {
-    throw new Error(`${label}: expected ~${expected}, got ${actual}`);
   }
 }
 
@@ -102,49 +78,49 @@ console.log('');
 
 test('normalizeKey — lowercase and trim', () => {
   const r = normalizeKey('  Client_Platform  ');
-  assertEqual(r.key, 'client_platform', 'key');
-  assert(!r.aliased, 'not aliased');
+  expect(r.key, 'key').toBe('client_platform');
+  expect(!r.aliased, 'not aliased').toBeTruthy();
 });
 
 test('normalizeKey — spaces become underscores', () => {
   const r = normalizeKey('client platform');
-  assertEqual(r.key, 'client_platform', 'key');
+  expect(r.key, 'key').toBe('client_platform');
 });
 
 test('normalizeKey — strips non-alphanumeric', () => {
   const r = normalizeKey('client-platform!');
-  assertEqual(r.key, 'clientplatform', 'key');
+  expect(r.key, 'key').toBe('clientplatform');
 });
 
 test('normalizeKey — resolves alias: ecommerce_platform → client_platform', () => {
   const r = normalizeKey('ecommerce_platform');
-  assertEqual(r.key, 'client_platform', 'canonical key');
-  assert(r.aliased, 'flagged as aliased');
-  assertEqual(r.originalKey, 'ecommerce_platform', 'original');
+  expect(r.key, 'canonical key').toBe('client_platform');
+  expect(r.aliased, 'flagged as aliased').toBeTruthy();
+  expect(r.originalKey, 'original').toBe('ecommerce_platform');
 });
 
 test('normalizeKey — resolves alias: cms → client_platform', () => {
   const r = normalizeKey('CMS');
-  assertEqual(r.key, 'client_platform', 'canonical key');
-  assert(r.aliased, 'flagged as aliased');
+  expect(r.key, 'canonical key').toBe('client_platform');
+  expect(r.aliased, 'flagged as aliased').toBeTruthy();
 });
 
 test('normalizeKey — resolves alias: report_frequency → reporting_cadence', () => {
   const r = normalizeKey('report_frequency');
-  assertEqual(r.key, 'reporting_cadence', 'canonical key');
-  assert(r.aliased, 'flagged as aliased');
+  expect(r.key, 'canonical key').toBe('reporting_cadence');
+  expect(r.aliased, 'flagged as aliased').toBeTruthy();
 });
 
 test('normalizeKey — non-aliased key passes through', () => {
   const r = normalizeKey('custom_metric_xyz');
-  assertEqual(r.key, 'custom_metric_xyz', 'key unchanged');
-  assert(!r.aliased, 'not aliased');
+  expect(r.key, 'key unchanged').toBe('custom_metric_xyz');
+  expect(!r.aliased, 'not aliased').toBeTruthy();
 });
 
 test('normalizeKey — custom alias map', () => {
   const r = normalizeKey('foo', { foo: 'bar' });
-  assertEqual(r.key, 'bar', 'resolved');
-  assert(r.aliased, 'aliased');
+  expect(r.key, 'resolved').toBe('bar');
+  expect(r.aliased, 'aliased').toBeTruthy();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -154,18 +130,18 @@ console.log('');
 // ══════════════════════════════════════════════════════════════════════════════
 
 test('validateKeyAliases — valid map returns null', () => {
-  assertEqual(validateKeyAliases(KEY_ALIASES), null, 'no error');
+  expect(validateKeyAliases(KEY_ALIASES), 'no error').toBe(null);
 });
 
 test('validateKeyAliases — detects chaining', () => {
   const bad = { a: 'b', b: 'c' };
   const err = validateKeyAliases(bad);
-  assert(err !== null, 'should return error');
-  assert(err!.includes('Chaining'), 'mentions Chaining');
+  expect(err !== null, 'should return error').toBeTruthy();
+  expect(err!.includes('Chaining'), 'mentions Chaining').toBeTruthy();
 });
 
 test('validateKeyAliases — empty map is valid', () => {
-  assertEqual(validateKeyAliases({}), null, 'no error');
+  expect(validateKeyAliases({}), 'no error').toBe(null);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -175,43 +151,23 @@ console.log('');
 // ══════════════════════════════════════════════════════════════════════════════
 
 test('normalizeValueForComparison — identical strings match', () => {
-  assertEqual(
-    normalizeValueForComparison('Uses WooCommerce'),
-    normalizeValueForComparison('Uses WooCommerce'),
-    'match',
-  );
+  expect(normalizeValueForComparison('Uses WooCommerce'), 'match').toEqual(normalizeValueForComparison('Uses WooCommerce'));
 });
 
 test('normalizeValueForComparison — case insensitive', () => {
-  assertEqual(
-    normalizeValueForComparison('uses woocommerce'),
-    normalizeValueForComparison('Uses WooCommerce'),
-    'case match',
-  );
+  expect(normalizeValueForComparison('uses woocommerce'), 'case match').toEqual(normalizeValueForComparison('Uses WooCommerce'));
 });
 
 test('normalizeValueForComparison — strips punctuation', () => {
-  assertEqual(
-    normalizeValueForComparison('Uses WooCommerce.'),
-    normalizeValueForComparison('Uses WooCommerce'),
-    'punctuation match',
-  );
+  expect(normalizeValueForComparison('Uses WooCommerce.'), 'punctuation match').toEqual(normalizeValueForComparison('Uses WooCommerce'));
 });
 
 test('normalizeValueForComparison — strips bracketed text', () => {
-  assertEqual(
-    normalizeValueForComparison('WooCommerce (WordPress)'),
-    normalizeValueForComparison('WooCommerce'),
-    'brackets stripped',
-  );
+  expect(normalizeValueForComparison('WooCommerce (WordPress)'), 'brackets stripped').toEqual(normalizeValueForComparison('WooCommerce'));
 });
 
 test('normalizeValueForComparison — collapses whitespace', () => {
-  assertEqual(
-    normalizeValueForComparison('Uses   WooCommerce'),
-    normalizeValueForComparison('Uses WooCommerce'),
-    'whitespace collapsed',
-  );
+  expect(normalizeValueForComparison('Uses   WooCommerce'), 'whitespace collapsed').toEqual(normalizeValueForComparison('Uses WooCommerce'));
 });
 
 test('normalizeValueForComparison — "Client uses WooCommerce" matches "Client is using WooCommerce"', () => {
@@ -219,7 +175,7 @@ test('normalizeValueForComparison — "Client uses WooCommerce" matches "Client 
   // This is the expected boundary: purely lexical, not semantic
   const a = normalizeValueForComparison('Client uses WooCommerce');
   const b = normalizeValueForComparison('Client is using WooCommerce');
-  assert(a !== b, 'different phrasing does not match (lexical only)');
+  expect(a !== b, 'different phrasing does not match (lexical only)').toBeTruthy();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -230,90 +186,90 @@ console.log('');
 
 test('add — no existing belief → add', () => {
   const action = determineEffectiveAction(makeItem(), undefined, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'add', 'effective action');
+  expect(action, 'effective action').toBe('add');
 });
 
 test('reinforce — existing belief with same value → reinforce', () => {
   const existing = makeBelief({ value: 'Uses WooCommerce' });
   const item = makeItem({ action: 'reinforce', value: 'Uses WooCommerce' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'reinforce', 'effective action');
+  expect(action, 'effective action').toBe('reinforce');
 });
 
 test('reinforce — LLM says add but key exists with same value → reinforce', () => {
   const existing = makeBelief({ value: 'Uses WooCommerce' });
   const item = makeItem({ action: 'add', value: 'Uses WooCommerce' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'reinforce', 'coerced to reinforce');
+  expect(action, 'coerced to reinforce').toBe('reinforce');
 });
 
 test('update — existing belief with different value → update', () => {
   const existing = makeBelief({ value: 'Uses Shopify' });
   const item = makeItem({ action: 'update', value: 'Uses WooCommerce' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'update', 'effective action');
+  expect(action, 'effective action').toBe('update');
 });
 
 test('update — LLM says add but key exists with different value → update', () => {
   const existing = makeBelief({ value: 'Uses Shopify' });
   const item = makeItem({ action: 'add', value: 'Uses WooCommerce' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'update', 'coerced to update');
+  expect(action, 'coerced to update').toBe('update');
 });
 
 test('idempotency — same run already applied → skip', () => {
   const existing = makeBelief({ sourceRunId: 'run-1' });
   const item = makeItem();
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'idempotency guard fires');
+  expect(action, 'idempotency guard fires').toBe('skip');
 });
 
 test('user override guard — existing is user_override → skip', () => {
   const existing = makeBelief({ source: 'user_override', confidence: 1.0 });
   const item = makeItem({ action: 'update', value: 'Different value' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'user override protected');
+  expect(action, 'user override protected').toBe('skip');
 });
 
 test('user override guard — remove action also skipped for user_override', () => {
   const existing = makeBelief({ source: 'user_override', confidence: 1.0 });
   const item = makeItem({ action: 'remove', confidence: 0.95 });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'user override not removable by agent');
+  expect(action, 'user override not removable by agent').toBe('skip');
 });
 
 test('remove — high confidence, exceeds existing → remove', () => {
   const existing = makeBelief({ confidence: 0.7 });
   const item = makeItem({ action: 'remove', confidence: 0.9 });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'remove', 'effective action');
+  expect(action, 'effective action').toBe('remove');
 });
 
 test('remove — below removeMinConfidence → skip', () => {
   const existing = makeBelief({ confidence: 0.5 });
   const item = makeItem({ action: 'remove', confidence: 0.6 });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'below threshold');
+  expect(action, 'below threshold').toBe('skip');
 });
 
 test('remove — below existing confidence → skip', () => {
   const existing = makeBelief({ confidence: 0.95 });
   const item = makeItem({ action: 'remove', confidence: 0.85 });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'below existing confidence');
+  expect(action, 'below existing confidence').toBe('skip');
 });
 
 test('remove — no existing belief → skip', () => {
   const item = makeItem({ action: 'remove', confidence: 0.9 });
   const action = determineEffectiveAction(item, undefined, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'nothing to remove');
+  expect(action, 'nothing to remove').toBe('skip');
 });
 
 test('value normalization prevents false update — "WooCommerce (WordPress)" vs "WooCommerce"', () => {
   const existing = makeBelief({ value: 'WooCommerce (WordPress)' });
   const item = makeItem({ action: 'update', value: 'WooCommerce' });
   const action = determineEffectiveAction(item, existing, 'run-1', DEFAULT_CONFIG);
-  assertEqual(action, 'reinforce', 'normalized values match → reinforce not update');
+  expect(action, 'normalized values match → reinforce not update').toBe('reinforce');
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -323,15 +279,15 @@ console.log('');
 // ══════════════════════════════════════════════════════════════════════════════
 
 test('computeUpdateConfidence — caps at the minimum of existing, new, and cap', () => {
-  assertClose(computeUpdateConfidence(0.8, 0.9, 0.7), 0.7, 0.001, 'capped');
-  assertClose(computeUpdateConfidence(0.5, 0.9, 0.7), 0.5, 0.001, 'existing is lowest');
-  assertClose(computeUpdateConfidence(0.8, 0.3, 0.7), 0.3, 0.001, 'new is lowest');
+  expect(computeUpdateConfidence(0.8, 0.9, 0.7)).toBeCloseTo(0.7, 4);
+  expect(computeUpdateConfidence(0.5, 0.9, 0.7)).toBeCloseTo(0.5, 4);
+  expect(computeUpdateConfidence(0.8, 0.3, 0.7)).toBeCloseTo(0.3, 4);
 });
 
 test('computeReinforceConfidence — boosts by increment, caps at ceiling', () => {
-  assertClose(computeReinforceConfidence(0.7, 0.05, 0.9), 0.75, 0.001, 'boosted');
-  assertClose(computeReinforceConfidence(0.88, 0.05, 0.9), 0.9, 0.001, 'capped at ceiling');
-  assertClose(computeReinforceConfidence(0.9, 0.05, 0.9), 0.9, 0.001, 'already at ceiling');
+  expect(computeReinforceConfidence(0.7, 0.05, 0.9)).toBeCloseTo(0.75, 4);
+  expect(computeReinforceConfidence(0.88, 0.05, 0.9)).toBeCloseTo(0.9, 4);
+  expect(computeReinforceConfidence(0.9, 0.05, 0.9)).toBeCloseTo(0.9, 4);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -342,11 +298,11 @@ console.log('');
 
 test('formatSingleBelief — renders confidence and value', () => {
   const b = makeBelief({ confidence: 0.85, value: 'Client prefers weekly reports' });
-  assertEqual(formatSingleBelief(b), '- [0.85] Client prefers weekly reports', 'format');
+  expect(formatSingleBelief(b), 'format').toBe('- [0.85] Client prefers weekly reports');
 });
 
 test('formatBeliefsForPrompt — empty returns empty string', () => {
-  assertEqual(formatBeliefsForPrompt([]), '', 'empty');
+  expect(formatBeliefsForPrompt([]), 'empty').toBe('');
 });
 
 test('formatBeliefsForPrompt — groups by category', () => {
@@ -356,16 +312,16 @@ test('formatBeliefsForPrompt — groups by category', () => {
     makeBelief({ category: 'preference', value: 'Concise style', confidence: 0.8, id: 'b-3', beliefKey: 'style' }),
   ];
   const result = formatBeliefsForPrompt(beliefs);
-  assert(result.includes('**Preference:**'), 'has Preference header');
-  assert(result.includes('**Metric:**'), 'has Metric header');
-  assert(result.includes('[0.90]'), 'has confidence');
-  assert(result.includes('Prefers weekly reports'), 'has value');
+  expect(result.includes('**Preference:**'), 'has Preference header').toBeTruthy();
+  expect(result.includes('**Metric:**'), 'has Metric header').toBeTruthy();
+  expect(result.includes('[0.90]'), 'has confidence').toBeTruthy();
+  expect(result.includes('Prefers weekly reports'), 'has value').toBeTruthy();
 });
 
 test('formatBeliefsForPrompt — includes preamble text', () => {
   const beliefs = [makeBelief()];
   const result = formatBeliefsForPrompt(beliefs);
-  assert(result.includes('facts you have formed from previous runs'), 'preamble present');
+  expect(result.includes('facts you have formed from previous runs'), 'preamble present').toBeTruthy();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -380,7 +336,7 @@ test('selectBeliefsWithinBudget — returns all beliefs when within budget', () 
     makeBelief({ confidence: 0.7, id: 'b-2', beliefKey: 'other' }),
   ];
   const result = selectBeliefsWithinBudget(beliefs, 1500);
-  assertEqual(result.length, 2, 'all included');
+  expect(result.length, 'all included').toBe(2);
 });
 
 test('selectBeliefsWithinBudget — drops lowest confidence first', () => {
@@ -392,13 +348,13 @@ test('selectBeliefsWithinBudget — drops lowest confidence first', () => {
   ];
   // Budget that fits ~2 beliefs (each is ~5 tokens)
   const result = selectBeliefsWithinBudget(beliefs, 12);
-  assert(result.length <= 2, `fits within budget (got ${result.length})`);
+  expect(result.length <= 2, `fits within budget (got ${result.length})`).toBeTruthy();
   // Highest confidence should survive
-  assert(result.some(b => b.confidence === 0.9), 'high confidence included');
+  expect(result.some(b => b.confidence === 0.9), 'high confidence included').toBeTruthy();
 });
 
 test('selectBeliefsWithinBudget — empty input returns empty', () => {
-  assertEqual(selectBeliefsWithinBudget([], 1500).length, 0, 'empty');
+  expect(selectBeliefsWithinBudget([], 1500).length, 'empty').toBe(0);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -409,65 +365,65 @@ console.log('');
 
 test('parseExtractionResponse — valid JSON array', () => {
   const result = parseExtractionResponse('[{"key":"a","value":"b"}]');
-  assert(result !== null, 'parsed');
-  assertEqual(result!.length, 1, 'one item');
+  expect(result !== null, 'parsed').toBeTruthy();
+  expect(result!.length, 'one item').toBe(1);
 });
 
 test('parseExtractionResponse — markdown fenced JSON', () => {
   const result = parseExtractionResponse('```json\n[{"key":"a","value":"b"}]\n```');
-  assert(result !== null, 'parsed');
-  assertEqual(result!.length, 1, 'one item');
+  expect(result !== null, 'parsed').toBeTruthy();
+  expect(result!.length, 'one item').toBe(1);
 });
 
 test('parseExtractionResponse — invalid JSON returns null', () => {
-  assertEqual(parseExtractionResponse('not json'), null, 'null on invalid');
+  expect(parseExtractionResponse('not json'), 'null on invalid').toBe(null);
 });
 
 test('parseExtractionResponse — empty string returns null', () => {
-  assertEqual(parseExtractionResponse(''), null, 'null on empty');
+  expect(parseExtractionResponse(''), 'null on empty').toBe(null);
 });
 
 test('parseExtractionResponse — non-array JSON returns null', () => {
-  assertEqual(parseExtractionResponse('{"key":"a"}'), null, 'null on object');
+  expect(parseExtractionResponse('{"key":"a"}'), 'null on object').toBe(null);
 });
 
 test('parseExtractionItem — valid item', () => {
   const item = parseExtractionItem({ key: 'test', value: 'hello', confidence: 0.8, action: 'add' }, 500);
-  assert(item !== null, 'parsed');
-  assertEqual(item!.key, 'test', 'key');
-  assertEqual(item!.value, 'hello', 'value');
-  assertClose(item!.confidence!, 0.8, 0.001, 'confidence');
-  assertEqual(item!.action, 'add', 'action');
+  expect(item !== null, 'parsed').toBeTruthy();
+  expect(item!.key, 'key').toBe('test');
+  expect(item!.value, 'value').toBe('hello');
+  expect(item!.confidence!).toBeCloseTo(0.8, 4);
+  expect(item!.action, 'action').toBe('add');
 });
 
 test('parseExtractionItem — missing key returns null', () => {
-  assertEqual(parseExtractionItem({ value: 'hello' }, 500), null, 'null');
+  expect(parseExtractionItem({ value: 'hello' }, 500), 'null').toBe(null);
 });
 
 test('parseExtractionItem — missing value returns null', () => {
-  assertEqual(parseExtractionItem({ key: 'test' }, 500), null, 'null');
+  expect(parseExtractionItem({ key: 'test' }, 500), 'null').toBe(null);
 });
 
 test('parseExtractionItem — defaults for optional fields', () => {
   const item = parseExtractionItem({ key: 'test', value: 'hello' }, 500);
-  assert(item !== null, 'parsed');
-  assertEqual(item!.category, 'general', 'default category');
-  assertClose(item!.confidence!, 0.7, 0.001, 'default confidence');
-  assertEqual(item!.action, 'add', 'default action');
-  assertEqual(item!.subject, null, 'default subject');
+  expect(item !== null, 'parsed').toBeTruthy();
+  expect(item!.category, 'default category').toBe('general');
+  expect(item!.confidence!).toBeCloseTo(0.7, 4);
+  expect(item!.action, 'default action').toBe('add');
+  expect(item!.subject, 'default subject').toBe(null);
 });
 
 test('parseExtractionItem — truncates value to maxLength', () => {
   const longValue = 'x'.repeat(600);
   const item = parseExtractionItem({ key: 'test', value: longValue }, 500);
-  assertEqual(item!.value.length, 500, 'truncated');
+  expect(item!.value.length, 'truncated').toBe(500);
 });
 
 test('parseExtractionItem — clamps confidence to [0, 1]', () => {
   const over = parseExtractionItem({ key: 'a', value: 'b', confidence: 1.5 }, 500);
-  assertClose(over!.confidence!, 1.0, 0.001, 'clamped to 1');
+  expect(over!.confidence!).toBeCloseTo(1.0, 4);
   const under = parseExtractionItem({ key: 'a', value: 'b', confidence: -0.5 }, 500);
-  assertClose(under!.confidence!, 0.0, 0.001, 'clamped to 0');
+  expect(under!.confidence!).toBeCloseTo(0.0, 4);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -478,16 +434,16 @@ console.log('');
 
 test('estimateTokens — rough word-based estimate', () => {
   // "hello world test" = 3 words → ceil(3/0.75) = 4
-  assertEqual(estimateTokens('hello world test'), 4, 'three words');
+  expect(estimateTokens('hello world test'), 'three words').toBe(4);
 });
 
 test('estimateTokens — single word', () => {
-  assertEqual(estimateTokens('hello'), 2, 'single word → ceil(1/0.75)');
+  expect(estimateTokens('hello'), 'single word → ceil(1/0.75)').toBe(2);
 });
 
 test('estimateTokens — empty string', () => {
   // empty split → [''] → 1 word → ceil(1/0.75) = 2
-  assertEqual(estimateTokens(''), 2, 'empty');
+  expect(estimateTokens(''), 'empty').toBe(2);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -502,23 +458,23 @@ test('scenario: first run on fresh workspace → all adds', () => {
     makeItem({ key: 'cadence', value: 'Weekly reports', action: 'add' }),
   ];
   const actions = items.map(i => determineEffectiveAction(i, undefined, 'run-1', DEFAULT_CONFIG));
-  assertEqual(actions, ['add', 'add'], 'all adds');
+  expect(actions, 'all adds').toEqual(['add', 'add']);
 });
 
 test('scenario: second run, same beliefs → all reinforces', () => {
   const existing = makeBelief({ value: 'WooCommerce', beliefKey: 'platform', sourceRunId: 'run-1' });
   const item = makeItem({ key: 'platform', value: 'WooCommerce', action: 'reinforce' });
   const action = determineEffectiveAction(item, existing, 'run-2', DEFAULT_CONFIG);
-  assertEqual(action, 'reinforce', 'reinforced');
+  expect(action, 'reinforced').toBe('reinforce');
 });
 
 test('scenario: platform change → update with confidence cap', () => {
   const existing = makeBelief({ value: 'Shopify', confidence: 0.85, sourceRunId: 'run-1' });
   const item = makeItem({ key: 'client_platform', value: 'WooCommerce', confidence: 0.9, action: 'update' });
   const action = determineEffectiveAction(item, existing, 'run-2', DEFAULT_CONFIG);
-  assertEqual(action, 'update', 'update action');
+  expect(action, 'update action').toBe('update');
   // Confidence should be min(0.85, 0.9, 0.7) = 0.7
-  assertClose(computeUpdateConfidence(0.85, 0.9, 0.7), 0.7, 0.001, 'confidence capped');
+  expect(computeUpdateConfidence(0.85, 0.9, 0.7)).toBeCloseTo(0.7, 4);
 });
 
 test('scenario: replay of same run (idempotency) → all skips', () => {
@@ -530,7 +486,7 @@ test('scenario: replay of same run (idempotency) → all skips', () => {
     makeItem({ action: 'remove', confidence: 0.9 }),
   ];
   const actions = items.map(i => determineEffectiveAction(i, existing, 'run-1', DEFAULT_CONFIG));
-  assertEqual(actions, ['skip', 'skip', 'skip', 'skip'], 'all skipped on replay');
+  expect(actions, 'all skipped on replay').toEqual(['skip', 'skip', 'skip', 'skip']);
 });
 
 test('scenario: agent tries to override user correction → skip', () => {
@@ -542,18 +498,16 @@ test('scenario: agent tries to override user correction → skip', () => {
     makeItem({ action: 'remove', confidence: 0.99 }),
   ];
   const actions = items.map(i => determineEffectiveAction(i, existing, 'run-2', DEFAULT_CONFIG));
-  assertEqual(actions, ['skip', 'skip', 'skip', 'skip'], 'user override fully protected');
+  expect(actions, 'user override fully protected').toEqual(['skip', 'skip', 'skip', 'skip']);
 });
 
 test('scenario: noisy remove signal → skip (low confidence)', () => {
   const existing = makeBelief({ confidence: 0.85 });
   const item = makeItem({ action: 'remove', confidence: 0.6 });
   const action = determineEffectiveAction(item, existing, 'run-2', DEFAULT_CONFIG);
-  assertEqual(action, 'skip', 'noisy remove rejected');
+  expect(action, 'noisy remove rejected').toBe('skip');
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);

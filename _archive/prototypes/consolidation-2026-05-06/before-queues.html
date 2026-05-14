@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<!--
+  BEFORE: Two separate pages — JobQueueDashboardPage + SystemTaskQueuePage
+  Shows the current production state as a split-screen side-by-side comparison.
+  Round 7b-3 — 2026-05-06
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BEFORE: Queue Pages | Automation OS Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── Before-page wrapper ── */
+  body { background: #f4f6fb; }
+
+  .before-banner {
+    background: #fef9c3;
+    border-bottom: 2px solid #fde047;
+    padding: 12px 28px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .before-banner-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #fde047;
+    color: #713f12;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    padding: 3px 8px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .before-banner-text {
+    font-size: 12.5px;
+    color: #78350f;
+    line-height: 1.5;
+  }
+  .before-banner-text strong { font-weight: 700; color: #92400e; }
+  .before-banner-link {
+    font-size: 12px;
+    font-weight: 600;
+    color: #4f46e5;
+    text-decoration: none;
+    margin-left: auto;
+    flex-shrink: 0;
+    align-self: center;
+    white-space: nowrap;
+  }
+  .before-banner-link:hover { text-decoration: underline; }
+
+  /* ── Two-column split ── */
+  .before-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 100px);
+  }
+  .before-col {
+    border-right: 2px dashed #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .before-col:last-child { border-right: none; }
+
+  /* Fake mini app shell per column */
+  .mini-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .mini-topbar {
+    background: white;
+    border-bottom: 1px solid #e8ecf0;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .mini-topbar-route {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 2px 7px;
+  }
+  .mini-topbar-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .mini-body {
+    flex: 1;
+    padding: 20px 22px;
+    overflow-y: auto;
+    background: #f8fafc;
+  }
+
+  /* Annotation callouts */
+  .annotation {
+    background: #fef3c7;
+    border: 1px dashed #fbbf24;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #92400e;
+    font-weight: 500;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .annotation::before {
+    content: 'NOTE';
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    background: #fbbf24;
+    color: #713f12;
+    border-radius: 3px;
+    padding: 1px 4px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── JobQueueDashboardPage replica styles ── */
+  .jq-header {
+    margin-bottom: 18px;
+  }
+  .jq-header h2 {
+    font-size: 17px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+  }
+  .jq-header p {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 3px;
+  }
+
+  .jq-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 9px;
+    overflow: hidden;
+    border: 1px solid #e8ecf0;
+    font-size: 12px;
+  }
+  .jq-table thead tr {
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .jq-table th {
+    text-align: left;
+    padding: 7px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .jq-table tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .jq-table tbody tr:last-child { border-bottom: none; }
+  .jq-table td {
+    padding: 8px 10px;
+    color: #475569;
+    vertical-align: middle;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  .jq-table td.queue-name-col {
+    font-weight: 500;
+    color: #1e293b;
+    font-size: 11.5px;
+  }
+  .jq-table td.red-num { color: #dc2626; font-weight: 600; }
+  .jq-table td.amber-num { color: #d97706; font-weight: 600; }
+
+  /* Old section label — flat, no visual tier card */
+  .jq-section-row td {
+    background: #f8fafc;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #94a3b8;
+    padding: 5px 10px;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  /* ── SystemTaskQueuePage replica styles ── */
+  .sq-header {
+    margin-bottom: 18px;
+  }
+  .sq-header h2 {
+    font-size: 17px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+  }
+  .sq-header p {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 3px;
+  }
+
+  .sq-filter-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .sq-filter {
+    padding: 5px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: #475569;
+    background: white;
+    font-family: inherit;
+  }
+
+  .sq-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 9px;
+    overflow: hidden;
+    border: 1px solid #e8ecf0;
+    font-size: 11.5px;
+  }
+  .sq-table thead tr {
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .sq-table th {
+    text-align: left;
+    padding: 7px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .sq-table tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .sq-table tbody tr:last-child { border-bottom: none; }
+  .sq-table td {
+    padding: 7px 10px;
+    color: #475569;
+    vertical-align: middle;
+  }
+  .sq-badge-failed { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 12px; font-size: 10px; font-weight: 500; padding: 1px 7px; white-space: nowrap; }
+  .sq-badge-completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; border-radius: 12px; font-size: 10px; font-weight: 500; padding: 1px 7px; white-space: nowrap; }
+  .sq-badge-running { background: #f0f9ff; color: #0ea5e9; border: 1px solid #bae6fd; border-radius: 12px; font-size: 10px; font-weight: 500; padding: 1px 7px; white-space: nowrap; }
+
+  /* ── Problems box ── */
+  .problems-box {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 18px 24px;
+    margin: 20px 20px 0;
+  }
+  .problems-box h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #991b1b;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .problems-box h3::before {
+    content: '';
+    display: block;
+    width: 16px; height: 16px;
+    background: #ef4444;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .problems-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .problem-item {
+    background: white;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .problem-item-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #7f1d1d;
+    margin-bottom: 4px;
+  }
+  .problem-item-desc {
+    font-size: 11px;
+    color: #991b1b;
+    line-height: 1.45;
+  }
+</style>
+</head>
+<body>
+
+<!-- Before banner -->
+<div class="before-banner">
+  <span class="before-banner-pill">Before</span>
+  <div class="before-banner-text">
+    <strong>Two separate pages:</strong>
+    <code style="background:#fde68a;border-radius:3px;padding:1px 5px;font-size:11px;font-family:'JetBrains Mono',monospace;">JobQueueDashboardPage</code> (system/job-queues) for aggregate live queue health
+    and <code style="background:#fde68a;border-radius:3px;padding:1px 5px;font-size:11px;font-family:'JetBrains Mono',monospace;">SystemTaskQueuePage</code> (system/task-queue) for per-execution forensic log.
+    Consolidated into <strong>queues.html</strong> with two tabs.
+  </div>
+  <a href="queues.html" class="before-banner-link">View after &rarr;</a>
+</div>
+
+<!-- Two-column split -->
+<div class="before-split">
+
+  <!-- LEFT: JobQueueDashboardPage -->
+  <div class="before-col">
+    <div class="mini-shell">
+      <div class="mini-topbar">
+        <span class="mini-topbar-route">/system/job-queues</span>
+        <span class="mini-topbar-title">JobQueueDashboardPage</span>
+      </div>
+      <div class="mini-body">
+        <div class="jq-header">
+          <h2>Job Queue Dashboard</h2>
+          <p>Live queue health across all system queues</p>
+        </div>
+
+        <div class="annotation">
+          Per-tier grouping is implicit in the table sort order, not visual sections. No colored tier cards, no tier-level summary line.
+        </div>
+
+        <div class="annotation">
+          No DLQ retry UI. Retrying dead-letter jobs requires running a separate admin script via CLI.
+        </div>
+
+        <table class="jq-table">
+          <thead>
+            <tr>
+              <th>Queue name</th>
+              <th>Active</th>
+              <th>Pending</th>
+              <th>Completed</th>
+              <th>Failed</th>
+              <th>DLQ</th>
+              <th>Avg dur</th>
+              <th>Retry rate</th>
+              <th>Oldest pending</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- agent_execution group (sorted by name) -->
+            <tr class="jq-section-row"><td colspan="9">agent_execution</td></tr>
+            <tr>
+              <td class="queue-name-col">agent.dispatch</td>
+              <td>1</td><td>3</td><td>892</td><td>1</td>
+              <td>0</td><td>1.8s</td><td>1%</td><td>7s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">agent.delegate</td>
+              <td>2</td><td>11</td><td>1,203</td><td>4</td>
+              <td>0</td><td>2.4s</td><td>2%</td><td>18s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">agent.run</td>
+              <td>5</td><td class="amber-num">80</td><td>4,821</td><td>23</td>
+              <td class="red-num">5</td><td>6.1s</td><td class="amber-num">12%</td><td class="amber-num">4m 22s</td>
+            </tr>
+            <!-- financial group -->
+            <tr class="jq-section-row"><td colspan="9">financial</td></tr>
+            <tr>
+              <td class="queue-name-col">billing.invoice</td>
+              <td>0</td><td>0</td><td>418</td><td>0</td>
+              <td>0</td><td>12.4s</td><td>0%</td><td>—</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">spend.aggregate</td>
+              <td>2</td><td>14</td><td>2,110</td><td>7</td>
+              <td class="red-num">3</td><td>3.2s</td><td class="amber-num">8%</td><td>52s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">spend.report</td>
+              <td>1</td><td>5</td><td>634</td><td>2</td>
+              <td>0</td><td>7.8s</td><td>3%</td><td>33s</td>
+            </tr>
+            <!-- maintenance group -->
+            <tr class="jq-section-row"><td colspan="9">maintenance</td></tr>
+            <tr>
+              <td class="queue-name-col">audit.compact</td>
+              <td>0</td><td>1</td><td>688</td><td>0</td>
+              <td>0</td><td>4.4s</td><td>0%</td><td>6m 17s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">db.cleanup</td>
+              <td>1</td><td>4</td><td>2,904</td><td>1</td>
+              <td>0</td><td>8.9s</td><td>1%</td><td>2m 1s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">log.rotate</td>
+              <td>1</td><td>2</td><td>1,402</td><td>0</td>
+              <td>0</td><td>1.2s</td><td>0%</td><td>44s</td>
+            </tr>
+            <!-- memory group -->
+            <tr class="jq-section-row"><td colspan="9">memory</td></tr>
+            <tr>
+              <td class="queue-name-col">embeddings.generate</td>
+              <td>0</td><td>0</td><td>8,401</td><td>0</td>
+              <td>0</td><td>0.9s</td><td>0%</td><td>—</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">memory.consolidate</td>
+              <td>0</td><td>2</td><td>1,047</td><td>1</td>
+              <td>0</td><td>5.1s</td><td>1%</td><td>1m 13s</td>
+            </tr>
+            <tr>
+              <td class="queue-name-col">memory.enrich</td>
+              <td>1</td><td>5</td><td>3,112</td><td>3</td>
+              <td>0</td><td>2.7s</td><td>2%</td><td>28s</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:14px;">
+          <div class="annotation">
+            No queue detail drawer. Clicking a row does nothing. To investigate a specific queue, copy the name and search manually in SystemTaskQueuePage.
+          </div>
+          <div class="annotation">
+            No "Pause queue" / "Resume queue" action. Queue control requires direct database or Redis CLI access.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /left col -->
+
+  <!-- RIGHT: SystemTaskQueuePage -->
+  <div class="before-col">
+    <div class="mini-shell">
+      <div class="mini-topbar">
+        <span class="mini-topbar-route">/system/task-queue</span>
+        <span class="mini-topbar-title">SystemTaskQueuePage</span>
+      </div>
+      <div class="mini-body">
+        <div class="sq-header">
+          <h2>System Task Queue</h2>
+          <p>Per-execution forensic log for all engine task attempts</p>
+        </div>
+
+        <div class="annotation">
+          No way to drill from a queue's elevated state in the Dashboard to its specific failing executions. Must copy-paste queue name here manually.
+        </div>
+
+        <!-- Basic filter bar -->
+        <div class="sq-filter-row">
+          <select class="sq-filter">
+            <option>All statuses</option>
+            <option>queued</option>
+            <option>running</option>
+            <option selected>failed</option>
+            <option>completed</option>
+          </select>
+          <select class="sq-filter">
+            <option>All engine types</option>
+            <option>agent</option>
+            <option>workflow</option>
+            <option>automation</option>
+          </select>
+          <input class="sq-filter" type="text" placeholder="Search..." style="flex:1;min-width:120px;">
+        </div>
+
+        <div class="annotation">
+          No live tail. Page does not auto-update. Must manually reload to see new entries.
+        </div>
+
+        <div class="annotation">
+          No time range filter. Shows all time or a hardcoded recent window depending on server-side pagination.
+        </div>
+
+        <table class="sq-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Engine</th>
+              <th>Task ID</th>
+              <th>Queue</th>
+              <th>Started</th>
+              <th>Retry</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="sq-badge-failed">failed</span></td>
+              <td style="font-size:11px;color:#64748b;">agent</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_1ab2c</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.run</td>
+              <td style="font-size:11px;color:#94a3b8;">2m ago</td>
+              <td style="text-align:center;font-size:12px;">3</td>
+              <td style="font-size:11px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">HubSpot API rate limit exceeded</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-failed">failed</span></td>
+              <td style="font-size:11px;color:#64748b;">automation</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_3de4f</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.run</td>
+              <td style="font-size:11px;color:#94a3b8;">4m ago</td>
+              <td style="text-align:center;font-size:12px;">1</td>
+              <td style="font-size:11px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">OAuth token expired</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-failed">failed</span></td>
+              <td style="font-size:11px;color:#64748b;">agent</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_5gh6i</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">spend.aggregate</td>
+              <td style="font-size:11px;color:#94a3b8;">6m ago</td>
+              <td style="text-align:center;font-size:12px;">5</td>
+              <td style="font-size:11px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Database connection timeout</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-completed">completed</span></td>
+              <td style="font-size:11px;color:#64748b;">scheduled</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_7jk8l</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">spend.aggregate</td>
+              <td style="font-size:11px;color:#94a3b8;">9m ago</td>
+              <td style="text-align:center;font-size:12px;">0</td>
+              <td style="font-size:11px;color:#94a3b8;">—</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-failed">failed</span></td>
+              <td style="font-size:11px;color:#64748b;">workflow</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_9mn0p</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.run</td>
+              <td style="font-size:11px;color:#94a3b8;">11m ago</td>
+              <td style="text-align:center;font-size:12px;">2</td>
+              <td style="font-size:11px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">LLM call: max tokens exceeded</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-running">running</span></td>
+              <td style="font-size:11px;color:#64748b;">agent</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_1qr2s</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.run</td>
+              <td style="font-size:11px;color:#94a3b8;">13m ago</td>
+              <td style="text-align:center;font-size:12px;">0</td>
+              <td style="font-size:11px;color:#94a3b8;">—</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-failed">failed</span></td>
+              <td style="font-size:11px;color:#64748b;">webhook</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_3tu4v</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.dispatch</td>
+              <td style="font-size:11px;color:#94a3b8;">15m ago</td>
+              <td style="text-align:center;font-size:12px;">1</td>
+              <td style="font-size:11px;color:#dc2626;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">OAuth token expired for stripe</td>
+            </tr>
+            <tr>
+              <td><span class="sq-badge-completed">completed</span></td>
+              <td style="font-size:11px;color:#64748b;">agent</td>
+              <td style="font-size:10.5px;font-family:'JetBrains Mono',monospace;color:#94a3b8;">tsk_5wx6y</td>
+              <td style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#475569;">agent.run</td>
+              <td style="font-size:11px;color:#94a3b8;">17m ago</td>
+              <td style="text-align:center;font-size:12px;">0</td>
+              <td style="font-size:11px;color:#94a3b8;">—</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:14px;">
+          <div class="annotation">
+            Row click opens a detail modal with raw payload dump and stack trace. No "Retry now" or "Discard" action in the UI. Must use admin CLI.
+          </div>
+          <div class="annotation">
+            No process name or org context visible at a glance. All identification is via internal task ID and queue name. Must cross-reference run IDs manually.
+          </div>
+          <div class="annotation">
+            Pagination is page-based with no page-size selector. Default 25 rows. No indication of total execution count.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /right col -->
+
+</div><!-- /before-split -->
+
+<!-- Problems box spanning full width -->
+<div class="problems-box">
+  <h3>Problems with the current two-page approach</h3>
+  <div class="problems-list">
+    <div class="problem-item">
+      <div class="problem-item-title">Two pages for related data</div>
+      <div class="problem-item-desc">Queue health and execution forensics are the same data at different aggregation levels. SREs must navigate between two URLs to correlate a queue's elevated state with its specific failing runs.</div>
+    </div>
+    <div class="problem-item">
+      <div class="problem-item-title">No drill-down from queue to executions</div>
+      <div class="problem-item-desc">Clicking a queue row in JobQueueDashboardPage does nothing. To see failing executions for agent.run, the engineer must copy the queue name and manually search in SystemTaskQueuePage.</div>
+    </div>
+    <div class="problem-item">
+      <div class="problem-item-title">Tier grouping is data, not visual</div>
+      <div class="problem-item-desc">The JobQueueDashboardPage groups queues by tier via table section rows with no color coding, no tier-level summary, and no visual differentiation between tiers.</div>
+    </div>
+    <div class="problem-item">
+      <div class="problem-item-title">No live tail in SystemTaskQueuePage</div>
+      <div class="problem-item-desc">The execution log does not update in real time. During an incident, the engineer must manually reload the page to see new failure events as they arrive.</div>
+    </div>
+    <div class="problem-item">
+      <div class="problem-item-title">DLQ retry requires CLI</div>
+      <div class="problem-item-desc">Dead-letter queue jobs cannot be retried or discarded from the UI. The only remediation path is a separate admin script executed via command line, requiring terminal access and environment knowledge.</div>
+    </div>
+    <div class="problem-item">
+      <div class="problem-item-title">No queue pause / resume in UI</div>
+      <div class="problem-item-desc">Pausing a queue to stop processing during an outage requires direct Redis CLI access. There is no operator-facing pause control in either page.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Sidebar (system mode, no active page since this is a before-state) -->
+<script src="_sidebar.js"></script>
+<script>
+  // Show system sidebar but no active page (before state)
+  renderSidebar('system', '');
+</script>
+
+</body>
+</html>

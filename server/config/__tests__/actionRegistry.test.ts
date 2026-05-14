@@ -12,31 +12,13 @@
  * lightweight pattern as server/services/__tests__/runContextLoader.test.ts.
  */
 
+import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { ACTION_REGISTRY } from '../actionRegistry.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assert(cond: unknown, message: string) {
-  if (!cond) throw new Error(message);
-}
-
 const VALID_GATE_LEVELS = ['auto', 'review', 'block'] as const;
 const VALID_CATEGORIES = ['api', 'worker', 'browser', 'devops', 'mcp'] as const;
-const VALID_IDEMPOTENCY_STRATEGIES = ['read_only', 'keyed_write', 'locked'] as const;
+const VALID_IDEMPOTENCY_STRATEGIES = ['read_only', 'keyed_write', 'locked', 'state_based'] as const;
 
 console.log('');
 console.log('actionRegistry — every entry shape and metadata');
@@ -45,63 +27,56 @@ console.log('');
 const entries = Object.entries(ACTION_REGISTRY);
 
 test(`registry has at least 29 entries (current: ${entries.length})`, () => {
-  assert(entries.length >= 29, `expected >= 29 entries, got ${entries.length}`);
+  expect(entries.length >= 29, `expected >= 29 entries, got ${entries.length}`).toBeTruthy();
 });
 
 for (const [slug, def] of entries) {
   test(`${slug}: actionType matches map key`, () => {
-    assert(
-      def.actionType === slug,
-      `expected actionType='${slug}', got '${def.actionType}'`,
-    );
+    expect(def.actionType === slug, `expected actionType='${slug}', got '${def.actionType}'`).toBeTruthy();
   });
 
   test(`${slug}: parameterSchema is a Zod object`, () => {
-    assert(
-      def.parameterSchema instanceof z.ZodObject,
-      `parameterSchema is not a z.ZodObject (got ${def.parameterSchema?.constructor?.name ?? 'undefined'})`,
-    );
+    expect(def.parameterSchema instanceof z.ZodObject, `parameterSchema is not a z.ZodObject (got ${def.parameterSchema?.constructor?.name ?? 'undefined'})`).toBeTruthy();
   });
 
   test(`${slug}: parameterSchema validates an empty object iff no required fields`, () => {
     const result = def.parameterSchema.safeParse({});
     // We don't assert success/failure absolutely — we just verify safeParse
     // returns a typed result without throwing.
-    assert(typeof result.success === 'boolean', 'safeParse returned a typed result');
+    expect(typeof result.success === 'boolean', 'safeParse returned a typed result').toBeTruthy();
   });
 
   test(`${slug}: defaultGateLevel is in the valid set`, () => {
-    assert(
-      VALID_GATE_LEVELS.includes(def.defaultGateLevel),
-      `defaultGateLevel='${def.defaultGateLevel}' not in ${JSON.stringify(VALID_GATE_LEVELS)}`,
-    );
+    expect(VALID_GATE_LEVELS.includes(def.defaultGateLevel), `defaultGateLevel='${def.defaultGateLevel}' not in ${JSON.stringify(VALID_GATE_LEVELS)}`).toBeTruthy();
   });
 
   test(`${slug}: actionCategory is in the valid set`, () => {
-    assert(
-      VALID_CATEGORIES.includes(def.actionCategory),
-      `actionCategory='${def.actionCategory}' not in ${JSON.stringify(VALID_CATEGORIES)}`,
-    );
+    expect(VALID_CATEGORIES.includes(def.actionCategory), `actionCategory='${def.actionCategory}' not in ${JSON.stringify(VALID_CATEGORIES)}`).toBeTruthy();
   });
 
   test(`${slug}: idempotencyStrategy is declared and valid`, () => {
-    assert(
-      def.idempotencyStrategy !== undefined,
-      'idempotencyStrategy is undefined (required field)',
-    );
-    assert(
-      VALID_IDEMPOTENCY_STRATEGIES.includes(def.idempotencyStrategy),
-      `idempotencyStrategy='${def.idempotencyStrategy}' not in ${JSON.stringify(VALID_IDEMPOTENCY_STRATEGIES)}`,
-    );
+    expect(def.idempotencyStrategy !== undefined, 'idempotencyStrategy is undefined (required field)').toBeTruthy();
+    expect(VALID_IDEMPOTENCY_STRATEGIES.includes(def.idempotencyStrategy), `idempotencyStrategy='${def.idempotencyStrategy}' not in ${JSON.stringify(VALID_IDEMPOTENCY_STRATEGIES)}`).toBeTruthy();
   });
 
   test(`${slug}: retryPolicy has a valid strategy`, () => {
-    assert(def.retryPolicy !== undefined, 'retryPolicy missing');
+    expect(def.retryPolicy !== undefined, 'retryPolicy missing').toBeTruthy();
     const validStrategies = ['exponential_backoff', 'fixed', 'none'];
-    assert(
-      validStrategies.includes(def.retryPolicy.strategy),
-      `retryPolicy.strategy='${def.retryPolicy.strategy}' not in ${JSON.stringify(validStrategies)}`,
-    );
+    expect(validStrategies.includes(def.retryPolicy.strategy), `retryPolicy.strategy='${def.retryPolicy.strategy}' not in ${JSON.stringify(validStrategies)}`).toBeTruthy();
+  });
+
+  // Trust & Verification Layer §6.1 + §11.4 — every entry must satisfy the
+  // CI gate's coverage rule: either `verify` is set (RuntimeCheckKind | null)
+  // OR `verifyNullJustification` is a non-empty string.
+  test(`${slug}: has runtime-check coverage (verify or verifyNullJustification)`, () => {
+    const hasVerifyField = def.verify !== undefined;
+    const hasJustification =
+      typeof def.verifyNullJustification === 'string' &&
+      def.verifyNullJustification.length > 0;
+    expect(
+      hasVerifyField || hasJustification,
+      `${slug} missing both \`verify\` and \`verifyNullJustification\` — fails the verify-runtime-check-coverage gate.`,
+    ).toBeTruthy();
   });
 
   // If scopeRequirements is present, verify the named fields exist on the schema.
@@ -115,17 +90,11 @@ for (const [slug, def] of entries) {
         const shape = (def.parameterSchema as z.ZodObject<z.ZodRawShape>).shape;
         const declaredFields = Object.keys(shape);
         for (const f of fieldsToCheck) {
-          assert(
-            declaredFields.includes(f),
-            `scopeRequirements references '${f}' but parameterSchema has no such field. Declared: ${declaredFields.join(', ')}`,
-          );
+          expect(declaredFields.includes(f), `scopeRequirements references '${f}' but parameterSchema has no such field. Declared: ${declaredFields.join(', ')}`).toBeTruthy();
         }
       });
     }
   }
 }
 
-console.log('');
-console.log(`${passed} passed, ${failed} failed`);
-console.log('');
-if (failed > 0) process.exit(1);
+console.log('');console.log('');

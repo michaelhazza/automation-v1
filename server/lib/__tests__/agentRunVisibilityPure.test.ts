@@ -1,5 +1,4 @@
-import { strict as assert } from 'node:assert';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 import {
   resolveAgentRunVisibility,
   type AgentRunVisibilityRun,
@@ -28,8 +27,8 @@ function mkUser(overrides: Partial<AgentRunVisibilityUser> = {}): AgentRunVisibi
 
 test('system_admin always sees + payload-views', () => {
   const v = resolveAgentRunVisibility(mkRun({ isSystemRun: true }), mkUser({ role: 'system_admin' }));
-  assert.equal(v.canView, true);
-  assert.equal(v.canViewPayload, true);
+  expect(v.canView).toBe(true);
+  expect(v.canViewPayload).toBe(true);
 });
 
 test('cross-org access rejected for non-admins', () => {
@@ -37,8 +36,8 @@ test('cross-org access rejected for non-admins', () => {
     mkRun({ organisationId: 'other-org' }),
     mkUser(),
   );
-  assert.equal(v.canView, false);
-  assert.equal(v.canViewPayload, false);
+  expect(v.canView).toBe(false);
+  expect(v.canViewPayload).toBe(false);
 });
 
 test('system-tier run denies non-admins', () => {
@@ -46,18 +45,18 @@ test('system-tier run denies non-admins', () => {
     mkRun({ isSystemRun: true }),
     mkUser({ orgPermissions: new Set(['org.agents.view']) }),
   );
-  assert.equal(v.canView, false);
+  expect(v.canView).toBe(false);
 });
 
 test('org_admin bypasses within their org', () => {
   const v = resolveAgentRunVisibility(mkRun(), mkUser({ role: 'org_admin' }));
-  assert.equal(v.canView, true);
-  assert.equal(v.canViewPayload, true);
+  expect(v.canView).toBe(true);
+  expect(v.canViewPayload).toBe(true);
 });
 
 test('user without AGENTS_VIEW → canView false', () => {
   const v = resolveAgentRunVisibility(mkRun(), mkUser());
-  assert.equal(v.canView, false);
+  expect(v.canView).toBe(false);
 });
 
 test('user with AGENTS_VIEW but not AGENTS_EDIT → view yes, payload no', () => {
@@ -65,8 +64,8 @@ test('user with AGENTS_VIEW but not AGENTS_EDIT → view yes, payload no', () =>
     mkRun(),
     mkUser({ orgPermissions: new Set(['org.agents.view']) }),
   );
-  assert.equal(v.canView, true);
-  assert.equal(v.canViewPayload, false);
+  expect(v.canView).toBe(true);
+  expect(v.canViewPayload).toBe(false);
 });
 
 test('user with AGENTS_VIEW + AGENTS_EDIT → both', () => {
@@ -74,8 +73,8 @@ test('user with AGENTS_VIEW + AGENTS_EDIT → both', () => {
     mkRun(),
     mkUser({ orgPermissions: new Set(['org.agents.view', 'org.agents.edit']) }),
   );
-  assert.equal(v.canView, true);
-  assert.equal(v.canViewPayload, true);
+  expect(v.canView).toBe(true);
+  expect(v.canViewPayload).toBe(true);
 });
 
 test('canViewPayload strictly implies canView (all positive cases)', () => {
@@ -86,6 +85,6 @@ test('canViewPayload strictly implies canView (all positive cases)', () => {
   ];
   for (const [r, u] of cases) {
     const v = resolveAgentRunVisibility(r, u);
-    if (v.canViewPayload) assert.equal(v.canView, true, 'payload implies view');
+    if (v.canViewPayload) expect(v.canView, 'payload implies view').toBe(true);
   }
 });

@@ -2,41 +2,25 @@
  * agentRunMessageServicePure.test.ts — Sprint 3 P2.1 Sprint 3A pure tests.
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/agentRunMessageServicePure.test.ts
+ *   npx vitest run server/services/__tests__/agentRunMessageServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   validateMessageShape,
   computeNextSequenceNumber,
+  projectMessageForRole,
+  projectForRole,
+  REDACTION_TOKEN,
+  TOOL_RESULT_TRUNCATE_CHARS,
+  normaliseRunTraceRole,
+  linkToolCallsToEventIds,
 } from '../agentRunMessageServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
-function assertThrows(fn: () => void, label: string) {
+function assertThrows(fn: () => unknown, label: string): void {
   let thrown = false;
-  try {
-    fn();
-  } catch {
-    thrown = true;
-  }
+  try { fn(); } catch { thrown = true; }
   if (!thrown) throw new Error(`${label} — expected throw`);
-}
-
-function assertEqual(a: unknown, b: unknown, label: string) {
-  if (a !== b) throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 
 console.log('');
@@ -79,6 +63,7 @@ test('rejects an invalid role', () => {
   assertThrows(
     () =>
       validateMessageShape({
+        // reason: deliberately passing an invalid role value to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         role: 'function' as any,
         content: 'x',
@@ -138,6 +123,7 @@ test('rejects non-string toolCallId', () => {
       validateMessageShape({
         role: 'assistant',
         content: [{ type: 'text', text: 'hi' }],
+        // reason: deliberately passing a non-string toolCallId to verify the runtime guard rejects it.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         toolCallId: 42 as any,
       }),
@@ -163,15 +149,15 @@ test('accepts explicit null toolCallId', () => {
 // ── computeNextSequenceNumber ──────────────────────────────────────
 
 test('null current max → 0 (fresh run)', () => {
-  assertEqual(computeNextSequenceNumber(null), 0, 'fresh run starts at 0');
+  expect(computeNextSequenceNumber(null), 'fresh run starts at 0').toBe(0);
 });
 
 test('0 current max → 1', () => {
-  assertEqual(computeNextSequenceNumber(0), 1, 'increment from 0');
+  expect(computeNextSequenceNumber(0), 'increment from 0').toBe(1);
 });
 
 test('42 current max → 43', () => {
-  assertEqual(computeNextSequenceNumber(42), 43, 'increment from 42');
+  expect(computeNextSequenceNumber(42), 'increment from 42').toBe(43);
 });
 
 test('rejects negative current max', () => {
@@ -187,6 +173,243 @@ test('rejects NaN', () => {
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);
+
+// ── §4.8 Run-trace role-aware masking projection ───────────────────
+
+console.log('agentRunMessageServicePure — §4.8 run-trace masking projection');
+console.log('');
+
+const SAMPLE_ENTRY = {
+  tool: 'send_email',
+  input: { to: 'alice@example.com', subject: 'Hello' },
+  output: 'Email sent successfully.',
+  durationMs: 42,
+  iteration: 0,
+};
+
+const LONG_OUTPUT = 'x'.repeat(TOOL_RESULT_TRUNCATE_CHARS + 50);
+
+// ── normaliseRunTraceRole ──────────────────────────────────────────
+
+test('normaliseRunTraceRole: known roles pass through', () => {
+  expect(normaliseRunTraceRole('system_admin')).toBe('system_admin');
+  expect(normaliseRunTraceRole('org_admin')).toBe('org_admin');
+  expect(normaliseRunTraceRole('user')).toBe('user');
+});
+
+test('normaliseRunTraceRole: unknown role falls back to user (most restrictive)', () => {
+  expect(normaliseRunTraceRole('superuser')).toBe('user');
+  expect(normaliseRunTraceRole('')).toBe('user');
+  expect(normaliseRunTraceRole('workspace_user')).toBe('user');
+});
+
+// ── workspace_user ('user') tier ──────────────────────────────────
+
+test('workspace_user: tool input is redacted', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'user');
+  expect(result.input).toBe(REDACTION_TOKEN);
+});
+
+test('workspace_user: tool output is truncated to TOOL_RESULT_TRUNCATE_CHARS chars', () => {
+  const result = projectMessageForRole({ ...SAMPLE_ENTRY, output: LONG_OUTPUT }, 'user');
+  expect(result.output).toHaveLength(TOOL_RESULT_TRUNCATE_CHARS);
+  expect(result.outputTruncated).toBe(true);
+});
+
+test('workspace_user: short output has no truncated flag', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'user');
+  expect(result.outputTruncated).toBeUndefined();
+});
+
+test('workspace_user: tool name and duration are always visible', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'user');
+  expect(result.toolName).toBe('send_email');
+  expect(result.durationMs).toBe(42);
+});
+
+test('workspace_user: masked field (input) has no truncated flag — mask-over-truncate precedence', () => {
+  // When a field is both masked and would be truncated, it must be '<redacted>' with no truncated flag.
+  const result = projectMessageForRole({ ...SAMPLE_ENTRY, input: { blob: 'x'.repeat(500) } }, 'user');
+  expect(result.input).toBe(REDACTION_TOKEN);
+  // No 'inputTruncated' field exists on the shape — the mask wins.
+  expect((result as unknown as Record<string, unknown>).inputTruncated).toBeUndefined();
+});
+
+// ── org_admin tier ─────────────────────────────────────────────────
+
+test('org_admin: tool input is visible (not redacted)', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'org_admin');
+  expect(result.input).toEqual({ to: 'alice@example.com', subject: 'Hello' });
+});
+
+test('org_admin: tool output is fully visible (no truncation)', () => {
+  const result = projectMessageForRole({ ...SAMPLE_ENTRY, output: LONG_OUTPUT }, 'org_admin');
+  expect(result.output).toHaveLength(LONG_OUTPUT.length);
+  expect(result.outputTruncated).toBeUndefined();
+});
+
+test('org_admin: tool name and duration are visible', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'org_admin');
+  expect(result.toolName).toBe('send_email');
+  expect(result.durationMs).toBe(42);
+});
+
+// ── system_admin tier ──────────────────────────────────────────────
+
+test('system_admin: all fields visible', () => {
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'system_admin');
+  expect(result.input).toEqual({ to: 'alice@example.com', subject: 'Hello' });
+  expect(result.output).toBe('Email sent successfully.');
+  expect(result.toolName).toBe('send_email');
+  expect(result.outputTruncated).toBeUndefined();
+});
+
+test('system_admin: long output not truncated', () => {
+  const result = projectMessageForRole({ ...SAMPLE_ENTRY, output: LONG_OUTPUT }, 'system_admin');
+  expect(result.output).toHaveLength(LONG_OUTPUT.length);
+  expect(result.outputTruncated).toBeUndefined();
+});
+
+test('system_admin scoped into an org still sees everything', () => {
+  // Per spec §4.8: "When system_admin is scoped into an org, they still see everything."
+  // The role string stays 'system_admin' regardless of org scope.
+  const result = projectMessageForRole(SAMPLE_ENTRY, 'system_admin');
+  expect(result.input).not.toBe(REDACTION_TOKEN);
+  expect(result.output).not.toBe(REDACTION_TOKEN);
+});
+
+// ── projectForRole (batch) ─────────────────────────────────────────
+
+test('projectForRole returns one projected entry per input entry', () => {
+  const entries = [SAMPLE_ENTRY, { ...SAMPLE_ENTRY, tool: 'create_task', iteration: 1 }];
+  const result = projectForRole(entries, 'user');
+  expect(result).toHaveLength(2);
+  expect(result[0].toolName).toBe('send_email');
+  expect(result[1].toolName).toBe('create_task');
+});
+
+test('projectForRole with empty array returns empty array', () => {
+  expect(projectForRole([], 'user')).toEqual([]);
+});
+
+// ── Default / fallback fields ─────────────────────────────────────
+
+test('entry with name field (no tool) uses name as toolName', () => {
+  const result = projectMessageForRole({ name: 'lookup', output: 'ok' }, 'org_admin');
+  expect(result.toolName).toBe('lookup');
+});
+
+test('missing input field defaults to empty object (not redacted) for org_admin', () => {
+  const result = projectMessageForRole({ tool: 'noop', output: 'done' }, 'org_admin');
+  expect(result.input).toEqual({});
+});
+
+test('missing durationMs defaults to 0', () => {
+  const result = projectMessageForRole({ tool: 'noop' }, 'system_admin');
+  expect(result.durationMs).toBe(0);
+});
+
+test('missing iteration defaults to 0', () => {
+  const result = projectMessageForRole({ tool: 'noop' }, 'system_admin');
+  expect(result.iteration).toBe(0);
+});
+
+// ── linkToolCallsToEventIds (Trust & Verification Layer §9 cross-entity guard) ──
+
+test('linkToolCallsToEventIds: empty inputs return empty array', () => {
+  expect(linkToolCallsToEventIds([], [])).toEqual([]);
+});
+
+test('linkToolCallsToEventIds: matches by skillSlug, prefers skill.completed', () => {
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+  const events = [
+    { id: 'a-inv', eventType: 'skill.invoked', payload: { skillSlug: 'a' } },
+    { id: 'a-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+    { id: 'b-inv', eventType: 'skill.invoked', payload: { skillSlug: 'b' } },
+    { id: 'b-cmp', eventType: 'skill.completed', payload: { skillSlug: 'b' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-cmp', 'b-cmp']);
+});
+
+test('linkToolCallsToEventIds: falls back to skill.invoked for the same slug', () => {
+  // skill `a` died after invoke but before completed
+  const toolCalls = [{ tool: 'a' }, { tool: 'b' }];
+  const events = [
+    { id: 'a-inv', eventType: 'skill.invoked', payload: { skillSlug: 'a' } },
+    { id: 'b-inv', eventType: 'skill.invoked', payload: { skillSlug: 'b' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-inv', 'b-inv']);
+});
+
+test('linkToolCallsToEventIds: tool calls without matching events resolve to null', () => {
+  // ordinary tool call that did not emit a skill event (the agent loop only
+  // emits these for special paths). Must NOT mis-attach to an event from a
+  // different slug.
+  const toolCalls = [{ tool: 'foo' }, { tool: 'bar' }, { tool: 'baz' }];
+  const events = [
+    { id: 'foo-cmp', eventType: 'skill.completed', payload: { skillSlug: 'foo' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['foo-cmp', null, null]);
+});
+
+test('linkToolCallsToEventIds: does NOT mis-attach across slugs (Codex P2)', () => {
+  // crm.query (special path) emits a skill.completed; an unrelated `foo` tool
+  // call does NOT have a matching event. The unrelated tool call must NOT
+  // pick up the crm.query event id.
+  const toolCalls = [{ tool: 'foo' }, { tool: 'crm.query' }];
+  const events = [
+    { id: 'crm-cmp', eventType: 'skill.completed', payload: { skillSlug: 'crm.query' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual([null, 'crm-cmp']);
+});
+
+test('linkToolCallsToEventIds: ordinal-within-slug for repeated calls of same skill', () => {
+  // Same skill called twice. First toolCall pairs with first completed,
+  // second toolCall pairs with second completed.
+  const toolCalls = [{ tool: 'a' }, { tool: 'a' }];
+  const events = [
+    { id: 'a1-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+    { id: 'a2-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a1-cmp', 'a2-cmp']);
+});
+
+test('linkToolCallsToEventIds: ignores unrelated event types', () => {
+  const toolCalls = [{ tool: 'a' }];
+  const events = [
+    { id: 'r1', eventType: 'run.started', payload: null },
+    { id: 'p1', eventType: 'prompt.assembled', payload: null },
+    { id: 'a-cmp', eventType: 'skill.completed', payload: { skillSlug: 'a' } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual(['a-cmp']);
+});
+
+test('linkToolCallsToEventIds: ignores events with missing skillSlug payload', () => {
+  // Event exists but payload doesn't carry skillSlug — cannot match.
+  const toolCalls = [{ tool: 'a' }];
+  const events = [
+    { id: 'noslug-cmp', eventType: 'skill.completed', payload: null },
+    { id: 'noslug-inv', eventType: 'skill.invoked', payload: { skillSlug: undefined } as { skillSlug?: string } },
+  ];
+  expect(linkToolCallsToEventIds(toolCalls, events)).toEqual([null]);
+});
+
+test('projectForRole: passes eventId through by position', () => {
+  const entries = [
+    { tool: 'a', input: { x: 1 }, output: 'ok', durationMs: 5, iteration: 0 },
+    { tool: 'b', input: { x: 2 }, output: 'ok', durationMs: 5, iteration: 0 },
+  ];
+  const result = projectForRole(entries, 'system_admin', ['evt-a', null]);
+  expect(result[0]!.eventId).toBe('evt-a');
+  expect(result[1]!.eventId).toBeNull();
+});
+
+test('projectForRole: omitting eventIdsByPosition leaves eventId null', () => {
+  const entries = [{ tool: 'a', output: 'ok' }];
+  const result = projectForRole(entries, 'system_admin');
+  expect(result[0]!.eventId).toBeNull();
+});
+
+console.log('');
+console.log('');

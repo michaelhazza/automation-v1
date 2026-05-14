@@ -7,6 +7,7 @@
  *   npx tsx server/services/__tests__/memoryBlockSynthesisServicePure.test.ts
  */
 
+import { expect, test } from 'vitest';
 import {
   scoreCluster,
   decideTier,
@@ -17,33 +18,10 @@ import {
   MEDIUM_CONFIDENCE_THRESHOLD,
 } from '../memoryBlockSynthesisServicePure.js';
 
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err instanceof Error ? err.message : err}`);
-  }
-}
-
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
     throw new Error(`${label} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
-}
-
-function assertTrue(cond: boolean, label: string) {
-  if (!cond) throw new Error(`${label} — expected true`);
-}
-
-function assertFalse(cond: boolean, label: string) {
-  if (cond) throw new Error(`${label} — expected false`);
 }
 
 console.log('');
@@ -63,7 +41,7 @@ test('below min size → 0', () => {
     avgCitedCount: 5,
     coherence: 1,
   });
-  assertEqual(c, 0, 'zero');
+  expect(c, 'zero').toBe(0);
 });
 
 test('perfect cluster → ~1.0', () => {
@@ -73,7 +51,7 @@ test('perfect cluster → ~1.0', () => {
     avgCitedCount: 10,
     coherence: 1,
   });
-  assertTrue(c >= HIGH_CONFIDENCE_THRESHOLD, `score ${c} should cross high threshold`);
+  expect(c >= HIGH_CONFIDENCE_THRESHOLD, `score ${c} should cross high threshold`).toBe(true);
 });
 
 test('weak cluster → low tier', () => {
@@ -83,7 +61,7 @@ test('weak cluster → low tier', () => {
     avgCitedCount: 0,
     coherence: 0.3,
   });
-  assertTrue(c < MEDIUM_CONFIDENCE_THRESHOLD, `weak → ${c} should be below medium`);
+  expect(c < MEDIUM_CONFIDENCE_THRESHOLD, `weak → ${c} should be below medium`).toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -93,18 +71,18 @@ test('weak cluster → low tier', () => {
 console.log('decideTier:');
 
 test('>= high → high', () => {
-  assertEqual(decideTier(HIGH_CONFIDENCE_THRESHOLD), 'high', 'at boundary');
-  assertEqual(decideTier(0.95), 'high', 'above');
+  expect(decideTier(HIGH_CONFIDENCE_THRESHOLD), 'at boundary').toBe('high');
+  expect(decideTier(0.95), 'above').toBe('high');
 });
 
 test('medium band', () => {
-  assertEqual(decideTier(MEDIUM_CONFIDENCE_THRESHOLD), 'medium', 'at lower boundary');
-  assertEqual(decideTier(0.7), 'medium', 'mid-band');
+  expect(decideTier(MEDIUM_CONFIDENCE_THRESHOLD), 'at lower boundary').toBe('medium');
+  expect(decideTier(0.7), 'mid-band').toBe('medium');
 });
 
 test('below medium → low', () => {
-  assertEqual(decideTier(MEDIUM_CONFIDENCE_THRESHOLD - 0.01), 'low', 'below medium');
-  assertEqual(decideTier(0), 'low', 'floor');
+  expect(decideTier(MEDIUM_CONFIDENCE_THRESHOLD - 0.01), 'below medium').toBe('low');
+  expect(decideTier(0), 'floor').toBe('low');
 });
 
 // ---------------------------------------------------------------------------
@@ -115,30 +93,28 @@ console.log('passiveAgeDecision:');
 
 test('draft survived cycles → activate', () => {
   const d = passiveAgeDecision({ cycles: PASSIVE_AGE_CYCLES, status: 'draft' });
-  assertTrue(d.shouldActivate, 'activate');
+  expect(d.shouldActivate, 'activate').toBe(true);
 });
 
 test('draft under cycle count → stay', () => {
   const d = passiveAgeDecision({ cycles: PASSIVE_AGE_CYCLES - 1, status: 'draft' });
-  assertFalse(d.shouldActivate, 'not yet');
+  expect(d.shouldActivate, 'not yet').toBe(false);
 });
 
 test('active block → no-op', () => {
   const d = passiveAgeDecision({ cycles: 10, status: 'active' });
-  assertFalse(d.shouldActivate, 'already active');
+  expect(d.shouldActivate, 'already active').toBe(false);
 });
 
 test('rejected block → no-op', () => {
   const d = passiveAgeDecision({ cycles: 10, status: 'rejected' });
-  assertFalse(d.shouldActivate, 'rejected does not activate');
+  expect(d.shouldActivate, 'rejected does not activate').toBe(false);
 });
 
 test('pending_review block → no passive age', () => {
   const d = passiveAgeDecision({ cycles: 10, status: 'pending_review' });
-  assertFalse(d.shouldActivate, 'pending_review stays');
+  expect(d.shouldActivate, 'pending_review stays').toBe(false);
 });
 
 console.log('');
-console.log(`${passed} passed, ${failed} failed`);
 console.log('');
-if (failed > 0) process.exit(1);

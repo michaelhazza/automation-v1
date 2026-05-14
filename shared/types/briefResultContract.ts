@@ -78,6 +78,15 @@ export interface BriefArtefactBase {
   relatedArtefactIds?: string[];
   /** Per-artefact contract version. Defaults to BRIEF_RESULT_CONTRACT_VERSION when omitted. */
   contractVersion?: number;
+  /**
+   * Server-authoritative ISO-8601 timestamp stamped at persistence time.
+   * Optional — older persisted artefacts may not carry it. Used by the UI
+   * to keep timeline order consistent when WS events for distinct
+   * artefactIds arrive out of logical order. The optimistic POST path
+   * sees this field on the server's response, so client-side merges that
+   * carry a `serverCreatedAt` can safely re-sort.
+   */
+  serverCreatedAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +114,7 @@ export type BriefResultEntityType =
  * provider API call. 'hybrid' = combined. Lets the UI flag freshness and the
  * caller decide whether to cache.
  */
-export type BriefResultSource = 'canonical' | 'live' | 'hybrid';
+export type BriefResultSource = 'canonical' | 'live' | 'hybrid' | 'stub';
 
 /**
  * Why the result set was truncated. Distinguishing these matters for
@@ -314,6 +323,20 @@ export interface BriefCostPreview {
 }
 
 // ---------------------------------------------------------------------------
+// Approval decision — supersedes a BriefApprovalCard after user acts on it
+// ---------------------------------------------------------------------------
+
+export interface BriefApprovalDecision extends BriefArtefactBase {
+  kind: 'approval_decision';
+  /** The user's decision on the parent approval card. */
+  decision: 'approve' | 'reject';
+  reason?: string;
+  /** Correlation key linking this decision to its action record. */
+  executionId?: string;
+  executionStatus?: BriefExecutionStatus;
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated union — the top-level artefact type
 // ---------------------------------------------------------------------------
 
@@ -324,6 +347,7 @@ export interface BriefCostPreview {
 export type BriefChatArtefact =
   | BriefStructuredResult
   | BriefApprovalCard
+  | BriefApprovalDecision
   | BriefErrorResult;
 
 // ---------------------------------------------------------------------------
@@ -336,6 +360,10 @@ export function isBriefStructuredResult(a: BriefChatArtefact): a is BriefStructu
 
 export function isBriefApprovalCard(a: BriefChatArtefact): a is BriefApprovalCard {
   return a.kind === 'approval';
+}
+
+export function isBriefApprovalDecision(a: BriefChatArtefact): a is BriefApprovalDecision {
+  return a.kind === 'approval_decision';
 }
 
 export function isBriefErrorResult(a: BriefChatArtefact): a is BriefErrorResult {

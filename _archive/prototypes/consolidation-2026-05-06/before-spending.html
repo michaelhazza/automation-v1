@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before: Spending Budgets + Spend Ledger | Automation OS Consolidation 2026-05-06</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; -webkit-font-smoothing: antialiased; }
+body { padding: 32px 40px; }
+
+/* ── Before banner ─────────────────────────────────────────────── */
+.before-banner {
+  background: #fff8e1;
+  border: 2px solid #f59e0b;
+  border-radius: 10px;
+  padding: 14px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.before-banner-text { font-size: 13.5px; font-weight: 600; color: #92400e; }
+.before-banner-note { font-size: 12.5px; color: #b45309; }
+.after-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 5px 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.after-link:hover { background: #e0e7ff; }
+
+/* ── Two-column layout ─────────────────────────────────────────── */
+.comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+/* ── Mock page frame ────────────────────────────────────────────── */
+.mock-page {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.mock-topbar {
+  background: #1e293b;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mock-topbar-logo {
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 5px;
+}
+.mock-topbar-breadcrumb {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+}
+.mock-topbar-breadcrumb span { color: rgba(255,255,255,0.85); font-weight: 500; }
+.mock-page-body { padding: 20px 22px; }
+.mock-page-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+.mock-page-sub { font-size: 12.5px; color: #64748b; margin-bottom: 18px; }
+
+/* ── Annotation chip ────────────────────────────────────────────── */
+.annotation {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fef9c3;
+  border: 1px solid #fde047;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #854d0e;
+  margin-bottom: 10px;
+}
+.annotation-block {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #9a3412;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* ── Old form-style fields ──────────────────────────────────────── */
+.old-form-row {
+  margin-bottom: 16px;
+}
+.old-form-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 5px;
+}
+.old-form-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.old-input {
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1e293b;
+  background: white;
+  width: 110px;
+}
+.old-input-hint { font-size: 11.5px; color: #94a3b8; }
+.old-save-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 16px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.old-section-divider {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 16px 0;
+}
+
+/* ── Old table ──────────────────────────────────────────────────── */
+.old-table { width: 100%; border-collapse: collapse; }
+.old-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.old-table td {
+  padding: 9px 10px;
+  font-size: 12.5px;
+  color: #334155;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.old-edit-btn {
+  padding: 3px 10px;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: #475569;
+  cursor: pointer;
+}
+
+/* ── Ledger-side styles ──────────────────────────────────────────── */
+.ledger-header {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 14px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ledger-header-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+.ledger-header-sub { font-size: 12px; color: #64748b; }
+.ledger-filter-bar {
+  padding: 10px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  background: white;
+}
+.ledger-select {
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #334155;
+  background: white;
+}
+.ledger-body { padding: 0; }
+.day-group-header {
+  background: #f8fafc;
+  padding: 8px 22px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.day-total { float: right; font-weight: 700; color: #0f172a; }
+.ledger-row {
+  padding: 9px 22px;
+  border-bottom: 1px solid #f1f5f9;
+  display: grid;
+  grid-template-columns: 130px 1fr 90px 70px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+  color: #334155;
+}
+.ledger-row-time { color: #64748b; font-size: 12px; }
+.ledger-row-agent { font-weight: 500; }
+.ledger-row-type {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #4338ca;
+  text-align: center;
+}
+.ledger-row-cost { font-weight: 600; text-align: right; }
+.limited-note {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #15803d;
+  margin: 10px 22px;
+}
+
+/* ── Problems box ───────────────────────────────────────────────── */
+.problems-box {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.problems-box h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9f1239;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.problems-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.problems-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #881337;
+  line-height: 1.5;
+}
+.problem-icon {
+  width: 18px;
+  height: 18px;
+  background: #fecdd3;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #be123c;
+  margin-top: 1px;
+}
+.page-label {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  color: #475569;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<!-- Before banner -->
+<div class="before-banner">
+  <div>
+    <div class="before-banner-text">BEFORE: Two separate pages</div>
+    <div class="before-banner-note">Spending Budgets (cap configuration at /admin/spending-budgets) and Spend Ledger (per-subaccount usage at /admin/subaccounts/:id/spend-ledger) are unrelated routes with no cross-links.</div>
+  </div>
+  <a href="spending.html" class="after-link">See consolidated design &#8594;</a>
+</div>
+
+<!-- Two-column comparison -->
+<div class="comparison-grid">
+
+  <!-- LEFT: Spending Budgets page -->
+  <div class="mock-page">
+    <div class="mock-topbar">
+      <div class="mock-topbar-logo"></div>
+      <div class="mock-topbar-breadcrumb">Admin / <span>Spending Budgets</span></div>
+    </div>
+    <div class="mock-page-body">
+      <div class="mock-page-title">Spending Budgets</div>
+      <div class="mock-page-sub">Set cost caps for your organisation and each subaccount.</div>
+
+      <div class="annotation">Route: /admin/spending-budgets</div>
+
+      <!-- Org cap section -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:12.5px;font-weight:700;color:#334155;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Organisation cap</div>
+        <div class="old-form-row">
+          <div class="old-form-label">Monthly compute budget</div>
+          <div class="old-form-input-row">
+            <input type="text" class="old-input" value="5000" readonly>
+            <span class="old-input-hint">USD per month across all subaccounts</span>
+          </div>
+        </div>
+        <button class="old-save-btn">Save org cap</button>
+      </div>
+
+      <hr class="old-section-divider">
+
+      <!-- Per-subaccount table -->
+      <div style="font-size:12.5px;font-weight:700;color:#334155;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Subaccount caps</div>
+      <table class="old-table">
+        <thead>
+          <tr>
+            <th>Subaccount</th>
+            <th>Daily limit (cents)</th>
+            <th>Monthly limit (cents)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Acme Corp</td>
+            <td>5000</td>
+            <td>150000</td>
+            <td><button class="old-edit-btn">Edit</button></td>
+          </tr>
+          <tr>
+            <td>TerraForm Partners</td>
+            <td>2000</td>
+            <td>80000</td>
+            <td><button class="old-edit-btn">Edit</button></td>
+          </tr>
+          <tr>
+            <td>Revel Group</td>
+            <td>3000</td>
+            <td>120000</td>
+            <td><button class="old-edit-btn">Edit</button></td>
+          </tr>
+          <tr>
+            <td>Globex Industries</td>
+            <td>2500</td>
+            <td>100000</td>
+            <td><button class="old-edit-btn">Edit</button></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="annotation-block" style="margin-top:14px">
+        Limits stored in cents (not dollars). No inline progress bars. No current-spend context alongside the cap fields. No pace indicator. No status column showing which accounts are approaching their caps.
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Spend Ledger page (per Acme Corp subaccount) -->
+  <div class="mock-page">
+    <div class="ledger-header">
+      <div>
+        <div class="ledger-header-title">Spend Ledger: Acme Corp</div>
+        <div class="ledger-header-sub">Route: /admin/subaccounts/sa_001/spend-ledger</div>
+      </div>
+    </div>
+
+    <div class="annotation-block" style="margin:10px 22px 0">
+      Reaching this view requires: Admin nav &#8594; Subaccounts &#8594; click Acme Corp &#8594; Spend Ledger tab. The ledger is per-subaccount only. There is no org-wide ledger. To compare spend across all 4 subaccounts, an admin must navigate to each one separately.
+    </div>
+
+    <div class="ledger-filter-bar">
+      <select class="ledger-select">
+        <option>Group by: Day</option>
+      </select>
+      <select class="ledger-select">
+        <option>This month</option>
+        <option>Last 30 days</option>
+        <option>Last 7 days</option>
+      </select>
+    </div>
+    <div class="limited-note">Only "Day" grouping is available. No Agent or Source type grouping. No search. No type filter.</div>
+
+    <div class="ledger-body">
+
+      <div class="day-group-header">
+        May 6, 2026
+        <span class="day-total">$9.50</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">14:22 UTC</span>
+        <span class="ledger-row-agent">Outreach Agent</span>
+        <span class="ledger-row-type">LLM</span>
+        <span class="ledger-row-cost">$1.82</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">13:14 UTC</span>
+        <span class="ledger-row-agent">Email Drafter</span>
+        <span class="ledger-row-type">LLM</span>
+        <span class="ledger-row-cost">$0.72</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">10:22 UTC</span>
+        <span class="ledger-row-agent">CRM Sync Agent</span>
+        <span class="ledger-row-type">Tool</span>
+        <span class="ledger-row-cost">$0.05</span>
+      </div>
+
+      <div class="day-group-header">
+        May 5, 2026
+        <span class="day-total">$18.40</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">15:22 UTC</span>
+        <span class="ledger-row-agent">Outreach Agent</span>
+        <span class="ledger-row-type">LLM</span>
+        <span class="ledger-row-cost">$2.92</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">09:55 UTC</span>
+        <span class="ledger-row-agent">Report Generator</span>
+        <span class="ledger-row-type">LLM</span>
+        <span class="ledger-row-cost">$3.85</span>
+      </div>
+
+      <div class="day-group-header">
+        May 4, 2026
+        <span class="day-total">$14.20</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">16:45 UTC</span>
+        <span class="ledger-row-agent">CRM Sync Agent</span>
+        <span class="ledger-row-type">Tool</span>
+        <span class="ledger-row-cost">$0.04</span>
+      </div>
+      <div class="ledger-row">
+        <span class="ledger-row-time">13:20 UTC</span>
+        <span class="ledger-row-agent">Email Drafter</span>
+        <span class="ledger-row-type">LLM</span>
+        <span class="ledger-row-cost">$0.22</span>
+      </div>
+
+    </div>
+
+    <div class="annotation-block" style="margin:10px 22px 14px">
+      No row drill-down to the run trace. No provider or model column. No token counts. No cache discount line. No status badge column. Clicking any row does nothing.
+    </div>
+  </div>
+
+</div>
+
+<!-- Problems box -->
+<div class="problems-box">
+  <h3>Problems with current state</h3>
+  <ul class="problems-list">
+    <li>
+      <div class="problem-icon">1</div>
+      <div><strong>Two pages for related data.</strong> Cap configuration lives at <span class="page-label">/admin/spending-budgets</span> and usage history lives at <span class="page-label">/admin/subaccounts/:id/spend-ledger</span>. An admin who notices an over-cap situation must navigate between two unrelated routes to understand and act.</div>
+    </li>
+    <li>
+      <div class="problem-icon">2</div>
+      <div><strong>No org-wide ledger view.</strong> The Spend Ledger is strictly per-subaccount. There is no consolidated view across all 4 subaccounts. Comparing total spend requires visiting each subaccount individually and summing manually.</div>
+    </li>
+    <li>
+      <div class="problem-icon">3</div>
+      <div><strong>Cap fields have no spend context.</strong> The Spending Budgets page shows cap values in cents (e.g. "150000") with no current-spend alongside them, no progress bar, no pace indicator, and no colour signal for accounts approaching their cap. An admin cannot tell at a glance which subaccounts are at risk.</div>
+    </li>
+    <li>
+      <div class="problem-icon">4</div>
+      <div><strong>Caps stored and displayed in cents.</strong> <span class="page-label">dailyCostLimitCents</span> and <span class="page-label">monthlyCostLimitCents</span> are shown raw. An admin editing a cap must mentally convert dollars to cents and back. The new design converts at the UI layer.</div>
+    </li>
+    <li>
+      <div class="problem-icon">5</div>
+      <div><strong>Ledger group-by is limited to "Day" only.</strong> No group by Agent, Source type, or Subaccount. An admin wanting to find which agent is driving up spend must scan the flat list manually.</div>
+    </li>
+    <li>
+      <div class="problem-icon">6</div>
+      <div><strong>No row drill-down.</strong> Clicking a ledger row does nothing. Provider, model, token counts, cache discount, and run trace link are all unavailable from the ledger surface.</div>
+    </li>
+  </ul>
+</div>
+
+</body>
+</html>

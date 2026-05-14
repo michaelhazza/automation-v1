@@ -1,0 +1,36 @@
+You are reviewing a draft specification document for implementation-readiness. Your job is to surface mechanical defects: contradictions across sections, stale or retired language, load-bearing claims without a named mechanism, file-inventory drift (prose references files not in the §4 inventory tables), schema overlaps without a source-of-truth statement, sequencing-ordering bugs (item A depends on B but B ships later), invariants stated in one place but not enforced elsewhere, missing per-item verdicts, and concretely-unnamed new primitives.
+
+Project context (do NOT re-derive from spec; use these as ground truth):
+
+- Pre-production codebase: NO live users, NO staged rollouts, NO feature flags for new migrations, commit-and-revert posture.
+- Testing posture: static gates primary, pure-function unit tests only, NO vitest/jest/playwright against the app, NO E2E tests, NO API contract tests, NO performance baselines, NO composition tests.
+- Architecture: prefer existing primitives over new abstractions. Accepted primitives include policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, failure() from shared/iee/failure.ts, agentExecutionEventService, plus storage helpers getS3Client()/getBucketName().
+- Migrations ship without feature flags in pre-production.
+
+Treat suggestions that would add feature flags, staged rollouts, frontend tests, E2E tests, supertest API contract tests, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, predictive cost modelling, or new abstractions duplicating existing primitives as OUT OF SCOPE — do NOT raise them.
+
+The spec is large. For each finding, give:
+
+1. A short title (one sentence).
+2. The exact section heading or line range it refers to.
+3. The defect (what's wrong, not what to do).
+4. The minimum fix.
+5. Severity tag: critical | important | minor | nit.
+
+Group findings by section. Be specific. Quote exact section headings and line numbers. Do not be vague.
+
+Specifically look for:
+
+- Section §4 (File inventory lock): every file referenced in §5–§9 must appear in §4 tables. Flag every prose mention of a file/column/migration/path that is NOT in §4.
+- Section §5 (Domain model + contracts): every named contract must have producer + consumer + example + source-of-truth precedence (where applicable). Flag missing fields.
+- Section §8 (Chunk sequencing): every column referenced by code in chunk N must be created in chunk ≤N. Flag backward dependencies. Spec §8 says migrations 0343, 0344, 0345 all ship in Chunk 1; verify §8 prose is consistent with that.
+- Section §9 (Execution-safety contracts): idempotency posture must match the write path's actual mechanism; retry classes must be plausible; concurrency guards must name an actual constraint or table; terminal event guarantees must enumerate every closing status.
+- Cross-section consistency: does §5.4 (cross-owner delegation) refer to fields/types declared in §5.2 (RoutingContext) and §5.5 (approval row)? Does §7 (execution model) refer to queues/jobs that exist?
+- Source-of-truth ranking in §3: every load-bearing claim should fall under §3's ranked-source rule.
+- Universal-OpenTaskView invariant: §1 (framing additions) names it; §4.7 doc-sync edits architecture.md for it. Verify the invariant is operationalised — what event types render where?
+- Stub Dev Agent acceptance test (Appendix A): four fixtures listed. Verify each fixture has all the data it needs from §5.1–§5.5 to actually run. Flag missing inputs.
+- @-addressing parser (§5.3): "score_boost: 0.15" cited. Verify the matcher's score scale is named somewhere or flag that this is unspecified.
+- "TBD during implementation grep" in §4.3 for the orchestrator routing module path. Flag if other paths are similarly TBD.
+
+The spec is:
+

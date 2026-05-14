@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<!--
+  FIELD AUDIT, Merged Calendar
+  Sources: ScheduleCalendarPage, SubaccountScheduleCalendarPage
+
+  ScheduleCalendarPage fields/actions:
+    KEEP: ScheduleCalendar component (merged projection across all subaccounts) -> scope = All clients
+    KEEP: window selector (7/14/30 days) -> top filter
+    KEEP: per-occurrence: subaccountId, agentId, sourceId, source type (scheduled_task / workflow / agent) -> row detail
+    KEEP: onClick navigation to scheduled-task or agent manage page -> row click
+
+  SubaccountScheduleCalendarPage fields/actions:
+    KEEP: same ScheduleCalendar component -> scope = selected client
+    KEEP: window selector -> same control
+    KEEP: subaccountId scoping -> becomes the "Client" filter selection
+
+  Merged design:
+    Single page. "Scope" filter at top: All clients OR a specific client.
+    When a specific client is selected from the client switcher, auto-scopes to that client.
+    Window selector preserved.
+    Calendar view: grouped by day, shows agent name, source type, occurrence time.
+
+  Round 6: 7/14/30 view switching wired with three DOM containers.
+  - 7-day: full-detail vertical day stack (existing design, default)
+  - 14-day: 7x2 grid with chip-style abbreviated events
+  - 30-day: 7x5 month grid with colored client dots + count
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar | Synthetos Consolidation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* ── 7-day (detail) styles ───────────────────────── */
+  .cal-day-group { margin-bottom: 16px; }
+  .cal-day-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--slate-400);
+    padding: 8px 0 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cal-day-label.today { color: var(--indigo-600); }
+  .cal-day-today-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--indigo-500);
+  }
+
+  .cal-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: white;
+    border: 1px solid var(--border); border-radius: 9px;
+    margin-bottom: 6px; cursor: pointer;
+    transition: all 0.12s; box-shadow: var(--shadow-sm);
+  }
+  .cal-item:hover { border-color: var(--indigo-300); box-shadow: 0 2px 8px rgba(99,102,241,0.12); }
+
+  .cal-time {
+    font-size: 12px; font-family: monospace; color: var(--slate-500);
+    width: 52px; flex-shrink: 0; text-align: right;
+  }
+  .cal-type-icon {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .cal-agent-name { font-size: 13px; font-weight: 600; color: var(--slate-800); margin-bottom: 2px; }
+  .cal-item-meta { font-size: 11.5px; color: var(--slate-500); display: flex; gap: 8px; align-items: center; }
+
+  .scope-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 500;
+    border: 1.5px solid var(--slate-200); background: white;
+    color: var(--slate-600); cursor: pointer; transition: all 0.12s;
+  }
+  .scope-pill.active { border-color: var(--indigo-400); background: var(--indigo-50); color: var(--indigo-700); }
+  .scope-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .window-btn {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12.5px; font-weight: 500;
+    border: 1px solid var(--slate-200); background: white;
+    color: var(--slate-600); cursor: pointer; transition: all 0.12s;
+  }
+  .window-btn.active { background: var(--indigo-600); color: white; border-color: var(--indigo-600); }
+
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--slate-500); }
+
+  /* ── 14-day grid styles ──────────────────────────── */
+  .cal-grid-14 {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .cal-grid-14-cell {
+    background: white; padding: 8px; min-height: 90px;
+    cursor: pointer; transition: background 0.1s;
+  }
+  .cal-grid-14-cell:hover { background: var(--slate-50); }
+  .cal-grid-14-cell.today { background: var(--indigo-50); }
+  .cal-grid-14-cell.has-events:hover { background: #eef2ff; }
+  .cal-grid-14-day { font-size: 10.5px; font-weight: 700; color: var(--slate-400); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .cal-grid-14-date { font-size: 13px; font-weight: 700; color: var(--slate-700); margin-bottom: 6px; }
+  .cal-grid-14-date.today-num { color: var(--indigo-600); }
+  .cal-chip {
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 6px; border-radius: 4px; margin-bottom: 3px;
+    font-size: 10.5px; font-weight: 500; color: var(--slate-700);
+    background: var(--slate-100); cursor: pointer; overflow: hidden;
+  }
+  .cal-chip-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .cal-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-grid-14-header { background: var(--slate-50); }
+
+  /* ── 30-day month grid styles ────────────────────── */
+  .cal-grid-30 {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .cal-grid-30-header {
+    background: var(--slate-50); padding: 6px 4px;
+    text-align: center; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-400);
+  }
+  .cal-grid-30-cell {
+    background: white; padding: 5px 6px; min-height: 62px;
+    cursor: pointer; transition: background 0.1s; position: relative;
+  }
+  .cal-grid-30-cell:hover { background: var(--slate-50); }
+  .cal-grid-30-cell.today { background: var(--indigo-50); }
+  .cal-grid-30-cell.out-of-month { background: var(--slate-50); }
+  .cal-grid-30-cell.out-of-month .cal-grid-30-date { color: var(--slate-300); }
+  .cal-grid-30-date {
+    font-size: 12px; font-weight: 600; color: var(--slate-600); margin-bottom: 4px;
+    display: block;
+  }
+  .cal-grid-30-date.today-num { color: var(--indigo-600); }
+  .cal-dots-row { display: flex; gap: 3px; flex-wrap: wrap; }
+  .cal-dot-sm {
+    width: 7px; height: 7px; border-radius: 50%; cursor: pointer;
+    flex-shrink: 0;
+  }
+  .cal-event-count {
+    font-size: 9.5px; font-weight: 700; color: var(--slate-400);
+    margin-top: 2px;
+  }
+
+  /* ── Day detail popover (30-day expand) ─────────── */
+  .day-popover {
+    position: fixed; z-index: 500;
+    background: white; border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    padding: 14px 16px; width: 240px;
+    display: none;
+  }
+  .day-popover.visible { display: block; }
+  .day-popover-head {
+    font-size: 12px; font-weight: 700; color: var(--slate-700);
+    margin-bottom: 10px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .popover-close { cursor: pointer; color: var(--slate-400); font-size: 16px; line-height: 1; background: none; border: none; }
+  .day-popover-item {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 0; border-bottom: 1px solid var(--slate-100);
+    font-size: 12px; color: var(--slate-700);
+  }
+  .day-popover-item:last-child { border-bottom: none; }
+  .day-popover-time { font-size: 11px; color: var(--slate-400); font-family: monospace; width: 44px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (three-mode shared) -->
+  <div id="sidebar-mount"></div>
+  <script src="_sidebar.js"></script>
+  <script>renderSidebar(localStorage.getItem('prototype.sidebar.mode') || 'workspace', 'calendar.html');</script>
+
+  <div class="main">
+    <!-- Subtle replaces banner: narrow single-line, slate bg, unobtrusive -->
+    <div style="background:var(--slate-100);border-bottom:1px solid var(--border);padding:6px 24px;font-size:11.5px;color:var(--slate-500);display:flex;align-items:center;gap:6px;">
+      Replaces 2 pages:
+      <a href="before-calendar.html" style="color:var(--slate-600);font-weight:600;">ScheduleCalendarPage + SubaccountScheduleCalendarPage</a>
+    </div>
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="topbar-breadcrumb-current">Calendar</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a href="index.html" class="btn btn-sm btn-secondary">&#8592; All prototypes</a>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Title row -->
+      <div style="margin-bottom:20px;">
+        <h1 style="font-size:22px;font-weight:800;color:var(--slate-900);letter-spacing:-0.02em;margin:0 0 4px;">Calendar</h1>
+        <p style="font-size:13px;color:var(--slate-500);margin:0;">Scheduled agent runs and workflow executions across your clients.</p>
+      </div>
+
+      <!-- Scope row -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:18px;flex-wrap:wrap;">
+        <button class="scope-pill active" onclick="setScope('all',this)">
+          <span class="scope-dot" style="background:var(--slate-400);"></span>
+          All clients
+        </button>
+        <button class="scope-pill" onclick="setScope('acme',this)">
+          <span class="scope-dot" style="background:#3b82f6;"></span>
+          Acme Corp
+        </button>
+        <button class="scope-pill" onclick="setScope('beta',this)">
+          <span class="scope-dot" style="background:#10b981;"></span>
+          Beta Industries
+        </button>
+        <button class="scope-pill" onclick="setScope('gamma',this)">
+          <span class="scope-dot" style="background:#f59e0b;"></span>
+          Gamma Holdings
+        </button>
+      </div>
+
+      <!-- Thin divider -->
+      <div style="height:1px;background:var(--slate-200);margin-bottom:18px;"></div>
+
+      <!-- Period nav row: Today + arrows + label + divider + view switcher -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
+        <!-- Today button -->
+        <button id="today-btn" onclick="resetToToday()" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--slate-300);background:white;color:var(--slate-700);font-size:12.5px;font-weight:500;cursor:pointer;transition:all 0.12s;white-space:nowrap;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">Today</button>
+        <!-- Prev arrow -->
+        <button onclick="shiftPeriod(-1)" title="Previous period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8249;</button>
+        <!-- Period label -->
+        <span id="period-label" style="font-size:15px;font-weight:600;color:var(--slate-900);white-space:nowrap;min-width:180px;">May 6 - May 12, 2026</span>
+        <!-- Next arrow -->
+        <button onclick="shiftPeriod(1)" title="Next period" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--slate-300);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--slate-600);font-size:15px;line-height:1;transition:background 0.1s;" onmouseover="this.style.background='var(--slate-50)'" onmouseout="this.style.background='white'">&#8250;</button>
+        <!-- Divider -->
+        <div style="width:1px;height:20px;background:var(--slate-200);margin:0 6px;"></div>
+        <!-- View switcher -->
+        <div style="display:flex;gap:2px;background:var(--slate-100);padding:3px;border-radius:8px;">
+          <button class="window-btn active" id="btn-week" onclick="switchCalView('7',this)" style="border-radius:6px;">Week</button>
+          <button class="window-btn" id="btn-fortnight" onclick="switchCalView('14',this)" style="border-radius:6px;">Fortnight</button>
+          <button class="window-btn" id="btn-month" onclick="switchCalView('30',this)" style="border-radius:6px;">Month</button>
+        </div>
+      </div>
+
+      <!-- Thin divider -->
+      <div style="height:1px;background:var(--slate-200);margin-bottom:16px;"></div>
+
+      <!-- Color key row -->
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--slate-400);">Legend:</span>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#3b82f6;flex-shrink:0;"></div>
+          Acme Corp
+        </div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#10b981;flex-shrink:0;"></div>
+          Beta Industries
+        </div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></div>
+          Gamma Holdings
+        </div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:50%;background:#7c3aed;flex-shrink:0;"></div>
+          Nova Agency
+        </div>
+        <div style="width:1px;height:14px;background:var(--slate-200);"></div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:var(--indigo-100);border:1.5px solid var(--indigo-300);flex-shrink:0;"></div>
+          Scheduled task
+        </div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:#eff6ff;border:1.5px solid #bfdbfe;flex-shrink:0;"></div>
+          Workflow
+        </div>
+        <div class="legend-item" style="font-size:11.5px;color:var(--slate-500);">
+          <div style="width:9px;height:9px;border-radius:2px;background:#f0fdf4;border:1.5px solid #a7f3d0;flex-shrink:0;"></div>
+          Agent heartbeat
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════ -->
+      <!-- VIEW: 7-day (default visible) -->
+      <!-- ════════════════════════════════════════ -->
+      <div id="cal-view-7" style="max-width:800px;">
+
+        <!-- Today -->
+        <div class="cal-day-group">
+          <div class="cal-day-label today">
+            <div class="cal-day-today-dot"></div>
+            Today, Wed May 6
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Outreach Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Acme Corp</span>
+              </div>
+            </div>
+            <span class="status-dot dot-blue dot-pulse" style="margin-right:4px;"></span>
+            <span style="font-size:11.5px;color:#3b82f6;font-weight:500;">Running now</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">10:30</div>
+            <div class="cal-type-icon" style="background:#eff6ff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Lead nurture workflow</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-blue" style="font-size:10px;">workflow</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Beta Industries</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">14:00</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Compliance check, monthly report</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">scheduled task</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Gamma Holdings</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Thu May 7 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Thu May 7</div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:#f0fdf4;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">CRM Hygiene Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-green" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Acme Corp</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">11:15</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Outreach Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Beta Industries</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Fri May 8 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Fri May 8</div>
+          <div class="cal-item">
+            <div class="cal-time">09:00</div>
+            <div class="cal-type-icon" style="background:#eff6ff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Weekly reporting workflow</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-blue" style="font-size:10px;">workflow</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>All clients</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Sat empty -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Sat May 9</div>
+          <div style="padding:10px 0;font-size:12.5px;color:var(--slate-400);font-style:italic;">No scheduled runs</div>
+        </div>
+
+        <!-- Sun May 10 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Sun May 10</div>
+          <div style="padding:10px 0;font-size:12.5px;color:var(--slate-400);font-style:italic;">No scheduled runs</div>
+        </div>
+
+        <!-- Mon May 11 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Mon May 11</div>
+          <div class="cal-item">
+            <div class="cal-time">08:30</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Pipeline Review Agent</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">heartbeat</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Nova Agency</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+          <div class="cal-item">
+            <div class="cal-time">14:00</div>
+            <div class="cal-type-icon" style="background:var(--indigo-100);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Lead scoring update</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-indigo" style="font-size:10px;">scheduled task</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Acme Corp</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+        <!-- Tue May 12 -->
+        <div class="cal-day-group">
+          <div class="cal-day-label">Tue May 12</div>
+          <div class="cal-item">
+            <div class="cal-time">10:00</div>
+            <div class="cal-type-icon" style="background:#eff6ff;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/></svg>
+            </div>
+            <div style="flex:1;">
+              <div class="cal-agent-name">Client health check workflow</div>
+              <div class="cal-item-meta">
+                <span class="badge badge-blue" style="font-size:10px;">workflow</span>
+                <span style="color:var(--slate-300);">|</span>
+                <span>Gamma Holdings</span>
+              </div>
+            </div>
+            <span class="badge badge-slate" style="font-size:10px;">Scheduled</span>
+          </div>
+        </div>
+
+      </div><!-- /cal-view-7 -->
+
+      <!-- ════════════════════════════════════════ -->
+      <!-- VIEW: 14-day grid (hidden by default) -->
+      <!-- ════════════════════════════════════════ -->
+      <div id="cal-view-14" style="display:none;max-width:1000px;">
+        <div class="cal-grid-14">
+          <!-- Row 1 headers -->
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Mon</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Tue</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Wed</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Thu</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Fri</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Sat</div>
+          </div>
+          <div class="cal-grid-14-cell cal-grid-14-header">
+            <div class="cal-grid-14-day">Sun</div>
+          </div>
+
+          <!-- Week 1: Apr 27 - May 3 -->
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">Apr 27</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">Outreach Ag.</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#10b981;"></span><span class="cal-chip-label">CRM Hygiene</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">Apr 28</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#f59e0b;"></span><span class="cal-chip-label">Compliance</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">Apr 29</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#7c3aed;"></span><span class="cal-chip-label">Pipeline Rev.</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#10b981;"></span><span class="cal-chip-label">Lead nurture</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">Apr 30</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">CRM Hygiene</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">May 1</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">Wkly report</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#f59e0b;"></span><span class="cal-chip-label">Health wkflw</span></div>
+          </div>
+          <div class="cal-grid-14-cell">
+            <div class="cal-grid-14-date" style="color:var(--slate-300);">May 2</div>
+          </div>
+          <div class="cal-grid-14-cell">
+            <div class="cal-grid-14-date" style="color:var(--slate-300);">May 3</div>
+          </div>
+
+          <!-- Week 2: May 4 - May 10 -->
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">May 4</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#7c3aed;"></span><span class="cal-chip-label">Pipeline Rev.</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">Lead scoring</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">May 5</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#f59e0b;"></span><span class="cal-chip-label">Compliance</span></div>
+          </div>
+          <div class="cal-grid-14-cell today has-events">
+            <div class="cal-grid-14-date today-num" style="font-weight:800;">May 6</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">Outreach Ag.</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#10b981;"></span><span class="cal-chip-label">Lead nurture</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#f59e0b;"></span><span class="cal-chip-label">Compliance</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">May 7</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">CRM Hygiene</span></div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#10b981;"></span><span class="cal-chip-label">Outreach Ag.</span></div>
+          </div>
+          <div class="cal-grid-14-cell has-events">
+            <div class="cal-grid-14-date">May 8</div>
+            <div class="cal-chip"><span class="cal-chip-dot" style="background:#3b82f6;"></span><span class="cal-chip-label">Wkly report</span></div>
+          </div>
+          <div class="cal-grid-14-cell">
+            <div class="cal-grid-14-date" style="color:var(--slate-300);">May 9</div>
+          </div>
+          <div class="cal-grid-14-cell">
+            <div class="cal-grid-14-date" style="color:var(--slate-300);">May 10</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--slate-400);">Click any cell to view that day's full schedule. Colored dots indicate client.</div>
+      </div><!-- /cal-view-14 -->
+
+      <!-- ════════════════════════════════════════ -->
+      <!-- VIEW: 30-day month grid (hidden by default) -->
+      <!-- ════════════════════════════════════════ -->
+      <div id="cal-view-30" style="display:none;max-width:1000px;">
+        <div class="cal-grid-30">
+          <!-- Day headers -->
+          <div class="cal-grid-30-header">Mon</div>
+          <div class="cal-grid-30-header">Tue</div>
+          <div class="cal-grid-30-header">Wed</div>
+          <div class="cal-grid-30-header">Thu</div>
+          <div class="cal-grid-30-header">Fri</div>
+          <div class="cal-grid-30-header">Sat</div>
+          <div class="cal-grid-30-header">Sun</div>
+
+          <!-- Week 1: Apr 7 - 13 (out of month lead-in is Apr in April context, but May calendar) -->
+          <!-- May starts on Thursday. Lead-in: Mon Apr 28 - Wed Apr 30 -->
+          <div class="cal-grid-30-cell out-of-month"><span class="cal-grid-30-date">28</span></div>
+          <div class="cal-grid-30-cell out-of-month"><span class="cal-grid-30-date">29</span></div>
+          <div class="cal-grid-30-cell out-of-month"><span class="cal-grid-30-date">30</span></div>
+          <!-- May 1 on Thursday -->
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 1',[{t:'09:00',n:'CRM Hygiene',c:'#3b82f6'},{t:'14:30',n:'Lead scoring',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">1</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;" title="Acme Corp"></div><div class="cal-dot-sm" style="background:#3b82f6;" title="Acme Corp"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 2',[{t:'09:00',n:'Weekly report workflow',c:'#3b82f6'},{t:'11:00',n:'Health check wkflw',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date">2</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">3</span></div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">4</span></div>
+
+          <!-- Week 2: May 5 - 11 -->
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 5',[{t:'08:30',n:'Pipeline Review',c:'#7c3aed'},{t:'14:00',n:'Lead scoring update',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">5</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#7c3aed;"></div><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 6',[{t:'09:00',n:'Outreach Agent (running)',c:'#3b82f6'},{t:'10:30',n:'Lead nurture workflow',c:'#10b981'},{t:'14:00',n:'Compliance check',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date today-num" style="font-weight:800;">6</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">3 events</div>
+          </div>
+          <div class="cal-grid-30-cell today" onclick="showDayPopover(event,'May 6 (today)',[{t:'09:00',n:'Outreach Agent',c:'#3b82f6'},{t:'10:30',n:'Lead nurture workflow',c:'#10b981'},{t:'14:00',n:'Compliance check',c:'#f59e0b'}])">
+            <!-- Note: this is a visual duplicate to keep grid alignment correct -->
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 7',[{t:'09:00',n:'CRM Hygiene Agent',c:'#3b82f6'},{t:'11:15',n:'Outreach Agent',c:'#10b981'}])">
+            <span class="cal-grid-30-date">7</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 8',[{t:'09:00',n:'Weekly reporting workflow',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">8</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">9</span></div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">10</span></div>
+
+          <!-- Week 3: May 12 - 18 -->
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 11',[{t:'08:30',n:'Pipeline Review Agent',c:'#7c3aed'},{t:'14:00',n:'Lead scoring update',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">11</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#7c3aed;"></div><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 12',[{t:'10:00',n:'Client health check workflow',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date">12</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 13',[{t:'09:00',n:'Outreach Agent',c:'#3b82f6'},{t:'10:30',n:'Lead nurture workflow',c:'#10b981'},{t:'14:00',n:'Compliance check',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date">13</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">3 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 14',[{t:'09:00',n:'CRM Hygiene Agent',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">14</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 15',[{t:'09:00',n:'Weekly reporting workflow',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">15</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">16</span></div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">17</span></div>
+
+          <!-- Week 4: May 19 - 25 -->
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 18',[{t:'08:30',n:'Pipeline Review Agent',c:'#7c3aed'},{t:'14:00',n:'Lead scoring update',c:'#3b82f6'},{t:'16:30',n:'EOD summary report',c:'#7c3aed'}])">
+            <span class="cal-grid-30-date">18</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#7c3aed;"></div><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#7c3aed;"></div></div>
+            <div class="cal-event-count">3 events</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">19</span></div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 20',[{t:'09:00',n:'Outreach Agent',c:'#3b82f6'},{t:'10:30',n:'Lead nurture workflow',c:'#10b981'},{t:'14:00',n:'Compliance check',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date">20</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">3 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 21',[{t:'09:00',n:'CRM Hygiene Agent',c:'#3b82f6'},{t:'11:15',n:'Outreach Agent',c:'#10b981'}])">
+            <span class="cal-grid-30-date">21</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 22',[{t:'09:00',n:'Weekly reporting workflow',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">22</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">23</span></div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">24</span></div>
+
+          <!-- Week 5: May 25 - 31 -->
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 25',[{t:'08:30',n:'Pipeline Review Agent',c:'#7c3aed'},{t:'14:00',n:'Lead scoring update',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">25</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#7c3aed;"></div><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">2 events</div>
+          </div>
+          <div class="cal-grid-30-cell"><span class="cal-grid-30-date">26</span></div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 27',[{t:'09:00',n:'Outreach Agent',c:'#3b82f6'},{t:'10:30',n:'Lead nurture workflow',c:'#10b981'},{t:'14:00',n:'Compliance check',c:'#f59e0b'}])">
+            <span class="cal-grid-30-date">27</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div><div class="cal-dot-sm" style="background:#10b981;"></div><div class="cal-dot-sm" style="background:#f59e0b;"></div></div>
+            <div class="cal-event-count">3 events</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 28',[{t:'09:00',n:'CRM Hygiene Agent',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">28</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell" onclick="showDayPopover(event,'May 29',[{t:'09:00',n:'Weekly reporting workflow',c:'#3b82f6'}])">
+            <span class="cal-grid-30-date">29</span>
+            <div class="cal-dots-row"><div class="cal-dot-sm" style="background:#3b82f6;"></div></div>
+            <div class="cal-event-count">1 event</div>
+          </div>
+          <div class="cal-grid-30-cell out-of-month"><span class="cal-grid-30-date">30</span></div>
+          <div class="cal-grid-30-cell out-of-month"><span class="cal-grid-30-date">31</span></div>
+
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--slate-400);">Click any cell to see that day's events. Colored dots indicate client.</div>
+      </div><!-- /cal-view-30 -->
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<!-- Day popover for 30-day view -->
+<div class="day-popover" id="day-popover">
+  <div class="day-popover-head">
+    <span id="popover-date-label"></span>
+    <button class="popover-close" onclick="closeDayPopover()">&times;</button>
+  </div>
+  <div id="popover-events"></div>
+</div>
+
+<script>
+// ── Period navigation state ────────────────────────────────────
+var currentPeriodType = 'week';   // 'week' | 'fortnight' | 'month'
+var currentPeriodOffset = 0;      // 0 = today's period, -1 = previous, +1 = next
+
+var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function getWeekStart(date) {
+  // Returns the Monday of the week containing `date`
+  var d = new Date(date);
+  var day = d.getDay(); // 0 = Sunday
+  var diff = day === 0 ? -6 : 1 - day; // shift to Monday
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function formatDate(d) {
+  return MONTH_SHORT[d.getMonth()] + ' ' + d.getDate();
+}
+
+function computePeriodLabel(type, offset) {
+  var today = new Date(2026, 4, 6); // May 6, 2026 (prototype anchor)
+
+  if (type === 'week') {
+    var weekStart = getWeekStart(today);
+    weekStart.setDate(weekStart.getDate() + offset * 7);
+    var weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return formatDate(weekStart) + ' – ' + formatDate(weekEnd) + ', ' + weekEnd.getFullYear();
+  }
+
+  if (type === 'fortnight') {
+    var fStart = getWeekStart(today);
+    fStart.setDate(fStart.getDate() + offset * 14);
+    var fEnd = new Date(fStart);
+    fEnd.setDate(fEnd.getDate() + 13);
+    return formatDate(fStart) + ' – ' + formatDate(fEnd) + ', ' + fEnd.getFullYear();
+  }
+
+  if (type === 'month') {
+    var base = new Date(2026, 4 + offset, 1); // May + offset months
+    return MONTH_NAMES[base.getMonth()] + ' ' + base.getFullYear();
+  }
+
+  return '';
+}
+
+function renderPeriod() {
+  var label = computePeriodLabel(currentPeriodType, currentPeriodOffset);
+  document.getElementById('period-label').textContent = label;
+  // Today button: muted/disabled when on current period, active when offset != 0
+  var todayBtn = document.getElementById('today-btn');
+  if (todayBtn) {
+    if (currentPeriodOffset === 0) {
+      todayBtn.style.borderColor = 'var(--slate-300)';
+      todayBtn.style.color = 'var(--slate-400)';
+      todayBtn.style.cursor = 'default';
+      todayBtn.style.background = 'white';
+      todayBtn.setAttribute('onmouseover', '');
+      todayBtn.setAttribute('onmouseout', '');
+    } else {
+      todayBtn.style.borderColor = 'var(--slate-300)';
+      todayBtn.style.color = 'var(--slate-700)';
+      todayBtn.style.cursor = 'pointer';
+      todayBtn.setAttribute('onmouseover', "this.style.background='var(--slate-50)'");
+      todayBtn.setAttribute('onmouseout', "this.style.background='white'");
+    }
+  }
+}
+
+function shiftPeriod(dir) {
+  currentPeriodOffset += dir;
+  renderPeriod();
+}
+
+function resetToToday() {
+  currentPeriodOffset = 0;
+  renderPeriod();
+}
+
+// ── View switching ─────────────────────────────────────────────
+function switchCalView(days, btn) {
+  // Map button id to type string
+  var typeMap = { '7': 'week', '14': 'fortnight', '30': 'month' };
+  currentPeriodType = typeMap[days] || 'week';
+  currentPeriodOffset = 0; // reset to current period when switching type
+
+  document.querySelectorAll('.window-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('cal-view-7').style.display  = days === '7'  ? '' : 'none';
+  document.getElementById('cal-view-14').style.display = days === '14' ? '' : 'none';
+  document.getElementById('cal-view-30').style.display = days === '30' ? '' : 'none';
+  closeDayPopover();
+  renderPeriod();
+}
+
+// ── Scope filter ───────────────────────────────────────────────
+function setScope(id, btn) {
+  document.querySelectorAll('.scope-pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Init period label on load ──────────────────────────────────
+renderPeriod();
+
+// ── Day popover (30-day view) ──────────────────────────────────
+function showDayPopover(evt, dateLabel, items) {
+  evt.stopPropagation();
+  const pop = document.getElementById('day-popover');
+  document.getElementById('popover-date-label').textContent = dateLabel;
+  let html = '';
+  items.forEach(function(item) {
+    html += '<div class="day-popover-item">'
+      + '<span class="day-popover-time">' + item.t + '</span>'
+      + '<span style="width:8px;height:8px;border-radius:50%;background:' + item.c + ';flex-shrink:0;display:inline-block;"></span>'
+      + '<span>' + item.n + '</span>'
+      + '</div>';
+  });
+  document.getElementById('popover-events').innerHTML = html;
+
+  // Position near click
+  const x = Math.min(evt.clientX + 8, window.innerWidth - 260);
+  const y = Math.min(evt.clientY + 8, window.innerHeight - 200);
+  pop.style.left = x + 'px';
+  pop.style.top  = y + 'px';
+  pop.classList.add('visible');
+}
+
+function closeDayPopover() {
+  document.getElementById('day-popover').classList.remove('visible');
+}
+
+document.addEventListener('click', function(e) {
+  const pop = document.getElementById('day-popover');
+  if (pop && pop.classList.contains('visible') && !pop.contains(e.target)) {
+    closeDayPopover();
+  }
+});
+</script>
+</body>
+</html>

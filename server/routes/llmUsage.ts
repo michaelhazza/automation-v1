@@ -1,21 +1,31 @@
 import { Router, NextFunction } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
 import {
-  costAggregates,
-  llmRequests,
-  llmPricing,
-  orgMarginConfigs,
-  orgBudgets,
-  workspaceLimits,
-  agentRuns,
-  subaccounts,
-} from '../db/schema/index.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
-import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
+  getRoutingLog,
+  getRoutingDistribution,
+  getRequestDetail,
+  getOrgUsageSummary,
+  getOrgUsageByAgent,
+  getOrgUsageByModel,
+  getOrgUsageByProvider,
+  getSubaccountUsageSummary,
+  getSubaccountUsageByAgent,
+  getSubaccountUsageByModel,
+  getSubaccountUsageByRun,
+  getRunOrg,
+  getRunCost,
+  getAdminUsageOverview,
+  getLlmPricing,
+  getMarginConfigs,
+  getBillingInvoice,
+  getAgentBudget,
+  updateAgentBudget,
+  getOrgBudget,
+  upsertOrgBudget,
+} from '../services/llmUsageService.js';
 import type { RoutingLogFilters } from '../services/llmUsageService.js';
 
 const router = Router();
@@ -31,49 +41,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const [monthly, daily, topSubaccounts] = await Promise.all([
-      // Monthly aggregate
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'organisation'),
-          eq(costAggregates.entityId, orgId),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).limit(1),
-
-      // Daily aggregate (today)
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'organisation'),
-          eq(costAggregates.entityId, orgId),
-          eq(costAggregates.periodType, 'daily'),
-          eq(costAggregates.periodKey, new Date().toISOString().slice(0, 10)),
-        ),
-      ).limit(1),
-
-      // Top 10 subaccounts by monthly spend — scoped to this org
-      db.select({ costAggregate: costAggregates })
-        .from(costAggregates)
-        .innerJoin(subaccounts, eq(costAggregates.entityId, subaccounts.id))
-        .where(
-          and(
-            eq(costAggregates.entityType, 'subaccount'),
-            eq(costAggregates.periodType, 'monthly'),
-            eq(costAggregates.periodKey, billingMonth),
-            eq(subaccounts.organisationId, orgId),
-          ),
-        ).orderBy(desc(costAggregates.totalCostCents)).limit(10)
-        .then(rows => rows.map(r => r.costAggregate)),
-    ]);
-
-    res.json({
-      period: billingMonth,
-      monthly: monthly[0] ?? null,
-      today:   daily[0] ?? null,
-      topSubaccounts,
-    });
+    const result = await getOrgUsageSummary(orgId, billingMonth);
+    res.json(result);
   }),
 );
 
@@ -88,17 +57,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const rows = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'agent'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-        sql`${costAggregates.entityId} LIKE ${orgId + ':%'}`,
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents));
-
-    res.json({ period: billingMonth, agents: rows });
+    const agents = await getOrgUsageByAgent(orgId, billingMonth);
+    res.json({ period: billingMonth, agents });
   }),
 );
 
@@ -113,30 +73,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    // Query llm_requests directly for per-model breakdown scoped to this org
-    const rows = await db
-      .select({
-        provider:        llmRequests.provider,
-        model:           llmRequests.model,
-        requestCount:    sql<number>`count(*)`,
-        totalCostCents:  sql<number>`sum(${llmRequests.costWithMarginCents})`,
-        totalTokensIn:   sql<number>`sum(${llmRequests.tokensIn})`,
-        totalTokensOut:  sql<number>`sum(${llmRequests.tokensOut})`,
-        avgLatencyMs:    sql<number>`avg(${llmRequests.providerLatencyMs})`,
-        errorCount:      sql<number>`count(*) filter (where ${llmRequests.status} != 'success')`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.organisationId, orgId),
-          eq(llmRequests.billingMonth, billingMonth),
-        ),
-      )
-      .groupBy(llmRequests.provider, llmRequests.model)
-      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
-
-    res.json({ period: billingMonth, models: rows });
+    const models = await getOrgUsageByModel(orgId, billingMonth);
+    res.json({ period: billingMonth, models });
   }),
 );
 
@@ -151,28 +89,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    // Query llmRequests directly for org-scoped provider breakdown
-    // (cost_aggregates provider rows are platform-wide, not per-org)
-    const rows = await db
-      .select({
-        provider:       llmRequests.provider,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
-        requestCount:   sql<number>`count(*)`,
-        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})`,
-        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.organisationId, orgId),
-          eq(llmRequests.billingMonth, billingMonth),
-        ),
-      )
-      .groupBy(llmRequests.provider)
-      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
-
-    res.json({ period: billingMonth, providers: rows });
+    const providers = await getOrgUsageByProvider(orgId, billingMonth);
+    res.json({ period: billingMonth, providers });
   }),
 );
 
@@ -188,33 +106,8 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const [monthly, daily, limits] = await Promise.all([
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'subaccount'),
-          eq(costAggregates.entityId, subaccountId),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).limit(1),
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'subaccount'),
-          eq(costAggregates.entityId, subaccountId),
-          eq(costAggregates.periodType, 'daily'),
-          eq(costAggregates.periodKey, new Date().toISOString().slice(0, 10)),
-        ),
-      ).limit(1),
-      db.select().from(workspaceLimits).where(eq(workspaceLimits.subaccountId, subaccountId)).limit(1),
-    ]);
-
-    res.json({
-      period: billingMonth,
-      monthly: monthly[0] ?? null,
-      today:   daily[0] ?? null,
-      limits:  limits[0] ?? null,
-    });
+    const result = await getSubaccountUsageSummary(subaccountId, billingMonth);
+    res.json(result);
   }),
 );
 
@@ -230,27 +123,8 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const rows = await db
-      .select({
-        agentName:      llmRequests.agentName,
-        requestCount:   sql<number>`count(*)::int`,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})::int`,
-        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})::int`,
-        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})::int`,
-        errorCount:     sql<number>`count(*) filter (where ${llmRequests.status} != 'success')::int`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, billingMonth),
-        ),
-      )
-      .groupBy(llmRequests.agentName)
-      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
-
-    res.json({ period: billingMonth, agents: rows });
+    const agents = await getSubaccountUsageByAgent(subaccountId, billingMonth);
+    res.json({ period: billingMonth, agents });
   }),
 );
 
@@ -266,28 +140,8 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const rows = await db
-      .select({
-        provider:       llmRequests.provider,
-        model:          llmRequests.model,
-        requestCount:   sql<number>`count(*)::int`,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})::int`,
-        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})::int`,
-        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})::int`,
-        avgLatencyMs:   sql<number>`avg(${llmRequests.providerLatencyMs})::int`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, billingMonth),
-        ),
-      )
-      .groupBy(llmRequests.provider, llmRequests.model)
-      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
-
-    res.json({ period: billingMonth, models: rows });
+    const models = await getSubaccountUsageByModel(subaccountId, billingMonth);
+    res.json({ period: billingMonth, models });
   }),
 );
 
@@ -302,41 +156,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-
-    // Join with agentRuns to scope cost data to this subaccount only —
-    // previously this query returned ALL runs globally (missing org/subaccount filter).
-    const rows = await db
-      .select({
-        id: costAggregates.id,
-        entityType: costAggregates.entityType,
-        entityId: costAggregates.entityId,
-        periodType: costAggregates.periodType,
-        periodKey: costAggregates.periodKey,
-        totalCostRaw: costAggregates.totalCostRaw,
-        totalCostWithMargin: costAggregates.totalCostWithMargin,
-        totalCostCents: costAggregates.totalCostCents,
-        totalTokensIn: costAggregates.totalTokensIn,
-        totalTokensOut: costAggregates.totalTokensOut,
-        requestCount: costAggregates.requestCount,
-        errorCount: costAggregates.errorCount,
-        updatedAt: costAggregates.updatedAt,
-      })
-      .from(costAggregates)
-      .innerJoin(agentRuns, eq(costAggregates.entityId, agentRuns.id))
-      .where(
-        and(
-          eq(costAggregates.entityType, 'run'),
-          eq(costAggregates.periodType, 'run'),
-          eq(agentRuns.subaccountId, subaccountId),
-          eq(agentRuns.organisationId, req.orgId!),
-          // Feature 2 §4.7 — exclude test runs by default
-          eq(agentRuns.isTestRun, false),
-        ),
-      )
-      .orderBy(desc(costAggregates.updatedAt))
-      .limit(50);
-
-    res.json({ runs: rows });
+    const runs = await getSubaccountUsageByRun(subaccountId, req.orgId!);
+    res.json({ runs });
   }),
 );
 
@@ -349,89 +170,12 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     const { runId } = req.params;
-
-    // Verify the run belongs to the caller's organisation
-    const [run] = await db.select({ organisationId: agentRuns.organisationId })
-      .from(agentRuns).where(eq(agentRuns.id, runId));
+    const run = await getRunOrg(runId);
     if (!run || run.organisationId !== req.orgId!) {
       throw { statusCode: 404, message: 'Run not found' };
     }
-
-    // Hermes Tier 1 Phase A — §5.4, §8.2.
-    //
-    // `totalCostCents` and `requestCount` come from `cost_aggregates` so
-    // their semantics (which include failed-call cost) are preserved for
-    // existing consumers. The four new fields — `llmCallCount`,
-    // `totalTokensIn/Out`, and `callSiteBreakdown` — are computed against
-    // the `llm_requests_all` view (migration 0189) so runs older than
-    // `LLM_LEDGER_RETENTION_MONTHS` still report correct values after the
-    // nightly archive job moves their rows into `llm_requests_archive`.
-    // All four share the same `status IN ('success','partial')` filter so
-    // the UI can reason about a single set of requests; errored calls are
-    // excluded from the new fields by design (their cost is counted in
-    // `totalCostCents` via `cost_aggregates`, which is the one
-    // intentional asymmetry — see §5.4).
-    const [runAgg] = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'run'),
-        eq(costAggregates.entityId, runId),
-        eq(costAggregates.periodType, 'run'),
-        eq(costAggregates.periodKey, runId),
-      ),
-    );
-
-    const [ledgerTotals] = await db.execute<{
-      llm_call_count: number | string;
-      tokens_in:      number | string | null;
-      tokens_out:     number | string | null;
-    }>(sql`
-      SELECT
-        COUNT(*)::int                       AS llm_call_count,
-        COALESCE(SUM(tokens_in), 0)::int    AS tokens_in,
-        COALESCE(SUM(tokens_out), 0)::int   AS tokens_out
-      FROM llm_requests_all
-      WHERE run_id = ${runId}
-        AND status IN ('success', 'partial')
-    `);
-
-    const callSiteRows = await db.execute<{
-      call_site:     'app' | 'worker' | string;
-      cost_cents:    number | string | null;
-      request_count: number | string;
-    }>(sql`
-      SELECT
-        call_site,
-        COALESCE(SUM(cost_with_margin_cents), 0)::int AS cost_cents,
-        COUNT(*)::int                                 AS request_count
-      FROM llm_requests_all
-      WHERE run_id = ${runId}
-        AND status IN ('success', 'partial')
-      GROUP BY call_site
-    `);
-
-    const callSiteBreakdown = {
-      app:    { costCents: 0, requestCount: 0 },
-      worker: { costCents: 0, requestCount: 0 },
-    };
-    for (const row of callSiteRows) {
-      const bucket =
-        row.call_site === 'worker' ? callSiteBreakdown.worker :
-        row.call_site === 'app'    ? callSiteBreakdown.app    :
-        null;
-      if (!bucket) continue; // Defensive: ignore any unexpected call_site value
-      bucket.costCents    = Number(row.cost_cents ?? 0);
-      bucket.requestCount = Number(row.request_count ?? 0);
-    }
-
-    res.json({
-      entityId:       runAgg?.entityId ?? runId,
-      totalCostCents: runAgg?.totalCostCents ?? 0,
-      requestCount:   runAgg?.requestCount   ?? 0,
-      llmCallCount:   Number(ledgerTotals?.llm_call_count ?? 0),
-      totalTokensIn:  Number(ledgerTotals?.tokens_in      ?? 0),
-      totalTokensOut: Number(ledgerTotals?.tokens_out     ?? 0),
-      callSiteBreakdown,
-    });
+    const result = await getRunCost(runId);
+    res.json(result);
   }),
 );
 
@@ -547,26 +291,8 @@ router.get(
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    const [orgs, providers] = await Promise.all([
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'organisation'),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).orderBy(desc(costAggregates.totalCostCents)).limit(50),
-
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'provider'),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).orderBy(desc(costAggregates.totalCostCents)),
-    ]);
-
-    res.json({ period: billingMonth, organisations: orgs, providers });
+    const result = await getAdminUsageOverview(billingMonth);
+    res.json(result);
   }),
 );
 
@@ -579,7 +305,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (_req, res) => {
-    const rows = await db.select().from(llmPricing).orderBy(llmPricing.provider, llmPricing.model);
+    const rows = await getLlmPricing();
     res.json(rows);
   }),
 );
@@ -589,7 +315,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (_req, res) => {
-    const rows = await db.select().from(orgMarginConfigs).orderBy(orgMarginConfigs.createdAt);
+    const rows = await getMarginConfigs();
     res.json(rows);
   }),
 );
@@ -605,97 +331,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const { subaccountId, period } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-
-    // Reconciliation check
-    const ledgerTotal = await db
-      .select({ total: sql<number>`COALESCE(SUM(${llmRequests.costWithMarginCents}), 0)` })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, period),
-          eq(llmRequests.status, 'success'),
-        ),
-      );
-
-    const [aggregateRow] = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'subaccount'),
-        eq(costAggregates.entityId, subaccountId),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, period),
-      ),
-    );
-
-    const ledger    = Number(ledgerTotal[0]?.total ?? 0);
-    const aggregate = aggregateRow?.totalCostCents ?? 0;
-    const mismatch  = Math.abs(ledger - aggregate) > 0;
-
-    // Agent breakdown
-    const agentBreakdown = await db
-      .select({
-        agentName:      llmRequests.agentName,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
-        requestCount:   sql<number>`count(*)`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, period),
-          eq(llmRequests.status, 'success'),
-        ),
-      )
-      .groupBy(llmRequests.agentName)
-      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
-
-    // Model breakdown
-    const modelBreakdown = await db
-      .select({
-        provider:       llmRequests.provider,
-        model:          llmRequests.model,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, period),
-          eq(llmRequests.status, 'success'),
-        ),
-      )
-      .groupBy(llmRequests.provider, llmRequests.model);
-
-    // Task type breakdown
-    const taskTypeBreakdown = await db
-      .select({
-        taskType:       llmRequests.taskType,
-        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, period),
-          eq(llmRequests.status, 'success'),
-        ),
-      )
-      .groupBy(llmRequests.taskType);
-
-    res.json({
-      subaccountId,
-      period,
-      totalCostCents: ledger,
-      mismatch,
-      breakdown: {
-        byAgent:    agentBreakdown,
-        byModel:    modelBreakdown,
-        byTaskType: taskTypeBreakdown,
-      },
-      requestCount:  aggregateRow?.requestCount ?? 0,
-      errorCount:    aggregateRow?.errorCount ?? 0,
-      reconciledAt:  new Date().toISOString(),
-    });
+    const result = await getBillingInvoice(subaccountId, period);
+    res.json(result);
   }),
 );
 
@@ -711,62 +348,11 @@ router.get(
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-
-    // Get the subaccount agent link for budget config
-    const { subaccountAgents } = await import('../db/schema/index.js');
-    const [saLink] = await db.select().from(subaccountAgents).where(
-      and(
-        eq(subaccountAgents.subaccountId, subaccountId),
-        eq(subaccountAgents.agentId, agentId),
-        eq(subaccountAgents.organisationId, req.orgId!),
-      ),
-    );
-
-    if (!saLink) {
+    const result = await getAgentBudget(subaccountId, agentId, req.orgId!, billingMonth);
+    if (!result) {
       return res.status(404).json({ error: 'Agent not linked to this subaccount' });
     }
-
-    // Get monthly spend from llm_requests for this agent in this subaccount
-    const [spend] = await db
-      .select({
-        totalCostCents: sql<number>`COALESCE(sum(${llmRequests.costWithMarginCents}), 0)::int`,
-        requestCount: sql<number>`count(*)::int`,
-        totalTokensIn: sql<number>`COALESCE(sum(${llmRequests.tokensIn}), 0)::int`,
-        totalTokensOut: sql<number>`COALESCE(sum(${llmRequests.tokensOut}), 0)::int`,
-        errorCount: sql<number>`count(*) filter (where ${llmRequests.status} != 'success')::int`,
-      })
-      .from(llmRequests)
-      .where(
-        and(
-          eq(llmRequests.subaccountId, subaccountId),
-          eq(llmRequests.billingMonth, billingMonth),
-          sql`${llmRequests.runId} IN (
-            SELECT id FROM agent_runs
-            WHERE agent_id = ${agentId} AND subaccount_id = ${subaccountId}
-          )`,
-        ),
-      );
-
-    // Get workspace-level limits
-    const [limits] = await db.select().from(workspaceLimits)
-      .where(eq(workspaceLimits.subaccountId, subaccountId)).limit(1);
-
-    res.json({
-      period: billingMonth,
-      agentId,
-      subaccountId,
-      spend: spend ?? { totalCostCents: 0, requestCount: 0, totalTokensIn: 0, totalTokensOut: 0, errorCount: 0 },
-      config: {
-        maxCostPerRunCents: saLink.maxCostPerRunCents,
-        maxLlmCallsPerRun: saLink.maxLlmCallsPerRun,
-        tokenBudgetPerRun: saLink.tokenBudgetPerRun,
-      },
-      limits: limits ? {
-        monthlyCostLimitCents: limits.monthlyCostLimitCents,
-        dailyCostLimitCents: limits.dailyCostLimitCents,
-        alertThresholdPct: limits.alertThresholdPct,
-      } : null,
-    });
+    res.json(result);
   }),
 );
 
@@ -782,30 +368,14 @@ router.put(
       maxLlmCallsPerRun?: number | null;
       tokenBudgetPerRun?: number;
     };
-
-    const { subaccountAgents } = await import('../db/schema/index.js');
-    const [saLink] = await db.select().from(subaccountAgents).where(
-      and(
-        eq(subaccountAgents.subaccountId, subaccountId),
-        eq(subaccountAgents.agentId, agentId),
-        eq(subaccountAgents.organisationId, req.orgId!),
-      ),
-    );
-
-    if (!saLink) {
+    const updated = await updateAgentBudget(subaccountId, agentId, req.orgId!, {
+      maxCostPerRunCents,
+      maxLlmCallsPerRun,
+      tokenBudgetPerRun,
+    });
+    if (!updated) {
       return res.status(404).json({ error: 'Agent not linked to this subaccount' });
     }
-
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-    if (maxCostPerRunCents !== undefined) updates.maxCostPerRunCents = maxCostPerRunCents;
-    if (maxLlmCallsPerRun !== undefined) updates.maxLlmCallsPerRun = maxLlmCallsPerRun;
-    if (tokenBudgetPerRun !== undefined) updates.tokenBudgetPerRun = tokenBudgetPerRun;
-
-    const [updated] = await db.update(subaccountAgents)
-      .set(updates)
-      .where(eq(subaccountAgents.id, saLink.id))
-      .returning();
-
     res.json(updated);
   }),
 );
@@ -820,7 +390,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
-    const [budget] = await db.select().from(orgBudgets).where(eq(orgBudgets.organisationId, orgId));
+    const budget = await getOrgBudget(orgId);
     res.json(budget ?? null);
   }),
 );
@@ -835,25 +405,7 @@ router.put(
       monthlyCostLimitCents?: number;
       alertThresholdPct?: number;
     };
-
-    const [upserted] = await db
-      .insert(orgBudgets)
-      .values({
-        organisationId: orgId,
-        monthlyCostLimitCents: monthlyCostLimitCents ?? null,
-        alertThresholdPct: alertThresholdPct ?? 80,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: orgBudgets.organisationId,
-        set: {
-          monthlyCostLimitCents: monthlyCostLimitCents ?? null,
-          alertThresholdPct: alertThresholdPct ?? 80,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-
+    const upserted = await upsertOrgBudget(orgId, monthlyCostLimitCents, alertThresholdPct);
     res.json(upserted);
   }),
 );

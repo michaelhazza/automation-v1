@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../lib/api';
+import MemoryBlockSourcesTab from './MemoryBlockSourcesTab';
 
 interface Version {
   id: string;
@@ -30,11 +31,13 @@ interface CanonicalDiff {
   unifiedDiff: string;
 }
 
-type Tab = 'history' | 'diff-canonical';
+type Tab = 'history' | 'diff-canonical' | 'sources';
 
 export default function MemoryBlockDetailPage() {
   const { blockId } = useParams<{ blockId: string }>();
   const [tab, setTab] = useState<Tab>('history');
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [blockSource, setBlockSource] = useState<string | null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
   const [canonical, setCanonical] = useState<CanonicalDiff | null>(null);
   const [canonicalError, setCanonicalError] = useState<string | null>(null);
@@ -46,6 +49,19 @@ export default function MemoryBlockDetailPage() {
   } | null>(null);
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  useEffect(() => {
+    api.get<{ organisationId: string }>('/api/auth/me').then(({ data }) => {
+      setOrgId(data.organisationId);
+      return api.get<{ id: string; source: string }>(
+        `/api/memory-blocks/${blockId}`,
+      );
+    }).then(({ data }) => {
+      setBlockSource(data.source);
+    }).catch(() => {
+      // non-fatal — Sources tab stays hidden if lookup fails
+    });
+  }, [blockId]);
 
   const loadVersions = async () => {
     if (!blockId) return;
@@ -81,6 +97,7 @@ export default function MemoryBlockDetailPage() {
   useEffect(() => {
     loadVersions();
     if (tab === 'diff-canonical') loadCanonical();
+    // reason: `loadVersions` and `loadCanonical` are inline async functions; only the trigger keys (blockId, tab) should re-run this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blockId, tab]);
 
@@ -134,6 +151,15 @@ export default function MemoryBlockDetailPage() {
         >
           Diff vs Canonical
         </button>
+        {blockSource === 'auto_synthesised' && (
+          <button
+            type="button"
+            className={`px-3 py-1.5 text-sm ${tab === 'sources' ? 'border-b-2 border-indigo-600 text-indigo-700' : 'text-slate-600'}`}
+            onClick={() => setTab('sources')}
+          >
+            Sources
+          </button>
+        )}
       </div>
 
       {tab === 'history' && (
@@ -188,6 +214,10 @@ export default function MemoryBlockDetailPage() {
             </pre>
           )}
         </div>
+      )}
+
+      {tab === 'sources' && orgId && (
+        <MemoryBlockSourcesTab blockId={blockId!} orgId={orgId} />
       )}
 
       {tab === 'diff-canonical' && (

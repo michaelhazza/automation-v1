@@ -1,0 +1,54 @@
+You are reviewing a specification document for implementation-readiness, iteration 2.
+
+The spec is at: `docs/superpowers/specs/2026-05-09-support-desk-canonical-spec.md` (1889 lines, commit b1745ff8 — most recent edits applied).
+
+The spec is for a "Support Desk Canonical layer + Teamwork Desk validating implementation". Single-PR Major-class build.
+
+Iteration 1 surfaced and resolved 11 mechanical findings:
+- F1: `last_sync_at` typo in §5 intro normalised to `last_synced_at`.
+- F2: Drafts now explicitly exempted from the `external_id` pattern.
+- F3: §17.1 acceptance, §17.2 capability matrix, and C9 chunk row reworded to manual-smoke + pure-fixtures (no vitest of polling/webhook services).
+- F4: §8.5 "Mark sent" rewritten — does NOT insert into `canonical_ticket_messages`; transitions draft only.
+- F5: §12 ticket route guard set to `authenticate` + org-scoped reads (no `support.tickets.read` permission key).
+- F6: §9 `support.draft.approve` now explicitly gates the edit route.
+- F7: §1 goals list now includes `support.reject_draft`.
+- R1: §5.3 `agent_config` shape now has `version: 1` field.
+- R3: §8 supersede transition rule + guard explicit; forbidden-transitions list includes `superseded`; §14.4 post-terminal includes `superseded`.
+- R4a: §15 `SUPPORT_LOG_CODES` extended with DRAFT_SENT/FAILED/REJECTED/EXPIRED/SUPERSEDED keys.
+- R4b: §14.4 terminal events now lists `support.draft.superseded`.
+
+Iteration 2 task: re-review the spec for any remaining mechanical issues. Focus on contradictions you DIDN'T raise in iteration 1, plus any issues introduced by the iteration 1 edits.
+
+The source brief is LOCKED v5.3 at `tasks/builds/support-desk-canonical/brief.md`. Findings that change brief-locked decisions are out of scope.
+
+Five open questions exist in §22 (OQ-1..OQ-5). Findings whose work is captured by an OQ should be skipped.
+
+Project framing context (do not propose work that contradicts these):
+- Pre-production, no live agency clients.
+- Testing posture: static_gates_primary, runtime_tests: pure_function_only. Vitest/E2E/playwright/supertest/frontend tests for non-pure code are forbidden.
+- Rollout: commit_and_revert. No feature flags for migrations. No staged rollout.
+- Prefer existing primitives over new abstractions.
+
+Mockups frozen at `prototypes/support-desk-canonical/`. UI findings that contradict the mockups are out of scope.
+
+Output findings in the same structured format:
+
+```
+FINDING: <short title>
+SECTION: <spec section heading or line range>
+TYPE: contradiction | drift | missing-contract | sequencing-bug | invariant-gap | ambiguity | typo | other
+SEVERITY: critical | important | minor | nit
+DESCRIPTION: <one paragraph>
+EVIDENCE: <quote the conflicting text or name the missing thing>
+SUGGESTED FIX: <one paragraph — minimum change>
+```
+
+If you find no NEW mechanical issues (i.e. nothing remaining after the iteration 1 edits), say "No new mechanical findings — spec is mechanically tight."
+
+Do NOT raise:
+- The 11 issues already resolved in iteration 1.
+- Adding tests beyond the pure-function set.
+- Adding feature flags or staged rollout.
+- New primitives that duplicate existing ones.
+- Anything covered by OQ-1..OQ-5.
+- Brief-locked decisions.

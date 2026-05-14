@@ -6,6 +6,10 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { HelpHint } from '../components/ui/HelpHint';
 import RichTextEditor from '../components/RichTextEditor';
+import EditArtefactDrawer from '../components/baseline/EditArtefactDrawer';
+import BaselineArtefactsStatusBadge from '../components/baseline/BaselineArtefactsStatusBadge';
+import { BASELINE_SLUGS, TIER_BY_SLUG } from '../../../shared/constants/baselineArtefacts';
+import type { ArtefactStatus } from '../../../shared/constants/baselineArtefacts';
 
 /**
  * Extract a plain-text title from Tiptap HTML / plain text. Used for table
@@ -145,15 +149,22 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
   const [renameRef, setRenameRef] = useState<Reference | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
 
+  // Baseline artefacts section state
+  const [artefactStatuses, setArtefactStatuses] = useState<Record<string, ArtefactStatus>>({});
+  const [drawerSlug, setDrawerSlug] = useState<string | null>(null);
+
   useEffect(() => {
     if (!subaccountId) return;
     load();
+    loadArtefactStatus();
+    // reason: `load` and `loadArtefactStatus` are inline async functions that close over state setters; only subaccountId is the intended trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId]);
 
   useEffect(() => {
     if (!subaccountId || tab !== 'insights') return;
     loadInsights();
+    // reason: `loadInsights` is an inline async function that closes over state setters; only the filter keys are the intended triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId, tab, insightFilters]);
 
@@ -167,6 +178,27 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
       setError('Failed to load knowledge');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadArtefactStatus() {
+    try {
+      const res = await api.get(`/api/subaccounts/${subaccountId}/baseline-artefacts-status`);
+      const raw = res.data.status;
+      if (!raw) return;
+      const statuses: Record<string, ArtefactStatus> = {};
+      for (const slug of BASELINE_SLUGS) {
+        const shortKey = slug.split('.')[1];
+        const tier = TIER_BY_SLUG[slug];
+        const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
+        const entry = (raw[tierKey] as Record<string, { status: string }> | undefined)?.[shortKey];
+        if (entry?.status) {
+          statuses[slug] = entry.status as ArtefactStatus;
+        }
+      }
+      setArtefactStatuses(statuses);
+    } catch {
+      // Non-critical — silently ignore if status cannot be loaded
     }
   }
 
@@ -408,7 +440,7 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           {tab === 'references' && (
             <button
               onClick={() => openEditReference('new')}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               + New Reference
             </button>
@@ -416,7 +448,7 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           {tab === 'blocks' && (
             <button
               onClick={() => openEditBlock('new')}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               + New Memory Block
             </button>
@@ -437,6 +469,42 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           </button>
         </div>
       )}
+
+      {/* Baseline artefacts section */}
+      <div className="mb-6 bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <h2 className="text-[13px] font-semibold text-slate-700 m-0">Baseline artefacts</h2>
+        </div>
+        <ul className="divide-y divide-slate-50">
+          {BASELINE_SLUGS.map((slug) => {
+            const shortKey = slug.split('.')[1];
+            const name = shortKey
+              .replace(/_/g, ' ')
+              .replace(/^./, (c) => c.toUpperCase());
+            const tier = TIER_BY_SLUG[slug];
+            const status = artefactStatuses[slug] ?? 'not_started';
+            return (
+              <li key={slug} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="text-[13px] text-slate-800 font-medium">{name}</span>
+                  <span className="text-[11px] text-slate-400">Tier {tier}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <BaselineArtefactsStatusBadge status={status} slug={slug} />
+                  {status === 'completed' && (
+                    <button
+                      onClick={() => setDrawerSlug(slug)}
+                      className="btn btn-xs btn-secondary"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 mb-4">
@@ -581,14 +649,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
             <div className="flex justify-end gap-2 mt-2">
               <button
                 onClick={() => setPromoteFrom(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePromote}
                 disabled={!promoteLabel.trim() || !promoteContent.trim() || promoting}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 {promoting ? 'Promoting…' : 'Promote'}
               </button>
@@ -624,14 +692,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setEditRef(null);
                   setEditRefContent('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveReference}
                 disabled={!editRefContent.replace(/<[^>]+>/g, '').trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Save
               </button>
@@ -668,14 +736,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setRenameRef(null);
                   setRenameTitle('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRenameReference}
                 disabled={!renameTitle.trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Rename
               </button>
@@ -728,14 +796,14 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
                   setEditBlockLabel('');
                   setEditBlockContent('');
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveBlock}
                 disabled={!editBlockLabel.trim() || !editBlockContent.trim()}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+                className="btn btn-primary"
               >
                 Save
               </button>
@@ -761,6 +829,16 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           confirmLabel="Demote"
           onConfirm={handleDemote}
           onCancel={() => setDemoteBlockId(null)}
+        />
+      )}
+
+      {drawerSlug && subaccountId && (
+        <EditArtefactDrawer
+          artefactSlug={drawerSlug}
+          subaccountId={subaccountId}
+          open={drawerSlug !== null}
+          onClose={() => setDrawerSlug(null)}
+          onSaved={() => loadArtefactStatus()}
         />
       )}
     </div>
@@ -845,25 +923,25 @@ function ReferencesTable({
                 <div className="flex gap-1.5 flex-wrap">
                   <button
                     onClick={() => onPromote(item)}
-                    className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-50"
                   >
                     Promote
                   </button>
                   <button
                     onClick={() => onEdit(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onRename(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Rename
                   </button>
                   <button
                     onClick={() => onArchive(item.id)}
-                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded text-[12px] text-amber-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-amber-700 hover:bg-amber-50"
                   >
                     Archive
                   </button>
@@ -999,7 +1077,7 @@ function InsightsTable({
               <td className="px-3 py-3">
                 <button
                   onClick={() => onPromote(item.id)}
-                  className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors"
+                  className="btn btn-xs btn-ghost text-indigo-700 hover:bg-indigo-50"
                 >
                   Promote
                 </button>
@@ -1061,13 +1139,13 @@ function BlocksTable({
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => onEdit(item)}
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-secondary"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onDemote(item.id)}
-                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded text-[12px] text-amber-700 cursor-pointer transition-colors"
+                    className="btn btn-xs btn-ghost text-amber-700 hover:bg-amber-50"
                   >
                     Demote
                   </button>

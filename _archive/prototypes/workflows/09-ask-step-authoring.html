@@ -1,0 +1,378 @@
+<!doctype html>
+<!--
+  Mock 09 · Ask step authoring deep-dive
+  ========================================
+  Five inspector states showing the full authoring affordances of the
+  Ask step type. Companion to mock 04 (which shows all four A's at once);
+  this one zooms into Ask specifically.
+
+  States:
+    A. Default Ask inspector with two fields configured
+    B. Who can submit dropdown open (all 4 options visible)
+    C. Auto-fill from dropdown open (V1 options + V2 deferral)
+    D. Add a field type picker open (7 V1 field types)
+    E. Editing a select field showing the options-list config
+
+  All states share the same canvas on the left with the Ask step selected.
+  Only the inspector content varies between states.
+
+  See brief §7.3 "How an Ask form is surfaced and submitted (V1)".
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 09 — Ask step authoring</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; color:#0f172a; }
+
+  /* State switching */
+  input[name="state-switcher"] { display: none; }
+  .scn { display: none; }
+  #state-a:checked ~ .page .scn.sa,
+  #state-b:checked ~ .page .scn.sb,
+  #state-c:checked ~ .page .scn.sc,
+  #state-d:checked ~ .page .scn.sd,
+  #state-e:checked ~ .page .scn.se { display: block; }
+
+  .state-btn { padding: 8px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600; color: #475569; background: white; border: 1px solid #e2e8f0; cursor: pointer; transition: all 100ms; }
+  .state-btn:hover { border-color: #cbd5e1; }
+  #state-a:checked ~ .page label[for="state-a"],
+  #state-b:checked ~ .page label[for="state-b"],
+  #state-c:checked ~ .page label[for="state-c"],
+  #state-d:checked ~ .page label[for="state-d"],
+  #state-e:checked ~ .page label[for="state-e"] { background: #4f46e5; color: white; border-color: #4f46e5; }
+
+  /* Step card on canvas */
+  .step-card { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 7px; }
+  .step-card.selected { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+  .step-card.faded { opacity: 0.55; }
+  .step-num { width: 22px; height: 22px; border-radius: 5px; background: #f1f5f9; color: #64748b; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .a-pill { padding: 1px 5px; border-radius: 3px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .a-pill.agent { background: #eef2ff; color: #4338ca; }
+  .a-pill.action { background: #ecfdf5; color: #065f46; }
+  .a-pill.approval { background: #fff7ed; color: #9a3412; }
+  .a-pill.ask { background: #fef3c7; color: #92400e; }
+
+  /* Inspector */
+  .insp-input { width: 100%; padding: 6px 9px; border: 1px solid #e2e8f0; border-radius: 5px; font-size: 12.5px; background: white; outline: none; }
+  .insp-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.15); }
+  .insp-label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 600; margin-bottom: 4px; }
+
+  /* Form-field row inside the inspector */
+  .ff-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 5px; cursor: pointer; }
+  .ff-row:hover { border-color: #cbd5e1; }
+  .ff-row.editing { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.10); }
+  .ff-key { font-size: 12px; color: #0f172a; font-weight: 600; }
+  .ff-type { padding: 1px 5px; border-radius: 3px; background: #f1f5f9; color: #475569; font-size: 9.5px; font-weight: 600; }
+  .ff-required { padding: 1px 5px; border-radius: 3px; background: #fef3c7; color: #92400e; font-size: 9.5px; font-weight: 600; }
+
+  /* Dropdown panel */
+  .dd-panel { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 12px 32px rgba(15,23,42,0.10); z-index: 30; max-height: 360px; overflow-y: auto; }
+  .dd-item { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+  .dd-item:last-child { border-bottom: none; }
+  .dd-item:hover { background: #f8fafc; }
+  .dd-item.selected { background: #eef2ff; }
+  .dd-item .label { font-size: 12.5px; font-weight: 600; color: #0f172a; }
+  .dd-item .help { font-size: 11px; color: #64748b; margin-top: 1px; }
+  .dd-item .v2 { display: inline-block; padding: 1px 5px; border-radius: 3px; background: #f1f5f9; color: #94a3b8; font-size: 9.5px; font-weight: 600; margin-left: 6px; }
+
+  /* Field-type picker tile */
+  .ft-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; }
+  .ft-tile { display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 5px; cursor: pointer; }
+  .ft-tile:hover { border-color: #4f46e5; background: #f8fafc; }
+  .ft-tile .icon { width: 24px; height: 24px; background: #f1f5f9; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; }
+  .ft-tile .name { font-size: 11.5px; font-weight: 600; color: #0f172a; }
+  .ft-tile .desc { font-size: 10.5px; color: #64748b; margin-top: 1px; }
+
+  /* Options list (for select field config) */
+  .opt-row { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
+  .opt-row .drag { cursor: grab; color: #cbd5e1; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<input type="radio" name="state-switcher" id="state-a" checked>
+<input type="radio" name="state-switcher" id="state-b">
+<input type="radio" name="state-switcher" id="state-c">
+<input type="radio" name="state-switcher" id="state-d">
+<input type="radio" name="state-switcher" id="state-e">
+
+<div class="page mx-auto max-w-[1280px] p-6">
+  <div class="flex justify-between items-baseline mb-3">
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 09 · Ask step authoring</h1>
+    <a href="index.html" class="text-[12.5px] text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
+  </div>
+
+  <p class="text-[12px] text-slate-500 mb-4 leading-relaxed">
+    Five inspector states showing how the Ask step is authored in the Studio. Click each state to see what the author sees when configuring the form. Brief §7.3.
+  </p>
+
+  <div class="flex gap-2 mb-4 flex-wrap">
+    <label for="state-a" class="state-btn">A · Default</label>
+    <label for="state-b" class="state-btn">B · Who can submit</label>
+    <label for="state-c" class="state-btn">C · Auto-fill</label>
+    <label for="state-d" class="state-btn">D · Add a field</label>
+    <label for="state-e" class="state-btn">E · Edit a select field</label>
+  </div>
+
+  <div class="grid grid-cols-[1fr_400px] gap-5">
+
+    <!-- Canvas (shared across all states) -->
+    <div class="bg-white border border-slate-200 rounded-lg p-6">
+      <div class="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">Studio canvas · workflow draft</div>
+      <div class="flex flex-col items-center gap-2">
+        <div class="step-card selected" style="width: 320px;">
+          <div class="step-num">1</div>
+          <div class="flex-1">
+            <div class="text-[12.5px] font-semibold text-slate-900">Confirm campaign target</div>
+            <div class="text-[10.5px] text-slate-500">Operator picks audience segment + tone</div>
+          </div>
+          <span class="a-pill ask">Ask</span>
+        </div>
+        <div class="w-px h-5 bg-slate-300"></div>
+        <div class="step-card faded" style="width: 320px;">
+          <div class="step-num">2</div>
+          <div class="flex-1"><div class="text-[12.5px] font-medium text-slate-900">Find stale leads</div></div>
+          <span class="a-pill action">Action</span>
+        </div>
+        <div class="w-px h-5 bg-slate-300"></div>
+        <div class="step-card faded" style="width: 320px;">
+          <div class="step-num">3</div>
+          <div class="flex-1"><div class="text-[12.5px] font-medium text-slate-900">Classify by fit</div></div>
+          <span class="a-pill agent">Agent</span>
+        </div>
+        <div class="w-px h-5 bg-slate-300"></div>
+        <div class="step-card faded" style="width: 320px;">
+          <div class="step-num">4</div>
+          <div class="flex-1"><div class="text-[12.5px] font-medium text-slate-900">Marketing review</div></div>
+          <span class="a-pill approval">Approval</span>
+        </div>
+      </div>
+      <p class="text-[11px] text-slate-500 text-center mt-4 italic">Step 1 selected. Inspector on the right shows its fields.</p>
+    </div>
+
+    <!-- Inspector (varies by state) -->
+    <div class="bg-white border border-slate-200 rounded-lg" style="min-height: 540px;">
+      <div class="px-4 py-3 border-b border-slate-200">
+        <div class="flex items-center gap-2">
+          <span class="text-[10.5px] uppercase tracking-wider font-semibold text-slate-400">Step 1</span>
+          <span class="a-pill ask">Ask</span>
+        </div>
+        <div class="text-[14px] font-semibold text-slate-900 mt-1">Confirm campaign target</div>
+      </div>
+
+      <div class="p-4 space-y-4">
+
+        <!-- Always-visible top fields -->
+        <div>
+          <label class="insp-label">Name</label>
+          <input class="insp-input" value="Confirm campaign target">
+        </div>
+
+        <div>
+          <label class="insp-label">Prompt to user</label>
+          <textarea class="insp-input" rows="2">Confirm this week's campaign target before we kick off the lead pull.</textarea>
+        </div>
+
+        <!-- Form fields list — same across all states except E (where field 1 is being edited) -->
+        <div>
+          <label class="insp-label">Form fields</label>
+          <div class="space-y-1.5">
+
+            <!-- Field 1 — appears differently in state E -->
+            <div class="scn sa sb sc sd">
+              <div class="ff-row">
+                <span class="ff-key">audience</span>
+                <span class="ff-type">text</span>
+                <span class="ff-required">required</span>
+                <span class="ml-auto text-slate-400 text-[14px]">⋯</span>
+              </div>
+            </div>
+            <div class="scn se">
+              <div class="ff-row editing" style="display: block; padding: 12px;">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="ff-key">audience</span>
+                  <span class="ff-type" style="background:#fef3c7; color:#92400e;">select</span>
+                  <span class="ff-required">required</span>
+                  <span class="ml-auto text-[11px] text-indigo-600 cursor-pointer">Done</span>
+                </div>
+                <div class="space-y-2.5">
+                  <div>
+                    <label class="insp-label" style="font-size: 9.5px; margin-bottom: 2px;">Label (shown to user)</label>
+                    <input class="insp-input" style="font-size: 11.5px; padding: 4px 7px;" value="Audience segment">
+                  </div>
+                  <div>
+                    <label class="insp-label" style="font-size: 9.5px; margin-bottom: 2px;">Field key (used in bindings)</label>
+                    <input class="insp-input" style="font-size: 11.5px; padding: 4px 7px; font-family: monospace; color:#475569;" value="audience" disabled>
+                  </div>
+                  <div>
+                    <label class="insp-label" style="font-size: 9.5px; margin-bottom: 2px;">Help text (optional)</label>
+                    <input class="insp-input" style="font-size: 11.5px; padding: 4px 7px;" placeholder="Shown below the field" value="Pick the segment for this campaign run.">
+                  </div>
+                  <div>
+                    <label class="insp-label" style="font-size: 9.5px; margin-bottom: 2px;">Options</label>
+                    <div class="opt-row">
+                      <span class="drag">⋮⋮</span>
+                      <input class="flex-1" style="border:none; outline:none; font-size: 11.5px;" value="High-fit accounts (Tier A)">
+                      <span class="text-slate-400 text-[12px] cursor-pointer">×</span>
+                    </div>
+                    <div class="opt-row">
+                      <span class="drag">⋮⋮</span>
+                      <input class="flex-1" style="border:none; outline:none; font-size: 11.5px;" value="Mid-fit accounts (Tier B)">
+                      <span class="text-slate-400 text-[12px] cursor-pointer">×</span>
+                    </div>
+                    <div class="opt-row">
+                      <span class="drag">⋮⋮</span>
+                      <input class="flex-1" style="border:none; outline:none; font-size: 11.5px;" value="Stale leads only (Tier C)">
+                      <span class="text-slate-400 text-[12px] cursor-pointer">×</span>
+                    </div>
+                    <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium mt-1">+ Add option</button>
+                  </div>
+                  <div>
+                    <label class="flex items-center gap-2 text-[12px] text-slate-700 cursor-pointer">
+                      <input type="checkbox" checked style="accent-color: #4f46e5;">
+                      Required
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Field 2 — same across all states -->
+            <div class="ff-row">
+              <span class="ff-key">tone</span>
+              <span class="ff-type">select</span>
+              <span class="ff-required">required</span>
+              <span class="ml-auto text-slate-400 text-[14px]">⋯</span>
+            </div>
+            <div class="text-[10.5px] text-slate-500 px-1">Options: Professional warm / Friendly / Direct</div>
+
+            <!-- Add a field button + state D picker -->
+            <div style="position: relative;">
+              <button class="text-[11.5px] text-indigo-600 hover:text-indigo-800 font-medium pt-2">+ Add a field</button>
+
+              <!-- State D — picker open -->
+              <div class="scn sd">
+                <div class="dd-panel" style="top: 32px;">
+                  <div class="px-3 py-2 border-b border-slate-100 text-[10.5px] uppercase tracking-wider font-semibold text-slate-500">Pick a field type</div>
+                  <div class="ft-grid">
+                    <div class="ft-tile">
+                      <div class="icon">A</div>
+                      <div><div class="name">Text</div><div class="desc">Single line</div></div>
+                    </div>
+                    <div class="ft-tile">
+                      <div class="icon">¶</div>
+                      <div><div class="name">Textarea</div><div class="desc">Multi-line</div></div>
+                    </div>
+                    <div class="ft-tile">
+                      <div class="icon">▼</div>
+                      <div><div class="name">Select</div><div class="desc">One choice</div></div>
+                    </div>
+                    <div class="ft-tile">
+                      <div class="icon">☰</div>
+                      <div><div class="name">Multi-select</div><div class="desc">Several choices</div></div>
+                    </div>
+                    <div class="ft-tile">
+                      <div class="icon">#</div>
+                      <div><div class="name">Number</div><div class="desc">Integer or decimal</div></div>
+                    </div>
+                    <div class="ft-tile">
+                      <div class="icon">📅</div>
+                      <div><div class="name">Date</div><div class="desc">Date picker</div></div>
+                    </div>
+                    <div class="ft-tile" style="grid-column: 1 / span 2;">
+                      <div class="icon">☑</div>
+                      <div><div class="name">Checkbox</div><div class="desc">Yes / no toggle</div></div>
+                    </div>
+                  </div>
+                  <div class="px-3 py-2 border-t border-slate-100 text-[10.5px] text-slate-500 italic">File upload, conditional fields, custom validation: V2.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Who can submit — closed on most states; open on state B -->
+        <div style="position: relative;">
+          <label class="insp-label">Who can submit</label>
+          <div class="insp-input flex items-center justify-between cursor-pointer">
+            <span class="text-slate-800">Task requester (whoever started this task)</span>
+            <span class="text-slate-400">▾</span>
+          </div>
+
+          <!-- State B — dropdown open -->
+          <div class="scn sb">
+            <div class="dd-panel">
+              <div class="dd-item">
+                <div class="label">Specific people</div>
+                <div class="help">Pick one or more named users; any of them can submit.</div>
+              </div>
+              <div class="dd-item">
+                <div class="label">A team</div>
+                <div class="help">Anyone in the chosen team can submit. First in wins.</div>
+              </div>
+              <div class="dd-item selected">
+                <div class="label">Task requester</div>
+                <div class="help">Whoever started this task. Most common; the requester is already on the task page.</div>
+              </div>
+              <div class="dd-item">
+                <div class="label">Org admin</div>
+                <div class="help">Anyone with the org-admin role. Catch-all for compliance flows.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto-fill from — closed on most states; open on state C -->
+        <div style="position: relative;">
+          <label class="insp-label">Auto-fill from</label>
+          <div class="insp-input flex items-center justify-between cursor-pointer">
+            <span class="text-slate-800">Last completed run (re-use answers)</span>
+            <span class="text-slate-400">▾</span>
+          </div>
+
+          <!-- State C — dropdown open -->
+          <div class="scn sc">
+            <div class="dd-panel">
+              <div class="dd-item">
+                <div class="label">Don't auto-fill</div>
+                <div class="help">Form starts blank every run.</div>
+              </div>
+              <div class="dd-item selected">
+                <div class="label">Last completed run</div>
+                <div class="help">Pre-fill with values from the most recent successful run of this workflow. Submitter can edit before resubmitting. Skips on first run.</div>
+              </div>
+              <div class="dd-item">
+                <div class="label">Pick a specific run<span class="v2">V2</span></div>
+                <div class="help">Choose any prior run as the source of pre-filled values.</div>
+              </div>
+              <div class="dd-item">
+                <div class="label">Saved preset<span class="v2">V2</span></div>
+                <div class="help">Reuse a named, saved set of answers across workflows.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Footnote per state -->
+  <div class="mt-5 p-4 bg-white border border-slate-200 rounded-lg text-[12px] leading-relaxed">
+    <div class="scn sa"><strong>State A · Default.</strong> The author lands here when they pick Ask as the step type. Two fields are already configured: <code class="text-[11px] bg-slate-100 px-1 rounded">audience</code> (text, required) and <code class="text-[11px] bg-slate-100 px-1 rounded">tone</code> (select, required, with three options). Below the field list, the small help text "Options: Professional warm / Friendly / Direct" is a peek at the select options without expanding the editor. Both dropdowns at the bottom are closed and showing their current value.</div>
+    <div class="scn sb"><strong>State B · Who can submit dropdown open.</strong> Four routing options. Three of them require additional config (Specific people = pick users; A team = pick a team; Org admin = no extra config) — the next click on any of them would surface the relevant picker inline. Task requester is the default and the most common pick because the requester is already on the task page when the form lands. The four-way routing is the same as Approval steps.</div>
+    <div class="scn sc"><strong>State C · Auto-fill dropdown open.</strong> V1 ships with two real options ("Don't auto-fill" and "Last completed run") plus two clearly-deferred V2 placeholders. Last-completed-run is the default because it's the value the operator gets the most leverage from with zero cost (skips silently on first run). The two V2 options are listed so the deferral is auditable, not invisible.</div>
+    <div class="scn sd"><strong>State D · Add a field type picker.</strong> Seven V1 field types in a tile picker. Standard form-renderer territory: text, textarea, select, multi-select, number, date, checkbox. The footer line names the deferrals so the author isn't left wondering "why no file upload?" — answer: V2. Picking any tile opens the field config inline (next state).</div>
+    <div class="scn se"><strong>State E · Editing a select field.</strong> The <code class="text-[11px] bg-slate-100 px-1 rounded">audience</code> field expanded for editing. Label (operator-visible), field key (binding identifier, auto-derived, read-only), help text, options list with drag-handles for reordering, required toggle. Same shape applies to all other field types except select-only fields drop the options list. Click "Done" to collapse back to a row.</div>
+  </div>
+
+  <p class="mt-3 text-[11.5px] text-slate-500 leading-relaxed">
+    The schema for everything in this inspector lives inside the existing <code class="text-[11px] bg-slate-100 px-1 rounded">params</code> JSON column on the workflow-template-step row. No new tables. The form renderer that consumes this schema at runtime is a single component — see mock 10 for the runtime rendering of an authored Ask form.
+  </p>
+</div>
+
+</body>
+</html>

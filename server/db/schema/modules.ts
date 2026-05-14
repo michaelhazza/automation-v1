@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+﻿import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const modules = pgTable(
@@ -11,11 +11,11 @@ export const modules = pgTable(
     allowedAgentSlugs: jsonb('allowed_agent_slugs').$type<string[] | null>(),
     allowAllAgents: boolean('allow_all_agents').notNull().default(false),
     sidebarConfig: jsonb('sidebar_config').$type<string[] | null>(),
-    // Phase F — onboarding-playbooks §10. Playbook slugs that should be
+    // Phase F — onboarding-Workflows §10. Workflow slugs that should be
     // offered (or auto-started) during onboarding for any sub-account that
     // enables this module. Stored as text[] so Postgres array semantics
     // (ANY, @>) drive the owed-list computation.
-    onboardingPlaybookSlugs: text('onboarding_playbook_slugs')
+    onboardingWorkflowSlugs: text('onboarding_workflow_slugs')
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),

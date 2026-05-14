@@ -1,17 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { BriefCreationEnvelope } from '../../../shared/types/briefFastPath.js';
 import CommandPalette from './CommandPalette';
-import { GlobalAskBar } from './global-ask-bar/GlobalAskBar';
+import GlobalAskBar from './global-ask-bar/GlobalAskBar';
+import ViewModeSwitcher from './ViewModeSwitcher';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
+import { logAndSwallow } from '../lib/silentCatchHelper';
 import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
   getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
+  removeSystemAdminOrgOverride, getSystemAdminOrgOverride, setSystemAdminOrgOverride,
 } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
+import { useViewMode } from '../hooks/useViewMode';
+import { useUserOwnedAgents } from '../hooks/useUserOwnedAgents';
+import { buildNavItems } from '../config/sidebar';
+import type { NavContext, NavItemSpec } from '../config/sidebar';
+import type { AppRoute } from '../config/routes';
 
 interface LayoutProps {
   user: User;
@@ -71,18 +80,21 @@ const Icons = {
 // ── Breadcrumb derivation from URL ─────────────────────────────────────────
 const SEG: Record<string, string | null> = {
   admin: null, system: null,
-  subaccounts: 'Companies', agents: 'AI Team', processes: 'Workflows',
+  subaccounts: 'Companies', agents: 'AI Team', automations: 'Automations', workflows: 'Workflows',
   executions: 'Activity', workspace: 'Tasks', memory: 'Memory',
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
-  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Briefs',
+  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals', briefs: 'Tasks', tasks: 'Tasks',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
   'agent-templates': 'Subaccount Blueprints',
   'admin-settings': 'Settings',
   usage: 'Usage & Costs',
   'mcp-servers': 'Integrations',
   'llm-pnl': 'LLM P&L',
+  'spending-budgets': 'Spending Budgets',
+  'spend-ledger': 'Spend Ledger',
+  'approval-channels': 'Approval Channels',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -133,7 +145,7 @@ function NavButton({ icon, label, onClick }: { icon: React.ReactNode; label: str
 
 function NavItem({
   to, icon, label, badge, badgeLabel, exact = false, manageTo,
-}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string }) {
+}: { to: string | AppRoute; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean; manageTo?: string | AppRoute }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const baseTo = to.split('?')[0]; // ignore query params for matching
@@ -216,24 +228,16 @@ function TrialCountdown() {
   if (msLeft <= 0) return null;
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
 
-  let label = '';
-  let cls = 'text-slate-500';
-  if (daysLeft > 7) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-slate-500';
-  } else if (daysLeft > 2) {
-    label = `${daysLeft} days left in trial`;
-    cls = 'text-amber-400';
-  } else if (daysLeft === 2) {
-    label = 'Trial ends in 2 days';
-    cls = 'text-red-400';
-  } else if (daysLeft === 1) {
-    label = 'Trial ends tomorrow';
-    cls = 'text-red-400';
-  } else {
-    label = 'Trial ends today';
-    cls = 'text-red-400';
-  }
+  const label =
+    daysLeft > 7 ? `${daysLeft} days left in trial` :
+    daysLeft > 2 ? `${daysLeft} days left in trial` :
+    daysLeft === 2 ? 'Trial ends in 2 days' :
+    daysLeft === 1 ? 'Trial ends tomorrow' :
+    'Trial ends today';
+  const cls =
+    daysLeft > 7 ? 'text-slate-500' :
+    daysLeft > 2 ? 'text-amber-400' :
+    'text-red-400';
 
   return (
     <div className={`flex items-center gap-2 px-3 py-[6px] mx-1.5 my-px text-[11.5px] font-medium ${cls}`}>
@@ -271,6 +275,7 @@ export default function Layout({ user, children }: LayoutProps) {
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
+  const [incidentCount, setIncidentCount] = useState(0);
 
   // Inline create modals
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -302,6 +307,8 @@ export default function Layout({ user, children }: LayoutProps) {
   const [newBriefDesc, setNewBriefDesc] = useState('');
   const [newBriefPriority, setNewBriefPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
   const [newBriefLoading, setNewBriefLoading] = useState(false);
+  const [briefOrgOverride, setBriefOrgOverride] = useState<OrgOption | null>(null);
+  const [briefSubaccountOverride, setBriefSubaccountOverride] = useState<ClientOption | null>(null);
 
   // Dynamic nav lists
   interface NavProject { id: string; name: string; color: string; status: string; }
@@ -315,6 +322,21 @@ export default function Layout({ user, children }: LayoutProps) {
 
   // Command palette
   const [cmdOpen, setCmdOpen] = useState(false);
+
+  // ViewMode — derived from identity state; wires to command palette for client selection
+  const { viewMode, availableModes, setViewMode } = useViewMode({
+    onRequireClientSelection: () => setCmdOpen(true),
+    // Sync Layout's React mirror state when setViewMode('org') clears the
+    // active client at the localStorage layer. Without this, downstream
+    // effects keep the stale client until something else triggers a render.
+    onClientCleared: () => {
+      setActiveClientIdState(null);
+      setActiveClientNameState(null);
+    },
+  });
+
+  // User-owned agents (personal nav group)
+  const { data: userOwnedAgents } = useUserOwnedAgents();
 
   // Module-driven sidebar config
   const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
@@ -362,6 +384,10 @@ export default function Layout({ user, children }: LayoutProps) {
       setSubaccounts([]);
       if (activeClientId) { removeActiveClient(); setActiveClientIdState(null); setActiveClientNameState(null); }
     }
+    // activeClientId is intentionally excluded — this effect is an org-change effect.
+    // Including it would refetch subaccounts on every client switch, which is wasteful
+    // and incorrect (subaccount list is org-scoped, not client-scoped).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasOrgContext, activeOrgId]);
 
   // Fetch org permissions
@@ -400,6 +426,12 @@ export default function Layout({ user, children }: LayoutProps) {
     if (!activeClientId) { setReviewCount(0); return; }
     api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to fetch review queue count:', err));
   }, [activeClientId]);
+
+  // Incident badge — system admin only, initial load
+  useEffect(() => {
+    if (!isSystemAdmin) return;
+    api.get('/api/system/incidents/badge-count').then(({ data }) => setIncidentCount(data.count ?? 0)).catch(logAndSwallow('Layout: incident badge refresh', { severity: 'critical' }));
+  }, [isSystemAdmin]);
 
   // Live agent badge — initial load + WebSocket updates
   useEffect(() => {
@@ -481,8 +513,14 @@ export default function Layout({ user, children }: LayoutProps) {
   }, []);
 
   const handleSelectClientFromPalette = useCallback((id: string, name: string) => {
+    // Persist to localStorage so the selection survives reload / cross-tab.
+    setActiveClient(id, name);
     setActiveClientIdState(id);
     setActiveClientNameState(name);
+    // Selecting a client must drop the system override; otherwise a system admin
+    // can pick a workspace and remain in System mode, which contradicts spec §4.6
+    // (workspace selection => mode flips to workspace).
+    if (getSystemAdminOrgOverride()) setSystemAdminOrgOverride(false);
   }, []);
 
   // Close org picker on outside click
@@ -510,18 +548,195 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveClient(sa.id, sa.name);
     setActiveClientIdState(sa.id);
     setActiveClientNameState(sa.name);
+    // Selecting a client must drop the system override; otherwise a system admin
+    // can pick a workspace and remain in System mode, which contradicts spec §4.6
+    // (workspace selection => mode flips to workspace).
+    if (getSystemAdminOrgOverride()) setSystemAdminOrgOverride(false);
+  };
+
+  const handleOpenNewBrief = () => {
+    setBriefOrgOverride(orgs.find((o) => o.id === activeOrgId) ?? null);
+    setBriefSubaccountOverride(subaccounts.find((s) => s.id === activeClientId) ?? null);
+    setShowNewBrief(true);
+  };
+
+  const handleNewBriefSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!newBriefTitle.trim() || newBriefLoading) return;
+
+    setNewBriefLoading(true);
+    try {
+      const targetOrgId = briefOrgOverride?.id ?? activeOrgId;
+      // When the user picks a different org without picking a subaccount, do
+      // NOT fall back to the current activeClientId — that subaccount belongs
+      // to the previous org and would create a cross-tenant tasks row.
+      const orgChanged = !!briefOrgOverride && briefOrgOverride.id !== activeOrgId;
+      const targetSubaccountId =
+        briefSubaccountOverride?.id ?? (orgChanged ? undefined : activeClientId ?? undefined);
+
+      const description = newBriefDesc.trim();
+      const res = await api.post<BriefCreationEnvelope>(
+        '/api/briefs',
+        {
+          text: [newBriefTitle.trim(), description].filter(Boolean).join('\n\n'),
+          explicitTitle: newBriefTitle.trim(),
+          explicitDescription: description || undefined,
+          priority: newBriefPriority,
+          source: 'new_brief_modal',
+          subaccountId: targetSubaccountId,
+          uiContext: { surface: 'new_brief_modal', currentSubaccountId: targetSubaccountId },
+        },
+        targetOrgId && targetOrgId !== activeOrgId
+          ? { headers: { 'X-Organisation-Id': targetOrgId } }
+          : undefined,
+      );
+
+      // Switch context if user chose a different org or subaccount
+      if (briefOrgOverride && briefOrgOverride.id !== activeOrgId) {
+        handleSelectOrg(briefOrgOverride);
+      }
+      if (briefSubaccountOverride && briefSubaccountOverride.id !== activeClientId) {
+        handleSelectClient(briefSubaccountOverride);
+      }
+
+      setShowNewBrief(false);
+      setNewBriefTitle('');
+      setNewBriefDesc('');
+      setNewBriefPriority('normal');
+      navigate(`/admin/tasks/${res.data.briefId}`);
+    } catch (err) {
+      console.error('[Layout] Failed to create brief:', err);
+    } finally {
+      setNewBriefLoading(false);
+    }
   };
 
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
       disconnectSocket();
-      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient();
+      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient(); removeSystemAdminOrgOverride();
       navigate('/login');
     }
   };
 
   const userInitials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
   const breadcrumbs = buildBreadcrumbs(location.pathname, activeClientName);
+
+  // ── Config-driven nav ──────────────────────────────────────────────────
+  const navCtx: NavContext = {
+    isSystemAdmin,
+    hasOrgContext,
+    hasAnyOrgPerm,
+    activeClientId,
+    hasOrgPerm,
+    hasClientPerm,
+    hasSidebarItem,
+    viewMode,
+    navProjects: navProjects.map(p => ({ id: p.id, name: p.name, color: p.color, status: p.status })),
+    navAgents: navAgents.map(a => ({ id: a.id, agentId: a.agentId, name: a.agent.name, icon: a.agent.icon })),
+    userOwnedAgents: userOwnedAgents.map(a => ({ agentId: a.id, name: a.name })),
+    reviewCount,
+    liveAgentCount,
+    incidentCount,
+    onCreateProject: () => setShowCreateProject(true),
+    onCreateAgent: () => setShowCreateAgent(true),
+    onOpenNewBrief: handleOpenNewBrief,
+    onLogout: handleLogout,
+    onOpenConfigAssistant: () => openConfigAssistant(),
+  };
+  const navItems = buildNavItems(navCtx);
+
+  /** Map a NavItemSpec to the appropriate JSX component. */
+  function renderNavItem(spec: NavItemSpec) {
+    if (spec.kind === 'empty-hint') {
+      return (
+        <div key={spec.key} className="px-[18px] py-1 text-[11px] text-slate-600 italic">
+          {spec.label}
+        </div>
+      );
+    }
+    if (spec.kind === 'section-header') {
+      const action = spec.onClick
+        ? <NavSectionAction onClick={spec.onClick} />
+        : undefined;
+      return <NavSection key={spec.key} label={spec.label ?? ''} action={action} />;
+    }
+
+    if (spec.kind === 'button') {
+      // Special-case: New Task button uses bolt icon inline style
+      if (spec.key === 'new-task') {
+        return (
+          <button
+            type="button"
+            key={spec.key}
+            onClick={spec.onClick}
+            className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
+          >
+            <span><Icons.bolt /></span>
+            <span className="flex-1">{spec.label}</span>
+          </button>
+        );
+      }
+      // Special-case: sign-out uses the original footer button styling (slate-600 base)
+      if (spec.key === 'sign-out') {
+        return (
+          <button
+            type="button"
+            key={spec.key}
+            onClick={spec.onClick}
+            className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
+          >
+            <Icons.logout />
+            <span>{spec.label}</span>
+          </button>
+        );
+      }
+      return (
+        <NavButton
+          key={spec.key}
+          icon={resolveIcon(spec.iconKey)}
+          label={spec.label ?? ''}
+          onClick={spec.onClick ?? (() => {})}
+        />
+      );
+    }
+
+    // kind === 'link'
+    if (!spec.to) return null;
+    return (
+      <NavItem
+        key={spec.key}
+        to={spec.to}
+        icon={resolveIcon(spec.iconKey)}
+        label={spec.label ?? ''}
+        badge={spec.badge}
+        badgeLabel={spec.badgeLabel}
+        exact={spec.exact}
+        manageTo={spec.manageTo}
+      />
+    );
+  }
+
+  /** Resolve an iconKey string to the appropriate React node. */
+  function resolveIcon(iconKey: string | undefined): React.ReactNode {
+    if (!iconKey) return null;
+    if (iconKey.startsWith('emoji:')) {
+      const emoji = iconKey.slice('emoji:'.length);
+      return <span className="text-[13px] shrink-0 leading-none">{emoji}</span>;
+    }
+    if (iconKey.startsWith('project-dot:')) {
+      const color = iconKey.slice('project-dot:'.length);
+      return <span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: color }} />;
+    }
+    const icon = (Icons as Record<string, () => React.ReactNode>)[iconKey];
+    if (!icon) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('resolveIcon: unknown icon key', iconKey);
+      }
+      return null;
+    }
+    return icon();
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -667,184 +882,26 @@ export default function Layout({ user, children }: LayoutProps) {
           )}
         </div>
 
-        {/* Navigation */}
+        {/* ViewModeSwitcher — shown above nav when org-admin+ permissions exist */}
+        {(hasOrgContext && hasAnyOrgPerm) && (
+          <div className="px-3 py-2 border-b border-white/5 flex justify-center">
+            <ViewModeSwitcher
+              value={viewMode}
+              onChange={setViewMode}
+              availableModes={availableModes}
+            />
+          </div>
+        )}
+
+        {/* Navigation — config-driven (all groups except footer) */}
         <div className="flex-1 py-1 overflow-y-auto overflow-x-hidden">
-
-          {/* ── Top controls — always visible when client selected */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <button
-                onClick={() => setShowNewBrief(true)}
-                className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
-              >
-                <span><Icons.bolt /></span>
-                <span className="flex-1">New Brief</span>
-              </button>
-              {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to={activeClientId ? `/admin/subaccounts/${activeClientId}/pulse` : '/admin/pulse'} icon={<Icons.inbox />} label="Pulse" badge={reviewCount} />
-              )}
-            </>
-          )}
-
-          {/* ── Fallback when no client selected */}
-          {!(hasOrgContext && activeClientId) && (
-            <NavItem to="/admin/pulse" exact icon={<Icons.inbox />} label="Pulse" />
-          )}
-
-          {/* ── Work section */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Work" />
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
-              )}
-              {hasOrgPerm('org.processes.view') && (
-                <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
-              )}
-              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.playbook_templates.read')) && (
-                <NavItem to="/playbooks" icon={<Icons.automations />} label="Playbooks" />
-              )}
-              {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
-              )}
-              {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/schedule-calendar`} icon={<Icons.scheduled />} label="Calendar" />
-              )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/page-projects`} icon={<Icons.portal />} label="Sites" />
-              )}
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/triggers`} icon={<Icons.scheduled />} label="Triggers" />
-              )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/actions`} icon={<Icons.activity />} label="Action Log" />
-              )}
-            </>
-          )}
-
-          {/* ── Projects section — dynamic list */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Projects" action={<NavSectionAction onClick={() => setShowCreateProject(true)} />} />
-              {navProjects.length === 0 && (
-                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No projects yet</div>
-              )}
-              {navProjects.map((p) => (
-                <NavItem
-                  key={p.id}
-                  to={`/projects/${p.id}`}
-                  icon={<span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: p.color }} />}
-                  label={p.name}
-                />
-              ))}
-            </>
-          )}
-
-          {/* ── Agents section — dynamic list */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
-              {navAgents.length === 0 && (
-                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No agents yet</div>
-              )}
-              {navAgents.map((a) => (
-                <NavItem
-                  key={a.id}
-                  to={`/agents/${a.agentId}`}
-                  icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
-                  label={a.agent.name}
-                  manageTo={`/admin/subaccounts/${activeClientId}/agents/${a.id}/manage`}
-                />
-              ))}
-            </>
-          )}
-
-          {/* ── Company section */}
-          {hasOrgContext && activeClientId && (
-            <>
-              <NavSection label="Company" />
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/goals`} icon={<Icons.goals />} label="Goals" />
-              )}
-              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && (
-                <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
-              )}
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && (
-                <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
-              )}
-              {hasSidebarItem('companies') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
-              )}
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
-              )}
-            </>
-          )}
-
-          {/* ── ClientPulse section — shown when org has client_pulse module */}
-          {hasOrgContext && hasSidebarItem('clientpulse') && (
-            <>
-              <NavSection label="ClientPulse" />
-              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
-              {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
-              <NavItem to="/clientpulse/settings" icon={<Icons.settings />} label="ClientPulse Settings" />
-            </>
-          )}
-
-          {/* ── Organisation section — always shown when org context exists */}
-          {hasOrgContext && hasAnyOrgPerm && (
-            <>
-              <NavSection label="Organisation" />
-              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
-              {hasSidebarItem('config_assistant') && (
-                <NavButton
-                  icon={<Icons.settings />}
-                  label="Configuration Assistant"
-                  onClick={() => openConfigAssistant()}
-                />
-              )}
-              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
-              {/* Feature 1 — Scheduled Runs Calendar (docs/routines-response-dev-spec.md §3.4) */}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/schedule-calendar" icon={<Icons.scheduled />} label="Calendar" />}
-              {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
-              {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
-              {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
-              {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || hasOrgPerm('org.mcp_servers.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage" />}
-            </>
-          )}
-
-          {/* ── Platform section — system admin */}
-          {isSystemAdmin && (
-            <>
-              <NavSection label="Platform" />
-              <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
-              <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
-              <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
-              <NavItem to="/system/playbook-studio" icon={<Icons.automations />} label="Playbook Studio" />
-              <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
-              <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
-              <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
-              <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
-              <NavItem to="/system/llm-pnl" icon={<Icons.usage />} label="LLM P&L" />
-              <NavItem to="/system/organisation-templates" icon={<Icons.agents />} label="Organisation Templates" />
-              <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
-            </>
-          )}
+          {navItems.filter(s => s.group !== 'footer').map(renderNavItem)}
         </div>
 
-        {/* Footer */}
+        {/* Footer — trial countdown + support link; profile/signout from buildNavItems */}
         <div className="px-1.5 pt-1.5 pb-2 border-t border-white/5">
           <TrialCountdown />
-          <NavItem to="/settings" exact icon={<Icons.settings />} label="Profile Settings" />
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
-          >
-            <Icons.logout />
-            <span>Sign out</span>
-          </button>
+          {navItems.filter(s => s.group === 'footer').map(renderNavItem)}
           <a
             href="mailto:support@synthetos.ai"
             className="flex items-center gap-[9px] px-3 py-[5px] mx-1.5 my-px rounded-[7px] text-slate-700 text-[12px] no-underline transition-[color,background] duration-100 hover:text-slate-400 hover:bg-white/[0.04]"
@@ -864,7 +921,7 @@ export default function Layout({ user, children }: LayoutProps) {
         <div className="h-[42px] pr-4 pl-6 flex items-center bg-white border-b border-slate-200 shrink-0 text-[13px] gap-1.5">
           <div className="flex-1 flex items-center gap-1.5">
             {breadcrumbs.length === 0
-              ? <span className="text-slate-900 font-semibold">Pulse</span>
+              ? <span className="text-slate-900 font-semibold">Home</span>
               : breadcrumbs.map((crumb, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-slate-300">›</span>}
@@ -878,7 +935,7 @@ export default function Layout({ user, children }: LayoutProps) {
           </div>
           {/* Global Ask Bar — always visible when org context exists */}
           {hasOrgContext && (
-            <GlobalAskBar currentSubaccountId={activeClientId ?? undefined} />
+            <GlobalAskBar />
           )}
           {/* Cmd+K trigger */}
           <button
@@ -970,8 +1027,8 @@ export default function Layout({ user, children }: LayoutProps) {
                 <input type="url" value={newProjectRepoUrl} onChange={(e) => setNewProjectRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
+                <button type="button" onClick={() => setShowCreateProject(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="btn btn-primary">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
               </div>
             </form>
           </div>
@@ -1118,8 +1175,8 @@ export default function Layout({ user, children }: LayoutProps) {
               </div>
 
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
+                <button type="button" onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="btn btn-primary">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
               </div>
             </form>
           </div>
@@ -1152,7 +1209,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 setSubaccounts(prev => [...prev, newEntry]);
                 handleSelectClient(newEntry);
                 // Refresh list in background to sync any server-side changes
-                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(() => {});
+                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(logAndSwallow('Layout: subaccounts background refresh', { severity: 'critical' }));
               } catch (err: unknown) {
                 const e = err as { response?: { status?: number; data?: { error?: string } } };
                 const msg = e.response?.data?.error;
@@ -1171,8 +1228,8 @@ export default function Layout({ user, children }: LayoutProps) {
                 <input type="text" value={newClientSlug} onChange={(e) => setNewClientSlug(e.target.value)} placeholder="acme-corp" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowCreateClient(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newClientName.trim() || createClientLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createClientLoading ? 'Creating...' : 'Create'}</button>
+                <button type="button" onClick={() => setShowCreateClient(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newClientName.trim() || createClientLoading} className="btn btn-primary">{createClientLoading ? 'Creating...' : 'Create'}</button>
               </div>
             </form>
           </div>
@@ -1184,31 +1241,10 @@ export default function Layout({ user, children }: LayoutProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Brief</h2>
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Task</h2>
               <button onClick={() => setShowNewBrief(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!newBriefTitle.trim() || newBriefLoading) return;
-              setNewBriefLoading(true);
-              try {
-                // Find top-level agent (no parent) to auto-assign
-                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch((err) => { console.error('[Layout] Failed to fetch agents for new brief:', err); return { data: [] }; });
-                const topAgent = (agentsRes.data as any[]).find((a: any) => a.isActive && !a.parentSubaccountAgentId);
-                await api.post(`/api/subaccounts/${activeClientId}/tasks`, {
-                  title: newBriefTitle.trim(),
-                  description: newBriefDesc.trim() || undefined,
-                  status: 'inbox',
-                  priority: newBriefPriority,
-                  assignedAgentId: topAgent?.agentId ?? undefined,
-                });
-                setShowNewBrief(false);
-                setNewBriefTitle('');
-                setNewBriefDesc('');
-                setNewBriefPriority('normal');
-              } catch { /* ignore */ }
-              finally { setNewBriefLoading(false); }
-            }} className="p-6 flex flex-col gap-4">
+            <form onSubmit={(e) => { void handleNewBriefSubmit(e); }} className="p-6 flex flex-col gap-4">
               <div>
                 <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Title</label>
                 <input autoFocus type="text" value={newBriefTitle} onChange={(e) => setNewBriefTitle(e.target.value)} placeholder="What needs to be done?" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -1226,9 +1262,59 @@ export default function Layout({ user, children }: LayoutProps) {
                   <option value="urgent">Urgent</option>
                 </select>
               </div>
+              {/* Org override — system admins only, when multiple orgs exist */}
+              {isSystemAdmin && orgs.length > 1 && (
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
+                    Organisation <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={briefOrgOverride?.id ?? ''}
+                    onChange={(e) => {
+                      const next = orgs.find((o) => o.id === e.target.value) ?? null;
+                      setBriefOrgOverride(next);
+                      setBriefSubaccountOverride(null);
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Use current organisation</option>
+                    {orgs.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Subaccount override — hidden when the user picks a different org,
+                  because the `subaccounts` list still belongs to the previously
+                  active org. Allowing a selection here would re-introduce the
+                  cross-tenant write defended against on submit (see comment at
+                  line 537). The user can pick the subaccount on the brief page
+                  after the context switch. */}
+              {subaccounts.length > 0 && !(briefOrgOverride && briefOrgOverride.id !== activeOrgId) && (
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
+                    Subaccount <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={briefSubaccountOverride?.id ?? ''}
+                    onChange={(e) => {
+                      const next = subaccounts.find((s) => s.id === e.target.value) ?? null;
+                      setBriefSubaccountOverride(next);
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Use current subaccount</option>
+                    {subaccounts.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex gap-2 justify-end pt-1">
-                <button type="button" onClick={() => setShowNewBrief(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{newBriefLoading ? 'Creating...' : 'Create Brief'}</button>
+                <button type="button" onClick={() => setShowNewBrief(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={!newBriefTitle.trim() || newBriefLoading} className="btn btn-primary">{newBriefLoading ? 'Creating...' : 'Create Task'}</button>
               </div>
             </form>
           </div>
