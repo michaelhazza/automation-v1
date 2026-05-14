@@ -1,8 +1,34 @@
-# Spec: Development Lifecycle Governance Upgrade
+OpenAI Codex v0.130.0
+--------
+workdir: C:\files\Claude\automation-v1-3rd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e249b-95a9-7122-971b-b66c39389d85
+--------
+user
+You are reviewing a Markdown specification document for an "implementation-readiness" rubric. This is iteration 3 of the review loop — earlier iterations resolved ~60 findings; this is the final tightening pass.
+
+Look for ONLY genuine remaining mechanical / consistency issues:
+- Contradictions between sections
+- Load-bearing claims without backing mechanisms
+- File-inventory drift (prose references to files not in §4)
+- Numeric-count mismatches
+- Cross-references pointing at wrong sections
+- Stale rewrite fragments from earlier iterations
+
+If the spec is materially clean and you have no genuine findings, say so up front and leave the list empty or extremely short. Don't manufacture findings to fill the list. Don't relitigate framing decisions (pre-production, no DB schema, markdown-only enforcement, no auto-apply, no feature flags).
+
+Here is the spec:
+
+---# Spec: Development Lifecycle Governance Upgrade
 
 **Status:** reviewing
 **Spec date:** 2026-05-14
-**Last updated:** 2026-05-14 (spec-reviewer iteration 3)
+**Last updated:** 2026-05-14 (spec-reviewer iteration 2)
 **Author:** main session (operator-directed)
 **Build slug:** `development-lifecycle-governance-upgrade`
 **Source brief:** [`tasks/ai-dlc-governance-brief.md`](../../ai-dlc-governance-brief.md) (locked 2026-05-14)
@@ -118,7 +144,6 @@ These documents are referenced in prose but are NOT changed by this build. Liste
 - `docs/context-packs/*` (cited as a future proposal target in §7.5 — not changed in v1)
 - `docs/decisions/<ADR>.md` (cited as a future proposal target in §7.5 — not changed in v1)
 - `tasks/ai-dlc-governance-brief.md` (source brief)
-- `tasks/current-focus.md` (read by `finalisation-coordinator` Step 9 for the existing `MERGE_READY` transition; not edited by this build — see §14 for the deferred optional capability reference)
 
 ### 4.5 Files **NOT** changed (called out to prevent drift)
 
@@ -297,7 +322,7 @@ The `## Duplication / Strategy Check` section in `intent.md` must contain exactl
 | Recommendation | proceed \| revise \| merge with existing capability \| stop |
 ```
 
-#### 7.1.1 Risk Surface canonical vocabulary (reproduced from `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2)
+#### 7.1.1 Risk Surface canonical vocabulary (reproduced from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2)
 
 `server/db/schema`, `server/routes`, `auth/permission services`, `middleware`, `RLS migrations`, `webhook handlers`, `billing surfaces`, `external messaging`, `agent runtime`, `approvals`.
 
@@ -619,7 +644,7 @@ Heading anchor format follows the same convention as §7.4.3 Owner placeholders 
 1. `CLAUDE.md` (lifecycle description update)
 2. `architecture.md` (agent fleet / lifecycle pointers)
 
-**Deferred per §14:** the optional `current-focus.md` capability reference is not added in this build. The architect may revisit if the addition fits within the binding scope constraint and does not require any reader/parser change.
+**Deferred per §14:** `current-focus.md` capability reference — only added if no broader schema migration is required. Defer otherwise.
 
 **Behaviour:**
 - Replace the existing lifecycle prose in `CLAUDE.md` and `architecture.md` with the corrected sequence (Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`, consistent with §6.2's order invariant):
@@ -710,7 +735,7 @@ Validation scripts (e.g. a `scripts/check-capabilities-md.sh` that lints Asset R
 Items mentioned in prose but intentionally deferred from v1.
 
 - **`docs/spec-template.md` reference file.** Chunk 2 may produce this if the spec author judges it useful; otherwise the same content lives inline in `spec-coordinator.md` Step 6 instructions and `docs/spec-authoring-checklist.md`. Decision deferred to Chunk 2 implementation. Reason: avoid creating a maintenance burden if the authoring checklist already covers it.
-- **`current-focus.md` capability reference.** Deferred from v1 unconditionally. `current-focus.md` continues to function as today (read by `finalisation-coordinator` Step 9). A future build may add an explicit capability reference if the addition fits the no-schema-change rule. Reason: scope-control — keeps the v1 merge diff bounded to the 7–8 repo files named in §4.6.
+- **`current-focus.md` capability reference.** Chunk 7 may add this if it does not require broader schema migration; otherwise deferred. Reason: scope-control — schema migration is out of scope for v1.
 - **`scripts/check-capabilities-md.sh` static validation.** A lightweight static checker for Asset Register row completeness could catch regressions early. Permanently deferred from v1: v1 enforcement is markdown + coordinator + doc-sync only, and adding a script violates the binding scope constraint in §1 ("0 new gate scripts, 0 new hooks"). Reason: if recurring drift surfaces during normal use, raise a separate Trivial PR to add a grep-based hook (≤ 50 lines) — that becomes its own build, not part of this one.
 - **Auto-apply of Compound Learning Feedback approvals.** Deferred indefinitely. v1 emits proposals only; operator-approved entries become `tasks/todo.md` items handled as separate PRs. Reason: auto-apply requires safety guarantees (test-gate policy compliance, agent-definition validation) not in scope here.
 - **Lifecycle Health Score automation.** Deferred to a future build. v1 stores fields; scoring is manual / human-led. Reason: scoring-engine is out of scope per the v1 implementation constraint (§1).
@@ -732,3 +757,25 @@ The following are remaining open questions after iteration 1 of spec review. Pre
 ---
 
 End of spec. Status: **reviewing** — see frontmatter for the canonical status.
+
+codex
+The spec is very close. I found two genuine remaining mechanical issues:
+
+1. `current-focus.md` inventory/count drift  
+   §10 and §14 say Chunk 7 may add a `current-focus.md` capability reference, and §11 references `current-focus.md` in the MERGE_READY invariant. But `current-focus.md` is not listed in §4.1, §4.2, §4.3, or §4.4, and §4.6 fixes the merge diff at 7–8 repo files. Either add it to the appropriate §4 inventory and count model, or make the deferral unconditional and list it as reference-only if it remains mentioned.
+
+2. Wrong canonical spec path in §7.1.1  
+   §7.1.1 says the Risk Surface vocabulary is reproduced from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2, but §4.4 and the frontmatter identify the canonical file as `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Update §7.1.1 to use the same path.
+
+I don’t see other material contradictions or count mismatches that are worth raising in this final pass.
+tokens used
+22,593
+The spec is very close. I found two genuine remaining mechanical issues:
+
+1. `current-focus.md` inventory/count drift  
+   §10 and §14 say Chunk 7 may add a `current-focus.md` capability reference, and §11 references `current-focus.md` in the MERGE_READY invariant. But `current-focus.md` is not listed in §4.1, §4.2, §4.3, or §4.4, and §4.6 fixes the merge diff at 7–8 repo files. Either add it to the appropriate §4 inventory and count model, or make the deferral unconditional and list it as reference-only if it remains mentioned.
+
+2. Wrong canonical spec path in §7.1.1  
+   §7.1.1 says the Risk Surface vocabulary is reproduced from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2, but §4.4 and the frontmatter identify the canonical file as `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md`. Update §7.1.1 to use the same path.
+
+I don’t see other material contradictions or count mismatches that are worth raising in this final pass.
