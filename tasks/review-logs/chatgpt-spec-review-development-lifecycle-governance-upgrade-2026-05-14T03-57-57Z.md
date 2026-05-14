@@ -94,3 +94,47 @@ Integrity-check (5 mechanical, all auto):
 - [auto] INT-5: §11 invariant path list updated to include `tasks/todo.md`.
 
 ---
+
+## Round 2 — 2026-05-14T04:25:00Z
+
+### ChatGPT Feedback (raw)
+
+> Round 2 Findings
+>
+> 1. **Stale file-count acceptance criterion still says 7–8 repo files** — Severity: high, Category: bug. §4.6 was correctly updated to 8–9 repo files, but §12 Self-consistency still says "The numeric counts in §4.6 (7–8 repo files in the merge diff) reconcile to the actual git diff at merge." This will create a false spec-conformance failure. Update §12 to 8–9 repo files.
+>
+> 2. **Cluster mutation rule still contains the old contradictory instruction in §7.4.2** — Severity: high, Category: bug. §7.1, §7.2, §7.4.1, §7.4.5, and §15 now correctly make docs/capabilities.md the live source of truth after Chunk 4. However §7.4.2 still says a new cluster must update "both §7.4.2 in this spec's successor (or via an ADR) AND the cluster list header in docs/capabilities.md." That conflicts with the new single-source rule. Replace that paragraph with a pointer to §7.4.5 only.
+>
+> 3. **Deferred current-focus.md note still references the old 7–8 file bound** — Severity: medium, Category: bug. §14 says deferring current-focus.md keeps the v1 merge diff bounded to the "7–8 repo files named in §4.6," but §4.6 is now 8–9. Update to 8–9 or avoid repeating the count and say "bounded to the §4.6 inventory."
+>
+> 4. **Chunk 3 behaviour summary omits the new revise soft gate** — Severity: medium, Category: improvement. §6.1 Step 3a and Chunk 3 acceptance now correctly define and test all four recommendation branches, including the revise pause-and-rerun loop. But Chunk 3's Behaviour still says only "Hard escalation on recommendation = stop or recommendation = merge with existing capability." Add one bullet for revise as a soft gate, so the behaviour summary matches the service contract and acceptance criteria.
+>
+> 5. **G5 says "n/a with reason," but the accepted format is stricter** — Severity: low, Category: clarity. G5 says MERGE_READY cannot be set without a yes or n/a with reason verdict. §6.2.1 restricts that to four exact n/a: strings. This is not a blocker, but tightening G5 to "one of the valid §6.2.1 verdict strings" would prevent loose phrasing from leaking into implementation.
+>
+> Overall verdict: CHANGES_REQUESTED
+
+**Top themes (Round 2):** stale-reference cleanup from Round 1's edits — three findings (F2-1, F2-2, F2-3) are sections I missed updating during the F1/F4 fix sweeps; one (F2-4) is a section I missed during F8; one (F2-5) is a new clarity tightening. All five are continuations or low-severity wording — no new architectural issues surfaced.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F2-1 | §12 Self-consistency still says "7–8 repo files in §4.6" but §4.6 is now 8–9 | technical (continuation of Round 1 F1) | apply | auto (apply) | high | Per duplicate-findings rule: continuation of an already-decided finding (count cleanup). User pre-approved in Round 1 F1; no re-escalation needed |
+| F2-2 | §7.4.2 closedness paragraph still says new cluster must update §7.4.2 + docs/capabilities.md (contradicts §7.4.5 single-source rule) | technical (continuation of Round 1 F4) | apply | auto (apply) | high | Same finding-class as F4 (cluster-list source-of-truth). Replaced paragraph with §7.4.5 pointer; "do not edit §7.4.2" guidance added |
+| F2-3 | §14 current-focus.md deferral references old "7–8 repo files" count | technical (continuation of Round 1 F1) | apply | auto (apply) | medium | Same finding-class. Reworded to "§4.6 inventory" so the count is not duplicated and stays in one place |
+| F2-4 | Chunk 3 Behaviour summary omits the new `revise` soft gate (continuation of Round 1 F8) | technical (continuation of Round 1 F8) | apply | auto (apply) | medium | Added soft-gate bullet + tie-break-rule bullet to Chunk 3 Behaviour for parity with §6.1 Step 3a contract |
+| F2-5 | G5 says "n/a with reason" but §6.2.1 enumerates four exact `n/a:` strings | technical | apply | auto (apply) | low | New finding (not from Round 1). Tightened G5 to reference the eight valid §6.2.1 verdict strings |
+
+**Integrity check (post-edit, one-pass):** 0 issues found. Greps for stale references (`7–8`, `7-8`, `six fixed targets`, `two outcomes`, `§6.5`, `§7.4.2 in this spec`) all returned zero matches. Round 2 introduced no new forward references or contradictions.
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+### Applied (auto-applied technical, all 5 from Round 2 + 0 from integrity check)
+
+- [auto] F2-1: §12 self-consistency count "7–8" → "8–9".
+- [auto] F2-2: §7.4.2 closedness paragraph rewritten — points at §7.4.5 procedure as the only mutation path; explicit "do not edit §7.4.2" guidance.
+- [auto] F2-3: §14 current-focus.md deferral count "7–8 repo files named in §4.6" → "§4.6 inventory".
+- [auto] F2-4: Chunk 3 Behaviour summary gains tie-break-rules bullet (§6.1.1 multi-cluster/mixed-lifecycle) + Hard-gate clarification + new Soft-gate `revise` bullet.
+- [auto] F2-5: G5 tightened to "one of the eight valid §6.2.1 verdict strings (four `yes:` + four `n/a:`)".
+
+---

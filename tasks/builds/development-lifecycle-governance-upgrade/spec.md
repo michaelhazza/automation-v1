@@ -48,7 +48,7 @@ This spec implements the lightweight governance wrapper defined in the locked br
 | G2 | `spec-coordinator` runs a hard duplication / strategy gate before authoring | Spec-coordinator step list includes the gate; gate output captured in `intent.md`; `stop` / `merge-with-existing` outcomes escalate to the operator |
 | G3 | Standard+ specs carry a Lifecycle Declaration block and an ABCd Estimate block (S/M/L sizing) | Spec authoring instructions require both blocks; `spec-authoring-checklist.md` flags missing blocks |
 | G4 | `docs/capabilities.md` becomes an Asset Register with the §7.4-derived field set and closed cluster list | The file's structure conforms to the schema in §7.4; cluster list matches the closed list verbatim |
-| G5 | Finalisation gates capability registration via `docs/doc-sync.md` | New trigger row exists in `docs/doc-sync.md`; `finalisation-coordinator` Step 6 verdicts it; `MERGE_READY` cannot be set without a `yes` or `n/a with reason` verdict |
+| G5 | Finalisation gates capability registration via `docs/doc-sync.md` | New trigger row exists in `docs/doc-sync.md`; `finalisation-coordinator` Step 6 verdicts it; `MERGE_READY` cannot be set without one of the eight valid §6.2.1 verdict strings (four `yes: <outcome>` variants or four `n/a: <reason>` variants) |
 | G6 | Finalisation runs a compound-learning feed-forward decision step after KNOWLEDGE.md extraction | `finalisation-coordinator` post-Step 7 emits a proposal list against the §7.5 eight-value target enum (the `agent-instruction` value is itself constrained to a fixed shortlist of six named agents); no auto-apply in v1 |
 | G7 | The full existing pipeline (S0/S1/S2 syncs, G1-G4 gates, GRADED reviewer matrix, KNOWLEDGE.md extraction, MERGE_READY flow) remains intact | Each existing gate / step still runs in the canonical order; no removals; spec adds only the wrapper steps named in this document |
 
@@ -398,7 +398,7 @@ The header is fixed at twelve columns in the order above; renames or column addi
 
 `Workflow Engine`, `Approvals`, `Identity & Auth`, `Reporting`, `Integrations`, `Agent Runtime`, `Admin & Ops`, `Billing`, `Memory & Knowledge`, `Audit & Governance`.
 
-**Closedness rule:** the list is closed per-PR — a build's intent / spec MUST select cluster(s) from this list as currently shipped. The list is **mutable via spec amendment**: a build that needs a new cluster (because none of the ten fit) must, in the same PR, update both §7.4.2 in this spec's successor (or via an ADR) AND the cluster list header in `docs/capabilities.md`. The two locations must always agree. See §7.4.5 for the mutation procedure.
+**Closedness rule:** the list is closed per-PR — a build's intent / spec MUST select cluster(s) from the live cluster header in `docs/capabilities.md` as currently shipped. The list is **mutable via the §7.4.5 cluster mutation procedure** — a build that needs a new cluster updates `docs/capabilities.md` (live source), authors a short ADR, and updates the authoring checklist, all in the same PR. Do NOT edit §7.4.2 of this spec; it is a one-time seed and becomes historical reference once Chunk 4 ships. See §7.4.5 for the procedure.
 
 The cluster list lives in the header of `docs/capabilities.md` so it is grep-able.
 
@@ -557,7 +557,9 @@ No backward dependencies. Chunks 1, 2, and 4 can be implemented in parallel. Chu
 **Behaviour:**
 - New Step 3a runs between Step 3 (intake) and Step 4 (slug derivation), per the §6.1 order invariant.
 - Step 3a applies the duplication / strategy check defined in §6.1.1 and writes the three outputs into `intent.md` (§7.1.0 table format).
-- Hard escalation on `recommendation = stop` or `recommendation = merge with existing capability`.
+- Multi-cluster Affected Capability Area and mixed-lifecycle clusters resolve via the §6.1.1 tie-break rules (most-conservative-wins per output; worst-toward-Sunset state for Strategic fit; per-cluster supplementary rows recorded in `intent.md`).
+- Hard escalation on `recommendation = stop` or `recommendation = merge with existing capability` (per §6.1 Step 3a Hard gate).
+- Soft escalation on `recommendation = revise` — pause-and-loop per §6.1 Step 3a Soft gate (operator amends `intent.md`, coordinator re-runs Step 3a until `proceed`).
 
 **Acceptance (inspection-based):**
 - Reading `.claude/agents/spec-coordinator.md` shows a Step 3a block between Step 3 and Step 4 that names the §6.1.1 inputs / sources / decision criteria verbatim.
@@ -701,7 +703,7 @@ A composite of Goals (§2) and Chunk-level acceptance (§10). Restated as a sing
 
 ### Self-consistency
 - [ ] Goals (§2) and Implementation (§10) describe the same set of changes.
-- [ ] The numeric counts in §4.6 (7–8 repo files in the merge diff) reconcile to the actual git diff at merge.
+- [ ] The numeric counts in §4.6 (8–9 repo files in the merge diff) reconcile to the actual git diff at merge.
 - [ ] Every prose reference to a **changed** file reconciles to §4.1 or §4.2 (i.e. every changed-file mention appears somewhere in those inventories — references in §§5, 6, 7, 10, 11, 13, 14 are expected and fine). Reference-only documents per §4.4 may appear anywhere; a prose mention of a path not in §4.1, §4.2, §4.3, or §4.4 is the actual violation.
 - [ ] Every "must" / "binding" / "hard gate" claim has a backing mechanism named.
 
@@ -729,7 +731,7 @@ Validation scripts (e.g. a `scripts/check-capabilities-md.sh` that lints Asset R
 Items mentioned in prose but intentionally deferred from v1.
 
 - **`docs/spec-template.md` reference file.** Chunk 2 may produce this if the spec author judges it useful; otherwise the same content lives inline in `spec-coordinator.md` Step 6 instructions and `docs/spec-authoring-checklist.md`. Decision deferred to Chunk 2 implementation. Reason: avoid creating a maintenance burden if the authoring checklist already covers it.
-- **`current-focus.md` capability reference.** Deferred from v1 unconditionally. `current-focus.md` continues to function as today (read by `finalisation-coordinator` Step 9). A future build may add an explicit capability reference if the addition fits the no-schema-change rule. Reason: scope-control — keeps the v1 merge diff bounded to the 7–8 repo files named in §4.6.
+- **`current-focus.md` capability reference.** Deferred from v1 unconditionally. `current-focus.md` continues to function as today (read by `finalisation-coordinator` Step 9). A future build may add an explicit capability reference if the addition fits the no-schema-change rule. Reason: scope-control — keeps the v1 merge diff bounded to the §4.6 inventory.
 - **`scripts/check-capabilities-md.sh` static validation.** A lightweight static checker for Asset Register row completeness could catch regressions early. Permanently deferred from v1: v1 enforcement is markdown + coordinator + doc-sync only, and adding a script violates the binding scope constraint in §1 ("0 new gate scripts, 0 new hooks"). Reason: if recurring drift surfaces during normal use, raise a separate Trivial PR to add a grep-based hook (≤ 50 lines) — that becomes its own build, not part of this one.
 - **Auto-apply of Compound Learning Feedback approvals.** Deferred indefinitely. v1 emits proposals only; operator-approved entries become `tasks/todo.md` items handled as separate PRs. Reason: auto-apply requires safety guarantees (test-gate policy compliance, agent-definition validation) not in scope here.
 - **Lifecycle Health Score automation.** Deferred to a future build. v1 stores fields; scoring is manual / human-led. Reason: scoring-engine is out of scope per the v1 implementation constraint (§1).
