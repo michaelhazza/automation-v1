@@ -166,5 +166,55 @@ Splitting at this stage would mean reverting 4 commits + opening 4 new PRs, each
 
 Regenerated at `.chatgpt-diffs/pr305-round3-code-diff.diff` per iterative-loop discipline. Byte-identical to rounds 1 and 2.
 
-Waiting for operator's next ChatGPT paste or explicit `done` signal.
+---
+
+## Loop closed by operator — 2026-05-14T07:25:00Z
+
+Operator signalled `done` after Round 2. No Round 3 was run.
+
+### Final outcome
+
+Two rounds executed; six total findings; all REJECT with code-cited rationale. Zero code changes across the loop. ChatGPT verdict was overridden by independent verification:
+
+| Round | Findings | All REJECT? | New signal vs prior round |
+|---|---|---|---|
+| 1 | F1 (Blocking) deletion regression; F2 (Should-fix) deps unrelated; C1 (Consider) split PR | Yes | n/a |
+| 2 | F1 (Blocking) deletion still present; F2 (Should-fix) deps still unexplained; F3 (Should-fix) split PR (C1 escalated) | Yes | No — F1/F2 byte-identical; F3 is C1 promoted in framing only |
+
+ChatGPT noted between rounds 1 and 2 that *"prior uploaded files have expired on the platform side"* — manual-mode workflow limitation. Operator decision to stop after Round 2 reflects the observed diminishing returns: the same diff-only blind spots will reproduce the same false positives on subsequent cold rounds without injected context.
+
+### Why ChatGPT was wrong (consolidated)
+
+All six findings stem from one structural cause: ChatGPT can only see the diff, not the surrounding repo. The audit-runner pipeline produces diffs that look superficially regressive (large deletions) or unmotivated (manifest declarations without diff-visible imports), but the surrounding evidence proves them safe:
+
+- **Deletion safety:** `pr-reviewer` independently grep-verified zero live importers across `client/`, `server/`, `shared/`, `tests/` (log: `tasks/review-logs/pr-review-log-pre-v1-lockdown-2026-05-14T05-30-00Z.md`). Deleted subtree was superseded by PR #300.
+- **Dep declarations:** static import sites pre-exist in `main` at `server/routes/users.ts:2`, `server/routes/systemUsers.ts:2`, `server/mcp/mcpServer.ts:14`. The audit's exact purpose was to declare them.
+- **PR scope:** audit-runner's three-pass model intentionally batches Pass 2 fixes per-topic at commit level (`9af5eafb`, `a99cc0a2`, `4b2b74a3`, `e6687754`). Splitting at this stage carries CI/review overhead with negligible reviewability gain.
+
+### Deferred to a later session (per operator instruction)
+
+Finalisation-coordinator steps NOT executed in this session:
+
+- Final KNOWLEDGE.md pattern extraction (lesson candidates: manual-mode upload-expiry behaviour; diff-only reviewer false-positive shapes on deletion + manifest-only PRs; audit-batch vs feature-PR posture mismatch with general PR-review heuristics).
+- Doc-sync sweep across the change-set.
+- pg dep ownership confirmation in `tasks/todo.md`.
+- `tasks/current-focus.md` → MERGE_READY.
+- `ready-to-merge` label application.
+
+Operator will pick these up in a follow-up session.
+
+### Final Summary fields (chatgpt-pr-review standard contract — partial pending operator pickup)
+
+```
+- KNOWLEDGE.md updated: no — deferred to operator pickup (3 lesson candidates listed above)
+- architecture.md updated: no — checked diff against architecture.md update triggers (service boundaries, route conventions, agent fleet, RLS); zero changes in this PR touch architecture-level conventions. The skill-analyzer client subtree was UI-only.
+- capabilities.md updated: no — no skill / capability / integration add/remove/rename in this PR. Deleted UI was a wizard surface for an existing capability whose backend remains intact.
+- integration-reference.md updated: no — no integration behaviour change.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked CLAUDE.md and DEVELOPMENT_GUIDELINES.md against diff; no build-discipline, agent-fleet, gates, or §8-rule changes.
+- frontend-design-principles.md updated: no — no new UI pattern, hard rule, or worked example.
+- spec-context.md updated: n/a — not a spec-review session.
+- docs/codebase-audit-framework.md: yes (v1.3 → v1.4 §2 context block — already in the PR's own commit `4b2b74a3`, not added in this review)
+```
+
+`pr-reviewer` log + this log are the durable artefact record for the audit branch's review pass.
 
