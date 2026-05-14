@@ -255,6 +255,14 @@ These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-chec
 
 ---
 
+## Deferred spec decisions — development-lifecycle-governance-upgrade
+
+Items routed here by `spec-reviewer` during the iteration loop for the spec at `tasks/builds/development-lifecycle-governance-upgrade/spec.md`. Each item is AUTO-DECIDED to keep the loop unblocked; review at your leisure and either confirm or amend the spec.
+
+- **F14 — ABCd dimensions vs Asset Register row schema.** Codex flagged that ABCd captures four dimensions (Acquire / Build / Carry / decommission) but the Asset Register row only carries Carry notes and Decommission notes. AUTO-DECIDED: accept-minimum-change. Acquire and Build remain pre-merge planning context (visible in the spec, absent from the Register). The spec's §7.3 Consumer wording and §14 Deferred Items now state this explicitly. Rationale: minimum-schema posture; adding two more columns to the Asset Register is a schema expansion that could be opportunistically added later if recurring need surfaces. If you want the Register to also carry Acquire / Build context (e.g. for future Acquire-cost reporting), amend §7.4.1 and §14 before architect handoff.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`
