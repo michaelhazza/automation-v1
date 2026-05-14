@@ -138,3 +138,33 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0).
 - [auto] F2-5: G5 tightened to "one of the eight valid §6.2.1 verdict strings (four `yes:` + four `n/a:`)".
 
 ---
+
+## Round 3 — 2026-05-14T04:35:00Z
+
+### ChatGPT Feedback (raw)
+
+> Nothing blocking. Still the same two low-severity polish items from the previous pass:
+>
+> 1. **G2 still omits the revise soft gate** — Severity: low, Category: clarity. §6.1 and Chunk 3 now clearly define revise as a pause-and-rerun soft gate, but G2 only mentions stop / merge-with-existing escalation. Not implementation-blocking, but G2 would be more complete if it said revise enters the soft revise loop.
+>
+> 2. **§12 G2 acceptance still omits the revise branch** — Severity: low, Category: clarity. Chunk 3 acceptance already requires dry-runs for all four branches, including revise, so coverage exists. §12 could mirror that by adding "revise triggers the §6.1 soft gate loop."
+>
+> I'd still call this APPROVED. These are polish-only and can be safely fixed inline or left for the plan author to preserve in implementation.
+
+**Top themes (Round 3):** two final continuations of Round 1 F8 (revise soft gate) — the Goals row and the Acceptance Criteria row that I missed during the F8 sweep. Verdict: APPROVED. No new architectural issues.
+
+### Recommendations and Decisions
+
+| # | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---------|--------|----------------|----------------|----------|-----------|
+| F3-1 | G2 only mentions `stop` / `merge-with-existing` escalation; omits the `revise` soft gate | technical (continuation of Round 1 F8) | apply | auto (apply) | low | Same finding-class as F8. Goals row updated to mention all three escalation behaviours |
+| F3-2 | §12 G2 acceptance row omits the `revise` branch (only mentions `stop` / `merge with existing capability`) | technical (continuation of Round 1 F8) | apply | auto (apply) | low | Same finding-class. Acceptance row updated for parity with G2 |
+
+**Integrity check (post-edit):** 1 spot-check pass — grepped for `stop.*merge.*existing` to find any remaining "two-branch" phrasings. All matches now either (a) mention all three branches, (b) are inside the recommendation enum table itself (which lists all four values neutrally), or (c) appear in Chunk 3 Behaviour where the Hard-gate / Soft-gate split already ships as separate bullets (lines 561-562). 0 issues.
+
+### Applied (auto-applied technical, all 2)
+
+- [auto] F3-1: G2 verifiable assertion now reads "`stop` / `merge-with-existing` outcomes hard-escalate to the operator; `revise` outcome enters the §6.1 Step 3a Soft-gate pause-and-rerun loop until `proceed` is reached".
+- [auto] F3-2: §12 G2 acceptance row now reads "`stop` / `merge with existing capability` outcomes hard-escalate to operator; `revise` outcome triggers the §6.1 Step 3a Soft-gate pause-and-rerun loop".
+
+---

@@ -45,7 +45,7 @@ This spec implements the lightweight governance wrapper defined in the locked br
 | # | Goal | Verifiable assertion |
 |---|---|---|
 | G1 | Standard+ builds produce a structured `intent.md` before specification begins | `tasks/builds/<slug>/intent.md` exists with the required sections for every Standard+ build merged after this ships |
-| G2 | `spec-coordinator` runs a hard duplication / strategy gate before authoring | Spec-coordinator step list includes the gate; gate output captured in `intent.md`; `stop` / `merge-with-existing` outcomes escalate to the operator |
+| G2 | `spec-coordinator` runs a hard duplication / strategy gate before authoring | Spec-coordinator step list includes the gate; gate output captured in `intent.md`; `stop` / `merge-with-existing` outcomes hard-escalate to the operator; `revise` outcome enters the §6.1 Step 3a Soft-gate pause-and-rerun loop until `proceed` is reached |
 | G3 | Standard+ specs carry a Lifecycle Declaration block and an ABCd Estimate block (S/M/L sizing) | Spec authoring instructions require both blocks; `spec-authoring-checklist.md` flags missing blocks |
 | G4 | `docs/capabilities.md` becomes an Asset Register with the §7.4-derived field set and closed cluster list | The file's structure conforms to the schema in §7.4; cluster list matches the closed list verbatim |
 | G5 | Finalisation gates capability registration via `docs/doc-sync.md` | New trigger row exists in `docs/doc-sync.md`; `finalisation-coordinator` Step 6 verdicts it; `MERGE_READY` cannot be set without one of the eight valid §6.2.1 verdict strings (four `yes: <outcome>` variants or four `n/a: <reason>` variants) |
@@ -682,7 +682,7 @@ A composite of Goals (§2) and Chunk-level acceptance (§10). Restated as a sing
 
 ### Functional
 - [ ] **G1:** A Standard+ test build produces `tasks/builds/<slug>/intent.md` matching the §7.1 schema.
-- [ ] **G2:** `spec-coordinator` Step 3a runs before authoring; `stop` / `merge with existing capability` outcomes escalate to operator.
+- [ ] **G2:** `spec-coordinator` Step 3a runs before authoring; `stop` / `merge with existing capability` outcomes hard-escalate to operator; `revise` outcome triggers the §6.1 Step 3a Soft-gate pause-and-rerun loop.
 - [ ] **G3:** A Standard+ test spec without Lifecycle Declaration or ABCd Estimate is flagged by `spec-conformance`.
 - [ ] **G3:** ABCd values are S / M / L only; numeric values are rejected by the authoring checklist.
 - [ ] **G4:** `docs/capabilities.md` matches the §7.4 structure with the §7.4.2 cluster list seeded in the header.
