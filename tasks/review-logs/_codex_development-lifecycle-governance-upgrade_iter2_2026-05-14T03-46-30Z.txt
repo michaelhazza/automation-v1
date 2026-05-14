@@ -1,8 +1,40 @@
-# Spec: Development Lifecycle Governance Upgrade
+OpenAI Codex v0.130.0
+--------
+workdir: C:\files\Claude\automation-v1-3rd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e2497-ddb5-7473-bdec-ecad94b5aa80
+--------
+user
+You are reviewing a Markdown specification document for an "implementation-readiness" rubric. This is iteration 2 of the review loop — the previous review surfaced ~50 findings and the spec has been heavily revised.
+
+For this iteration, look at the CURRENT state of the spec freshly and surface any REMAINING mechanical / consistency issues:
+- Contradictions between sections
+- Load-bearing claims without backing mechanisms
+- File-inventory drift (prose references to files not in §4)
+- Missing or under-specified contracts
+- Sequencing problems
+- Numeric-count mismatches
+- Internal cross-references that broke during the rewrite (§ numbers pointing at the wrong thing, etc.)
+- Vague verbs without named actor / location / mechanism
+
+Issue findings as a numbered list with section reference, one-sentence description, and suggested fix.
+
+DO NOT relitigate the framing (pre-production, no DB schema, markdown-only enforcement, no auto-apply). Take it as given.
+
+If the spec looks materially clean compared to a typical implementation-ready spec, say so explicitly at the top of your reply before listing any remaining nits.
+
+Here is the spec:
+
+---# Spec: Development Lifecycle Governance Upgrade
 
 **Status:** reviewing
 **Spec date:** 2026-05-14
-**Last updated:** 2026-05-14 (spec-reviewer iteration 2)
+**Last updated:** 2026-05-14 (spec-reviewer iteration 1)
 **Author:** main session (operator-directed)
 **Build slug:** `development-lifecycle-governance-upgrade`
 **Source brief:** [`tasks/ai-dlc-governance-brief.md`](../../ai-dlc-governance-brief.md) (locked 2026-05-14)
@@ -131,7 +163,7 @@ These documents are referenced in prose but are NOT changed by this build. Liste
 ### 4.6 Count reconciliation
 
 - Repo-diff files at this build's merge: **0–1 new** (`docs/spec-template.md`, optional per §14) + **7 modified** (`.claude/agents/spec-coordinator.md`, `.claude/agents/finalisation-coordinator.md`, `docs/doc-sync.md`, `docs/capabilities.md`, `docs/spec-authoring-checklist.md`, `CLAUDE.md`, `architecture.md`) = **7–8 repo files** in the merge diff.
-- Runtime artefact write obligations produced by future pipeline runs: 4 distinct write obligations across 3 file paths (`intent.md` once per Standard+ build; `progress.md` written twice per build at Steps 3a and 7a; `tasks/todo.md` per-build at Step 7a + one-time at Chunk 4 backfill).
+- Runtime artefacts produced by future pipeline runs: 4 distinct sinks (`intent.md`, `progress.md` Step 3a, `progress.md` Step 7a, `tasks/todo.md` entries).
 - 0 schema migrations, 0 new jobs, 0 new services, 0 new routes, 0 new hooks, 0 new gate scripts.
 
 Anything that drifts from these counts is a spec violation.
@@ -212,7 +244,7 @@ The coordinator records each output verbatim in `intent.md` (§7.1 format). Gate
 | Step | Change | Required behaviour |
 |---|---|---|
 | Step 6 — full doc-sync sweep | **Extend** to include the new Capability Registration trigger row defined in `docs/doc-sync.md` | The sweep must produce a verdict for `docs/capabilities.md` in the combined format `<verdict>: <registration outcome>` per §6.2.1 below. A `yes`-class verdict requires that the Asset Register row(s) follow §7.4 and that one of the §7.4.4 registration outcomes is named explicitly. `MERGE_READY` is blocked until a verdict exists. |
-| Step 7a — Compound Learning Feedback (NEW) | Insert immediately after Step 7 (KNOWLEDGE.md pattern extraction) and before Step 8 (tasks/todo.md cleanup) | For each pattern extracted in Step 7, the coordinator must emit one proposal-list row routing the pattern to exactly one target value from the §7.5 enum. The enum has eight values; one of those values, `agent-instruction`, is itself constrained to a fixed shortlist of six named agents (`spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `pr-reviewer`, `architect`, `builder`). Operator approves / rejects / defers each row. Approved entries become follow-up tasks in `tasks/todo.md` — they do **not** auto-apply in v1. |
+| Step 7a — Compound Learning Feedback (NEW) | Insert immediately after Step 7 (KNOWLEDGE.md pattern extraction) and before Step 8 (tasks/todo.md cleanup) | For each pattern extracted in Step 7, the coordinator must emit one proposal-list row routing the pattern to exactly one target value from the §7.5 enum (which has eight values; six of those represent agent-instruction-class targets, plus `no-further-action` and `documentation`). Operator approves / rejects / defers each row. Approved entries become follow-up tasks in `tasks/todo.md` — they do **not** auto-apply in v1. |
 
 #### 6.2.1 Capability Registration verdict — combined format
 
@@ -372,7 +404,7 @@ Field rules:
 | Last review date | yes | At creation: the date the row is added to the Asset Register (Chunk 4 merge date for migrated entries; the build's finalisation date for new entries). At subsequent reviews: the most recent review date. | ISO date `YYYY-MM-DD` |
 | Carry notes | yes | spec ABCd estimate `Carry` row Notes column | |
 | Decommission notes | yes | spec ABCd estimate `decommission` row Notes column | "None planned" is acceptable for Inception/Growth |
-| Related docs | yes | links to spec (required); ADR / KNOWLEDGE.md links optional when present | Markdown link list. The spec link uses the canonical build path `tasks/builds/<slug>/spec.md` (resolved at finalisation time using the build's slug); ADR / KNOWLEDGE links are appended only when applicable. `"spec: tasks/builds/<slug>/spec.md"` alone is a valid value. |
+| Related docs | yes | links to spec (required); ADR / KNOWLEDGE.md links optional when present | Markdown link list; the spec link is mandatory, others are appended only when applicable. `"spec: <link>"` alone is a valid value. |
 
 #### 7.4.2 Closed cluster list (seeded in `docs/capabilities.md` header)
 
@@ -386,11 +418,11 @@ The cluster list lives in the header of `docs/capabilities.md` so it is grep-abl
 
 A placeholder owner is allowed when permanent ownership cannot yet be assigned. Three artefacts must accompany the placeholder, all captured at registration time:
 
-1. A **temporary accountable reviewer** — a named human who answers questions in the interim. Written in the Owner cell as `TBD owner - temp reviewer: <name>`.
+1. A **temporary accountable reviewer** — a named human who answers questions in the interim. Written in the Owner cell as `TBD owner — temp reviewer: <name>`.
 2. An **owner-resolution follow-up task** in `tasks/todo.md` under the heading `### owner-resolution: <capability-id>` (stable anchor format — one heading per pending owner; `<capability-id>` matches the Asset Register row's Capability ID / slug). The Asset Register row's Related docs cell links to this heading via `tasks/todo.md#owner-resolution-<capability-id>`.
 3. A **resolution due date** appended to the Owner cell as `; due <ISO date>`.
 
-Example Owner cell: `TBD owner - temp reviewer: alice; due 2026-08-01`.
+Example Owner cell: `TBD owner — temp reviewer: alice; due 2026-08-01`.
 Example Related docs cell: `spec: tasks/builds/foo/spec.md; owner-task: tasks/todo.md#owner-resolution-foo`.
 
 Without all three, `finalisation-coordinator` Step 6 must reject the registration verdict.
@@ -407,15 +439,13 @@ Exactly one of:
 
 #### 7.4.5 Cluster mutation procedure
 
-**Canonical durable location for the cluster list:** the cluster header of `docs/capabilities.md`. Once this spec is shipped, that file becomes the single source of truth for the active cluster set — future builds, ADRs, and successor specs read it but do not maintain a parallel copy.
+When a build needs a cluster that does not exist in §7.4.2, the build's PR must:
 
-When a build needs a cluster that does not exist in the current `docs/capabilities.md` cluster header, the build's PR must:
+1. Add the new cluster name to §7.4.2 of this spec's currently-shipped form (or to its successor / via ADR if the original spec is shipped and superseded).
+2. Add the same cluster name to the cluster list header of `docs/capabilities.md`.
+3. Update `docs/spec-authoring-checklist.md` Appendix to reference the extended list.
 
-1. Add the new cluster name to the cluster list header of `docs/capabilities.md`.
-2. Author a short ADR under `docs/decisions/` (or extend an existing one) noting the rationale for the new cluster.
-3. Update `docs/spec-authoring-checklist.md` Appendix to mention the extended list (or reference `docs/capabilities.md` as the live source).
-
-The three edits land in the same PR. `finalisation-coordinator` Step 6 verifies the cluster header is internally consistent with the Asset Register rows below it. This spec's §7.4.2 list is a seed value used at Chunk 4 backfill time; once shipped, `docs/capabilities.md` is the live cluster list and §7.4.2 is historical reference only.
+The three edits land in the same PR. `finalisation-coordinator` Step 6 verifies cluster-list parity between §7.4.2 and `docs/capabilities.md` as part of the existing doc-sync sweep.
 
 ### 7.5 Compound Learning Feedback decision contract
 
@@ -535,14 +565,13 @@ No backward dependencies. Chunks 1, 2, and 4 can be implemented in parallel. Chu
 1. `.claude/agents/spec-coordinator.md` (insert Step 3a)
 
 **Behaviour:**
-- New Step 3a runs between Step 3 (intake) and Step 4 (slug derivation), per the §6.1 order invariant.
-- Step 3a applies the duplication / strategy check defined in §6.1.1 and writes the three outputs into `intent.md` (§7.1.0 table format).
-- Hard escalation on `recommendation = stop` or `recommendation = merge with existing capability`.
+- New Step 3a runs between Step 3 and Step 4 (or before Step 6, depending on the open question in §15).
+- Outputs the three §7.1 Duplication / Strategy fields into `intent.md`.
+- Hard escalation on `stop` or `merge with existing capability`.
 
-**Acceptance (inspection-based):**
-- Reading `.claude/agents/spec-coordinator.md` shows a Step 3a block between Step 3 and Step 4 that names the §6.1.1 inputs / sources / decision criteria verbatim.
-- The Step 3a block names `tasks/builds/<slug>/progress.md` as the recording location for escalation outputs and operator decisions (§6.1 Step 3a row).
-- Implementer dry-runs `stop` and `proceed` branches and records both walkthroughs in `tasks/builds/development-lifecycle-governance-upgrade/progress.md`.
+**Acceptance:**
+- A test build with `recommendation = stop` halts the coordinator until operator decision is recorded in `progress.md`.
+- A test build with `recommendation = proceed` continues without prompt.
 
 #### Chunk 4 — `docs/capabilities.md` Asset Register
 
@@ -568,7 +597,7 @@ Each unknown produces one entry under the heading `### capabilities-backfill: <c
 
 - `Capability ID:` matches the Asset Register row's Capability ID / slug.
 - `Unknown field:` the field that needs resolution (e.g. `Owner`, `Carry notes`).
-- `Current value:` the placeholder used in the Asset Register row (e.g. `TBD owner - temp reviewer: alice; due 2026-08-01`).
+- `Current value:` the placeholder used in the Asset Register row (e.g. `TBD owner — temp reviewer: alice; due 2026-08-01`).
 - `Due date:` ISO date when this should be resolved.
 - `Notes:` one-line context if helpful.
 
@@ -581,15 +610,15 @@ Heading anchor format follows the same convention as §7.4.3 Owner placeholders 
 2. `.claude/agents/finalisation-coordinator.md` (Step 6 edit — extend doc-sync sweep)
 
 **Behaviour:**
-- New row in the `docs/doc-sync.md` trigger table names `docs/capabilities.md` as the synced document. Triggers: any merge that creates, mutates, splits, or merges a capability surface (i.e. anything that would change an Asset Register row's §7.4.1 fields). Valid `n/a` reasons match §6.2.1.
-- `finalisation-coordinator` Step 6 must emit a verdict for the new row in the combined format defined in §6.2.1 (one of the eight valid strings — four `yes: <outcome>` variants, four `n/a: <reason>` variants).
+- New row in the doc-sync trigger table names `docs/capabilities.md` with the triggers (§6.2 — capability-surface-affecting changes) and valid `n/a` reasons.
+- `finalisation-coordinator` Step 6 must emit a verdict for the new row (`yes (updated)` with §7.4.4 outcome OR `n/a` with valid reason).
 - `MERGE_READY` (Step 9) is blocked until the verdict exists.
 
 **Acceptance (inspection-based):**
-- `docs/doc-sync.md` contains a row for `docs/capabilities.md` naming the trigger conditions (any §7.4.1 field change) and the four valid `n/a` reasons (§6.2.1).
-- `.claude/agents/finalisation-coordinator.md` Step 6 names the new row and the eight-string combined verdict format (§6.2.1).
+- `docs/doc-sync.md` contains a row for `docs/capabilities.md` naming the Capability Registration triggers (§6.2 of this spec) and the four valid `n/a` reasons (§6.2.1).
+- `.claude/agents/finalisation-coordinator.md` Step 6 names the new row and the combined verdict format (§6.2.1).
 - The Step 6 instructions explicitly state that `MERGE_READY` (Step 9) is withheld and the missing-verdict reason is recorded in `progress.md` when the verdict is absent.
-- Implementer dry-runs both branches (capability-surface-touching change → `yes: update existing capability record`; internal refactor → `n/a: internal refactor with no capability surface change`) and records the walkthrough in `progress.md`.
+- Implementer dry-runs both branches (capability-surface-touching change ⇒ `yes: <outcome>`; internal refactor ⇒ `n/a: internal refactor with no capability surface change`) and records the walkthrough in `progress.md`.
 
 #### Chunk 6 — Compound Learning Feedback Step 7a
 
@@ -629,9 +658,8 @@ Heading anchor format follows the same convention as §7.4.3 Owner placeholders 
 - Update any cross-doc references that now point at obsolete step names.
 
 **Acceptance:**
-- The doc-sync sweep at finalisation of this build emits ordinary `yes (updated)` doc-sync verdicts for `CLAUDE.md` and `architecture.md` (these are process docs, not capability docs — they are NOT subject to the new Capability Registration verdict, which applies only to `docs/capabilities.md`).
-- The Capability Registration verdict for this build itself is `yes: update existing capability record` (Asset Register row: `dev-lifecycle-governance` under cluster `Audit & Governance`, transitioning to `Growth`) OR `n/a: docs-only change` if Chunk 4 has not yet shipped at this build's finalisation. The architect resolves which during plan authoring.
-- A grep of the repo for old step phrasing (e.g. "Intent → Elaboration", or pre-edit lifecycle sequences) returns no results, or every result is in `docs/decisions/` (historical) or `_retired/` (archived).
+- Doc-sync sweep at finalisation of this build emits `yes: update existing capability record` (or appropriate verdict) for both `CLAUDE.md` and `architecture.md`.
+- A grep of the repo for old step phrasing returns no results, or every result is in `docs/decisions/` (historical) or `_retired/` (archived).
 
 ---
 
@@ -682,7 +710,7 @@ A composite of Goals (§2) and Chunk-level acceptance (§10). Restated as a sing
 ### Self-consistency
 - [ ] Goals (§2) and Implementation (§10) describe the same set of changes.
 - [ ] The numeric counts in §4.6 (7–8 repo files in the merge diff) reconcile to the actual git diff at merge.
-- [ ] Every prose reference to a **changed** file reconciles to §4.1 or §4.2 (i.e. every changed-file mention appears somewhere in those inventories — references in §§5, 6, 7, 10, 11, 13, 14 are expected and fine). Reference-only documents per §4.4 may appear anywhere; a prose mention of a path not in §4.1, §4.2, §4.3, or §4.4 is the actual violation.
+- [ ] No prose reference to a **changed** file (i.e. a file in §4.1 or §4.2) appears outside §4.1/§4.2/§10. Reference-only documents per §4.4 may appear anywhere.
 - [ ] Every "must" / "binding" / "hard gate" claim has a backing mechanism named.
 
 ---
@@ -696,7 +724,7 @@ This spec changes **only Markdown and agent-instruction files**. No pure functio
 - **No new unit tests** are added.
 - **No new integration tests** are added.
 - **Primary verification is inspection.** Each chunk's acceptance criteria are framed in inspection terms (reading the updated agent / docs files; the implementer dry-runs the relevant flow and records the walkthrough in `progress.md`).
-- **Static gates** (`lint`, `typecheck`) are still run as baseline repository checks; they are not expected to exercise these markdown-only changes. They remain a safety net for any incidental code drift if the implementer accidentally touches a TypeScript file.
+- **Static gates** (`lint`, `typecheck`) confirm that any incidental code touched by Chunk 7's `architecture.md` updates has not introduced syntax / type drift. They do not exercise the markdown changes.
 
 Validation scripts (e.g. a `scripts/check-capabilities-md.sh` that lints Asset Register rows) are explicitly out of v1 scope — see §14. v1 enforcement is markdown + coordinator instructions + doc-sync verdicts only.
 
@@ -724,10 +752,72 @@ Items mentioned in prose but intentionally deferred from v1.
 
 The following are remaining open questions after iteration 1 of spec review. Previously-open questions 1, 2, 4, and 5 in earlier drafts have been resolved into the body of the spec (see §6.1 order invariant, §14 spec-template deferral, §14 current-focus deferral, §14 validation-script deferral).
 
-1. **Closed cluster list — completeness.** The §7.4.2 seed list has ten clusters. Are any product surfaces missing (e.g. "Onboarding", "Telemetry", "Notifications")? Recommendation: review against the existing `docs/capabilities.md` during Chunk 4 backfill; if a gap is found, extend `docs/capabilities.md`'s cluster header in the same Chunk 4 PR and add a short ADR per §7.4.5 (the canonical durable location is `docs/capabilities.md`, not this spec — once Chunk 4 ships, §7.4.2 is historical reference only).
+1. **Closed cluster list — completeness.** The §7.4.2 list has ten clusters. Are any product surfaces missing (e.g. "Onboarding", "Telemetry", "Notifications")? Recommendation: review against `docs/capabilities.md` during Chunk 4 backfill; extend the list in the same PR if a gap is found. The list is closed-per-PR but mutable via §7.4.5 amendment procedure.
 
 (No other open questions remain. The spec is implementation-ready pending architect chunk-plan handoff.)
 
 ---
 
-End of spec. Status: **reviewing** — see frontmatter for the canonical status.
+End of spec. Status: **draft** — ready for `spec-reviewer` and `chatgpt-spec-review`.
+
+codex
+The spec looks materially clean compared to a typical implementation-ready spec. Remaining issues are mostly stale rewrite fragments and count/wording mismatches.
+
+1. **Header / end status** — The top says `Status: reviewing`, while the footer says `Status: draft`; pick one lifecycle state and use it consistently.
+
+2. **§2 G6 / §5.5 / §6.2 / §7.5** — The Compound Learning target count is inconsistent: some sections say “six targets,” §6.2 says “eight values,” and §7.5 defines eight enum values with one value containing a six-agent shortlist. Fix by saying “eight target enum values, including one `agent-instruction` target constrained to six named agents.”
+
+3. **§6.2 Step 7a** — “six of those represent agent-instruction-class targets” is mechanically wrong because only `agent-instruction` is the agent-specific target value. Reword to “one enum value, `agent-instruction`, is constrained to the fixed shortlist of six agents.”
+
+4. **§10 Chunk 3** — “or before Step 6, depending on the open question in §15” contradicts the resolved §6.1 order invariant and §15 says no such open question remains. Delete the parenthetical and state Step 3a runs between Step 3 and Step 4.
+
+5. **§10 Chunk 5** — It says the verdict is `yes (updated)` with a §7.4.4 outcome, but §6.2.1 allows only `yes: <registration outcome>` formats. Change Chunk 5 to use the exact combined verdict format, e.g. `yes: update existing capability record`.
+
+6. **§10 Chunk 5** — “Capability Registration triggers (§6.2 — capability-surface-affecting changes)” points to a section that defines finalisation behaviour, not an explicit trigger taxonomy. Either add the trigger definition to §6.2 / §6.2.1 or reference the new `docs/doc-sync.md` row as the mechanism.
+
+7. **§12 Self-consistency** — “No prose reference to a changed file appears outside §4.1/§4.2/§10” is false as written because changed files are intentionally referenced throughout §§6, 7, 11, 13, and 14. Replace with “Every prose reference to a changed file reconciles to §4.1 or §4.2.”
+
+8. **§4.6 Runtime artefacts count** — It counts “4 distinct sinks,” but two rows are the same file, `tasks/builds/<slug>/progress.md`, for different sections. Clarify as “4 runtime write obligations across 3 file paths” or “4 runtime artefact entries.”
+
+9. **§7.4.1 vs §7.1 / §7.2** — `Related docs` requires a spec link, but §7.1 and §7.2 never state the canonical spec path or how finalisation locates it. Add the expected spec path, likely `tasks/builds/<slug>/spec.md`, to the contract.
+
+10. **§7.4.3 / §10 Chunk 4** — Owner placeholder examples use `TBD owner — temp reviewer`, while the spec otherwise prefers markdown-only mechanical enforcement and ASCII-safe content. If exact string matching matters, standardize on ASCII `TBD owner - temp reviewer` or explicitly allow the dash variant.
+
+11. **§7.4.5** — “update §7.4.2 of this spec's currently-shipped form” is under-specified once the original spec is historical. Name the actual durable location that future PRs must edit, or make `docs/capabilities.md` the canonical cluster list and require successor specs/ADRs to mirror it.
+
+12. **§13** — “Static gates (`lint`, `typecheck`) confirm that any incidental code touched by Chunk 7's `architecture.md` updates…” is a load-bearing but odd claim because Chunk 7 touches markdown docs, not code. Reword to “Static gates are still run as baseline repository checks; they are not expected to exercise these markdown-only changes.”
+
+13. **§10 Chunk 7 Acceptance** — “Doc-sync sweep … emits `yes: update existing capability record` for both `CLAUDE.md` and `architecture.md`” conflates process-doc sync with the new Capability Registration verdict for `docs/capabilities.md`. Clarify whether this means the capability register verdict for the whole build, or ordinary doc-sync verdicts for those two docs.
+
+14. **§15** — The open question recommends extending the cluster list “in the same PR” during Chunk 4, but §4.2 does not include this spec as a modified file in the implementation diff. If the current spec itself is not edited during implementation, route the extension through `docs/capabilities.md` plus ADR/successor-spec only.
+tokens used
+22,829
+The spec looks materially clean compared to a typical implementation-ready spec. Remaining issues are mostly stale rewrite fragments and count/wording mismatches.
+
+1. **Header / end status** — The top says `Status: reviewing`, while the footer says `Status: draft`; pick one lifecycle state and use it consistently.
+
+2. **§2 G6 / §5.5 / §6.2 / §7.5** — The Compound Learning target count is inconsistent: some sections say “six targets,” §6.2 says “eight values,” and §7.5 defines eight enum values with one value containing a six-agent shortlist. Fix by saying “eight target enum values, including one `agent-instruction` target constrained to six named agents.”
+
+3. **§6.2 Step 7a** — “six of those represent agent-instruction-class targets” is mechanically wrong because only `agent-instruction` is the agent-specific target value. Reword to “one enum value, `agent-instruction`, is constrained to the fixed shortlist of six agents.”
+
+4. **§10 Chunk 3** — “or before Step 6, depending on the open question in §15” contradicts the resolved §6.1 order invariant and §15 says no such open question remains. Delete the parenthetical and state Step 3a runs between Step 3 and Step 4.
+
+5. **§10 Chunk 5** — It says the verdict is `yes (updated)` with a §7.4.4 outcome, but §6.2.1 allows only `yes: <registration outcome>` formats. Change Chunk 5 to use the exact combined verdict format, e.g. `yes: update existing capability record`.
+
+6. **§10 Chunk 5** — “Capability Registration triggers (§6.2 — capability-surface-affecting changes)” points to a section that defines finalisation behaviour, not an explicit trigger taxonomy. Either add the trigger definition to §6.2 / §6.2.1 or reference the new `docs/doc-sync.md` row as the mechanism.
+
+7. **§12 Self-consistency** — “No prose reference to a changed file appears outside §4.1/§4.2/§10” is false as written because changed files are intentionally referenced throughout §§6, 7, 11, 13, and 14. Replace with “Every prose reference to a changed file reconciles to §4.1 or §4.2.”
+
+8. **§4.6 Runtime artefacts count** — It counts “4 distinct sinks,” but two rows are the same file, `tasks/builds/<slug>/progress.md`, for different sections. Clarify as “4 runtime write obligations across 3 file paths” or “4 runtime artefact entries.”
+
+9. **§7.4.1 vs §7.1 / §7.2** — `Related docs` requires a spec link, but §7.1 and §7.2 never state the canonical spec path or how finalisation locates it. Add the expected spec path, likely `tasks/builds/<slug>/spec.md`, to the contract.
+
+10. **§7.4.3 / §10 Chunk 4** — Owner placeholder examples use `TBD owner — temp reviewer`, while the spec otherwise prefers markdown-only mechanical enforcement and ASCII-safe content. If exact string matching matters, standardize on ASCII `TBD owner - temp reviewer` or explicitly allow the dash variant.
+
+11. **§7.4.5** — “update §7.4.2 of this spec's currently-shipped form” is under-specified once the original spec is historical. Name the actual durable location that future PRs must edit, or make `docs/capabilities.md` the canonical cluster list and require successor specs/ADRs to mirror it.
+
+12. **§13** — “Static gates (`lint`, `typecheck`) confirm that any incidental code touched by Chunk 7's `architecture.md` updates…” is a load-bearing but odd claim because Chunk 7 touches markdown docs, not code. Reword to “Static gates are still run as baseline repository checks; they are not expected to exercise these markdown-only changes.”
+
+13. **§10 Chunk 7 Acceptance** — “Doc-sync sweep … emits `yes: update existing capability record` for both `CLAUDE.md` and `architecture.md`” conflates process-doc sync with the new Capability Registration verdict for `docs/capabilities.md`. Clarify whether this means the capability register verdict for the whole build, or ordinary doc-sync verdicts for those two docs.
+
+14. **§15** — The open question recommends extending the cluster list “in the same PR” during Chunk 4, but §4.2 does not include this spec as a modified file in the implementation diff. If the current spec itself is not edited during implementation, route the extension through `docs/capabilities.md` plus ADR/successor-spec only.

@@ -118,4 +118,4 @@ AUTO-DECIDED items routed to `tasks/todo.md`:
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED: 1 (F14 — see tasks/todo.md)
-- Spec commit after iteration: pending (will be recorded after commit in Step 8b).
+- Spec commit after iteration: `90026032`
