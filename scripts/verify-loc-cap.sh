@@ -30,7 +30,7 @@
 # Baseline: scripts/.gate-baselines/loc-cap.txt
 #   Format: # expires: YYYY-MM-DD  then  <relpath>:0:<reason>
 #
-# Exit codes: 0=pass, 1=hard violations above baseline, 2=soft/within-baseline, 3=expired baseline
+# Exit codes: 0=pass, 1=hard violations above baseline or past-grace expiry, 2=soft/within-baseline/within-grace expiry warning
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -156,9 +156,7 @@ if [ "$BASELINE_EXIT" = "1" ]; then
     exit 2
   fi
   exit 1
-elif [ "$BASELINE_EXIT" = "3" ]; then
-  exit 3
-elif [ "$SOFT_COUNT" -gt 0 ]; then
+elif [ "$BASELINE_EXIT" = "2" ] || [ "$SOFT_COUNT" -gt 0 ]; then
   exit 2
 fi
 exit 0

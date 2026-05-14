@@ -30,6 +30,8 @@ run_gate() {
     echo "[WARNING] $name"
     WARN_COUNT=$((WARN_COUNT + 1))
   else
+    # Legacy gates (readiness/manifest checks) exit 3 to signal an informational
+    # state ("not yet applicable"). Do not count as pass/warn/fail.
     echo "[INFO] $name"
   fi
 }

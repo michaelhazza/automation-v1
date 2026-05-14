@@ -142,9 +142,7 @@ emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
 if [ "$BASELINE_EXIT" = "1" ]; then
   exit 1
-elif [ "$BASELINE_EXIT" = "3" ]; then
-  exit 3
-elif [ "$VIOLATIONS" -gt 0 ]; then
+elif [ "$BASELINE_EXIT" = "2" ] || [ "$VIOLATIONS" -gt 0 ]; then
   exit 2
 fi
 exit 0

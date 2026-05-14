@@ -43,7 +43,9 @@ result=$(
   node --input-type=module <<'NODEEOF'
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { countPerFile, diffAgainstBaseline, isSuppressed } from 'file://' + process.env.PER_FILE_HELPER;
+const { countPerFile, diffAgainstBaseline, isSuppressed } = await import(
+  'file://' + process.env.PER_FILE_HELPER
+);
 
 const rootDir = process.env.ROOT_DIR;
 const guardId = process.env.GUARD_ID;

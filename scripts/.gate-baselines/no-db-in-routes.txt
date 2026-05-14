@@ -27,6 +27,5 @@
 #
 # EXIT CODES
 #   0 — pass (no violations; or all violations within current baseline)
-#   1 — new violations found above baseline
-#   2 — baseline-only violations (pre-existing, within baseline, not expired)
-#   3 — expired or past-grace-period baseline entries detected
+#   1 — error: new violations above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only or within-grace expiry (pre-existing, not yet over grace)

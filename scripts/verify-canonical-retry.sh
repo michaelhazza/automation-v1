@@ -18,7 +18,7 @@
 #   // guard-ignore: canonical-retry reason="<rationale, ≤120 chars>"
 #   // guard-ignore-next-line: canonical-retry reason="<rationale, ≤120 chars>"
 #
-# Exit codes: 0=pass, 1=new violations, 2=within baseline, 3=expired baseline
+# Exit codes: 0=pass, 1=new violations or past-grace baseline expiry, 2=within baseline or within-grace expiry warning
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

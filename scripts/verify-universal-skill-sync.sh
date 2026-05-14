@@ -11,9 +11,8 @@
 #
 # Exit codes:
 #   0 — no drift
-#   1 — new violation above baseline (or no baseline and violations > 0)
-#   2 — baseline-only violations (warning; within grace period)
-#   3 — expired baseline entry detected
+#   1 — new violation above baseline OR baseline entry past grace period
+#   2 — baseline-only violations or within-grace expiry warning
 #
 # Warning-first rollout: ships with default exit 2; promote to 1 via §C1.
 # ---------------------------------------------------------------------------
@@ -31,7 +30,9 @@ emit_header "$GUARD_NAME"
 
 # Delegate to pure helper via Node
 RESULT=$(REPO_ROOT="$ROOT_DIR" node --input-type=module <<'NODEEOF'
-import { loadUniversalSkillNames, loadActionRegistrySnapshot, diffUniversalSkills } from 'file://' + process.env.REPO_ROOT + '/scripts/lib/universal-skill-sync-pure.mjs';
+const { loadUniversalSkillNames, loadActionRegistrySnapshot, diffUniversalSkills } = await import(
+  'file://' + process.env.REPO_ROOT + '/scripts/lib/universal-skill-sync-pure.mjs'
+);
 
 const names    = loadUniversalSkillNames(process.env.REPO_ROOT);
 const registry = loadActionRegistrySnapshot(process.env.REPO_ROOT);

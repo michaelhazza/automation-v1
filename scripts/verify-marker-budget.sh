@@ -57,7 +57,9 @@ result=$(
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { countPerFile, diffAgainstBaseline, isSuppressed } from 'file://' + process.env.PER_FILE_HELPER;
+const { countPerFile, diffAgainstBaseline, isSuppressed } = await import(
+  'file://' + process.env.PER_FILE_HELPER
+);
 
 const rootDir = process.env.ROOT_DIR;
 const baselineFile = process.env.BASELINE_FILE;

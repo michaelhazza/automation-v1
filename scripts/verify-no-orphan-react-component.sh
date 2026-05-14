@@ -48,7 +48,9 @@ RESULT_JSON=$(
   ALLOW_LIST_FILE="$ALLOW_LIST_FILE" \
   ANALYSER_PATH="$ANALYSER" \
   node --input-type=module <<'NODEEOF'
-import { findOrphanComponents } from 'file://' + process.env.ANALYSER_PATH;
+const { findOrphanComponents } = await import(
+  'file://' + process.env.ANALYSER_PATH
+);
 
 const violations = findOrphanComponents({
   entryFile: process.env.ENTRY_FILE,
@@ -82,6 +84,30 @@ if [ -d "${COMPONENT_ROOT}/components" ]; then
   FILES_SCANNED=$((FILES_SCANNED + count_components))
 fi
 
+# Stage the JSON payload to a temp file so the parser heredoc does not collide
+# with the pipe stdin (a heredoc-backed `node --input-type=module` consumes its
+# stdin from the heredoc, not from any piped predecessor — see Codex review
+# 2026-05-14).
+TMP_RESULT_JSON=$(mktemp)
+printf '%s' "$RESULT_JSON" > "$TMP_RESULT_JSON"
+
+PARSED_LINES=$(RESULT_JSON_FILE="$TMP_RESULT_JSON" node --input-type=module <<'PARSEEOF'
+import { readFileSync } from 'node:fs';
+const input = readFileSync(process.env.RESULT_JSON_FILE, 'utf8');
+const violations = JSON.parse(input || '[]');
+for (const v of violations) {
+  process.stdout.write(`${v.file}:${v.message}\n`);
+}
+PARSEEOF
+)
+PARSE_EXIT=$?
+rm -f "$TMP_RESULT_JSON"
+
+if [ $PARSE_EXIT -ne 0 ]; then
+  echo "[GATE] ${GUARD_ID}: failed to parse analyser output (exit ${PARSE_EXIT})" >&2
+  exit 1
+fi
+
 # Emit each violation and collect baseline keys.
 while IFS= read -r vline; do
   [ -z "$vline" ] && continue
@@ -95,15 +121,7 @@ while IFS= read -r vline; do
   VIOLATION_KEYS="${VIOLATION_KEYS}${vfile}:1:${vmsg}
 "
   VIOLATIONS=$((VIOLATIONS + 1))
-done < <(echo "$RESULT_JSON" | node --input-type=module <<'PARSEEOF' 2>/dev/null || true
-import { readFileSync } from 'node:fs';
-const input = readFileSync('/dev/stdin', 'utf8');
-const violations = JSON.parse(input || '[]');
-for (const v of violations) {
-  process.stdout.write(`${v.file}:${v.message}\n`);
-}
-PARSEEOF
-)
+done <<< "$PARSED_LINES"
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 

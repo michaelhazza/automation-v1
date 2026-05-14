@@ -18,9 +18,8 @@
 #
 # Exit codes:
 #   0 — no unreferenced exports outside baseline
-#   1 — new unreferenced exports above baseline
-#   2 — baseline-only violations (warning; within grace period)
-#   3 — expired baseline entry
+#   1 — new unreferenced exports above baseline OR baseline entry past grace period
+#   2 — baseline-only violations or within-grace expiry warning
 #
 # Warning-first rollout: ships with default exit 2; promote to 1 via §C1.
 # ---------------------------------------------------------------------------
@@ -38,7 +37,9 @@ emit_header "$GUARD_NAME"
 
 # Delegate to pure helper via Node
 RESULT=$(REPO_ROOT="$ROOT_DIR" node --input-type=module <<'NODEEOF'
-import { findUnreferencedExports } from 'file://' + process.env.REPO_ROOT + '/scripts/lib/types-used-pure.mjs';
+const { findUnreferencedExports } = await import(
+  'file://' + process.env.REPO_ROOT + '/scripts/lib/types-used-pure.mjs'
+);
 
 const unreferenced = findUnreferencedExports(process.env.REPO_ROOT);
 const violations = unreferenced.map(e => `${e.file}:${e.line}:${e.name} is exported but not referenced in server/, client/, or worker/`);

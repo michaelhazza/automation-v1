@@ -254,9 +254,8 @@ check_baseline() {
 #
 # Exit codes returned (printed to stdout — caller uses the value):
 #   0 — all baseline entries current; no new violations
-#   1 — new violations found (above baseline)
-#   2 — baseline-only violations (warning; pre-existing, within baseline)
-#   3 — expired or past-grace-period baseline entries detected
+#   1 — error: new violations above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only violations OR baseline entry expired within grace
 
 GATE_BASELINES_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/scripts/.gate-baselines"
 GATE_BASELINE_HELPERS="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/scripts/lib/gate-baseline-helpers.mjs"
@@ -265,7 +264,12 @@ GATE_BASELINE_HELPERS="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &
 # Usage: check_expiring_baseline <guard_id> <current_violation_lines>
 #   guard_id              — matches <guard-id>.txt under scripts/.gate-baselines/
 #   current_violation_lines — newline-separated violation strings (may be empty)
-# Prints exit code to stdout (0/1/2/3).  Emits diagnostic messages to stderr.
+# Prints exit code to stdout. Exit-code policy mirrors
+# references/test-gate-policy.md § "Baseline expiry policy":
+#   0 — no current violations, no baseline expiry
+#   1 — error: new violation above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only violations OR baseline entry expired within grace
+# Emits diagnostic messages to stderr (per-entry expiry warnings and errors).
 check_expiring_baseline() {
   local guard_id="$1"
   local current_violations="$2"
@@ -331,12 +335,15 @@ for (const entry of entries) {
   }
 }
 
+// Exit-code policy per references/test-gate-policy.md § "Baseline expiry policy":
+//   past-grace expiry → exit-1 contribution (error)
+//   within-grace expiry → exit-2 contribution (warning)
+//   new violation above baseline → exit-1 contribution (error)
+//   baseline-only violations → exit-2 contribution (warning)
 const newViolations = [...currentKeys].filter(k => !baselineKeys.has(k));
-if (newViolations.length > 0) {
+if (newViolations.length > 0 || hasExpiredError) {
   process.stdout.write('1');
-} else if (hasExpiredError || hasExpiredWarning) {
-  process.stdout.write('3');
-} else if (baselineKeys.size > 0) {
+} else if (hasExpiredWarning || baselineKeys.size > 0) {
   process.stdout.write('2');
 } else {
   process.stdout.write('0');
