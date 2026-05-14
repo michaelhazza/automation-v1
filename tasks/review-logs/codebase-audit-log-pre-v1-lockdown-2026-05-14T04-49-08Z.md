@@ -265,7 +265,83 @@ Aggregated across all Pass 1 findings (Rule 16). One proposal can close many fin
 
 ## Pass 2 Changes Applied
 
-(N/A — operator requested Pass 1 only.)
+Operator subsequently requested "proceed all pass-2". Three discrete commits landed on the audit branch.
+
+### Pass 2A — Area 1 dead-code removal
+
+**Change intent.** Delete the dead skill-analyzer client subtree confirmed unreferenced in Pass 1. Update one stale server-side comment that mentioned the deleted component.
+
+**Risk profile.** Low. Isolation proof: `SkillAnalyzerWizard` had no external referrer; `App.tsx:39` confirmed the build-stream consolidation already replaced the entry point.
+
+| Fix | Classification | Confidence | Justification | Files Modified |
+|---|---|---|---|---|
+| Delete 11 files under `client/src/components/skill-analyzer/` | `deletion` | high | Pre-deletion verification: every file's external-referrer count verified manually; only `types` returned matches but path-specific grep showed zero | 11 deleted |
+| Update stale doc comment | `behaviour-preserving refactor` | high | Comment cited the deleted React component as the consumer | `server/services/skillAnalyzerServicePure.ts` (4 lines) |
+
+**Validation results:**
+
+| Check | Command | Outcome |
+|---|---|---|
+| Server typecheck | `npm run build:server` | PASS |
+| Client build | `npm run build:client` | PASS (4.28s) |
+| Targeted unit tests | n/a | N/A — no tests authored or modified |
+| Skill visibility | `npm run skills:verify-visibility` | N/A — no skills changed |
+| Playbooks | `npm run playbooks:validate` | N/A — no workflow files changed |
+
+**Commit:** `audit: area 1 — delete dead skill-analyzer subtree (4,114 LOC)` · tag `audit-area-1-complete` · removed 4,115 lines / added 1 line.
+
+### Pass 2B — Area 1 missing-dependency declaration
+
+**Change intent.** Add the two static-import packages (`express-rate-limit`, `zod-to-json-schema`) to `dependencies`; add the two dynamic-import packages (`docx`, `mammoth`) to a new `optionalDependencies` block. Versions pinned to currently-resolved transitive versions to avoid surprise upgrades.
+
+**Risk profile.** Low — additive deps that match the existing import surface. `package.json` is HITL-protected per `.claude/hooks/config-protection.js`; **operator explicitly approved** ("whatever you recommend as best practice"). Sentinel file consumed once per edit; two sentinels required for the two Edit operations.
+
+**Pass 1 finding revision.** The Pass 1 finding listed five packages as a single pass-2 candidate. On verification the audit revised the split:
+- **`express-rate-limit`, `zod-to-json-schema`** — static imports; transitive resolution via `@modelcontextprotocol/sdk` is fragile. **Pass 2.**
+- **`docx`, `mammoth`** — dynamic imports with `.catch(() => null)` documented optionality. Declared as `optionalDependencies` to preserve intent while making the dep visible to tooling. **Pass 2.**
+- **`pg`** — used only in tooling scripts. Tier choice (`devDependencies` vs `dependencies`) is a packaging decision. **Routed to pass 3.**
+
+| Fix | Classification | Confidence | Justification | Files Modified |
+|---|---|---|---|---|
+| Add `express-rate-limit@^8.3.2` and `zod-to-json-schema@^3.25.2` to `dependencies` | `bug fix` (declared deps now match imports) | high | Static imports at fixed call sites; pinned to current transitive versions | `package.json`, `package-lock.json` |
+| Add `docx@^9.6.1` and `mammoth@^1.12.0` to `optionalDependencies` | `behaviour-preserving refactor` | high | Dynamic imports + catch pattern remains the canonical handling; declaration only adds visibility | `package.json`, `package-lock.json` |
+| Remove two stale `@ts-expect-error` directives now that TS resolves the optional modules | `behaviour-preserving refactor` | high | Compiler said the directives were unused | `server/services/configDocumentGeneratorService.ts`, `server/services/configDocumentParserService.ts` |
+
+**Validation results:**
+
+| Check | Command | Outcome |
+|---|---|---|
+| Server typecheck | `npm run build:server` | PASS (after removing the unused `@ts-expect-error` directives that the dep addition exposed) |
+| Client build | `npm run build:client` | N/A — verified already-green from Pass 2A; no `client/` files touched in 2B |
+| Targeted unit tests | n/a | N/A — no tests authored or modified |
+| `npm install` | `npm install --no-audit --no-fund` | PASS (25 packages added, lockfile updated) |
+
+**Commit:** `audit: area 1 — declare statically imported deps + optional DOCX deps` · tag `audit-area-1b-complete` · 4 files changed, 280 insertions, 9 deletions.
+
+### Pass 2C — Module C / D framework §2 refresh
+
+**Change intent.** Bump `docs/codebase-audit-framework.md` v1.3 → v1.4. Refresh §2 rows: Test framework is Vitest (post-migration); `npm run lint` exists. Clean three §12/§13 staleness clusters that still asserted the old facts.
+
+**Risk profile.** Zero — documentation only. No source files touched.
+
+| Fix | Classification | Confidence | Justification | Files Modified |
+|---|---|---|---|---|
+| §2 Test framework row → Vitest canonical | `behaviour-preserving refactor` | high | `package.json:38` declares `vitest run`; `@vitest/coverage-v8@^2.1.9` installed | `docs/codebase-audit-framework.md` |
+| §2 Lint command row → `npm run lint` exists | `behaviour-preserving refactor` | high | `package.json:19` declares `eslint .` | `docs/codebase-audit-framework.md` |
+| §12 "Tools NOT to use" — removed `npm run lint does not exist` + `Vitest/Jest not installed` | `behaviour-preserving refactor` | high | Same evidence; replaced with positive guidance "no Jest" | `docs/codebase-audit-framework.md` |
+| §13 "Common pitfalls" — removed "Adding `npm run lint` when scripts don't have it" | `behaviour-preserving refactor` | high | Same evidence | `docs/codebase-audit-framework.md` |
+| Version bump 1.3 → 1.4 with changelog entry | `behaviour-preserving refactor` | high | Framework §10 "Updating this framework" rule | `docs/codebase-audit-framework.md` |
+
+**Validation results:**
+
+| Check | Command | Outcome |
+|---|---|---|
+| Server typecheck | n/a | N/A — no source files changed |
+| Client build | n/a | N/A — no source files changed |
+| Targeted unit tests | n/a | N/A — no tests authored or modified |
+| Doc consistency | grep for old "no Vitest" / "no lint" strings | PASS (zero matches remaining) |
+
+**Commit:** `audit: framework v1.3 -> v1.4 — §2 context-block Vitest + lint refresh` · tag `audit-framework-v1.4-complete` · 1 file changed, 8 insertions, 9 deletions.
 
 ---
 
@@ -322,18 +398,19 @@ Cross-listed in `tasks/todo.md` under:
 
 | Field | Value |
 |---|---|
-| Overall Status | **WARN** — 1 critical finding; no pass 2 executed (operator-requested Pass 1 stop) |
+| Overall Status | **WARN** — 1 critical finding (Route → DB breach in `supportAgentRoutes.ts`) remains pass 3. Pass 2 shipped 3 commits (skill-analyzer subtree deletion, 4 dep declarations, framework v1.4 refresh). 24 prevention proposals routed to a separate `audit-prevention-gates-2026-05-14` build spec. |
 | Critical findings | **1** (Route → DB bypass in `supportAgentRoutes.ts`) |
 | High findings | **5** (skill-analyzer subtree dead, 5 missing deps, 10 god files at hard cap — counted as one Area 10 cluster, etc.) |
 | Medium findings | **17** |
 | Low findings | **7** |
 | Informational (positive) | **7** (atomic lead-swap in schema, handoff depth ≤ 5 enforced, withBackoff health, webhookDedupe health, named coverage on RLS+agentRunVisibility, rlsProtectedTables manifest size, `req.user.organisationId` discipline) |
-| Fixes applied (pass 2) | 0 — Pass 1 only per operator |
-| Files modified | 2 (audit log + per-run progress file) |
-| Items deferred to pass 3 | **24 symptom items** + **24 prevention proposals** |
+| Fixes applied (pass 2) | **3** discrete commits with checkpoint tags |
+| Files modified by pass 2 | 17 (11 deletions, 5 modifications, 1 new section in package.json) |
+| Items deferred to pass 3 | **24 symptom items** (now in `tasks/todo.md` § Deferred from codebase audit — 2026-05-14) + **24 prevention proposals** (now in `tasks/todo.md` § Prevention proposals + spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md`) |
 | Prevention target breakdown | `gate`: 16 · `architecture.md`: 1 · `CLAUDE.md`: 2 · `docs/capabilities.md`: 1 · `KNOWLEDGE.md`: 3 · `ADR`: 1 · `not feasible`: 2 |
-| KNOWLEDGE.md entries to append | 4 (after operator confirmation at findings gate) |
-| Checkpoint tags created | none yet |
+| KNOWLEDGE.md entries appended | **4** (§2 staleness; gate baselines must expire; custom retry loops; build-stream consolidations) |
+| Checkpoint tags created | `audit-area-1-complete`, `audit-area-1b-complete`, `audit-framework-v1.4-complete` |
+| Build spec written | `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` (Major class; 16 gates + 4 docs + 4 knowledge/ADR; awaits architect for `plan.md`) |
 | Linked `pr-reviewer` log | not yet run |
 | Linked `spec-conformance` log | not applicable (Pass 1 made no code changes) |
 | Linked `dual-reviewer` log | not requested |
@@ -342,17 +419,25 @@ Cross-listed in `tasks/todo.md` under:
 
 ## Post-audit actions required
 
-The caller (operator session) should, after reviewing this report:
+Pass 2 has shipped. Pass 3 routing and prevention spec are persisted. Remaining post-audit actions for the caller:
 
-1. **Decide on Pass 2 scope.** Reply `proceed` (run high-confidence fixes — top candidates: skill-analyzer subtree deletion, 5 missing deps, framework §2 update), `narrow scope` (specify which findings), or `stop` (defer all to pass 3).
-2. **If Pass 2 runs:** run `spec-conformance` only if a spec-driven contract is touched (none expected for the top candidates), then `pr-reviewer` on the audit branch.
-3. **Schedule follow-up hotspot audits** (separately, after this Pass 1 closes):
+1. **Run `pr-reviewer` on the audit branch** — `audit/full-pre-v1-lockdown-2026-05-14`. Mandatory per framework §13 Completion Criteria. The 3 pass-2 commits + the log/progress/KNOWLEDGE/spec updates are all in scope.
+2. **`spec-conformance` not applicable** — Pass 2 touched no spec-driven contract (no files under `docs/superpowers/specs/*.md` or `docs/*-spec.md` were modified). Frame the framework update as a Module D doc-drift fix, not a spec touch.
+3. **Open a PR** for the audit branch when ready. The audit-runner does not create PRs.
+4. **Schedule follow-up hotspot audits** (each in its own branch):
    - `audit-runner: hotspot skills` — 186-skill / registry alignment (Module L)
    - `audit-runner: hotspot frontend` — 101 client pages vs Frontend Design Principles (Module M Part-2)
    - `audit-runner: hotspot agent-execution` — handoff audit-trail durability + observability (Module K)
    - `audit-runner: hotspot duplication` — `jscpd` run (Area 2)
    - `audit-runner: hotspot circular-deps` — `madge` run (Area 8)
-4. **Process the 24 Prevention Proposals as a batch** via a dedicated `feat/audit-prevention-gates` build. These collectively shift the codebase from symptom-fixing to write-time prevention.
+5. **Implement the prevention-gates spec** — invoke `architect` on `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` to produce `plan.md`, then proceed via the standard feature-coordinator pipeline (recommended class: Major).
+6. **Sequence god-file splits** as individual builds. Recommended order:
+   1. `feat/split-skillexecutor` (6,133 LOC — touches every agent execution path; highest leverage)
+   2. `feat/split-workflowengine` (4,073 LOC)
+   3. `feat/split-skillanalyzerservicepure` (3,729 LOC)
+   4. `feat/split-agentexecutionservice` (2,807 LOC — already moderately split via `*Pure.ts` convention; smallest delta)
+   5. The remaining hard-cap pages/components in opportunistic order
+7. **Service-extract `supportAgentRoutes` Route → DB breach** (the audit's 1 critical finding). Track as `feat/extract-support-agent-inbox-service`. Defer until the prevention-gates spec's P2 tightening lands so the gate baseline can be expired in the same PR.
 
 ---
 
