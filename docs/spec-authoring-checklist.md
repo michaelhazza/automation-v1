@@ -24,6 +24,7 @@ Use it when drafting any **Significant** or **Major** spec (per the task classif
 9. Testing posture sanity check
 10. Execution-safety contracts (new writes and state machines)
 11. Spec frontmatter (status header convention)
+12. Lifecycle Declaration and ABCd Estimate blocks (Standard+ only)
 
 Appendix — Pre-review checklist summary
 
@@ -415,6 +416,51 @@ Existing specs without this frontmatter are NOT required to be updated retroacti
 
 ---
 
+## Section 12 — Lifecycle Declaration and ABCd Estimate blocks (Standard+ only)
+
+Every Standard+ spec must include two governance blocks introduced by the development-lifecycle-governance-upgrade build (`tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.2` and `§7.3`). These blocks are required at spec authoring time (Step 6 of `spec-coordinator`) and are verified by `spec-conformance` via this checklist.
+
+### 12.1 Lifecycle Declaration block (required per spec §7.2)
+
+**What it is:** a five-field Markdown table placed at the top of the spec, after frontmatter, that captures the capability cluster, ownership, launch lifecycle state, risk surface, and review cadence for the capability being shipped.
+
+**When required:** every Standard, Significant, or Major spec. Not required for Trivial builds or ADR-shaped specs with `Build slug: n/a`.
+
+**Required fields (all five must be present and non-blank):**
+
+| Field | Rule |
+|---|---|
+| Capability cluster | One or more values from the cluster header in `docs/capabilities.md`, comma-separated when multiple |
+| Capability owner | Handle, or a compliant placeholder per the owner-placeholder rule (§7.4.3 of the governance spec) |
+| Lifecycle state on launch | `Inception` or `Growth` only — no other value is valid at first registration |
+| Risk surface | Copied verbatim from `intent.md § Risk Surface`; either the literal string `None.` or a comma-separated list of §7.1.1 vocabulary terms |
+| Review cadence | Free text, e.g. `quarterly`, `biannually`, `on-incident-only` |
+
+**Launch-state restriction:** only `Inception` (no production traffic yet) or `Growth` (live but actively iterating) are valid at first registration. Any other state is a blocking spec review finding.
+
+### 12.2 ABCd Estimate block (required per spec §7.3)
+
+**What it is:** a four-row Markdown table placed inside the spec body that sizes the capability across four lifecycle cost dimensions using a coarse S / M / L bucket.
+
+**When required:** every Standard, Significant, or Major spec (same scope as the Lifecycle Declaration block).
+
+**Required dimensions (all four must be present):**
+
+| Dimension | Meaning |
+|---|---|
+| Acquire | Cost to acquire or license an equivalent capability externally |
+| Build | Engineering effort to build this capability from scratch |
+| Carry | Ongoing maintenance and operations cost |
+| decommission | Cost to turn off and fully remove the capability |
+
+**Sizing constraint:** the `Sizing` column must be exactly one of `S`, `M`, or `L`. Numeric estimates are prohibited (false-precision class). No half-buckets, no ranges, no dollar figures.
+
+### Reviewer signal this prevents
+
+"Spec missing Lifecycle Declaration" / "ABCd block absent or uses numeric estimates" — caught by `spec-conformance` reading this checklist's Appendix. Adding these two blocks at authoring time (Step 6 of `spec-coordinator`) is cheaper than a blocking spec-conformance gap at Phase 2 review.
+
+---
+
 ## Appendix — Pre-review checklist summary
 
 Before invoking `spec-reviewer` on a draft spec, answer yes to all of the following:
@@ -437,6 +483,8 @@ Before invoking `spec-reviewer` on a draft spec, answer yes to all of the follow
 - [ ] **[Section 10]** Every DB unique constraint has a named HTTP mapping (no bubbled 500s from `23505`)
 - [ ] **[Section 10]** If a state machine is introduced or modified: valid transitions, forbidden transitions, and status-set closure are declared
 - [ ] **[Section 11]** Spec opens with `Status:` / `Spec date:` / `Last updated:` / `Author:` / `Build slug:` frontmatter
+- [ ] **[Section 12]** Lifecycle Declaration present per spec §7.2 (5 required fields; launch state = `Inception` or `Growth` only)
+- [ ] **[Section 12]** ABCd Estimate present with S/M/L sizing only per spec §7.3 (4 dimensions; no numeric values)
 
 If every box is checked, the spec is ready for `spec-reviewer`. If any box is unchecked and you're intentionally leaving it so (e.g. deferring the contract to implementation), mark the deviation inline in the spec's framing section — don't leave it implicit.
 

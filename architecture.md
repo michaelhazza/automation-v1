@@ -3708,6 +3708,14 @@ Set `OAUTH_CALLBACK_BASE_URL` in `.env` to the ngrok HTTPS URL. `APP_BASE_URL` s
 
 Everything else in `.env` is portable.
 
+### Dev build lifecycle
+
+Every Standard+ feature follows this nine-step sequence (full detail in `CLAUDE.md` § *Build lifecycle*):
+
+> Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge
+
+Orchestrators: `spec-coordinator` (Phase 1 — Intent intake, Duplication / Strategy Check, mockup loop, spec authoring, reviews, handoff), `feature-coordinator` (Phase 2 — planning + construction + review), `finalisation-coordinator` (Phase 3 — Capability Registration + Compound Learning + merge). Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
+
 ---
 
 <a id="canonical-support-desk"></a>

@@ -51,6 +51,28 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ---
 
+## 2.4.0 — 2026-05-14
+
+**Highlights:** adds lightweight governance overlay to the dev pipeline — intent intake, duplication/strategy check, Lifecycle Declaration + ABCd sizing, Asset Register, Capability Registration verdict, and Compound Learning Feedback. All additions are operator-driven and markdown-only; no new runtime code paths. Pipeline is fully backwards-compatible: Trivial builds keep the existing `brief.md` flow; Standard, Significant, and Major builds produce `intent.md` with a structured schema.
+
+**Added:**
+- `spec-coordinator.md` — Step 3 renamed to "Intent intake"; branches on classification (Trivial → `brief.md` unchanged; Standard+ → produces `tasks/builds/<slug>/intent.md` per §7.1 schema with 9 required H2 sections + §7.1.1 Risk Surface vocabulary + provisional-slug rule + migration rule).
+- `spec-coordinator.md` — Step 3a "Duplication / Strategy Check" inserted between Step 3 and Step 4; 4-branch recommendation table (`proceed` / `revise` / `merge with existing capability` / `stop`); hard-gate and soft-gate behaviours; `**Operator decision:**` resume signal.
+- `finalisation-coordinator.md` — Step 7a "Compound Learning Feedback" inserted between Step 7 and Step 8; 8-value target enum; 6-agent shortlist for `agent-instruction`; auto-apply prohibition; never blocks `MERGE_READY`.
+- `docs/capabilities.md` — 10-cluster header (closed cluster list per §7.4.2); pinned 12-column Asset Register table header (§7.4.1); 47 existing capabilities backfilled as rows with spec-compliant placeholders per §7.4.3.
+- `docs/doc-sync.md` — Capability Registration trigger row for `docs/capabilities.md` with all 8 §6.2.1 valid verdict strings; `MERGE_READY` block clause.
+
+**Changed:**
+- `spec-coordinator.md` Step 6 — required sections list now includes Lifecycle Declaration (§7.2: 5-field table) and ABCd Estimate (§7.3: 4-dimension S/M/L-only table); both templates reproduced inline.
+- `finalisation-coordinator.md` Step 6 — extended to emit §6.2.1 combined Capability Registration verdict (`yes: <outcome>` or `n/a: <reason>`); 8 valid strings enumerated; `MERGE_READY` blocked until valid verdict recorded.
+- `docs/spec-authoring-checklist.md` — Section 12 added (Lifecycle Declaration + ABCd blocks); two new Appendix pre-review checklist boxes.
+- `CLAUDE.md` — `spec-coordinator` agent fleet row updated ("intent intake, duplication/strategy check, …"); Build lifecycle subsection added with corrected 9-step sequence.
+- `architecture.md` — Dev build lifecycle subsection added with corrected 9-step sequence and orchestrator mapping.
+- `docs/doc-sync.md` Final Summary fields — `capabilities.md updated` format updated to §6.2.1 combined eight-string format.
+- `tasks/review-logs/README.md` — `capabilities.md updated` field format updated to §6.2.1 combined format.
+
+---
+
 ## 2.3.0 — 2026-05-12
 
 **Highlights:** adds `incident-commander` coordinator agent and companion `docs/incident-response.md`. Provides a dedicated inline playbook for production incident coordination (SEV classification, scribe duties, post-mortem) that is distinct from `hotfix`, which focuses on shipping the fix.
