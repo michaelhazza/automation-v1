@@ -622,8 +622,57 @@ Step 7a processes:
 
 ## Chunk 7 — Process documentation sync (CLAUDE.md + architecture.md)
 
-**Status:** PENDING
-**Files:** `CLAUDE.md`, `architecture.md`
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:** `CLAUDE.md`, `architecture.md`
+
+### Changes made
+
+**`CLAUDE.md`:**
+- Updated `spec-coordinator` row in the agent fleet table: changed "brief intake, mockup loop, spec authoring, reviews, handoff" to "intent intake, duplication/strategy check, mockup loop, spec authoring, reviews, handoff" (aligns with Chunk 1's coordinator-file update).
+- Added "### Build lifecycle" subsection in the "Local Dev Agent Fleet" section (between the Model guidance table and Task Classification). Contains:
+  - The nine-step corrected lifecycle sequence (verbatim from spec §10 Chunk 7).
+  - One bullet per step with coordinator/gate mapping.
+  - Explicit statement: "Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`."
+
+**`architecture.md`:**
+- Added "### Dev build lifecycle" subsection in the "Local Development Setup" section (after the "Switching machines" subsection, before the `---` separator). Contains:
+  - The nine-step corrected lifecycle sequence (verbatim from spec §10 Chunk 7).
+  - Orchestrator summary line mapping Phase 1/2/3 to the new wrapper steps.
+  - Explicit statement: "Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`."
+
+### Pre-check: Rule 16 / audit framework section integrity
+
+Pre-check finding: "Rule 16" and "audit framework" content is in `docs/codebase-audit-framework.md` (PR #303), NOT in `architecture.md`. Grep of `architecture.md` for "Rule 16", "audit framework", "#303" returned **0 matches** before and after the edit. The architecture.md edit is confined to the "Local Development Setup" section (lines ~3703-3711). No audit framework content was touched.
+
+Confirmed post-edit: `grep -n "Rule 16|audit framework" architecture.md` → **0 matches**. Rule 16 content preserved in `docs/codebase-audit-framework.md`.
+
+### Repo-wide grep for old step phrasing
+
+`grep -rn "Intent.*Elaboration|Elaboration.*Specification" --include="*.md"` (excluding spec.md, review-logs, brief.md):
+- Only match: `tasks/builds/development-lifecycle-governance-upgrade/plan.md` line 355 — this is the acceptance criteria text describing *what to search for*, not a live lifecycle sequence. This is a legitimate historical reference.
+- No matches in `docs/decisions/` or `_retired/`.
+- No matches in `CLAUDE.md` or `architecture.md`.
+
+Result: **no old step phrasing remains in live process docs**.
+
+### Grep-the-old-value pass
+
+- Grep for "brief intake" in `CLAUDE.md`: **0 matches** — updated to "intent intake, duplication/strategy check".
+- Grep for "Elaboration" in `CLAUDE.md`: **0 matches**.
+- Grep for "Elaboration" in `architecture.md`: **0 matches**.
+- Grep for `Intent.*Duplication.*Specification.*Build Planning.*Construction.*Review.*Capability Registration.*Compound Learning.*Merge` in both files: **1 match each** — correct.
+
+### `docs/spec-template.md` confirmation
+
+`docs/spec-template.md` does not exist. Confirmed via `ls`: no such file or directory. Plan-locked decision from Chunk 2 preserved.
+
+### G1 gate result
+
+- `npx eslint CLAUDE.md architecture.md`: exit 0; 2 expected warnings (markdown files not in eslint config). No errors.
+- `npm run typecheck`: exit 0 (both tsconfigs). No TypeScript files touched.
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 

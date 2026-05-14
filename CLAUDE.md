@@ -202,7 +202,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `reality-checker` | Post-pr-reviewer evidence-demanding verifier; read-only; demands proof before approving a build; Significant/Major only |
 | `spec-reviewer` | Codex review loop for spec documents; max 5 iterations lifetime; non-blocking |
 | `feature-coordinator` | Phase 2 orchestrator — plan, build chunks, branch review, doc-sync, Phase 3 handoff |
-| `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, reviews, handoff |
+| `spec-coordinator` | Phase 1 orchestrator — intent intake, duplication/strategy check, mockup loop, spec authoring, reviews, handoff |
 | `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, ChatGPT PR review, MERGE_READY |
 | `builder` | Sonnet sub-agent; implements one plan chunk and runs G1 gate; auto-invoked by feature-coordinator |
 | `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by spec-coordinator |
@@ -231,6 +231,24 @@ Use the most capable model where reasoning matters; switch to Sonnet once decisi
 | Mid-build decision | Opus | If a hard architectural choice surfaces during implementation, switch back to Opus for that question only, then return to Sonnet |
 
 The plan gate is a deliberate checkpoint. Do not proceed to execution on Opus — the execution phase is token-intensive and Sonnet handles a clear plan equally well at lower cost.
+
+### Build lifecycle
+
+Every Standard+ build follows this nine-step sequence:
+
+> Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge
+
+- **Intent** — structured `intent.md` authored by `spec-coordinator` Step 3 (Standard+ only; Trivial builds retain `brief.md`).
+- **Duplication / Strategy Check** — `spec-coordinator` Step 3a hard gate; stops or redirects builds that duplicate existing capabilities or target declining clusters.
+- **Specification** — `spec-coordinator` Steps 4–6; produces `spec.md` with Lifecycle Declaration and ABCd Estimate.
+- **Build Planning** — `architect` decomposes the spec into chunks; `feature-coordinator` presents the finalised plan at the plan gate.
+- **Construction** — `feature-coordinator` drives per-chunk `builder` runs against the plan; G1 gate per chunk.
+- **Review** — branch-level review pass: `spec-conformance` → `adversarial-reviewer` (conditional) → `pr-reviewer` → `reality-checker` → `dual-reviewer`.
+- **Capability Registration** — `finalisation-coordinator` Step 6; emits a Capability Registration verdict for `docs/capabilities.md` (one of the eight §6.2.1 valid strings); blocks `MERGE_READY` until recorded.
+- **Compound Learning** — `finalisation-coordinator` Step 7a; routes patterns from Step 7 to a target enum; operator approves; no auto-apply.
+- **Merge** — `finalisation-coordinator` Step 9 sets `MERGE_READY`; Step 10 applies the label.
+
+Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
 
 ### Task Classification
 
