@@ -279,6 +279,99 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 
 ---
 
+## Deferred from codebase audit — 2026-05-14
+
+**Captured:** 2026-05-14T04-49-08Z
+**Source log:** `tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`
+**Branch:** `audit/full-pre-v1-lockdown-2026-05-14`
+**Pass 2 already shipped on the audit branch:** Area 1 dead skill-analyzer subtree (~4,114 LOC); two static-import deps + two optional DOCX deps; framework §2 v1.3 → v1.4 refresh.
+
+### Critical
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Route → DB layer breach in `server/routes/support/supportAgentRoutes.ts`**. Lines 6, 35-46, 74+ import the `canonicalInboxes` schema table object and build Drizzle `.select().from(canonicalInboxes).where(...).orderBy(...)` queries inside the route handler. Bypasses route → service → db cascade. Gate `scripts/verify-no-db-in-routes.sh` has it in baseline. critical/high. Extract `supportAgentInboxService`; tighten gate baseline.
+
+### High
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Area 10 god-file register — hard-cap breaches** — `server/services/skillExecutor.ts` (6,133 LOC), `workflowEngineService.ts` (4,073), `skillAnalyzerServicePure.ts` (3,729), `agentExecutionService.ts` (2,807), `skillAnalyzerService.ts` (2,642), `client/src/pages/AdminSubaccountDetailPage.tsx` (1,430), `Layout.tsx` (1,325), `UsagePage.tsx` (1,284). Each split is its own ADR + plan + chunks (Rule 7 blast radius). high/informational. Recommended sequence: `skillExecutor` first because of execution-path centrality.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Area 10 soft-cap breaches** — 10 files over the services 1,500 LOC soft cap (`agentService.ts` 2,335, `skillAnalyzerJob.ts` 2,254, `workspaceMemoryService.ts` 1,949, `llmRouter.ts` 1,918, `queueService.ts` 1,683, etc.). high/informational. Address opportunistically.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Missing dep `pg`** (used in 5 tooling scripts; tier choice deferred). Static + optional pairs already shipped. high/medium. Likely `devDependencies`.
+
+### Medium
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Custom retry loop in `server/services/agentBeliefService.ts:124-403`** outside canonical `withBackoff`. medium/medium. Extend `withBackoff` with storm cap OR document divergence + add a test.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`enqueueHandoff` silent depth-cap rejection at `skillExecutor.ts:3988-3994`** — no structured event. medium/medium. Replace `console.warn` with structured `logger.warn` + Langfuse span tag.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Three silent `.catch(() => {})` in `agentExecutionService.ts` lines 1157, 1240, 1368** without `guard-ignore` annotation. medium/medium. Annotate or escalate per site.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **188 `: any` / `as any` occurrences** in non-test server + shared. medium/low. Ratchet via `verify-any-budget.sh`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **133 marker comments** (73 TEMP, 50 TODO, 23 LEGACY, 10 DEPRECATED, 1 XXX). medium/low. Batch triage.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Knip 306 unused-file flags + no `knip.json`** — false-positive risk high. medium/high (on noisiness). Author `knip.json` first.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **~80 unused exports in `shared/types/*`** (knip). medium/low. Per-export manual cross-check.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **101 client pages not yet audited against Frontend Design Principles**. medium/low. Schedule `audit-runner: hotspot frontend`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`SystemPnlPage.tsx` KPI cards admin-only status unverified**. medium/low. Confirm gate; document or trim.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **186 skill ↔ actionRegistry alignment not cross-referenced**. medium/low. `audit-runner: hotspot skills`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Per-critical-path coverage matrix not produced** (Module C). medium/medium.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`madge --circular` not run** (Area 8). medium/low. `audit-runner: hotspot circular-deps`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`jscpd` not run** (Area 2). medium/low. `audit-runner: hotspot duplication`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Handoff audit-trail durability not fully traced** (Module K). medium/low. `audit-runner: hotspot agent-execution`.
+
+### Low
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`pagePreview.ts:12-13` and `pageServing.ts:13-14` type-only imports from `db/schema/*`** trip gate regex. low/high. Move row types to `shared/types/page.ts`; gate fix in Prevention Proposals.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`req.user.organisationId` dual-source in `server/middleware/auth.ts` lines 262, 288, 318, 384**. low/medium. Extract `resolveOrganisationId(req)` helper.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Comment cluster `agentExecutionService.ts:72-116`** WHAT-prose residue. low/medium. Delete.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Borderline editorial mention of Google Docs / Dropbox at `docs/capabilities.md:210`**. low/medium. Human editorial review.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **19 duplicate exports (default + named)** in client React components. low/medium. Drop aliases on 7 components; keep `auth.ts` shims.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`UNIVERSAL_SKILL_NAMES` dual-source maintained by hand**. low/medium. Refactor to generate from `ACTION_REGISTRY`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`@playwright/test` listed as production dep**; used only in tests/scripts. low/medium. Reclassify to `devDependencies` (touches `package.json`).
+
+---
+
+## Prevention proposals from codebase audit — 2026-05-14
+
+**Captured:** 2026-05-14T04-49-08Z
+**Source log:** `tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`
+**Spec for batched implementation:** `tasks/builds/audit-prevention-gates-2026-05-14/spec.md`
+**Rule 16 invariant:** always pass 3; never auto-applied. Operator reviews and applies as a batch.
+
+### Tier 1 — block at write time (16; gates / hooks)
+
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P1** — `scripts/verify-no-missing-deps.sh`: `depcheck --skip-missing=false`; fail on any import absent from `package.json`.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P2** — tighten `scripts/verify-no-db-in-routes.sh`: (a) skip `import type`; (b) refuse new baseline entries; (c) companion `verify-with-org-tx-or-scoped-db.sh`.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P3** — `scripts/verify-loc-cap.sh`: enforce Area 10 thresholds.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P4** — `scripts/verify-no-silent-catch.sh`: silent catches require `guard-ignore: no-silent-failures`.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P5** — `scripts/verify-canonical-retry.sh`: `retryCount` loops outside `withBackoff` require `guard-ignore: canonical-retry`.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P6** — `scripts/verify-canonical-logger.sh`: `console.(log\|warn\|error)` in `server/services`/`server/routes` requires `guard-ignore: canonical-logger`.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P7** — `scripts/verify-universal-skill-sync.sh`: `UNIVERSAL_SKILL_NAMES` ↔ `ACTION_REGISTRY` bidirectional.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P8** — `scripts/verify-frontend-design-budget.sh`: KPI/Sparkline/chart imports require admin-only allowlist.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P9** — `scripts/verify-any-budget.sh`: non-growing `: any` count per file.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P10** — `scripts/verify-marker-budget.sh`: non-growing marker count per file.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P11** — `scripts/verify-no-new-cycles.sh`: `madge --circular --json` baseline.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P12** — `scripts/verify-duplicate-blocks.sh`: `jscpd --min-tokens 15` baseline.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P13** — `scripts/verify-framework-context-block.sh`: §2 against `package.json` drift.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P14** — `scripts/verify-types-used.sh`: every exported event type in a discriminated union or used in code.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P15** — `scripts/verify-no-orphan-react-component.sh`: walk React Router from `App.tsx`; flag zero-ingress pages.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P16** — `scripts/verify-knip-config.sh`: `knip.json` registers every dynamic entry surface.
+
+### Tier 2 — convention at design time (4; docs)
+
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:architecture.md] [status:open] **P17** — "Single org-id source" sub-section.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:open] **P18** — extend § Comments: "comments describing a completed refactor are residue".
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:open] **P19** — § Frontend: "prefer named exports for React components".
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:docs/capabilities.md] [status:open] **P20** — § Editorial Rules: explicit always-OK industry-terms list.
+
+### Tier 3 — lesson via context (4; KNOWLEDGE.md / ADR)
+
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P21** — pattern: per-critical-path coverage tier matrix; refresh quarterly.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P22** — pattern: "Custom retry loops are pass-3 even when they look right".
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P23** — pattern: "Handoff depth-cap rejections need structured events".
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:ADR] [status:open] **P24** — ADR: "Service-layer extraction policy for routes touching `db/schema/`".
+
+### Not feasible — rationale
+
+- N1 — `depcheck` false positives on PostCSS / Vitest coverage are noise-shaped; no enforceable preventive control.
+- N2 — Handoff audit-trail durability requires deep agent-execution tracing; covered by `audit-runner: hotspot agent-execution`.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`
