@@ -81,11 +81,14 @@ INVARIANT_3=$(psql "$DATABASE_URL" --tuples-only --no-align -c "
   SELECT COUNT(*)
   FROM subaccount_agents
   WHERE capability_map IS NOT NULL
-    AND jsonb_typeof(capability_map->'integrations') != 'array';
+    AND (
+      NOT (capability_map ? 'integrations')
+      OR jsonb_typeof(capability_map->'integrations') != 'array'
+    );
 " 2>&1)
 
 if [ "$INVARIANT_3" != "0" ] && [ -n "$INVARIANT_3" ]; then
-  echo "[FAIL] verify-capability-map-shape (invariant 3): ${INVARIANT_3} subaccount_agents row(s) have a non-array 'integrations' in capability_map"
+  echo "[FAIL] verify-capability-map-shape (invariant 3): ${INVARIANT_3} subaccount_agents row(s) have an absent or non-array 'integrations' in capability_map"
   FAIL=1
 else
   echo "[PASS] verify-capability-map-shape (invariant 3): all capability_map.integrations are arrays"
@@ -100,13 +103,15 @@ INVARIANT_4=$(psql "$DATABASE_URL" --tuples-only --no-align -c "
   FROM subaccount_agents
   WHERE capability_map IS NOT NULL
     AND (
-      jsonb_typeof(capability_map->'read_capabilities') != 'array'
+      NOT (capability_map ? 'read_capabilities')
+      OR NOT (capability_map ? 'write_capabilities')
+      OR jsonb_typeof(capability_map->'read_capabilities') != 'array'
       OR jsonb_typeof(capability_map->'write_capabilities') != 'array'
     );
 " 2>&1)
 
 if [ "$INVARIANT_4" != "0" ] && [ -n "$INVARIANT_4" ]; then
-  echo "[FAIL] verify-capability-map-shape (invariant 4): ${INVARIANT_4} subaccount_agents row(s) have non-array read_capabilities or write_capabilities"
+  echo "[FAIL] verify-capability-map-shape (invariant 4): ${INVARIANT_4} subaccount_agents row(s) have absent or non-array read_capabilities/write_capabilities"
   FAIL=1
 else
   echo "[PASS] verify-capability-map-shape (invariant 4): all capability_map.read_capabilities and write_capabilities are arrays"

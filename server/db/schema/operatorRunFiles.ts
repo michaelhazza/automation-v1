@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, integer, bigint, timestamp, index, unique } from 'drizzle-orm/pg-core';
-import { organisations } from './organisations';
-import { agentRuns } from './agentRuns';
+import { organisations } from './organisations.js';
+import { agentRuns } from './agentRuns.js';
 import { users } from './users.js';
 import { subaccounts } from './subaccounts.js';
 

@@ -34,14 +34,20 @@ interface ParentRunContext {
 }
 
 /**
- * Assemble a CrossOwnerDelegationRequest and persist cross_owner_approval_timeout_policy
- * to delegation_outcomes.
+ * Assemble a CrossOwnerDelegationRequest and persist
+ * `cross_owner_approval_timeout_policy` to a specific `delegation_outcomes` row.
+ *
+ * `delegationOutcomeId` MUST be the id of the open delegation_outcomes row this
+ * cross-owner request belongs to (chatgpt-pr-review Round 6 F15). The UPDATE
+ * scopes by that id so a parent run with multiple open delegations does NOT
+ * receive the same timeout policy applied across unrelated substeps.
  *
  * Throws with errorCode 'cross_owner_assembler_precondition' when
  * routingContext.target_owner_user_id is missing.
  */
 export async function build(
   parentRun: ParentRunContext,
+  delegationOutcomeId: string,
   routingContext: RoutingContextV2,
   authorisationSignal: 'user_named_owner' | 'parent_agent_explicit_capability',
   requiredCapabilities: string[],
@@ -63,7 +69,7 @@ export async function build(
     .set({ crossOwnerApprovalTimeoutPolicy: timeoutPolicy })
     .where(
       and(
-        eq(delegationOutcomes.runId, parentRun.id),
+        eq(delegationOutcomes.id, delegationOutcomeId),
         eq(delegationOutcomes.organisationId, parentRun.organisationId),
         isNull(delegationOutcomes.terminalAt),
       ),
@@ -73,6 +79,7 @@ export async function build(
   if (updated.length === 0) {
     logger.warn('crossOwnerDelegationRequestAssembler.no_outcome_row', {
       runId: parentRun.id,
+      delegationOutcomeId,
       timeoutPolicy,
     });
   }

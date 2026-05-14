@@ -367,3 +367,71 @@ All routed to `tasks/todo.md` with full remediation plans:
 - `PA-V2-WATCHER-HOST-BRIDGE` (F1)
 - `PA-V2-OPERATOR-TEMPLATE-PROMOTION` (T2)
 - `PA-V2-EVENT-IDEMPOTENCY` (F10/F11 residual)
+
+## Round 6 — 2026-05-14T10:00Z (post-S2-merge adversarial pass)
+
+### Context
+After ChatGPT Round 5 returned APPROVED, the branch did an S2 sync that brought
+in main's PR #297 (`iee-browser-on-e2b`). The sync forced a 6-migration renumber
+of all PA-V2 migrations (0346–0351 → 0351–0356). ChatGPT Round 6 ran a focused
+post-merge adversarial pass for merge-introduced drift, not a full re-review.
+
+### ChatGPT Verdict
+CHANGES_REQUESTED — 3 blockers (F13–F15) + 1 should-fix (T7).
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| F13 | blocker | technical | EA migration still at 0345; out of sequence after merge | IMPLEMENT — rename to 0357 | applied |
+| F14 | blocker | technical | operatorRunFiles.ts has 2 bare relative imports (no `.js`) | IMPLEMENT — add `.js` extensions | applied |
+| F15 | blocker | technical | crossOwnerDelegationRequestAssembler.build() updates all open delegation rows for a run | IMPLEMENT — add `delegationOutcomeId` param, scope UPDATE by id | applied |
+| T7 | should-fix | technical | capability-map gate misses absent JSONB keys (jsonb_typeof NULL is NULL, not != 'array') | IMPLEMENT — add `?` key-existence guard | applied |
+
+### Decisions log
+
+**F13 — Migration 0345 out of sequence after main merge**
+- Triaged technical (migration-ordering hygiene).
+- Recommendation: IMPLEMENT.
+- Fix: renamed `migrations/0345_ea_controller_style_native_and_operator.sql` (+ `.down.sql`) to `0357_*`. Updated references in:
+  - migration file headers ("Migration 0357: Flip EA ...")
+  - `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (4 references: §4.1 row, §3.6 Phase 0 row, §8 chunk 1 prereqs, §9.1 idempotency table)
+  - `tasks/builds/personal-assistant-v2-operator/plan.md` (5 references in Chunk 1 file inventory, scope audit note, error-handling, Chunk 5 prerequisites, and the risk-table reversibility row)
+- Historical review logs (`spec-conformance-log-*-2026-05-13T*.md`) left intact with their stale `0345` references; the verdicts stand and the audit trail is preserved. New review logs will reference 0357.
+
+**F14 — operatorRunFiles.ts bare relative imports**
+- Triaged technical (NodeNext module-resolution compile failure waiting to bite).
+- Recommendation: IMPLEMENT.
+- Fix: `server/db/schema/operatorRunFiles.ts` — added `.js` extensions to `./organisations` and `./agentRuns` imports. Matches the existing pattern on `./users.js` + `./subaccounts.js` in the same file and ADR-0020 (test conventions — Vitest only, `__tests__/` folder, `.js` relative imports).
+
+**F15 — Assembler.build() updates all open delegation outcomes for a run**
+- Triaged technical (behavioural correctness; affects dead code today, would have shipped wrong-by-construction).
+- Recommendation: IMPLEMENT.
+- Fix: `server/services/crossOwnerDelegationRequestAssembler.ts:build()` — added a required `delegationOutcomeId: string` parameter (positional, after `parentRun`). The UPDATE WHERE clause now scopes by `id = $delegationOutcomeId` (plus org filter + `terminal_at IS NULL` guard), not by `run_id`. A parent run with multiple concurrent open delegations no longer has its timeout policy applied to every row.
+- No caller changes required: the function has no production callers today (it's wired-when-needed dead code, same as `deriveApproverUserId`). When wired, the caller will pass the specific outcome id derived from the delegation event being processed.
+
+**T7 — Capability-map gate misses absent keys**
+- Triaged technical (CI-gate correctness).
+- Recommendation: IMPLEMENT.
+- Fix: `scripts/gates/verify-capability-map-shape.sh` — invariants 3 and 4 now combine `NOT (capability_map ? '<key>')` (key-existence check) with the type assertion. Previously `jsonb_typeof(capability_map->'<key>')` returned SQL NULL for absent keys, and `NULL != 'array'` evaluates to NULL (not TRUE), so missing fields slipped through. Updated FAIL message to "absent or non-array" to make the new coverage explicit.
+
+### Verification (G3 — round-6 fix bundle)
+
+- `npm run lint`: 0 errors, 899 warnings (unchanged from post-merge baseline).
+- `npm run typecheck`: clean for all touched files; only the 2 pre-existing `@react-pdf/renderer` errors.
+- `npx vitest run` on the four V2 pure-test files: 24/24 PASS.
+
+### Files changed in Round 6
+
+```
+renamed: migrations/0345_ea_controller_style_native_and_operator.sql → 0357_*.sql (+ .down.sql)
+edit:    docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
+edit:    tasks/builds/personal-assistant-v2-operator/plan.md
+edit:    server/db/schema/operatorRunFiles.ts
+edit:    server/services/crossOwnerDelegationRequestAssembler.ts
+edit:    scripts/gates/verify-capability-map-shape.sh
+```
+
+### Round-7 diff prep
+
+After commit, regenerate `.chatgpt-diffs/pr299-round7-code-diff.diff` for the operator to paste into ChatGPT for Round 7 (or `done` if no further findings).

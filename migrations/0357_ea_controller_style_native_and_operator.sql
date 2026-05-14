@@ -1,4 +1,4 @@
--- Migration 0345: Flip EA subaccount_agents rows to 'native_and_operator'
+-- Migration 0357: Flip EA subaccount_agents rows to 'native_and_operator'
 --
 -- Enables operator-mode dispatch for every existing Executive Assistant
 -- instance. Idempotent: the WHERE predicate `controller_style_allowed = 'native_only'`
@@ -9,7 +9,7 @@
 -- (e.g. manually by an org admin) are not touched.
 --
 -- Spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
--- §4.1 (migration 0345), §6.1, §7 (EA seed flip row)
+-- §4.1 (migration 0357), §6.1, §7 (EA seed flip row)
 
 UPDATE subaccount_agents sa
 SET
