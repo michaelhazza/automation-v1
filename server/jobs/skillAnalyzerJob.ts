@@ -1396,24 +1396,49 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                       jobId, slug: candidate.slug, outcome: 'failed', failureReason,
                     });
                   } else {
-                    // Success — strip mergeRationale so jsonb columns retain four-field shape;
-                    // the rationale already flows into its dedicated DB column via mergeRationale arg.
-                    storedMerge = { ...postConsolidationMerge, mergeRationale: undefined } as StoredMerge;
-                    mergeWarnings = postWarnings;
-                    slotConsolidationOutcome = 'succeeded';
-                    slotConsolidationNote = parseResult.consolidationNote;
+                    // Provisional success — enforce the spec's outcome-classification
+                    // rule (§5 / §6 "Outcome classification rule"): `succeeded` requires
+                    // the post-consolidation draft to be strictly shorter than the
+                    // pre-consolidation draft. If the LLM returned a non-shortening
+                    // payload with declinedToConsolidate=false, that's a protocol
+                    // violation (the LLM ignored its self-check at §4.4) — revert to
+                    // pre-consolidation and route to `failed` rather than emit
+                    // misleading "0% shorter" / negative-reduction telemetry.
                     const preWords = consolidationWordCount(slotPreConsolidationMerge.instructions);
-                    const postWords = consolidationWordCount(storedMerge.instructions);
-                    const reductionPct = preWords > 0 ? Math.round((1 - postWords / preWords) * 100) : 0;
-                    mergeWarnings.push({
-                      code: 'CONSOLIDATION_APPLIED',
-                      severity: 'warning',
-                      message: `AI tightened the merge from ${preWords} to ${postWords} words (${reductionPct}% shorter).`,
-                      detail: JSON.stringify({ preWords, postWords, reductionPct }),
-                    });
-                    logger.info('skill_analyzer_consolidation_outcome', {
-                      jobId, slug: candidate.slug, outcome: 'succeeded', preWords, postWords,
-                    });
+                    const postWords = consolidationWordCount(postConsolidationMerge.instructions);
+                    if (postWords >= preWords) {
+                      const failureReason = 'not_shortened';
+                      storedMerge = slotPreConsolidationMerge as unknown as StoredMerge;
+                      mergeWarnings = preConsolidationMergeWarnings.slice();
+                      slotConsolidationOutcome = 'failed';
+                      slotConsolidationNote = null;
+                      mergeWarnings.push({
+                        code: 'CONSOLIDATION_FAILED',
+                        severity: 'warning',
+                        message: 'Tightening pass did not complete; reviewer is seeing the original merge.',
+                        detail: JSON.stringify({ failureReason, preWords, postWords }),
+                      });
+                      logger.info('skill_analyzer_consolidation_outcome', {
+                        jobId, slug: candidate.slug, outcome: 'failed', failureReason, preWords, postWords,
+                      });
+                    } else {
+                      // Success — strip mergeRationale so jsonb columns retain four-field shape;
+                      // the rationale already flows into its dedicated DB column via mergeRationale arg.
+                      storedMerge = { ...postConsolidationMerge, mergeRationale: undefined } as StoredMerge;
+                      mergeWarnings = postWarnings;
+                      slotConsolidationOutcome = 'succeeded';
+                      slotConsolidationNote = parseResult.consolidationNote;
+                      const reductionPct = preWords > 0 ? Math.round((1 - postWords / preWords) * 100) : 0;
+                      mergeWarnings.push({
+                        code: 'CONSOLIDATION_APPLIED',
+                        severity: 'warning',
+                        message: `AI tightened the merge from ${preWords} to ${postWords} words (${reductionPct}% shorter).`,
+                        detail: JSON.stringify({ preWords, postWords, reductionPct }),
+                      });
+                      logger.info('skill_analyzer_consolidation_outcome', {
+                        jobId, slug: candidate.slug, outcome: 'succeeded', preWords, postWords,
+                      });
+                    }
                   }
                 }
               }
