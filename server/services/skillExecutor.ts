@@ -149,6 +149,9 @@ import {
 } from './skillExecutor/handlers/workflowStudio.js';
 import { skillStudioHandlers } from './skillExecutor/handlers/skillStudio.js';
 import { methodologyStubHandlers } from './skillExecutor/handlers/methodologyStubs.js';
+import { autoGatedStubHandlers } from './skillExecutor/handlers/autoGatedStubs.js';
+import { reviewGatedProposerHandlers } from './skillExecutor/handlers/reviewGatedProposers.js';
+import { thinDispatcherHandlers } from './skillExecutor/handlers/thinDispatchers.js';
 
 /**
  * Registry of skill handlers keyed by skill name. The `skillExecutor.execute`
@@ -233,6 +236,12 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   ...skillStudioHandlers,
   // ── Methodology skills — LLM-guided scaffold handlers ─────────────────
   ...methodologyStubHandlers,
+  // ── Auto-gated stubs — unwired integrations returning {status:'stub'} ──
+  ...autoGatedStubHandlers,
+  // ── Review-gated proposers — single-line proposeReviewGatedAction wraps ─
+  ...reviewGatedProposerHandlers,
+  // ── Thin dispatchers — dynamic-import forwarding (none remain post-split) ─
+  ...thinDispatcherHandlers,
   trigger_process: async (input, context) => {
     requireSubaccountContext(context, 'trigger_process');
     return executeTriggerProcess(input, context);
@@ -309,17 +318,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWorkflowRunStart(input, context);
   },
 
-  // ── Review-gated skills (proposes action, does NOT execute immediately) ──
-  send_email: async (input, context) => {
-    return proposeReviewGatedAction('send_email', input, context);
-  },
-  update_record: async (input, context) => {
-    return proposeReviewGatedAction('update_record', input, context);
-  },
-  request_approval: async (input, context) => {
-    return proposeReviewGatedAction('request_approval', input, context);
-  },
-
   // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
   read_codebase: async (input, context) => {
     requireSubaccountContext(context, 'read_codebase');
@@ -378,22 +376,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('publish_page', input, context);
   },
 
-  write_spec: async (input, context) => {
-    return proposeReviewGatedAction('write_spec', input, context);
-  },
-  search_knowledge_base: async (input, context) => {
-    // Auto-gated stub — integration not yet wired
-    const searchQuery = typeof input.query === 'string' ? input.query : '';
-    const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
-    return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      query: searchQuery,
-      intent_category: searchCategory ?? null,
-      results: [],
-      message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
-    }));
-  },
   'support.classify_ticket': async (input, context) => {
     const { classifyTicket } = await import('./skillHandlers/supportClassifyTicket.js');
     return classifyTicket({
@@ -403,75 +385,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     });
   },
 
-  // ── Social Media Agent skills ────────────────────────────────────────
-  publish_post: async (input, context) => {
-    return proposeReviewGatedAction('publish_post', input, context);
-  },
-  read_analytics: async (input, context) => {
-    // Auto-gated stub — platform integrations not yet wired
-    const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
-    const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-    const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-    // Validate date range
-    if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
-      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-    }
-    return executeWithActionAudit('read_analytics', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      platforms: analyticsplatforms,
-      date_from: dateFrom,
-      date_to: dateTo,
-      results: [],
-      message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
-    }));
-  },
-
-  // ── Ads Management Agent skills ──────────────────────────────────────
-  read_campaigns: async (input, context) => {
-    // Auto-gated stub — ads platform integrations not yet wired
-    const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
-    const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-    const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-    if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
-      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-    }
-    return executeWithActionAudit('read_campaigns', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      platform: adsPlatform,
-      date_from: adsDateFrom,
-      date_to: adsDateTo,
-      campaigns: [],
-      message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
-    }));
-  },
-  update_bid: async (input, context) => {
-    return proposeReviewGatedAction('update_bid', input, context);
-  },
-  update_copy: async (input, context) => {
-    return proposeReviewGatedAction('update_copy', input, context);
-  },
-  pause_campaign: async (input, context) => {
-    return proposeReviewGatedAction('pause_campaign', input, context);
-  },
-  increase_budget: async (input, context) => {
-    return proposeReviewGatedAction('increase_budget', input, context);
-  },
-
-  // ── Email Outreach Agent skills ──────────────────────────────────────
-  enrich_contact: async (input, context) => {
-    // Auto-gated stub — enrichment integration not yet wired
-    const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
-    return executeWithActionAudit('enrich_contact', input, context, async () => ({
-      status: 'stub',
-      dataAvailability: 'stub' as const,
-      contact: enrichEmail,
-      matched: false,
-      fields: {},
-      message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
-    }));
-  },
   // ── Generic methodology handler ──────────────────────────────────────────
   // Used by imported LLM-guided skills. All behaviour comes from the skill's
   // instructions field, which is injected into the agent's context before any
@@ -520,24 +433,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
     }));
   },
-  update_financial_record: async (input, context) => {
-    return proposeReviewGatedAction('update_financial_record', input, context);
-  },
-
-  create_lead_magnet: async (input, context) => {
-    return proposeReviewGatedAction('create_lead_magnet', input, context);
-  },
-
-  // ── Client Reporting Agent skills ────────────────────────────────────
-  deliver_report: async (input, context) => {
-    return proposeReviewGatedAction('deliver_report', input, context);
-  },
-
-  // ── Onboarding Agent skills ──────────────────────────────────────────
-  configure_integration: async (input, context) => {
-    return proposeReviewGatedAction('configure_integration', input, context);
-  },
-
   // ── CRM/Pipeline Agent skills ────────────────────────────────────────
   read_crm: async (input, context) => {
     // Auto-gated stub — CRM integration not yet wired
@@ -564,13 +459,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
     }));
   },
-  propose_doc_update: async (input, context) => {
-    return proposeReviewGatedAction('propose_doc_update', input, context);
-  },
-  write_docs: async (input, context) => {
-    return proposeReviewGatedAction('write_docs', input, context);
-  },
-
   // ── Phase 2: Workflow orchestration ──────────────────────────────────
   assign_task: async (input, context) => {
     const { executeAssignTask } = await import('../tools/internal/assignTask.js');
