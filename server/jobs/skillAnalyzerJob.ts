@@ -58,10 +58,14 @@ import {
   startsWithPersonaOpener,
   detectContentOverlap,
   detectSkillGraphCollision,
+  buildConsolidationPrompt,
+  parseConsolidationResponse,
+  computeConsolidationViolations,
   type LibrarySkillSummary,
   type MergeWarning,
   type ProposedMerge,
   type ValidationThresholds,
+  type ConsolidationOutcome,
 } from '../services/skillAnalyzerServicePure.js';
 import { effectiveTierMap } from '../services/skillAnalyzerConfigService.js';
 import type { SkillAnalyzerConfig } from '../db/schema/skillAnalyzerConfig.js';
@@ -78,6 +82,11 @@ import { logger } from '../lib/logger.js';
 async function getPLimit(concurrency: number) {
   const { default: pLimit } = await import('p-limit');
   return pLimit(concurrency);
+}
+
+function consolidationWordCount(text: string | null): number {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 const BATCH_SIZE = 100; // OpenAI embedding batch size
@@ -678,6 +687,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             classificationFailureReason: null,
             isDocumentationFile: flags?.isDocumentationFile ?? false,
             isContextFile: flags?.isContextFile ?? false,
+            preConsolidationMerge: null,
+            consolidationOutcome: 'not_triggered' as ConsolidationOutcome,
+            consolidationNote: null,
           });
         }
         continue;
@@ -776,6 +788,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           classificationFailureReason: null,
           isDocumentationFile: flags?.isDocumentationFile ?? false,
           isContextFile: flags?.isContextFile ?? false,
+          preConsolidationMerge: null,
+          consolidationOutcome: 'not_triggered' as ConsolidationOutcome,
+          consolidationNote: null,
         });
       }
     }
@@ -840,6 +855,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 classificationFailureReason: null,
                 isDocumentationFile: flags?.isDocumentationFile ?? false,
                 isContextFile: flags?.isContextFile ?? false,
+                preConsolidationMerge: null,
+                consolidationOutcome: 'not_triggered' as ConsolidationOutcome,
+                consolidationNote: null,
               });
             }
             return;
@@ -1120,6 +1138,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           // Extract rationale before stripping it from the stored merge.
           let mergeWarnings: MergeWarning[] = [];
           let mergeRationale: string | null = null;
+          // Consolidation gate outcome fields — declared at outer scope so
+          // insertSingleResult (below the if-block) can always read them.
+          let slotConsolidationOutcome: ConsolidationOutcome = 'not_triggered';
+          let slotConsolidationNote: string | null = null;
+          let slotPreConsolidationMerge: ProposedMerge | null = null;
           type StoredMerge = { name: string; description: string; definition: object; instructions: string | null; mergeRationale?: undefined };
           let storedMerge: StoredMerge | null = finalResult.proposedMerge
             ? {
@@ -1225,6 +1248,181 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               validationThresholds,
               candidate.name,
             );
+
+            // -----------------------------------------------------------------------
+            // Consolidation gate (spec §5): fires when validateMergeOutput emits
+            // SCOPE_EXPANSION or SCOPE_EXPANSION_CRITICAL. Single attempt, no retry.
+            // Idempotency note: consolidationOutcome is an audit field, NOT an
+            // idempotency guard. The per-slug skip in Stage 5 is the only guard.
+            // -----------------------------------------------------------------------
+            const consolidationEnabled = configSnapshot?.consolidationEnabled !== false; // default true
+            const triggerSeverity = configSnapshot?.consolidationTriggerSeverity ?? 'warning';
+            const hasScopeExpansion = mergeWarnings.some(w => w.code === 'SCOPE_EXPANSION' || w.code === 'SCOPE_EXPANSION_CRITICAL');
+            const triggerFired =
+              consolidationEnabled &&
+              hasScopeExpansion &&
+              (triggerSeverity === 'warning' || mergeWarnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL'));
+
+            if (triggerFired && storedMerge) {
+              // Cache pre-consolidation state for revert path (R2).
+              const preConsolidationMergeWarnings = mergeWarnings.slice();
+              slotPreConsolidationMerge = JSON.parse(JSON.stringify(storedMerge)) as ProposedMerge;
+
+              const richerSourceWords = Math.max(
+                consolidationWordCount(baseSkill.instructions),
+                consolidationWordCount(nonBaseSkill.instructions),
+              );
+              const mergedWords = consolidationWordCount(storedMerge.instructions);
+              const scopeExpansionStandardThreshold = configSnapshot?.scopeExpansionStandardThreshold ?? 0.40;
+
+              const { system: consolidationSystem, userMessage: consolidationUserMessage } =
+                buildConsolidationPrompt(storedMerge, richerSourceWords, mergedWords, scopeExpansionStandardThreshold);
+
+              const consolidationAbort = new AbortController();
+              const consolidationTimeoutId = setTimeout(
+                () => consolidationAbort.abort('caller_timeout'),
+                SKILL_CLASSIFY_TIMEOUT_MS,
+              );
+
+              let rawConsolidationContent: string | null = null;
+              try {
+                const consolidationResponse = await routeCall({
+                  system: consolidationSystem,
+                  messages: [{ role: 'user', content: consolidationUserMessage }],
+                  maxTokens: 8192,
+                  temperature: 0.1,
+                  context: {
+                    organisationId:     job.organisationId,
+                    sourceType:         'analyzer',
+                    sourceId:           jobId,
+                    featureTag:         'skill-analyzer-consolidate',
+                    taskType:           'general',
+                    systemCallerPolicy: 'bypass_routing',
+                    provider:           'anthropic',
+                    model:              'claude-sonnet-4-6',
+                  },
+                  abortSignal: consolidationAbort.signal,
+                  postProcess: (_content: string) => { /* pass-through; parse on caller side */ },
+                });
+                rawConsolidationContent = consolidationResponse.content;
+              } catch (consolidationErr) {
+                const code = (consolidationErr as { code?: string })?.code;
+                const abortReason = (consolidationErr as { abortReason?: string })?.abortReason;
+                const wasTimeout = code === 'CLIENT_DISCONNECTED' && abortReason === 'caller_timeout';
+                const failureReason = wasTimeout ? 'timeout' : `llm_error: ${code ?? String(consolidationErr)}`;
+                slotConsolidationOutcome = 'failed';
+                slotConsolidationNote = null;
+                mergeWarnings = preConsolidationMergeWarnings.slice();
+                mergeWarnings.push({
+                  code: 'CONSOLIDATION_FAILED',
+                  severity: 'warning',
+                  message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                  detail: JSON.stringify({ failureReason }),
+                });
+                logger.info('skill_analyzer_consolidation_outcome', {
+                  jobId, slug: candidate.slug, outcome: 'failed', failureReason,
+                });
+              } finally {
+                clearTimeout(consolidationTimeoutId);
+              }
+
+              if (rawConsolidationContent !== null) {
+                const parseResult = parseConsolidationResponse(rawConsolidationContent, storedMerge);
+
+                if ('reason' in parseResult) {
+                  // Branch (2): typed parser rejection → failed
+                  const failureReason = `parse_rejected: ${parseResult.reason}`;
+                  slotConsolidationOutcome = 'failed';
+                  slotConsolidationNote = null;
+                  mergeWarnings = preConsolidationMergeWarnings.slice();
+                  mergeWarnings.push({
+                    code: 'CONSOLIDATION_FAILED',
+                    severity: 'warning',
+                    message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                    detail: JSON.stringify({ failureReason }),
+                  });
+                  logger.info('skill_analyzer_consolidation_parse_failure', {
+                    jobId, slug: candidate.slug, reason: parseResult.reason,
+                  });
+                  logger.info('skill_analyzer_consolidation_outcome', {
+                    jobId, slug: candidate.slug, outcome: 'failed', failureReason,
+                  });
+                } else if (parseResult.declinedToConsolidate) {
+                  // Branch (3): LLM declined
+                  slotConsolidationOutcome = 'declined';
+                  slotConsolidationNote = parseResult.consolidationNote;
+                  mergeWarnings.push({
+                    code: 'CONSOLIDATION_DECLINED',
+                    severity: 'warning',
+                    message: 'AI reviewed this merge for tightening and judged it cannot be shortened without losing capability.',
+                    detail: JSON.stringify({ declineReason: parseResult.declineReason }),
+                  });
+                  logger.info('skill_analyzer_consolidation_outcome', {
+                    jobId, slug: candidate.slug, outcome: 'declined', declineReason: parseResult.declineReason,
+                  });
+                } else {
+                  // Branch (4): provisional success — re-validate
+                  const postConsolidationMerge = parseResult.consolidatedMerge;
+                  const postWarnings = validateMergeOutput(
+                    { definition: baseSkill.definition, instructions: baseSkill.instructions, invocationBlock: baseInvocation },
+                    { definition: nonBaseSkill.definition, instructions: nonBaseSkill.instructions, invocationBlock: nonBaseInvocation },
+                    postConsolidationMerge,
+                    allLibraryNames,
+                    allLibrarySlugs,
+                    librarySkills,
+                    excludedId,
+                    validationThresholds,
+                    candidate.name,
+                  );
+
+                  const newViolations = computeConsolidationViolations(preConsolidationMergeWarnings, postWarnings);
+
+                  if (newViolations.length > 0) {
+                    // Sub-revert: consolidation introduced hard-constraint violations
+                    const failureReason = `hard_constraint_violation: ${newViolations.join(',')}`;
+                    storedMerge = slotPreConsolidationMerge as unknown as StoredMerge;
+                    mergeWarnings = preConsolidationMergeWarnings.slice();
+                    slotConsolidationOutcome = 'failed';
+                    slotConsolidationNote = null;
+                    mergeWarnings.push({
+                      code: 'CONSOLIDATION_FAILED',
+                      severity: 'warning',
+                      message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                      detail: JSON.stringify({ failureReason }),
+                    });
+                    logger.info('skill_analyzer_consolidation_outcome', {
+                      jobId, slug: candidate.slug, outcome: 'failed', failureReason,
+                    });
+                  } else {
+                    // Success
+                    storedMerge = postConsolidationMerge as unknown as StoredMerge;
+                    mergeWarnings = postWarnings;
+                    slotConsolidationOutcome = 'succeeded';
+                    slotConsolidationNote = parseResult.consolidationNote;
+                    const preWords = consolidationWordCount(slotPreConsolidationMerge.instructions);
+                    const postWords = consolidationWordCount(storedMerge.instructions);
+                    const reductionPct = preWords > 0 ? Math.round((1 - postWords / preWords) * 100) : 0;
+                    mergeWarnings.push({
+                      code: 'CONSOLIDATION_APPLIED',
+                      severity: 'warning',
+                      message: `AI tightened the merge from ${preWords} to ${postWords} words (${reductionPct}% shorter).`,
+                      detail: JSON.stringify({ preWords, postWords, reductionPct }),
+                    });
+                    logger.info('skill_analyzer_consolidation_outcome', {
+                      jobId, slug: candidate.slug, outcome: 'succeeded', preWords, postWords,
+                    });
+                  }
+                }
+              }
+            }
+            // -----------------------------------------------------------------------
+            // End consolidation gate. Downstream blocks (table recovery, output-format
+            // recovery, classifier-fallback prepend, skill-graph collision, cross-ref
+            // warnings) operate on the final storedMerge and mergeWarnings.
+            // Stage 5b batch-cross-ref collision detection reads storedMerge which is
+            // now the post-consolidation content — correct, because the reviewer sees
+            // post-consolidation content too (R12).
+            // -----------------------------------------------------------------------
 
             // Fix 2 (v4): append source tables as reference appendix when
             // tables were dropped (merged rows < 50% of source rows).
@@ -1383,6 +1581,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailureReason: classificationFailureReason ?? null,
               isDocumentationFile: flags?.isDocumentationFile ?? false,
               isContextFile: flags?.isContextFile ?? false,
+              preConsolidationMerge: slotPreConsolidationMerge ?? undefined,
+              consolidationOutcome: slotConsolidationOutcome,
+              consolidationNote: slotConsolidationNote ?? undefined,
             });
           } finally {
             // Wrap unmark in its own try/catch — if it throws, the error must

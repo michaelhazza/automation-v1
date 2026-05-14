@@ -3661,6 +3661,22 @@ export function parseConsolidationResponse(
   };
 }
 
+/**
+ * Compute the set of hard-constraint violation codes introduced by
+ * post-consolidation warnings that were NOT present before consolidation.
+ * Returns an empty array when consolidation may proceed (succeeded path).
+ * Pure: no DB, no network.
+ */
+export function computeConsolidationViolations(
+  preWarnings: readonly { code: string }[],
+  postWarnings: readonly { code: string }[],
+): string[] {
+  const HARD = new Set(['HITL_LOST', 'INVOCATION_LOST', 'REQUIRED_FIELD_DEMOTED', 'CAPABILITY_OVERLAP']);
+  const preHard = new Set(preWarnings.filter(w => HARD.has(w.code)).map(w => w.code));
+  const postHard = new Set(postWarnings.filter(w => HARD.has(w.code)).map(w => w.code));
+  return [...postHard].filter(c => !preHard.has(c));
+}
+
 export const skillAnalyzerServicePure = {
   cosineSimilarity,
   classifyBand,
@@ -3688,4 +3704,5 @@ export const skillAnalyzerServicePure = {
   extractPreservationInventory,
   buildConsolidationPrompt,
   parseConsolidationResponse,
+  computeConsolidationViolations,
 };
