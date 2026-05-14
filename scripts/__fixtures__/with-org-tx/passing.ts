@@ -13,8 +13,12 @@ const db = {
 
 const records = { tableName: 'records' };
 
-async function queryRecords(tx: typeof db): Promise<unknown[]> {
-  return tx.select().from(records);
+// queryRecords calls db.select() directly. The analyser flags every db.<method>
+// call and then checks whether the enclosing function is reached via withOrgTx.
+// This fixture's whole point is the success case — the enclosing function IS
+// called via withOrgTx, so the violation should be suppressed.
+async function queryRecords(): Promise<unknown[]> {
+  return db.select().from(records);
 }
 
 // withOrgTx stub — in production this sets the org-scoped RLS session var.
@@ -24,5 +28,5 @@ async function withOrgTx<T>(orgId: string, fn: (tx: typeof db) => Promise<T>): P
 
 // Caller: queryRecords is called inside a withOrgTx callback → passes gate.
 export async function getRecordsForOrg(orgId: string): Promise<unknown[]> {
-  return withOrgTx(orgId, async (tx) => queryRecords(tx));
+  return withOrgTx(orgId, async () => queryRecords());
 }

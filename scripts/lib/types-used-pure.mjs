@@ -21,6 +21,38 @@ import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 /**
+ * Strip re-export-only lines (which should NOT count as "usage" of a type)
+ * from a TypeScript source. Re-exports are export declarations that name
+ * a SOURCE module via `from '...'` — they propagate a type from another file
+ * without consuming it locally. Barrel files (e.g. `shared/types/index.ts`)
+ * are full of these and would otherwise mask genuinely-unused types.
+ *
+ * Handles:
+ *   export { Foo } from '...';
+ *   export { Foo, Bar } from '...';
+ *   export type { Foo } from '...';
+ *   export { Foo as Bar } from '...';
+ *   export type { Foo as Bar } from '...';
+ *   export * from '...';
+ *   export * as Ns from '...';
+ *   multi-line variants of the named-list form.
+ *
+ * Direct exports (export const, export type X = ..., export interface, etc.)
+ * are NOT stripped — those are real declarations the type appears in
+ * locally and should count if matched.
+ *
+ * @param {string} text
+ * @returns {string}  text with re-export blocks removed
+ */
+export function stripReExports(text) {
+  return text
+    // export { ... } from '...';   (single- or multi-line; allow inner whitespace and commas)
+    .replace(/export\s+(?:type\s+)?\{[\s\S]*?\}\s+from\s+['"][^'"]+['"]\s*;?/g, '')
+    // export * from '...';  /  export * as Ns from '...';
+    .replace(/export\s+\*(?:\s+as\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s+from\s+['"][^'"]+['"]\s*;?/g, '');
+}
+
+/**
  * Collect all exported type/interface/const names from a single .ts file.
  * Also checks for per-export guard-ignore suppression.
  *
@@ -142,11 +174,15 @@ export function scanReferences(repoRoot, name, declaringFile) {
 
   const declaringAbsolute = join(repoRoot, declaringFile);
 
-  // Use rg if available (spawnSync avoids shell quoting issues on Windows)
+  // Use rg if available, with -l (files-with-matches) so we can re-verify each
+  // candidate file by stripping its re-export lines before testing for the
+  // type name. A raw `--quiet` match would false-positive on barrel files like
+  // `shared/types/index.ts` that re-export the type without consuming it.
+  // spawnSync avoids shell quoting issues on Windows.
   const rgResult = spawnSync(
     'rg',
     [
-      '--quiet',
+      '-l',
       '--glob', '*.ts',
       '--glob', '*.tsx',
       '--glob', `!${declaringFile}`,
@@ -157,8 +193,18 @@ export function scanReferences(repoRoot, name, declaringFile) {
   );
   if (rgResult.error === undefined) {
     // rg ran: status 0 = found, 1 = not found, 2+ = error
-    if (rgResult.status === 0) return true;
     if (rgResult.status === 1) return false;
+    if (rgResult.status === 0) {
+      const candidateFiles = rgResult.stdout.split('\n').filter(Boolean);
+      const re = new RegExp(`\\b${name}\\b`);
+      for (const file of candidateFiles) {
+        try {
+          const text = readFileSync(file, 'utf8');
+          if (re.test(stripReExports(text))) return true;
+        } catch { /* skip unreadable */ }
+      }
+      return false;
+    }
     // status 2+ = rg error — fall through to Node scan
   }
   // rg not available — fall through to Node scan
@@ -212,7 +258,8 @@ function searchDirForPattern(dirPath, re, excludeFile) {
       if (fullPath === excludeFile) continue;
       try {
         const text = readFileSync(fullPath, 'utf8');
-        if (re.test(text)) return true;
+        // Strip barrel re-exports first — they propagate the type without consuming it.
+        if (re.test(stripReExports(text))) return true;
       } catch {
         // skip unreadable files
       }

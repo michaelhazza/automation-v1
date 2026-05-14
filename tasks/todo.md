@@ -1170,3 +1170,23 @@ Unknown field: Carry notes
 Current value: TBD — see tasks/todo.md#capabilities-backfill-tier-4-isolated-code-execution
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
+
+
+---
+
+## audit-prevention-gates-2026-05-14 / PR #307 — deferred from chatgpt-pr-review
+
+### BUDGET-EXPIRY-ENFORCEMENT-1 — Per-file budget gates do not enforce `# expires:` directives
+
+**Source:** `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md` Round 1 / T2
+**Severity:** medium (gate is warning-first; bug doesn't fire until 2026-08-14 when current entries expire)
+**Files:**
+- `scripts/lib/per-file-counter-pure.mjs` — `parsePerFileBudgetBaseline` silently strips `#`-comment lines including `# expires:` directives
+- `scripts/verify-any-budget.sh` (P9) — has 73 `# expires:` entries in `scripts/.gate-baselines/any-budget.txt`, none enforced
+- `scripts/verify-marker-budget.sh` (P10) — has 34 `# expires:` entries in `scripts/.gate-baselines/marker-budget.txt`, none enforced
+- `references/test-gate-policy.md` — policy doc says these are enforced; they're not (contradicts itself)
+
+**Fix outline:** thread per-entry expiry through `parsePerFileBudgetBaseline` → `diffAgainstBaseline`, then have the calling shell scripts emit `[GUARD] WARNING / ERROR` per expired/past-grace entry. Apply same exit-code policy as `check_expiring_baseline` (current ∩ baseline > 0 → exit 2; new violation or past-grace → exit 1).
+
+**Estimated effort:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
+

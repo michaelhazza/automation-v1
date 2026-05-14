@@ -8,11 +8,17 @@
  * checks whether the enclosing function is called from within a
  * withOrgTx(...) or getOrgScopedDb(...) call site.
  *
- * HEURISTIC LIMITATION: This performs a single-level caller walk only.
- * Functions called indirectly (e.g. via setImmediate, queue handlers,
- * event emitters, or deep call chains) are not traced. Violations from
- * deeply-nested call chains should be suppressed with the per-line
- * directive:
+ * HEURISTIC LIMITATION: This performs a single-level, same-file caller walk only.
+ *
+ *   - Indirect calls (via setImmediate, queue handlers, event emitters, deep
+ *     call chains) are not traced.
+ *   - Cross-file callers are NOT walked: if `foo()` is defined in fileA and
+ *     wrapped by `withOrgTx(foo)` in fileB, fileA's db.X() call is flagged.
+ *     This is by design — name-only cross-file walks created false-negatives
+ *     when two files defined same-named functions (see PR #307 F1).
+ *
+ * Violations that are genuinely safe but trigger one of these limitations
+ * should be suppressed with the per-line directive:
  *   // guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
  *
  * Public API:
@@ -217,14 +223,14 @@ export function analyseWithOrgTxScope(repoRoot, files) {
         continue;
       }
 
-      // Single-level caller walk: check if enclosingFn is called via an org-scope helper.
-      let scopeFound = false;
-      for (const projectSf of project.getSourceFiles()) {
-        if (isCalledViaOrgScope(projectSf, enclosingFn)) {
-          scopeFound = true;
-          break;
-        }
-      }
+      // Same-file caller walk: check if enclosingFn is called via an org-scope
+      // helper IN THE SAME FILE as the function declaration. Cross-file callers
+      // are out of scope — name-only matches across files create false-negatives
+      // when two unrelated files share a function name (one safe, one not).
+      // For cross-file safe-callers, use the per-line suppression directive:
+      //   // guard-ignore: with-org-tx-or-scoped-db ADR-... <rationale>
+      // See chatgpt-pr-review Round 1 / PR #307 F1 for the regression case.
+      const scopeFound = isCalledViaOrgScope(sf, enclosingFn);
 
       if (!scopeFound) {
         violations.push({

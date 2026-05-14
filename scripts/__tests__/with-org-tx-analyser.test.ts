@@ -24,6 +24,8 @@ const FIXTURES_DIR = path.join(__dirname, '../__fixtures__/with-org-tx');
 const PASSING_FILE = path.join(FIXTURES_DIR, 'passing.ts');
 const FAILING_FILE = path.join(FIXTURES_DIR, 'failing.ts');
 const SUPPRESSED_FILE = path.join(FIXTURES_DIR, 'suppressed.ts');
+const NAME_COLLISION_UNSAFE = path.join(FIXTURES_DIR, 'name-collision-unsafe.ts');
+const NAME_COLLISION_SAFE = path.join(FIXTURES_DIR, 'name-collision-safe.ts');
 
 describe('analyseWithOrgTxScope — passing fixture', () => {
   test('returns no violations when db.select is called via withOrgTx', () => {
@@ -65,5 +67,16 @@ describe('analyseWithOrgTxScope — multiple files', () => {
     expect(failingViolations.length).toBeGreaterThan(0);
     expect(passingViolations).toHaveLength(0);
     expect(suppressedViolations).toHaveLength(0);
+  });
+});
+
+describe('analyseWithOrgTxScope — same-name function in another file does NOT mask unsafe call (F1 regression)', () => {
+  test('unsafe fetchAll in one file is flagged even when a wrapped fetchAll exists in another file', () => {
+    const violations = analyseWithOrgTxScope(REPO_ROOT, [NAME_COLLISION_UNSAFE, NAME_COLLISION_SAFE]);
+    const unsafeViolations = violations.filter(v => v.file.includes('name-collision-unsafe.ts'));
+    const safeViolations = violations.filter(v => v.file.includes('name-collision-safe.ts'));
+    expect(unsafeViolations.length).toBeGreaterThan(0);
+    expect(unsafeViolations[0].message).toContain("fetchAll");
+    expect(safeViolations).toHaveLength(0);
   });
 });

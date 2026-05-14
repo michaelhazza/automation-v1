@@ -21,6 +21,7 @@ import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import {
   isExportSuppressed,
   scanReferencesNode,
+  stripReExports,
 } from '../lib/types-used-pure.mjs';
 
 // ── isExportSuppressed ────────────────────────────────────────────────────────
@@ -164,5 +165,83 @@ const x: SelfRef = 'hello'; // self-reference, should not count
     );
     cleanup();
     expect(result).toBe(true);
+  });
+
+  // F2 regression — barrel re-exports must NOT count as real usage.
+  test('(F2) barrel re-export only — returns false', () => {
+    setup({
+      'shared/types/dead.ts': 'export type DeadType = { id: string };',
+      'shared/types/index.ts': `export type { DeadType } from './dead';`,
+      'server/services/other.ts': 'const x = 1;',
+    });
+
+    const declaringAbsolute = join(tmpDir, 'shared/types/dead.ts');
+    const result = scanReferencesNode(
+      tmpDir,
+      'DeadType',
+      declaringAbsolute,
+      [join(tmpDir, 'server'), join(tmpDir, 'shared')]
+    );
+    cleanup();
+    expect(result).toBe(false);
+  });
+
+  test('(F2) barrel re-export + real consumer — returns true', () => {
+    setup({
+      'shared/types/live.ts': 'export type LiveType = { id: string };',
+      'shared/types/index.ts': `export type { LiveType } from './live';`,
+      'server/services/consumer.ts': `import type { LiveType } from '@shared/types';\nconst x: LiveType = { id: 'x' };`,
+    });
+
+    const declaringAbsolute = join(tmpDir, 'shared/types/live.ts');
+    const result = scanReferencesNode(
+      tmpDir,
+      'LiveType',
+      declaringAbsolute,
+      [join(tmpDir, 'server'), join(tmpDir, 'shared')]
+    );
+    cleanup();
+    expect(result).toBe(true);
+  });
+});
+
+// ── stripReExports ────────────────────────────────────────────────────────────
+
+describe('stripReExports', () => {
+  test('strips single-line named re-export', () => {
+    const src = `export { Foo } from './foo';\nconst x = 1;`;
+    expect(stripReExports(src)).not.toMatch(/Foo/);
+    expect(stripReExports(src)).toMatch(/const x = 1/);
+  });
+
+  test('strips type-only named re-export', () => {
+    const src = `export type { Foo } from './foo';\nconst x: number = 1;`;
+    expect(stripReExports(src)).not.toMatch(/Foo/);
+  });
+
+  test('strips wildcard re-export', () => {
+    const src = `export * from './foo';\nconst x = 1;`;
+    expect(stripReExports(src)).not.toMatch(/from '\.\/foo'/);
+  });
+
+  test('strips namespace re-export (export * as Ns from ...)', () => {
+    const src = `export * as Helpers from './foo';\nconst x = 1;`;
+    expect(stripReExports(src)).not.toMatch(/Helpers/);
+  });
+
+  test('strips multi-line named re-export', () => {
+    const src = `export {\n  Foo,\n  Bar,\n} from './foo';\nconst x = 1;`;
+    expect(stripReExports(src)).not.toMatch(/Foo|Bar/);
+  });
+
+  test('preserves direct exports', () => {
+    const src = `export type Foo = string;\nexport const Bar = 1;`;
+    expect(stripReExports(src)).toMatch(/export type Foo = string/);
+    expect(stripReExports(src)).toMatch(/export const Bar = 1/);
+  });
+
+  test('preserves regular imports', () => {
+    const src = `import { Foo } from './foo';\nconst x: Foo = 'y';`;
+    expect(stripReExports(src)).toMatch(/Foo/);
   });
 });
