@@ -8,6 +8,7 @@
 **Scope:** all of spec (Goals G1–G7 + §11 invariants + §4.6 count reconciliation) — caller-confirmed whole-branch verification
 **Changed-code set:** 9 files (8 spec §4.2 modified files + 1 build artefact `progress.md` per §4.3)
 **Run at:** 2026-05-14T08:51:26Z
+**Commit at finish:** 2b03b64c
 
 ---
 
