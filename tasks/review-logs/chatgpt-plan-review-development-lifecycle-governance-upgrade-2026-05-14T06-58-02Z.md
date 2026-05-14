@@ -48,3 +48,57 @@ None required — all 5 findings are technical and auto-applyable. F1 had two op
 Plan revised. Ready for next round or `done`.
 
 ---
+
+## Round 2 — 2026-05-14T07:30:00Z
+
+**Prompt sent to operator (paste-into-ChatGPT-web):** "Review the revised plan.md (Round 2). Round 1 surfaced 5 findings — all auto-applied. Please verify the 5 fixes are correct and surface any remaining concerns. Same 7 surfaces as Round 1."
+
+**ChatGPT verdict (Round 2):** **APPROVED — ready to lock after 2 minor polish items.** No remaining blockers. Conditional Capability Registration verdict, locked docs/spec-template.md decision, tasks/todo.md multi-chunk handling, and inspection-only verification posture are now coherent.
+
+### Findings
+
+| ID | Severity | Surface | Class | Description | Decision | Status |
+|---|---|---|---|---|---|---|
+| T1 | Minor polish | Scope guard / R9 | technical | R9 still says any file outside §4.1+§4.2 is a violation, but Architecture notes Key invariant #2 + Executor notes correctly state the conditional ADR exception. R9 wording is internally inconsistent with the rest of the plan. | Apply. Update R9 mitigation column to name the single allowed `docs/decisions/<ADR>.md` exception IF Chunk 4 triggers §15.1 / §7.4.5; every other file outside §4.1+§4.2 remains a violation. Cross-references to Key invariant #2 + Self-consistency pass + Executor notes File-count summary added so R9 is consistent with the rest of the plan. | applied |
+| T2 | Minor polish | Chunk 4 acceptance | technical | Chunk 4 grep-the-old-value pass says "Fix in the same chunk or surface as a follow-up". The "or follow-up" branch is too permissive for in-scope (in-inventory) stale references — those should always be fixed in the chunk. Follow-up should only apply to out-of-inventory references. | Apply. Reword to: "Fix stale references in-scope in the same chunk — i.e. when the stale reference is inside one of the 8 modified files. If the stale reference is outside the allowed merge inventory, record a follow-up in `tasks/todo.md` and cite in `progress.md` — do NOT expand the merge diff to fix out-of-inventory references." | applied |
+
+### Applied edits — file diffs
+
+`tasks/builds/development-lifecycle-governance-upgrade/plan.md`:
+
+1. **R9 (risk table)** — mitigation column expanded to name the single allowed `docs/decisions/` ADR exception (conditional on Chunk 4 §15.1 / §7.4.5 firing), with cross-references to Key invariant #2 + Self-consistency pass + Executor notes File-count summary so R9 is consistent.
+2. **Chunk 4 > Acceptance > Grep-the-old-value pass** — reworded to require in-scope fixes in the chunk; follow-up routing only for stale references in files outside the §4.1+§4.2 inventory; explicit "do NOT expand the merge diff" clause.
+
+### Operator decisions in Round 2
+
+None required — both findings are minor polish, technical, auto-applyable.
+
+### Round 2 verdict
+
+**APPROVED — plan locked for plan-gate review.** No further chatgpt-plan-review rounds are needed.
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED
+**Rounds:** 2
+**Total findings:** 7 (2 blockers + 3 should-fix in Round 1; 2 minor polish in Round 2)
+**Auto-applied:** 7 (100%)
+**Operator-approved:** 0 (no user-facing findings surfaced)
+**Deferred to tasks/todo.md:** 0
+**Log path:** tasks/review-logs/chatgpt-plan-review-development-lifecycle-governance-upgrade-2026-05-14T06-58-02Z.md
+
+**Key plan-level decisions locked through this review:**
+
+- File-count locked: 8 modified, 0 new (default); 9 only if Chunk 4 triggers spec §15.1 / §7.4.5 cluster-mutation procedure (adds one new ADR).
+- `docs/spec-template.md` is NOT created in this build (locked, not optional; future need handled via Compound Learning Feedback as separate Trivial PR).
+- Capability Registration verdict for this build itself is **conditional** on post-Chunk-4 register state (`yes: update existing capability record` IF row exists; ELSE `yes: create new capability record`). Not hardcoded.
+- `tasks/todo.md` multi-chunk handling clarified (Chunks 4 + 6 use distinct heading namespaces).
+- Verification posture: inspection-based only; no unit tests authored; baseline CI is the safety net.
+- Stale-reference handling on `docs/capabilities.md` restructure: in-scope fixes in-chunk; out-of-inventory references → follow-up in `tasks/todo.md`.
+
+Plan is ready for plan-gate. Operator may now proceed.
+
+---
+
