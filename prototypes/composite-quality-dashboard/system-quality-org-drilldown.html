@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>/system/quality — Acme Marketing Co. subaccounts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.admin-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:9999px; font-size:10.5px; font-weight:700; background:#ede9fe; color:#6d28d9; border:1px solid #ddd6fe; margin-left:8px; vertical-align:middle; }
+.sort-indicator { color:#4f46e5; font-size:10px; margin-left:3px; }
+.callout-text { font-size:12px; color:#475569; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.callout-text.urgent { color:#dc2626; font-weight:600; }
+.callout-text.amber { color:#d97706; font-weight:600; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark" style="background:linear-gradient(135deg, #7c3aed, #a855f7);">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Staff admin</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">System</div>
+      <a class="nav-item" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        In-Flight
+      </a>
+      <a class="nav-item" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        P&amp;L
+      </a>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Quality
+      </a>
+      <a class="nav-item" href="#">Orgs</a>
+    </div>
+  </nav>
+
+  <main class="page-area">
+    <div class="page-content">
+
+      <!-- Breadcrumb -->
+      <div class="breadcrumb" style="margin-bottom:12px;">
+        <a href="system-quality-org-rollup.html">System</a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="system-quality-org-rollup.html">Quality</a>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Acme Marketing Co.</span>
+      </div>
+
+      <!-- Page header -->
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px;">
+        <div>
+          <h1 class="page-title">Acme Marketing Co. <span class="admin-chip">Staff only</span></h1>
+          <p class="page-sub">Composite quality by subaccount · updated hourly</p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" style="font-size:12px;">Export CSV</button>
+          <button class="btn btn-secondary" style="font-size:12px;">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Org-level summary card -->
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px 24px; margin-bottom:24px; display:flex; align-items:center; gap:24px;">
+        <div style="flex-shrink:0;">
+          <div style="font-size:48px; font-weight:800; color:#d97706; line-height:1; letter-spacing:-0.03em;">67</div>
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-top:2px;">Org composite</div>
+        </div>
+        <div style="width:1px; height:52px; background:#e2e8f0; flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <span class="band-pill amber"><span class="band-dot amber"></span>Attention needed</span>
+            <span class="trend-arrow down" style="font-size:12px;"><svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>-6 vs last week</span>
+          </div>
+          <div style="font-size:12.5px; color:#64748b;">3 subaccounts · 13 total pending amendments · org weighted by subaccount run volume</div>
+        </div>
+        <div style="flex-shrink:0;">
+          <button class="btn-details">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Org-level drill-in
+          </button>
+        </div>
+      </div>
+
+      <!-- Sort controls -->
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:12.5px; color:#64748b;">Sort by:</span>
+          <button class="btn btn-sm" style="background:#eef2ff; border-color:#c7d2fe; color:#4338ca; font-size:11.5px;">Composite (worst first)</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:11.5px;">Trend</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:11.5px;">Pending</button>
+        </div>
+      </div>
+
+      <!-- Subaccounts table -->
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; margin-bottom:24px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Subaccount</th>
+              <th class="sort-active">Composite <span class="sort-indicator">▲</span></th>
+              <th>Trend</th>
+              <th>Attention callout</th>
+              <th>Pending</th>
+              <th>Last activity</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Worst first -->
+            <tr>
+              <td>
+                <div style="font-weight:700; color:#0f172a; font-size:13.5px;">Data Ops</div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">High-volume · 480 runs / 7 days</div>
+              </td>
+              <td><span class="score-cell red">52</span></td>
+              <td><span class="trend-arrow down" style="font-size:11.5px;"><svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>-15</span></td>
+              <td><span class="callout-text urgent">Safety check pii_redaction_v2 regressed</span></td>
+              <td><span style="font-size:13px; font-weight:700; color:#dc2626;">8</span></td>
+              <td style="font-size:12px; color:#94a3b8;">14 May 07:14</td>
+              <td><a href="system-quality-subaccount-drilldown.html" class="table-link">Drill in ↗</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-weight:700; color:#0f172a; font-size:13.5px;">Content Team</div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Medium-volume · 215 runs / 7 days</div>
+              </td>
+              <td><span class="score-cell amber">71</span></td>
+              <td><span class="trend-arrow down" style="font-size:11.5px;"><svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>-4</span></td>
+              <td><span class="callout-text amber">5 amendments awaiting review 24h+</span></td>
+              <td><span style="font-size:13px; font-weight:700; color:#d97706;">5</span></td>
+              <td style="font-size:12px; color:#94a3b8;">14 May 08:00</td>
+              <td><a href="system-quality-subaccount-drilldown.html" class="table-link">Drill in ↗</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div style="font-weight:700; color:#0f172a; font-size:13.5px;">Client Success</div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Low-volume · 88 runs / 7 days</div>
+              </td>
+              <td><span class="score-cell green">84</span></td>
+              <td><span class="trend-arrow up" style="font-size:11.5px;"><svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>+2</span></td>
+              <td><span style="font-size:12px; color:#94a3b8; font-style:italic;">All systems healthy</span></td>
+              <td><span style="font-size:13px; font-weight:700; color:#94a3b8;">0</span></td>
+              <td style="font-size:12px; color:#94a3b8;">14 May 07:45</td>
+              <td><a href="system-quality-subaccount-drilldown.html" class="table-link">Drill in ↗</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Dimension breakdown table (staff-only extra detail) -->
+      <div style="font-size:13px; font-weight:700; color:#0f172a; margin-bottom:12px;">Dimension breakdown by subaccount</div>
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; margin-bottom:24px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Subaccount</th>
+              <th>Quality</th>
+              <th>Stability</th>
+              <th>Cost</th>
+              <th>Capacity</th>
+              <th>Composite</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight:600; color:#0f172a;">Data Ops</td>
+              <td><span style="color:#dc2626; font-weight:700;">58</span></td>
+              <td><span style="color:#dc2626; font-weight:700;">44</span></td>
+              <td><span style="color:#d97706; font-weight:700;">66</span></td>
+              <td><span style="color:#dc2626; font-weight:700;">40</span></td>
+              <td><span class="score-cell red">52</span></td>
+            </tr>
+            <tr>
+              <td style="font-weight:600; color:#0f172a;">Content Team</td>
+              <td><span style="color:#d97706; font-weight:700;">71</span></td>
+              <td><span style="color:#d97706; font-weight:700;">63</span></td>
+              <td><span style="color:#16a34a; font-weight:700;">88</span></td>
+              <td><span style="color:#dc2626; font-weight:700;">62</span></td>
+              <td><span class="score-cell amber">71</span></td>
+            </tr>
+            <tr>
+              <td style="font-weight:600; color:#0f172a;">Client Success</td>
+              <td><span style="color:#16a34a; font-weight:700;">88</span></td>
+              <td><span style="color:#16a34a; font-weight:700;">82</span></td>
+              <td><span style="color:#16a34a; font-weight:700;">91</span></td>
+              <td><span style="color:#d97706; font-weight:700;">74</span></td>
+              <td><span class="score-cell green">84</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer -->
+      <div style="margin-top:24px; padding-top:14px; border-top:1px solid #e2e8f0; font-size:11.5px; color:#64748b; display:flex; justify-content:space-between;">
+        <div>Org composite is run-volume-weighted average across subaccounts</div>
+        <a href="system-quality-org-rollup.html" style="color:#6366f1; text-decoration:none; font-size:12px; font-weight:600;">← Back to all orgs</a>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px;">
+  <div style="max-width:1060px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — system-quality-org-drilldown.html</strong><br>
+    Extends: <code>client/src/pages/SystemPnlPage.tsx</code> — same page layout, header, breadcrumb pattern. Breadcrumb: System / Quality / Acme Marketing Co. (three levels, matching SystemPnlPage navigation patterns).<br>
+    Org-level summary card mirrors the quality-header component from the review queue, giving visual consistency. Subaccount table follows the same data-table pattern as org rollup, same columns. Dimension breakdown table is a staff-only extra — not shown to operators — showing all four sub-scores per subaccount side-by-side. This is the "per-skill breakdown at staff level" described in §3.5 (here shown at the per-subaccount-dimension level before the per-skill level in the next drill).<br>
+    Run volume label per subaccount helps staff weight their attention (480 runs/week for Data Ops vs 88 for Client Success). "Drill in" for each subaccount leads to system-quality-subaccount-drilldown.html.<br>
+    Principles (staff view, relaxed budget): multiple panels and tables are acceptable. Primary action for staff: drill into the worst subaccount.
+  </div>
+</div>
+</body>
+</html>

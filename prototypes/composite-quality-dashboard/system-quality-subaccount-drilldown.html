@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>/system/quality — Content Team per-skill breakdown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.admin-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:9999px; font-size:10.5px; font-weight:700; background:#ede9fe; color:#6d28d9; border:1px solid #ddd6fe; margin-left:8px; vertical-align:middle; }
+.sort-indicator { color:#4f46e5; font-size:10px; margin-left:3px; }
+.dim-sub { font-size:11px; color:#94a3b8; font-weight:400; }
+.skill-code { font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace; font-size:12px; background:#f1f5f9; padding:1px 6px; border-radius:4px; color:#334155; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark" style="background:linear-gradient(135deg, #7c3aed, #a855f7);">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Staff admin</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">System</div>
+      <a class="nav-item" href="#">In-Flight</a>
+      <a class="nav-item" href="#">P&amp;L</a>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        Quality
+      </a>
+      <a class="nav-item" href="#">Orgs</a>
+    </div>
+  </nav>
+
+  <main class="page-area">
+    <div class="page-content">
+
+      <!-- Breadcrumb — 3 levels -->
+      <div class="breadcrumb" style="margin-bottom:12px;">
+        <a href="system-quality-org-rollup.html">System</a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="system-quality-org-rollup.html">Quality</a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="system-quality-org-drilldown.html">Acme Marketing Co.</a>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">Content Team</span>
+      </div>
+
+      <!-- Page header -->
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px;">
+        <div>
+          <h1 class="page-title">Content Team <span class="admin-chip">Staff only</span></h1>
+          <p class="page-sub">Per-skill composite breakdown · Acme Marketing Co. · updated hourly</p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" style="font-size:12px;">Export CSV</button>
+          <button class="btn btn-secondary" style="font-size:12px;">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Subaccount summary -->
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px 24px; margin-bottom:24px; display:flex; align-items:center; gap:24px;">
+        <div>
+          <div style="font-size:48px; font-weight:800; color:#d97706; line-height:1; letter-spacing:-0.03em;">71</div>
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-top:2px;">Subaccount composite</div>
+        </div>
+        <div style="width:1px; height:52px; background:#e2e8f0;"></div>
+        <div style="flex:1;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <span class="band-pill amber"><span class="band-dot amber"></span>Attention needed</span>
+            <span class="trend-arrow down" style="font-size:12px;"><svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>-4 vs last week</span>
+          </div>
+          <div style="font-size:12.5px; color:#64748b;">215 runs in last 7 days · 4 active skills · 5 pending amendments</div>
+        </div>
+        <div style="display:flex; gap:16px; text-align:center; font-size:12px;">
+          <div><div style="font-size:20px; font-weight:800; color:#d97706;">71</div><div style="color:#94a3b8; margin-top:2px;">Quality</div></div>
+          <div><div style="font-size:20px; font-weight:800; color:#d97706;">63</div><div style="color:#94a3b8; margin-top:2px;">Stability</div></div>
+          <div><div style="font-size:20px; font-weight:800; color:#16a34a;">88</div><div style="color:#94a3b8; margin-top:2px;">Cost</div></div>
+          <div><div style="font-size:20px; font-weight:800; color:#d97706;">62</div><div style="color:#94a3b8; margin-top:2px;">Capacity</div></div>
+        </div>
+      </div>
+
+      <!-- Sort / filter -->
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:12.5px; color:#64748b;">Sort by:</span>
+          <button class="btn btn-sm" style="background:#eef2ff; border-color:#c7d2fe; color:#4338ca; font-size:11.5px;">Composite (worst first)</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:11.5px;">Quality sub-score</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:11.5px;">Run volume</button>
+        </div>
+        <div style="font-size:12px; color:#94a3b8;">4 skills active in last 7 days</div>
+      </div>
+
+      <!-- Per-skill table -->
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; margin-bottom:24px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Skill</th>
+              <th class="sort-active">Composite <span class="sort-indicator">▲</span></th>
+              <th>Quality <span class="dim-sub">pass rate</span></th>
+              <th>Stability <span class="dim-sub">acceptance</span></th>
+              <th>Cost <span class="dim-sub">vs baseline</span></th>
+              <th>Capacity <span class="dim-sub">queue depth</span></th>
+              <th>Runs (7d)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Worst first -->
+            <tr>
+              <td>
+                <div><code class="skill-code">draft_proposal_v3</code></div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Proposal drafting</div>
+              </td>
+              <td><span class="score-cell amber">62</span></td>
+              <td>
+                <span style="color:#d97706; font-weight:700; font-size:13px;">68%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:68%; height:100%; background:#fbbf24; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#d97706; font-weight:700; font-size:13px;">61%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:61%; height:100%; background:#fbbf24; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">+2%</span>
+                <div style="font-size:11px; color:#94a3b8;">within baseline</div>
+              </td>
+              <td>
+                <span style="color:#dc2626; font-weight:700; font-size:13px;">8 items</span>
+                <div style="font-size:11px; color:#dc2626;">3 overdue 24h+</div>
+              </td>
+              <td style="font-size:13px; font-weight:600; color:#374151;">94</td>
+              <td><a href="#" class="table-link">Detail ↗</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div><code class="skill-code">summarise_call_transcript</code></div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Call summarisation</div>
+              </td>
+              <td><span class="score-cell amber">70</span></td>
+              <td>
+                <span style="color:#d97706; font-weight:700; font-size:13px;">74%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:74%; height:100%; background:#fbbf24; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">82%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:82%; height:100%; background:#86efac; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">-4%</span>
+                <div style="font-size:11px; color:#94a3b8;">below baseline</div>
+              </td>
+              <td>
+                <span style="color:#d97706; font-weight:700; font-size:13px;">4 items</span>
+                <div style="font-size:11px; color:#d97706;">1 overdue</div>
+              </td>
+              <td style="font-size:13px; font-weight:600; color:#374151;">72</td>
+              <td><a href="#" class="table-link">Detail ↗</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div><code class="skill-code">generate_client_brief</code></div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Brief generation</div>
+              </td>
+              <td><span class="score-cell green">81</span></td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">86%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:86%; height:100%; background:#86efac; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">88%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:88%; height:100%; background:#86efac; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">+1%</span>
+                <div style="font-size:11px; color:#94a3b8;">within baseline</div>
+              </td>
+              <td>
+                <span style="color:#94a3b8; font-weight:700; font-size:13px;">1 item</span>
+                <div style="font-size:11px; color:#94a3b8;">within SLA</div>
+              </td>
+              <td style="font-size:13px; font-weight:600; color:#374151;">38</td>
+              <td><a href="#" class="table-link">Detail ↗</a></td>
+            </tr>
+            <tr>
+              <td>
+                <div><code class="skill-code">research_competitor</code></div>
+                <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Competitor research</div>
+              </td>
+              <td><span class="score-cell green">88</span></td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">91%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:91%; height:100%; background:#86efac; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">93%</span>
+                <div style="height:3px; background:#e2e8f0; border-radius:9999px; margin-top:3px; width:60px; overflow:hidden;"><div style="width:93%; height:100%; background:#86efac; border-radius:9999px;"></div></div>
+              </td>
+              <td>
+                <span style="color:#16a34a; font-weight:700; font-size:13px;">-8%</span>
+                <div style="font-size:11px; color:#94a3b8;">below baseline</div>
+              </td>
+              <td>
+                <span style="color:#94a3b8; font-weight:700; font-size:13px;">2 items</span>
+                <div style="font-size:11px; color:#94a3b8;">within SLA</div>
+              </td>
+              <td style="font-size:13px; font-weight:600; color:#374151;">11</td>
+              <td><a href="#" class="table-link">Detail ↗</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Staff insight box -->
+      <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:14px 18px; margin-bottom:24px; font-size:13px; color:#0c4a6e;">
+        <strong>Skill insight (staff only):</strong> draft_proposal_v3 has a lower Quality score than summarise_call_transcript but more pending amendments. The Capacity dimension is the largest drag (8 items, 3 overdue). Reviewing and approving the 3 overdue draft_proposal_v3 amendments would directly improve the Capacity sub-score.
+        <br><div style="margin-top:8px;"><a href="#" style="color:#0369a1; font-weight:600; text-decoration:none;">Go to amendment queue for this subaccount ↗</a></div>
+      </div>
+
+      <!-- Footer -->
+      <div style="padding-top:14px; border-top:1px solid #e2e8f0; font-size:11.5px; color:#64748b; display:flex; justify-content:space-between;">
+        <div>Per-skill breakdown is staff-only. Operators see subaccount composite only.</div>
+        <a href="system-quality-org-drilldown.html" style="color:#6366f1; text-decoration:none; font-size:12px; font-weight:600;">← Back to Acme Marketing</a>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px;">
+  <div style="max-width:1060px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — system-quality-subaccount-drilldown.html</strong><br>
+    Extends: <code>client/src/pages/SystemPnlPage.tsx</code> — same layout shell, 3-level breadcrumb (System / Quality / Acme Marketing Co. / Content Team), staff-only chip. This is the Level 3 staff view from brief §3.5: "Drill into a subaccount: per-skill composite breakdown."<br>
+    Four sub-score mini-stats in the summary card show Quality 71, Stability 63, Cost 88, Capacity 62 — same values as the org drilldown to confirm consistency. Per-skill table shows: skill slug (monospace code tag to match existing code conventions), composite (colour-banded), each dimension as a value + mini progress bar, run volume. The "within baseline / below baseline" copy for Cost is plain-English for staff.<br>
+    Footer note: "Per-skill breakdown is staff-only. Operators see subaccount composite only." — reinforces the brief §4 rule against leaking per-skill detail to operator view and supports Goodhart's law mitigation.<br>
+    Staff insight box: deterministic observation (largest drag is Capacity, specific item count, direct action link). Not LLM-generated; follows §3.3 rule-based callout pattern applied at staff level.<br>
+    Table columns (8): skill, composite, quality, stability, cost, capacity, runs, action. Exceeds the 4-column consumer budget but this is an admin view with the relaxed budget per frontend-design-principles §budget exception.
+  </div>
+</div>
+</body>
+</html>

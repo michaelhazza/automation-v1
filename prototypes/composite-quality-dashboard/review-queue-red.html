@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Queue — Intervention needed (composite 52, red) with safety banner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Acme Marketing Co.</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Operate</div>
+      <a class="nav-item" href="home-with-chip-red.html">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Home
+      </a>
+      <a class="nav-item" href="#">Inbox</a>
+      <a class="nav-item" href="#">Clients</a>
+      <a class="nav-item" href="#">Agents</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Review</div>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Review Queue
+        <span style="margin-left:auto; background:#fee2e2; color:#b91c1c; font-size:11px; font-weight:700; padding:1px 7px; border-radius:9999px;">19</span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="page-area">
+    <div class="page-content">
+
+      <!-- Page header -->
+      <div style="margin-bottom:16px;">
+        <a href="home-with-chip-red.html" style="font-size:13.5px; color:#6366f1; text-decoration:none; display:inline-block; margin-bottom:8px;">← Back to Home</a>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <h1 style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 4px; letter-spacing:-0.02em;">Morning Review Queue</h1>
+            <p style="font-size:13.5px; color:#64748b; margin:0;">Amendments and actions awaiting your review.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary" style="font-size:12px;">Group by Run</button>
+            <button class="btn btn-secondary" style="font-size:12px;">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SAFETY BANNER — above composite header, separate component (§3.2) -->
+      <div class="safety-banner" style="margin-bottom:16px;">
+        <div class="safety-banner-icon">
+          <svg width="20" height="20" fill="none" stroke="#dc2626" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div class="safety-banner-body">
+          <div class="safety-banner-title">Safety check regressed: pii_redaction_v2</div>
+          <div class="safety-banner-sub">PII redaction scorecard failed in the last hour. Outputs from this skill should not be deployed until reviewed. <a href="#safety-item" style="color:#b91c1c; font-weight:700; text-decoration:none;">Jump to item</a></div>
+        </div>
+        <button style="background:none; border:none; cursor:pointer; color:#b91c1c; font-size:18px; padding:0 0 0 12px; align-self:flex-start;">&times;</button>
+      </div>
+
+      <!-- COMPOSITE HEADER — red state -->
+      <div class="quality-header red" style="margin-bottom:20px;">
+        <div class="qh-score-block">
+          <div class="qh-score-num red">52</div>
+          <div class="qh-score-label">Quality score</div>
+        </div>
+        <div class="qh-divider"></div>
+        <div class="qh-meta">
+          <div class="qh-trend-row">
+            <span class="band-pill red">
+              <span class="band-dot red"></span>
+              Intervention needed
+            </span>
+            <span class="trend-arrow down" style="font-size:12px;">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>
+              -15 vs last week
+            </span>
+            <!-- Sparkline — sharp decline -->
+            <svg width="80" height="28" viewBox="0 0 80 28" style="display:inline-block; vertical-align:middle;">
+              <polyline fill="none" stroke="#fca5a5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                points="0,6 6,7 12,8 18,9 24,9 30,10 36,12 42,13 48,15 54,17 60,18 66,20 72,22 80,24"/>
+            </svg>
+          </div>
+          <div class="qh-callout urgent">Safety check pii_redaction_v2 regressed; review immediately.</div>
+        </div>
+        <div class="qh-actions" style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <a href="review-queue-drill-in-dimensions.html" class="btn-details">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Details
+          </a>
+          <button style="background:none; border:none; font-size:11px; color:#94a3b8; cursor:pointer; padding:0;">Refresh now</button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-group">
+        <button class="tab-btn active">Needs Review<span class="tab-badge amber" style="margin-left:6px;">19</span></button>
+        <button class="tab-btn">Briefs<span class="tab-badge indigo" style="margin-left:6px;">6</span></button>
+      </div>
+
+      <!-- Safety-related item pinned to top -->
+      <div style="margin-bottom:8px; font-size:11.5px; font-weight:600; color:#dc2626; text-transform:uppercase; letter-spacing:0.05em;">Requires immediate action</div>
+
+      <div id="safety-item" style="background:#fff1f2; border:2px solid #fca5a5; border-radius:10px; padding:16px 18px; margin-bottom:10px;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <svg width="14" height="14" fill="none" stroke="#dc2626" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span style="font-size:13.5px; font-weight:700; color:#991b1b;">pii_redaction_v2: safety scorecard regression</span>
+            </div>
+            <div style="font-size:12px; color:#dc2626;">Safety scorecard · Data Ops · detected 1h 02m ago</div>
+          </div>
+          <div style="display:flex; gap:8px; flex-shrink:0;">
+            <button class="btn btn-sm" style="background:#dc2626; border-color:#dc2626; color:white;">Review Now</button>
+            <a href="#" style="font-size:12px; color:#dc2626; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; padding:5px 10px; border:1px solid #fca5a5; border-radius:6px; background:white;">View run detail ↗</a>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#7f1d1d; background:white; border:1px solid #fecaca; border-radius:8px; padding:12px 14px;">
+          Skill <code style="background:#fee2e2; padding:1px 5px; border-radius:3px; font-size:12px;">pii_redaction_v2</code> produced output containing a partial phone number in a field that should be fully redacted. Run ID #4821. Scorecard rule <code style="background:#fee2e2; padding:1px 5px; border-radius:3px; font-size:12px;">no_pii_in_output</code> flagged. No output has been sent externally.
+        </div>
+      </div>
+
+      <!-- Overdue section -->
+      <div style="margin: 16px 0 8px; font-size:11.5px; font-weight:600; color:#b45309; text-transform:uppercase; letter-spacing:0.05em;">Overdue (11)</div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Q2 revenue forecast — finance deck <span class="overdue-badge" style="margin-left:8px;">26h overdue</span></div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Analytics · submitted May 12, 10:14</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Stellar Ops case study draft <span class="overdue-badge" style="margin-left:8px;">31h overdue</span></div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · submitted May 12, 05:22</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Blueprint Agency pricing update <span class="overdue-badge" style="margin-left:8px;">38h overdue</span></div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Sales · submitted May 12, 00:08</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align:center; padding:12px 0; font-size:12.5px; color:#94a3b8;">8 more overdue items · <a href="#" style="color:#6366f1; text-decoration:none; font-weight:600;">Load all</a></div>
+
+      <!-- Recent items -->
+      <div style="margin: 16px 0 8px; font-size:11.5px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Recent (7)</div>
+
+      <div class="queue-item">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Q2 investor update — executive summary</div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · 44m ago</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue-item">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">April performance summary</div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Analytics · 2h 10m ago</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align:center; padding:12px 0; font-size:12.5px; color:#94a3b8;">5 more recent items · <a href="#" style="color:#6366f1; text-decoration:none; font-weight:600;">Load all</a></div>
+
+    </div>
+  </main>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px;">
+  <div style="max-width:1060px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — review-queue-red.html</strong><br>
+    Extends: <code>client/src/pages/ReviewQueuePage.tsx</code> and <code>client/src/pages/operate/InboxPage.tsx</code> (HIGH PRIORITY band concept).<br>
+    Key decision: safety banner appears ABOVE the composite header (separate component), not inside it. Per brief §3.2 and §8: "Safety regressions surface as red banners that override the composite presentation. The composite is supplementary; safety is primary." The safety item is also pinned to the top of the queue list above the overdue section. Composite header still shows (52, red, -15) so the operator has the full picture, but the safety callout drives the immediate action.<br>
+    Sparkline shows sharp decline (red colour, steeper slope). Attention callout is bold red and names the specific skill slug (pii_redaction_v2). The "Jump to item" link anchors to the safety item within the page.<br>
+    Principles: (1) workflow-anchored: yes; (2) default-to-hidden: safety banner is only shown when active; (3) one primary action: Review the safety item; (4) inline state: red composite + safety banner communicate urgency without a separate page; (5) re-check: non-technical operator cannot miss the red safety banner and the pinned safety item.
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Queue — Attention needed (composite 67, amber)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Acme Marketing Co.</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Operate</div>
+      <a class="nav-item" href="home-with-chip-amber.html">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Home
+      </a>
+      <a class="nav-item" href="#">Inbox</a>
+      <a class="nav-item" href="#">Clients</a>
+      <a class="nav-item" href="#">Agents</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Review</div>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Review Queue
+        <span style="margin-left:auto; background:#fef3c7; color:#b45309; font-size:11px; font-weight:700; padding:1px 7px; border-radius:9999px;">13</span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="page-area">
+    <div class="page-content">
+
+      <!-- Page header -->
+      <div style="margin-bottom:20px;">
+        <a href="home-with-chip-amber.html" style="font-size:13.5px; color:#6366f1; text-decoration:none; display:inline-block; margin-bottom:8px;">← Back to Home</a>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <h1 style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 4px; letter-spacing:-0.02em;">Morning Review Queue</h1>
+            <p style="font-size:13.5px; color:#64748b; margin:0;">Amendments and actions awaiting your review.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary" style="font-size:12px;">Group by Run</button>
+            <button class="btn btn-secondary" style="font-size:12px;">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPOSITE HEADER — amber state -->
+      <div class="quality-header amber" style="margin-bottom:20px;">
+        <div class="qh-score-block">
+          <div class="qh-score-num amber">67</div>
+          <div class="qh-score-label">Quality score</div>
+        </div>
+        <div class="qh-divider"></div>
+        <div class="qh-meta">
+          <div class="qh-trend-row">
+            <span class="band-pill amber">
+              <span class="band-dot amber"></span>
+              Attention needed
+            </span>
+            <span class="trend-arrow down" style="font-size:12px;">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>
+              -6 vs last week
+            </span>
+            <!-- Sparkline — downward trend -->
+            <svg width="80" height="28" viewBox="0 0 80 28" style="display:inline-block; vertical-align:middle;">
+              <polyline fill="none" stroke="#fde68a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                points="0,10 6,11 12,12 18,11 24,13 30,14 36,13 42,15 48,16 54,17 60,16 66,18 72,19 80,21"/>
+            </svg>
+          </div>
+          <div class="qh-callout attention">5 amendments awaiting review for over 24 hours.</div>
+        </div>
+        <div class="qh-actions" style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <a href="review-queue-drill-in-dimensions.html" class="btn-details">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Details
+          </a>
+          <button style="background:none; border:none; font-size:11px; color:#94a3b8; cursor:pointer; padding:0;">Refresh now</button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-group">
+        <button class="tab-btn active">Needs Review<span class="tab-badge amber" style="margin-left:6px;">13</span></button>
+        <button class="tab-btn">Briefs<span class="tab-badge indigo" style="margin-left:6px;">4</span></button>
+      </div>
+
+      <!-- Queue — 5 overdue items first (amber left-border), then 3 newer items -->
+      <div style="margin-bottom:8px; font-size:11.5px; font-weight:600; color:#b45309; text-transform:uppercase; letter-spacing:0.05em;">Overdue (5)</div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">
+              Q2 revenue forecast — finance deck
+              <span class="overdue-badge" style="margin-left:8px;">26h overdue</span>
+            </div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Analytics · draft_proposal_v3 · submitted May 12, 10:14</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#475569; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 14px;">Proposed change: updated Q2 projection from $280k to $310k based on recent contract renewals. Needs review before board presentation on 16 May.</div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">
+              Stellar Ops case study draft
+              <span class="overdue-badge" style="margin-left:8px;">31h overdue</span>
+            </div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · draft_proposal_v3 · submitted May 12, 05:22</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#475569; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 14px;">Proposed sections: executive summary, challenge, solution, results (ROI +42%). 1,200 word draft. Client approval still needed before publication — amendment is for internal review.</div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">
+              Blueprint Agency pricing update
+              <span class="overdue-badge" style="margin-left:8px;">38h overdue</span>
+            </div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Sales · draft_proposal_v3 · submitted May 12, 00:08</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#475569; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 14px;">Revised retainer tier from $4,200/mo to $4,800/mo based on expanded scope. Approval required before contract renewal call scheduled for tomorrow.</div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">
+              Prospect outreach batch — May cohort
+              <span class="overdue-badge" style="margin-left:8px;">42h overdue</span>
+            </div>
+            <div class="queue-item-meta"><span class="action-badge send-email" style="margin-right:6px;">send email</span> Sales · AI agent · submitted May 11, 20:30</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#475569; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 14px;">8 personalised outreach emails to May target list. Each email references specific pain points from LinkedIn profiles. Medium risk tier — requires human review per policy.</div>
+      </div>
+
+      <div class="queue-item overdue">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">
+              Data Ops compliance note — GDPR retention
+              <span class="overdue-badge" style="margin-left:8px;">51h overdue</span>
+            </div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Data Ops · summarise_call_transcript · submitted May 11, 11:15</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+        <div style="font-size:13px; color:#475569; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 14px;">Proposed policy update: extend call transcript retention from 90 days to 180 days for compliance with new client agreement. Needs legal sign-off alongside this approval.</div>
+      </div>
+
+      <!-- Newer items below the overdue section -->
+      <div style="margin: 20px 0 8px; font-size:11.5px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em;">Recent (8)</div>
+
+      <div class="queue-item">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Q2 investor update — executive summary</div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · draft_proposal_v3 · submitted 44m ago</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue-item">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">April performance summary</div>
+            <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Analytics · 2h 10m ago</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue-item">
+        <div class="queue-item-header">
+          <div style="flex:1; min-width:0;">
+            <div class="queue-item-title">Client onboarding email — Horizon Digital</div>
+            <div class="queue-item-meta"><span class="action-badge send-email" style="margin-right:6px;">send email</span> Client Success · 3h 20m ago</div>
+          </div>
+          <div class="queue-item-actions">
+            <button class="btn btn-sm btn-success">Approve</button>
+            <button class="btn btn-sm btn-secondary">Edit</button>
+            <button class="btn btn-sm btn-danger-ghost">Reject</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align:center; padding:16px 0; font-size:12.5px; color:#94a3b8;">5 more items · <a href="#" style="color:#6366f1; text-decoration:none; font-weight:600;">Load all</a></div>
+
+    </div>
+  </main>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px;">
+  <div style="max-width:1060px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — review-queue-amber.html</strong><br>
+    Extends: <code>client/src/pages/ReviewQueuePage.tsx</code> — same header/tab/item structure. Composite header shows amber band pill, down arrow, attention callout. Overdue items are visually separated (amber left-border, overdue-badge) and float to the top per brief §3.3 attention callout priority rule 2. The queue is NOT reordered arbitrarily — overdue items surface because that is exactly the callout ("5 amendments awaiting review for over 24 hours").<br>
+    Sparkline uses amber colour (fde68a) and shows a downward 30-day trajectory. Callout text is bold amber (attention class). "Details" opens the drill-in dialog (review-queue-drill-in-dimensions.html).<br>
+    Principles: (1) workflow-anchored: yes; (2) default-to-hidden: yes, no extra panels; (3) one primary action: approve/reject; (4) inline state: amber border + overdue badge tells the story without a separate dashboard; (5) re-check: operator sees 5 overdue items highlighted, knows exactly what to do first.
+  </div>
+</div>
+</body>
+</html>

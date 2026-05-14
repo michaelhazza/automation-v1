@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill-in: Quality dimension — raw verdicts and corrections</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<!-- Dimmed queue behind -->
+<div class="app-shell" style="filter:brightness(0.4); pointer-events:none; user-select:none;">
+  <nav class="sidebar">
+    <div class="sidebar-logo"><div class="logo-mark">S</div><div><div class="logo-text">Synthetos</div><div class="logo-sub">Acme Marketing Co.</div></div></div>
+    <div class="nav-section">
+      <a class="nav-item active" href="#"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Review Queue</a>
+    </div>
+  </nav>
+  <main class="page-area">
+    <div class="page-content">
+      <h1 style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 20px;">Morning Review Queue</h1>
+      <div class="quality-header amber" style="margin-bottom:20px; opacity:0.5;"><div class="qh-score-block"><div class="qh-score-num amber">67</div><div class="qh-score-label">Quality score</div></div></div>
+      <div class="queue-item" style="opacity:0.4;"><div class="queue-item-header"><div><div class="queue-item-title">Q2 revenue forecast</div></div></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Dialog overlay — Quality dimension expanded to Level 3 -->
+<div class="modal-backdrop" style="position:fixed; inset:0; background:rgba(0,0,0,0.56); display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; z-index:50; overflow-y:auto;">
+  <div class="modal" style="width:100%; max-width:640px; background:white; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,0.3); max-height:calc(100vh - 80px); display:flex; flex-direction:column; overflow:hidden;">
+
+    <!-- Modal header -->
+    <div class="modal-header" style="flex-shrink:0;">
+      <div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+          <a href="review-queue-drill-in-dimensions.html" style="font-size:12px; color:#6366f1; text-decoration:none; font-weight:600; display:flex; align-items:center; gap:4px;">
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+            All dimensions
+          </a>
+          <span style="color:#94a3b8; font-size:12px;">/</span>
+          <span style="font-size:12px; font-weight:600; color:#0f172a;">Quality</span>
+        </div>
+        <div class="modal-title">Quality dimension — detail</div>
+        <div class="modal-subtitle">Acme Marketing Co. · rolling 7 days · sub-score 71/100</div>
+      </div>
+      <a href="review-queue-amber.html" class="modal-close" title="Close">&times;</a>
+    </div>
+
+    <!-- Sub-score summary + sparkline -->
+    <div style="padding:14px 24px; background:#fffbeb; border-bottom:1px solid #fde68a; display:flex; align-items:center; gap:20px; flex-shrink:0;">
+      <div>
+        <span style="font-size:32px; font-weight:800; color:#d97706; letter-spacing:-0.03em;">71</span>
+        <span style="font-size:13px; color:#94a3b8; font-weight:500;">/100</span>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:11.5px; color:#64748b; margin-bottom:6px;">30-day trend</div>
+        <svg width="200" height="36" viewBox="0 0 200 36" style="display:block;">
+          <!-- Y-axis bands: green 80-100, amber 60-79, red 0-59 -->
+          <rect x="0" y="0" width="200" height="7" fill="#dcfce7" opacity="0.4" rx="2"/>
+          <rect x="0" y="7" width="200" height="11" fill="#fef3c7" opacity="0.5" rx="0"/>
+          <rect x="0" y="18" width="200" height="18" fill="#fee2e2" opacity="0.3" rx="0"/>
+          <!-- Score line -->
+          <polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            points="0,10 15,11 30,12 45,11 60,13 75,14 90,14 105,15 120,16 135,16 150,17 165,18 180,19 200,20"/>
+          <!-- Today dot -->
+          <circle cx="200" cy="20" r="3" fill="#d97706"/>
+        </svg>
+      </div>
+      <div style="font-size:12px; color:#64748b; text-align:right;">
+        <div style="font-weight:600; color:#d97706;">Trending down</div>
+        <div style="color:#94a3b8; margin-top:2px;">from 79 four weeks ago</div>
+      </div>
+    </div>
+
+    <!-- Modal body — scrollable -->
+    <div class="modal-body" style="overflow-y:auto; flex:1;">
+
+      <!-- Input metric summary -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Input metrics</div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:9px; padding:12px 14px;">
+            <div style="font-size:11px; color:#64748b; margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Scorecard pass rate</div>
+            <div style="font-size:22px; font-weight:800; color:#d97706;">72%</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">vs 84% last week</div>
+            <div style="height:4px; background:#e2e8f0; border-radius:9999px; margin-top:8px; overflow:hidden;"><div style="width:72%; height:100%; background:#fbbf24; border-radius:9999px;"></div></div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:9px; padding:12px 14px;">
+            <div style="font-size:11px; color:#64748b; margin-bottom:4px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Operator correction rate</div>
+            <div style="font-size:22px; font-weight:800; color:#dc2626;">38%</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">vs 24% last week</div>
+            <div style="height:4px; background:#e2e8f0; border-radius:9999px; margin-top:8px; overflow:hidden;"><div style="width:38%; height:100%; background:#f87171; border-radius:9999px;"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent failed verdicts -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Recent failed scorecard verdicts (last 7 days)</div>
+
+        <div class="verdict-item">
+          <div class="verdict-dot fail"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">draft_proposal_v3: Jargon density above threshold</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Skill: draft_proposal_v3 · Rule: no_jargon_overload · Run #4819</div>
+          </div>
+          <div class="verdict-meta">May 14, 06:12</div>
+          <a href="#" class="verdict-link">View run ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div class="verdict-dot fail"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">summarise_call_transcript: Summary exceeded word limit</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Skill: summarise_call_transcript · Rule: word_count_limit · Run #4807</div>
+          </div>
+          <div class="verdict-meta">May 13, 22:40</div>
+          <a href="#" class="verdict-link">View run ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div class="verdict-dot fail"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">draft_proposal_v3: Missing conclusion section</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Skill: draft_proposal_v3 · Rule: required_sections · Run #4793</div>
+          </div>
+          <div class="verdict-meta">May 13, 14:55</div>
+          <a href="#" class="verdict-link">View run ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div class="verdict-dot fail"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">summarise_call_transcript: Sentiment misclassified as neutral</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Skill: summarise_call_transcript · Rule: sentiment_accuracy · Run #4781</div>
+          </div>
+          <div class="verdict-meta">May 12, 20:18</div>
+          <a href="#" class="verdict-link">View run ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div class="verdict-dot fail"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">draft_proposal_v3: Active voice threshold not met</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Skill: draft_proposal_v3 · Rule: active_voice_ratio · Run #4770</div>
+          </div>
+          <div class="verdict-meta">May 12, 11:30</div>
+          <a href="#" class="verdict-link">View run ↗</a>
+        </div>
+
+        <div style="margin-top:8px; font-size:12px; color:#94a3b8;">Showing 5 of 11 failed verdicts this week · <a href="#" style="color:#6366f1; font-weight:600; text-decoration:none;">View all in run log ↗</a></div>
+      </div>
+
+      <!-- Recent operator corrections -->
+      <div>
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Recent operator corrections (last 7 days)</div>
+
+        <div class="verdict-item">
+          <div style="width:6px; height:6px; border-radius:50%; background:#6366f1; flex-shrink:0;"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">Alex M. edited proposal intro paragraph</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Run #4815 · draft_proposal_v3 · Q2 investor update</div>
+          </div>
+          <div class="verdict-meta">May 14, 08:40</div>
+          <a href="#" class="verdict-link">View ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div style="width:6px; height:6px; border-radius:50%; background:#6366f1; flex-shrink:0;"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">Alex M. rejected email tone as too formal</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Run #4802 · send_email · Stellar Ops onboarding</div>
+          </div>
+          <div class="verdict-meta">May 13, 16:22</div>
+          <a href="#" class="verdict-link">View ↗</a>
+        </div>
+
+        <div class="verdict-item">
+          <div style="width:6px; height:6px; border-radius:50%; background:#6366f1; flex-shrink:0;"></div>
+          <div style="flex:1; min-width:0;">
+            <div class="verdict-name">Alex M. shortened summary by 40%</div>
+            <div style="font-size:11.5px; color:#94a3b8; margin-top:1px;">Run #4787 · summarise_call_transcript · April review</div>
+          </div>
+          <div class="verdict-meta">May 12, 14:05</div>
+          <a href="#" class="verdict-link">View ↗</a>
+        </div>
+
+        <div style="margin-top:10px; padding:12px 14px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:9px; font-size:12.5px; color:#3730a3;">
+          <strong>Insight:</strong> Two skills (draft_proposal_v3 and summarise_call_transcript) account for 82% of failed verdicts this week. Reviewing amendments for those skills may accelerate improvement.
+          <br><a href="#" style="color:#4338ca; font-weight:600; text-decoration:none;">Go to amendment review ↗</a>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px; position:relative; z-index:100;">
+  <div style="max-width:700px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — review-queue-drill-in-quality-expanded.html</strong><br>
+    Extends: <code>client/src/pages/ReviewQueuePage.tsx</code> (queue dimmed behind) + DrillInDialog Level 3 view.<br>
+    This is Level 3 of the drill-in pattern (brief §3.6). The breadcrumb "All dimensions / Quality" lets the operator navigate back to the Level 2 view. The 30-day sparkline has band-coloured background bands (green/amber/red zones) to give visual context to the score's position. Input metrics are shown as stat cards with progress bars. Raw verdicts list up to 5 rows; excess items link to the existing run log ("View all in run log"). Corrections list also links to existing pages.<br>
+    "Insight" box surfaces a pattern (two skills dominate failures) as a deterministic observation — not LLM generated, consistent with Phase 1 rule-based callouts (brief §3.3). Links to amendment review for direct action. The dialog does NOT replicate the run log or amendment page; it points into them (§3.6: "The dashboard does not duplicate any existing page; it points into them.").<br>
+    Principles: (1) workflow-anchored: operator is still in the review queue flow; (2) default-to-hidden: Level 3 is 2 clicks deep; (3) one primary action: go to amendment review or close; (4) inline state: sub-score + sparkline + verdict list communicate the full picture; (5) re-check: non-technical operator can read "72% pass rate, 38% correction rate" and understand why Quality is amber.
+  </div>
+</div>
+</body>
+</html>

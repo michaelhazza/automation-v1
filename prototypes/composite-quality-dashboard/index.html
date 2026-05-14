@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Composite Quality Dashboard — Prototype Index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; background: #f4f6fb; margin: 0; padding: 48px 32px 80px; color: #0f172a; -webkit-font-smoothing: antialiased; }
+.shell { max-width: 900px; margin: 0 auto; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6366f1; margin-bottom: 8px; }
+.title { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.sub { font-size: 14px; color: #64748b; line-height: 1.65; max-width: 720px; margin-bottom: 4px; }
+
+.info-card { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 14px 18px; margin: 20px 0 6px; font-size: 13px; color: #3730a3; line-height: 1.7; }
+.info-card strong { color: #1e1b4b; }
+
+.section-h { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: #94a3b8; margin: 28px 0 10px; }
+
+.screen-row { display: flex; align-items: flex-start; gap: 16px; background: white; border: 1px solid #e2e8f0; border-radius: 11px; padding: 16px 18px; text-decoration: none; margin-bottom: 8px; transition: border-color 0.12s, box-shadow 0.12s; color: inherit; }
+.screen-row:hover { border-color: #818cf8; box-shadow: 0 2px 12px rgba(99,102,241,0.10); }
+.screen-num { width: 38px; height: 38px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.num-green  { background: #dcfce7; color: #15803d; }
+.num-amber  { background: #fef3c7; color: #b45309; }
+.num-red    { background: #fee2e2; color: #b91c1c; }
+.num-indigo { background: #e0e7ff; color: #4338ca; }
+.num-violet { background: #ede9fe; color: #6d28d9; }
+.num-slate  { background: #f1f5f9; color: #475569; }
+.screen-body { flex: 1; min-width: 0; }
+.screen-title { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.screen-desc { font-size: 12.5px; color: #64748b; line-height: 1.6; }
+.screen-tags { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
+.tag { display: inline-block; padding: 2px 7px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 11px; color: #475569; }
+.tag.green  { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.tag.amber  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.tag.red    { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
+.tag.indigo { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
+.screen-arrow { color: #c7d2fe; font-size: 18px; align-self: center; flex-shrink: 0; }
+
+.decision-box { background: white; border: 1px solid #e2e8f0; border-radius: 11px; padding: 16px 20px; margin-top: 8px; }
+.decision-row { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 12.5px; line-height: 1.6; }
+.decision-row:last-child { border-bottom: none; padding-bottom: 0; }
+.decision-q { color: #374151; font-weight: 600; min-width: 240px; }
+.decision-a { color: #64748b; }
+
+.footer-note { font-size: 11.5px; color: #94a3b8; line-height: 1.65; margin-top: 36px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">Round 1 prototype · 2026-05-14</div>
+  <h1 class="title">Composite Quality Dashboard</h1>
+  <p class="sub">Twelve screens covering every surface, state, and drill-in level from the brief. Start here and click through to each screen. Return with feedback.</p>
+
+  <div class="info-card">
+    <strong>Context.</strong> The composite quality score (0-100, four dimensions: Quality, Stability, Cost, Capacity) lives as a header on the existing morning review queue, not as a standalone page. The home page gets a compact chip. Synthetos staff get a dedicated admin page at /system/quality. No new nav items for operators.
+    <br><br>
+    <strong>Decisions locked.</strong> Home page chip only (no drill-in on home). Staff /system/quality view in scope. Org admin cross-subaccount roll-up deferred to Phase 2.
+  </div>
+
+  <div class="section-h">Surface 1 — Home page (compact chip echo)</div>
+
+  <a class="screen-row" href="home-with-chip-green.html">
+    <div class="screen-num num-green">1a</div>
+    <div class="screen-body">
+      <div class="screen-title">Home page — quality chip (green state, composite 84)</div>
+      <div class="screen-desc">Existing home page unchanged, with one new "Quality" metric tile added to the KPI row. Green band. Trend arrow up. Clicking the chip routes to the review queue. The rest of the page is identical to today.</div>
+      <div class="screen-tags"><span class="tag green">composite 84</span><span class="tag green">green band</span><span class="tag indigo">chip only</span><span class="tag">no drill-in</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="home-with-chip-amber.html">
+    <div class="screen-num num-amber">1b</div>
+    <div class="screen-body">
+      <div class="screen-title">Home page — quality chip (amber state, composite 67)</div>
+      <div class="screen-desc">Same home page. Chip is amber, trend arrow pointing down. Sub-label shows "Attention needed". Same minimal footprint — the chip is the only change.</div>
+      <div class="screen-tags"><span class="tag amber">composite 67</span><span class="tag amber">amber band</span><span class="tag">trend down</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="home-with-chip-red.html">
+    <div class="screen-num num-red">1c</div>
+    <div class="screen-body">
+      <div class="screen-title">Home page — quality chip (red state, composite 52) with safety override banner</div>
+      <div class="screen-desc">Composite is red. A safety-class alert banner appears above the chip tile (not inside it) because a safety regression was detected. Banner is separate from the composite — safety overrides always surface independently per §3.2.</div>
+      <div class="screen-tags"><span class="tag red">composite 52</span><span class="tag red">safety banner</span><span class="tag">intervention needed</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <div class="section-h">Surface 2 — Morning review queue (composite header)</div>
+
+  <a class="screen-row" href="review-queue-green.html">
+    <div class="screen-num num-green">2a</div>
+    <div class="screen-body">
+      <div class="screen-title">Review queue — healthy state (composite 84, green)</div>
+      <div class="screen-desc">The composite header sits above the existing queue list. Green, trend up vs last week, callout omitted (all systems healthy). Queue shows 6 example items. "Details" button opens the drill-in dialog.</div>
+      <div class="screen-tags"><span class="tag green">composite 84</span><span class="tag green">all healthy</span><span class="tag indigo">header only</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="review-queue-amber.html">
+    <div class="screen-num num-amber">2b</div>
+    <div class="screen-body">
+      <div class="screen-title">Review queue — attention needed (composite 67, amber)</div>
+      <div class="screen-desc">Composite 67, trend arrow down. Attention callout: "5 amendments awaiting review for over 24 hours." Those 5 overdue items float to the top of the queue with an amber left-border highlight.</div>
+      <div class="screen-tags"><span class="tag amber">composite 67</span><span class="tag amber">5 overdue</span><span class="tag">attention callout</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="review-queue-red.html">
+    <div class="screen-num num-red">2c</div>
+    <div class="screen-body">
+      <div class="screen-title">Review queue — intervention needed (composite 52, red) with safety banner</div>
+      <div class="screen-desc">Safety-class regression detected: pii_redaction_v2 failed. Red safety banner appears above the composite header. Attention callout: "Safety check pii_redaction_v2 regressed; review immediately."</div>
+      <div class="screen-tags"><span class="tag red">composite 52</span><span class="tag red">safety regression</span><span class="tag red">intervention needed</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <div class="section-h">Surface 2 (continued) — Drill-in dialog (composite to dimensions to raw verdicts)</div>
+
+  <a class="screen-row" href="review-queue-drill-in-dimensions.html">
+    <div class="screen-num num-indigo">3a</div>
+    <div class="screen-body">
+      <div class="screen-title">Drill-in: Level 2 — four dimension breakdown (one expanded)</div>
+      <div class="screen-desc">Operator clicked "Details" on the amber review queue. Overlay dialog shows all four dimensions (Quality 71, Stability 63, Cost 88, Capacity 46) with sub-scores, trend arrows, and sparklines. Quality is expanded to show its inputs. The queue is dimmed behind the dialog.</div>
+      <div class="screen-tags"><span class="tag amber">amber state</span><span class="tag indigo">dialog overlay</span><span class="tag">quality expanded</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="review-queue-drill-in-quality-expanded.html">
+    <div class="screen-num num-indigo">3b</div>
+    <div class="screen-body">
+      <div class="screen-title">Drill-in: Level 3 — Quality dimension raw verdicts</div>
+      <div class="screen-desc">Quality dimension fully expanded inside the dialog. Shows recent failed scorecard verdicts (5 rows) and recent operator corrections. Each row links to the existing run detail page. Dialog does not duplicate run detail — it points into it.</div>
+      <div class="screen-tags"><span class="tag indigo">level 3</span><span class="tag">raw verdicts</span><span class="tag">links to run detail</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <div class="section-h">Surface 3 — Synthetos staff admin (/system/quality)</div>
+
+  <a class="screen-row" href="system-quality-org-rollup.html">
+    <div class="screen-num num-violet">4a</div>
+    <div class="screen-body">
+      <div class="screen-title">System Quality — top level (one row per org)</div>
+      <div class="screen-desc">Staff-only admin page at /system/quality. Mirrors the layout of /system/llm-pnl. Table: one row per org, columns include composite score (band-coloured), trend arrow, attention callout (truncated), pending amendments count. Default sort: worst composite first. 10 example rows.</div>
+      <div class="screen-tags"><span class="tag indigo">staff only</span><span class="tag">org-level rollup</span><span class="tag">worst-first sort</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="system-quality-org-drilldown.html">
+    <div class="screen-num num-violet">4b</div>
+    <div class="screen-body">
+      <div class="screen-title">System Quality — org drilldown (one row per subaccount)</div>
+      <div class="screen-desc">Clicked on "Acme Marketing Co." Breadcrumb: System / Quality / Acme Marketing Co. Table shows each subaccount within that org with the same column shape. Same composite-band colouring, same sort, same pending count.</div>
+      <div class="screen-tags"><span class="tag indigo">staff only</span><span class="tag">subaccount rows</span><span class="tag indigo">breadcrumb nav</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <a class="screen-row" href="system-quality-subaccount-drilldown.html">
+    <div class="screen-num num-violet">4c</div>
+    <div class="screen-body">
+      <div class="screen-title">System Quality — subaccount drilldown (per-skill breakdown)</div>
+      <div class="screen-desc">Drilled into "Acme Marketing — Content Team" subaccount. Shows per-skill composite breakdown: one row per skill with composite score, Quality/Stability/Cost/Capacity sub-scores, trend. Staff-only surface per §4 (out of scope for operator view).</div>
+      <div class="screen-tags"><span class="tag indigo">staff only</span><span class="tag">per-skill detail</span><span class="tag">3-level breadcrumb</span></div>
+    </div>
+    <div class="screen-arrow">›</div>
+  </a>
+
+  <div class="section-h">Open questions for operator review</div>
+
+  <div class="decision-box">
+    <div class="decision-row">
+      <div class="decision-q">Home chip placement</div>
+      <div class="decision-a">Mocked as a new tile in the existing KPI grid (same MetricCard pattern). Alternative: a separate narrow strip above the grid. Which do you prefer?</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">Safety banner location on home page</div>
+      <div class="decision-a">Mocked as a narrow banner above the KPI grid (not inside the chip tile). Brief is clear that safety is separate from composite. Confirm this placement.</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">Composite header width on review queue</div>
+      <div class="decision-a">Mocked as a full-width card above the queue list. Could also be narrower (e.g. 480px max). Confirm.</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">Dialog vs slide-over for drill-in</div>
+      <div class="decision-a">Brief says dialog. Mocked as a centered modal overlay. Slide-over from the right is an alternative if the operator prefers. Current mockup: dialog.</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">Sparkline granularity in dialog</div>
+      <div class="decision-a">Brief recommends daily points over 30 days. Mocked as a 30-day sparkline inline with each dimension row. Confirm or adjust window.</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">"All systems healthy" callout text</div>
+      <div class="decision-a">Brief says "omit or show." Mocked as omitted in the green state — the composite number alone communicates health. Should we show explicit positive confirmation instead?</div>
+    </div>
+    <div class="decision-row">
+      <div class="decision-q">Refresh Now button</div>
+      <div class="decision-a">Brief mentions an on-demand recompute button. Mocked as a small "Refresh" link on the quality header. Confirm placement and label.</div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Round 1 prototype · composite-quality-dashboard · 2026-05-14. For operator review only. Nothing in these files ships to production. Return feedback via the spec-coordinator session.
+  </div>
+</div>
+</body>
+</html>

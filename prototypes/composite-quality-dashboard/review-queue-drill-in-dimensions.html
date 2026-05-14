@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Queue — Drill-in dialog: four dimensions (Quality expanded)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Inline sparklines for dimension rows */
+.dim-sparkline { display:inline-block; vertical-align:middle; }
+/* Input metric rows inside expanded dimension */
+.input-row {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 12px; border-radius:7px;
+  background:#f8fafc; margin-bottom:6px; font-size:12.5px;
+}
+.input-row:last-child { margin-bottom:0; }
+.input-name { flex:1; color:#374151; font-weight:500; }
+.input-value { font-weight:700; font-size:13px; }
+.input-bar { flex:0 0 80px; height:6px; background:#e2e8f0; border-radius:9999px; overflow:hidden; }
+.input-bar-fill { height:100%; border-radius:9999px; }
+</style>
+</head>
+<body>
+<!-- Queue page is dimmed behind the dialog -->
+<div class="app-shell" style="filter:brightness(0.45); pointer-events:none; user-select:none;">
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Acme Marketing Co.</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Review</div>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Review Queue
+      </a>
+    </div>
+  </nav>
+  <main class="page-area">
+    <div class="page-content">
+      <h1 style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 4px;">Morning Review Queue</h1>
+      <p style="font-size:13.5px; color:#64748b; margin:0 0 20px;">Amendments and actions awaiting your review.</p>
+      <div class="quality-header amber" style="margin-bottom:20px; opacity:0.6;">
+        <div class="qh-score-block"><div class="qh-score-num amber">67</div><div class="qh-score-label">Quality score</div></div>
+        <div class="qh-divider"></div>
+        <div class="qh-meta">
+          <div class="qh-trend-row"><span class="band-pill amber"><span class="band-dot amber"></span>Attention needed</span></div>
+          <div class="qh-callout attention">5 amendments awaiting review for over 24 hours.</div>
+        </div>
+      </div>
+      <div class="queue-item" style="opacity:0.5;"><div class="queue-item-header"><div><div class="queue-item-title">Q2 revenue forecast — finance deck</div><div class="queue-item-meta">amendment · Analytics · 26h overdue</div></div></div></div>
+      <div class="queue-item" style="opacity:0.3; margin-top:8px;"><div class="queue-item-header"><div><div class="queue-item-title">Stellar Ops case study draft</div></div></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Dialog overlay -->
+<div class="modal-backdrop" style="position:fixed; inset:0; background:rgba(0,0,0,0.52); display:flex; align-items:flex-start; justify-content:center; padding:48px 20px; z-index:50; overflow-y:auto;">
+  <div class="modal" style="width:100%; max-width:600px; background:white; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+
+    <!-- Modal header -->
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Quality score breakdown</div>
+        <div class="modal-subtitle">Acme Marketing Co. · as of today, 08:00 · computed hourly</div>
+      </div>
+      <a href="review-queue-amber.html" class="modal-close" title="Close">&times;</a>
+    </div>
+
+    <!-- Composite summary bar at top of dialog -->
+    <div style="padding:16px 24px; background:#fffbeb; border-bottom:1px solid #fde68a; display:flex; align-items:center; gap:16px;">
+      <div>
+        <span style="font-size:36px; font-weight:800; color:#d97706; letter-spacing:-0.03em;">67</span>
+        <span style="font-size:14px; color:#94a3b8; font-weight:500;">/100</span>
+      </div>
+      <div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+          <span class="band-pill amber"><span class="band-dot amber"></span>Attention needed</span>
+          <span class="trend-arrow down" style="font-size:12px;">
+            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 9 12 15 6 9"/></svg>
+            -6 vs last week
+          </span>
+        </div>
+        <div style="font-size:12px; color:#94a3b8;">Equal weights: Quality 25% · Stability 25% · Cost 25% · Capacity 25%</div>
+      </div>
+    </div>
+
+    <!-- Dimension list -->
+    <div class="modal-body">
+
+      <!-- QUALITY — expanded -->
+      <div class="dim-row" style="border-color:#e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:10px;">
+        <div class="dim-row-header expanded" style="display:flex; align-items:center; gap:14px; padding:14px 18px; background:#fafbff; border-bottom:1px solid #e2e8f0; cursor:pointer;">
+          <div class="dim-icon" style="background:#eef2ff; color:#6366f1; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="dim-name">Quality</div>
+            <div class="dim-desc">Scorecard pass rate and operator correction rate · rolling 7 days</div>
+          </div>
+          <svg width="80" height="24" viewBox="0 0 80 24" class="dim-sparkline">
+            <polyline fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              points="0,12 10,11 20,12 30,13 40,15 50,16 60,17 70,18 80,19"/>
+          </svg>
+          <div class="dim-score amber" style="font-size:20px; font-weight:800; color:#d97706; min-width:36px; text-align:right;">71</div>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="transform:rotate(90deg); color:#94a3b8;"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <!-- Expanded: inputs -->
+        <div style="padding:16px 18px; background:white;">
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Inputs (rolling 7 days)</div>
+
+          <div class="input-row">
+            <div class="input-name">Scorecard pass rate <span style="color:#94a3b8; font-size:11px; font-weight:400;">(weight 70%)</span></div>
+            <div class="input-value" style="color:#d97706;">72%</div>
+            <div class="input-bar"><div class="input-bar-fill" style="width:72%; background:#fbbf24;"></div></div>
+          </div>
+          <div class="input-row">
+            <div class="input-name">Operator correction rate <span style="color:#94a3b8; font-size:11px; font-weight:400;">(weight 30%, inverted)</span></div>
+            <div class="input-value" style="color:#d97706;">38%</div>
+            <div class="input-bar"><div class="input-bar-fill" style="width:38%; background:#fbbf24;"></div></div>
+          </div>
+
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f1f5f9;">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Recent signals</div>
+
+            <div class="verdict-item">
+              <div class="verdict-dot fail"></div>
+              <div class="verdict-name">draft_proposal_v3: Jargon density above threshold</div>
+              <div class="verdict-meta">May 14, 06:12</div>
+              <a href="#" class="verdict-link">View run ↗</a>
+            </div>
+            <div class="verdict-item">
+              <div class="verdict-dot fail"></div>
+              <div class="verdict-name">summarise_call_transcript: Summary exceeded 250 words</div>
+              <div class="verdict-meta">May 13, 22:40</div>
+              <a href="#" class="verdict-link">View run ↗</a>
+            </div>
+            <div class="verdict-item">
+              <div class="verdict-dot pass"></div>
+              <div class="verdict-name">draft_proposal_v3: Tone and clarity passed</div>
+              <div class="verdict-meta">May 13, 18:05</div>
+              <a href="#" class="verdict-link">View run ↗</a>
+            </div>
+          </div>
+
+          <a href="review-queue-drill-in-quality-expanded.html" style="display:inline-flex; align-items:center; gap:5px; margin-top:12px; font-size:12.5px; color:#6366f1; text-decoration:none; font-weight:600;">
+            See all failed verdicts and corrections
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- STABILITY — collapsed -->
+      <div class="dim-row" style="border-color:#e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:10px;">
+        <div class="dim-row-header" style="display:flex; align-items:center; gap:14px; padding:14px 18px; background:white; cursor:pointer;">
+          <div class="dim-icon" style="background:#fff7ed; color:#f97316; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="dim-name">Stability</div>
+            <div class="dim-desc">Amendment acceptance, run failure rate, churn · rolling 7-14 days</div>
+          </div>
+          <svg width="80" height="24" viewBox="0 0 80 24" class="dim-sparkline">
+            <polyline fill="none" stroke="#fca5a5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              points="0,8 10,9 20,11 30,13 40,14 50,15 60,17 70,18 80,20"/>
+          </svg>
+          <div class="dim-score red" style="font-size:20px; font-weight:800; color:#dc2626; min-width:36px; text-align:right;">63</div>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:#94a3b8;"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+
+      <!-- COST — collapsed, green -->
+      <div class="dim-row" style="border-color:#e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:10px;">
+        <div class="dim-row-header" style="display:flex; align-items:center; gap:14px; padding:14px 18px; background:white; cursor:pointer;">
+          <div class="dim-icon" style="background:#f0fdf4; color:#22c55e; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="dim-name">Cost</div>
+            <div class="dim-desc">Cost per run vs 30-day baseline · token usage trend</div>
+          </div>
+          <svg width="80" height="24" viewBox="0 0 80 24" class="dim-sparkline">
+            <polyline fill="none" stroke="#86efac" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              points="0,16 10,15 20,15 30,14 40,13 50,14 60,13 70,12 80,11"/>
+          </svg>
+          <div class="dim-score green" style="font-size:20px; font-weight:800; color:#16a34a; min-width:36px; text-align:right;">88</div>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:#94a3b8;"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+
+      <!-- CAPACITY — collapsed, red -->
+      <div class="dim-row" style="border-color:#e2e8f0; border-radius:10px; overflow:hidden; margin-bottom:0;">
+        <div class="dim-row-header" style="display:flex; align-items:center; gap:14px; padding:14px 18px; background:white; cursor:pointer;">
+          <div class="dim-icon" style="background:#fef2f2; color:#ef4444; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="dim-name">Capacity</div>
+            <div class="dim-desc">Pending review queue depth · median review latency</div>
+          </div>
+          <svg width="80" height="24" viewBox="0 0 80 24" class="dim-sparkline">
+            <polyline fill="none" stroke="#fca5a5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              points="0,20 10,19 20,18 30,17 40,15 50,14 60,12 70,10 80,8"/>
+          </svg>
+          <div class="dim-score red" style="font-size:20px; font-weight:800; color:#dc2626; min-width:36px; text-align:right;">46</div>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:#94a3b8;"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid #f1f5f9; font-size:12px; color:#94a3b8; display:flex; align-items:center; justify-content:space-between;">
+        <span>Composite = 0.25×71 + 0.25×63 + 0.25×88 + 0.25×46 = <strong style="color:#d97706;">67</strong></span>
+        <a href="#" style="font-size:12px; color:#6366f1; text-decoration:none; font-weight:600;">Snapshot history</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px; position:relative; z-index:100;">
+  <div style="max-width:700px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — review-queue-drill-in-dimensions.html</strong><br>
+    Extends: <code>client/src/pages/ReviewQueuePage.tsx</code> (queue behind) + new DrillInDialog component.<br>
+    Backdrop dimming: the queue is rendered with filter:brightness(0.45) and pointer-events:none to simulate the modal overlay. In production this would be a React portal with backdrop. Dims the entire page including sidebar and queue list.<br>
+    Dialog structure: composite summary bar (amber, full-width at top) then four collapsible dimension rows. Quality is expanded (default for this mockup) to show inputs as metric rows and 3 recent signal verdicts. Three-dot chevron indicates collapsed/expanded state. Sparklines are 80x24px SVG inline polylines (30-day range, daily points). Sub-scores: Quality 71 (amber), Stability 63 (red), Cost 88 (green), Capacity 46 (red). Weighted average: (71+63+88+46)/4=67 shown in the formula line.<br>
+    "See all failed verdicts and corrections" links to review-queue-drill-in-quality-expanded.html (Level 3). Each verdict row has a "View run ↗" link pointing to the existing run detail page — no duplication per §3.6.<br>
+    Principles: (1) workflow-anchored: operator is still on the review queue page; (2) default-to-hidden: dialog is 1-click deep, not on the default view; (3) one primary action: review the expanded dimension or close and return to the queue; (4) inline state: sparklines + sub-scores tell the dimension story; (5) re-check: non-technical operator can read Quality 71, Stability 63, Cost 88, Capacity 46 and identify the problem dimensions.
+  </div>
+</div>
+</body>
+</html>

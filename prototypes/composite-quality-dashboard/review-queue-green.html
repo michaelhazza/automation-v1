@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Queue — Healthy (composite 84, green)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.sparkline-svg { display:inline-block; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">S</div>
+      <div><div class="logo-text">Synthetos</div><div class="logo-sub">Acme Marketing Co.</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Operate</div>
+      <a class="nav-item" href="home-with-chip-green.html">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Home
+      </a>
+      <a class="nav-item" href="#">Inbox</a>
+      <a class="nav-item" href="#">Clients</a>
+      <a class="nav-item" href="#">Agents</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-label">Review</div>
+      <a class="nav-item active" href="#">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Review Queue
+        <span style="margin-left:auto; background:#e0e7ff; color:#4338ca; font-size:11px; font-weight:700; padding:1px 7px; border-radius:9999px;">6</span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="page-area">
+    <div class="page-content">
+
+      <!-- Page header (ReviewQueuePage.tsx pattern) -->
+      <div style="margin-bottom:20px;">
+        <a href="home-with-chip-green.html" style="font-size:13.5px; color:#6366f1; text-decoration:none; display:inline-block; margin-bottom:8px;">← Back to Home</a>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <h1 style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 4px; letter-spacing:-0.02em;">Morning Review Queue</h1>
+            <p style="font-size:13.5px; color:#64748b; margin:0;">Amendments and actions awaiting your review.</p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-secondary" style="font-size:12px;">Group by Run</button>
+            <button class="btn btn-secondary" style="font-size:12px;">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPOSITE HEADER — green state -->
+      <div class="quality-header green" style="margin-bottom:20px;">
+        <div class="qh-score-block">
+          <div class="qh-score-num green">84</div>
+          <div class="qh-score-label">Quality score</div>
+        </div>
+        <div class="qh-divider"></div>
+        <div class="qh-meta">
+          <div class="qh-trend-row">
+            <span class="band-pill green">
+              <span class="band-dot green"></span>
+              Healthy
+            </span>
+            <span class="trend-arrow up" style="font-size:12px;">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+              +4 vs last week
+            </span>
+            <!-- Sparkline — 30-day composite trend -->
+            <svg class="sparkline-svg" width="80" height="28" viewBox="0 0 80 28">
+              <polyline fill="none" stroke="#86efac" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                points="0,22 6,20 12,18 18,17 24,16 30,15 36,14 42,16 48,14 54,13 60,12 66,11 72,10 80,8"/>
+            </svg>
+          </div>
+          <div class="qh-callout" style="color:#64748b;">All systems healthy. No action required.</div>
+        </div>
+        <div class="qh-actions" style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <a href="review-queue-drill-in-dimensions.html" class="btn-details">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Details
+          </a>
+          <button style="background:none; border:none; font-size:11px; color:#94a3b8; cursor:pointer; padding:0;">Refresh now</button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-group">
+        <button class="tab-btn active">Needs Review<span class="tab-badge indigo" style="margin-left:6px;">6</span></button>
+        <button class="tab-btn">Briefs<span class="tab-badge indigo" style="margin-left:6px;">2</span></button>
+      </div>
+
+      <!-- Queue items — 6 example items, healthy state, no overdue -->
+      <div style="display:flex; flex-direction:column; gap:0;">
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">Q2 investor update — executive summary draft</div>
+              <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · draft_proposal_v3 · submitted 42m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">Proposed change: reorder introduction paragraph to lead with market opportunity before risk factors. Agent reasoning: "Client presentation style favours leading with opportunity framing."</div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">Blueprint Agency — retainer renewal proposal</div>
+              <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Sales · draft_proposal_v3 · submitted 1h 12m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">Proposed change: add pricing table section with three tier options. Tone adjusted to match previous accepted proposals. No risk flags detected.</div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">Client onboarding welcome email — Stellar Ops</div>
+              <div class="queue-item-meta"><span class="action-badge send-email" style="margin-right:6px;">send email</span> Client Success · AI agent · submitted 1h 45m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">To: marcus@stellarops.com · Subject: Welcome to Acme — your first steps. Plain-text welcome email, 3 paragraphs, no attachments. Low risk tier.</div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">April performance summary — internal metrics</div>
+              <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Analytics · summarise_call_transcript · submitted 2h 10m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">Proposed addition: "Key win: Blueprint Agency contract renewal at +18% fee. Risk: two clients at delayed payment status." Factually correct per CRM data.</div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">Prospect outreach — Horizon Digital follow-up</div>
+              <div class="queue-item-meta"><span class="action-badge send-email" style="margin-right:6px;">send email</span> Sales · AI agent · submitted 3h 20m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">To: sarah@horizondigital.com · Subject: Following up on your campaign brief. Short follow-up, references their specific interest in SEO audit capability.</div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item-header">
+            <div>
+              <div class="queue-item-title">Acme internal newsletter — May edition</div>
+              <div class="queue-item-meta"><span class="action-badge amendment" style="margin-right:6px;">amendment</span> Content Team · draft_proposal_v3 · submitted 4h 05m ago</div>
+            </div>
+            <div class="queue-item-actions">
+              <button class="btn btn-sm btn-success">Approve</button>
+              <button class="btn btn-sm btn-secondary">Edit</button>
+              <button class="btn btn-sm btn-danger-ghost">Reject</button>
+            </div>
+          </div>
+          <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #f1f5f9; border-radius:8px; padding:12px 14px;">Proposed changes: added "Team spotlight" section, reordered project wins to feature Blueprint Agency first. Copy reviewed for tone consistency.</div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div style="background:#f8fafc; border-top:1px dashed #e2e8f0; padding:20px 32px;">
+  <div style="max-width:1060px; margin:0 auto; font-size:11px; color:#94a3b8; line-height:1.8;">
+    <strong style="color:#64748b;">Designer notes — review-queue-green.html</strong><br>
+    Extends: <code>client/src/pages/ReviewQueuePage.tsx</code> — header block, tab group, queue item cards, approve/edit/reject actions. Also references <code>client/src/pages/operate/InboxPage.tsx</code> for the three-band list pattern. Composite header is a NEW component injected above the tab group.<br>
+    Components/tokens reused: .btn, .btn-sm, .btn-success, .btn-secondary, .btn-danger-ghost from index.css; tab-group pill pattern from ReviewQueuePage.tsx line 790-810; queue item card shape from renderItemCard().<br>
+    Green state: callout is informational ("All systems healthy") and subdued. No amber/red attention styles. Sparkline shows 30-day upward trend. Details link opens drill-in dialog. "Refresh now" is a low-emphasis text link beneath the details button.<br>
+    Principles: (1) workflow-anchored: operator opens review queue daily to act; (2) default-to-hidden: composite header is minimal — just number, band, trend, callout, one action; (3) one primary action: approve/reject items; (4) inline state: composite communicates health without leaving the page; (5) re-check: non-technical operator sees a green score and a list of items to review. Simple.
+  </div>
+</div>
+</body>
+</html>
