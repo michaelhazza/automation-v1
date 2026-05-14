@@ -1316,7 +1316,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 mergeWarnings.push({
                   code: 'CONSOLIDATION_FAILED',
                   severity: 'warning',
-                  message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                  message: 'Tightening pass did not complete; reviewer is seeing the original merge.',
                   detail: JSON.stringify({ failureReason }),
                 });
                 logger.info('skill_analyzer_consolidation_outcome', {
@@ -1338,7 +1338,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   mergeWarnings.push({
                     code: 'CONSOLIDATION_FAILED',
                     severity: 'warning',
-                    message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                    message: 'Tightening pass did not complete; reviewer is seeing the original merge.',
                     detail: JSON.stringify({ failureReason }),
                   });
                   logger.info('skill_analyzer_consolidation_parse_failure', {
@@ -1387,7 +1387,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                     mergeWarnings.push({
                       code: 'CONSOLIDATION_FAILED',
                       severity: 'warning',
-                      message: 'Tightening pass did not complete — reviewer is seeing the original merge.',
+                      message: 'Tightening pass did not complete; reviewer is seeing the original merge.',
                       detail: JSON.stringify({ failureReason }),
                     });
                     logger.info('skill_analyzer_consolidation_outcome', {
@@ -1881,6 +1881,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       similarityScore: 1.0,
       classificationReasoning: 'Exact content match (identical content hash).',
       diffSummary: null,
+      // Spec §10 state-machine closure: post-migration rows MUST carry one of
+      // the four enum values, never NULL. DUPLICATE rows produce no merge, so
+      // consolidation never fires for them — write 'not_triggered'.
+      consolidationOutcome: 'not_triggered' as ConsolidationOutcome,
     });
   }
 
@@ -1907,6 +1911,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       agentProposals: agentProposalsByCandidateIndex.get(m.candidateIndex) ?? [],
       isDocumentationFile: flags?.isDocumentationFile ?? false,
       isContextFile: flags?.isContextFile ?? false,
+      // Spec §10 state-machine closure: post-migration rows MUST carry one of
+      // the four enum values. DISTINCT rows produce no merge — write
+      // 'not_triggered'.
+      consolidationOutcome: 'not_triggered' as ConsolidationOutcome,
     });
   }
 

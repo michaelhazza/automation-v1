@@ -1054,7 +1054,7 @@ function ConsolidationBanner({ result }: ConsolidationBannerProps) {
       className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900"
     >
       <p className="font-medium mb-1">
-        Tightening pass did not complete — reviewer is seeing the original merge.
+        Tightening pass did not complete; reviewer is seeing the original merge.
       </p>
       {failureReason && (
         <p className="text-amber-800">Reason: {failureReason}</p>
