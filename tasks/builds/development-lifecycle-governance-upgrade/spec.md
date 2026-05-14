@@ -1,0 +1,602 @@
+# Spec: Development Lifecycle Governance Upgrade
+
+**Status:** draft
+**Spec date:** 2026-05-14
+**Last updated:** 2026-05-14
+**Author:** main session (operator-directed)
+**Build slug:** `development-lifecycle-governance-upgrade`
+**Source brief:** [`tasks/ai-dlc-governance-brief.md`](../../ai-dlc-governance-brief.md) (locked 2026-05-14)
+**Extends, does not replace:** `docs/2026-04-30-dev-pipeline-coordinators-spec.md` (canonical pipeline contract)
+
+---
+
+## Contents
+
+1. Context & Background
+2. Goals
+3. Non-Goals
+4. Files to Change (inventory lock)
+5. Domain Model — artefact definitions
+6. Service Contracts — coordinator changes
+7. Data Contracts — artefact schemas
+8. Permissions / RLS — opt-out documented
+9. Execution Model — opt-out documented
+10. Chunk Plan & Phase Sequencing
+11. Backwards-Compatibility Invariants
+12. Acceptance Criteria
+13. Testing Posture
+14. Deferred Items
+15. Open Questions for the Architect
+
+---
+
+## 1. Context & Background
+
+The current AI-assisted development lifecycle (spec → plan → build → review → finalise → merge) is the build engine. It works. What it does not do is govern the **capability that ships** after merge: ownership, lifecycle state, risk context, carry cost, review status, and learning feedback are not consistently tracked.
+
+This spec implements the lightweight governance wrapper defined in the locked brief. It adds structured intent capture, a duplication / strategy gate, lifecycle-aware spec authoring, capability registration via the existing doc-sync mechanism, and a compound-learning feed-forward step — all enforceable through markdown artefacts, coordinator instructions, doc-sync verdicts, and lightweight static checks.
+
+**Hard scope constraint (binding):** v1 introduces **no** database schema, UI, background jobs, dashboards, scoring engines, scheduled monitors, or new coordinators. Enforcement is markdown + coordinator instructions + doc-sync + light static checks only. This is restated from the brief because it is the most likely scope-creep failure mode.
+
+---
+
+## 2. Goals
+
+| # | Goal | Verifiable assertion |
+|---|---|---|
+| G1 | Standard+ builds produce a structured `intent.md` before specification begins | `tasks/builds/<slug>/intent.md` exists with the required sections for every Standard+ build merged after this ships |
+| G2 | `spec-coordinator` runs a hard duplication / strategy gate before authoring | Spec-coordinator step list includes the gate; gate output captured in `intent.md`; `stop` / `merge-with-existing` outcomes escalate to the operator |
+| G3 | Standard+ specs carry a Lifecycle Declaration block and an ABCd Estimate block (S/M/L sizing) | Spec authoring instructions require both blocks; `spec-authoring-checklist.md` flags missing blocks |
+| G4 | `docs/capabilities.md` becomes an Asset Register with the §6.5-derived field set and closed cluster list | The file's structure conforms to the schema in §7.4; cluster list matches the closed list verbatim |
+| G5 | Finalisation gates capability registration via `docs/doc-sync.md` | New trigger row exists in `docs/doc-sync.md`; `finalisation-coordinator` Step 6 verdicts it; `MERGE_READY` cannot be set without a `yes` or `n/a with reason` verdict |
+| G6 | Finalisation runs a compound-learning feed-forward decision step after KNOWLEDGE.md extraction | `finalisation-coordinator` post-Step 7 emits a proposal list against a fixed shortlist of six targets; no auto-apply in v1 |
+| G7 | The full existing pipeline (S0/S1/S2 syncs, G1-G4 gates, GRADED reviewer matrix, KNOWLEDGE.md extraction, MERGE_READY flow) remains intact | Each existing gate / step still runs in the canonical order; no removals; spec adds only the wrapper steps named in this document |
+
+---
+
+## 3. Non-Goals
+
+Explicit exclusions for this build. These are deferred to later iterations.
+
+- Decommission coordinator (Phase D).
+- Automated Lifecycle Health Score.
+- Continuous regulatory / compliance monitor.
+- Stream coordinator and multi-stream `current-focus.md`.
+- Mob-builder (parallel-builder pattern).
+- Quarterly portfolio coherence automation.
+- ML-based lifecycle scoring.
+- Portfolio dashboard UI.
+- Any database schema, background job, scheduled monitor, or new coordinator.
+- Retroactive rewriting of historical `tasks/builds/<slug>/brief.md` files into `intent.md`.
+
+---
+
+## 4. Files to Change (inventory lock)
+
+Every change in this spec is listed below. Prose references in later sections must reconcile to this table; references not in this inventory are blocking review findings.
+
+### 4.1 New files
+
+| Path | Purpose | Chunk |
+|---|---|---|
+| `docs/spec-template.md` | Reference template for Standard+ specs; embeds Lifecycle Declaration + ABCd blocks. Decision deferred to Chunk 2 — if the spec author judges this duplicative with the authoring checklist, it may be skipped. | 2 |
+| `tasks/builds/<slug>/intent.md` (per-build, not in repo at spec-merge time) | New artefact authored per Standard+ build; replaces `brief.md` for Standard+. | runtime artefact |
+
+### 4.2 Modified files
+
+| Path | Change | Chunk |
+|---|---|---|
+| `.claude/agents/spec-coordinator.md` | Step 3 (brief intake) requires `intent.md` for Standard+; new Step 3a (Duplication / Strategy Check, hard gate); Step 6 (authoring) requires Lifecycle Declaration + ABCd blocks. | 1, 3, 2 |
+| `.claude/agents/finalisation-coordinator.md` | Step 6 doc-sync sweep gains capability-registration row check; new Step 7a (Compound Learning Feedback) after Step 7 KNOWLEDGE.md extraction. | 5, 6 |
+| `docs/doc-sync.md` | New trigger row: Capability Registration (`docs/capabilities.md`). | 5 |
+| `docs/capabilities.md` | Restructured into Asset Register format; seeded with closed cluster list; existing content preserved via structure-preserving backfill. | 4 |
+| `docs/spec-authoring-checklist.md` | Add Lifecycle Declaration + ABCd block requirements to pre-authoring rubric and Appendix checklist. | 2 |
+| `CLAUDE.md` | Update lifecycle description: Intent → Elaboration → Duplication / Strategy Check → Specification → … → Merge → Capability Registration → Compound Learning. | 7 |
+| `architecture.md` | Update agent fleet / lifecycle pointers to reflect the new wrapper steps; no structural change. | 7 |
+| `tasks/builds/<slug>/progress.md` per build | Records the `brief.md` → `intent.md` promotion decision for in-progress Standard+ builds. | runtime artefact |
+| `tasks/todo.md` | One-time entries for any unknowns surfaced during the `docs/capabilities.md` backfill. | 4 |
+
+### 4.3 Files **NOT** changed (called out to prevent drift)
+
+- `.claude/agents/feature-coordinator.md` — no direct change. The new intent signal flows through unchanged.
+- `.claude/agents/architect.md` — no change.
+- `.claude/agents/builder.md` — no change.
+- Any reviewer agent (`pr-reviewer`, `reality-checker`, `adversarial-reviewer`, `dual-reviewer`, `spec-conformance`, `chatgpt-*-review`) — no change.
+- Any gate script (G1/G2/G3/G4) — no change.
+- Any database schema, route, service, job, hook, or test file — no change (binding scope constraint).
+
+**Count reconciliation:** 2 new files (one runtime artefact, one optional repo file), 9 modified files, 0 schema migrations, 0 new jobs, 0 new services, 0 new routes. Anything that drifts from these counts is a spec violation.
+
+---
+
+## 5. Domain Model — artefact definitions
+
+The five artefacts this spec introduces or restructures.
+
+### 5.1 `intent.md` (new per-build artefact)
+
+Location: `tasks/builds/<slug>/intent.md`. Replaces the freeform `brief.md` for Standard+ builds. Trivial builds retain `brief.md`.
+
+Authored by `spec-coordinator` Step 3 in collaboration with the operator. Required before authoring proceeds to Step 6. Schema in §7.1.
+
+### 5.2 Lifecycle Declaration block (new spec sub-section)
+
+A required block inside every Standard+ spec. Captures capability cluster, owner, launch lifecycle state, risk surface, and review cadence. Schema in §7.2.
+
+### 5.3 ABCd Estimate block (new spec sub-section)
+
+A required block inside every Standard+ spec. Three-bucket S/M/L sizing per ABCd dimension plus free-text notes. Numeric estimates are prohibited (false-precision class). Schema in §7.3.
+
+### 5.4 `docs/capabilities.md` — Asset Register (restructured)
+
+Existing list converted into a per-capability record schema. Closed cluster list seeded. Structure-preserving backfill: existing descriptions retained, mapped into new fields, unknowns marked with explicit placeholders and follow-up tasks in `tasks/todo.md`. Schema in §7.4.
+
+### 5.5 Compound Learning Feedback decision (new finalisation step output)
+
+A proposal list produced by `finalisation-coordinator` Step 7a after KNOWLEDGE.md extraction. Each pattern is routed to at most one of six fixed targets (or "no further action"). Operator approves before any change applies — no auto-apply in v1. Schema in §7.5.
+
+---
+
+## 6. Service Contracts — coordinator changes
+
+This section pins the exact behaviour change inside each coordinator. The contract is "the coordinator must do X at step Y." Implementation is straight Markdown edits to the agent definitions — no code.
+
+### 6.1 `spec-coordinator` (three changes)
+
+| Step | Change | Required behaviour |
+|---|---|---|
+| Step 3 — brief intake | **Replace** "brief intake + UI-touch detection" with "intent intake (brief.md for Trivial, intent.md for Standard+) + UI-touch detection" | If classification ≥ Standard, the coordinator must produce `tasks/builds/<slug>/intent.md` matching §7.1 before proceeding. Trivial builds retain `brief.md`. Migration rule from brief §6.1 applies. |
+| Step 3a — Duplication / Strategy Check (NEW) | Insert between Step 3 (intake) and Step 4 (slug derivation) | Run the check per §6.3 of the brief. Capture the three outputs (duplication / strategic fit / recommendation) in `intent.md`. **Hard gate:** if `recommendation = stop` or `merge with existing capability`, halt the coordinator and escalate to the operator. The coordinator may resume only after operator decision is recorded. |
+| Step 6 — spec authoring | Authoring instructions must require Lifecycle Declaration (§7.2) and ABCd Estimate (§7.3) blocks in every Standard+ spec | If the spec emerges without both blocks, `spec-conformance` and `spec-reviewer` must flag it as a blocking gap. |
+
+**Order invariant:** Step 3 → Step 3a → Step 4 → Step 5 → Step 6 must execute in this order. The duplication gate runs **before** slug derivation only if the gate's `merge with existing` outcome could reassign the build to an existing slug — otherwise after slug derivation is acceptable. Spec author to confirm this ordering with operator during Chunk 3.
+
+### 6.2 `finalisation-coordinator` (two changes)
+
+| Step | Change | Required behaviour |
+|---|---|---|
+| Step 6 — full doc-sync sweep | **Extend** to include the new Capability Registration trigger row defined in `docs/doc-sync.md` | The sweep must produce a verdict for `docs/capabilities.md` of one of: `yes (updated)`, `n/a — docs-only`, `n/a — test-only`, `n/a — internal refactor with no capability surface change`, `n/a — build / tooling change only`. A `yes` verdict requires that the Asset Register row(s) follow §7.4 and that one of the registration outcomes from brief §6.5 is recorded. `MERGE_READY` is blocked until a verdict exists. |
+| Step 7a — Compound Learning Feedback (NEW) | Insert immediately after Step 7 (KNOWLEDGE.md pattern extraction) and before Step 8 (tasks/todo.md cleanup) | For each pattern extracted in Step 7, the coordinator must emit a proposal-list entry routing the pattern to at most one of six fixed targets (§7.5). Operator approves or rejects each entry. Approved entries become follow-up tasks in `tasks/todo.md` — they do **not** auto-apply in v1. |
+
+**Order invariant:** Step 6 → Step 7 → Step 7a → Step 8 → Step 9 (`MERGE_READY`) → Step 10 (label). The Compound Learning step never blocks `MERGE_READY` — it emits proposals and continues.
+
+### 6.3 `feature-coordinator` (no direct change)
+
+Documented for clarity: no edits to `.claude/agents/feature-coordinator.md`. The Risk Surface field in `intent.md` reuses the existing §5.1.2 vocabulary, so the existing adversarial-reviewer auto-invocation logic in Step 8 already responds to it. No new gates, no new builder behaviour. Confirmed in §4.3.
+
+### 6.4 All reviewers (no change)
+
+The GRADED reviewer matrix is unchanged. `spec-conformance` will, by virtue of reading the spec, flag missing Lifecycle Declaration / ABCd blocks as gaps — this is emergent behaviour from the authoring change, not a reviewer-agent change.
+
+---
+
+## 7. Data Contracts — artefact schemas
+
+This section pins the shape of every artefact crossing a coordinator boundary. Each contract names a producer and consumer, lists required and optional fields, and gives a worked example.
+
+### 7.1 `intent.md` contract
+
+**Name:** `INTENT_ARTEFACT`
+**Type:** Markdown file at `tasks/builds/<slug>/intent.md`
+**Producer:** `spec-coordinator` Step 3 (with operator)
+**Consumer:** `spec-coordinator` Step 6 (spec authoring), `finalisation-coordinator` Step 6 (auto-population of Asset Register)
+
+Required sections (Markdown H2 headings, in this order):
+
+```markdown
+## Problem Statement
+## Desired Outcome
+## Non-Goals
+## Affected Capability Area
+## User / Operator Impact
+## Risk Surface
+## Assumptions
+## Open Questions
+## Duplication / Strategy Check
+```
+
+Field rules:
+
+| Section | Required | Allowed values / shape |
+|---|---|---|
+| Problem Statement | yes | Free text, ≤ 200 words |
+| Desired Outcome | yes | Free text, ≤ 200 words |
+| Non-Goals | yes | Bulleted list; "None." is acceptable |
+| Affected Capability Area | yes | One value from the closed cluster list in §7.4. If multiple, list them; if a new cluster is needed, the spec must extend the cluster list in the same PR |
+| User / Operator Impact | yes | Free text, ≤ 100 words |
+| Risk Surface | yes | Zero-or-more values from the §5.1.2 vocabulary (canonical list reproduced in §7.1.1 below). Selecting any value flags the build for adversarial-reviewer during construction |
+| Assumptions | yes | Bulleted list; "None." acceptable |
+| Open Questions | yes | Bulleted list; "None." acceptable |
+| Duplication / Strategy Check | yes | Three rows: `Duplication check: clear / partial overlap / likely duplicate`; `Strategic fit: clear / questionable / not aligned`; `Recommendation: proceed / revise / merge with existing capability / stop` |
+
+#### 7.1.1 Risk Surface canonical vocabulary (reproduced from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2)
+
+`server/db/schema`, `server/routes`, `auth/permission services`, `middleware`, `RLS migrations`, `webhook handlers`, `billing surfaces`, `external messaging`, `agent runtime`, `approvals`.
+
+If a build touches none of these, the Risk Surface section must contain "None." — empty is invalid.
+
+### 7.2 Lifecycle Declaration contract
+
+**Name:** `SPEC_LIFECYCLE_DECLARATION`
+**Type:** Markdown table inside the spec (location: top of spec, after frontmatter)
+**Producer:** `spec-coordinator` Step 6 (with operator)
+**Consumer:** `finalisation-coordinator` Step 6 (auto-populates Asset Register row)
+
+Required table:
+
+```markdown
+## Lifecycle Declaration
+
+| Field | Value |
+|---|---|
+| Capability cluster | <from §7.4 cluster list> |
+| Capability owner | <handle, or placeholder per §7.4.3> |
+| Lifecycle state on launch | Inception | Growth |
+| Risk surface | <copied verbatim from intent.md §Risk Surface> |
+| Review cadence | <e.g. quarterly, biannually, on-incident-only> |
+```
+
+### 7.3 ABCd Estimate contract
+
+**Name:** `SPEC_ABCD_ESTIMATE`
+**Type:** Markdown table inside the spec
+**Producer:** `spec-coordinator` Step 6 (with operator)
+**Consumer:** `finalisation-coordinator` Step 6 (records actuals against estimates on Asset Register row)
+
+Required table:
+
+```markdown
+## ABCd Lifecycle Estimate
+
+| Dimension | Sizing | Notes |
+|---|---|---|
+| Acquire | S \| M \| L | <free text> |
+| Build | S \| M \| L | <free text> |
+| Carry | S \| M \| L | <free text> |
+| decommission | S \| M \| L | <free text> |
+```
+
+Field rules:
+
+- Sizing must be exactly one of `S`, `M`, `L` — no numeric estimates, no half-buckets. This is binding (false-precision prevention).
+- Notes column is free text but should name the dominant cost driver (e.g. "ongoing webhook monitoring", "compliance review per release").
+
+### 7.4 Asset Register row contract (`docs/capabilities.md`)
+
+**Name:** `ASSET_REGISTER_ROW`
+**Type:** Markdown table row in `docs/capabilities.md`
+**Producer:** `finalisation-coordinator` Step 6 (pre-filled from intent.md + Lifecycle Declaration; operator confirms)
+**Consumer:** humans, future `spec-coordinator` Step 3a (Duplication / Strategy Check sources)
+
+#### 7.4.1 Row fields (in order)
+
+| Field | Required | Source | Notes |
+|---|---|---|---|
+| Capability ID / slug | yes | new (kebab-case, derived from name) | Stable forever; used for cross-doc references |
+| Name | yes | operator-supplied | Human-readable; ≤ 80 chars |
+| Description | yes | preserved from existing `docs/capabilities.md` if migrating; new free text otherwise | ≤ 300 chars |
+| Owner | yes | spec Lifecycle Declaration; placeholders allowed per §7.4.3 | |
+| Cluster | yes | from §7.4.2 closed list | |
+| Lifecycle state | yes | Lifecycle Declaration | One of: `Inception`, `Growth`, `Mature`, `Declining`, `Sunset Candidate`, `Sunset` |
+| Launch source | yes | build slug or PR URL | Link if available |
+| Risk surface | yes | intent.md §Risk Surface | Comma-separated subset of §7.1.1 vocabulary |
+| Last review date | yes | finalisation date for new; backfill date for migrated entries | ISO date |
+| Carry notes | yes | spec ABCd estimate Notes column | |
+| Decommission notes | yes | spec ABCd estimate Notes column | "None planned" is acceptable for Inception/Growth |
+| Related docs | yes | links to spec, ADRs, KNOWLEDGE.md sections | Markdown link list |
+
+#### 7.4.2 Closed cluster list (seeded in `docs/capabilities.md` header)
+
+`Workflow Engine`, `Approvals`, `Identity & Auth`, `Reporting`, `Integrations`, `Agent Runtime`, `Admin & Ops`, `Billing`, `Memory & Knowledge`, `Audit & Governance`.
+
+Builds may not invent new clusters without extending this list in the same PR. The cluster list lives in the header of `docs/capabilities.md` so it is grep-able.
+
+#### 7.4.3 Owner placeholder rule
+
+A placeholder owner is allowed when permanent ownership cannot yet be assigned. Three artefacts must accompany the placeholder, all captured at registration time:
+
+1. A **temporary accountable reviewer** — a named human who answers questions in the interim. Written in the Owner cell as `TBD owner — temp reviewer: <name>`.
+2. An **owner-resolution follow-up task** in `tasks/todo.md` linked from the Asset Register row's Related docs column.
+3. A **resolution due date** appended to the Owner cell as `; due <ISO date>`.
+
+Example Owner cell: `TBD owner — temp reviewer: alice; due 2026-08-01`.
+
+Without all three, `finalisation-coordinator` Step 6 must reject the registration verdict.
+
+#### 7.4.4 Registration outcomes (recorded in the finalisation verdict)
+
+Exactly one of:
+
+- `create new capability record` — new row appended to the Asset Register.
+- `update existing capability record` — fields on an existing row mutated; Last review date refreshed.
+- `split existing capability record` — one row becomes two-or-more; original row marked deprecated or restated.
+- `merge with existing capability record` — build's surface absorbed into an existing row; no new row created.
+- `n/a with reason` — one of the four valid `n/a` reasons from §6.2 above.
+
+### 7.5 Compound Learning Feedback decision contract
+
+**Name:** `LEARNING_FEEDBACK_PROPOSAL`
+**Type:** Markdown table inside `tasks/builds/<slug>/progress.md` (Step 7a output section)
+**Producer:** `finalisation-coordinator` Step 7a
+**Consumer:** operator (approves), then `tasks/todo.md` (follow-up entries)
+
+For each pattern extracted in Step 7, one row:
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| `<KNOWLEDGE.md heading>` | one of the seven values below | one sentence | approved / rejected / deferred |
+
+**Target enum (fixed, closed):**
+
+1. `spec-authoring-instructions` (= `.claude/agents/spec-coordinator.md` Step 6 or `docs/spec-authoring-checklist.md` or `docs/spec-template.md`)
+2. `plan-template` (= `architect` plan template instructions)
+3. `agent-instruction` — one of the **fixed shortlist of six**: `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `pr-reviewer`, `architect`, `builder`. Other agents are not v1 targets — surface them as separate items in `tasks/todo.md` instead.
+4. `hook-or-grep-gate` (= `.claude/hooks/*` or a new lightweight grep check)
+5. `regression-test` (= new test path; respects `docs/testing-conventions.md`)
+6. `context-pack` (= `docs/context-packs/*`)
+7. `documentation` (= `architecture.md`, `CLAUDE.md`, `KNOWLEDGE.md` follow-up, `docs/decisions/<ADR>.md`)
+8. `no-further-action` — explicitly logged so the pattern is not silently dropped.
+
+**Auto-apply prohibition (v1):** the coordinator must not apply the change in the same finalisation cycle. Approved entries become `tasks/todo.md` items handled as separate (often Trivial) PRs.
+
+### 7.6 Source-of-truth precedence
+
+Two precedence pairs the implementation must respect.
+
+| Pair | Winner | Rationale |
+|---|---|---|
+| `intent.md` vs spec Lifecycle Declaration | spec Lifecycle Declaration | The spec is the authoritative artefact at finalisation. `intent.md` is the pre-spec record. If they disagree at finalisation, the spec wins and the operator may amend `intent.md` retroactively. |
+| Asset Register row vs spec Lifecycle Declaration | Asset Register row | The Asset Register reflects the *current* state of the capability across multiple builds. The spec reflects state *at that build's launch*. Subsequent builds may move the capability's lifecycle state without re-authoring the original spec. |
+
+Both pairs are append-only at the level of historical records — historical specs are not retroactively edited when the Asset Register evolves.
+
+---
+
+## 8. Permissions / RLS — opt-out
+
+**This spec introduces no tenant-scoped tables.** All changes are to markdown artefacts (`docs/*.md`, `tasks/builds/<slug>/*.md`, `.claude/agents/*.md`, `CLAUDE.md`, `architecture.md`) and coordinator instructions. There is no HTTP surface, no database write path, no agent execution path, and no tenant-scoped data.
+
+The canonical RLS posture sentence is **not applicable**. The four-requirement RLS checklist (`docs/spec-authoring-checklist.md` §4) is **opted out** by virtue of having no schema changes. If the architect later proposes any database or service component to implement part of this spec (e.g. a validation script that reads tenant data), that proposal must come back through spec amendment and the RLS checklist applies in full.
+
+---
+
+## 9. Execution Model — opt-out
+
+**This spec introduces no runtime code paths.** No sync/async decision, no pg-boss job, no prompt-partition / cache-tier choice. All enforcement is at coordinator-instruction execution time (which is itself part of the existing build pipeline runtime, not a new runtime).
+
+The execution-model checklist (`docs/spec-authoring-checklist.md` §5) is **opted out** by virtue of having no new write paths or external calls. The execution-safety contracts (`docs/spec-authoring-checklist.md` §10 — idempotency, retry classification, concurrency guards, terminal event guarantees, unique-constraint-to-HTTP mapping, state machine closure) are likewise **opted out** for the same reason. If the architect later proposes any of these surfaces, the checklist applies in full at that point.
+
+---
+
+## 10. Chunk Plan & Phase Sequencing
+
+Seven chunks, ordered by dependency. Each chunk is ≤ 5 files (per the builder constraint) and produces a coherent, individually-mergeable artefact set.
+
+### Dependency graph (must hold)
+
+```
+Chunk 1 (Intent artefact + spec-coordinator Step 3) ─┐
+                                                     ├─► Chunk 3 (Duplication / Strategy gate — depends on Chunk 1 intent.md schema)
+Chunk 2 (Lifecycle + ABCd in spec authoring) ────────┘
+
+Chunk 4 (capabilities.md Asset Register) ─► Chunk 5 (doc-sync row + finalisation Step 6)
+
+Chunk 5 ─► Chunk 6 (Compound Learning Feedback Step 7a)
+
+Chunk 1-6 ─► Chunk 7 (Process docs sync)
+```
+
+No backward dependencies. Chunks 1 and 2 can be implemented in parallel. Chunks 4 and 5 must be sequential (Asset Register structure must exist before doc-sync references it). Chunk 7 is last.
+
+### Chunk-by-chunk detail
+
+#### Chunk 1 — Intent artefact + spec-coordinator intake
+
+**Files touched:**
+1. `.claude/agents/spec-coordinator.md` (Step 3 edit only)
+2. Optional: an inline template snippet in the agent file (no separate template file in this chunk)
+
+**Behaviour:**
+- For classification ≥ Standard, the coordinator authors `tasks/builds/<slug>/intent.md` with the §7.1 schema before proceeding to Step 4.
+- For Trivial, retain existing `brief.md` flow.
+- Migration rule wording added inline (per brief §6.1).
+
+**Acceptance (verifiable):**
+- Reading `.claude/agents/spec-coordinator.md` shows Step 3 explicitly branches on classification.
+- A test build with classification = Standard produces `intent.md` matching §7.1.
+- A test build with classification = Trivial produces `brief.md` (existing behaviour preserved).
+
+#### Chunk 2 — Lifecycle Declaration + ABCd in spec authoring
+
+**Files touched:**
+1. `.claude/agents/spec-coordinator.md` (Step 6 edit)
+2. `docs/spec-authoring-checklist.md` (add Lifecycle Declaration + ABCd to rubric + Appendix checklist)
+3. Optional: `docs/spec-template.md` (new file — decision deferred to spec author; skip if duplicative)
+
+**Behaviour:**
+- Standard+ specs must include the §7.2 and §7.3 blocks.
+- Authoring checklist Appendix gains two new boxes: "Lifecycle Declaration present", "ABCd Estimate present with S/M/L sizing only".
+
+**Acceptance:**
+- Authoring a test spec without either block triggers a `spec-conformance` blocking finding.
+- Authoring with both blocks passes.
+
+#### Chunk 3 — Duplication / Strategy Check hard gate
+
+**Files touched:**
+1. `.claude/agents/spec-coordinator.md` (insert Step 3a)
+
+**Behaviour:**
+- New Step 3a runs between Step 3 and Step 4 (or before Step 6, depending on the open question in §15).
+- Outputs the three §7.1 Duplication / Strategy fields into `intent.md`.
+- Hard escalation on `stop` or `merge with existing capability`.
+
+**Acceptance:**
+- A test build with `recommendation = stop` halts the coordinator until operator decision is recorded in `progress.md`.
+- A test build with `recommendation = proceed` continues without prompt.
+
+#### Chunk 4 — `docs/capabilities.md` Asset Register
+
+**Files touched:**
+1. `docs/capabilities.md` (restructured)
+2. `tasks/todo.md` (follow-up entries for unknowns)
+
+**Behaviour:**
+- Existing capability descriptions preserved (structure-preserving backfill).
+- Closed cluster list (§7.4.2) seeded in the file header.
+- Asset Register table created with §7.4.1 columns.
+- Unknown fields filled with explicit placeholders + linked follow-up tasks.
+
+**Acceptance:**
+- Every existing capability listed today appears as a row in the new structure (none dropped).
+- File header contains the cluster list verbatim from §7.4.2.
+- No row has an unfilled field — placeholders are valid; blanks are not.
+- For every placeholder, a corresponding `tasks/todo.md` entry exists.
+
+#### Chunk 5 — doc-sync trigger row + finalisation Step 6 extension
+
+**Files touched:**
+1. `docs/doc-sync.md` (new trigger row for Capability Registration)
+2. `.claude/agents/finalisation-coordinator.md` (Step 6 edit — extend doc-sync sweep)
+
+**Behaviour:**
+- New row in the doc-sync trigger table names `docs/capabilities.md` with the triggers (§6.2 — capability-surface-affecting changes) and valid `n/a` reasons.
+- `finalisation-coordinator` Step 6 must emit a verdict for the new row (`yes (updated)` with §7.4.4 outcome OR `n/a` with valid reason).
+- `MERGE_READY` (Step 9) is blocked until the verdict exists.
+
+**Acceptance:**
+- A test build that touches a capability surface and merges without updating `docs/capabilities.md` blocks `MERGE_READY` with a clear error.
+- A test build whose only change is internal refactor (no capability surface) verdicts `n/a — internal refactor with no capability surface change` and proceeds.
+
+#### Chunk 6 — Compound Learning Feedback Step 7a
+
+**Files touched:**
+1. `.claude/agents/finalisation-coordinator.md` (insert Step 7a)
+
+**Behaviour:**
+- After Step 7 (KNOWLEDGE.md extraction), the coordinator emits a `LEARNING_FEEDBACK_PROPOSAL` table to `progress.md`.
+- Each pattern is routed to exactly one target from the §7.5 enum.
+- Operator approves/rejects/defers each row inline.
+- Approved entries become `tasks/todo.md` items.
+- **No auto-apply.** This is binding.
+
+**Acceptance:**
+- A test finalisation with three KNOWLEDGE.md patterns produces three proposal rows.
+- Operator approval of a row creates a corresponding `tasks/todo.md` entry; no agent / hook / test file changes occur in the same cycle.
+
+#### Chunk 7 — Process documentation sync
+
+**Files touched:**
+1. `CLAUDE.md` (lifecycle description update)
+2. `architecture.md` (agent fleet / lifecycle pointers)
+3. Optional: `current-focus.md` schema (only if no broader schema migration required — otherwise defer per brief §9 Chunk 7)
+
+**Behaviour:**
+- Replace the existing lifecycle prose in CLAUDE.md and architecture.md with the new sequence (Intent → Elaboration → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Finalisation → Merge → Capability Registration → Compound Learning).
+- Update any cross-doc references that now point at obsolete step names.
+
+**Acceptance:**
+- Doc-sync sweep at finalisation of this build emits `yes (updated)` for both `CLAUDE.md` and `architecture.md`.
+- A grep of the repo for the old step phrasing returns no results, or every result is in `docs/decisions/` (historical) or `_retired/` (archived).
+
+---
+
+## 11. Backwards-Compatibility Invariants
+
+These must hold after this spec ships. Each is verifiable by inspection or by running a test build.
+
+| Invariant | How to verify |
+|---|---|
+| All existing coordinator phases run in their canonical order (S0, S1, S2 sync; G1/G2/G3/G4 quality gates; GRADED reviewer matrix) | Side-by-side diff of `.claude/agents/spec-coordinator.md`, `feature-coordinator.md`, `finalisation-coordinator.md` against the locked baseline; only Steps 3, 3a, 6 (spec-coordinator), Step 6 (extend), Step 7a (insert) (finalisation-coordinator) differ. |
+| No reviewer agent file changes | `git diff` against the baseline shows zero changes under `.claude/agents/pr-reviewer.md`, `reality-checker.md`, `adversarial-reviewer.md`, `dual-reviewer.md`, `spec-conformance.md`, any `chatgpt-*-review.md`. |
+| No gate-script changes | `git diff` shows zero changes under any path matching `scripts/gates/*`, `scripts/verify-*`, or the test-gate policy at `references/test-gate-policy.md`. |
+| `KNOWLEDGE.md` extraction (Step 7) preserved | Step 7 still runs before Step 7a; output format unchanged. |
+| `MERGE_READY` flow preserved | Step 9 of `finalisation-coordinator` still transitions `current-focus.md` and applies the `ready-to-merge` label. |
+| Trivial builds keep `brief.md`-only flow | A Trivial classification produces no `intent.md`; existing behaviour preserved. |
+| No database schema, no new routes, no new jobs, no new services | `git diff` shows zero changes under `server/db/schema/`, `server/routes/`, `server/jobs/`, `server/services/`. |
+
+If any invariant fails, the build is non-conformant — `spec-conformance` must block.
+
+---
+
+## 12. Acceptance Criteria
+
+A composite of Goals (§2) and Chunk-level acceptance (§10). Restated as a single checklist for `spec-conformance` and reviewer use.
+
+### Functional
+- [ ] **G1:** A Standard+ test build produces `tasks/builds/<slug>/intent.md` matching the §7.1 schema.
+- [ ] **G2:** `spec-coordinator` Step 3a runs before authoring; `stop` / `merge with existing capability` outcomes escalate to operator.
+- [ ] **G3:** A Standard+ test spec without Lifecycle Declaration or ABCd Estimate is flagged by `spec-conformance`.
+- [ ] **G3:** ABCd values are S / M / L only; numeric values are rejected by the authoring checklist.
+- [ ] **G4:** `docs/capabilities.md` matches the §7.4 structure with the §7.4.2 cluster list seeded in the header.
+- [ ] **G4:** Every pre-existing capability description appears in the new structure (none dropped).
+- [ ] **G5:** `docs/doc-sync.md` contains a Capability Registration trigger row.
+- [ ] **G5:** `finalisation-coordinator` Step 6 emits a Capability Registration verdict; `MERGE_READY` is blocked without it.
+- [ ] **G5:** A test build with no capability-surface impact verdicts `n/a` and proceeds.
+- [ ] **G6:** `finalisation-coordinator` emits a `LEARNING_FEEDBACK_PROPOSAL` table for every pattern extracted in Step 7.
+- [ ] **G6:** No agent / hook / test file is modified in the same finalisation cycle as a learning-feedback approval (auto-apply prohibition).
+
+### Backwards Compatibility
+- [ ] **G7:** All §11 invariants hold.
+
+### Governance
+- [ ] Every registered capability has Owner (or compliant placeholder per §7.4.3), Lifecycle state, Risk surface, Carry notes, Decommission notes, Last review date.
+- [ ] No row in the Asset Register has an unfilled field; placeholders are explicit, blanks are invalid.
+- [ ] For every placeholder Owner, a follow-up task exists in `tasks/todo.md` with a resolution due date.
+
+### Self-consistency
+- [ ] Goals (§2) and Implementation (§10) describe the same set of changes.
+- [ ] The numeric counts in §4.2 ("9 modified files") reconcile to the actual git diff at merge.
+- [ ] No prose reference to a file outside §4 appears anywhere in the spec.
+- [ ] Every "must" / "binding" / "hard gate" claim has a backing mechanism named.
+
+---
+
+## 13. Testing Posture
+
+Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`.
+
+This spec changes **only Markdown and agent-instruction files**. No pure functions are added. No HTTP routes, no DB writes, no state machines. Consequently:
+
+- **No new unit tests** are added.
+- **No new integration tests** are added.
+- **Static gates** (`lint`, `typecheck`) remain the primary verification — they will not exercise the new behaviour but will catch any incidental code touched by Chunk 7's doc updates.
+- **Behavioural verification** is by inspection: reading the updated agent files and running a representative test build through each chunk's acceptance criteria.
+
+If the architect proposes lightweight static validation scripts (e.g. a script that lints `docs/capabilities.md` for missing required columns), those scripts must respect `references/test-gate-policy.md` (CI-only for full suites; targeted `npx vitest run <path>` is the only locally-runnable test command).
+
+**Framing deviation acknowledgement:** none. This spec's testing plan is fully consistent with `docs/spec-context.md`.
+
+---
+
+## 14. Deferred Items
+
+Items mentioned in prose but intentionally deferred from v1.
+
+- **`docs/spec-template.md` reference file.** Chunk 2 may produce this if the spec author judges it useful; otherwise the same content lives inline in `spec-coordinator.md` Step 6 instructions and `docs/spec-authoring-checklist.md`. Decision deferred to Chunk 2 implementation. Reason: avoid creating a maintenance burden if the authoring checklist already covers it.
+- **`current-focus.md` capability reference.** Chunk 7 may add this if it does not require broader schema migration; otherwise deferred. Reason: scope-control — schema migration is out of scope for v1.
+- **Auto-apply of Compound Learning Feedback approvals.** Deferred indefinitely. v1 emits proposals only; operator-approved entries become `tasks/todo.md` items handled as separate PRs. Reason: auto-apply requires safety guarantees (test-gate policy compliance, agent-definition validation) not in scope here.
+- **Lifecycle Health Score automation.** Deferred to a future build. v1 stores fields; scoring is manual / human-led. Reason: scoring-engine is out of scope per the v1 implementation constraint (§1).
+- **Decommission coordinator (Phase D).** Deferred until the Asset Register has real entries to act on. Reason: premature without entries.
+- **Continuous regulatory monitor.** Deferred. Reason: heavier than v1's enforcement model allows.
+- **Retroactive `brief.md` → `intent.md` rewriting for historical builds.** Permanently deferred. Historical artefacts remain valid as-is. Reason: zero value, non-trivial cost.
+
+---
+
+## 15. Open Questions for the Architect
+
+These resolve during plan authoring or early Chunk 3.
+
+1. **Order of Step 3a vs Step 4 in `spec-coordinator`.** If the duplication gate's `merge with existing capability` outcome can reassign the build to an existing slug, Step 3a must run **before** Step 4 (slug derivation). If reassignment is always operator-driven and never automated, Step 3a after Step 4 is acceptable. Recommendation: run Step 3a **before** Step 4 to keep the slug aligned with the operator's reassignment decision. Confirm during Chunk 3.
+
+2. **Should `docs/spec-template.md` be created as a new file (Chunk 2)?** Pro: a single canonical template makes operator-facing spec creation faster. Con: another file to keep in sync with the authoring checklist. Recommendation: skip the new file; embed the template inline in `spec-coordinator.md` Step 6 and `docs/spec-authoring-checklist.md` Appendix. Revisit if operators report friction.
+
+3. **Closed cluster list — completeness.** The §7.4.2 list has ten clusters. Are any product surfaces missing (e.g. "Onboarding", "Telemetry", "Notifications")? Recommendation: review against `docs/capabilities.md` during Chunk 4 backfill; extend the list in the same PR if a gap is found. The list is closed but mutable via spec amendment.
+
+4. **`current-focus.md` schema migration scope.** Whether the optional capability reference (Chunk 7) requires touching the `current-focus.md` reader/parser logic anywhere. If a parser exists, defer per §14. Quick grep: `grep -rn "current-focus" .claude/ docs/` will surface any parser. Recommendation: defer if a parser exists; add as optional Markdown otherwise.
+
+5. **Validation script for `docs/capabilities.md`.** Should Chunk 5 include a lightweight static check (`scripts/check-capabilities-md.sh`) that the Asset Register rows have all required fields? Pro: catches regressions early. Con: out of v1 scope if interpreted strictly. Recommendation: include it as a **grep-based** hook in `.claude/hooks/` only if the implementation fits in one ≤ 50-line script; otherwise defer.
+
+---
+
+End of spec. Status: **draft** — ready for `spec-reviewer` and `chatgpt-spec-review`.

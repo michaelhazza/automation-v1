@@ -1,7 +1,7 @@
 # Brief: Development Lifecycle Governance Upgrade
 
 **Slug:** `development-lifecycle-governance-upgrade`
-**Status:** Draft for specification
+**Status:** Locked — handed to specification (2026-05-14)
 **Supersedes:** previous draft of this file (AI-DLC + Skyjed synthesis, 2026-05-14)
 **Extends, does not replace:** `docs/2026-04-30-dev-pipeline-coordinators-spec.md` (canonical pipeline contract)
 
@@ -308,6 +308,7 @@ The spec author should refine these; this is a starting decomposition for the ar
 - Convert `docs/capabilities.md` into the Asset Register structure (§6.5 fields).
 - Seed the closed capability-cluster list before the gate goes live.
 - Backfill existing capabilities into the new structure as a one-time pass.
+- **Implementation guidance for the spec author:** preserve useful existing content. Treat the first pass as a **structure-preserving backfill**, not a wholesale replacement. Keep current capability descriptions, map them into the new Asset Register fields, and mark unknowns with explicit placeholders plus follow-up tasks in `tasks/todo.md`. Do not delete content the operator may need; route ambiguity to follow-up rather than discarding it.
 
 ### Chunk 5: Capability Registration gate via doc-sync
 - Add the new trigger row to `docs/doc-sync.md`.
