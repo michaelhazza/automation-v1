@@ -505,4 +505,14 @@ export const methodologyStubHandlers: Record<string, SkillHandler> = {
         'Follow the 42 Macro A-Player Brain instructions injected into your system prompt. Output the three tiers (Dashboard, Executive Summary, Full Analysis) in plain language. Return the completed markdown content as the value of the tier3FullAnalysis fields and the rendered filename. The agent will pass the result to send_to_slack.',
     });
   },
+
+  // ── Generic methodology fallback (does NOT use executeMethodologySkill scaffold) ──
+  generic_methodology: async (input) => {
+    const skillName = typeof input.skillName === 'string' ? input.skillName : 'unknown';
+    return {
+      success: true,
+      skillName,
+      guidance: 'Follow the methodology instructions in your skill context to complete this task.',
+    };
+  },
 };

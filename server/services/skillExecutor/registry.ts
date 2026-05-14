@@ -46,7 +46,6 @@ import {
 } from './handlers/workflowStudio.js';
 import { skillStudioHandlers } from './handlers/skillStudio.js';
 import { methodologyStubHandlers } from './handlers/methodologyStubs.js';
-import { methodologyHandlers } from './handlers/methodology.js';
 import { autoGatedStubHandlers } from './handlers/autoGatedStubs.js';
 import { reviewGatedProposerHandlers } from './handlers/reviewGatedProposers.js';
 import { thinDispatcherHandlers } from './handlers/thinDispatchers.js';
@@ -114,8 +113,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   ...skillStudioHandlers,
   // ── Methodology skills — LLM-guided scaffold handlers ─────────────────
   ...methodologyStubHandlers,
-  // ── Generic methodology handler ──────────────────────────────────────────
-  ...methodologyHandlers,
   // ── Auto-gated stubs — unwired integrations returning {status:'stub'} ──
   ...autoGatedStubHandlers,
   // ── Review-gated proposers — single-line proposeReviewGatedAction wraps ─
