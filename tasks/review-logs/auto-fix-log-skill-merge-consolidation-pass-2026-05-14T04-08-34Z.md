@@ -25,6 +25,13 @@ Iteration log appended below as each iteration runs.
 - **Fix:** Added `IF EXISTS` to each `DROP COLUMN` in `migrations/0358_skill_merge_consolidation.down.sql`; added a header comment explaining the convention and why violating it breaks fresh-DB CI.
 - **G3-local verify:** lint 0 errors / 899 baseline warnings; typecheck clean.
 - **Single-fix-per-iteration justification:** all 6 CI failures (3 FAILUREs + 3 CANCELLEDs) trace to a single root cause — the migration runner aborting at 0358's down step prevents migrations completion, which blocks both test jobs and propagates as cancellations through the dependency chain. One fix, one root cause, six observed symptoms.
-- **Diff:** (commit sha appended after push)
-- **CI re-fire result:** pending at next poll
+- **Diff:** 595fed4f
+- **CI re-fire result:** **green** at 2026-05-14T04:18:03Z — all 6 checks COMPLETED with SUCCESS, mergeStateStatus CLEAN. Single iteration resolved all 6 prior failures (3 FAILUREs + 3 CANCELLEDs).
+
+## Auto-fix loop closed
+
+- **Iterations used:** 1 / 5
+- **Outcome:** CI green; proceeding to Step 12 (auto-merge).
+- **Patterns extracted for KNOWLEDGE.md:** scripts/migrate.ts treats `*.down.sql` files as forward migrations — `.down.sql` files MUST use `IF EXISTS` to be idempotent against this. See KNOWLEDGE.md entry pending after merge.
+
 
