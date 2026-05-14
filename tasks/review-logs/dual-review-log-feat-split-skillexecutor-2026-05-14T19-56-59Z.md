@@ -1,5 +1,6 @@
 # Dual Review Log — feat-split-skillexecutor
 
+**Commit at finish:** 41fcc8e1
 **Files reviewed:** entire `feat/split-skillexecutor` branch vs `main` — `architecture.md`, `server/services/skillExecutor.ts` (4-LOC barrel), the 38 modules under `server/services/skillExecutor/` (including `adapter-registration.ts`, `context.ts`, `gating.ts`, `pipeline.ts`, `registry.ts`, and the 33 handler modules under `handlers/`), plus build artifacts under `tasks/builds/feat-split-skillexecutor/` and the spec-conformance log.
 **Iterations run:** 1/3
 **Timestamp:** 2026-05-14T19:56:59Z
