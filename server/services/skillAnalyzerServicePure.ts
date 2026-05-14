@@ -2644,10 +2644,8 @@ export function rankAgentsForCandidate(
 // ---------------------------------------------------------------------------
 // Phase 5: deriveDiffRows — token-level diff for the Recommended column
 // ---------------------------------------------------------------------------
-// Used by the Phase 5 MergeReviewBlock React component to render inline
-// highlighting in the Recommended column of the three-column merge view.
 // Pure wrapper around jsdiff's diffWordsWithSpace so the diff algorithm
-// is testable in isolation and the React component is a thin renderer.
+// is testable in isolation.
 
 /** One token in a token-level diff between two strings. The kind tells the
  *  renderer which span style to apply: 'unchanged' is plain text, 'added'
