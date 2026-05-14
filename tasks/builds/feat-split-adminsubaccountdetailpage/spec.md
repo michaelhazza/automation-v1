@@ -37,6 +37,7 @@
 - Permission-gating change. `mode='client'` vs `mode='admin'` still controls visible tabs and the "Back to companies" link.
 - Re-routing the page. The file path `client/src/pages/AdminSubaccountDetailPage.tsx` does not change.
 - New tests. Per `docs/spec-context.md` (`runtime_tests: pure_function_only`, `frontend_tests: none_for_now`), no UI tests are added.
+- Preserving draft tab-state across tab switches. See the acknowledged behaviour delta in §12 — modal-open state, unsaved settings-form edits, and unsaved board-column edits no longer survive a switch-away-and-back. This is an accepted minor delta for this refactor.
 
 ## 3. Existing primitives this spec reuses
 
@@ -142,7 +143,11 @@ The refactor splits ownership by tab while keeping the page-level identity load:
 
 Pin every shape. JSON-style examples are illustrative; final TypeScript shapes live in `types.ts` co-located with the tab components.
 
-**Error-banner contract (applies to every extracted tab).** Today the host owns a shared `error` state (line 51 of the source) rendered as a single banner at line 244 above the tab dispatch; `handleCreateCategory`, `handleCreateLink`, `handleSaveSettings` all push into it, and the tab-bar handler clears it on switch (line 231). After extraction each tab owns its own local `error` state and renders the same Tailwind banner (`<div className="text-[13px] text-red-600 mb-4">{error}</div>`) at the top of its body. The host's shared `error` state and banner are removed. Tab-switch clearing happens implicitly because the unmounting tab discards its local state. This is the pattern AgentsTab and BeliefsTab already use today (their internal `setError` at lines 589 / 963 of the source). No new `onError` callbacks are added.
+**Error-banner contract (applies only to the THREE tabs whose error path moves off the host).** Today the host owns a shared `error` state (line 51 of the source) rendered as a single banner at line 244 above the tab dispatch; only three handlers push into it: `handleCreateCategory`, `handleCreateLink`, `handleSaveSettings`. The tab-bar handler clears it on switch (line 231). After extraction those three handlers' tabs — `CategoriesTab`, `WorkflowsTab`, `AdminTab` — each own their own local `error` state and render the same simple Tailwind banner (`<div className="text-[13px] text-red-600 mb-4">{error}</div>`) at the top of their body, byte-for-byte identical to the host's current banner. Tab-switch clearing happens implicitly because the unmounting tab discards its local state. The host's shared `error` state and banner are removed.
+
+All OTHER tabs (AgentsTab, BeliefsTab, DevContextConfig, OnboardingTab) keep their existing local error treatment verbatim — AgentsTab and DevContextConfig use boxed red banners (`bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 …`), OnboardingTab uses a plain `py-4 text-sm text-red-600`, BeliefsTab has no local error state and uses `toast.error(…)`. None of those visual treatments change; this contract does NOT propagate to them. The §2 "Visual change of any kind" non-goal is preserved.
+
+No new `onError` callbacks are added.
 
 ### 8.1 `<OnboardingTab>`
 
@@ -299,13 +304,16 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 - "Back to companies" link only in `mode='admin'`: preserved.
 - All console error logs in `.catch` clauses: preserved verbatim; do not consolidate into a helper.
 - Visible error-banner location: changes from one host-level banner above the tab dispatch to one local banner inside whichever extracted tab raised the error. Tab-switch clearing remains automatic (unmount discards local state). Same Tailwind class string preserved verbatim.
+- **Acknowledged behaviour delta — draft tab-state across tab switches.** Today, `settingsForm`, `boardColumns`, `showCatForm`/`catForm`, `showLinkForm`/`linkForm` all live on the host above the activeTab conditional, so unsaved values and open-modal state survive switching away and back. After this refactor those states live inside their respective tab components, which unmount when activeTab changes. The behaviour delta: (a) an open category-create or workflow-link modal closes when the user switches tabs, (b) unsaved settings-form edits in AdminTab are lost on tab switch (last-fetched `Subaccount` reseeds the form on remount), (c) unsaved board-column edits in BoardConfigTab are lost on tab switch (the tab refetches `/board-config` on remount). This delta is intentional and accepted because preserving the old behaviour would require either mounting every tab unconditionally and toggling visibility via `hidden` (which causes every tab to self-fetch on initial page load, defeating the lazy/conditional render model the page uses) or lifting all draft state back to the host (which undoes the refactor). The current behaviour is not a feature users rely on — it is an incidental consequence of where the state lived. Document in the PR description for the human to confirm acceptance.
 
 ## 13. Acceptance criteria
 
 - Pre / post comparison: `git diff client/src/pages/AdminSubaccountDetailPage.tsx` shows the host shrunk to ≤ 280 LOC; no JSX or class strings changed for any element that remains in the host.
 - New folder `client/src/components/admin-subaccount-detail/` exists with one file per tab listed in §5.
 - `npm run lint`, `npm run typecheck`, `npm run build:client` all pass.
-- Manual smoke test through every tab in both `mode='admin'` and `mode='client'` — host + all 11 tabs render, all modals open and close, link / unlink / save / reset / init / run / unlink / template-apply all succeed against a dev backend.
+- Manual smoke test:
+  - In `mode='admin'`: all 11 tabs (`onboarding`, `engines`, `workflows`, `agents`, `beliefs`, `categories`, `tags`, `board`, `usage`, `workspace`, `admin`) render; all modals open and close; link / unlink / save / reset / init / run / template-apply all succeed against a dev backend.
+  - In `mode='client'`: the only visible tabs (`board`, `categories`) both render; category create/delete and board init/save/reset all succeed; the "Back to companies" link is hidden as expected.
 - No new top-level package dependencies added to `package.json` by this refactor. New tab files MAY (and will need to) import existing modules — `react-router-dom` (for `Link`), `../../lib/api` (for the axios wrapper), `../../lib/auth` (for `User`) — as their own props and JSX require. The intent of this criterion is "no new npm dependencies," not "no new import statements."
 
 ## 14. Open questions
