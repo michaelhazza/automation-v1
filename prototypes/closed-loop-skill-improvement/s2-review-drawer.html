@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skill improvement review — Draft Email</title>
+  <link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-logo-text">Automation OS</div>
+        <div class="sidebar-logo-sub">Meridian Agency</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace</div>
+      <a href="s1-review-queue.html" class="sidebar-nav-item active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+        <span class="nav-badge amber">4</span>
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        AI Team
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Activity
+      </a>
+      <a href="s3-skill-detail.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Skills
+      </a>
+    </div>
+  </aside>
+
+  <!-- Page behind drawer (blurred queue) -->
+  <main class="main-content" style="filter:blur(1.5px); pointer-events:none; user-select:none; opacity:0.6;">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Inbox</h1>
+        <p class="page-subtitle">Skill improvements pending your review</p>
+      </div>
+    </div>
+    <div style="height:400px; background:#fff; border:1px solid #e2e8f0; border-radius:12px;"></div>
+  </main>
+
+  <!-- Drawer overlay -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="handleOverlayClick(event)">
+    <div class="drawer" onclick="event.stopPropagation()">
+      <!-- Drawer header -->
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-head-meta">
+            <div class="drawer-head-skill">Draft Email</div>
+            <span class="kind-pill kind-example">Example</span>
+          </div>
+          <div class="drawer-subaccount-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Acme Corp workspace
+          </div>
+        </div>
+        <a href="s1-review-queue.html" class="drawer-close">&times;</a>
+      </div>
+
+      <!-- Drawer body -->
+      <div class="drawer-body">
+
+        <!-- Section 1: Proposed improvement (editable) -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Proposed improvement</div>
+          <label class="form-label">
+            Improvement text
+            <span style="font-weight:400; color:#94a3b8;">(Example type, max 1500 chars)</span>
+          </label>
+          <textarea
+            id="improvementText"
+            class="form-input"
+            rows="6"
+            oninput="updateCounter()"
+          >When a deadline has been missed, open the email with a direct, empathetic acknowledgement before any other content. Example:
+
+"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
+
+Do not lead with explanations or context before the apology.</textarea>
+          <div class="char-counter ok" id="charCounter">1,198 / 1,500</div>
+        </div>
+
+        <!-- Section 2: Diff -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Change preview</div>
+          <div class="diff-grid">
+            <div class="diff-pane">
+              <div class="diff-pane-head before">Without this improvement</div>
+              <div class="diff-pane-body">You are a professional email drafter for [company].
+
+INSTRUCTIONS:
+1. Match the sender's voice and tone.
+2. Keep emails concise — one idea per paragraph.
+3. Always include a clear subject line.
+4. Close with next steps when relevant.
+
+When writing apology emails, be sincere and brief.</div>
+            </div>
+            <div class="diff-pane">
+              <div class="diff-pane-head after">With this improvement</div>
+              <div class="diff-pane-body">You are a professional email drafter for [company].
+
+INSTRUCTIONS:
+1. Match the sender's voice and tone.
+2. Keep emails concise — one idea per paragraph.
+3. Always include a clear subject line.
+4. Close with next steps when relevant.
+
+When writing apology emails, be sincere and brief.
+
+<span class="diff-added">EXAMPLE (missed deadline apology):
+"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
+
+Open with acknowledgement before explanation.</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Why this was proposed (collapsed) -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Why this was proposed</div>
+          <button class="expander-trigger" id="whyTrigger" onclick="toggleExpander('why')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            See failing run and root-cause analysis
+          </button>
+          <div class="expander-body" id="why-body">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <!-- Failing run -->
+              <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
+                <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:8px;">Failing run</div>
+                <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:5px;">
+                  <div><span style="font-weight:600; color:#0f172a;">Run:</span> <a href="s4-run-trace.html" style="color:#4f46e5; font-weight:600; text-decoration:none;">Draft Email run, 13 May 2026 09:41</a></div>
+                  <div><span style="font-weight:600; color:#0f172a;">Failed check:</span> Tone Alignment</div>
+                  <div><span style="font-weight:600; color:#0f172a;">Judge reasoning:</span> "The email began with a three-paragraph explanation of why the deadline was missed before any acknowledgement. This pattern fails the empathy-first requirement for apology correspondence."</div>
+                </div>
+              </div>
+              <!-- Root cause -->
+              <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
+                <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:8px;">Root-cause analysis</div>
+                <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:5px;">
+                  <div><span style="font-weight:600; color:#0f172a;">Failure mode:</span> Missing concrete example for high-stakes edge case</div>
+                  <div><span style="font-weight:600; color:#0f172a;">Contributing factors:</span>
+                    <ul style="margin:4px 0 0 18px; display:flex; flex-direction:column; gap:3px;">
+                      <li>Skill body describes the principle but provides no worked example</li>
+                      <li>Agent has no sample to pattern-match against for deadline-miss scenarios</li>
+                      <li>Three prior runs show same opening structure failing the same check</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Peer review -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Peer review</div>
+          <div class="peer-verdict">
+            <div class="peer-verdict-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="peer-verdict-text">
+              <span class="peer-verdict-label">Addresses root cause: yes</span>
+              Adding a concrete worked example directly resolves the identified gap — the skill described the principle but lacked a model to pattern-match against for deadline-miss scenarios.
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /drawer-body -->
+
+      <!-- Drawer footer -->
+      <div class="drawer-foot">
+        <!-- Reject is destructive, placed at left separated from primaries -->
+        <button class="btn btn-ghost danger" onclick="handleReject()">Reject</button>
+        <div style="flex:1;"></div>
+        <button class="btn btn-secondary" onclick="handleEditAccept()" id="editAcceptBtn" style="display:none;">Edit &amp; accept</button>
+        <button class="btn btn-accept" onclick="handleAccept()" id="acceptBtn">Accept</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast">
+  <span class="toast-icon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  </span>
+  <span id="toastMsg">Improvement accepted</span>
+</div>
+
+<!-- Proto nav -->
+<div class="proto-nav">
+  Prototype:
+  <a href="s1-review-queue.html">S1 Queue</a>
+  <a href="s2-review-drawer.html" class="current">S2 Drawer</a>
+  <a href="s3-skill-detail.html">S3 Skill detail</a>
+  <a href="s4-run-trace.html">S4 Run trace</a>
+</div>
+
+<script>
+  // Track whether user has edited text
+  const originalText = document.getElementById('improvementText').value;
+
+  function updateCounter() {
+    const text = document.getElementById('improvementText').value;
+    const len = text.length;
+    const max = 1500;
+    const counter = document.getElementById('charCounter');
+    const remaining = max - len;
+    counter.textContent = len.toLocaleString() + ' / ' + max.toLocaleString();
+
+    if (remaining < 0) {
+      counter.className = 'char-counter over';
+    } else if (remaining < 150) {
+      counter.className = 'char-counter warn';
+    } else {
+      counter.className = 'char-counter ok';
+    }
+
+    // Swap primary CTA if text has been edited
+    const edited = text !== originalText;
+    document.getElementById('acceptBtn').style.display = edited ? 'none' : 'inline-flex';
+    document.getElementById('editAcceptBtn').style.display = edited ? 'inline-flex' : 'none';
+  }
+
+  function toggleExpander(id) {
+    const body = document.getElementById(id + '-body');
+    const trigger = document.getElementById(id + 'Trigger');
+    const isOpen = body.classList.contains('open');
+    body.classList.toggle('open');
+    trigger.classList.toggle('open');
+    trigger.querySelector('span') && null; // no span here
+    const svg = trigger.querySelector('svg');
+    svg.style.transform = isOpen ? '' : 'rotate(90deg)';
+  }
+
+  function handleAccept() {
+    showToast('Improvement accepted', '#4ade80');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1400);
+  }
+
+  function handleEditAccept() {
+    showToast('Improvement accepted with edits', '#4ade80');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1400);
+  }
+
+  function handleReject() {
+    showToast('Improvement rejected — regression test case created', '#f87171');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1800);
+  }
+
+  function showToast(msg, iconColor) {
+    document.getElementById('toastMsg').textContent = msg;
+    const toast = document.getElementById('toast');
+    toast.querySelector('.toast-icon svg').setAttribute('stroke', iconColor);
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+
+  function handleOverlayClick(e) {
+    if (e.target === document.getElementById('drawerOverlay')) {
+      window.location.href = 's1-review-queue.html';
+    }
+  }
+
+  // Show Edit & Accept button label on first keystroke
+  document.getElementById('improvementText').addEventListener('input', updateCounter);
+</script>
+
+</body>
+</html>

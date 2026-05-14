@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Closed-loop skill improvement — Prototype index</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    .index-body { max-width: 680px; margin: 60px auto; padding: 0 24px; }
+    .index-title { font-size: 26px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .index-sub   { font-size: 14px; color: #64748b; margin-bottom: 36px; }
+    .screen-card {
+      display: flex; gap: 18px; padding: 20px;
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      text-decoration: none; color: inherit;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      margin-bottom: 12px;
+    }
+    .screen-card:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+    .screen-card-num {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: #eef2ff; color: #4338ca;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+    }
+    .screen-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+    .screen-card-desc  { font-size: 13px; color: #64748b; line-height: 1.5; }
+    .screen-card-tag   { font-size: 11.5px; color: #6366f1; font-weight: 600; margin-top: 6px; display: inline-block; }
+    .flow-note {
+      background: #f5f3ff; border: 1px solid #c4b5fd;
+      border-radius: 10px; padding: 14px 16px;
+      font-size: 13px; color: #5b21b6; line-height: 1.6;
+      margin-bottom: 28px;
+    }
+  </style>
+</head>
+<body style="background:#f8fafc;">
+
+<div class="index-body">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+    <div class="sidebar-logo-mark" style="width:36px; height:36px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </div>
+    <span style="font-size:13px; font-weight:600; color:#64748b;">Automation OS</span>
+  </div>
+
+  <h1 class="index-title">Closed-loop skill improvement</h1>
+  <p class="index-sub">Hi-fi prototype, Round 1. Agents propose improvements; operators approve them.</p>
+
+  <div class="flow-note">
+    <strong>Flow:</strong> Operator opens Inbox (S1), clicks a skill improvement row, reviews it in the side drawer (S2), and accepts, edits, or rejects. Accepted improvements appear in the skill detail page (S3). The run trace (S4) shows how the proposed improvement event surfaces inline after a scorecard fail.
+  </div>
+
+  <a href="s1-review-queue.html" class="screen-card">
+    <div class="screen-card-num">1</div>
+    <div>
+      <div class="screen-card-title">Review queue — Skill improvements tab</div>
+      <div class="screen-card-desc">Extends <code>ReviewQueuePage</code>. New "Skill improvements" tab added to the existing Briefs / Needs Review tabs. Toggle the ViewModeSwitcher to see Workspace vs. Org (cross-workspace roll-up with Subaccount column).</div>
+      <span class="screen-card-tag">Toggle Workspace / Org in the header to see both variants</span>
+    </div>
+  </a>
+
+  <a href="s2-review-drawer.html" class="screen-card">
+    <div class="screen-card-num">2</div>
+    <div>
+      <div class="screen-card-title">Amendment review drawer</div>
+      <div class="screen-card-desc">Side drawer opened from a queue row. Shows skill name, kind pill, proposed text (editable with char counter), diff view, collapsible "Why proposed" block with failing run details, and peer-review verdict. Footer: Accept / Edit &amp; accept (CTA swaps when you type) / Reject.</div>
+      <span class="screen-card-tag">Type in the textarea to swap "Accept" to "Edit &amp; accept". Click Reject to see the regression toast.</span>
+    </div>
+  </a>
+
+  <a href="s3-skill-detail.html" class="screen-card">
+    <div class="screen-card-num">3</div>
+    <div>
+      <div class="screen-card-title">Skill detail with active improvements</div>
+      <div class="screen-card-desc">Extends <code>SubaccountSkillsPage</code>. New "Active improvements (N / 20)" section below skill body. Each row shows kind pill, summary, source badge (only on agent-proposed items), and a Retire action. Click the cap counter to demo amber and red states. One improvement is pre-expanded.</div>
+      <span class="screen-card-tag">Click the "3 / 20" counter to cycle through cap warning states</span>
+    </div>
+  </a>
+
+  <a href="s4-run-trace.html" class="screen-card">
+    <div class="screen-card-num">4</div>
+    <div>
+      <div class="screen-card-title">Run trace — "Improvement proposed" event</div>
+      <div class="screen-card-desc">Extends <code>RunTracePage</code> / <code>RunTraceEventRenderer</code>. Shows a failed scorecard event (red) immediately above the new improvement-proposed event (violet). The new event card shows kind pill, one-line summary, and a "Review in queue" link to the drawer.</div>
+      <span class="screen-card-tag">Click the tool-call event cards to expand input/output. "Review in queue" links to S2.</span>
+    </div>
+  </a>
+
+  <div style="margin-top:32px; padding-top:20px; border-top:1px solid #e2e8f0;">
+    <div style="font-size:12px; color:#94a3b8; margin-bottom:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em;">Design decisions, Round 1</div>
+    <ul style="font-size:13px; color:#475569; line-height:1.7; padding-left:20px;">
+      <li>Multi-screen directory format (four distinct screens with cross-screen navigation).</li>
+      <li>Drawer over full page for the amendment review: the operator's mental context is the queue list, not a new page hierarchy.</li>
+      <li>ViewModeSwitcher reuses the existing pill component exactly (Workspace / Org segments).</li>
+      <li>Worked example uses "Draft Email" skill for all four screens for narrative coherence.</li>
+      <li>Source badge only on agent-proposed improvements; operator-authored rows carry no badge (default case per design rules).</li>
+      <li>Char counter turns amber at 150 chars remaining, red when over limit.</li>
+      <li>Cap counter (N / 20) cycles amber at 15+, red at 20 — demo by clicking the counter on S3.</li>
+      <li>No em-dashes in any copy. Framing is "agents propose, you approve" throughout.</li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>
