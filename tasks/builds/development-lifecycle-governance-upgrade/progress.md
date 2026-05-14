@@ -528,8 +528,95 @@ No stale references to the old doc-sync format remain.
 
 ## Chunk 6 — Compound Learning Feedback (Step 7a)
 
-**Status:** PENDING
-**Files:** `.claude/agents/finalisation-coordinator.md` (Step 7a insert)
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:** `.claude/agents/finalisation-coordinator.md`
+
+### Changes made
+
+- Inserted `## Step 7a — Compound Learning Feedback` section between Step 7 and Step 8 (between line 319 and line 321 in the pre-edit file).
+- Updated frontmatter description: inserted `Step 7a — Compound Learning Feedback.` between `Step 7 — KNOWLEDGE.md pattern extraction.` and `Step 8 — tasks/todo.md cleanup.`
+- Updated Step 1 TodoWrite list: added item `7a. Compound Learning Feedback` between items 7 and 8.
+
+Step 7a contains:
+- Order invariant statement: Step 6 → Step 7 → Step 7a → Step 8 → Step 9 (MERGE_READY) → Step 10. Step 7a NEVER blocks MERGE_READY.
+- Producer / consumer model description.
+- Proposal table contract reproduced verbatim from spec §7.5.
+- 8-value target enum reproduced verbatim from spec §7.5.
+- 6-agent shortlist for `agent-instruction` reproduced verbatim from spec §7.5.
+- Auto-apply prohibition reproduced verbatim from spec §7.5.
+- Step-by-step behaviour (emit rows, operator marks decisions, approved → tasks/todo.md, collision check).
+- Error handling for all four edge cases from spec §6.
+
+### Grep-the-old-value pass results
+
+Grep for `Step 7.*Step 8` (old direct sequencing without Step 7a):
+
+- **Frontmatter description (line 3):** old value `Step 7 — KNOWLEDGE.md pattern extraction. Step 8 — tasks/todo.md cleanup.` Updated to insert `Step 7a — Compound Learning Feedback.` between them.
+- **Step 1 TodoWrite list (line 71):** old value had item 7 directly followed by item 8. Updated to add item `7a. Compound Learning Feedback`.
+- **Step 7a body:** references to "patterns extracted in Step 7" and "No patterns extracted in Step 7" are correct — they refer to Step 7's output, not sequencing.
+- **All other step-number references in the file** were checked. No other "Step 7 → Step 8" direct-sequencing references found without the intervening Step 7a.
+
+Result: all stale references updated. No remaining Step 7 → Step 8 references that skip Step 7a.
+
+### Dry-run walkthrough: three synthetic KNOWLEDGE.md patterns through Step 7a
+
+**Pattern 1 — Agent instruction pattern**
+
+Scenario: Step 7 extracts a pattern titled "finalisation-coordinator must pause on conflicting code-area files before auto-resolving". This pattern is about improving an agent's behaviour.
+
+Step 7a processes:
+
+```
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| finalisation-coordinator must pause on conflicting code-area files before auto-resolving | agent-instruction: finalisation-coordinator | This pattern describes a behavioural rule for the finalisation-coordinator agent, which is in the 6-agent shortlist. | approved |
+```
+
+- Target `agent-instruction: finalisation-coordinator` is valid — `finalisation-coordinator` is in the 6-agent shortlist.
+- Operator approves. Approved entry appended to `tasks/todo.md` under heading `### compound-learning: finalisation-coordinator code-area conflict pause (<slug>)`.
+- No agent file edited in this finalisation cycle — the entry becomes a follow-up Trivial PR task.
+
+**Pattern 2 — Missing checklist box pattern**
+
+Scenario: Step 7 extracts a pattern titled "spec authoring checklist missing validation for Risk Surface vocabulary". This pattern is about a gap in the spec authoring instructions.
+
+Step 7a processes:
+
+```
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| spec authoring checklist missing validation for Risk Surface vocabulary | spec-authoring-instructions | This pattern identifies a missing check in the spec authoring checklist / spec-coordinator Step 6 instructions — the `spec-authoring-instructions` target is the correct bucket. | approved |
+```
+
+- Target `spec-authoring-instructions` is in the 8-value enum. Valid.
+- Operator approves. Approved entry appended to `tasks/todo.md` under heading `### compound-learning: spec authoring Risk Surface vocabulary check (<slug>)`.
+- No `docs/spec-authoring-checklist.md` or `spec-coordinator.md` edited in this finalisation cycle.
+
+**Pattern 3 — No clear target pattern**
+
+Scenario: Step 7 extracts a pattern titled "build timelines are consistently underestimated for Growth-state capabilities". This is a general observation with no obvious mechanism to enforce.
+
+Step 7a processes:
+
+```
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| build timelines consistently underestimated for Growth-state capabilities | no-further-action | No specific mechanism in the existing target set (spec-authoring-instructions, plan-template, agent-instruction, hook-or-grep-gate, regression-test, context-pack, documentation) can enforce this — it is a planning judgment, not a mechanical rule. Logging explicitly to avoid silently dropping. | deferred |
+```
+
+- Target `no-further-action` is in the 8-value enum. Valid.
+- Operator defers. Row remains in `progress.md` as deferred. Not appended to `tasks/todo.md`.
+- No agent / hook / test file edited.
+
+**Confirmation:** Three proposal rows produced. No agent / hook / test file edited in any of the three dry-runs. The auto-apply prohibition holds for all three cases.
+
+### G1 gate result
+
+- `npx eslint .claude/agents/finalisation-coordinator.md`: exit 0; 1 expected warning (file ignored — no matching config for .md). No errors.
+- `npm run typecheck`: exit 0 (both tsconfigs). No TypeScript files touched.
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 

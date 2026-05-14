@@ -1,6 +1,6 @@
 ---
 name: finalisation-coordinator
-description: Phase 3 orchestrator. Restores Phase 2 handoff, runs branch-sync S2 (auto-resolves known-shape conflicts in append-only artefact files; pauses only on code-area conflicts) + G4 regression guard, runs chatgpt-pr-review (manual ChatGPT-web rounds), runs the full doc-sync sweep, updates KNOWLEDGE.md and tasks/todo.md, transitions current-focus to MERGE_READY, applies the ready-to-merge label so CI runs, and stops. Step 0 — context loading + REVIEW_GAP check. Step 1 — TodoWrite list. Step 2 — S2 branch sync. Step 3 — G4 regression guard. Step 4 — PR existence check. Step 5 — chatgpt-pr-review. Step 6 — full doc-sync sweep. Step 7 — KNOWLEDGE.md pattern extraction. Step 8 — tasks/todo.md cleanup. Step 9 — current-focus.md → MERGE_READY. Step 10 — apply ready-to-merge label. Step 11 — end-of-phase prompt.
+description: Phase 3 orchestrator. Restores Phase 2 handoff, runs branch-sync S2 (auto-resolves known-shape conflicts in append-only artefact files; pauses only on code-area conflicts) + G4 regression guard, runs chatgpt-pr-review (manual ChatGPT-web rounds), runs the full doc-sync sweep, updates KNOWLEDGE.md and tasks/todo.md, transitions current-focus to MERGE_READY, applies the ready-to-merge label so CI runs, and stops. Step 0 — context loading + REVIEW_GAP check. Step 1 — TodoWrite list. Step 2 — S2 branch sync. Step 3 — G4 regression guard. Step 4 — PR existence check. Step 5 — chatgpt-pr-review. Step 6 — full doc-sync sweep. Step 7 — KNOWLEDGE.md pattern extraction. Step 7a — Compound Learning Feedback. Step 8 — tasks/todo.md cleanup. Step 9 — current-focus.md → MERGE_READY. Step 10 — apply ready-to-merge label. Step 11 — end-of-phase prompt.
 tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
 model: opus
 ---
@@ -68,6 +68,7 @@ Emit a TodoWrite list before doing any other work. Update items in real time as 
 5. chatgpt-pr-review (MANUAL mode)
 6. Full doc-sync sweep
 7. KNOWLEDGE.md pattern extraction
+7a. Compound Learning Feedback
 8. tasks/todo.md cleanup
 9. tasks/current-focus.md → MERGE_READY + clear active fields
 10. Apply ready-to-merge label to PR
@@ -317,6 +318,50 @@ Patterns appended in this step are clearly marked with provenance:
 ```
 
 Before appending: grep for a similar existing entry (same finding_type OR same leading phrase — first ~5 words). Update instead of duplicating if found.
+
+## Step 7a — Compound Learning Feedback
+
+**Order invariant:** Step 6 → Step 7 → Step 7a → Step 8 → Step 9 (`MERGE_READY`) → Step 10. **Step 7a NEVER blocks `MERGE_READY`** — it emits proposals and continues regardless of operator response.
+
+**Producer / consumer model:** `finalisation-coordinator` produces a `LEARNING_FEEDBACK_PROPOSAL` table in `tasks/builds/<slug>/progress.md`. The operator marks each row's decision inline (approved / rejected / deferred). Approved entries become `tasks/todo.md` items.
+
+**Proposal table contract:**
+
+```
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+```
+
+**8-value target enum (fixed, closed):**
+
+1. `spec-authoring-instructions`
+2. `plan-template`
+3. `agent-instruction` (constrained to the 6-agent shortlist — see below)
+4. `hook-or-grep-gate`
+5. `regression-test`
+6. `context-pack`
+7. `documentation`
+8. `no-further-action`
+
+**6-agent shortlist for `agent-instruction`:** `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `pr-reviewer`, `architect`, `builder`. Other agents are not v1 targets — surface them as separate `tasks/todo.md` items instead.
+
+**Auto-apply prohibition (v1 binding):** the coordinator MUST NOT apply the change in the same finalisation cycle. Approved entries become `tasks/todo.md` items handled as separate (often Trivial) PRs. **No exception in v1.**
+
+### Behaviour
+
+For each pattern extracted in Step 7:
+
+1. Emit one proposal row in the `LEARNING_FEEDBACK_PROPOSAL` table in `tasks/builds/<slug>/progress.md`.
+2. Operator marks each row's decision: `approved` / `rejected` / `deferred`.
+3. Approved entries are appended to `tasks/todo.md` with heading format `### compound-learning: <pattern-title> (<slug>)` — check for heading collisions before appending (namespace with build slug if collision found).
+4. Unapproved rows remain in `progress.md` as deferred.
+
+### Error handling
+
+1. **Pattern routed to a target outside the 8-value enum:** the row is invalid — rewrite before operator approval.
+2. **`agent-instruction` target naming an agent outside the 6-agent shortlist:** rewrite the row or split into a separate-PR `tasks/todo.md` follow-up.
+3. **Operator absent / declines to triage:** unapproved rows remain in `progress.md` as deferred; they do NOT block `MERGE_READY`. Proceed to Step 8.
+4. **No patterns extracted in Step 7:** emit an empty proposal table with a note "no patterns extracted from Step 7 — Compound Learning Feedback section is empty." This is normal.
 
 ## Step 8 — tasks/todo.md cleanup
 
