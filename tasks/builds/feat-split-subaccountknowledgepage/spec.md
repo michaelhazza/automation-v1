@@ -56,7 +56,7 @@ No new primitives invented.
 
 ### 4.1 API endpoints (verbatim from source)
 
-Three real endpoints. Spec inventory below references these names exactly — there is no `/knowledge/references` or `/knowledge/blocks` endpoint.
+Three GET endpoints feed the page, plus the mutating endpoints. Spec inventory below references these names exactly — there is no `/knowledge/references` or `/knowledge/blocks` endpoint.
 
 - `GET /api/subaccounts/:id/knowledge` → returns `{ references: Reference[]; memoryBlocks: MemoryBlock[] }`. Drives BOTH the References tab and the Memory Blocks tab.
 - `GET /api/subaccounts/:id/knowledge/insights[?domain&topic&entryType&taskSlug]` → returns `{ insights, facets }`. Drives the Insights tab and re-runs on filter change.
@@ -88,7 +88,7 @@ client/src/components/subaccount-knowledge/
   └─ atoms/                                         (created only if shared atoms emerge during build — same precedent as usage/atoms/ in batch 1)
 ```
 
-`ReferencesTable`, `InsightsTable`, and `BlocksTable` stay as internal non-exported functions inside their respective `*Tab.tsx` files. They are not promoted to top-level files. Only `RenameReferenceModal.tsx` is allowed as an optional extraction (per Chunk 4) — no other sub-files are introduced.
+`ReferencesTable`, `InsightsTable`, and `BlocksTable` stay as internal non-exported functions inside their respective `*Tab.tsx` files. They are not promoted to top-level files. The only conditional additions allowed are: (a) `RenameReferenceModal.tsx` as a single optional file extraction (per Chunk 4); (b) an `atoms/` directory if — and only if — a genuinely shared atom (used by two or more tab files) emerges during the build. Neither is created speculatively. No other sub-files are introduced.
 
 Host import path in `App.tsx` is unchanged.
 
@@ -103,9 +103,9 @@ SubaccountKnowledgePage (host, ~280 LOC)
 ├── tab bar with three <TabButton>                                                                     ← inline using imported TabButton
 ├── search input (`search` host state)                                                                 ← inline
 ├── tab body — dispatch by activeTab
-│   ├── references → <ReferencesTab subaccountId items={references} search={search} onMutated={load} onTabSwitchTo={setTab} />
+│   ├── references → <ReferencesTab subaccountId items={references} search={search} openCreateOnMount={pendingCreate === 'reference'} onCreateConsumed={clearPendingCreate} onMutated={load} onTabSwitchTo={setTab} />
 │   ├── insights   → <InsightsTab   subaccountId search={search} onTabSwitchTo={setTab} onPromotedToReference={load} />
-│   └── blocks     → <BlocksTab     subaccountId items={blocks}     search={search} onMutated={load} onTabSwitchTo={setTab} />
+│   └── blocks     → <BlocksTab     subaccountId items={blocks}     search={search} openCreateOnMount={pendingCreate === 'block'} onCreateConsumed={clearPendingCreate} onMutated={load} onTabSwitchTo={setTab} />
 └── EditArtefactDrawer (host-owned; opens when drawerSlug !== null, set by the baseline-artefacts row's Edit button) ← inline
 ```
 
@@ -121,12 +121,12 @@ The host keeps the combined fetch because today's `/api/subaccounts/:id/knowledg
 - `load()` — calls `GET /api/subaccounts/:id/knowledge`, populates `references` AND `blocks`.
 - `search` state and the `onChange` for the search input. The host passes `search` down so each tab can apply its own `useMemo` filter — same behaviour as today's `filteredRefs` / `filteredBlocks` / `filteredInsights`. Insights filtering on `search` happens inside `InsightsTab` over its own internal `insights` state.
 - `artefactStatuses`, `drawerSlug`, `loadArtefactStatus()`, and the `EditArtefactDrawer` JSX render — all kept in the host's baseline-artefacts region. The drawer is NOT inside ReferencesTab.
-- The header-level "+ New Reference" / "+ New Memory Block" buttons. Clicking them sets a host-level `pendingCreate: 'reference' | 'block' | null` state (replacing today's `setEditRef('new')` / `setEditBlock('new')` triggers) and either flips `activeTab` first (if needed) or simply opens the create modal inside the now-active tab. Implementation note: simpler is for the host to dispatch via an imperative callback prop — `<ReferencesTab openCreateOnMount={pendingCreate === 'reference'} onCreateConsumed={() => setPendingCreate(null)} />` and the same for blocks. Behaviour matches today's: click "+ New Reference" while on the References tab opens the Reference create modal; click "+ New Memory Block" while on the Blocks tab opens the Block create modal. The buttons render conditionally on `activeTab` as today, so the cross-tab edge case ("click + New X while on a different tab") cannot happen.
+- The header-level "+ New Reference" / "+ New Memory Block" buttons. The buttons render conditionally on `activeTab` (same as today's source at lines 440-455), so they are only ever clickable when the matching tab is already active. Click sets a host-level `pendingCreate: 'reference' | 'block' | null` state (replacing today's `setEditRef('new')` / `setEditBlock('new')` triggers). The already-mounted active tab observes `openCreateOnMount` flip true via a `useEffect` on the prop, opens its create modal, and immediately calls `onCreateConsumed()` (host clears `pendingCreate` to null). No tab-switch is needed because the active tab is the only one that can produce the click. There is no cross-tab dispatch path.
 
 **Tab components own:**
-- `ReferencesTab`: receives `items: Reference[]` (host's `references` array) + `search`. Owns the filtered `useMemo`, the Reference create/edit modal state (`editRef`, `editRefContent`), the Promote modal state (`promoteFrom`, `promoteLabel`, `promoteContent`, `promoting`), the Rename modal state (`renameRef`, `renameTitle`), the Archive ConfirmDialog state (`archiveRefId`), and all four handlers (`handleSaveReference`, `handlePromote`, `handleRenameReference`, `handleArchiveReference`). After a successful mutation, the tab calls `onMutated()` (host's `load()`) to refresh `references` + `blocks`; if a tab-switch was part of today's behaviour (promote flips to Blocks), the tab calls `onTabSwitchTo('blocks')` before `onMutated()`.
-- `InsightsTab`: owns `insights`, `insightFacets`, `insightFilters`, `insightsLoading`, `loadInsights()`, the `useEffect` that fetches on mount + filter change, and `handlePromoteInsight`. Receives `search` to power its `useMemo` filter. After a successful promote-to-reference: calls `onTabSwitchTo('references')`, then `onPromotedToReference()` (host's `load()`), then refetches its own `loadInsights()` (since the promoted entry leaves the insights list).
-- `BlocksTab`: receives `items: MemoryBlock[]` (host's `blocks` array) + `search`. Owns the filtered `useMemo`, the Memory Block create/edit modal state (`editBlock`, `editBlockLabel`, `editBlockContent`), the Demote ConfirmDialog state (`demoteBlockId`), and the handlers `handleSaveBlock` + `handleDemote`. After a successful demote: calls `onTabSwitchTo('references')` then `onMutated()`.
+- `ReferencesTab`: receives `items: Reference[]` (host's `references` array) + `search`. Owns the filtered `useMemo`, the Reference create/edit modal state (`editRef`, `editRefContent`), the Promote modal state (`promoteFrom`, `promoteLabel`, `promoteContent`, `promoting`), the Rename modal state (`renameRef`, `renameTitle`), the Archive ConfirmDialog state (`archiveRefId`), and all four handlers (`handleSaveReference`, `handlePromote`, `handleRenameReference`, `handleArchiveReference`). After a successful mutation, the tab calls `await onMutated()` (host's `load()`) to refresh `references` + `blocks`; if a tab-switch was part of today's behaviour (promote flips to Blocks), the tab calls `onTabSwitchTo('blocks')` AFTER `onMutated()` resolves. See §8.2 for the exact ordering and rationale.
+- `InsightsTab`: owns `insights`, `insightFacets`, `insightFilters`, `insightsLoading`, `loadInsights()`, the `useEffect` that fetches on mount + filter change, and `handlePromoteInsight`. Receives `search` to power its `useMemo` filter. After a successful promote-to-reference: calls `onPromotedToReference()` (host's `load()`) first to refresh references + blocks, then `onTabSwitchTo('references')`. No local `loadInsights()` refetch is needed — the tab is about to unmount on the next render, and on its next mount (when the user returns to the Insights tab) the existing mount-effect refetches automatically. This drops one network call vs today's source but is consistent with the §6 "inactive tabs unmount" accepted delta. The reordering (mutate-then-switch instead of today's switch-then-mutate) is intentional: avoids an unmounted-state-update warning that would arise from running `loadInsights()` after `setTab`.
+- `BlocksTab`: receives `items: MemoryBlock[]` (host's `blocks` array) + `search`. Owns the filtered `useMemo`, the Memory Block create/edit modal state (`editBlock`, `editBlockLabel`, `editBlockContent`), the Demote ConfirmDialog state (`demoteBlockId`), and the handlers `handleSaveBlock` + `handleDemote`. After a successful demote: calls `await onMutated()` first, then `onTabSwitchTo('references')`. See §8.4 for the exact ordering and rationale.
 
 There is no `blocksKey` and no force-remount mechanism — because the host owns `blocks` and re-hydrates it via `load()` after every cross-tab mutation, the Blocks tab's `items` prop updates declaratively. The earlier draft's `blocksKey` idea was a leftover from a different ownership model where each tab self-fetched; with the host owning the combined fetch (as today's source does), the prop simply changes and React re-renders.
 
@@ -138,18 +138,20 @@ There is no `blocksKey` and no force-remount mechanism — because the host owns
 ```
 props: {
   subaccountId: string;
-  items: Reference[];                 // hydrated by host's load()
-  search: string;                     // host-owned search query string
-  openCreateOnMount: boolean;         // host sets true when "+ New Reference" was clicked; tab opens create modal once then calls onCreateConsumed
+  items: Reference[];                          // hydrated by host's load()
+  search: string;                              // host-owned search query string
+  openCreateOnMount: boolean;                  // host sets true when "+ New Reference" was clicked; tab opens create modal once then calls onCreateConsumed
   onCreateConsumed(): void;
-  onMutated(): void;                  // host's load() — call after save/promote/rename/archive succeeds
-  onTabSwitchTo(next: 'blocks'): void; // called BEFORE onMutated() after a successful promote, to mirror today's setTab('blocks') ordering
+  onMutated(): Promise<void>;                  // host's load() — call after save/promote/rename/archive succeeds; awaited
+  onTabSwitchTo(next: 'blocks'): void;         // called AFTER onMutated() resolves; sequence per Promote ordering note below
 }
 ```
 
 Owns internally: `filteredRefs` (`useMemo` over `items` + `search`), the Reference create/edit modal (Tiptap), the Promote modal (label + condensed content + REFERENCE_PROMOTE_PREVIEW_MAX seeding), the Rename modal, the Archive ConfirmDialog, and the four handlers (`handleSaveReference`, `handlePromote`, `handleRenameReference`, `handleArchiveReference`). Renders an internal non-exported `ReferencesTable` (moved verbatim from host).
 
-Promote callback ordering (preserve today's behaviour exactly): `await api.post(.../promote)` → `toast.success` → close modal → `onTabSwitchTo('blocks')` → `onMutated()` (await). The `onTabSwitchTo` precedes `onMutated` to match the source's `setTab('blocks'); await load();` order at lines 287-288.
+Create-on-mount pattern: a `useEffect(() => { if (openCreateOnMount) { setEditRef('new'); onCreateConsumed(); } }, [openCreateOnMount])` opens the create modal exactly once when the prop transitions true and immediately clears the host flag via `onCreateConsumed()`. The same pattern is used by `<BlocksTab>` (§8.4).
+
+Promote callback ordering: `await api.post(.../promote)` → `toast.success` → close modal → `await onMutated()` → `onTabSwitchTo('blocks')`. The order is reversed from today's source (today: `setTab('blocks'); await load()`) so the mutating call completes inside the still-mounted ReferencesTab, avoiding an unmounted-state-update warning. The user-visible result is identical: the user lands on the Blocks tab and sees the new block.
 
 ### 8.3 `<InsightsTab>`
 ```
@@ -157,13 +159,13 @@ props: {
   subaccountId: string;
   search: string;
   onTabSwitchTo(next: 'references'): void;
-  onPromotedToReference(): void;     // host's load() — refreshes refs + blocks after promote-to-reference
+  onPromotedToReference(): Promise<void>;     // host's load() — refreshes refs + blocks after promote-to-reference; awaited
 }
 ```
 
 Owns: insights state, facets state, filter state, the `useEffect` that fetches on mount + filter change, `<InsightFilterSelect>` row, the `<InsightsTable>` render, the search-filtered `useMemo`, and `handlePromoteInsight`.
 
-`onPromoted` callback fires only on the success branch of `handlePromoteInsight`, after `toast.success` and AFTER the local refetch (`loadInsights()`) completes. Sequence (matches source lines 234-236): `await api.post(.../promote-to-reference)` → `toast.success` → `onTabSwitchTo('references')` → `Promise.all([onPromotedToReference(), loadInsights()])`.
+Promote-insight callback ordering: `await api.post(.../promote-to-reference)` → `toast.success` → `await onPromotedToReference()` (refreshes refs + blocks while InsightsTab is still mounted) → `onTabSwitchTo('references')` (triggers unmount of InsightsTab on the next render). No local `loadInsights()` refetch — the next mount of InsightsTab will fetch fresh via its existing mount-effect. Reorder vs today's source is intentional to avoid an unmounted-state-update warning that would arise from running `loadInsights()` after the tab switch.
 
 ### 8.4 `<BlocksTab>`
 ```
@@ -173,14 +175,14 @@ props: {
   search: string;
   openCreateOnMount: boolean;
   onCreateConsumed(): void;
-  onMutated(): void;
+  onMutated(): Promise<void>;
   onTabSwitchTo(next: 'references'): void;
 }
 ```
 
-Owns internally: `filteredBlocks` (`useMemo`), the Memory Block create/edit modal, the Demote ConfirmDialog, and handlers `handleSaveBlock` + `handleDemote`. Renders an internal non-exported `BlocksTable`.
+Owns internally: `filteredBlocks` (`useMemo`), the Memory Block create/edit modal, the Demote ConfirmDialog, and handlers `handleSaveBlock` + `handleDemote`. Renders an internal non-exported `BlocksTable`. Uses the same create-on-mount pattern as §8.2 (a `useEffect` on `openCreateOnMount` that opens the create modal once and immediately calls `onCreateConsumed`).
 
-Demote callback ordering (preserve today's behaviour, source lines 306-309): `await api.post(.../demote)` → `toast.success` → close confirm → `onTabSwitchTo('references')` → `onMutated()` (await).
+Demote callback ordering: `await api.post(.../demote)` → `toast.success` → close confirm → `await onMutated()` → `onTabSwitchTo('references')`. Same reorder as §8.2's promote to keep the mutating call inside the still-mounted tab.
 
 ## 9. Pure helpers
 
@@ -215,12 +217,12 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 ### Chunk 3 — `InsightsTab`
 - Create `InsightsTab.tsx`. Move into it: the inlined `InsightFilterSelect` + `InsightsTable` sub-components (as internal non-exported functions), `insights`, `insightFacets`, `insightFilters`, `insightsLoading` state, the `useEffect` at host lines 164-169, `loadInsights()`, `filteredInsights` `useMemo`, the filter-row JSX (host lines 541-581), and `handlePromoteInsight`.
 - Add `onTabSwitchTo` and `onPromotedToReference` props per §8.3.
-- **Done when:** Insights tab fetches on mount + filter change; promote-to-reference flips to References tab, refreshes both refs and blocks, and refetches insights.
+- **Done when:** Insights tab fetches on mount + filter change; promote-to-reference refreshes both refs and blocks (host `load()`) and flips to References tab. No local `loadInsights()` refetch happens after promote — next mount of InsightsTab re-fetches via its mount-effect. See §8.3 for the ordering rationale.
 
 ### Chunk 4 — `ReferencesTab`
 - Create `ReferencesTab.tsx`. Move into it: the inlined `ReferencesTable` sub-component (as an internal non-exported function), `filteredRefs` `useMemo`, the Reference create/edit modal (Tiptap) + its state (`editRef`, `editRefContent`, `openEditReference`), the Promote modal + its state (`promoteFrom`, `promoteLabel`, `promoteContent`, `promoting`, `openPromote`, `handlePromote`), the Rename modal + its state (`renameRef`, `renameTitle`, `handleRenameReference`), the Archive ConfirmDialog + its state (`archiveRefId`, `handleArchiveReference`), and `handleSaveReference`.
 - Add `openCreateOnMount` / `onCreateConsumed` / `onMutated` / `onTabSwitchTo` props per §8.2.
-- **If `ReferencesTab.tsx` exceeds ~300 LOC after this move**, extract the Rename modal into `client/src/components/subaccount-knowledge/RenameReferenceModal.tsx` with props `{ ref: Reference; initialTitle: string; onClose(): void; onRenamed(): void }`. No other extractions.
+- **If `ReferencesTab.tsx` exceeds ~300 LOC after this move**, extract the Rename modal into `client/src/components/subaccount-knowledge/RenameReferenceModal.tsx` with props `{ reference: Reference; initialTitle: string; onClose(): void; onRenamed(): Promise<void> }`. (`reference` not `ref` because `ref` is a reserved React prop name.) No other extractions.
 - Host stops owning the Reference modal pair (create/edit, promote, rename, archive). The host's "+ New Reference" button now sets `pendingCreate = 'reference'`.
 - **Done when:** References tab renders, "+ New Reference" opens the create modal, edit / save / rename / archive / promote all round-trip, promote flips to Blocks tab and refreshes both lists.
 
@@ -241,9 +243,9 @@ Each chunk leaves the page green (lint + typecheck + build:client clean) and vis
 - 3 tabs, same labels, same order — preserved (host renders the same tab bar inline).
 - `BaselineArtefactsStatusBadge` per slug + `EditArtefactDrawer` opens from per-slug Edit button — preserved on host, NOT moved to ReferencesTab.
 - All `toast.success` / `toast.error` strings preserved verbatim by the migrating handlers.
-- Promote (Refs → Blocks): host's `handlePromote` → ReferencesTab's `handlePromote`. Tab-switch ordering `setTab('blocks')` precedes `await load()` — preserved via `onTabSwitchTo('blocks')` called before `onMutated()`.
-- Demote (Blocks → Refs): host's `handleDemote` → BlocksTab's `handleDemote`. Tab-switch ordering preserved (`onTabSwitchTo('references')` before `onMutated()`).
-- Promote insight (Insight → Reference): host's `handlePromoteInsight` → InsightsTab's `handlePromoteInsight`. Both refetches happen in parallel (`Promise.all`), matching today's source.
+- Promote (Refs → Blocks): host's `handlePromote` → ReferencesTab's `handlePromote`. Sequence reordered from today's `setTab('blocks'); await load()` to `await onMutated(); onTabSwitchTo('blocks')` so the mutating call completes inside the still-mounted ReferencesTab. User-visible result identical.
+- Demote (Blocks → Refs): host's `handleDemote` → BlocksTab's `handleDemote`. Same reorder: `await onMutated(); onTabSwitchTo('references')`. User-visible result identical.
+- Promote insight (Insight → Reference): host's `handlePromoteInsight` → InsightsTab's `handlePromoteInsight`. Sequence: `await onPromotedToReference()` (refreshes refs + blocks while InsightsTab is still mounted) → `onTabSwitchTo('references')`. No local `loadInsights()` refetch; next mount of InsightsTab fetches fresh. Drops one network call vs today's source — consistent with the §6 "inactive tabs unmount" accepted delta.
 - Header "+ New Reference" / "+ New Memory Block" buttons: still rendered by host conditional on `activeTab`. Click flows through new `pendingCreate` host state into the active tab's `openCreateOnMount` prop, which opens the create modal once and calls `onCreateConsumed` to clear the host flag.
 - Inactive tabs unmount: modal-open and unsaved form state inside an inactive tab is discarded on tab switch. Same accepted minor delta as batch 1's AdminSubaccountDetailPage.
 - `search` input remains in host; each tab receives `search` and filters its own list — preserves today's "type once, all three lists filter" behaviour.
