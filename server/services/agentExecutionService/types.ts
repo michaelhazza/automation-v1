@@ -1,5 +1,6 @@
 import type { LoopParams } from '../agentExecutionLoop.js';
 import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
+import type { agentRuns } from '../../db/schema/index.js';
 
 /**
  * Closure-context bundle assembled in `executeRun` and forwarded to each
@@ -224,11 +225,15 @@ export interface TaskWithAgent {
  * Extended by Chunks 5-9 — see DEFERRED AGENTEXEC-SPLIT-DEF-2 for shape
  * consolidation.
  */
-// Extended in Chunk 4+
+// Extended in Chunk 4+; Chunk 5 adds resolvedControllerStyleAllowed, controllerStyleSource, run
 export interface RunExecutionContext {
   startTime: number;
   isOrgSubaccountRun: boolean;
   idempotencyLookupKeys: string[];
+  // Populated by persistAndAnnounce (Chunk 5)
+  resolvedControllerStyleAllowed?: string;
+  controllerStyleSource?: 'subaccount_agent' | 'default' | string;
+  run?: typeof agentRuns.$inferSelect;
 }
 
 /**

@@ -39,7 +39,7 @@ import { project as projectToolCallsLogFromMessages } from './toolCallsLogProjec
 import { fingerprint } from './regressionCaptureServicePure.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
-import { tryEmitAgentEvent, emitAgentEvent } from './agentExecutionEventEmitter.js';
+import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
 import { persistAssembly as persistPromptAssembly } from './agentRunPromptService.js';
 import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
@@ -55,7 +55,6 @@ import {
   type MiddlewareContext,
 } from './middleware/index.js';
 import { CONTROLLER_LIMITS } from '../config/controllerLimits.js';
-import { deriveControllerStyle } from './controllerStyleResolver.js';
 import {
   resolvePolicyEnvelope,
   persist as persistPolicyEnvelope,
@@ -116,6 +115,7 @@ import type { ExecutionClosureContext, AgentRunRequest, AgentRunResult } from '.
 import { buildTeamRoster, buildSmartBoardContext, buildTaskContext, buildAutonomousInstructions } from './agentExecutionService/promptBuilders.js';
 import { buildBackendOptionsForMode } from './agentExecutionService/backendDispatch.js';
 import { validateAndPrepare } from './agentExecutionService/runLifecycle/validate.js';
+import { persistAndAnnounce } from './agentExecutionService/runLifecycle/persistRun.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,147 +137,9 @@ export const agentExecutionService = {
     const validated = await validateAndPrepare(request, startTime);
     if (validated.kind === 'early_exit') return validated.result;
     const ctx = validated.ctx;
-    const isOrgSubaccountRun = ctx.isOrgSubaccountRun;
 
-    // ── 1. Resolve controller style before inserting the run ─────────────
-    // Read controllerStyleAllowed from the subaccountAgents row so we can
-    // pass the resolved value into the INSERT. Default 'native_only' matches
-    // the DB column default so missing rows are safe.
-    let resolvedControllerStyleAllowed = 'native_only';
-    if (request.subaccountAgentId) {
-      const [saGovRow] = await db
-        .select({ controllerStyleAllowed: subaccountAgents.controllerStyleAllowed })
-        .from(subaccountAgents)
-        .where(and(
-          eq(subaccountAgents.id, request.subaccountAgentId),
-          eq(subaccountAgents.organisationId, request.organisationId),
-        ));
-      if (saGovRow) {
-        resolvedControllerStyleAllowed = saGovRow.controllerStyleAllowed;
-      }
-    }
-    const { controllerStyle: resolvedControllerStyle, source: controllerStyleSource } =
-      deriveControllerStyle(
-        request.executionMode ?? 'api',
-        resolvedControllerStyleAllowed,
-        request.controllerStyle,
-      );
-
-    // ── 2. Create the run record ──────────────────────────────────────────
-    const [run] = await db
-      .insert(agentRuns)
-      .values({
-        organisationId: request.organisationId,
-        subaccountId: request.subaccountId,
-        agentId: request.agentId,
-        subaccountAgentId: request.subaccountAgentId ?? null,
-        idempotencyKey: request.idempotencyKey ?? null,
-        runType: request.runType,
-        executionMode: request.executionMode ?? 'api',
-        executionScope: 'subaccount',
-        controllerStyle: resolvedControllerStyle,
-        runSource: request.runSource ?? null,
-        status: 'running',
-        triggerContext: request.triggerContext ?? null,
-        taskId: request.taskId ?? null,
-        handoffDepth: request.handoffDepth ?? 0,
-        parentRunId: request.parentRunId ?? null,
-        handoffSourceRunId: request.handoffSourceRunId ?? null,
-        isSubAgent: request.isSubAgent ?? false,
-        parentSpawnRunId: request.parentSpawnRunId ?? null,
-        workflowStepRunId: request.workflowStepRunId ?? null,
-        isTestRun: request.isTestRun ?? false,
-        delegationScope: request.delegationScope ?? null,
-        delegationDirection: request.delegationDirection ?? null,
-        lastActivityAt: new Date(),
-        startedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
-    // Emit run started event
-    emitAgentRunUpdate(run.id, 'agent:run:started', {
-      agentId: request.agentId, subaccountId: request.subaccountId ?? null,
-      runType: request.runType, status: 'running',
-    });
-    emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
-      runId: run.id, agentId: request.agentId,
-    });
-
-    // Live Agent Execution Log — critical lifecycle bookend (spec §5.3).
-    // Awaited so that run.started claims sequence_number=1 before any later
-    // event (prompt.assembled, context.source_loaded, etc.) allocates a
-    // sequence number. Using tryEmitAgentEvent here would fire it in the
-    // background, creating a race where a subsequent event could win the
-    // lower sequence and sort before the bookend in the timeline.
-    await emitAgentEvent({
-      runId: run.id,
-      organisationId: request.organisationId,
-      subaccountId: request.subaccountId ?? null,
-      sourceService: 'agentExecutionService',
-      payload: {
-        eventType: 'run.started',
-        critical: true,
-        agentId: request.agentId,
-        runType: request.runType,
-        triggeredBy: request.runSource ?? 'unknown',
-      },
-      linkedEntity: { type: 'agent', id: request.agentId },
-    });
-
-    // Log the resolved controller style for observability (spec §3.5 log code).
-    tryEmitAgentEvent({
-      runId: run.id,
-      organisationId: request.organisationId,
-      subaccountId: request.subaccountId ?? null,
-      sourceService: 'agentExecutionService',
-      payload: {
-        eventType: 'foundation.controller_style.derived',
-        critical: false,
-        runId: run.id,
-        executionMode: request.executionMode ?? 'api',
-        controllerStyle: resolvedControllerStyle,
-        source: controllerStyleSource,
-      },
-      linkedEntity: { type: 'agent', id: request.agentId },
-    });
-
-    // Live Agent Execution Log — `orchestrator.routing_decided` (spec §5.3).
-    // Emitted here (not from the orchestrator job) so the event lands
-    // inside THIS run's timeline at sequence 2, immediately after
-    // `run.started`. The previous shape — job calls tryEmitAgentEvent
-    // AFTER awaiting executeRun — put the event after `run.completed`,
-    // breaking the "timeline represents actual execution order"
-    // invariant. Fire-and-forget is safe: this is a non-critical event
-    // and the run is now committed with sequence_number = 1 claimed.
-    if (request.orchestratorDispatch) {
-      tryEmitAgentEvent({
-        runId: run.id,
-        organisationId: request.organisationId,
-        subaccountId: request.subaccountId ?? null,
-        sourceService: 'orchestratorFromTaskJob',
-        payload: {
-          eventType: 'orchestrator.routing_decided',
-          critical: false,
-          taskId: request.orchestratorDispatch.taskId,
-          chosenAgentId: request.orchestratorDispatch.chosenAgentId,
-          idempotencyKey: request.orchestratorDispatch.idempotencyKey,
-          routingSource: request.orchestratorDispatch.routingSource,
-        },
-        linkedEntity: { type: 'agent', id: request.orchestratorDispatch.chosenAgentId },
-      });
-    }
-
-    // Observability: temporary metric for org subaccount runs (remove after 2 weeks stable)
-    if (isOrgSubaccountRun) {
-      logger.info('org_subaccount_run', {
-        orgId: request.organisationId,
-        agentId: request.agentId,
-        runId: run.id,
-        runType: request.runType,
-      });
-    }
+    const { run } = await persistAndAnnounce(request, ctx);
+    ctx.run = run;
 
     try {
       // ── 2. Load agent config ────────────────────────────────────────────
@@ -1192,7 +1054,7 @@ export const agentExecutionService = {
         orgProcesses,
         request,
         startTime,
-        isOrgSubaccountRun,
+        isOrgSubaccountRun: ctx.isOrgSubaccountRun,
         maxLoopIterations: CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations,
         // Routing context for the LLM router — built here because
         // `run.id` and `agent.name` are only in scope at the dispatch
