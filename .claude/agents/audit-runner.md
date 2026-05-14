@@ -103,10 +103,11 @@ Before doing anything else:
 For each in-scope area / module:
 
 1. Run the **How to investigate** steps from the framework. Static analysis, grep, gate scripts. Use `Bash` for commands; use `Grep` and `Glob` for codebase searches. Work directly — do not delegate to sub-agents. Mark the area's todo item `in_progress` before starting and `completed` when the finding table is written.
-2. Classify each finding: **severity** (critical / high / medium / low), **confidence** (high / medium / low), **justification** (named test, gate output, scope proof, or isolation proof), **proposed fix**, **target pass** (2 or 3).
+2. Classify each finding: **severity** (critical / high / medium / low), **confidence** (high / medium / low), **justification** (named test, gate output, scope proof, or isolation proof), **proposed fix**, **target pass** (2 or 3), **prevention** (per Universal Rule 16 — target doc / hook / gate plus the concrete proposed addition, or `not feasible — <reason>`).
 3. Apply the automatic confidence-downgrade triggers from Universal Rule 8 — every shared-module touch, signature change, RLS-relevant file, idempotency surface, gate script, migration, or capabilities-editorial-boundary touch downgrades.
 4. Apply the test-coverage trust model (Rule 9). For AutomationOS, default coverage assumption is "low" unless a named test file covers the path — downgrade `high` to `medium` accordingly.
 5. Write findings into the audit log under "Pass 1 Findings" — one table per area / module.
+6. After all areas are walked, **aggregate prevention proposals** across findings into the audit log under "Prevention Proposals" (framework §11 template). One proposal can close many findings — track the closure list per proposal, not per finding row. If a finding's prevention is `not feasible`, record it in the "Not feasible — rationale" sub-table with a one-line reason.
 
 **Do not change any code in pass 1.** Findings only.
 
@@ -117,6 +118,7 @@ After pass 1 completes, present a summary to the user:
 - Critical / high / medium / low counts.
 - The 3–5 highest-impact findings, named with file paths.
 - The pass-2 candidates (high confidence, in-scope) and the pass-3 items (everything else).
+- **Prevention proposal count, with target breakdown** — number of proposals per target (`hook`, `gate`, `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `docs/frontend-design-principles.md`, `docs/spec-authoring-checklist.md`, `docs/capabilities.md`, `KNOWLEDGE.md`, `ADR`). Per Rule 16, prevention proposals are always pass 3 — never auto-applied. The findings-gate response (`proceed` / `narrow scope` / `stop`) controls pass-2 fixes only; prevention proposals are routed to `tasks/todo.md` regardless of that decision.
 
 Output verbatim:
 
@@ -170,6 +172,18 @@ The `origin:audit:<scope>:<timestamp>` tag is **mandatory** on every pass-3 item
 
 Never rewrite or delete existing sections (CLAUDE.md §3 + framework §10).
 
+**Prevention proposals** (Rule 16) route to a separate section in the same `tasks/todo.md` file:
+
+```
+## Prevention proposals from codebase audit — <YYYY-MM-DD>
+**Captured:** <ISO timestamp>
+**Source log:** tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md
+
+- [ ] [origin:audit:prevention:<scope>:<timestamp>] [status:open] [target:<doc|hook|gate>] <one-line proposed addition>. Closes findings: <F1, F4, …>. Leverage tier <1|2|3>.
+```
+
+The `origin:audit:prevention:<scope>:<timestamp>` sub-tag distinguishes prevention proposals from symptom-fix pass-3 items so a future review pass can filter to either category. Apply the same dedup rules (origin-scope match preferred, heuristic match fallback). Never auto-apply a prevention proposal — they always defer to operator review per Rule 16.
+
 ### E) spec-conformance note
 
 You do not invoke sub-agents. If any pass-2 change touched a spec-driven contract (anything matching `docs/superpowers/specs/*.md` or `docs/*-spec.md`), record the list of affected spec files in the audit log under "Post-audit actions required" and include this line in the final handoff message so the caller can run it:
@@ -197,10 +211,12 @@ Append-only — never edit existing entries.
 
 ### H) Audit Completion Criteria gate
 
-Verify framework §13 Audit Completion Criteria — **all five** must be true:
+Verify framework §13 Audit Completion Criteria — **all seven** must be true:
 
 - [ ] All pass-2 fixes applied and validated (Rule 6 outputs recorded, with `N/A` reasons for any check marked not applicable).
-- [ ] All pass-3 items recorded in `tasks/todo.md` under `## Deferred from codebase audit — <date>`.
+- [ ] All pass-3 symptom-fix items recorded in `tasks/todo.md` under `## Deferred from codebase audit — <date>`.
+- [ ] All prevention proposals (Rule 16) recorded in `tasks/todo.md` under `## Prevention proposals from codebase audit — <date>`, each tagged `[origin:audit:prevention:<scope>:<timestamp>]` and `[target:<doc|hook|gate>]`.
+- [ ] Prevention Proposals section written in the audit log with the aggregated table (one row per distinct proposal) plus the "Not feasible — rationale" sub-table for findings where preventive controls are unrealistic.
 - [ ] "Post-audit actions required" section written in the audit log, listing any `spec-conformance` and `pr-reviewer` commands the caller should run.
 - [ ] The audit report is persisted at `tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md`.
 - [ ] `KNOWLEDGE.md` has been appended with any new patterns surfaced.
@@ -216,7 +232,8 @@ If any criterion is unmet, **do not declare done** — escalate to the user with
    - Branch name.
    - Audit log path.
    - Pass-2 commit count and files changed.
-   - Pass-3 deferred count (link to `tasks/todo.md` section).
+   - Pass-3 deferred count (symptom fixes — link to `## Deferred from codebase audit` section in `tasks/todo.md`).
+   - Prevention proposal count, with breakdown by target (`hook` / `gate` / `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` / `architecture.md` / `docs/frontend-design-principles.md` / `docs/spec-authoring-checklist.md` / `docs/capabilities.md` / `KNOWLEDGE.md` / `ADR`). Link to `## Prevention proposals from codebase audit` section in `tasks/todo.md`.
    - KNOWLEDGE.md entries appended (count + headings).
    - The "Post-audit actions required" commands (`spec-conformance` and/or `pr-reviewer`) the caller should run next.
 4. Tell the user: **"Audit complete. Review the report at <log path>. Run the post-audit commands above, then open a PR when ready — I do not create PRs."**
