@@ -8,7 +8,7 @@
 | Date | 2026-05-14 |
 | Branch | audit/track-rls-agent-exec |
 | Starting commit SHA | 4b3c4f2f347e620db932962c2ae67894b491ee15 |
-| Final commit SHA | _(filled at finish)_ |
+| Final commit SHA | bebbb75e (pass 2 fix) + subsequent log/todo/KNOWLEDGE commits |
 | Mode | Targeted — RLS area + agent-execution area |
 | Layers run | Layer 2 Modules I (RLS & Multi-tenancy) + K (Three-Tier Agent Invariants), informed by Layer 1 Areas 1, 5, 6, 9 as needed |
 | Subagents invoked | None (audit-runner runs inline) |
@@ -184,4 +184,98 @@ Aggregated across F1–F8 (framework §11). Every prevention is pass 3 per Rule 
 No prevention-proposal entries marked "not feasible".
 
 ---
+
+## Pass 2 Changes Applied
+
+### F1 — `server/routes/portal.ts` org-id-source mechanical fix
+
+**Change intent.** This area modifies 1 file, affecting 1 route module, with low risk profile. Primary concern: closing the `verify-org-id-source.sh` regression by replacing `req.user!.organisationId` with `req.orgId!` at 10 call sites.
+
+| Fix | Classification | Confidence | Justification | Files Modified |
+|---|---|---|---|---|
+| Replace `req.user!.organisationId` → `req.orgId!` at lines 46, 100, 126, 148, 184, 210, 231, 259, 295, 342 (10 sites) | bug fix (closes a documented org-switching bypass for system_admin) | high | (1) gate-script output is deterministic — 12 → 2 violations confirmed post-fix; (2) localised to a single file; (3) `req.orgId` is set by the authenticate middleware (`server/middleware/auth.ts:142`) to `payload.organisationId` for normal users and to the validated `X-Org-Id` header for system_admin org-switching — semantics-preserving for normal users, semantics-correcting for admins; (4) downstream consumer (`resolveSubaccount`) signature is `(subaccountId: string, organisationId: string)` — identical type. | `server/routes/portal.ts` |
+
+#### Validation Results
+
+| Check | Exact Command | Outcome |
+|---|---|---|
+| Server typecheck | `npm run typecheck:server` | 2 pre-existing errors in unrelated files (`configDocumentGeneratorService.ts:76` missing `docx`, `configDocumentParserService.ts:101` missing `mammoth`). Pre-existence confirmed via `git stash && npm run typecheck:server` — same errors. **N/A — pre-existing, not introduced by this change.** |
+| Client build | `npm run build:client` | N/A — no client/ files changed |
+| Static gates | `npm run test:gates` | Not run locally — CI-only per `references/test-gate-policy.md`. Specific gate `verify-org-id-source.sh` ran: violations 12 → 2 (below baseline 3). |
+| Targeted unit tests | `npx vitest run …` | N/A — no test files authored or modified in this change |
+| Lint | `npx eslint server/routes/portal.ts` | PASS — no output |
+| Skill visibility | `npm run skills:verify-visibility` | N/A — no skill files changed |
+| Playbooks | `npm run playbooks:validate` | N/A — no `server/lib/workflow/` files changed |
+
+Commit: `bebbb75e — audit: F1 — portal.ts org-id-source mechanical fix`.
+
+---
+
+## Pass 3 Items (Awaiting Human Decision)
+
+Cross-listed in `tasks/todo.md` under `## Deferred from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)`.
+
+| Item | Area | Severity | Confidence | Reason for Escalation | Recommendation |
+|---|---|---|---|---|---|
+| F2 | RLS gate tooling | low | medium | Root cause not fully isolated — needs Linux regression test | Investigate `xargs grep` portability; wrap with `\|\| true` |
+| F3 | RLS coverage / Module I | medium | medium | Architectural — 231 service files touched; per-service work | Pair with P2 / P4 prevention work |
+| F4 | Agent-execution / Module I | medium | high | Architectural — wide blast radius across `executeRun` call sites | Migrate to `getOrgScopedDb()` with call-site audit |
+| F5 | Agent-execution / Module A | low | medium | Requires product call on intent | Either gate route, or document intent |
+| F6 | God-files / Area 10 | medium | high | Per framework Area 10, splits are NEVER pass 2 | Per-phase decomposition of `executeRun` + handoff extraction |
+| F7 | Skill executor / Module I | medium | medium | Same root cause as F3 / F4 | Migrate to `getOrgScopedDb()` |
+| F8 | Agent-execution / idempotency | low | medium | Product judgement on retry semantics | Document trade-off; consider UUID default |
+
+---
+
+## Patterns Captured to KNOWLEDGE.md
+
+| Pattern title | Trigger | KNOWLEDGE.md entry |
+|---|---|---|
+| `verify-rls-contract-compliance.sh` allowlists `server/services/` and lets raw-`db` queries on tenant tables slip through | F3 / F4 / F7 finding cluster — gate gives a false sense of coverage | `[2026-05-14] Pattern — verify-rls-contract-compliance.sh allowlists server/services/ and lets raw-db queries on tenant tables slip through` |
+| Mixed scoped-vs-raw DB posture inside a single service file is the signal of an incomplete migration, not a stable design | F4 finding — `agentExecutionService.ts` mixed posture | `[2026-05-14] Pattern — Mixed scoped-vs-raw DB posture inside a single service file is the signal of an incomplete migration, not a stable design` |
+| God-files persist after a "split" commit — the `*Pure.ts` companion landed; the main file did not shrink | F6 finding — `skillExecutor.ts` still 6,133 LOC | `[2026-05-14] Pattern — God-files persist after a "split" commit — the *Pure.ts companion landed; the main file did not shrink` |
+
+---
+
+## Summary
+
+| Field | Value |
+|---|---|
+| Overall Status | PASS (pass 2 fix landed cleanly; pass 3 deferred per operator brief) |
+| Critical findings | 0 |
+| High findings | 0 |
+| Medium findings | F1, F3, F4, F6, F7 — 5 |
+| Low findings | F2, F5, F8 — 3 |
+| Fixes applied (pass 2) | 1 (F1 — 10 mechanical edits in 1 file) |
+| Files modified | 1 (`server/routes/portal.ts`) |
+| Items deferred to pass 3 (symptom fixes, in `tasks/todo.md`) | 7 (F2, F3, F4, F5, F6, F7, F8) |
+| Prevention proposals (root-cause fixes, in `tasks/todo.md`) | 6 — breakdown: `gate` × 3 (P1, P2, P3) + `DEVELOPMENT_GUIDELINES.md` × 1 (P4) + `architecture.md` × 1 (P5) + `KNOWLEDGE.md` × 1 (P6) |
+| KNOWLEDGE.md entries appended | 3 (RLS gate allowlist gap, mixed-posture service file, god-file post-split persistence) |
+| Checkpoint tags created | none (single pass-2 commit, no per-area tagging needed for this audit shape) |
+| Linked `pr-reviewer` log | _(filled when run)_ |
+| Linked `spec-conformance` log | _(filled when run)_ |
+| Linked `dual-reviewer` log | not requested |
+
+---
+
+## Post-audit actions required
+
+The caller (this main session) runs the following before declaring the audit complete:
+
+1. `spec-conformance: verify the audit branch audit/track-rls-agent-exec against its spec` — treat as a sanity check (no spec exists for this audit; the framework `docs/codebase-audit-framework.md` is the implicit contract).
+2. `pr-reviewer: review the audit branch audit/track-rls-agent-exec. Files changed in pass 2: server/routes/portal.ts. Audit log: tasks/review-logs/codebase-audit-log-rls-agent-exec-2026-05-14T13-14-38Z.md.`
+
+No spec-driven contract was touched by pass-2 changes — `spec-conformance` is run as a sanity check only.
+
+---
+
+## Recommended Next Steps
+
+- Open the PR titled `audit: track A — RLS + agent-execution (post-refactor)` after `pr-reviewer` returns.
+- Coordinate with Tracks B and C to merge in series (per framework parallel-mode preconditions §parallel mode — pass-2 PRs merged sequentially).
+- Schedule a follow-up sprint to address the F3 / F4 / F7 cluster (services using raw `db` on tenant-scoped tables). Pair with P2 prevention work so the gate catches future regressions.
+- Decide product policy on F5 (`GET /api/agents` permission gate) and apply the chosen fix.
+- Decide product policy on F8 (manual-run idempotency key 10-second bucket).
+- Plan further god-file decomposition for F6 — start with `agentExecutionService.executeRun` per-phase split.
+
 

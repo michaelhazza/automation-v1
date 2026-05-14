@@ -15,17 +15,17 @@ Per operator brief, Tracks B + C are running on separate branches/worktrees. Thi
 - [x] Pre-flight: context block validated (Vitest 2.1.9, drizzle 0.45.1, pg-boss 9.0.3, `npm run lint` exists)
 - [x] Path resolution — discovered actual structure (brief paths were stylised)
 - [x] Audit log initialised
-- [ ] Pass 1 — RLS area: schema + rlsProtectedTables + RLS migrations
-- [ ] Pass 1 — RLS area: permission services + plumbing
-- [ ] Pass 1 — RLS area: routes touching gated tables + shared types
-- [ ] Pass 1 — Agent-exec: agentExecutionService modules
-- [ ] Pass 1 — Agent-exec: skillExecutor modules
-- [ ] Pass 1 — Agent-exec: routes/agents.ts + agentRuns.ts (lifecycle + permission gates)
-- [ ] Findings gate (operator approval)
-- [ ] Pass 2 — approved high-confidence fixes
-- [ ] Pass 3 — defer to tasks/todo.md
-- [ ] KNOWLEDGE.md patterns appended
-- [ ] Audit Completion Criteria gate
+- [x] Pass 1 — RLS area: schema + rlsProtectedTables + RLS migrations
+- [x] Pass 1 — RLS area: permission services + plumbing
+- [x] Pass 1 — RLS area: routes touching gated tables + shared types
+- [x] Pass 1 — Agent-exec: agentExecutionService modules
+- [x] Pass 1 — Agent-exec: skillExecutor modules
+- [x] Pass 1 — Agent-exec: routes/agents.ts + agentRuns.ts (lifecycle + permission gates)
+- [x] Findings gate (operator approval — auto-decided per pre-authorisation memory; F1 mechanical only)
+- [x] Pass 2 — approved high-confidence fixes (F1 — portal.ts org-id-source)
+- [x] Pass 3 — defer to tasks/todo.md (7 deferred + 6 prevention)
+- [x] KNOWLEDGE.md patterns appended (3 entries)
+- [x] Audit Completion Criteria gate
 - [ ] Auto-commit + push
 - [ ] spec-conformance (sanity)
 - [ ] pr-reviewer
