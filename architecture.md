@@ -3707,7 +3707,7 @@ Every Standard+ feature follows this nine-step sequence (full detail in `CLAUDE.
 
 > Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge
 
-Orchestrators: `spec-coordinator` (Phase 1 — Steps 1–2 + spec authoring), `feature-coordinator` (Phase 2 — planning + construction + review), `finalisation-coordinator` (Phase 3 — Capability Registration + Compound Learning + merge). Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
+Orchestrators: `spec-coordinator` (Phase 1 — Intent intake, Duplication / Strategy Check, mockup loop, spec authoring, reviews, handoff), `feature-coordinator` (Phase 2 — planning + construction + review), `finalisation-coordinator` (Phase 3 — Capability Registration + Compound Learning + merge). Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
 
 ---
 

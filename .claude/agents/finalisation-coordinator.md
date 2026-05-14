@@ -278,6 +278,8 @@ Reference doc update triggers:
 
 **Capability Registration verdict — `docs/capabilities.md` (§6.2.1 combined format).**
 
+> Section references §6.2.1, §7.4.1, §7.4.4 below resolve to `tasks/builds/development-lifecycle-governance-upgrade/spec.md` (the development-lifecycle-governance-upgrade build spec).
+
 When the doc-sync sweep reaches `docs/capabilities.md`, the verdict is recorded in the combined format `<verdict>: <registration outcome>`. Exactly one of these eight strings is valid:
 
 - `yes: create new capability record`
