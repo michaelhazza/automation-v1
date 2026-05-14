@@ -19,18 +19,18 @@ Targeted audit on the workflowEngine split surface (one of the four operator-sta
 - [x] Pre-flight (context block validated in Track A 2.5 hours ago; no stack changes since)
 - [x] Path resolution
 - [x] Audit log initialised
-- [ ] Pass 1 — workflowEngineService.ts (4,073 LOC) + Pure companion
-- [ ] Pass 1 — workflowRunService + workflowDraftService + workflowPublishService
-- [ ] Pass 1 — workflowGate* services
-- [ ] Pass 1 — workflowActionCallExecutor + confidence + agent run hook
-- [ ] Pass 1 — workflow routes
-- [ ] Pass 1 — schema RLS posture
-- [ ] Findings gate (auto-decided)
-- [ ] Pass 2 fixes
-- [ ] Pass 3 deferred items
-- [ ] KNOWLEDGE.md patterns
-- [ ] Completion criteria
+- [x] Pass 1 — workflowEngineService.ts (4,073 LOC) + Pure companion
+- [x] Pass 1 — workflowRunService + workflowDraftService + workflowPublishService
+- [x] Pass 1 — workflowGate* services
+- [x] Pass 1 — workflowActionCallExecutor + confidence + agent run hook
+- [x] Pass 1 — workflow routes
+- [x] Pass 1 — schema RLS posture (WF1 critical finding)
+- [x] Findings gate (auto-decided — NO Pass 2 fixes; all architectural / product-call)
+- [x] Pass 2 fixes (none — see audit log)
+- [x] Pass 3 deferred items (WF1–WF8 + Q1–Q6)
+- [x] KNOWLEDGE.md patterns (2 entries)
+- [x] Completion criteria
 - [ ] Auto-commit + push
 - [ ] spec-conformance (sanity)
-- [ ] pr-reviewer + apply should-fix
+- [ ] pr-reviewer
 - [ ] PR opened
