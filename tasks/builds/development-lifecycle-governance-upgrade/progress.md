@@ -678,16 +678,61 @@ Result: **no old step phrasing remains in live process docs**.
 
 ## G2 gate
 
-**Status:** PENDING
+**Status:** COMPLETE — 2026-05-14
+- `npm run lint`: 0 errors, 899 warnings (all pre-existing, none from this branch). Pass.
+- `npm run typecheck`: exit 0 (both tsconfigs). Pass.
+- Zero TypeScript files changed — G2 baseline CI safety net only.
 
 ---
 
 ## Branch-level review pass
 
-**Status:** PENDING
+**Status:** COMPLETE — 2026-05-14
+
+### spec-conformance
+Verdict: CONFORMANT_AFTER_FIXES. 37 requirements checked. One mechanical gap fixed: Step 3a recording-location table used wrong shape (`| Dimension | Assessment | Notes |` with capitalized values); corrected to spec §7.1.0 `| Output | Value |` shape with lowercase enum values. Commit: 2b03b64c.
+
+### adversarial-reviewer
+skipped — policy-not-applicable (diff is markdown-only with zero §5.1.2 security surface: no server/db/schema, no server/routes, no auth/permission services, no middleware, no RLS migrations, no webhook handlers)
+
+### pr-reviewer
+Verdict: APPROVED (after 4 rounds, 3 fix-loop commits applying 7 findings):
+- Round 1: 2 blocking + 2 should-fix — doc-sync.md Final Summary template; architecture.md Phase 1 description; capabilities.md 47 owner-task links; spec-pointer for bare §-refs
+- Round 2: 3 should-fix — HTML entity bug in code fence; review-logs/README.md stale format; finalisation-coordinator.md disambiguation scope
+- Round 3: 1 blocking — path regression `docs/2026-04-30...` → `docs/superpowers/specs/2026-04-30...`; brief.md stale path
+
+### reality-checker
+Verdict: READY. All 7 goals (G1–G7) and all backwards-compat invariants verified with file+line citations.
+
+### dual-reviewer
+REVIEW_GAP: dual-reviewer | task-class: Significant | reason: Codex CLI not installed locally (command not found) | operator-override: no | remediation: accept — markdown-only build; pr-reviewer ran 4 rounds with fix-loop; reality-checker READY; risk is low
+
+---
+
+## Doc Sync gate
+
+**Status:** COMPLETE — 2026-05-14
+
+| Doc | Verdict | Rationale |
+|---|---|---|
+| `architecture.md` | yes (Dev build lifecycle subsection added) | Chunk 7 added `### Dev build lifecycle` with corrected 9-step sequence |
+| `docs/capabilities.md` | yes: update existing capability record | Chunk 4 restructured all 47 existing capability entries into the 12-column Asset Register; dev-lifecycle-governance row deferred to Phase 3 per plan Executor notes (conditional on post-Chunk-4 state) |
+| `docs/integration-reference.md` | n/a: build / tooling change only | No integration scope in this build |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | yes (CLAUDE.md: Build lifecycle subsection + agent fleet row updated) | Chunk 7 updated CLAUDE.md; DEVELOPMENT_GUIDELINES.md unchanged |
+| `CONTRIBUTING.md` | n/a: build / tooling change only | No lint/convention policy changes |
+| `docs/frontend-design-principles.md` | n/a: build / tooling change only | No UI changes |
+| `KNOWLEDGE.md` | no — deferred to Phase 3 | Phase 2 build produced no runtime code patterns; KNOWLEDGE.md extraction handled by finalisation-coordinator Step 7 at Phase 3 |
+| `docs/spec-context.md` | n/a: spec-review sessions only | Not a spec-review session |
+| `docs/decisions/` | n/a: §7.4.5 cluster mutation procedure did not fire | 10-cluster seed list was sufficient for all 47 capabilities |
+| `docs/context-packs/` | no — unaffected | architecture.md sections added but no existing anchors renamed/removed; context packs unaffected |
+| `references/test-gate-policy.md` | n/a: build / tooling change only | No test-gate posture changes |
+| `references/spec-review-directional-signals.md` | n/a: no new recurring spec-reviewer pattern | No new recurring signals |
+| `docs/incident-response.md` | n/a: build / tooling change only | No incident response changes |
+| `docs/testing-transition-plan.md` | n/a: build / tooling change only | No test migration changes |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | yes (version 2.3.0 → 2.4.0) | Framework-level change: new coordinator pipeline steps (spec-coordinator Steps 3/3a/6; finalisation-coordinator Step 7a); CHANGELOG.md entry added |
 
 ---
 
 ## REVIEW_GAP log
 
-<!-- Write REVIEW_GAP lines here if any required reviewer is skipped -->
+REVIEW_GAP: dual-reviewer | task-class: Significant | reason: Codex CLI not installed locally | operator-override: no | remediation: accept

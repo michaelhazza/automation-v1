@@ -3,7 +3,7 @@ active_spec: tasks/builds/development-lifecycle-governance-upgrade/spec.md
 active_plan: tasks/builds/development-lifecycle-governance-upgrade/plan.md
 build_slug: development-lifecycle-governance-upgrade
 branch: claude/ai-driven-dev-lifecycle-FRqBd
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-14
 last_merged_pr: #300
 last_merged_slug: skill-merge-consolidation-pass
@@ -22,7 +22,7 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**In flight (BUILDING):** `development-lifecycle-governance-upgrade` on `claude/ai-driven-dev-lifecycle-FRqBd`. Spec locked at `tasks/builds/development-lifecycle-governance-upgrade/spec.md` (APPROVED — spec-reviewer 3 iterations READY_FOR_BUILD; chatgpt-spec-review 3 rounds APPROVED). Phase 1 close written retroactively at `tasks/builds/development-lifecycle-governance-upgrade/handoff.md`. `feature-coordinator` adopting Phase 2 in this session: plan authoring (architect) → chatgpt-plan-review → plan-gate → chunk loop with G1 gates → G2 → branch-level review pass → doc-sync gate → Phase 3 handoff.
+**In flight (REVIEWING):** `development-lifecycle-governance-upgrade` on `claude/ai-driven-dev-lifecycle-FRqBd`. Phase 2 BUILD complete. All 7 chunks built (7 builder sub-agents, all G1 pass on first attempt). Branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES; pr-reviewer APPROVED in 4 rounds; reality-checker READY; dual-reviewer REVIEW_GAP — Codex unavailable). Doc-sync gate complete (15 verdicts; FRAMEWORK_VERSION bumped 2.3.0 → 2.4.0). Handoff at `tasks/builds/development-lifecycle-governance-upgrade/handoff.md`. **Next:** run `launch finalisation` in a new session to create the PR, run chatgpt-pr-review, and merge. Capability Registration verdict deferred to Phase 3: expected `yes: create new capability record` (no dev-lifecycle-governance row exists post-Chunk-4).
 
 **Just merged:** PR #300 — `skill-merge-consolidation-pass` (squash-commit `7fa97612`, 2026-05-14T04:18:03Z). Conditional LLM consolidation pass for the skill analyzer's merge pipeline (migration 0358). Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. New closed enum `consolidationOutcome` (`not_triggered | succeeded | declined | failed`) with `failureReason='not_shortened'` routing non-shortening LLM outputs to `failed` (dual-reviewer ACCEPT). Three informational warning codes (`CONSOLIDATION_APPLIED | DECLINED | FAILED`). chatgpt-pr-review APPROVED after 2 rounds (F4 canonical-JSON deep-equality + regression test applied; 4 findings rejected with code-cited rationale; 1 deferred as `SKILL-MERGE-RATIONALE-1`). CI fix-loop: 1 iteration (migration 0358 down was non-idempotent — `DROP COLUMN` without `IF EXISTS` violated the codebase convention that `*.down.sql` files must survive being applied first by the forward-only migrate runner). KNOWLEDGE.md +3 entries (Stripped-field upstream; Canonicalise JSON before deep-equality; LLM-self-attestation is not the success signal). 9 forward-backlog items routed to tasks/todo.md as `SKILL-MERGE-*`.
 
