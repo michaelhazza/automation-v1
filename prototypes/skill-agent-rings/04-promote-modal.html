@@ -65,10 +65,11 @@
     <div class="px-6 py-4 border-b border-slate-100">
       <h3 class="text-[13px] font-semibold text-slate-900 mb-2">What happens next</h3>
       <ul class="text-[13px] text-slate-700 space-y-1.5 list-disc pl-5">
-        <li>rev 46 runs for <b>7% of orgs</b> (38 organisations). White-glove tier orgs are excluded.</li>
-        <li>Runs on rev 46 are compared live against runs on rev 44 (prod).</li>
-        <li>If error rate, escalation rate, or cost drift beyond the limits, the rollout <b>auto-pauses</b> and rev 46 is reverted for those 38 orgs.</li>
-        <li>If it's clean for 48h, rev 46 is ready to promote to prod.</li>
+        <li>rev 46 runs for <b>7% of orgs</b> (38 organisations). White-glove tier orgs are excluded. Stratified random — covers all volume buckets, skill-usage classes, and behavioural clusters.</li>
+        <li>Runs on rev 46 are compared live against runs on rev 44 (prod) via SPRT-style sequential test.</li>
+        <li><b>In-flight runs on rev 44 finish on rev 44.</b> Only new runs that start after promotion pick up rev 46 (per-run version pinning, see brief §3.1).</li>
+        <li>If safety scorecard regresses, or operator-correction rate jumps, or tool failures spike — rollout <b>auto-pauses</b> and the 38 orgs revert to rev 44.</li>
+        <li>If clean for 48h minimum + one weekday cycle, rev 46 is ready to promote to global.</li>
       </ul>
     </div>
 

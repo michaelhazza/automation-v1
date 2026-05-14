@@ -1,13 +1,19 @@
 <!doctype html>
 <!--
-  Mock 07 / 09 — System skills library
-  =========================================
-  Shows the same ring pattern applied to system skills. The skills page
-  exists today (SystemSkillsPage.tsx); the only change is the "In flight"
-  column. Individual skill detail + rollout pipeline reuse Mocks 02–06
-  (just the noun changes from "agent" to "skill").
+  Mock 07 / 10 — System skills library with reversibility class
+  ================================================================
+  Existing surface: client/src/pages/SystemSkillsPage.tsx (route /system/skills).
+  Two additions: a Class column (I/R/K/X reversibility classification per
+  brief §3.6) and an In-flight column matching the agent list.
 
-  Admin-only. One primary action per row (open). Same column shape as Mock 01.
+  Reversibility classes:
+    I  Idempotent      — read-only, no side effects
+    R  Reversible      — has automatic undo path
+    K  Compensable     — undo requires manual counter-action
+    X  Irreversible    — no undo; human approval required at every execution
+
+  Admin-only. One primary action per row (Open). Skill detail / rollout
+  pipeline reuse Mocks 02-06 (noun changes from agent to skill).
 -->
 <html lang="en">
 <head>
@@ -22,12 +28,18 @@
   .pill-canary { background:#fef3c7; color:#92400e; }
   .pill-test { background:#e0f2fe; color:#075985; }
   .pill-dev { background:#f1f5f9; color:#334155; }
+  .class-pill { display:inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; font-weight:700; width:22px; height:22px; line-height:22px; text-align:center; border-radius:5px; }
+  .class-I { background:#ecfdf5; color:#047857; }
+  .class-R { background:#eff6ff; color:#1d4ed8; }
+  .class-K { background:#fef3c7; color:#b45309; }
+  .class-X { background:#fee2e2; color:#b91c1c; }
   .row:hover { background:#fafbff; }
+  .new-pill { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#4338ca; margin-left:6px; vertical-align:1px; }
 </style>
 </head>
 <body class="min-h-screen">
 
-<div class="mx-auto max-w-[960px] p-6">
+<div class="mx-auto max-w-[980px] p-6">
   <div class="flex justify-between items-baseline mb-4 text-[13px]">
     <h1 class="text-[15px] font-semibold text-slate-900">Mock 07 · System skills library</h1>
     <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
@@ -35,6 +47,15 @@
 
   <div class="text-[12px] text-slate-500 mb-3">
     Synthetos admin <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">System skills</span>
+  </div>
+
+  <!-- Class legend (small, inline, only shown once at top) -->
+  <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 mb-3 text-[12px] text-slate-700 flex items-center gap-4 flex-wrap">
+    <span class="text-slate-500 font-medium">Class<span class="new-pill">new</span></span>
+    <span class="flex items-center gap-1.5"><span class="class-pill class-I">I</span> Idempotent · read-only</span>
+    <span class="flex items-center gap-1.5"><span class="class-pill class-R">R</span> Reversible · auto undo</span>
+    <span class="flex items-center gap-1.5"><span class="class-pill class-K">K</span> Compensable · manual undo</span>
+    <span class="flex items-center gap-1.5"><span class="class-pill class-X">X</span> Irreversible · human approval each call</span>
   </div>
 
   <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -47,17 +68,33 @@
     </div>
 
     <div class="divide-y divide-slate-100 text-[13.5px]">
-      <div class="grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-2 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+      <!-- Column header -->
+      <div class="grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-2 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-semibold items-center">
+        <div>Class</div>
         <div>Name</div>
         <div>Live version</div>
         <div>In flight</div>
         <div></div>
       </div>
 
-      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+      <!-- I-class skill (read CRM) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-I">I</span></div>
+        <div>
+          <div class="font-semibold">read_crm</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Reads a CRM contact / company / deal record.</div>
+        </div>
+        <div><span class="pill pill-prod">v9 · prod</span></div>
+        <div class="text-[12.5px] text-slate-400">—</div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- R-class skill (draft email — has undo via draft archival) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-R">R</span></div>
         <div>
           <div class="font-semibold">draft_followup</div>
-          <div class="text-[12px] text-slate-500 mt-0.5">Drafts a follow-up reply based on thread history.</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Drafts a follow-up reply (saved to Drafts; not sent).</div>
         </div>
         <div><span class="pill pill-prod">v11 · prod</span></div>
         <div class="text-[12.5px] text-slate-700">
@@ -67,17 +104,33 @@
         <div class="text-slate-400 text-[18px] leading-none">›</div>
       </a>
 
-      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+      <!-- K-class skill (post to slack — manual delete to undo) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-K">K</span></div>
+        <div>
+          <div class="font-semibold">send_to_slack</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Posts a message to a configured Slack channel.</div>
+        </div>
+        <div><span class="pill pill-prod">v6 · prod</span></div>
+        <div class="text-[12.5px] text-slate-400">—</div>
+        <div class="text-slate-400 text-[18px] leading-none">›</div>
+      </a>
+
+      <!-- X-class skill (send transactional email) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-X">X</span></div>
         <div>
           <div class="font-semibold">send_email</div>
-          <div class="text-[12px] text-slate-500 mt-0.5">Sends an email via the org's configured provider.</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">Sends an email via the org's configured provider. <span class="text-red-700">Approval required at every call.</span></div>
         </div>
         <div><span class="pill pill-prod">v4 · prod</span></div>
         <div class="text-[12.5px] text-slate-400">—</div>
         <div class="text-slate-400 text-[18px] leading-none">›</div>
       </a>
 
-      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+      <!-- K-class skill (audit_geo — writes audit record) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-K">K</span></div>
         <div>
           <div class="font-semibold">audit_geo</div>
           <div class="text-[12px] text-slate-500 mt-0.5">Runs a generative-engine-optimisation audit on a site.</div>
@@ -90,7 +143,9 @@
         <div class="text-slate-400 text-[18px] leading-none">›</div>
       </a>
 
-      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+      <!-- R-class skill (enrich contact — adds a row that can be deleted) -->
+      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[auto_1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
+        <div><span class="class-pill class-R">R</span></div>
         <div>
           <div class="font-semibold">enrich_contact</div>
           <div class="text-[12px] text-slate-500 mt-0.5">Looks up enrichment data for a contact.</div>
@@ -101,21 +156,11 @@
         </div>
         <div class="text-slate-400 text-[18px] leading-none">›</div>
       </a>
-
-      <a href="03-rollout-pipeline.html" class="row grid grid-cols-[1.5fr_0.8fr_1.2fr_auto] gap-4 px-5 py-3.5 items-center no-underline text-slate-900">
-        <div>
-          <div class="font-semibold">scrape_structured</div>
-          <div class="text-[12px] text-slate-500 mt-0.5">Extracts structured data from a web page.</div>
-        </div>
-        <div><span class="pill pill-prod">v14 · prod</span></div>
-        <div class="text-[12.5px] text-slate-400">—</div>
-        <div class="text-slate-400 text-[18px] leading-none">›</div>
-      </a>
     </div>
   </div>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SystemSkillsPage.tsx</code>. Skills follow the identical ring pattern as agents — Mocks 02–06 work the same way here, just reading "skill" wherever they read "agent." Skill-specific readiness signals (tool error rate, output-schema validity) substitute for agent signals (escalation rate) on the canary health view.
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SystemSkillsPage.tsx</code>. Two additions (<span class="new-pill">new</span>): the reversibility-class column (I/R/K/X per brief §3.6) and the in-flight ring column matching the agent list. Class is shown as a coloured letter pill so it's scannable at row level; full names in the legend above. X-class rows carry an inline "Approval required at every call" note so operators know what they're looking at. Skills detail / rollout pipeline reuse Mocks 02–06.
   </p>
 </div>
 

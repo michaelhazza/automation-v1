@@ -112,16 +112,17 @@
 
   <!-- Advanced (collapsed) — per progressive-disclosure rule -->
   <details class="bg-white border border-slate-200 rounded-lg px-5 py-3 mt-3 text-[13px]">
-    <summary class="font-medium text-slate-700 cursor-pointer">Advanced — raw signals &amp; thresholds</summary>
-    <div class="mt-3 text-[12px] text-slate-600 space-y-1">
-      <div>Auto-pause trips if: <code class="text-[11.5px] bg-slate-100 px-1 rounded">error Δ &gt; +1.0pp</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">escalation Δ &gt; +2.0pp</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">cost Δ &gt; +30%</code></div>
-      <div>Cache-hit-rate delta: <span class="text-slate-700">−9% · expected after prompt change · inside the 2-week warm-up grace period</span></div>
-      <div>Cohort hash: <code class="text-[11.5px] bg-slate-100 px-1 rounded">canary_v45_5c2a</code> · 38 org_ids deterministically selected</div>
+    <summary class="font-medium text-slate-700 cursor-pointer">Advanced — diagnostic signals &amp; thresholds</summary>
+    <div class="mt-3 text-[12px] text-slate-600 space-y-2">
+      <div><b class="text-slate-800">Hard-stop thresholds</b> (auto-rollback): <code class="text-[11.5px] bg-slate-100 px-1 rounded">safety scorecard regression</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">tool failure +1pp or 2× baseline</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">operator-correction +30%</code></div>
+      <div><b class="text-slate-800">Soft-stop thresholds</b> (pause for review): <code class="text-[11.5px] bg-slate-100 px-1 rounded">non-safety scorecard −2pp</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">latency p95 +25%</code> · <code class="text-[11.5px] bg-slate-100 px-1 rounded">cost +15%</code></div>
+      <div><b class="text-slate-800">Cache-hit-rate delta:</b> <span class="text-slate-700">−9% · diagnostic only, not a gate. A prompt change invalidates the prefix cache by design; this metric is uninformative at t=0 and becomes useful after both cohorts warm up. Large divergence post-warm-up flags unintended prompt-prefix divergence.</span></div>
+      <div><b class="text-slate-800">Cohort:</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">canary_v45_5c2a</code> · 38 subaccounts · stratified random across volume + skill-usage + behavioural-cluster axes · immutable for the life of this release</div>
     </div>
   </details>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    New surface. One comparison table is enough — two cohorts, one time window. Auto-pause status at the top is the signal the admin scans first. Thresholds and prefix-hash diagnostics live in Advanced so primary path stays clean.
+    New surface. One comparison table is enough — two cohorts, one time window, one delta column. Auto-pause status at the top is what the admin scans first. Cache-hit-rate is intentionally <em>not</em> a gate metric (see brief §3.4) — it lives in Advanced as a diagnostic.
   </p>
 </div>
 

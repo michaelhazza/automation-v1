@@ -32,8 +32,8 @@
     <p class="text-[13.5px] text-slate-600 mt-1.5 leading-relaxed">
       How a system agent or system skill revision travels from the author's desk to every organisation — safely, in stages, with automatic pause if anything regresses. Mockups are grouped by user class; each file is one screen, one primary task.
     </p>
-    <div class="mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[12.5px] text-amber-900">
-      <b>Revisions pending.</b> This mockup set was drafted before three deep-research passes landed (see <code class="text-[11.5px] bg-amber-100 px-1 rounded">tasks/dev-brief-staged-rollout.md</code> §4). Required changes: (A) cache-hit-rate moves from primary canary-health table to Advanced-only — diagnostic, not gate; (B) reversibility class column added to skill list; (C) calibration status indicator on rollout pipeline; (D) per-run version pinning called out in promote / rollback modals; (E) Phase 1 vs Phase 2 status banner; (F) new Mockup 10 for emergency kill switch.
+    <div class="mt-4 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-[12.5px] text-slate-700">
+      <b>Grounded in the codebase.</b> Each mockup references the actual existing surface it sits on (or notes when it's a net-new route). Source files named in each mockup's footer. Per the brief's recommendation, this feature is on hold until closed-loop skill-improvement (separate brief on main) ships and validates its case — see <code class="text-[11.5px] bg-slate-100 px-1 rounded">tasks/dev-brief-staged-rollout.md</code> §11.3.
     </div>
   </div>
 
@@ -84,7 +84,13 @@
       <a href="07-system-skills-library.html" class="card block bg-white border border-slate-200 rounded-lg px-4 py-3 no-underline text-slate-900">
         <div class="flex items-baseline justify-between">
           <div class="font-semibold text-[14px]">07 · System skills library</div>
-          <div class="text-[12px] text-slate-500">Same pattern applied to skills — Mocks 02–06 reuse</div>
+          <div class="text-[12px] text-slate-500">+ reversibility class column (I / R / K / X)</div>
+        </div>
+      </a>
+      <a href="10-kill-switch.html" class="card block bg-white border border-slate-200 rounded-lg px-4 py-3 no-underline text-slate-900">
+        <div class="flex items-baseline justify-between">
+          <div class="font-semibold text-[14px]">10 · Emergency kill switch</div>
+          <div class="text-[12px] text-slate-500">Disable a skill instantly · no deploy · scoped global / org / subaccount</div>
         </div>
       </a>
     </div>
@@ -117,11 +123,12 @@
   <div class="bg-white border border-slate-200 rounded-lg px-5 py-4">
     <h3 class="text-[13px] font-semibold text-slate-900 mb-2">Design notes</h3>
     <ul class="text-[12.5px] text-slate-600 space-y-1.5 leading-relaxed list-disc pl-4">
-      <li><b>Two user classes, different rules.</b> Admin screens (01–07) use the relaxed budget per <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/frontend-design-principles.md</code>. Agency screens (08, 09) obey the strict budget — no metrics, no version numbers in primary copy, version info lives inside a collapsed Advanced section.</li>
-      <li><b>Versioning already exists.</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_prompt_revisions</code> is live. Rings add one <code class="text-[11.5px] bg-slate-100 px-1 rounded">ring</code> column + one membership table.</li>
-      <li><b>This composes with Explore/Execute Mode.</b> Rings are per-revision safety (platform authors shipping changes); Explore/Execute is per-run safety (operators trying things). Orthogonal, not competing.</li>
-      <li><b>Platform stance:</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/spec-context.md</code> currently says <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_model: commit_and_revert</code> and <code class="text-[11.5px] bg-slate-100 px-1 rounded">staged_rollout: never_for_this_codebase_yet</code>. This feature is queued for when that flips (first live agency client).</li>
-      <li><b>Brief lives at <code class="text-[11.5px] bg-slate-100 px-1 rounded">tasks/dev-brief-staged-rollout.md</code></b> — consolidated from this branch + three deep-research passes done in a parallel session. No spec yet; the brief is the input to the dev session.</li>
+      <li><b>Two user classes, different rules.</b> Admin screens (01–07, 10) use the relaxed budget per <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/frontend-design-principles.md</code>. Agency screens (08, 09) obey the strict budget — no metrics, no version numbers in primary copy, version info lives inside a collapsed Advanced section.</li>
+      <li><b>Existing surfaces vs new routes.</b> Mockups 01 (Agents list), 02 (Agent edit), 07 (Skills list), 08 (Subaccount agent config), 10 (kill switch on skill edit) sit on existing pages. Mockup 03 (Rollout pipeline) and 05 (Canary health) are new routes reachable from the existing edit pages. Mockups 04, 06 are modals. Mockup 09 is a notification surface (in-app banner + email).</li>
+      <li><b>Versioning already exists.</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_prompt_revisions</code> and <code class="text-[11.5px] bg-slate-100 px-1 rounded">skill_versions</code> are live. Rings add per-run pinning columns on <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_runs</code>, a <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_cohorts</code> table, a <code class="text-[11.5px] bg-slate-100 px-1 rounded">skill_disable_flags</code> table, and a <code class="text-[11.5px] bg-slate-100 px-1 rounded">reversibility_class</code> column on <code class="text-[11.5px] bg-slate-100 px-1 rounded">system_skills</code>.</li>
+      <li><b>Composes with Explore/Execute Mode.</b> Rings are per-revision safety (platform authors shipping changes); Explore/Execute is per-run safety (operators trying things). Orthogonal.</li>
+      <li><b>Platform stance:</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/spec-context.md</code> currently says <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_model: commit_and_revert</code>. Phase 1 (internal release) is technically permitted today; Phase 2 (customer rings) activates when first live agency client onboards.</li>
+      <li><b>Build sequencing.</b> See brief §11. Closed-loop skill improvement ships first; staged rollout follows only if closed-loop validates its case. Per brief §11.3, holding this work is recommended until both: (i) closed-loop has 4 weeks of internal operation showing measurable improvement, and (ii) there's at least one live agency client.</li>
     </ul>
   </div>
 

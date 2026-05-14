@@ -1,15 +1,17 @@
 <!doctype html>
 <!--
-  Mock 08 / 09 — Agency-facing agent config (strict)
+  Mock 08 / 10 — Agency-facing agent config (strict)
   =======================================================
-  What an agency operator (the customer) sees on their system-agent
-  detail page. Version management is essentially invisible — it lives
-  in a collapsed "Advanced" section per frontend-design-principles
-  §progressive-disclosure. No KPIs, no history table inline, no
-  "coming soon" banner unless a specific rev is days away from them.
+  Existing surface: client/src/pages/SubaccountAgentEditPage.tsx
+  (~871 lines, single long form with <Card> sections). What an agency
+  operator (the customer) sees on their agent config page. Version
+  management is essentially invisible — it lives in a collapsed
+  Advanced section per frontend-design-principles §progressive-disclosure.
 
-  Primary task: "configure this agent for my org." Version awareness
-  is peripheral and progressive — they only see it if they look.
+  Primary task: "configure this agent for my organisation."
+  Version awareness is peripheral and progressive — operators only
+  see it if they look. No KPIs, no version numbers in primary copy,
+  no "coming soon" banner unless a specific rev is days away.
 -->
 <html lang="en">
 <head>
@@ -84,7 +86,7 @@
   </div>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SubaccountAgentEditPage.tsx</code>. The primary task is still "configure my org's additional instructions + schedule." Version management is a one-line entry inside the existing <em>Advanced</em> collapse — zero visual weight unless the agency opens it. No "coming soon" banner, no pinning UI, no early-access opt-in. Those are admin concerns, not operator concerns.
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SubaccountAgentEditPage.tsx</code> (~871 lines, single long form with <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">&lt;Card&gt;</code> sections). The page renders the same way today; the only addition is a "System version" row inside the existing <em>Advanced</em> collapse — zero visual weight unless the agency opens it. No "coming soon" banner, no pinning UI, no early-access opt-in. Those are admin concerns, not operator concerns. Per brief §3.3, the volunteer Test+ ring is Phase 2 work.
   </p>
 </div>
 

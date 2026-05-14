@@ -1,15 +1,15 @@
 <!doctype html>
 <!--
-  Mock 03 / 09 — Rollout pipeline (four rings)
+  Mock 03 / 10 — Rollout pipeline (four rings)
   ================================================
-  The pipeline tab on the agent edit page. Shows every active revision and
-  which ring it currently occupies. Primary task: "where is each version
-  right now, and what's my next action?"
+  New surface. New route: /system/agents/:id/rollout (or
+  /system/skills/:id/rollout). Reachable from an "Open rollout" action on
+  the existing SystemAgentEditPage.tsx / SystemSkillEditPage.tsx.
 
-  Admin-only. Relaxed budget per frontend-design-principles §when-to-break.
-  Four vertically stacked ring cards, each with one primary action if the
-  user is allowed to promote. A timeline summary at the top so the whole
-  state is readable in 3 seconds.
+  Primary task: "where is each version right now, and what's my next action?"
+
+  Admin-only. Relaxed budget. Net-new page with two top banners (Phase 1/2
+  + calibration status), four vertical ring cards, one primary action per ring.
 -->
 <html lang="en">
 <head>
@@ -20,11 +20,13 @@
 <style>
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
   .ring { border:1px solid #e2e8f0; border-radius:10px; background:white; }
+  .ring.disabled { background:#f8fafc; opacity:0.7; }
   .pill { display:inline-block; font-size:10.5px; font-weight:600; letter-spacing:0.04em; padding:2px 8px; border-radius:999px; }
   .pill-prod { background:#eef2ff; color:#4338ca; }
   .pill-canary { background:#fef3c7; color:#92400e; }
   .pill-test { background:#e0f2fe; color:#075985; }
   .pill-dev { background:#f1f5f9; color:#334155; }
+  .pill-inactive { background:#f1f5f9; color:#94a3b8; }
   .divider { height:1px; background:#e2e8f0; }
   .arrow { width:2px; background:#cbd5e1; margin:0 auto; }
 </style>
@@ -39,35 +41,33 @@
 
   <!-- Breadcrumb -->
   <div class="text-[12px] text-slate-500 mb-2">
-    Synthetos admin <span class="text-slate-300 mx-1">›</span> <a href="01-system-agents-library.html" class="text-indigo-600 no-underline">System agents</a> <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">Outreach Agent</span>
+    Synthetos admin <span class="text-slate-300 mx-1">›</span> <a href="01-system-agents-library.html" class="text-indigo-600 no-underline">Agents</a> <span class="text-slate-300 mx-1">›</span> <a href="02-edit-agent-prompt.html" class="text-indigo-600 no-underline">Outreach Agent</a> <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">Rollout</span>
   </div>
 
-  <!-- Tab bar (context) -->
-  <div class="bg-white border border-slate-200 rounded-t-lg px-6 pt-3 border-b-0">
-    <div class="flex gap-4 -mb-px">
-      <button class="py-2 px-1 text-[13px] font-medium text-slate-500">General</button>
-      <button class="py-2 px-1 text-[13px] font-medium text-slate-500"><a href="02-edit-agent-prompt.html" class="text-slate-500 no-underline">Prompts</a></button>
-      <button class="py-2 px-1 text-[13px] font-medium text-slate-500">Skills</button>
-      <button class="py-2 px-1 text-[13px] font-semibold border-b-2 border-indigo-600 text-indigo-600">Rollout</button>
-      <button class="py-2 px-1 text-[13px] font-medium text-slate-500">Advanced</button>
+  <!-- Two top banners — Phase status + calibration status -->
+  <div class="grid grid-cols-2 gap-3 mb-4">
+    <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-[12.5px] text-amber-900">
+      <b>Internal release · Phase 1.</b> Dev and Test rings active. Customer rings (Canary, Prod) activate once the first live agency client onboards.
+    </div>
+    <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-[12.5px] text-slate-700">
+      <b>Calibration: advisory mode.</b> Auto-pause is alert-only until no-op canary calibration completes (~7 days). Real 2σ / 3σ thresholds engage after.
     </div>
   </div>
 
-  <!-- Body -->
-  <div class="bg-white border border-slate-200 border-t-0 rounded-b-lg px-6 py-5">
+  <!-- Pipeline body -->
+  <div class="bg-white border border-slate-200 rounded-lg px-6 py-5">
 
-    <!-- Summary header -->
     <div class="mb-5 pb-4 border-b border-slate-100">
       <h3 class="text-[14px] font-semibold text-slate-900">Active revisions</h3>
-      <p class="text-[12px] text-slate-500 mt-0.5">One revision per ring at a time. Changes move left → right once readiness checks pass.</p>
+      <p class="text-[12px] text-slate-500 mt-0.5">One revision per ring at a time. Changes move left → right once readiness checks pass. In-flight runs always finish on the version pinned at first step (per-run version pinning, see brief §3.1).</p>
     </div>
 
-    <!-- DEV RING -->
+    <!-- DEV RING (active in Phase 1) -->
     <div class="ring">
       <div class="p-4 flex items-start justify-between">
         <div>
           <div class="flex items-center gap-2"><span class="pill pill-dev">dev</span><span class="text-[13.5px] font-semibold text-slate-900">rev 47</span><span class="text-[12px] text-slate-500">· you · 2h ago</span></div>
-          <div class="text-[12.5px] text-slate-700 mt-1.5">“Adds explicit signal-reference step; reduces generic openers.”</div>
+          <div class="text-[12.5px] text-slate-700 mt-1.5">"Adds explicit signal-reference step; reduces generic openers."</div>
           <div class="text-[11.5px] text-slate-500 mt-1">Ran 12 times on your test subaccount. No errors.</div>
         </div>
         <a href="04-promote-modal.html" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-lg no-underline">Promote to Test →</a>
@@ -76,44 +76,40 @@
 
     <div class="arrow h-5"></div>
 
-    <!-- TEST RING -->
+    <!-- TEST RING (active in Phase 1) -->
     <div class="ring">
       <div class="p-4 flex items-start justify-between">
         <div>
           <div class="flex items-center gap-2"><span class="pill pill-test">test</span><span class="text-[13.5px] font-semibold text-slate-900">rev 46</span><span class="text-[12px] text-slate-500">· 6 days in test</span></div>
-          <div class="text-[12.5px] text-slate-700 mt-1.5">“Tightened tone guidelines for regulated-industry clients.”</div>
-          <div class="text-[11.5px] text-slate-500 mt-1">5 internal orgs + 3 early-access. 412 runs. Looking healthy.</div>
+          <div class="text-[12.5px] text-slate-700 mt-1.5">"Tightened tone guidelines for regulated-industry clients."</div>
+          <div class="text-[11.5px] text-slate-500 mt-1">All staff subaccounts. 412 runs. Looking healthy.</div>
         </div>
-        <a href="04-promote-modal.html" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-lg no-underline">Promote to Canary →</a>
+        <a href="04-promote-modal.html" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-lg no-underline">Promote to global →</a>
       </div>
     </div>
 
     <div class="arrow h-5"></div>
 
-    <!-- CANARY RING -->
-    <div class="ring">
+    <!-- CANARY RING (inactive Phase 1, visually dimmed) -->
+    <div class="ring disabled">
       <div class="p-4 flex items-start justify-between">
         <div>
-          <div class="flex items-center gap-2"><span class="pill pill-canary">canary</span><span class="text-[13.5px] font-semibold text-slate-900">rev 45</span><span class="text-[12px] text-slate-500">· day 3 of 2-day minimum · 7% of orgs</span></div>
-          <div class="text-[12.5px] text-slate-700 mt-1.5">“Switched email subject-line heuristic; tested in 5 internal orgs.”</div>
-          <div class="text-[11.5px] text-slate-500 mt-1">38 of 542 orgs. 2,104 runs. Error rate +0.2pp vs prod — within limits.</div>
+          <div class="flex items-center gap-2"><span class="pill pill-inactive">canary · inactive</span><span class="text-[13.5px] font-semibold text-slate-500">activates Phase 2</span></div>
+          <div class="text-[12px] text-slate-500 mt-1.5">5% stratified customer cohort. SPRT-style sequential test on scorecard win-rate. Auto-pause armed.</div>
         </div>
-        <div class="flex flex-col gap-2 items-end">
-          <a href="05-canary-health.html" class="text-[12.5px] text-indigo-600 font-medium no-underline">Live health →</a>
-          <a href="04-promote-modal.html" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[12.5px] font-semibold rounded-lg no-underline">Promote to Prod →</a>
-        </div>
+        <button disabled class="px-3.5 py-2 bg-slate-100 text-slate-400 text-[12.5px] font-semibold rounded-lg cursor-not-allowed" title="Activates when first customer onboards">Activates Phase 2</button>
       </div>
     </div>
 
     <div class="arrow h-5"></div>
 
-    <!-- PROD RING -->
+    <!-- PROD RING (active for global rollout in Phase 1 — single step, not the four-step ramp until Phase 2) -->
     <div class="ring">
       <div class="p-4 flex items-start justify-between">
         <div>
-          <div class="flex items-center gap-2"><span class="pill pill-prod">prod</span><span class="text-[13.5px] font-semibold text-slate-900">rev 44</span><span class="text-[12px] text-slate-500">· live 18 days · 93% of orgs</span></div>
-          <div class="text-[12.5px] text-slate-700 mt-1.5">“Added regulated-industry-specific tone guidance.”</div>
-          <div class="text-[11.5px] text-slate-500 mt-1">504 orgs. 48,912 runs in the last 30 days. Stable baseline.</div>
+          <div class="flex items-center gap-2"><span class="pill pill-prod">global</span><span class="text-[13.5px] font-semibold text-slate-900">rev 44</span><span class="text-[12px] text-slate-500">· live 18 days · all staff subaccounts</span></div>
+          <div class="text-[12.5px] text-slate-700 mt-1.5">"Added regulated-industry-specific tone guidance."</div>
+          <div class="text-[11.5px] text-slate-500 mt-1">Stable baseline. (Phase 2 will replace this single step with a 10% → 25% → 50% → 100% customer ramp.)</div>
         </div>
         <a href="06-rollback-modal.html" class="text-[12.5px] text-slate-600 hover:text-red-600 font-medium no-underline">Rollback…</a>
       </div>
@@ -122,7 +118,7 @@
   </div>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    New surface. Sits on <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/AdminAgentEditPage.tsx</code> as a new "Rollout" tab. One ring per card, vertical flow so it scans top-to-bottom. Actions are inline — promotion opens Mock 04, live metrics open Mock 05, rollback opens Mock 06.
+    New surface. New route <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">/system/agents/:id/rollout</code> (and equivalent for skills). Reachable from a new "Open rollout" action on <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">SystemAgentEditPage.tsx</code> / <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">SystemSkillEditPage.tsx</code>. Phase 1 layout above: Dev and Test are active rings; Canary is visibly inactive; Prod is a single global step (not the four-substep ramp) because there are no customer cohorts yet. The full four-substep Prod ramp engages in Phase 2.
   </p>
 </div>
 
