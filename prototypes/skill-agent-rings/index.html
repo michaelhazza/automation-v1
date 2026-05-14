@@ -27,11 +27,14 @@
 
   <!-- Header -->
   <div class="mb-7">
-    <div class="text-[11px] uppercase tracking-[0.18em] font-semibold text-indigo-600 mb-1">Pre-spec design review · queued post-launch</div>
+    <div class="text-[11px] uppercase tracking-[0.18em] font-semibold text-indigo-600 mb-1">Pre-spec design review · canonical brief at tasks/dev-brief-staged-rollout.md</div>
     <h1 class="text-[24px] font-bold text-slate-900">Skill &amp; Agent Ring Rollout — Mockups</h1>
     <p class="text-[13.5px] text-slate-600 mt-1.5 leading-relaxed">
       How a system agent or system skill revision travels from the author's desk to every organisation — safely, in stages, with automatic pause if anything regresses. Mockups are grouped by user class; each file is one screen, one primary task.
     </p>
+    <div class="mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[12.5px] text-amber-900">
+      <b>Revisions pending.</b> This mockup set was drafted before three deep-research passes landed (see <code class="text-[11.5px] bg-amber-100 px-1 rounded">tasks/dev-brief-staged-rollout.md</code> §4). Required changes: (A) cache-hit-rate moves from primary canary-health table to Advanced-only — diagnostic, not gate; (B) reversibility class column added to skill list; (C) calibration status indicator on rollout pipeline; (D) per-run version pinning called out in promote / rollback modals; (E) Phase 1 vs Phase 2 status banner; (F) new Mockup 10 for emergency kill switch.
+    </div>
   </div>
 
   <!-- Author / admin flow -->
@@ -118,7 +121,7 @@
       <li><b>Versioning already exists.</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_prompt_revisions</code> is live. Rings add one <code class="text-[11.5px] bg-slate-100 px-1 rounded">ring</code> column + one membership table.</li>
       <li><b>This composes with Explore/Execute Mode.</b> Rings are per-revision safety (platform authors shipping changes); Explore/Execute is per-run safety (operators trying things). Orthogonal, not competing.</li>
       <li><b>Platform stance:</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/spec-context.md</code> currently says <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_model: commit_and_revert</code> and <code class="text-[11.5px] bg-slate-100 px-1 rounded">staged_rollout: never_for_this_codebase_yet</code>. This feature is queued for when that flips (first live agency client).</li>
-      <li><b>No spec yet.</b> These mockups are the review surface. Spec is drafted after the UX locks.</li>
+      <li><b>Brief lives at <code class="text-[11.5px] bg-slate-100 px-1 rounded">tasks/dev-brief-staged-rollout.md</code></b> — consolidated from this branch + three deep-research passes done in a parallel session. No spec yet; the brief is the input to the dev session.</li>
     </ul>
   </div>
 

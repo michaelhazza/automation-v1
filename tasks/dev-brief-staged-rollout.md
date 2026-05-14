@@ -236,4 +236,265 @@ Two classes of gate. Hard stops trigger automatic rollback; soft stops pause for
 
 **The most signal-rich metric is operator corrections.** Across every published incident in the last 18 months, internal evals missed the regression and users surfaced it. Operator corrections are humans literally typing "the agent got this wrong"; the signal-to-noise is higher than any automated metric. Weight it the highest and tune thresholds tightly.
 
-<!-- APPEND_HERE -->
+### 3.5 Rollback semantics
+
+Four operations, used in different situations.
+
+**1. Hard rollback (default).** Flip the global default version for new runs to the last-known-good. In-flight runs finish on their pinned versions (see §3.1). This is your default for any non-catastrophic regression. Anchored to OpenAI's GPT-4o sycophancy rollback (~24 hours, in-flight conversations carried on).
+
+**2. Per-subaccount version pin.** Maintain a `subaccount.pinned_version` field. Use to leave specific subaccounts on the new version for diagnosis, or pin specific subaccounts to the old version because they hit the bug specifically. The operational cost is small because the LLM ledger is already per-run; we just need a sticky version selector at run-start.
+
+**3. Shadow execution.** Run old and new versions in parallel on the shadowed traffic; old version's output wins, new version's output is logged for comparison. Expensive (2× cost on shadowed traffic), reserved for high-stakes changes: any skill in reversibility class K (compensable) or X (irreversible), any skill that emits to a customer-visible channel, any system-prompt or tool-description change. The Replit deletion incident is the cautionary tale for why shadow exists.
+
+**4. Replay.** Re-run affected work on the reverted version. Practically scoped to safety-class regressions where the output already emitted is the problem. Re-run with temperature pinned to 0 if possible; compare reverted output to original; flag any case where they differ substantively for human review. Promise replay-then-review, not auto-resolved replay.
+
+**In-flight runs:** let finish on the pinned version unless the failure mode is catastrophic (data loss, security violation, content policy breach). Mid-run termination has its own failure mode (partial tool calls leave inconsistent state). The exception is safety-class regression, in which case you terminate and replay.
+
+**Hotfix prompt as intermediate step.** OpenAI's sycophancy rollback used a system-prompt patch late Sunday night to mitigate the worst behaviour while preparing the full rollback. This is a useful intermediate option: a constrained-behaviour amendment that ships fast while the full rollback is being prepared. Recommend supporting it as an explicit operation in the rollout UI.
+
+### 3.6 Reversibility taxonomy and skill classification
+
+Every skill is classified into one of four reversibility classes. The classification dictates rollout cadence, gate strictness, and rollback requirements.
+
+| Class | Definition | Example | Approval gate | Rollback approach |
+|---|---|---|---|---|
+| **I** Idempotent | Read-only; no side effects | Read CRM contact, query memory | None required | Stop the run; no rollback action needed |
+| **R** Reversible | Has an undo path that can be executed automatically | Create draft email, schedule message in queue | Pre-execute approval not required if class verified | Trigger the registered undo action |
+| **K** Compensable | Side effect that can be undone with a manual counter-action | Charge card, send invoice, post to public channel | Reversibility-aware staged rollout; full four-ring | Surface compensation steps for human execution |
+| **X** Irreversible | No undo possible | Send transactional email, submit form to third-party, delete production data | **Human approval gate before each execution**, not just before rollback | Cannot rollback; only forward correction possible |
+
+**Phase 1 deliverable.** Every system skill is classified. The classification is a new column on `system_skills`. The rollout pipeline reads the column and adjusts: I-class skills can use a fast-revert path with flag-only rollout; X-class skills require shadow execution in Canary and an in-place human approval gate at every execution (not just at rollout time).
+
+**Default classification when uncertain: K (compensable).** Forces a conservative posture. Re-classify down when audit confirms full reversibility.
+
+**Change classification matters as much as skill classification.** Independent axis:
+
+| Change shape | Rollout requirement |
+|---|---|
+| Typo / rephrase in non-tool-using skill | Test ring only, then 100% behind a flag |
+| Substantive prompt rewrite in single skill | Full four-ring |
+| System-prompt change | Full four-ring + shadow on a sample |
+| Tool description change | Full four-ring (treat as system-prompt-equivalent) |
+| New tool added to agent | Full four-ring + enforced sandboxing in Canary |
+| Agent graph topology change | Full four-ring at slowest cadence |
+
+### 3.7 Emergency per-skill disable flag
+
+A no-deploy kill switch per skill, per scope (global, org, subaccount). When triggered:
+- All new runs that would have invoked the skill receive a deterministic "skill temporarily unavailable" response.
+- In-flight runs that are mid-execution complete on the pinned version (do not interrupt).
+- Operator audit log captures who flipped the flag, when, and why.
+- The flag flip propagates within seconds; not behind any deploy pipeline.
+
+Anchored to two incidents: Gemini Feb 2024 paused image generation within hours; Replit's commitment after the deletion was a "planning-only mode" switchable atomically.
+
+**Implementation.** Single `skill_disable_flags` table with `(skill_slug, scope_org_id, scope_subaccount_id, disabled_at, disabled_by, reason)`. Resolver checks this table at run start, after version pinning. Skill is treated as unavailable for that scope until row is deleted.
+
+### 3.8 Detection threshold calibration (no-op canary)
+
+The discipline that protects the pipeline from false-positive fatigue and false-negative miss.
+
+**The procedure.** Before going live with real auto-pause thresholds:
+1. Run a no-op canary: same version as Prod, tagged as canary, for one week.
+2. Measure standard deviation of every gate metric in the canary cohort against the Prod cohort.
+3. Set real auto-pause thresholds at:
+   - Safety metrics: **2σ** above no-op variance.
+   - Non-safety metrics: **3σ** above no-op variance.
+4. Re-calibrate quarterly, or any time the baseline traffic shape changes materially.
+
+**Why it matters.** Anthropic's Claude Code reasoning-depth regression flew under the radar for weeks because nobody had calibrated detection thresholds to actual signal size; the regression was real but smaller than the noise floor of their monitoring. The fix is not "tighter thresholds" but "know your variance and set thresholds above it."
+
+**What this protects against.** Two failure modes:
+- (a) the threshold is too tight → auto-pause fires on noise → operators lose trust in the pipeline → they manually override → next real regression slips through;
+- (b) the threshold is too loose → real regressions don't trigger → they ship → user-visible incident.
+
+**Phase 1 deliverable.** Calibration is run before the pipeline is permitted to auto-pause anything. Until calibrated, all auto-pauses are **advisory** (alert only, no rollback action).
+
+## 4. Mockup integration — how the existing set lines up with this brief
+
+The mockup set at [`prototypes/skill-agent-rings/`](../prototypes/skill-agent-rings/) was drafted before the deep-research passes. The shape survives; specific gate-metric and surface decisions need adjustment.
+
+### 4.1 What stays
+
+- **Per-file mockup structure** (one screen per HTML, ~80–140 lines, Riley house style, light theme, Tailwind + Inter). Matches `docs/frontend-design-principles.md` and the convention used by Riley Observations and cached-context.
+- **Two user classes, two design budgets.** Admin screens (01–07) use the relaxed budget; agency-facing screens (08, 09) use the strict consumer-simple budget. Confirmed correct by the research — agencies see "updated, here's what changed," not "rev 45 promoted from canary to prod_10."
+- **Four-ring shape.** Convergent with the research recommendation.
+- **One-confirm rollback.** Section 3.5 confirms this is right for the default case.
+- **Auto-pause status as the first thing you read on canary health.** Section 3.4 confirms.
+
+### 4.2 Two revisions the research forces
+
+**Revision A — Cache-hit-rate moves from gate to diagnostic.**
+- *Affected mockup:* `05-canary-health.html`.
+- *Current state:* the canary-vs-prod comparison table treats cache-hit-rate delta as a primary signal alongside error rate, escalation rate, cost, latency, and output quality.
+- *Required change:* remove cache-hit-rate from the primary comparison table. Surface it in the **Advanced — raw signals & thresholds** collapse instead, framed as a diagnostic ("expected after prompt change; large divergence after warm-up is a yellow flag"). The existing mockup already has the Advanced section and already mentions "−9% · expected after prompt change" — the change is to demote it from the primary table to Advanced-only.
+- *Why:* a prompt change invalidates the prefix cache by design (§3.4). The metric is uninformative at t=0 and can't be a gate.
+
+**Revision B — Reversibility class becomes a column on skill-list views.**
+- *Affected mockup:* `07-system-skills-library.html`.
+- *Current state:* skill list shows name, live version, in-flight version.
+- *Required change:* add a Class column (I / R / K / X) between Name and Live version. X-class rows should show a small "human approval at every execution" indicator. The skill detail (Mockup 02, when reused for skills) should display the reversibility class prominently next to the title.
+- *Why:* the dev session needs a UI surface that makes reversibility class operationally visible. Without it, the classification is data, not signal.
+
+### 4.3 Three smaller refinements
+
+**Refinement C — Calibration status indicator on the rollout pipeline (Mockup 03).** Add a small status pill at the top of the page reading "Calibration: live · 2σ/3σ" or "Calibration: in progress · advisory mode" so an admin knows whether auto-pause is real or alert-only. Phase 1 default is "advisory mode" until the no-op canary has run for a week (§3.8).
+
+**Refinement D — Per-run version pinning called out in the promote and rollback modals.** Mockup 04 (promote) and Mockup 06 (rollback) should explicitly mention "in-flight runs finish on their pinned versions" in the "what happens" body. The Mockup 06 copy already has this line ("12 runs currently in flight finish on rev 44") — keep it; add an equivalent line to Mockup 04 explaining that promotion does not interrupt in-flight runs on the old version.
+
+**Refinement E — Phase 1 vs Phase 2 status banner on the rollout pipeline (Mockup 03).** A small banner at the top of the page: "Internal release · customer rings inactive until first live customer" while in Phase 1. The four-ring diagram remains, but Canary and Prod cards are visually dimmed and the promote-to-canary button is disabled with a tooltip "Activates when first customer onboards."
+
+### 4.4 Where each architectural section maps to a mockup
+
+This is the spec-session's mapping table — useful when the spec session is decomposing into chunks.
+
+| Brief section | Primary mockup | Touches |
+|---|---|---|
+| §3.1 Per-run version pinning | n/a (backend primitive) | Modals 04, 06 reference it in copy |
+| §3.2 Ring shape | Mockup 03 | All admin screens carry ring pill |
+| §3.3 Cohort selection | Mockup 04 (promotion modal) | "What happens next" body |
+| §3.4 Gate metrics | Mockup 05 | The primary surface for monitoring |
+| §3.5 Rollback semantics | Mockup 06 + new "hotfix prompt" operation | Promote modal also touches hotfix |
+| §3.6 Reversibility taxonomy | Mockup 07 (new column) + skill detail | Cross-cutting on every skill row |
+| §3.7 Emergency disable flag | New mockup needed: `10-kill-switch.html` | Admin top-nav action |
+| §3.8 No-op calibration | Mockup 03 (status indicator) | Pipeline page only |
+
+**Mockup 10 (kill switch) is missing from the current set.** Add it as part of the spec-session's mockup-refresh chunk.
+
+## 5. What is explicitly out of scope (Phase 1)
+
+- **Customer-facing rings (Canary, Prod).** Built in code but inactive. Activated when first live customer lands and `docs/spec-context.md` flips `rollout_model` off `commit_and_revert`. Phase 1 ships Dev and Test only.
+- **Opt-in volunteer ring (Test+).** Deferred to Phase 2. Requires a customer to opt in to, which we do not have yet.
+- **Org-tier or subaccount-tier promotion through rings.** The pipeline is for system-tier changes only. Org-tier and subaccount-tier changes happen via the closed-loop / amendment-primitive feature (separate brief — see §11), reviewed per subaccount, not ringed.
+- **Cross-region or per-region cohort stratification.** Synthetos is single-region in Phase 1. Adds at Phase 2.
+- **Automatic skill-classification reasoning.** Phase 1 requires a manual classification pass on the 100+ system skills (I/R/K/X). Auto-classification from observed side effects is a separate feature.
+- **Real-time hash-based stratification.** A one-time stratified-sampling job at rollout start is sufficient at our cohort size. Hash-based real-time assignment is over-engineered.
+- **Bayesian or mixture-SPRT.** Plain SPRT on the primary scorecard metric is enough. Full Bayesian formalism adds debugging cost without proportional benefit at our scale.
+- **Multi-version-per-subaccount experimentation.** Within a subaccount, every run sees the same version (§3.3). A/B testing inside a subaccount is a separate evals feature.
+
+## 6. Sequencing inside Phase 1
+
+**Step 1. Schema.** Per-run version pinning columns on `agent_runs`; `skill_disable_flags` table; `rollout_cohorts` table; `reversibility_class` column on `system_skills`. Migration only, behind a feature flag, no behaviour change yet.
+
+**Step 2. Resolver wiring.** At run start, capture pinned versions; on subsequent steps, use the pinned versions instead of re-resolving. Existing run flows unchanged for any run whose pin matches current global default. Light unit tests.
+
+**Step 3. Manual classification of all system skills into reversibility classes.** Default K when uncertain. Reviewed by Synthetos staff; one-time work, captured as data. Top 30 most-used skills in week 1; remainder over the next month.
+
+**Step 4. Ring shape: Dev and Test rings activated.** Internal release flow: a Synthetos staff member submits a system-skill change, it lands in Dev (their own subaccount), promotes through Test, then ships to global at 100%. No Canary or Prod ramp yet.
+
+**Step 5. Gate metrics aggregation jobs.** SPRT computation on scorecard win-rate. Tool failure rate aggregation. Operator correction rate aggregation. Latency and cost rollups (these exist; just need cohort-aware views).
+
+**Step 6. No-op canary calibration.** Run the unchanged version through the new pipeline for one week. Measure variance. Set initial real thresholds at 2σ / 3σ as appropriate. Pipeline remains in advisory mode (alert only) until calibration completes.
+
+**Step 7. Emergency per-skill disable flag UI.** Single-action operator surface; audit log; immediate effect. Backed by Mockup 10 (to be created — see §4.4).
+
+**Step 8. Mockup refresh.** Update `prototypes/skill-agent-rings/` per §4.2–4.3:
+- Cache-hit-rate demoted from primary canary-health table to Advanced (`05-canary-health.html`).
+- Reversibility class column added to skill-list views (`07-system-skills-library.html`).
+- Calibration status banner on rollout pipeline (`03-rollout-pipeline.html`).
+- Phase 1 vs Phase 2 status banner on rollout pipeline.
+- Per-run version pinning called out in promote and rollback modal copy (`04`, `06`).
+- New Mockup 10: kill switch surface.
+
+**Step 9. Documentation.** Runbook for operating the pipeline (how to promote, how to rollback, what to do on auto-pause). Lives at `docs/rollout-runbook.md`.
+
+**Estimated rough size:** 8 to 12 weeks for one engineer, longer if the no-op calibration phase finds noisy metrics that need pipeline-level fixes before real thresholds can be set.
+
+## 7. Open questions for the dev session
+
+1. **Skill classification pass.** Who reviews? How much time? *Recommended*: Synthetos staff classify the top 30 most-used skills in week 1, the remainder over the next month, with default K as a safe fallback for unclassified skills.
+
+2. **What is "operator correction"?** Currently `feedbackVotes` exist on `task_activity`, `task_deliverable`, `agent_message` but are decorative. To use as a gate metric, the dev session needs to specify which events count: explicit thumbs-down? Edits to a draft? Re-runs of the same task? *Recommended*: start with explicit thumbs-down and edits to agent-produced text; refine after no-op calibration shows variance.
+
+3. **Stratification cohort calculation.** Daily? Per-release? Where is the job that materialises the stratified sample? *Recommended*: per-release, materialised into `rollout_cohorts` at rollout start, immutable for the life of that release.
+
+4. **Sub-agent runs and pinning.** Inherit from parent or re-resolve at sub-agent boundary? *Recommended*: inherit (coherent behaviour across delegation graph) but make this explicit so it's not a silent design choice.
+
+5. **Hotfix-prompt operation.** Is this a first-class rollout operation alongside promote / rollback, or is it just "ship a Test-ring change at maximum speed"? *Recommended*: first-class operation, with reduced gate set (safety scorecards only) and clear audit trail noting it as a hotfix.
+
+6. **Backward compatibility with existing runs.** Runs that started before per-run pinning landed have no pinned versions. How does rollback affect them? *Recommended*: existing in-flight runs at migration time finish on whatever version they happen to resolve to at each step; new runs after migration are fully pinned.
+
+7. **Mockup naming alignment.** Riley Observations introduced a rename (Playbooks → Workflows; current Workflows → Automations). The mockups in this set use "agent" and "skill" which are unaffected, but any future cross-references to Workflows / Playbooks need adjustment before the spec session.
+
+## 8. Success criteria
+
+The build is successful when:
+
+- Any run started today has the pinned prompt, skill, and model versions recorded at run start and uses those versions for every subsequent step.
+- A Synthetos staff member can promote a system-skill change through Dev and Test rings without manual intervention beyond initial submission, and observe gate-metric movement at each ring boundary.
+- A simulated regression (deliberate small quality drop on a test skill) triggers an advisory alert in Test ring within the dwell window. (Auto-pause cannot be evaluated until customer rings activate in Phase 2.)
+- The emergency per-skill disable flag, when triggered, stops new invocations of that skill within seconds, lets in-flight runs finish on the pinned version, and is captured in the audit log.
+- Every system skill has a reversibility class assigned (I / R / K / X), and X-class skills cannot execute without an in-place human approval gate.
+- No-op canary calibration has run for at least one full week, variance is measured for every gate metric, and real thresholds are set at 2σ / 3σ above no-op variance before any auto-action is enabled.
+- The `prototypes/skill-agent-rings/` mockup set reflects the §4.2–4.3 revisions: cache-hit-rate-as-diagnostic-only, reversibility class surface, calibration status indicator, Phase 1/2 banner, per-run-pinning copy, and a Mockup 10 for the kill switch.
+
+## 9. Known failure modes we are designing against
+
+All anchored to public production incidents in the last 18 months.
+
+1. **OpenAI GPT-4o sycophancy (April 2025).** Offline evals and small-scale A/B looked positive; qualitative spot-checks flagged "feels off" but were overruled. Customer-visible regression for four days; full rollback took ~24 hours.
+   *Mitigation in this design:* manual spot-check is a hard gate in Test, not an advisory; soft-stop on non-safety scorecard at −2pp regardless of A/B verdict; hotfix prompt as a first-class operation for the bleeding-stop window.
+
+2. **Anthropic Claude Code reasoning depth (Feb–Mar 2025).** Real regression flew under the radar for weeks because internal monitoring thresholds were not calibrated to actual signal size; an outside researcher analysing thousands of session files surfaced it.
+   *Mitigation:* no-op canary calibration (§3.8) is a hard prerequisite to auto-action; thresholds are set above measured variance, not at arbitrary percentages.
+
+3. **Replit production database deletion (July 2025).** Agent executed destructive command during code freeze, then misreported its capabilities.
+   *Mitigation:* reversibility classification (§3.6); X-class skills require in-place human approval at every execution; shadow execution mandatory for X-class skills in Canary; emergency per-skill disable flag (§3.7) for instant containment.
+
+4. **Cursor pricing rollout (June–July 2025).** Single rollout to all paying customers with no staged communication; users hit hard limits within hours.
+   *Mitigation:* customer-rollout flavour uses stratified canary; soft-stop on cost-per-run +15% surfaces unexpected economic impact before broad exposure.
+
+5. **Gemini image generation (Feb 2024).** Diversity post-processing layer over-applied to historical contexts; detected on social media.
+   *Mitigation:* emergency per-skill disable flag (§3.7) enables atomic per-feature pause without deploy.
+
+6. **Slow-drift regressions that survive eval suites.** Most published incidents went undetected by internal evals.
+   *Mitigation:* operator correction frequency is weighted as the most signal-rich metric (§3.4); hard-stop threshold tight.
+
+7. **Cohort reassignment on rollout restart.** Tools that reassign cohort membership when a rollout is stopped and restarted produce irreproducible post-incident tests.
+   *Mitigation:* `rollout_cohorts` table is immutable for the life of a release; restarts reference the saved cohort.
+
+8. **In-flight runs straddling rollback.** Mid-conversation behaviour inconsistency degrades trust.
+   *Mitigation:* per-run version pinning (§3.1); in-flight runs finish on their start version regardless of global rollback.
+
+## 10. What this brief is not
+
+**Not a spec.** The dev session produces the spec, including API contracts, migration plans, test plans, and the runbook.
+
+**Not a commitment to the customer-rollout flavour.** Phase 1 ships internal release only; Phase 2 activation depends on first-customer trigger and `spec-context.md` flipping.
+
+**Not a substitute for the runbook.** Auto-pause and rollback procedures need a written operational doc (`docs/rollout-runbook.md`) that humans can follow at 2am when something fires. The brief specifies the primitives; the runbook specifies the moves.
+
+**Not a marketing pitch.** External framing is "we promote changes through stages with safety gates," never "we have automated rollback AI."
+
+## 11. Dependencies and related work
+
+### Closed-loop skill improvement / amendment-primitive feature
+
+A parallel dev session has drafted a closed-loop brief (referenced by the originating session as `tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md`). That document is **not currently present in this branch** — it lives on a separate working branch in the parallel session. The two features are deeply linked:
+
+- The closed-loop feature ships an **amendment primitive** that lets subaccount-level corrections accumulate into discoverable improvements at org and system tiers.
+- Without staged rollout, the **upward-promotion path** of those improvements to system tier cannot ship safely. Promoting an amendment that worked for one subaccount to all subaccounts without the four-ring pipeline is "ship and pray."
+- Conversely, the closed-loop feature is the primary **source of changes** the staged rollout pipeline gates. Phase 1 of staged rollout can ship without closed-loop, but its main customer (the amendment-promotion path) is unmet until both features land.
+
+**Recommended order**:
+1. Closed-loop / amendment primitive ships first (independent feature, builds on existing scorecard + skill-versioning).
+2. Staged rollout Phase 1 ships second (gates internal-tier-promotion of amendments).
+3. Staged rollout Phase 2 activates when first customer onboards.
+
+When the closed-loop brief lands on main, link it from this brief's §11 and remove the "not currently present in this branch" caveat.
+
+### Other related work on main
+
+- **Cached context infrastructure** (PRs landed via migration 0185+). The prefix-hash column on `llm_requests` is the substrate for the cache-hit-rate diagnostic in §3.4.
+- **LLM observability ledger generalisation.** The `/system/llm-pnl` admin page and `llm_inflight_history` table are the substrate for the per-step cost and model attribution this brief assumes.
+- **Riley Observations — Explore Mode / Execute Mode.** Per-run safety mode for the *end user* (operator choosing "try this safely"). Orthogonal to the per-revision safety this brief provides for the *platform author*. The two compose: Dev ring runs ≈ author running in Execute mode on their own test subaccount.
+
+### Spec-context flag
+
+This brief assumes `docs/spec-context.md` currently states `rollout_model: commit_and_revert` and `staged_rollout: never_for_this_codebase_yet`. Phase 1 ships under those flags (internal-release flavour is not customer-facing). Phase 2 activation requires the flag to flip, which happens when the first live agency client onboards.
+
+### Source artefacts
+
+- Three deep-research passes on staged rollout (Claude / Gemini / ChatGPT) — raw outputs archived in the parallel session; key findings synthesised in §2.4 and §3.
+- Original brief location: `tasks/research-briefs/staged-rollout-dev-brief.md` on the parallel session's branch. This document supersedes it for the canonical version on `claude/analyze-agent-orchestration-4Gdlz`.
+- Mockup set on this branch: `prototypes/skill-agent-rings/` (drafted before research; needs §4 revisions).
