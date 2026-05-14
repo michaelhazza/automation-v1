@@ -77,7 +77,13 @@ export const skillAnalyzerConfig = pgTable('skill_analyzer_config', {
     TABLE_ROWS_DROPPED:       'informational',
     OUTPUT_FORMAT_LOST:       'informational',
     WARNINGS_TRUNCATED:       'informational',
+    CONSOLIDATION_APPLIED:    'informational',
+    CONSOLIDATION_DECLINED:   'informational',
+    CONSOLIDATION_FAILED:     'informational',
   }),
+
+  consolidationEnabled: boolean('consolidation_enabled').notNull().default(true),
+  consolidationTriggerSeverity: text('consolidation_trigger_severity').$type<'warning' | 'critical'>().notNull().default('warning'),
 
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   updatedBy: uuid('updated_by'),

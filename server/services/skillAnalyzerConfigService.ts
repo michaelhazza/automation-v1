@@ -103,6 +103,8 @@ export interface ConfigPatch {
   executionAutoUnlockEnabled?: boolean;
   criticalWarningConfirmationPhrase?: string;
   warningTierMap?: WarningTierMap;
+  consolidationEnabled?: boolean;
+  consolidationTriggerSeverity?: 'warning' | 'critical';
 }
 
 /** Apply a partial update to the singleton config.
@@ -157,6 +159,11 @@ export async function updateConfig(
     if (typeof patch.criticalWarningConfirmationPhrase !== 'string'
       || patch.criticalWarningConfirmationPhrase.trim().length < 3) {
       throw { statusCode: 400, message: 'criticalWarningConfirmationPhrase must be ≥ 3 characters' };
+    }
+  }
+  if (patch.consolidationTriggerSeverity !== undefined) {
+    if (patch.consolidationTriggerSeverity !== 'warning' && patch.consolidationTriggerSeverity !== 'critical') {
+      throw { statusCode: 400, message: 'consolidationTriggerSeverity must be "warning" or "critical"' };
     }
   }
 
