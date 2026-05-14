@@ -122,6 +122,14 @@ export const skillAnalyzerResults = pgTable(
     // previous approval" badge on unapprove→edit→re-approve cycles.
     wasApprovedBefore: boolean('was_approved_before').notNull().default(false),
 
+    // New consolidation audit columns — NULL on legacy rows (pre-migration 0358).
+    // Post-migration rows always carry consolidationOutcome (orchestration writes
+    // 'not_triggered' when the gate does not fire). preConsolidationMerge is null
+    // on 'not_triggered'.
+    preConsolidationMerge: jsonb('pre_consolidation_merge'),
+    consolidationOutcome: text('consolidation_outcome').$type<'not_triggered' | 'succeeded' | 'declined' | 'failed'>(),
+    consolidationNote: text('consolidation_note'),
+
     // Optimistic concurrency for merge edits — set by patchMergeFields and
     // resetMergeToOriginal. Null on rows that have never been merge-edited.
     // The PATCH /merge endpoint accepts an optional ifUnmodifiedSince value and

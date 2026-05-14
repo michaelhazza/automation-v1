@@ -375,6 +375,27 @@ When running multiple subagents across areas:
 - **`tasks/todo.md` is single-writer.** Two review agents cannot append concurrently — they will race on the write. Serialise human-in-the-loop invocations.
 - **Do not fan out review agents in parallel against the same branch.** This applies to `pr-reviewer`, `spec-conformance`, and the ChatGPT review agents.
 
+### Rule 16 — Prevent the next occurrence
+
+Every finding must propose **how to prevent the same issue class from being introduced again** — not just how to fix this instance. Symptom fixes alone are insufficient; the framework's leverage comes from compounding prevention over time.
+
+For each finding, capture a `prevention` field with two parts:
+
+1. **Target** — one of: `hook` (a `.claude/hooks/*.js` write-time blocker), `gate` (a `scripts/gates/*.sh` CI blocker), `CLAUDE.md` (global session rule), `DEVELOPMENT_GUIDELINES.md` (code-discipline rule), `architecture.md` (backend convention), `docs/frontend-design-principles.md` (UI rule), `docs/spec-authoring-checklist.md` (spec authoring rule), `docs/capabilities.md` (editorial rule), `KNOWLEDGE.md` (pattern / gotcha), `ADR` (durable decision), `not feasible — <reason>` (when no preventive control is realistic).
+2. **Proposed addition** — the concrete rule, hook spec, or gate check that would have caught this finding at introduction. Specific enough that a separate session could implement it without ambiguity.
+
+**Leverage tiers** — prefer the highest leverage your finding supports:
+
+- **Tier 1 — block at write time.** Hooks and CI gates change behaviour before a commit lands. Strongest prevention. Use when the violation is mechanically detectable (a forbidden import, a missing field, a deleted manifest entry).
+- **Tier 2 — convention at design time.** `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `docs/frontend-design-principles.md`. Use when the violation requires judgement but is teachable. Loaded into every session's context.
+- **Tier 3 — lesson via context.** `KNOWLEDGE.md` (append-only corrections) and `ADRs` (durable decisions with rationale). Use when the lesson is situational rather than universal.
+
+Multiple findings often share a single prevention. The report aggregates these — one proposal can close many findings (1:N). Aggregation belongs in the Prevention Proposals section of the report template (§11), not duplicated per finding row.
+
+**Prevention proposals are always pass 3.** A new hook can block legitimate work; a new gate can fail CI on unrelated PRs; a new `CLAUDE.md` rule shapes every future session. The blast radius is wide and the proposals require human review before they land. Never auto-apply a prevention proposal inside an audit run — even if it looks trivial. Route to `tasks/todo.md` with the distinct origin sub-tag `[origin:audit:prevention:<scope>:<timestamp>]` so they can be reviewed and applied as a batch after the audit closes.
+
+If a finding's prevention is `not feasible`, name why in one line — usually because the issue is pure judgement (UX taste, naming, doc tone) or because the cost of preventive plumbing exceeds the cost of catching it in review. The audit log records the negative answer so future audits do not re-investigate.
+
 ---
 
 ## 4. Protected Files & Patterns (AutomationOS-specific)
@@ -1196,11 +1217,12 @@ This framework **does not replace** the existing AutomationOS review-loop infras
 
 ### Findings → backlog → KNOWLEDGE.md
 
-Findings have three destinations depending on classification:
+Findings have four destinations depending on classification:
 
 1. **Pass-2 fixes** — committed to the audit branch directly.
-2. **Pass-3 deferred items** — appended to `tasks/todo.md` under a new dated section: `## Deferred from codebase audit — <date>`. Format follows `CLAUDE.md` Review-log filename convention. Each item lists `**Captured**`, `**Source log**` (path to the audit report), and a checkbox.
-3. **Patterns to prevent recurrence** — appended to `KNOWLEDGE.md` per `CLAUDE.md` §3, with the `### [YYYY-MM-DD] Pattern — <short title>` heading shape (see §10 below).
+2. **Pass-3 deferred items (symptom fixes)** — appended to `tasks/todo.md` under a new dated section: `## Deferred from codebase audit — <date>`. Format follows `CLAUDE.md` Review-log filename convention. Each item lists `**Captured**`, `**Source log**` (path to the audit report), and a checkbox.
+3. **Pass-3 prevention proposals (root-cause fixes)** — appended to `tasks/todo.md` under a separate dated section: `## Prevention proposals from codebase audit — <date>`. Each item carries the origin sub-tag `[origin:audit:prevention:<scope>:<timestamp>]` and names a doc / hook / gate target plus the proposed addition. See Rule 16. Reviewed and applied as a batch after the audit closes; never auto-applied inside the run.
+4. **Patterns to prevent recurrence** — appended to `KNOWLEDGE.md` per `CLAUDE.md` §3, with the `### [YYYY-MM-DD] Pattern — <short title>` heading shape (see §10 below). KNOWLEDGE.md captures **observations** the audit surfaced (what happened, why); prevention proposals (destination 3) capture **structural changes** to docs / hooks / gates that would have caught the issue at introduction. The two are complementary — a single audit can produce both.
 
 ---
 
@@ -1218,6 +1240,24 @@ tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md
 - `<timestamp>` — ISO 8601 UTC with hyphens between time fields, e.g. `2026-04-25T07-08-30Z`.
 
 **The report is append-only.** If a follow-up audit re-runs the same scope, write a new file with a new timestamp — never overwrite the previous one.
+
+### Prevention proposals
+
+Per Rule 16, every finding carries a `prevention` field. Aggregate prevention proposals across all findings into a single section of the audit report under `## Prevention Proposals` (template in §11). One proposal may close many findings — track the closure list per proposal, not per finding row.
+
+Route all prevention proposals to `tasks/todo.md` using this shape:
+
+```
+## Prevention proposals from codebase audit — <YYYY-MM-DD>
+**Captured:** <ISO timestamp>
+**Source log:** tasks/review-logs/codebase-audit-log-<scope>-<timestamp>.md
+
+- [ ] [origin:audit:prevention:<scope>:<timestamp>] [status:open] [target:<doc|hook|gate>] <one-line proposed addition>. Closes findings: <F1, F4, …>. <leverage tier>.
+```
+
+The `[target:...]` tag uses the values from Rule 16 (`hook`, `gate`, `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `architecture.md`, `docs/frontend-design-principles.md`, `docs/spec-authoring-checklist.md`, `docs/capabilities.md`, `KNOWLEDGE.md`, `ADR`).
+
+**Never auto-apply.** Prevention proposals always defer to operator review (Rule 16). The audit run records them and stops there.
 
 ### KNOWLEDGE.md updates
 
@@ -1327,6 +1367,24 @@ Pre-filled context block from §2 of the framework, plus audit-specific addenda 
 
 ---
 
+## Prevention Proposals
+
+Aggregated across all Pass 1 findings (one proposal can close many findings — see Rule 16). Every proposal is pass 3; none are auto-applied.
+
+| # | Target | Leverage tier | Proposed addition | Closes findings | Severity blocked | Notes |
+|---|---|---|---|---|---|---|
+| 1 | `hook` / `gate` / `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` / `architecture.md` / `docs/frontend-design-principles.md` / `docs/spec-authoring-checklist.md` / `docs/capabilities.md` / `KNOWLEDGE.md` / `ADR` | 1 (block at write time) / 2 (convention at design time) / 3 (lesson via context) | <concrete rule, hook spec, or gate check — specific enough that a separate session could implement it> | F1, F4 | high | <any preconditions, expected blast radius, related ADR refs> |
+
+[Repeat one row per distinct prevention proposal. If a finding's prevention is `not feasible`, record it in a separate "Not feasible — rationale" sub-table below, with one line per finding.]
+
+### Not feasible — rationale
+
+| Finding | Reason no preventive control is realistic |
+|---|---|
+| F<N> | <one line — typically pure-judgement issues (UX taste, copy tone) or where prevention cost exceeds review cost> |
+
+---
+
 ## Pass 2 Changes Applied
 
 ### Area / Module <N>: <Name>
@@ -1383,7 +1441,8 @@ Cross-listed in `tasks/todo.md` under `## Deferred from codebase audit — <YYYY
 | Low findings | <count> |
 | Fixes applied (pass 2) | <count> |
 | Files modified | <count> |
-| Items deferred to pass 3 (in `tasks/todo.md`) | <count> |
+| Items deferred to pass 3 (symptom fixes, in `tasks/todo.md`) | <count> |
+| Prevention proposals (root-cause fixes, in `tasks/todo.md`) | <count, plus breakdown by target: hook / gate / CLAUDE.md / DEVELOPMENT_GUIDELINES.md / architecture.md / frontend / capabilities / spec-authoring / KNOWLEDGE.md / ADR> |
 | KNOWLEDGE.md entries appended | <count> |
 | Checkpoint tags created | <list> |
 | Linked `pr-reviewer` log | <path or "not yet run"> |
