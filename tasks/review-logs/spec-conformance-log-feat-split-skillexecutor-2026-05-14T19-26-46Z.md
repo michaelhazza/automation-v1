@@ -7,6 +7,7 @@
 **Scope:** all-of-spec (operator-confirmed; 15-chunk plan landed in git history)
 **Changed-code set:** 42 files
 **Run at:** 2026-05-14T19:26:46Z
+**Commit at finish:** `41e90dc7`
 
 ---
 
