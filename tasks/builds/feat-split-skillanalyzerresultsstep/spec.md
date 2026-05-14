@@ -28,13 +28,13 @@
 | `client/src/components/skill-analyzer/types.ts` + `mergeTypes.ts` | Stay |
 | `client/src/components/Modal.tsx` | Stays |
 
-No new shared primitives invented. The new `resultsStep/` sub-folder and its `constants.ts` are colocation only — files that already exist inside `SkillAnalyzerResultsStep.tsx` move out into siblings; nothing crosses the skill-analyzer feature boundary.
+No new shared primitives invented. The new `resultsStep/` sub-folder and its `constants.ts` are colocation only — inline components and constants currently embedded in `SkillAnalyzerResultsStep.tsx` move into colocated files under `resultsStep/`. Nothing crosses the skill-analyzer feature boundary.
 
 ## 4. Current structure (today)
 
 `SkillAnalyzerResultsStep.tsx`:
 
-- Top-of-file `SECTION_CONFIG` (lines 27-75) — colour map per classification.
+- Top-of-file `SECTION_CONFIG` (lines 30-75) — colour map per classification.
 - `DiffView` (77-116) — small atom for "before/after" preview.
 - `AgentChipBlock` (117-285, ~170 LOC) — agent assignment chip block (per-result).
 - `ResultRow` (286-577, ~290 LOC) — single-result accordion row with warning resolutions + MergeReviewBlock.
@@ -65,7 +65,7 @@ client/src/components/skill-analyzer/
 
 Sub-folder chosen (vs. flat in skill-analyzer/) because the 5 extracted files are coherent and specific to ResultsStep — keeping them grouped prevents skill-analyzer/ from sprawling.
 
-Host import path in the caller (likely `SkillAnalyzerWizard.tsx`) is unchanged.
+Host import path in the caller (`SkillAnalyzerWizard.tsx` — verified by grep as the sole importer in `client/src`) is unchanged.
 
 ## 6. Component tree (post-refactor)
 
@@ -163,11 +163,11 @@ No new pure functions introduced. No new tests required.
 ### Chunk 1 — Extract `constants.ts` + `DiffView` + `AgentChipBlock`
 - Create `resultsStep/constants.ts` with `Classification` type and `SECTION_CONFIG`.
 - Create `DiffView.tsx` and `AgentChipBlock.tsx` (move verbatim).
-- Update orchestrator imports.
+- Interim import owners: until Chunk 2 carves out `ResultRow`, the orchestrator file (which still contains the inline `ResultRow` definition) imports `DiffView` and `AgentChipBlock`. `ResultSection` (still inline at this point) imports `SECTION_CONFIG` from `constants.ts`.
 
 ### Chunk 2 — Extract `ResultRow` + `ResultSection`
 - Create `ResultRow.tsx` and `ResultSection.tsx`.
-- The orchestrator's section-rendering loop now uses `<ResultSection>` components.
+- Final import owners: `ResultRow.tsx` imports `DiffView`, `AgentChipBlock`, and `MergeReviewBlock`; `ResultSection.tsx` imports `SECTION_CONFIG` from `constants.ts` and renders `ResultRow`; the orchestrator imports only `ResultSection` (plus `SECTION_CONFIG` for its own page-header pills).
 
 ### Chunk 3 — Extract `ProposedAgentBanner`
 - Move into `resultsStep/ProposedAgentBanner.tsx`.
@@ -196,6 +196,7 @@ No new pure functions introduced. No new tests required.
 - 6 new files exist under `client/src/components/skill-analyzer/resultsStep/` (`constants.ts` + 5 component files: `DiffView.tsx`, `AgentChipBlock.tsx`, `ResultRow.tsx`, `ResultSection.tsx`, `ProposedAgentBanner.tsx`).
 - `npm run lint`, `npm run typecheck`, and `npm run build:client` all pass locally. Full CI test gates (`test:gates`, `test:qa`, `test:unit`) run on the PR — not locally.
 - Manual smoke: each classification section renders with the correct colour band, section accordion open/close works, row expand/collapse works (including section-level Expand all / Collapse all and global Expand all / Collapse all from the page header), warning resolutions update result state, MergeReviewBlock still renders within ResultRow, RestoreBackupControl still works, Continue button stays always-enabled with the `→ (n)` suffix appearing when at least one result is approved, ProposedAgentBanner fires when expected.
+- Callback parity: every mutation path that previously called `onResultsUpdated` (approve / reject / skip per row, bulk action per classification, warning-resolution patch, retry-classification refetch, bulk-retry refetch, proposed-agent confirm/reject refetch) still fires `onResultsUpdated` with the replaced `AnalysisResult[]` array.
 
 ## 13. Open questions
 
