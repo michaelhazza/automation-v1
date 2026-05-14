@@ -82,3 +82,35 @@
 **phase_status:** PHASE_2_COMPLETE
 
 ---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #300
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-skill-merge-consolidation-pass-2026-05-14T03-37-03Z.md
+**Rounds:** 2 (operator drove cadence; explicit `done` signal received 2026-05-14T04:00:00Z)
+**ChatGPT verdict:** APPROVED — 6 findings raised (F1-F6); 1 implemented (F4 canonicalJSON deep-equality + regression test, commit `b0470e30`); 4 rejected with code-cited rationale (F1, F2, F3, F6); 1 deferred to backlog (F5 → `SKILL-MERGE-RATIONALE-1`)
+**spec_deviations reviewed:** yes — migration renumbering 0346→0358 and Phase-2-time `failureReason='not_shortened'` amendment both included in chatgpt-pr-review kickoff context; neither raised concerns
+
+**Doc-sync sweep verdicts (15 registered docs):**
+- architecture.md: **yes** (Phase 3 added Stage 6a Consolidation gate to Pipeline Stages; added `consolidation_enabled` + `consolidation_trigger_severity` to Schema table; added enum validation to Config validation rules; added new pure functions + canonicalJSON/sortKeys helpers to Files table; Phase 2 had already added migration 0358 to Recent Migrations)
+- docs/capabilities.md: yes (Phase 2 — Skill Analyzer § tightening pass)
+- docs/integration-reference.md: n/a (no integration behaviour change)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no (checked `consolidation|skill[_-]?analyzer|MergeReviewBlock`; zero matches in CLAUDE.md, one unrelated match in DG.md:146; no build-discipline change)
+- CONTRIBUTING.md: n/a (no lint / contributor-facing convention change)
+- docs/frontend-design-principles.md: no (zero matches for `MergeReviewBlock|consolidation|skill[_-]?analyzer`; banner-add to an existing component, not a new pattern)
+- KNOWLEDGE.md: yes (3 entries — Stripped-field upstream from Phase 2; Canonicalise JSON before deep-equality on LLM-echoed objects from Phase 3; LLM-self-attestation is not the success signal from Phase 3 cross-check)
+- docs/spec-context.md: n/a (feature pipeline)
+- docs/decisions/: n/a (no durable chose-X-over-Y decision)
+- docs/context-packs/: n/a (existing `<a id="skill-analyzer">` anchor preserved)
+- references/test-gate-policy.md: n/a (zero matches; no test-gate posture change)
+- references/spec-review-directional-signals.md: n/a (zero matches)
+- docs/incident-response.md: n/a (zero matches)
+- docs/testing-transition-plan.md: no (existing `skillAnalyzerServicePure.ts` references are general test-sequencing references that remain accurate)
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md: n/a (repo-specific feature, not framework-level)
+
+**KNOWLEDGE.md entries added (Phase 3):** 2 (canonical-JSON deep-equality; LLM-self-attestation-needs-measurement)
+**tasks/todo.md items removed:** 0 (no pre-existing items closed by this build; the 9 SKILL-MERGE-* entries created during Phase 2 + Phase 3 are forward backlog)
+**ready-to-merge label applied at:** 2026-05-14T04:05:25Z
+
+**phase_status:** PHASE_3_COMPLETE
+

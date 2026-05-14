@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/skill-merge-consolidation-pass/spec.md
-active_plan: tasks/builds/skill-merge-consolidation-pass/plan.md
-build_slug: skill-merge-consolidation-pass
-branch: claude/improve-skill-analyzer-RiFpB
-status: REVIEWING
-last_updated: 2026-05-14T03:25:00Z
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
+last_updated: 2026-05-14
+last_merge_ready_pr: #300
+last_merge_ready_slug: skill-merge-consolidation-pass
+last_merge_ready_branch: claude/improve-skill-analyzer-RiFpB
 last_merged_pr: #299
 last_merged_slug: personal-assistant-v2-operator
 last_merged_branch: claude/personal-assistant-post-merge-audit
@@ -22,15 +25,13 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** tasks/builds/skill-merge-consolidation-pass/spec.md
-**Active plan:** tasks/builds/skill-merge-consolidation-pass/plan.md
-**Active build slug:** skill-merge-consolidation-pass
-**Branch:** claude/improve-skill-analyzer-RiFpB
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR #300 (`skill-merge-consolidation-pass`) on `claude/improve-skill-analyzer-RiFpB`. Phase 3 finalisation complete; `ready-to-merge` label applied 2026-05-14T04:05:25Z. CI will fire on the post-Phase-3 commit; if green, Step 12 auto-merges with `--admin --squash --delete-branch`.
 
-**Active build:** `skill-merge-consolidation-pass` — adds a conditional LLM consolidation pass to the skill analyzer's merge pipeline. Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. Spec at `tasks/builds/skill-merge-consolidation-pass/spec.md` (3 ChatGPT review rounds + Phase 2 amendment for `not_shortened` failureReason). Plan at `tasks/builds/skill-merge-consolidation-pass/plan.md` (1 ChatGPT plan-review round complete). Task class: Significant. Migration `0358` (renumbered from 0351 after PR #299 occupied slots 0351–0357).
-
-**Phase 2 complete (2026-05-14T03:25:00Z).** 4 chunks built, branch-level review pass complete: spec-conformance CONFORMANT_AFTER_FIXES (3 mechanical gaps auto-fixed); adversarial-reviewer HOLES_FOUND advisory (6 items routed to backlog); pr-reviewer rounds 1→3 closing with APPROVED (round 1 found 3 blockers — consolidation success path was structurally unreachable due to rationale-stripping; resolved in fix-loop commit 17d9d930); reality-checker READY; dual-reviewer APPROVED with 1 ACCEPT applied (non-shortening outputs routed to `failed` — commit b7432cf1). Doc-sync gate: architecture.md + capabilities.md + KNOWLEDGE.md updated. Handoff at `tasks/builds/skill-merge-consolidation-pass/handoff.md`. Next: open a new Claude Code session and type `launch finalisation`.
+**Just finalised:** PR #300 — `skill-merge-consolidation-pass`. Conditional LLM consolidation pass for the skill analyzer's merge pipeline (migration 0358). Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. New closed enum `consolidationOutcome` (`not_triggered | succeeded | declined | failed`) with `failureReason='not_shortened'` routing non-shortening LLM outputs to `failed` (dual-reviewer ACCEPT). Three informational warning codes (`CONSOLIDATION_APPLIED | DECLINED | FAILED`). Phase 3 reviews: chatgpt-pr-review APPROVED after 2 rounds (commit `b0470e30` — F4 canonical-JSON deep-equality + regression test; 27/27 targeted tests passing). 4 findings rejected with code-cited rationale (F1 router-contract misread, F2 update-loop overlooked, F3 typecheck empirical, F6 drizzle-row-passthrough verified by grep). 1 deferred to backlog: `SKILL-MERGE-RATIONALE-1`. Phase 3 doc-sync filled gaps in architecture.md that Phase 2 missed (Stage 6a Consolidation gate; config-schema columns; pure-function exports). KNOWLEDGE.md +3 entries.
 
 **Last merged:** PR #299 — `personal-assistant-v2-operator` (squash-commit `6cd7e158`, 2026-05-14T00:44:20Z). Personal Assistant V2 (Operator Mode): cross-owner delegation pattern, live file events via R2 + UPSERT-derived version, capability-map V2 axis (`owner_user_id`), three-state owner-lookup privacy projection enforced at both service and route layers with org-scoped fail-closed, atomic claim+emit pattern for cross-owner timeout events with stale-claim TTL retry, DB trigger to auto-bump substep status-transition timestamp. 7 rounds of chatgpt-pr-review (APPROVED on Round 7); 22 findings applied; 4 backlog items routed to tasks/todo.md (PA-V2-LIST-APPROVALS-V1-ARM, PA-V2-WATCHER-HOST-BRIDGE, PA-V2-OPERATOR-TEMPLATE-PROMOTION, PA-V2-EVENT-IDEMPOTENCY). Mid-Phase-3 main-sync renumbered 6 V2 migrations to 0351-0356 (after main's iee-browser-on-e2b PR #297 claimed 0346-0350), plus EA controller-style flip moved 0345 → 0357. CI auto-fix loop closed: 2 iterations (RLS-gate single-line CREATE POLICY + action-registry snapshot refresh; then PDF determinism standalone-date-literal normaliser fix).
 
