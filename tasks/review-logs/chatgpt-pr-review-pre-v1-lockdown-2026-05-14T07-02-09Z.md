@@ -90,7 +90,81 @@ ChatGPT's overall `Do not merge` verdict is overridden by code-cited rationale. 
 
 ### Round 2 diff
 
-Per the iterative-loop discipline rule (regenerate the round-N+1 diff regardless of code changes): `.chatgpt-diffs/pr305-round2-code-diff.diff` will be regenerated from the same `HEAD~6..HEAD` range as round 1. Since no fixes were applied this round, the file will be byte-identical to `pr305-round1-code-diff.diff` — the regeneration is the loop-freshness signal, not a content delta.
+Per the iterative-loop discipline rule (regenerate the round-N+1 diff regardless of code changes): `.chatgpt-diffs/pr305-round2-code-diff.diff` regenerated from the same `HEAD~6..HEAD` range as round 1. Byte-identical to `pr305-round1-code-diff.diff` (no fixes applied).
+
+---
+
+## Round 2 — 2026-05-14T07:15:00Z
+
+### Diff uploaded
+
+- Path: `.chatgpt-diffs/pr305-round2-code-diff.diff`
+- Size: 198,887 bytes (byte-identical to round 1).
+
+### Important context
+
+ChatGPT explicitly noted: *"Some prior uploaded files have expired on the platform side, so I reviewed the current pasted diff only, plus the prior round summary from this chat."* This is the manual-mode workflow's known limitation — each round is essentially a cold review unless the operator manually re-pastes prior rationale. As expected, Round 2 produced no new signal.
+
+### ChatGPT findings (verbatim summary)
+
+- **F1 (Blocking)** — Skill Analyzer UI deletion still present; requires revert OR full deprecation contract (imports/routes removed, navigation updated, server endpoints retired or deprecated, migration notes, tests proving zero references).
+- **F2 (Should-fix)** — `express-rate-limit` and `zod-to-json-schema` additions still unexplained in the diff; remove or include the source that uses them. `docx` / `mammoth` now defensible per the service-comment changes.
+- **F3 (Should-fix, NEW for round 2)** — PR scope is incoherent. Split into separate PRs: (a) optional-DOCX dep declaration + comment cleanup; (b) audit framework doc refresh; (c) any intentional Skill Analyzer removal with full deprecation contract. This is round-1's C1 promoted from Consider to Should-fix.
+
+### Triage decisions
+
+#### F1 (round 2) — Skill Analyzer UI deletion
+
+**RECOMMENDATION:** REJECT. **Triage:** technical.
+
+**Rationale:** unchanged from round 1. ChatGPT's checklist of "what a valid intentional removal needs" is satisfied:
+
+- Imports/routes referencing the components: NONE exist post-deletion. Verified by `Grep "skill-analyzer" --glob "*.{ts,tsx}"` → 33 hits, ZERO in `client/`. The 33 server-side hits reference the unrelated LLM merge-analysis backend (`server/services/skillAnalyzerService*.ts`, `server/jobs/skillAnalyzerJob.ts`, `server/routes/skillAnalyzer.ts`, etc.) — a DIFFERENT artefact from the deleted wizard UI.
+- Navigation and feature access points: there were none. The wizard UI was an isolated subtree.
+- Server endpoints: the server pipeline is the OTHER artefact and remains intentionally untouched.
+- Deprecation contract / migration notes: documented in the audit log (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`) + KNOWLEDGE.md entries. The deletion was a consequence of PR #300 (`skill-merge-consolidation-pass`) replacing the wizard's responsibilities.
+- Tests proving zero references: pr-reviewer's grep over `*.test.{ts,tsx}` returned zero matches.
+
+All checklist items met. ChatGPT is asking for evidence that exists outside the diff it can see. No code change.
+
+#### F2 (round 2) — express-rate-limit + zod-to-json-schema additions
+
+**RECOMMENDATION:** REJECT. **Triage:** technical.
+
+**Rationale:** unchanged from round 1. Pre-existing import sites in `main`:
+
+- `server/routes/users.ts:2` — `import rateLimit from 'express-rate-limit';`
+- `server/routes/systemUsers.ts:2` — `import rateLimit from 'express-rate-limit';`
+- `server/mcp/mcpServer.ts:14` — `import { zodToJsonSchema } from 'zod-to-json-schema';`
+
+The audit's exact purpose was to declare these. No code change.
+
+#### F3 (round 2, new framing) — Split the PR
+
+**RECOMMENDATION:** REJECT. **Triage:** technical (process decision).
+
+**Rationale:** unchanged from round 1's C1, escalated only in ChatGPT's framing. Audit branches are intentionally batched by `audit-runner`'s three-pass model. Topic scoping is preserved at the commit level:
+
+- `9af5eafb` — delete skill-analyzer subtree (one topic, one commit)
+- `a99cc0a2` — declare static + optional deps + comment cleanup (one topic, one commit)
+- `4b2b74a3` — framework v1.3 → v1.4 refresh (one topic, one commit)
+- `e6687754` — Pass 3 routing + KNOWLEDGE patterns + prevention-gates spec (one topic, one commit)
+
+Splitting at this stage would mean reverting 4 commits + opening 4 new PRs, each with a full CI cycle, for negligible reviewability gain over the existing commit history. No code change.
+
+### Round 2 outcome
+
+| Finding | ChatGPT severity | Verdict | Code change |
+|---|---|---|---|
+| F1 (round 2) | Blocking | REJECT | none |
+| F2 (round 2) | Should-fix | REJECT | none |
+| F3 (round 2) | Should-fix | REJECT | none |
+
+**Loop signal:** zero new findings. F1 and F2 are byte-identical repeats; F3 is round 1's C1 with a stronger framing word. ChatGPT confirmed it can't see prior uploads, so additional rounds with the same diff will likely repeat the same false positives. Diminishing returns reached unless the operator paste-injects round-1 rationale into round 3.
+
+### Round 3 diff
+
+Regenerated at `.chatgpt-diffs/pr305-round3-code-diff.diff` per iterative-loop discipline. Byte-identical to rounds 1 and 2.
 
 Waiting for operator's next ChatGPT paste or explicit `done` signal.
 
