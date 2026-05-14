@@ -1,6 +1,6 @@
 ---
 name: spec-coordinator
-description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — brief intake + UI-touch detection. Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
+description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — intent intake + UI-touch detection. Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
 tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
 model: opus
 ---
@@ -43,7 +43,7 @@ If status is NONE or MERGED:
 If status is PLANNING:
   Read build_slug from the existing block.
   If build_slug is set AND tasks/builds/{build_slug}/handoff.md exists with phase_status: PHASE_1_PAUSED:
-    enter resume mode — skip Brief intake (Step 3) and jump to the paused step.
+    enter resume mode — skip Intent intake (Step 3) and jump to the paused step.
   Otherwise (PLANNING with no matching paused handoff):
     refuse with a message naming the current PLANNING slug and instruct the operator to either:
     (a) abort the stuck session manually (git stash + reset tasks/current-focus.md to NONE)
@@ -63,7 +63,7 @@ Emit a TodoWrite list with one item per phase step. Update items in real time as
 
 1. Context loading + set current-focus.md → PLANNING
 2. Branch-sync S0 + freshness check
-3. Brief intake + UI-touch detection
+3. Intent intake + UI-touch detection
 4. Build slug derivation + tasks/builds/{slug}/ directory creation
 5. Mockup loop (conditional on UI-detect)
 6. Spec authoring
@@ -112,14 +112,66 @@ Freshness thresholds:
 - 11–30 commits behind: yellow — warn operator and continue
 - 31+ commits behind: red — refuse without `force=true`
 
-## Step 3 — Brief intake and UI-touch detection
+## Step 3 — Intent intake and UI-touch detection
 
 Read the brief (provided in the invocation, or read from a file the operator names). Classify the brief along two axes:
 
 **Scope class:** `Trivial | Standard | Significant | Major` per CLAUDE.md Task Classification.
-- Trivial: reset `tasks/current-focus.md` to `NONE` (release the PLANNING lock), tell the operator to implement directly, and stop.
-- Standard: may skip mockups and `chatgpt-spec-review` if the operator confirms.
-- Significant / Major: run full Phase 1.
+- Trivial: reset `tasks/current-focus.md` to `NONE` (release the PLANNING lock), tell the operator to implement directly, and stop. Use the existing `brief.md` flow — no `intent.md` is produced.
+- Standard: may skip mockups and `chatgpt-spec-review` if the operator confirms. Produce `intent.md` (see below).
+- Significant / Major: run full Phase 1. Produce `intent.md` (see below).
+
+**Classification ambiguous (Standard vs Trivial):** if the operator cannot immediately place the brief, default to asking one question: "Is this a single-file obvious change with no design decisions?" If yes → Trivial. If no → Standard. Record the decision in `tasks/builds/<provisional-slug>/progress.md`.
+
+**Provisional-slug rule (Standard+):** the operator nominates a working slug at intent capture time so `tasks/builds/<slug>/intent.md` has a writable path. Step 4 ratifies (or, on operator decision after the duplication gate, renames) the slug. A rename at Step 4 carries any files already written under the provisional slug into the ratified slug directory.
+
+**Migration rule (Standard+):** in-flight Standard+ builds that pre-date this spec keep their existing `brief.md`; new Standard+ builds started after this spec ships use `intent.md`. The per-build `progress.md` records the `brief.md` → `intent.md` decision when an in-flight build chooses to upgrade voluntarily. Historical `brief.md` files are **not** retroactively converted — no retroactive rewriting.
+
+### intent.md schema (Standard | Significant | Major only)
+
+For any Standard+ build, produce `tasks/builds/<provisional-slug>/intent.md` with the following nine H2 sections in order before proceeding to Step 4:
+
+```markdown
+## Problem Statement
+## Desired Outcome
+## Non-Goals
+## Affected Capability Area
+## User / Operator Impact
+## Risk Surface
+## Assumptions
+## Open Questions
+## Duplication / Strategy Check
+```
+
+Field rules (see `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.1` for the authoritative table):
+
+| Section | Required | Allowed values / shape |
+|---|---|---|
+| Problem Statement | yes | Free text, ≤ 200 words |
+| Desired Outcome | yes | Free text, ≤ 200 words |
+| Non-Goals | yes | Bulleted list; "None." is acceptable |
+| Affected Capability Area | yes | One-or-more values from the cluster header in `docs/capabilities.md`, comma-separated when multiple |
+| User / Operator Impact | yes | Free text, ≤ 100 words |
+| Risk Surface | yes | Either the literal string `None.` OR a comma-separated list of one-or-more values from the Risk Surface vocabulary below. The bare absence of values is invalid — the author must affirm "None." |
+| Assumptions | yes | Bulleted list; "None." acceptable |
+| Open Questions | yes | Bulleted list; "None." acceptable |
+| Duplication / Strategy Check | yes | The exact three-row table format below (filled by Step 3a) |
+
+**Risk Surface canonical vocabulary:** `server/db/schema`, `server/routes`, `auth/permission services`, `middleware`, `RLS migrations`, `webhook handlers`, `billing surfaces`, `external messaging`, `agent runtime`, `approvals`.
+
+If a build touches none of these, the Risk Surface section must contain "None." — empty is invalid.
+
+**Duplication / Strategy Check table shape** (filled in by Step 3a — author the section heading and empty table at Step 3, Step 3a fills in values):
+
+```markdown
+## Duplication / Strategy Check
+
+| Output | Value |
+|---|---|
+| Duplication assessment | clear \| partial overlap \| likely duplicate |
+| Strategic fit | clear \| questionable \| not aligned |
+| Recommendation | proceed \| revise \| merge with existing capability \| stop |
+```
 
 **UI-touch detection:** check if the brief mentions any of: a new page, a new screen, a new dialog, a new flow, a redesign, a layout change, a new control, visible copy, a new dashboard, or a new admin surface. If yes, set `ui_touch = true`.
 
