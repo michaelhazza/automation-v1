@@ -4,6 +4,7 @@
 **Iterations run:** 2/3
 **Timestamp:** 2026-05-14T03:09:46Z
 **HEAD at review start:** 17d9d930
+**Commit at finish:** b7432cf1
 **Task class:** Significant
 **Codex CLI:** v0.130.0 (upgraded from v0.118.0 mid-session — v0.118.0 default model `gpt-5.5` requires CLI ≥ v0.130.0; ChatGPT-account auth on v0.118.0 rejected `gpt-5-codex` / `gpt-5.1-codex` / `gpt-5` overrides)
 
