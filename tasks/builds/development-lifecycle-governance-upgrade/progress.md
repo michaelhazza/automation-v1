@@ -332,8 +332,132 @@ Coordinator halts. Operator must append `**Operator decision:** stop confirmed �
 
 ## Chunk 4 — `docs/capabilities.md` Asset Register restructure
 
-**Status:** PENDING
-**Files:** `docs/capabilities.md`, `tasks/todo.md`
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:** `docs/capabilities.md`, `tasks/todo.md`
+
+### Changes made
+
+**`docs/capabilities.md`:**
+- Added `## Cluster list (closed — see §7.4.5 for mutation procedure)` section after the Editorial Rules section and before the Table of Contents. Contains the 10-cluster seed list verbatim from spec §7.4.2 (Workflow Engine, Approvals, Identity & Auth, Reporting, Integrations, Agent Runtime, Admin & Ops, Billing, Memory & Knowledge, Audit & Governance) plus the mutation procedure note referencing spec §7.4.5.
+- Added `## Asset Register` section immediately after the cluster list, containing the pinned 12-column Markdown table header verbatim from spec §7.4.1.
+- Backfilled 47 capability rows (31 Product Capabilities + 16 Agency Capabilities) into the Asset Register table. All existing capability descriptions preserved; every cell populated with real value or explicit placeholder.
+
+**`tasks/todo.md`:**
+- Appended a new section `## Capabilities Asset Register backfill — development-lifecycle-governance-upgrade (2026-05-14)`.
+- 47 `### owner-resolution: <capability-id>` entries (spec §7.4.3).
+- 47 `### capabilities-backfill: <capability-id>` entries for Carry notes (spec §10 Chunk 4 entry format).
+
+### Count of capabilities migrated
+
+**Total: 47 capabilities**
+
+Product Capabilities (31):
+1. multi-tenant-platform
+2. authentication-access-control
+3. ai-agent-system
+4. agent-workplace-identity
+5. capability-aware-orchestrator
+6. platform-feature-request-pipeline
+7. universal-brief
+8. configuration-assistant
+9. skill-system
+10. crm-query-planner
+11. workflow-engine
+12. human-in-the-loop
+13. task-board-workspace
+14. pulse-supervision-home
+15. agent-spending
+16. live-execution-log
+17. memory-knowledge-system
+18. trust-verification-layer
+19. workspace-health-diagnostics
+20. sub-account-optimiser
+21. sub-account-baseline
+22. activity-analytics
+23. client-portal
+24. pages-content-builder
+25. integration-framework
+26. document-bundles-cached-context
+27. execution-infrastructure
+28. personal-assistant
+29. sandboxed-runtime-iee
+30. persistent-agent-workspace
+31. subscription-driven-long-task-execution
+
+Agency Capabilities (16):
+32. performance-reporting-analytics
+33. seo-management
+34. geo-ai-search-visibility
+35. content-creation-publishing
+36. crm-contact-management
+37. email-marketing-outreach
+38. campaign-management-optimization
+39. financial-analysis-reporting
+40. churn-detection-account-health
+41. customer-support-automation
+42. landing-page-management
+43. competitor-intelligence
+44. portfolio-intelligence
+45. llm-spend-observability
+46. memory-injection-utility
+47. tier-4-isolated-code-execution
+
+### Count of placeholders created
+
+- **Owner placeholders:** 47 (one per capability; all Owner cells = `TBD owner - temp reviewer: michaelhazza; due 2026-08-14`)
+- **Carry notes placeholders:** 47 (one per capability; all TBD with backfill link)
+- **Launch source placeholders:** 47 (all = `unknown — historical` — no build slug available for migrated entries)
+
+Breakdown by field type:
+- Owner: 47 entries → each has `### owner-resolution: <id>` in tasks/todo.md (spec §7.4.3 all three artefacts: cell value + todo entry + ISO due date)
+- Carry notes: 47 entries → each has `### capabilities-backfill: <id>` in tasks/todo.md (spec §10 Chunk 4 format)
+
+### §15.1 open question — cluster list completeness
+
+**Decision: 10-cluster list is sufficient. §7.4.5 did NOT fire.**
+
+Every capability maps cleanly to at least one of the 10 seed clusters:
+- "Universal Brief" → Agent Runtime (conversational agent intake surface)
+- "Trust & Verification Layer" → Audit & Governance, Agent Runtime
+- "Document Bundles & Cached Context" → Memory & Knowledge
+- "Sub-account Optimiser" → Admin & Ops
+- "Sub-account Baseline" → Admin & Ops
+- "LLM Spend Observability & Per-Client P&L" → Billing, Reporting
+- "Memory Injection Utility" → Memory & Knowledge
+- "Tier 4 Isolated Code Execution" → Agent Runtime
+
+No ADR required. Merge diff stays at 8 modified, 0 new.
+
+### Post-S1-merge content confirmation
+
+PR #301 (audit-runner Area 10 god-file register additions) was checked. The following capabilities from the current `docs/capabilities.md` head were included in the backfill:
+- memory-injection-utility (B2 dashboard capability, added in PR #298 memory-improvements)
+- All 47 capabilities reflect the current state of the file at 2026-05-14 (post-S1-merge).
+
+### Anchor-collision check
+
+Pre-append scan of `tasks/todo.md` for `### capabilities-backfill:` and `### owner-resolution:` headings:
+- Result: **0 collisions found**. No pre-existing headings with either namespace exist. No namespacing required.
+- Checked against PR #300 (skill-merge-consolidation-pass) deferred items section: headings use different namespaces (`SKILL-MERGE-*`) — no collision.
+
+### Lifecycle state reasoning (per capability)
+
+- **Mature** (live and stable for ≥1 quarter): multi-tenant-platform, authentication-access-control, ai-agent-system, skill-system, workflow-engine, human-in-the-loop, task-board-workspace, pulse-supervision-home, live-execution-log, memory-knowledge-system, workspace-health-diagnostics, activity-analytics, client-portal, pages-content-builder, integration-framework, execution-infrastructure, performance-reporting-analytics, seo-management, content-creation-publishing, crm-contact-management, email-marketing-outreach, campaign-management-optimization, financial-analysis-reporting, landing-page-management
+- **Growth** (live but in active iteration): agent-workplace-identity, capability-aware-orchestrator, platform-feature-request-pipeline, universal-brief, configuration-assistant, crm-query-planner, agent-spending, trust-verification-layer, sub-account-optimiser, sub-account-baseline, document-bundles-cached-context, personal-assistant, sandboxed-runtime-iee, persistent-agent-workspace, subscription-driven-long-task-execution, geo-ai-search-visibility, churn-detection-account-health, customer-support-automation, competitor-intelligence, portfolio-intelligence, llm-spend-observability, memory-injection-utility, tier-4-isolated-code-execution
+
+### Grep-the-old-value pass results
+
+Grep for `capabilities\.md#(product-capabilities|agency-capabilities|skills-reference|integrations-reference|changelog|core-value)` across all `.md` files: **0 matches** — no anchor-based links to old section headings exist. All existing file-level references to `docs/capabilities.md` remain valid.
+
+Grep for `\| \|` in the Asset Register section: the 16 matches found are ALL in the pre-existing Agency Capabilities two-column info tables (lines 685+ in the updated file) — not in Asset Register rows. Confirmed: every Asset Register row has all 12 cells populated.
+
+### G1 gate result
+
+- `npx eslint docs/capabilities.md tasks/todo.md`: exit 0; 2 expected warnings (markdown files not in eslint config). No errors.
+- `npm run typecheck`: exit 0 (no TypeScript files touched).
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 
