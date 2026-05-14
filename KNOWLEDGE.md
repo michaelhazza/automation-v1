@@ -1191,6 +1191,20 @@ When a single-writer event emitter loses a coordination race (another writer alr
 
 When a service throws typed errors with a `code` discriminator, the route MUST map the code to its HTTP envelope via a closed `switch` (every branch enumerated, `default: throw`). Open-ended string-comparison mapping (`if (err.code === 'foo') ...` cascades) is a blocking review finding — new codes silently fall through with the wrong HTTP status and the wrong envelope shape. The canonical pattern: define the error-code union at the service boundary (`shared/types/...` if shared across routes), import it into both the service and the route, and let TypeScript's exhaustiveness checking enforce the mapping. Surfaced repeatedly during consolidation-govern (CONSOL-GOV-DEF-9) and audit-remediation reviews; promoted because the pattern is reusable across every service that throws typed errors. Cross-link: `architecture.md § Service Layer` now references this entry directly.
 
+### 2026-05-13 Correction — OpenTaskView + run-trace invariants are platform-level, not per-agent or per-build
+
+Drafted V2 framing scoped the "operator-mode tasks surface through the same OpenTaskView / ChatPane / FilesTab / Activity primitives" rule to V2 (the EA's operator-mode upgrade). Operator pushed back: this is universal — every agent run in every controller mode in every build uses the same task surface. No agent and no controller gets a "special" task screen, ever. Capture in V2 spec only at the level of "EA inherits the universal invariant"; the invariant itself belongs in `architecture.md` and the master brief, not in a use-case spec. Detection: any new spec that proposes a task-management UI surface tied to a specific agent / controller / runtime is automatically suspect — challenge it back to "reuse OpenTaskView, extend the event channel if needed."
+
+### 2026-05-13 Correction — Orchestrator routing must be declarative (capability-map + scope), never hard-coded per agent
+
+Drafted V2 routing logic for the EA as if the orchestrator needed special-case rules ("if intent mentions calendar → route to PA"). Operator corrected: the orchestrator already does declarative capability matching via `capabilityMapService.ts`; V2's job is to extend the matcher's scope axis (capabilities tagged `scope: user:<owner_user_id>` match only when `requester_user_id == owner_user_id`), not to add per-agent if-statements. Explicit name addressing (`@PA`, `@MyAssistant`) is a soft routing hint that boosts a candidate's score but doesn't bypass capability matching. Cross-ownership delegation uses the same rules — parent agent's request carries through to capability matching at the delegated step. Detection: any spec that proposes "the orchestrator detects X and routes to Y" without showing it as a capability-declaration + scope-match is incorrectly hard-coded; reframe as a declarative rule.
+
+### 2026-05-13 Pattern — Derive event type from UPSERT result, never from a preflight existence check
+
+Source: PA-V2-OP chatgpt-spec-review Round 2 F1 (spec §4.2 / §5.7 / §9.1 / §9.3 for `operator_run_files`).
+
+When an event-emitter writes through an UPSERT on a UNIQUE key and emits an event whose type discriminator depends on whether the row was new or pre-existing (`*.created` vs `*.modified`, `inserted` vs `updated`, etc.), the discriminator MUST be sourced from the post-write return value — `RETURNING version`, `RETURNING xmax = 0`, the UPSERT result version field, etc. — NEVER from a separately-issued preflight `SELECT` against the same key. The race: two writers issue independent preflight lookups, both observe "no prior row", both decide `*.created`, the UNIQUE constraint serialises the UPSERTs so one gets version 1 and the other gets version 2, and both incorrectly emit `*.created`. The correct contract: writer A's UPSERT returns version=1 (emits `*.created`), writer B's UPSERT returns version=2 (emits `*.modified`). Preflight lookups are acceptable for watcher dedupe / fast-path skip ("same hash already stored, no need to write"), but never as the source of truth for event type under concurrency. This generalises across every agent-emitted event stream that fronts a Postgres UPSERT — webhook fan-out, file-event bridges, audit trails, lifecycle events. Detection: in any new spec touching event-stream emission against an UPSERT-backed table, search the contract for "looks up prior row" / "checks existence" / "preflight" wording on the event-type-decision path and challenge it; the rule is "ask the database what happened, don't ask twice."
+
 ### [2026-05-13] Pattern — Idempotency keys MUST include a per-emission discriminator when the product allows multi-emission
 
 Source: PR #296 chatgpt-pr-review Round 2 F2 (REVIEW-F2 reversal). `eaDraftService.createDraftWithProposal` originally built the upstream `actionService.proposeAction` idempotency key from `(agentRunId, kind, ownerUserId)` only. Within a single agent run, that key collapses every draft of the same kind for the same owner onto the FIRST proposal action — the second `proposeAction` call returns `isNew: false` with the first action's id, the second `ea_drafts` row is then inserted sharing that `proposal_action_id`, and on approval `dispatchAfterApproval`'s `.limit(1)` only sends one. The second draft is permanently stuck in `idle` with no recovery path.
@@ -1209,8 +1223,31 @@ Source: PR #296 chatgpt-pr-review Round 2 F2 reversal. `chatgpt-pr-review` §1a 
 
 **Detection.** Any chatgpt-pr-review Round 2+ finding that matches a prior decided finding by `finding_type + file` — if the agent's instinct is to override the duplicate-auto-apply, STOP and require an explicit operator instruction. The instruction must include the substantive new reasoning (one sentence is fine); the audit log records both.
 
-Cross-link: `.claude/agents/chatgpt-pr-review.md` §1a duplicate-detection carveouts; this session's log under `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2 entry.
+---
 
+## Two-axis routing for owner-scoped capabilities (V2, 2026-05-13)
+
+When a capability map has `owner_user_id` set, the orchestrator's target resolution is `target_owner_user_id ?? requester_user_id` (not `requester_user_id` alone). Without the second axis, cross-owner delegation (Sarah asking about Michael's calendar) would filter out Michael's PA because `requester_user_id != owner_user_id`. The two fields must both be propagated from HTTP intake through `RoutingContext` to the matcher. `target_owner_user_id` is server-side-only — HTTP-supplied values are discarded at intake.
+
+---
+
+## Approval routes follow the executor's owner, not the initiator (V2, 2026-05-13)
+
+For cross-owner action proposals inside a sub-run, `actions.approver_user_id` is set to `executor_agent.owner_user_id`, not the initiating user. This means Michael's EA, when invoked by Sarah's parent task, routes approvals to Michael's queue — not Sarah's. Same-owner runs preserve V1 default: `approver_user_id = NULL` (initiator-defaulted path unchanged). Pattern: **approval ownership follows the executor's data boundary, not the request origin**.
+
+---
+
+## Live-file events on R2 via UPSERT-derived version (V2, 2026-05-13)
+
+`operator_run_files` uses a canonical UPSERT (`INSERT ... ON CONFLICT (agent_run_id, path) DO UPDATE SET version = operator_run_files.version + 1 RETURNING version`) as the single source of truth for event type. `version === 1` → `file.created`; `version > 1` → `file.modified`. Never use a preflight SELECT to determine event type — two racing writers would both observe "no prior row" and both emit `file.created`. The UPSERT serialises the conflict under Postgres row-lock and the returned `version` is authoritative. Both the tool-call interceptor path and the sandbox watcher path go through the same UPSERT.
+
+---
+
+## Two-layer service + route privacy projection enforcement (V2, 2026-05-13)
+
+`runTraceProjectionForViewer` is applied at BOTH the service layer (`agentExecutionEventService`) AND the route layer (`server/routes/`). The deliberate two-layer enforcement ensures a future direct consumer of `agentExecutionEventService` (bypassing the route) still gets the projection. Do not remove the route-layer call assuming the service call is sufficient — the redundancy is intentional security depth.
+
+Cross-link: `.claude/agents/chatgpt-pr-review.md` §1a duplicate-detection carveouts; this session's log under `tasks/review-logs/chatgpt-pr-review-claude-close-deferred-pa-v1-13lHR-2026-05-13T06-43-44Z.md` Round 2 entry.
 ### 2026-05-13 Pattern — Brief-level external review does NOT substitute for spec-level external review
 
 Discovered during `iee-browser-on-e2b` chatgpt-spec-review. The brief had been refined through 7 ChatGPT-driven external reframes (v2 through v7) before spec authoring; the working hypothesis was that this absorbed the directional review and the spec could skip chatgpt-spec-review. That hypothesis was wrong. When the operator later re-opened chatgpt-spec-review, round 1 surfaced 4 high-severity build-readiness blockers the brief reviews had not caught: (1) a referenced warm-pool persistence table with no schema/migration/RLS definition; (2) an audit-able mutation path for a launch-control flag that was described as "direct DB / future route" with no permission, audit, or rollback contract; (3) two new `FailureReason` enum values introduced in the spec but absent from the file inventory; (4) a profile-mount concurrency claim that didn't actually serialise the operation. Pattern: **brief-level review catches scope and policy gaps; spec-level review catches contract / schema / inventory / safety-mechanism gaps. They are different review surfaces and neither substitutes for the other.** For Significant / Major specs: always run chatgpt-spec-review at least one round, regardless of how thoroughly the brief was reviewed. The brief and the spec speak about different things — a brief that locked the right decisions can still produce a spec that fails build-readiness in execution-safety, schema completeness, or contract mechanics. Cost is small (one or two manual rounds); the downside of skipping is a build that stalls in Phase 2 with implementation-readiness failures.
@@ -1303,3 +1340,35 @@ Companion: the matching test must assert the rejection shape. Zod's strict-mode 
 Detection: any schema where a field is documented as "not accepted here — admin-only" but the schema is plain `z.object({...})` without `.strict()`. The doc comment claims the contract; `.strict()` enforces it.
 
 Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBodySchema`, `server/services/__tests__/subaccountIeeBrowserSettingsServicePure.test.ts` (the unrecognized_keys assertion).
+
+---
+
+## [Pattern title] Three-state owner lookup must be preserved through every layer
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Rounds 2/3/4 (F6, F9, F12)
+**Pattern:** `runTraceProjectionForViewer` treats `ownerUserId === null` as "subaccount-owned, no privacy boundary, return all events". Owner-lookup helpers return three states: `string` (owned), `null` (subaccount-owned within this org), `undefined` (run not found / cross-org). Any caller that coerces `undefined → null` via `?? null` turns a failed-or-cross-org lookup into "no privacy boundary" — a fail-open on a privacy boundary. The three-state lookup MUST be preserved end-to-end: route layer detects `undefined` and returns 404 / empty-response; service layer detects missing-row and returns an empty page. Add `eq(organisationId, opts.forUser.organisationId)` to every owner-lookup query so cross-org runIds produce the same fail-closed result as missing runs — relying on the underlying `db` handle being RLS-scoped is implicit; explicit org filter is the contract.
+**Why it matters:** prevents privacy-projection fail-open when run lookup fails or crosses tenancy. Grep for `?? null` adjacent to any function whose return type includes `undefined` and whose downstream consumer has a non-restrictive `null` branch.
+
+---
+
+## [Pattern title] Cross-row event durability via atomic claim+emit + stale-claim TTL
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Rounds 2/3 (F4, F8, F10, F11)
+**Pattern:** when a row-level state machine emits an external event (via `appendEvent`) as part of a transition, the emit is NOT atomic with the row UPDATE. Naive "UPDATE then emit" loses the event on crash; naive "emit then UPDATE" duplicates under concurrent writers. Per event-type, add two columns: `<type>_event_claim_at TIMESTAMP NULL` and `<type>_event_emitted_at TIMESTAMP NULL`. Flow: (1) atomic claim — `UPDATE ... SET claim_at = NOW() WHERE id = $1 AND emitted_at IS NULL AND (claim_at IS NULL OR claim_at < NOW() - $TTL) RETURNING id`; (2) if 0 rows, skip; (3) if 1 row, append the event; (4) on success, UPDATE `emitted_at = NOW()`; (5) on failure, leave columns alone — stale-claim TTL (5 min default) releases for retry. Pair with a retry pass at sweep start for state-machine-terminal rows where `emitted_at IS NULL`, with a tight WHERE clause that only matches the specific policy/status combination that owns the emit (avoid permissive fallbacks that emit synthetic events).
+**Why it matters:** keeps audit-trail durable across in-process crashes without sacrificing concurrent-writer dedupe. Residual edge case (crash between successful `appendEvent` and `emitted_at` UPDATE) requires event-idempotency support for a full fix; otherwise the stale-TTL retry can produce a duplicate. Documented in migrations 0351–0356 + the `crossOwnerApprovalTimeoutSweep` job.
+
+---
+
+## [Pattern title] DB trigger to auto-bump status-transition timestamp
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 2 F7
+**Pattern:** when a state-machine column needs a "last transitioned at" companion timestamp, document-only enforcement ("writers must set both") fails the first time a new caller forgets. A `BEFORE UPDATE` trigger gated on `NEW.<status> IS DISTINCT FROM OLD.<status>` is the only enforcement that future writers cannot bypass. The `IS DISTINCT FROM` guard is essential — without it, no-op race-claim UPDATEs (where the column is SET to its own current value as a row-lock) would incorrectly bump the timestamp. Application code can then drop manual `<column>_updated_at` writes; the trigger owns the invariant.
+**Why it matters:** moves the status-transition-timestamp invariant from convention-and-hope to enforced-at-the-DB. Future writers cannot break it. The reverse-coded case (no-op row-lock UPDATEs) is handled by `IS DISTINCT FROM`.
+
+---
+
+## [Pattern title] Reject scope before checking shape in JSONB-key gates
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 6 T7
+**Pattern:** `jsonb_typeof(col->'key')` returns SQL `NULL` for absent keys, and `NULL != 'array'` evaluates to `NULL` (not `TRUE`) — so a WHERE clause like `WHERE jsonb_typeof(col->'key') != 'array'` silently accepts rows where the key is missing entirely. Always combine key-existence (`NOT (col ? 'key')`) with the type assertion: `WHERE NOT (col ? 'key') OR jsonb_typeof(col->'key') != 'array'`. Three-valued logic in CI gates is a common silent-failure source.
+**Why it matters:** prevents JSONB-shape gates from silently passing rows that are missing the required key. Pair with explicit FAIL messages that say "absent or non-array" so the cause is unambiguous when the gate finally triggers on a real violation.

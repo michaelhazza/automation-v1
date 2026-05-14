@@ -1,0 +1,20 @@
+You are reviewing iteration 5 — the FINAL pass — of a draft specification document. Iterations 1-4 fixed 30 mechanical defects. Two AUTO-DECIDED items are routed to `tasks/todo.md`:
+
+- `PA-V2-OP-S1` (BLOCKS CHUNK 7) — file-events backing-store schema strategy. §13 #1.
+- `PA-V2-OP-S2` (BLOCKS CHUNK 3) — `delegation_outcomes` state-machine column gap. §13 #2.
+
+Do NOT re-raise either.
+
+This iteration is the convergence check. If the spec is now mechanically clean, say so explicitly: "no new findings, the spec is mechanically clean." If you find genuine NEW mechanical defects (not re-raises of resolved items, not directional/posture findings, not the two routed schema decisions), surface them with the standard finding shape.
+
+Project context (do NOT re-derive):
+- Pre-production. No staged rollouts. No feature flags for new migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives. No new abstractions duplicating existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, predictive cost modelling, new abstractions duplicating existing primitives.
+- PA-V2-OP-S1 and PA-V2-OP-S2 (already operator-routed).
+
+The spec is:
+

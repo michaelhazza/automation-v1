@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-05-13T07:32:08.441Z",
+  "capturedAt": "2026-05-14T00:20:07.190Z",
   "entries": {
     "add_deliverable": {
       "actionCategory": "worker",
@@ -3671,6 +3671,42 @@
         "toContactId": {
           "type": "ZodString",
           "describe": "CRM contact ID"
+        }
+      }
+    },
+    "cross_owner.ask_initiator_decision": {
+      "actionCategory": "worker",
+      "actionType": "cross_owner.ask_initiator_decision",
+      "blastRadius": "tenant",
+      "createsBoardTask": false,
+      "defaultGateLevel": "review",
+      "description": "A cross-owner delegation sub-step has timed out. The run initiator must decide whether to continue, approve retrospectively, or abandon the sub-step.",
+      "idempotencyStrategy": "keyed_write",
+      "isExternal": false,
+      "payloadFields": [
+        "substepId",
+        "parentRunId"
+      ],
+      "readPath": "none",
+      "retryPolicy": {
+        "maxRetries": 0,
+        "strategy": "none",
+        "retryOn": [],
+        "doNotRetryOn": []
+      },
+      "reversible": true,
+      "riskTier": 2,
+      "sideEffectClass": "write",
+      "verify": null,
+      "verifyNullJustification": "System-generated delegation decision request — outcome is a human decision, not a deterministic side effect; no post-action check is possible.",
+      "parameterSchemaShape": {
+        "parentRunId": {
+          "type": "ZodString",
+          "describe": "Parent agent run ID that owns this delegation"
+        },
+        "substepId": {
+          "type": "ZodString",
+          "describe": "delegation_outcomes row ID for this sub-step"
         }
       }
     },

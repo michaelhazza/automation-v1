@@ -49,6 +49,13 @@ function normalizePdfBytes(buf: Buffer): Buffer {
   let str = buf.toString('binary');
   str = str.replace(/\/CreationDate\s*\([^)]*\)/g, '/CreationDate (D:20000101000000Z)');
   str = str.replace(/\/ModDate\s*\([^)]*\)/g, '/ModDate (D:20000101000000Z)');
+  // Standalone PDF date literals — @react-pdf/renderer emits CreationDate
+  // as an INDIRECT object (e.g. `0 0 obj\n(D:20260514003513Z)\nendobj`)
+  // and the inline `/CreationDate` key references that object via `0 0 R`.
+  // The inline-form regex above never matches the date literal in that
+  // case. Normalise any free-standing `(D:YYYYMMDDhhmmss[Z|±HH'mm])` PDF
+  // date string regardless of where it appears.
+  str = str.replace(/\(D:\d{14}(?:Z|[+-]\d{2}'\d{2})?\)/g, '(D:20000101000000Z)');
   str = str.replace(/\/ID\s*\[<[0-9a-fA-F]{32}>\s*<[0-9a-fA-F]{32}>\]/g, '');
   str = str.replace(/[A-Z]{6}\+/g, 'AAAAAA+');
   // Strip PDF object stream contents — opaque binary that may vary per

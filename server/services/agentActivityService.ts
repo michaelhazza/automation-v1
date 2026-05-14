@@ -588,4 +588,18 @@ export const agentActivityService = {
       .orderBy(sql`${agentRuns.startedAt} DESC`)
       .limit(params.limit);
   },
+
+  /**
+   * Fetch the ownerUserId for a single run, scoped to the given org.
+   * Returns null when the run has no designated owner (subaccount-owned legacy run).
+   * Returns undefined when the run does not exist or belongs to a different org.
+   */
+  async getRunOwnerUserId(runId: string, orgId: string): Promise<string | null | undefined> {
+    const [row] = await db
+      .select({ ownerUserId: agentRuns.ownerUserId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))
+      .limit(1);
+    return row?.ownerUserId;
+  },
 };

@@ -30,6 +30,7 @@ import type { AiSubscriptionConnection } from '../../shared/types/govern.js';
 import { auditService } from './auditService.js';
 import { operatorSessionConsentService } from './operatorSessionConsentService.js';
 import { operatorSessionLifecycleService } from './operatorSessionLifecycleService.js';
+import { operatorSandboxFileEventBridge } from './operatorSandboxFileEventBridge.js';
 import { OPERATOR_SESSION_PROVIDERS } from '../config/operatorSessionProviders.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
@@ -618,6 +619,20 @@ export const operatorSessionService = {
       to: 'connected_needs_consent',
       cause: 'disclosure_bumped',
       actorUserId: null,
+    });
+  },
+
+  async handleFileWriteToolCall(input: {
+    agentRunId: string;
+    organisationId: string;
+    subaccountId: string;
+    ownerUserId: string | null;
+    path: string;
+    content: Buffer;
+  }): Promise<void> {
+    await operatorSandboxFileEventBridge.handleToolCallEvent({
+      ...input,
+      emittedBy: 'tool_call',
     });
   },
 

@@ -312,6 +312,8 @@ Run Trace answers:
 
 In Phase 1, Run Trace is implemented as a **virtual view** over existing decision ledgers (`agent_execution_events`, `routing_outcomes`, `delegation_outcomes`, `tool_call_security_events`, `reviewAuditRecords`). A canonical Run Trace event table that consolidates these into one ledger is deferred to Phase 3 or later when scale and audit requirements justify the migration cost.
 
+**Universal controller invariant (V2):** All controllers — native, operator-mode, and future controller styles — surface through the same `OpenTaskView` primitives and the same event renderer. No controller-specific UI chrome is introduced. V2 adds four event variants (`file.created`, `file.modified`, `cross_owner_substep.awaiting_initiator_decision`, `cross_owner_substep.completed`) to the run-trace event stream; all four render through the existing event renderer.
+
 ---
 
 ## 6. Layered Architecture

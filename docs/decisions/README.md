@@ -69,5 +69,6 @@ Update when adding ADRs.
 | [0020](./0020-test-conventions-vitest-and-test-folder.md) | Test conventions — Vitest only, `__tests__/` folder, `.js` relative imports | accepted | tests / tooling |
 | [0021](./0021-workflows-v1-v2-boundary.md) | Workflows V1 → V2 boundary contract | accepted | workflow-engine |
 | [0022](./0022-workspace-inbound-webhook-db-exception.md) | Direct DB access in workspaceInboundWebhook route | accepted | auth, routes |
+| [0023](./0023-approval-follows-executor-owner.md) | Approval ownership follows the executor's data boundary, not the request origin | accepted | agent delegation, approvals, personal assistant |
 
 ADRs 0001-0005 were extracted from KNOWLEDGE.md historical "Decision" entries on 2026-05-03. The remaining 6 historical Decision entries stay in KNOWLEDGE.md as observations — they're either implementation patterns (not durable choices) or research notes (no decision to defend). Promote them to ADRs only if they keep being cited.

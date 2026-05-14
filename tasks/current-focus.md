@@ -4,12 +4,12 @@ active_plan: none
 build_slug: none
 branch: none
 status: NONE
-last_updated: 2026-05-14T00:00:00Z
-last_merged_pr: #297
-last_merged_slug: iee-browser-on-e2b
-last_merged_branch: claude/migrate-browser-e2b-snI99
-last_merged_at: 2026-05-14T00:00:00Z
-last_merged_commit: 8008abae
+last_updated: 2026-05-14
+last_merged_pr: #299
+last_merged_slug: personal-assistant-v2-operator
+last_merged_branch: claude/personal-assistant-post-merge-audit
+last_merged_at: 2026-05-14T00:44:20Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -22,15 +22,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Status:** **NONE** — no active build. Spec-coordinator entry available for the next brief.
+**Just merged:** PR #299 — `personal-assistant-v2-operator` (squash-commit `pending-squash`, 2026-05-14T00:44:20Z). Personal Assistant V2 (Operator Mode): cross-owner delegation pattern, live file events via R2 + UPSERT-derived version, capability-map V2 axis (`owner_user_id`), three-state owner-lookup privacy projection enforced at both service and route layers with org-scoped fail-closed, atomic claim+emit pattern for cross-owner timeout events with stale-claim TTL retry, DB trigger to auto-bump substep status-transition timestamp. 7 rounds of chatgpt-pr-review (APPROVED on Round 7); 22 findings applied; 4 backlog items routed to tasks/todo.md (PA-V2-LIST-APPROVALS-V1-ARM, PA-V2-WATCHER-HOST-BRIDGE, PA-V2-OPERATOR-TEMPLATE-PROMOTION, PA-V2-EVENT-IDEMPOTENCY). Mid-Phase-3 main-sync renumbered 6 V2 migrations to 0351-0356 (after main's iee-browser-on-e2b PR #297 claimed 0346-0350), plus EA controller-style flip moved 0345 → 0357. CI auto-fix loop closed: 2 iterations (RLS-gate single-line CREATE POLICY + action-registry snapshot refresh; then PDF determinism standalone-date-literal normaliser fix).
 
-**Just merged:** PR #297 — `iee-browser-on-e2b` (squash-commit `8008abae`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
+**Last merged:** PR #297 — `iee-browser-on-e2b` (squash-commit `8008abae`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
 
-**Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
-
-**Paused build (concurrent, different branch):** `fleet-and-codebase-health` on `codebase-health` branch (Branch 2 of 2). Status was REVIEWING when this iee-browser session was launched. Handoff: `tasks/builds/fleet-and-codebase-health/handoff-branch-2.md`. Progress: `progress-branch-2.md`. Sibling Branch 1 (`fleet-and-process` / PR #293) is APPROVED. To resume: switch to `codebase-health` branch and restore this pointer to `active_spec: tasks/builds/fleet-and-codebase-health/spec.md` / `build_slug: fleet-and-codebase-health` / `status: REVIEWING`.
-
-**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
+**Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/2025-automation/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
 ---
 
