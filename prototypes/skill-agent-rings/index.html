@@ -93,6 +93,12 @@
           <div class="text-[12px] text-slate-500">Disable a skill instantly · no deploy · scoped global / org / subaccount</div>
         </div>
       </a>
+      <a href="11-promote-blocked.html" class="card block bg-white border border-slate-200 rounded-lg px-4 py-3 no-underline text-slate-900">
+        <div class="flex items-baseline justify-between">
+          <div class="font-semibold text-[14px]">11 · Promote blocked by pre-deploy agent</div>
+          <div class="text-[12px] text-slate-500">CI-stage agent caught a structural break · structured findings + audit-logged override path</div>
+        </div>
+      </a>
     </div>
   </div>
 
@@ -124,7 +130,8 @@
     <h3 class="text-[13px] font-semibold text-slate-900 mb-2">Design notes</h3>
     <ul class="text-[12.5px] text-slate-600 space-y-1.5 leading-relaxed list-disc pl-4">
       <li><b>Two user classes, different rules.</b> Admin screens (01–07, 10) use the relaxed budget per <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/frontend-design-principles.md</code>. Agency screens (08, 09) obey the strict budget — no metrics, no version numbers in primary copy, version info lives inside a collapsed Advanced section.</li>
-      <li><b>Existing surfaces vs new routes.</b> Mockups 01 (Agents list), 02 (Agent edit), 07 (Skills list), 08 (Subaccount agent config), 10 (kill switch on skill edit) sit on existing pages. Mockup 03 (Rollout pipeline) and 05 (Canary health) are new routes reachable from the existing edit pages. Mockups 04, 06 are modals. Mockup 09 is a notification surface (in-app banner + email).</li>
+      <li><b>Existing surfaces vs new routes.</b> Mockups 01 (Agents list), 02 (Agent edit), 07 (Skills list), 08 (Subaccount agent config), 10 (kill switch on skill edit) sit on existing pages. Mockup 03 (Rollout pipeline) and 05 (Canary health) are new routes reachable from the existing edit pages. Mockups 04, 06, 11 are modals. Mockup 09 is a notification surface (in-app banner + email).</li>
+      <li><b>Pre-deploy safety, not just post-deploy.</b> Mockup 11 represents the pre-deploy prevention agent (brief §3.9) — a CI-stage agent that runs before any ring sees a change. Catches in-flight-run breakage, subaccount-amendment conflicts, and tool-description changes <em>before</em> traffic exposure. Complements (not replaces) the post-deploy ring validation in Mockups 04, 05.</li>
       <li><b>Versioning already exists.</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_prompt_revisions</code> and <code class="text-[11.5px] bg-slate-100 px-1 rounded">skill_versions</code> are live. Rings add per-run pinning columns on <code class="text-[11.5px] bg-slate-100 px-1 rounded">agent_runs</code>, a <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_cohorts</code> table, a <code class="text-[11.5px] bg-slate-100 px-1 rounded">skill_disable_flags</code> table, and a <code class="text-[11.5px] bg-slate-100 px-1 rounded">reversibility_class</code> column on <code class="text-[11.5px] bg-slate-100 px-1 rounded">system_skills</code>.</li>
       <li><b>Composes with Explore/Execute Mode.</b> Rings are per-revision safety (platform authors shipping changes); Explore/Execute is per-run safety (operators trying things). Orthogonal.</li>
       <li><b>Platform stance:</b> <code class="text-[11.5px] bg-slate-100 px-1 rounded">docs/spec-context.md</code> currently says <code class="text-[11.5px] bg-slate-100 px-1 rounded">rollout_model: commit_and_revert</code>. Phase 1 (internal release) is technically permitted today; Phase 2 (customer rings) activates when first live agency client onboards.</li>

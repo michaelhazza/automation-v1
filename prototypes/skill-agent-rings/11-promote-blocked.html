@@ -1,0 +1,127 @@
+<!doctype html>
+<!--
+  Mock 11 / 11 — Promote blocked by pre-deploy agent
+  ========================================================
+  Sibling state to Mockup 04 (promote modal). Triggered when the
+  pre-deploy prevention agent (brief §3.9) returns a Block verdict
+  while the author tries to promote a Dev revision into Test.
+
+  This is the failure variant. The modal frame matches Mock 04 so
+  the operator's mental model is "same action, different outcome,"
+  not "new screen."
+
+  Three blocking findings shown as red rows with one-line explanations
+  and an inline "Show details" affordance. The override path lives
+  below the findings — explicit "I've reviewed" toggle that reveals
+  the justification field; primary action shifts from "Promote" to
+  "Override and promote" (red destructive style) once toggled on.
+  Without override, primary action is disabled.
+
+  Admin-only. Anchored to brief §3.9.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock 11 — Promote blocked by pre-deploy agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f6f8; }
+  .pill-dev { background:#f1f5f9; color:#334155; font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; letter-spacing:0.04em; }
+  .pill-test { background:#e0f2fe; color:#075985; font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; letter-spacing:0.04em; }
+  .pill-block { background:#fee2e2; color:#991b1b; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:0.06em; text-transform:uppercase; }
+  .x { color:#dc2626; font-weight:700; }
+  .backdrop { position:absolute; inset:0; background:rgba(15,23,42,0.35); backdrop-filter:blur(2px); }
+  .modal { position:relative; }
+  .finding { background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px 14px; }
+  .toggle { width:34px; height:20px; background:#cbd5e1; border-radius:999px; position:relative; cursor:pointer; flex-shrink:0; }
+  .toggle::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; background:white; border-radius:50%; transition:left 120ms; box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+  .toggle.on { background:#dc2626; }
+  .toggle.on::after { left:16px; }
+</style>
+</head>
+<body class="min-h-screen relative">
+
+<!-- Simulated page behind the modal -->
+<div class="mx-auto max-w-[820px] p-6 opacity-40 pointer-events-none select-none">
+  <div class="text-[12px] text-slate-500 mb-2">Synthetos admin › System agents › Outreach Agent › Rollout</div>
+  <div class="bg-white border border-slate-200 rounded-lg h-[520px]"></div>
+</div>
+
+<div class="backdrop"></div>
+
+<div class="fixed inset-0 flex items-start justify-center p-6 pt-12 overflow-auto">
+  <div class="modal w-full max-w-[620px] bg-white rounded-xl shadow-2xl border border-slate-200">
+
+    <!-- Header (same shape as Mock 04, different verdict pill) -->
+    <div class="px-6 py-4 border-b border-slate-200">
+      <div class="flex items-center justify-between">
+        <div class="text-[11px] uppercase tracking-[0.14em] text-red-600 font-semibold">Promote · blocked by pre-deploy check</div>
+        <a href="03-rollout-pipeline.html" class="text-[13px] text-slate-500 hover:text-slate-800 no-underline">✕</a>
+      </div>
+      <h2 class="text-[17px] font-bold text-slate-900 mt-1">Cannot move rev 47 from <span class="pill-dev">dev</span> to <span class="pill-test">test</span></h2>
+      <p class="text-[12.5px] text-slate-600 mt-1">The pre-deploy agent found <b>3 blocking issues</b>. Resolve them, or override with justification below.</p>
+    </div>
+
+    <!-- Blocking findings -->
+    <div class="px-6 py-4 border-b border-slate-100 space-y-2.5">
+
+      <div class="finding">
+        <div class="flex items-baseline justify-between">
+          <div class="text-[13.5px] font-semibold text-red-900"><span class="x mr-1">✗</span>12 in-flight runs would be affected</div>
+          <a href="#" class="text-[11.5px] text-red-700 font-medium no-underline">Show runs →</a>
+        </div>
+        <div class="text-[12.5px] text-slate-700 mt-1.5 pl-5">12 runs across 5 subaccounts are pinned to rev 46 and use the signal-reference text rev 47 removes. They will complete on rev 46 if you wait; promoting now risks splitting their multi-step output.</div>
+        <div class="text-[11.5px] text-slate-500 mt-1.5 pl-5">Smallest fix: wait ~14 min for the in-flight runs to drain, then re-promote.</div>
+      </div>
+
+      <div class="finding">
+        <div class="flex items-baseline justify-between">
+          <div class="text-[13.5px] font-semibold text-red-900"><span class="x mr-1">✗</span>3 subaccount amendments would be invalidated</div>
+          <a href="#" class="text-[11.5px] text-red-700 font-medium no-underline">Show amendments →</a>
+        </div>
+        <div class="text-[12.5px] text-slate-700 mt-1.5 pl-5">Subaccounts <code class="text-[11.5px] bg-white px-1 rounded border border-red-200">acme-prod</code>, <code class="text-[11.5px] bg-white px-1 rounded border border-red-200">bigwidget-ops</code>, <code class="text-[11.5px] bg-white px-1 rounded border border-red-200">novaco</code> have <em>guardrail</em>-kind amendments referencing the regulated-industry tone clause this revision removes.</div>
+        <div class="text-[11.5px] text-slate-500 mt-1.5 pl-5">Smallest fix: review the three amendments first; either retire them (if no longer relevant) or revise rev 47 to preserve the underlying guardrail.</div>
+      </div>
+
+      <div class="finding">
+        <div class="flex items-baseline justify-between">
+          <div class="text-[13.5px] font-semibold text-red-900"><span class="x mr-1">✗</span>Tool description change detected</div>
+          <a href="#" class="text-[11.5px] text-red-700 font-medium no-underline">Show diff →</a>
+        </div>
+        <div class="text-[12.5px] text-slate-700 mt-1.5 pl-5">The <code class="text-[11.5px] bg-white px-1 rounded border border-red-200">send_email</code> tool description was edited. Tool-description changes carry the same blast radius as system-prompt changes; this revision must take the full four-ring path including a Canary shadow on a sample.</div>
+        <div class="text-[11.5px] text-slate-500 mt-1.5 pl-5">Smallest fix: acknowledge below. Once acknowledged, the rollout is auto-classified as full four-ring and shadow execution is enabled for the affected skill in Canary.</div>
+      </div>
+
+    </div>
+
+    <!-- Override section — explicit, friction-bearing -->
+    <div class="px-6 py-4 border-b border-slate-100">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-[13px] font-semibold text-slate-900">Override and promote anyway</div>
+          <div class="text-[12px] text-slate-500 mt-0.5">I've reviewed each finding above and accept the risk. This action is logged in the audit trail with the justification below.</div>
+        </div>
+        <div class="toggle" title="Click to enable override (mockup only)"></div>
+      </div>
+
+      <div class="mt-3">
+        <label class="block text-[12px] font-medium text-slate-500 mb-1">Justification<span class="text-slate-400 font-normal"> · required for audit log</span></label>
+        <textarea rows="2" disabled placeholder="Why is the block being overridden?" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px] resize-none bg-slate-50 text-slate-400"></textarea>
+      </div>
+    </div>
+
+    <!-- Footer — primary action disabled until override toggled -->
+    <div class="px-6 py-4 flex items-center justify-between">
+      <a href="03-rollout-pipeline.html" class="text-[12.5px] text-slate-500 hover:text-slate-800 no-underline">View full check log →</a>
+      <div class="flex gap-2">
+        <a href="03-rollout-pipeline.html" class="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-semibold rounded-lg border border-slate-300 no-underline">Cancel</a>
+        <button disabled class="px-5 py-2 bg-red-100 text-red-300 text-[13px] font-semibold rounded-lg cursor-not-allowed">Override and promote</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
