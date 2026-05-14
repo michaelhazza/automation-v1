@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: tasks/builds/development-lifecycle-governance-upgrade/spec.md
+active_plan: tasks/builds/development-lifecycle-governance-upgrade/plan.md
+build_slug: development-lifecycle-governance-upgrade
+branch: claude/ai-driven-dev-lifecycle-FRqBd
+status: REVIEWING
 last_updated: 2026-05-14
 last_merged_pr: #305
 last_merged_slug: pre-v1-lockdown-2026-05-14
@@ -22,11 +22,7 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**In flight (REVIEWING):** `development-lifecycle-governance-upgrade` on `claude/ai-driven-dev-lifecycle-FRqBd`. Phase 2 BUILD complete. All 7 chunks built (7 builder sub-agents, all G1 pass on first attempt). Branch-level review pass complete (spec-conformance CONFORMANT_AFTER_FIXES; pr-reviewer APPROVED in 4 rounds; reality-checker READY; dual-reviewer REVIEW_GAP — Codex unavailable). Doc-sync gate complete (15 verdicts; FRAMEWORK_VERSION bumped 2.3.0 → 2.4.0). Handoff at `tasks/builds/development-lifecycle-governance-upgrade/handoff.md`. **Next:** run `launch finalisation` in a new session to create the PR, run chatgpt-pr-review, and merge. Capability Registration verdict deferred to Phase 3: expected `yes: create new capability record` (no dev-lifecycle-governance row exists post-Chunk-4).
 
 **Just merged:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
 
