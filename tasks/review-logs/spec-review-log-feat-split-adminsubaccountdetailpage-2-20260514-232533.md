@@ -67,4 +67,4 @@ Iteration 2 surfaced 3 P2 findings. All real, all mechanical. None match a direc
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED: 0
-- Spec commit after iteration: (set after commit below)
+- Spec commit after iteration: `81e9d34b`

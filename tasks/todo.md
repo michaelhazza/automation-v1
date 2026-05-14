@@ -4498,3 +4498,9 @@ before being passed to the LLM.
   - Gap: Spec prose says stall job should "transition expired proposal rows (`createdAt + 7d`) to approval state `expired`" for EA-linked drafts. Code's `eaDraftStallResetHandler` only resets `sending → idle`. Existing `actions` primitive expiry may already cover this, but the spec's explicit clause says it should be added to the stall job for EA-linked rows.
   - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
 
+## Deferred spec decisions — feat-split-usagepage (2026-05-14)
+
+Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/builds/feat-split-usagepage/spec.md`. These are informational — the spec is mechanically tight and READY_FOR_BUILD; review only if you want to revisit a directional call.
+
+- [ ] **Codex #9 — `setRoutingFilters` / `setIeeFilters` update-pattern contract.** AUTO-REJECT (framing). Codex suggested specifying how filter setters avoid reload loops. Rejected because this is a pure refactor preserving today's plain `setState` behaviour, and adding a defensive contract over a simple setter is over-specification for pre-production / rapid-evolution scope.
+
