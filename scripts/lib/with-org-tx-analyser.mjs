@@ -127,26 +127,24 @@ function isCalledViaOrgScope(sf, funcName) {
     const callee = call.getExpression().getText().trim();
     if (!ORG_SCOPE_HELPERS.has(callee)) continue;
 
-    // Check arguments for a direct reference or call to funcName.
+    // For each argument to withOrgTx/getOrgScopedDb, walk the AST for
+    // identifier nodes matching funcName. AST traversal — rather than a
+    // textual `includes()` substring check — guarantees that comments,
+    // string literals, and unrelated longer identifiers (e.g. `loadAll`
+    // when funcName is `load`) cannot trigger a false-positive.
+    // See PR #307 chatgpt-pr-review Round 2 / T5 for the regression case.
     for (const arg of call.getArguments()) {
-      const argText = arg.getText();
-      // Direct reference: withOrgTx(funcName)
-      if (argText.trim() === funcName) return true;
-      // Inline call: withOrgTx(tx => funcName(tx))
-      if (argText.includes(funcName)) return true;
-    }
-  }
-
-  // Also check: if funcName is called from within a function body that
-  // is itself an argument to an org-scope helper.
-  for (const call of callExprs) {
-    const callee = call.getExpression().getText().trim();
-    if (!ORG_SCOPE_HELPERS.has(callee)) continue;
-    for (const arg of call.getArguments()) {
-      // Walk all call expressions inside this arg.
-      const innerCalls = arg.getDescendantsOfKind(SyntaxKind.CallExpression);
-      for (const inner of innerCalls) {
-        if (inner.getExpression().getText().trim() === funcName) return true;
+      // Direct reference: withOrgTx(funcName) — the arg itself IS the identifier.
+      if (arg.getKind() === SyntaxKind.Identifier && arg.getText() === funcName) {
+        return true;
+      }
+      // Any identifier node inside the arg's subtree (function bodies,
+      // method-call receivers, etc.) — covers both `funcName(tx)` (call)
+      // and `someService.funcName(tx)` (method call), since both forms
+      // contain an Identifier node with text === funcName.
+      const identifiers = arg.getDescendantsOfKind(SyntaxKind.Identifier);
+      for (const id of identifiers) {
+        if (id.getText() === funcName) return true;
       }
     }
   }

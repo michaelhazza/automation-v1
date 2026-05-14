@@ -1178,15 +1178,14 @@ Notes: Research and fill in carry notes for this capability.
 
 ### BUDGET-EXPIRY-ENFORCEMENT-1 — Per-file budget gates do not enforce `# expires:` directives
 
-**Source:** `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md` Round 1 / T2
-**Severity:** medium (gate is warning-first; bug doesn't fire until 2026-08-14 when current entries expire)
+**Source:** chatgpt-pr-review Round 1 / T2 (escalated as Round 2 / F4 with operator-approved doc-softening remediation; full log: `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`)
+**Status:** doc/code mismatch CLOSED in Round 2 — `references/test-gate-policy.md § Per-file count baselines are out of scope` explicitly carves these gates out of the expiry framework; both baseline file headers now carry the NOTE callout. This follow-up is now about the **feature gap** (if we ever want calendar-expiry-driven promotion for per-file budgets), not about a doc/code mismatch.
+**Severity:** low (no doc/code mismatch any more; feature gap only fires if we decide we want calendar-expiry-driven promotion for per-file budgets in future)
 **Files:**
-- `scripts/lib/per-file-counter-pure.mjs` — `parsePerFileBudgetBaseline` silently strips `#`-comment lines including `# expires:` directives
-- `scripts/verify-any-budget.sh` (P9) — has 73 `# expires:` entries in `scripts/.gate-baselines/any-budget.txt`, none enforced
-- `scripts/verify-marker-budget.sh` (P10) — has 34 `# expires:` entries in `scripts/.gate-baselines/marker-budget.txt`, none enforced
-- `references/test-gate-policy.md` — policy doc says these are enforced; they're not (contradicts itself)
+- `scripts/lib/per-file-counter-pure.mjs` — `parsePerFileBudgetBaseline` strips `#`-comment lines including any `# expires:` directives (by design — see doc carve-out)
+- `scripts/verify-any-budget.sh` (P9) and `scripts/verify-marker-budget.sh` (P10) — promote on count growth, not calendar
 
-**Fix outline:** thread per-entry expiry through `parsePerFileBudgetBaseline` → `diffAgainstBaseline`, then have the calling shell scripts emit `[GUARD] WARNING / ERROR` per expired/past-grace entry. Apply same exit-code policy as `check_expiring_baseline` (current ∩ baseline > 0 → exit 2; new violation or past-grace → exit 1).
+**Fix outline (if we ever do want expiry-driven promotion for these gates):** thread per-entry expiry through `parsePerFileBudgetBaseline` → `diffAgainstBaseline`, then have the calling shell scripts emit `[GUARD] WARNING / ERROR` per expired/past-grace entry. Apply same exit-code policy as `check_expiring_baseline` (current ∩ baseline > 0 → exit 2; new violation or past-grace → exit 1). Update `references/test-gate-policy.md § Per-file count baselines are out of scope` and the two baseline file headers when this lands.
 
-**Estimated effort:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
+**Estimated effort if pursued:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
 

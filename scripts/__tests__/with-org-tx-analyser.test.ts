@@ -26,6 +26,7 @@ const FAILING_FILE = path.join(FIXTURES_DIR, 'failing.ts');
 const SUPPRESSED_FILE = path.join(FIXTURES_DIR, 'suppressed.ts');
 const NAME_COLLISION_UNSAFE = path.join(FIXTURES_DIR, 'name-collision-unsafe.ts');
 const NAME_COLLISION_SAFE = path.join(FIXTURES_DIR, 'name-collision-safe.ts');
+const SUBSTRING_COLLISION = path.join(FIXTURES_DIR, 'substring-collision.ts');
 
 describe('analyseWithOrgTxScope — passing fixture', () => {
   test('returns no violations when db.select is called via withOrgTx', () => {
@@ -78,5 +79,16 @@ describe('analyseWithOrgTxScope — same-name function in another file does NOT 
     expect(unsafeViolations.length).toBeGreaterThan(0);
     expect(unsafeViolations[0].message).toContain("fetchAll");
     expect(safeViolations).toHaveLength(0);
+  });
+});
+
+describe('analyseWithOrgTxScope — substring collisions and comment mentions do NOT mark unsafe call as safe (T5 regression)', () => {
+  test('unsafe load() is flagged even when withOrgTx wraps loadAll() and a comment mentions load', () => {
+    const violations = analyseWithOrgTxScope(REPO_ROOT, [SUBSTRING_COLLISION]);
+    const loadViolations = violations.filter(v => v.message.includes("'load'"));
+    expect(loadViolations.length).toBeGreaterThan(0);
+    // loadAll IS wrapped, so it should NOT be flagged.
+    const loadAllViolations = violations.filter(v => v.message.includes("'loadAll'"));
+    expect(loadAllViolations).toHaveLength(0);
   });
 });

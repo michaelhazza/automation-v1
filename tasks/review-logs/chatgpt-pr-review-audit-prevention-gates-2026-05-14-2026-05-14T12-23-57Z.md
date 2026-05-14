@@ -108,3 +108,66 @@
 - Targeted Vitest runs: 6/6 with-org-tx-analyser tests pass; 19/19 types-used-pure tests pass.
 - Lint: 0 errors / 887 warnings (baseline). Typecheck: clean.
 
+---
+
+## Round 2 — 2026-05-14T13-00-00Z
+
+**Verdict:** CHANGES_REQUESTED (1 Blocking / 2 Should-fix)
+**Top themes:** scope (analyser substring-match false-positive), policy (doc/code mismatch on budget gate expiry), prior-finding duplicate
+
+### ChatGPT Feedback (raw)
+
+> Round 2 verdict: close, but not ready to merge yet. The previous high-risk issues are mostly resolved, but I still see 1 blocking issue and 2 should-fix items.
+>
+> 🔴 Blocking
+> **F4**: Expiring-baseline policy is still false for per-file budget gates. references/test-gate-policy.md says every per-gate baseline entry expires, but parsePerFileBudgetBaseline() ignores expiry comments. The any-budget.txt and marker-budget.txt baselines have `# expires:` lines that are effectively permanent. Fix: either extend per-file-counter-pure.mjs to parse expiry metadata, or explicitly carve out per-file count baselines from the policy and remove the misleading `# expires:` comments.
+>
+> 🟡 Should-fix
+> **T4**: verify-org-id-source.sh is still claimed in docs but not wired into run-all-gates.sh. architecture.md states the invariant is enforced by `scripts/verify-org-id-source.sh`, but the run-all-gates.sh additions in this PR don't add it. Fix: add the gate, or soften the doc.
+>
+> **T5**: with-org-tx analyser still uses substring matching inside org-scope args. `argText.includes(funcName)` in isCalledViaOrgScope can false-positive on substring collisions or identifier mentions in comments/string literals. Fix: remove the broad includes() branch and rely on AST call/reference matching only.
+>
+> Resolved from prior round: F2, F3, T1 appear resolved. F1's main issue (cross-file same-name masking) appears resolved by fixture and test coverage.
+
+### Pre-triage verification (per playbook step 1b)
+
+- **F4** — VERIFIED as a substantive duplicate of Round 1 T2 (same files, same finding_type, same global concern) WITH new evidence (a lighter alternative remediation: soften the policy doc instead of implementing full expiry). The duplicate-detection rule preserves the Round 1 operator decision (defer); the new remediation option is genuinely different evidence so it deserves a re-decision. Operator chose "soften the doc now" — implemented in this round.
+- **T4** — REJECTED — diff-misread (substantive duplicate of Round 1 T3, same finding, no new evidence). `git blame -L 65,66 scripts/run-all-gates.sh` confirms `verify-org-id-source.sh` was wired on 2026-04-04 in commit `89a818cc` ("Implement architecture guard system with security fixes") — six weeks before this branch began. The script is present at line 65 of `scripts/run-all-gates.sh` and architecture.md's claim is accurate. Per playbook step 1a, no escalation despite ChatGPT's stronger Round-2 phrasing.
+- **T5** — VERIFIED. `scripts/lib/with-org-tx-analyser.mjs:136` originally had `if (argText.includes(funcName)) return true;` — a textual substring match that matches identifier text in comments, string literals, and longer identifiers (e.g. `load` inside `loadAll`). Real false-positive path on warning-first gate.
+
+### Recommendations and Decisions
+
+| ID | Triage | Severity | Scope | Recommendation | Final Decision | Rationale |
+|----|--------|----------|-------|----------------|----------------|-----------|
+| F4 | technical-escalated (new-remediation evidence on duplicate) | high (per ChatGPT) | standard | implement doc-softening + baseline-file annotations | user-approved (doc-soften) | Operator chose option B: clarify policy doc that per-file count baselines are out of scope for expiry framework; annotate baseline-file headers so `# expires:` lines are informational only. Closes blocking claim without expanding PR scope; updates BUDGET-EXPIRY-ENFORCEMENT-1 in tasks/todo.md to reflect the new framing. |
+| T4 | technical (auto-reject, duplicate of R1/T3) | low | standard | reject (diff-misread, duplicate of Round 1 T3) | auto (reject — duplicate of Round 1 / T3) | Script wired since 2026-04-04. Same ChatGPT misread as Round 1; per duplicate-detection rule, no escalation. |
+| T5 | technical (auto-apply) | medium | standard | implement (replace `.includes` with AST identifier walk + add regression test) | auto (implement) | Real false-positive (substring + comments + string-literal matches). Fix preserves correct method-call detection that ChatGPT's literal "remove .includes" remediation would have broken — see Insight in main session for the divergence. Single fixture + test added; 7/7 analyser tests pass. |
+
+### Implementation summary
+
+- **T5 (auto-applied):** `scripts/lib/with-org-tx-analyser.mjs::isCalledViaOrgScope` — replaced the `argText.trim() === funcName || argText.includes(funcName)` substring path AND the redundant second AST loop with a single AST identifier walk via `getDescendantsOfKind(SyntaxKind.Identifier)`. This matches identifier nodes in code (covering direct calls like `funcName(tx)`, method calls like `someService.funcName(tx)`, and bare references like `withOrgTx(funcName)`) but NOT identifier text in comments or string literals (the AST does not tokenize those as Identifier nodes). New fixture `scripts/__fixtures__/with-org-tx/substring-collision.ts` plus one test case in `scripts/__tests__/with-org-tx-analyser.test.ts`; 7/7 tests pass.
+- **F4 (operator chose doc-soften):**
+  - `references/test-gate-policy.md § Baseline expiry policy` reworded to scope the expiry framework to **violation-list baselines** (`<path>:<line>:<msg>` format) only.
+  - New explicit sub-section `Per-file count baselines are out of scope for the expiry framework` carves out `any-budget.txt` and `marker-budget.txt` with a pointer to `BUDGET-EXPIRY-ENFORCEMENT-1`.
+  - `scripts/.gate-baselines/any-budget.txt` and `scripts/.gate-baselines/marker-budget.txt` headers carry a `NOTE:` callout explaining that the per-entry `# expires:` lines are informational soft-deadlines, not enforced.
+  - `tasks/todo.md § BUDGET-EXPIRY-ENFORCEMENT-1` status updated: doc/code mismatch CLOSED; feature gap remains and is now correctly framed as "future opt-in" rather than "current bug."
+- **T4 (auto-rejected):** no code change. Logged duplicate-of-Round-1/T3 verdict above.
+
+### Files changed this round
+
+- `scripts/lib/with-org-tx-analyser.mjs` (T5)
+- `scripts/__fixtures__/with-org-tx/substring-collision.ts` (T5 regression fixture, new)
+- `scripts/__tests__/with-org-tx-analyser.test.ts` (T5 regression test case)
+- `references/test-gate-policy.md` (F4 doc-soften)
+- `scripts/.gate-baselines/any-budget.txt` (F4 header annotation)
+- `scripts/.gate-baselines/marker-budget.txt` (F4 header annotation)
+- `tasks/todo.md` (F4 BUDGET-EXPIRY-ENFORCEMENT-1 status update)
+- `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md` (this log)
+
+### Round 2 done
+
+- Auto-accepted (technical): 1 implemented (T5), 1 auto-rejected (T4 — duplicate of Round 1 T3, diff-misread).
+- User-decided (technical-escalated): 1 implemented via doc-soften remediation (F4).
+- Targeted Vitest runs: 7/7 with-org-tx-analyser tests pass (new substring-collision regression added).
+- G3 lint/typecheck: skipped per operator decision (changes are 1 AST analyser tweak + doc/comment edits; targeted Vitest passes are the operative signal).
+
