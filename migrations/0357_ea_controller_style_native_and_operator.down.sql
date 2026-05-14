@@ -1,4 +1,4 @@
--- 0345 down — revert EA subaccount_agents rows back to 'native_only'
+-- 0357 down — revert EA subaccount_agents rows back to 'native_only'
 --
 -- Hard-revert: pauses operator-mode runs for EA instances. Only flips rows
 -- that are currently 'native_and_operator' and linked to an EA agent.

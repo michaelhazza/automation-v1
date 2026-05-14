@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md
-active_plan: tasks/builds/personal-assistant-v2-operator/plan.md
-build_slug: personal-assistant-v2-operator
-branch: claude/personal-assistant-post-merge-audit
-status: REVIEWING
-last_updated: 2026-05-14T07:45:00Z
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
+last_updated: 2026-05-14
+last_merge_ready_pr: #299
+last_merge_ready_slug: personal-assistant-v2-operator
+last_merge_ready_branch: claude/personal-assistant-post-merge-audit
 last_merged_pr: #296
 last_merged_slug: claude-close-deferred-pa-v1-13lHR
 last_merged_branch: claude/close-deferred-pa-v1-13lHR
@@ -22,17 +25,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (design APPROVED at commit `e27a218a`)
-**Active plan:** `tasks/builds/personal-assistant-v2-operator/plan.md`
-**Active build slug:** `personal-assistant-v2-operator`
-**Branch:** `claude/personal-assistant-post-merge-audit`
-**Status:** **REVIEWING** — Phase 2 complete; awaiting Phase 3 finalisation
+**Status:** **MERGE_READY** — PR #299 (`personal-assistant-v2-operator`) finalised; ready-to-merge label applied 2026-05-14T00:12:11Z. CI now running on branch `claude/personal-assistant-post-merge-audit` at HEAD post-Phase-3.
 
-Phase 1 (SPEC) complete. Spec APPROVED 2026-05-13 after 5 spec-reviewer + 2 chatgpt-spec-review rounds.
+PR #299: Personal Assistant V2 (Operator Mode) — cross-owner delegation + live file events. Major build. 7 rounds of chatgpt-pr-review (APPROVED on Round 7); 22 findings applied; 4 backlog items routed to `tasks/todo.md`. Mid-Phase-3 main-sync handled the iee-browser-on-e2b PR #297 collision: 6 V2 migrations renumbered 0346–0351 → 0351–0356; EA controller-style flip renumbered 0345 → 0357.
 
-Phase 2 (BUILD) complete 2026-05-14. All 10 chunks built (1a, 1b, 2–9). Full review pass complete: adversarial-reviewer (HOLES_FOUND → 6 fixed), spec-conformance (NON_CONFORMANT — 8 directional gaps to todo.md), pr-reviewer x3 (APPROVED), reality-checker (READY), dual-reviewer (APPROVED — 5 fixes). Branch HEAD: `96e5df6c`. Handoff at `tasks/builds/personal-assistant-v2-operator/handoff.md`.
-
-Phase 3 (FINALISE): run `launch finalisation` in a new session.
+Build artefacts: `tasks/builds/personal-assistant-v2-operator/`. Phase 3 handoff section: `tasks/builds/personal-assistant-v2-operator/handoff.md § Phase 3 (FINALISATION) — complete`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-personal-assistant-v2-operator-2026-05-13T22-55-35Z.md`.
 
 **Last merged:** PR #296 — `claude/close-deferred-pa-v1-13lHR` (commit `27b00d1d`, 2026-05-13). Closed all deferred PA-V1 items + adversarial findings; idempotency-key discriminator pattern extracted to `KNOWLEDGE.md`.
 

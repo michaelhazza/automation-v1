@@ -435,3 +435,39 @@ edit:    scripts/gates/verify-capability-map-shape.sh
 ### Round-7 diff prep
 
 After commit, regenerate `.chatgpt-diffs/pr299-round7-code-diff.diff` for the operator to paste into ChatGPT for Round 7 (or `done` if no further findings).
+
+## Round 7 — 2026-05-14T10:07Z (final pass)
+
+### ChatGPT Verdict
+APPROVED — ready to finalise.
+
+### Findings
+
+| # | Severity | Type | Triage | Recommendation | Status |
+|---|----------|------|--------|----------------|--------|
+| T8 | nit | technical | down migration header still says `-- 0345 down` | IMPLEMENT — update to `-- 0357 down` | applied |
+
+### Decisions log
+
+**T8 — Down migration header stale**
+- Triaged technical (cosmetic; non-blocking per ChatGPT).
+- Fix: `migrations/0357_ea_controller_style_native_and_operator.down.sql` line 1 — `-- 0345 down` → `-- 0357 down`. The forward migration's header was already updated in Round 6; the down counterpart was missed.
+
+### Verification
+- No code change; comment-only edit. G3 (lint + typecheck + targeted tests) results from Round 6 still apply.
+
+### Final wrap-up (7 rounds total)
+
+- **Final verdict:** APPROVED.
+- **Total findings applied:** 15 (F1, F2, F3, F4, F5, T1, F6, F7, F8, T3, T4, F9, F10, F11, T5, F12, T6, F13, F14, F15, T7, T8 — counted across all 7 rounds; F2 and T2 partially deferred per their nature).
+- **Total findings rejected:** 0.
+- **Total findings deferred to backlog:** 4 (`PA-V2-LIST-APPROVALS-V1-ARM`, `PA-V2-WATCHER-HOST-BRIDGE`, `PA-V2-OPERATOR-TEMPLATE-PROMOTION`, `PA-V2-EVENT-IDEMPOTENCY`).
+- **KNOWLEDGE.md updated:** yes (4 Phase-2-extracted patterns + 3 Phase-3-extracted patterns at finalisation — see Step 7 of the finalisation-coordinator playbook).
+- **architecture.md updated:** yes (Cross-ownership delegation pattern V2 — cross-org service-layer fail-closed bullet + timeout-sweep durability columns paragraph).
+- **capabilities.md updated:** no — `n/a` (no capability/skill/integration add/remove/rename in this PR).
+- **integration-reference.md updated:** no — `n/a`.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — `n/a`.
+- **spec-context.md updated:** `n/a` (PR review, not spec review).
+- **frontend-design-principles.md updated:** no — `n/a`.
+
+Branch HEAD at finalisation: `000fde0a` + the T8 comment fix that follows.

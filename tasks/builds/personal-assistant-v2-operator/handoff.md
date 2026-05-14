@@ -130,3 +130,25 @@ None required. All mandatory reviewers ran:
 | chatgpt-spec-review (manual) | APPROVED | 2 | 16 | 1 | 0 |
 
 Branch state at handoff: clean local tree (spec + KNOWLEDGE.md + tasks/todo.md edits committed). Branch ahead of `main` by ~11 commits (1 sync + 1 brief + 6 spec-reviewer + 1 schema-lock + 2 ChatGPT + this handoff).
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #299
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-personal-assistant-v2-operator-2026-05-13T22-55-35Z.md`
+**spec_deviations reviewed:** n/a (none recorded in Phase 2 handoff)
+**Doc-sync sweep verdicts:** architecture.md `yes (Cross-ownership delegation pattern V2 — added cross-org service-layer fail-closed bullet + timeout-sweep durability columns paragraph)`; capabilities.md `n/a` (no capability/skill/integration change); integration-reference.md `n/a` (no integration change); CLAUDE.md / DEVELOPMENT_GUIDELINES.md `no — no build-discipline / agent-fleet / locked-rule change`; CONTRIBUTING.md `no — checked listPendingApprovalsForUser / cross_owner_substep / operator_run_files / substep_status_updated_at / terminal_event_emitted_at / awaiting_initiator_event terms; zero stale references; no lint-suppression-policy change`; frontend-design-principles.md `n/a` (no UI pattern change); KNOWLEDGE.md `yes (4 Phase-2 patterns + 3 Phase-3 patterns extracted)`; docs/decisions/ `yes (ADR-0023 added Phase 2, index entry verified)`; references/test-gate-policy.md `n/a`; references/spec-review-directional-signals.md `n/a` (PR review, not spec review); docs/incident-response.md `n/a`; docs/testing-transition-plan.md `n/a`; .claude/FRAMEWORK_VERSION + CHANGELOG.md `n/a (no framework-level change; this repo is at 2.3.0)`.
+**KNOWLEDGE.md entries added:** 4 in Phase 2 + 3 in Phase 3 finalisation (three-state owner lookup, claim+emit pattern, DB trigger for status-transition timestamp, JSONB key-existence guards).
+**tasks/todo.md items removed:** 0 — no items closed by this build's Phase 3 fixes; 4 new backlog items added (PA-V2-LIST-APPROVALS-V1-ARM, PA-V2-WATCHER-HOST-BRIDGE, PA-V2-OPERATOR-TEMPLATE-PROMOTION, PA-V2-EVENT-IDEMPOTENCY).
+**ready-to-merge label applied at:** 2026-05-14T00:12:11Z
+
+### Phase 3 review summary
+
+| Reviewer | Verdict | Rounds | Findings applied | Findings rejected | Findings deferred |
+|---|---|---|---|---|---|
+| chatgpt-pr-review (manual) | APPROVED | 7 | 22 (F1–F15 + T1, T3–T8 — F2 + T2 partially deferred per nature) | 0 | 4 (LIST-APPROVALS-V1-ARM, WATCHER-HOST-BRIDGE, OPERATOR-TEMPLATE-PROMOTION, EVENT-IDEMPOTENCY) |
+
+### Notable Phase 3 events
+
+1. **Mid-Phase-3 main sync (Round 5→6):** main's PR #297 (iee-browser-on-e2b) merged while ChatGPT Round 5 returned APPROVED. The follow-up S2 sync hit a 6-migration collision on numbers 0346-0350 (main claimed them for IEE browser session work). All six V2 migrations renumbered: `0346→0351`, `0347→0352`, `0348→0353`, `0349→0354`, `0350→0355`, `0351→0356`. A subsequent Round 6 adversarial pass found three new issues (F13 stale 0345 EA migration renumbered to 0357; F14 missing `.js` imports; F15 over-broad assembler UPDATE) and one should-fix (T7 capability-map gate ignoring absent JSONB keys). All fixed in Round 6 + final T8 down-migration-header cleanup in Round 7.
+2. **Final migration ordering:** 0345 (memory_utility_30d, main) + 0346/0347/0349/0350 (iee-browser, main) + 0348 (llm_subtype, main) + 0351-0356 (PA-V2: actions.approver, delegation state, operator_run_files, substep_status_updated_at, trigger, event-emit audit) + 0357 (EA controller-style flip).
+3. **Branch at finalisation:** all Phase 3 commits on `claude/personal-assistant-post-merge-audit`; the squash-commit on main will collapse the 7-round review arc + the post-merge renumber + the doc-sync work into a single landed commit.

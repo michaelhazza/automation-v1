@@ -1340,3 +1340,35 @@ Companion: the matching test must assert the rejection shape. Zod's strict-mode 
 Detection: any schema where a field is documented as "not accepted here — admin-only" but the schema is plain `z.object({...})` without `.strict()`. The doc comment claims the contract; `.strict()` enforces it.
 
 Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBodySchema`, `server/services/__tests__/subaccountIeeBrowserSettingsServicePure.test.ts` (the unrecognized_keys assertion).
+
+---
+
+## [Pattern title] Three-state owner lookup must be preserved through every layer
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Rounds 2/3/4 (F6, F9, F12)
+**Pattern:** `runTraceProjectionForViewer` treats `ownerUserId === null` as "subaccount-owned, no privacy boundary, return all events". Owner-lookup helpers return three states: `string` (owned), `null` (subaccount-owned within this org), `undefined` (run not found / cross-org). Any caller that coerces `undefined → null` via `?? null` turns a failed-or-cross-org lookup into "no privacy boundary" — a fail-open on a privacy boundary. The three-state lookup MUST be preserved end-to-end: route layer detects `undefined` and returns 404 / empty-response; service layer detects missing-row and returns an empty page. Add `eq(organisationId, opts.forUser.organisationId)` to every owner-lookup query so cross-org runIds produce the same fail-closed result as missing runs — relying on the underlying `db` handle being RLS-scoped is implicit; explicit org filter is the contract.
+**Why it matters:** prevents privacy-projection fail-open when run lookup fails or crosses tenancy. Grep for `?? null` adjacent to any function whose return type includes `undefined` and whose downstream consumer has a non-restrictive `null` branch.
+
+---
+
+## [Pattern title] Cross-row event durability via atomic claim+emit + stale-claim TTL
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Rounds 2/3 (F4, F8, F10, F11)
+**Pattern:** when a row-level state machine emits an external event (via `appendEvent`) as part of a transition, the emit is NOT atomic with the row UPDATE. Naive "UPDATE then emit" loses the event on crash; naive "emit then UPDATE" duplicates under concurrent writers. Per event-type, add two columns: `<type>_event_claim_at TIMESTAMP NULL` and `<type>_event_emitted_at TIMESTAMP NULL`. Flow: (1) atomic claim — `UPDATE ... SET claim_at = NOW() WHERE id = $1 AND emitted_at IS NULL AND (claim_at IS NULL OR claim_at < NOW() - $TTL) RETURNING id`; (2) if 0 rows, skip; (3) if 1 row, append the event; (4) on success, UPDATE `emitted_at = NOW()`; (5) on failure, leave columns alone — stale-claim TTL (5 min default) releases for retry. Pair with a retry pass at sweep start for state-machine-terminal rows where `emitted_at IS NULL`, with a tight WHERE clause that only matches the specific policy/status combination that owns the emit (avoid permissive fallbacks that emit synthetic events).
+**Why it matters:** keeps audit-trail durable across in-process crashes without sacrificing concurrent-writer dedupe. Residual edge case (crash between successful `appendEvent` and `emitted_at` UPDATE) requires event-idempotency support for a full fix; otherwise the stale-TTL retry can produce a duplicate. Documented in migrations 0351–0356 + the `crossOwnerApprovalTimeoutSweep` job.
+
+---
+
+## [Pattern title] DB trigger to auto-bump status-transition timestamp
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 2 F7
+**Pattern:** when a state-machine column needs a "last transitioned at" companion timestamp, document-only enforcement ("writers must set both") fails the first time a new caller forgets. A `BEFORE UPDATE` trigger gated on `NEW.<status> IS DISTINCT FROM OLD.<status>` is the only enforcement that future writers cannot bypass. The `IS DISTINCT FROM` guard is essential — without it, no-op race-claim UPDATEs (where the column is SET to its own current value as a row-lock) would incorrectly bump the timestamp. Application code can then drop manual `<column>_updated_at` writes; the trigger owns the invariant.
+**Why it matters:** moves the status-transition-timestamp invariant from convention-and-hope to enforced-at-the-DB. Future writers cannot break it. The reverse-coded case (no-op row-lock UPDATEs) is handled by `IS DISTINCT FROM`.
+
+---
+
+## [Pattern title] Reject scope before checking shape in JSONB-key gates
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 6 T7
+**Pattern:** `jsonb_typeof(col->'key')` returns SQL `NULL` for absent keys, and `NULL != 'array'` evaluates to `NULL` (not `TRUE`) — so a WHERE clause like `WHERE jsonb_typeof(col->'key') != 'array'` silently accepts rows where the key is missing entirely. Always combine key-existence (`NOT (col ? 'key')`) with the type assertion: `WHERE NOT (col ? 'key') OR jsonb_typeof(col->'key') != 'array'`. Three-valued logic in CI gates is a common silent-failure source.
+**Why it matters:** prevents JSONB-shape gates from silently passing rows that are missing the required key. Pair with explicit FAIL messages that say "absent or non-array" so the cause is unambiguous when the gate finally triggers on a real violation.
