@@ -1453,3 +1453,42 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 **Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
 **Pattern:** `audit-runner` produces a different pipeline shape from `feature-coordinator` — it auto-commits/pushes its three-pass output but does NOT write a `tasks/builds/{slug}/handoff.md` and does NOT set `tasks/current-focus.md` to `REVIEWING`. The `finalisation-coordinator` entry guard refuses to proceed without `status: REVIEWING`, which means audit branches need a recovery path. Canonical recovery: **Light finalisation** — operator-confirmed entry-guard bypass; open PR manually, run pr-reviewer + optionally chatgpt-pr-review, run the doc-sync sweep, then apply `ready-to-merge`. Audit branches do NOT execute `finalisation-coordinator` Step 9 (MERGE_READY transition) because they were never in REVIEWING — they go straight from `NONE` to `MERGED` on squash.
 **Why it matters:** without this recovery path the operator either has to manually fake a handoff (high-friction + state-confusing) or skip the formal finalisation entirely (skipping doc-sync and KNOWLEDGE extraction). Naming the recovery as "Light finalisation" makes it explicit and reusable for future audit branches.
+
+---
+
+### [2026-05-14] Pattern — Per-critical-path coverage tier matrix
+
+Not every critical path needs the same coverage shape. Static gates are cheap, unit tests are mid, trajectory tests are expensive. Match the tier to the failure-mode being defended against.
+
+**Initial matrix (refresh quarterly):**
+
+| Critical path | Coverage tier | Rationale |
+|---|---|---|
+| RLS context propagation (`withOrgTx`, `getOrgScopedDb`, session var canonicalisation) | gates + unit | Failure mode is silent cross-tenant; gates catch shape, unit tests catch propagation through transformations |
+| `agentRunVisibility` resolution | gates + unit | Failure mode is permission bypass; both invariant types tested |
+| Idempotency-key dedup | gates + sparse unit | Failure mode is double-execution; gates assert declaration, sparse unit covers the dedup logic at one canonical site |
+| Cost-breaker invocation | gates only | Failure mode is over-spend; the invariant ("breaker wraps every LLM call") is structural and gate-detectable |
+
+Refresh this matrix every quarterly review. If a new critical path emerges and lacks a tier, the first PR that touches it picks one.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Layer 1 Area 5 coverage assessment.
+
+---
+
+### [2026-05-14] Pattern — Custom retry loops are pass-3 even when they look right
+
+`agentBeliefService.ts:124-403` rolls its own `retryCount` storm-detection loop with manual jitter and exponential backoff. The implementation is sound on first read. On second read it's a partial reimplementation of `server/lib/withBackoff.ts`. Audit caught it because the gate `verify-canonical-retry.sh` (P5) flagged the `retryCount` declaration outside the canonical helper.
+
+**Rule.** A retry-shaped construct outside `server/lib/withBackoff.ts` is pass-3 by default, never auto-merge a custom retry loop on Rule 8 ("trust this is intentional"). Either extend `withBackoff` to cover the new case, OR document why the canonical helper genuinely cannot, AND add a `guard-ignore: canonical-retry ADR-<id> <rationale>` suppression that future audits can grep.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module J finding 1.
+
+---
+
+### [2026-05-14] Pattern — Handoff depth-cap rejections need structured events, not `console.warn`
+
+`server/services/skillExecutor.ts:3992` (the `enqueueHandoff` depth-cap path) rejected handoffs deeper than 5 with a `console.warn` and a silent drop. The three-tier agent invariant is "handoffs up to 5 deep", a rejection at that boundary is a meaningful event, not a debug log. The 2026-05-14 audit found this only because the audit explicitly walked all three-tier invariants; routine log review never flags `console.warn` strings.
+
+**Rule.** Any invariant rejection (depth cap, rate limit, idempotency conflict, RLS gate) emits a structured event via the canonical logger AND a Langfuse tag, not a `console.*` call. Gate-enforced via `verify-no-raw-console.sh` (pre-existing; P6's intended scope is a strict subset of this gate).
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module K finding 3.
