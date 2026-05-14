@@ -122,6 +122,28 @@ When you hit a stuck-detection condition (per CLAUDE.md §1), append a Blocker s
 
 ---
 
+## Calendar
+
+- [ ] [2026-06-12] Complete tasks/builds/iee-browser-on-e2b/cost-report-month-1.md from observed production traffic.
+
+---
+
+## iee-browser-on-e2b — deferred TODOs to wire when paths become live
+
+These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-checker + chatgpt-pr-review Round 1 (PR #297). They are listed here so they don't get lost when the relevant code paths get wired up.
+
+- [ ] **IEE-DEF-1** — `server/services/sandbox/browserWarmPool.ts::evictStale` outer FOR UPDATE SKIP LOCKED needs `withAdminConnection` for cross-tenant sweep. Currently dead code (zero callers); wire when warm-pool eviction is scheduled.
+- [ ] **IEE-DEF-2** — `server/services/sandbox/browserWarmPool.ts::refillIfEligible` needs `organisationId` on its context and `setOrgAndSubaccountGUC` wrapping; currently inserts stub sandbox IDs (`stub-${randomUUID()}`). Wire when warm-pool refill is wired to a caller (today: dead code, zero callers).
+- [ ] **IEE-DEF-3** — `server/services/sandbox/ieeBrowserProfileManager.ts::gcSweep` cross-tenant sweep needs `withAdminConnection`. Currently dead code; wire when profile GC is scheduled.
+- [ ] **IEE-DEF-4** — `infra/sandbox-templates/iee-browser/` template is not yet buildable. Add CI sandbox-template-build pipeline when the e2b SDK is installed (SANDBOX-DEF-EGRESS-MECH). Pipeline: bundle `harness/index.ts` to `harness/dist/index.js`, publish image, write real digest into `PUBLISHED_VERSION`. Until then `assertNotLatestTemplateVersion` rejects the all-zero placeholder so production cannot accidentally use this template.
+- [ ] **IEE-DEF-5** — Wire real Playwright executor into `infra/sandbox-templates/iee-browser/harness/index.ts`. Today the stub writes `status:'failed'` so any accidental deploy fails visibly. Pull the reference implementation from `worker/src/browser/executor.ts` when bundling.
+- [ ] **IEE-DEF-6** — Pre-existing host-disk profiles (`BROWSER_SESSION_DIR`) migration decision was deferred during Phase 2 chunk 5 as no-op given dogfood-first launch. Revisit if production traffic shows profile-data continuity is needed across the substrate switch.
+- [ ] **IEE-DEF-7** — Wire production network policy in `server/services/executionBackends/_ieeShared.ts::ieeDispatchBrowser` policy build. Today `network.mode='none'` makes Playwright tasks unable to navigate. Decide before any subaccount flips `rolloutApproved=true`: allowlist per skill, allowlist per subaccount, or open. The SDK-not-installed factory + `assertNotLatestTemplateVersion` placeholder guard prevent dispatch from reaching production today.
+- [ ] **IEE-DEF-8** — Implement real assertions in `server/services/sandbox/__tests__/ieeBrowserProfileManager.serialization.test.ts`. Today the file is a scaffold gated behind `E2B_E2E=true`; the only assertion is a placeholder. Lands with the e2b SDK install + a real provider client so the test can spawn two concurrent mounts and assert serialisation + cross-tenant safety per spec §15 R2-F6.
+- [ ] **IEE-DEF-9** — Add `template_name = 'iee-browser'` AND compatible-`template_version` filter to `browserWarmPool.checkout()` SELECT. Today only one template exists and refill is RUNTIME-DISABLED, so this is a forward-looking invariant. Wire before refillIfEligible (IEE-DEF-2) goes live, otherwise checkout could lease a warm session created against an incompatible template digest.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`

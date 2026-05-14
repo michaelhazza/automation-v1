@@ -4,12 +4,12 @@ active_plan: none
 build_slug: none
 branch: none
 status: NONE
-last_updated: 2026-05-13
-last_merged_pr: #298
-last_merged_slug: memory-improvements
-last_merged_branch: claude/add-memvid-integration-ehAOr
-last_merged_at: 2026-05-13T10:11:16Z
-last_merged_commit: 2bd3d6d3
+last_updated: 2026-05-14T00:00:00Z
+last_merged_pr: #297
+last_merged_slug: iee-browser-on-e2b
+last_merged_branch: claude/migrate-browser-e2b-snI99
+last_merged_at: 2026-05-14T00:00:00Z
+last_merged_commit: 8008abae
 -->
 
 # Current Focus
@@ -22,15 +22,13 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Status:** **NONE** — no active build. Spec-coordinator entry available for the next brief.
 
-**Just merged:** PR [#298](https://github.com/michaelhazza/automation-v1/pull/298) — `memory-improvements` (squash-commit `2bd3d6d3`, 2026-05-13T10:11:16Z). Shipped 3 capabilities: synthesis lineage (`memory_block_version_sources` migration 0333, sources route + UI tab), citation-rate utility (migrations 0334 + 0345, materialised view with nightly 16:00 UTC refresh, dashboard tab), env-flagged AKR semantic ranker. 5 Phase 2 reviewers + chatgpt-pr-review (2 rounds, 11 findings auto-applied) + 1 CI fix-loop iteration (RLS-contract org-filter on tasks lookup); no REVIEW_GAP. 6 env-gated operational items deferred to pre-enablement before flipping AKR ranker flag.
+**Just merged:** PR #297 — `iee-browser-on-e2b` (squash-commit `8008abae`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
 
-**Previously merged:** PR #294 — `fleet-and-codebase-health` Branch 2 (gate fix + 9 route migrations + KNOWLEDGE/todo sweeps, 2026-05-13). Branch 1 (PR #293 — agent fleet upgrades + GRADED review posture) merged same session.
+**Last merged:** PR #288 — `operator-backend` (squash-commit `83fd8347`, 2026-05-13). Operator Backend = first concrete adapter for delegated long-running operator-managed tasks. Phase 3 handoff: `tasks/builds/operator-backend/handoff.md`.
+
+**Paused build (concurrent, different branch):** `fleet-and-codebase-health` on `codebase-health` branch (Branch 2 of 2). Status was REVIEWING when this iee-browser session was launched. Handoff: `tasks/builds/fleet-and-codebase-health/handoff-branch-2.md`. Progress: `progress-branch-2.md`. Sibling Branch 1 (`fleet-and-process` / PR #293) is APPROVED. To resume: switch to `codebase-health` branch and restore this pointer to `active_spec: tasks/builds/fleet-and-codebase-health/spec.md` / `build_slug: fleet-and-codebase-health` / `status: REVIEWING`.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/automation-v1/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
 
