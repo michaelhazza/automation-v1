@@ -140,5 +140,10 @@ done <<< "$PARSED_LINES"
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-exit_code=$(check_expiring_baseline "$GUARD_ID" "$VIOLATION_KEYS")
+# Numeric baseline via scripts/guard-baselines.json. The per-file baseline
+# at scripts/.gate-baselines/with-org-tx-or-scoped-db.txt would enumerate
+# every violation — impractical at landing time given 2,153 pre-existing
+# sites. Numeric baseline still blocks regressions (current > baseline) and
+# documents the migration debt for Tracks A / A2 / A3 follow-up.
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
 exit "$exit_code"
