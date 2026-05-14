@@ -1463,6 +1463,42 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 
 ---
 
+### [2026-05-14] Pattern — Per-critical-path coverage tier matrix
+
+Not every critical path needs the same coverage shape. Static gates are cheap, unit tests are mid, trajectory tests are expensive. Match the tier to the failure-mode being defended against.
+
+**Initial matrix (refresh quarterly):**
+
+| Critical path | Coverage tier | Rationale |
+|---|---|---|
+| RLS context propagation (`withOrgTx`, `getOrgScopedDb`, session var canonicalisation) | gates + unit | Failure mode is silent cross-tenant; gates catch shape, unit tests catch propagation through transformations |
+| `agentRunVisibility` resolution | gates + unit | Failure mode is permission bypass; both invariant types tested |
+| Idempotency-key dedup | gates + sparse unit | Failure mode is double-execution; gates assert declaration, sparse unit covers the dedup logic at one canonical site |
+| Cost-breaker invocation | gates only | Failure mode is over-spend; the invariant ("breaker wraps every LLM call") is structural and gate-detectable |
+
+Refresh this matrix every quarterly review. If a new critical path emerges and lacks a tier, the first PR that touches it picks one.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Layer 1 Area 5 coverage assessment.
+
+---
+
+### [2026-05-14] Pattern — Custom retry loops are pass-3 even when they look right
+
+`agentBeliefService.ts:124-403` rolls its own `retryCount` storm-detection loop with manual jitter and exponential backoff. The implementation is sound on first read. On second read it's a partial reimplementation of `server/lib/withBackoff.ts`. Audit caught it because the gate `verify-canonical-retry.sh` (P5) flagged the `retryCount` declaration outside the canonical helper.
+
+**Rule.** A retry-shaped construct outside `server/lib/withBackoff.ts` is pass-3 by default, never auto-merge a custom retry loop on Rule 8 ("trust this is intentional"). Either extend `withBackoff` to cover the new case, OR document why the canonical helper genuinely cannot, AND add a `guard-ignore: canonical-retry ADR-<id> <rationale>` suppression that future audits can grep.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module J finding 1.
+
+---
+
+### [2026-05-14] Pattern — Handoff depth-cap rejections need structured events, not `console.warn`
+
+`server/services/skillExecutor.ts:3992` (the `enqueueHandoff` depth-cap path) rejected handoffs deeper than 5 with a `console.warn` and a silent drop. The three-tier agent invariant is "handoffs up to 5 deep", a rejection at that boundary is a meaningful event, not a debug log. The 2026-05-14 audit found this only because the audit explicitly walked all three-tier invariants; routine log review never flags `console.warn` strings.
+
+**Rule.** Any invariant rejection (depth cap, rate limit, idempotency conflict, RLS gate) emits a structured event via the canonical logger AND a Langfuse tag, not a `console.*` call. Gate-enforced via `verify-no-raw-console.sh` (pre-existing; P6's intended scope is a strict subset of this gate).
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module K finding 3.
 ## [2026-05-14] Pattern — Code-only diff exclusions in manual chatgpt-pr-review produce false-positive "missing file" findings
 **Date:** 2026-05-14
 **Source:** chatgpt-pr-review session on PR #304 — `tasks/review-logs/chatgpt-pr-review-claude-ai-driven-dev-lifecycle-FRqBd-2026-05-14T09-47-42Z.md`, Round 1 findings T1 + T2.
@@ -1476,3 +1512,12 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 **Source:** chatgpt-pr-review session on PR #304 — `tasks/review-logs/chatgpt-pr-review-claude-ai-driven-dev-lifecycle-FRqBd-2026-05-14T09-47-42Z.md`, Round 2 F4 vs Round 1 F1.
 **Pattern:** Coordinator's duplicate-detection step (per-round step 1a) auto-applies the prior round's decision when a later-round finding is a "substantive duplicate" — same `finding_type` + same file/area, no new evidence. The trap: a later-round finding can share the *finding type* and *file* with a previously-rejected general-case finding, but be a **localised sub-case the original rejection rationale does not cover**. On PR #304: Round 1 F1 claimed "Step 3/3a writes to `tasks/builds/<slug>/...` before Step 4 ratifies the slug" (general case, rejected because line 127 of `spec-coordinator.md` already reconciles this via a provisional-slug rule). Round 2 F4 claimed "the *ambiguous-classification* paragraph writes to `<slug>/progress.md` and the provisional-slug rule is textually *below* it" — same finding_type (`architecture`/sequencing), same file (`spec-coordinator.md`), but a narrower scope: the ambiguous branch's write happens at line 125, the provisional-slug rule lives at line 127, so the local order *is* wrong even though the general case is reconciled. The narrow case is a real defect that the broad rejection does not cover. **Rule:** before auto-rejecting a Round-N finding as a duplicate, compare the textual *scope* (not just type+file) — if the new finding names a specific paragraph/line/branch the prior rationale did NOT address, treat it as a new finding and triage it on its own merits.
 **Why it matters:** silent auto-reject of narrowed-case subfindings ships real sequencing/scope defects under the guise of "we already decided this." The duplicate-detection heuristic exists to save the operator from repeated rephrased findings, not to filter out legitimately new evidence with overlapping classification.
+
+---
+
+## [2026-05-14] Pattern — Manual-mode ChatGPT has no session memory across rounds — same diff-misread can recur indefinitely
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator chatgpt-pr-review on PR #307 (audit-prevention-gates-2026-05-14) — `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`, Round 1 T3 → Round 2 T4 → Round 3 T6, all the SAME finding.
+**Pattern:** ChatGPT in manual-mode chatgpt-pr-review uses no shared session state between rounds — each upload is processed against a fresh chat. If a finding was rejected as a diff-only-reviewer false positive in Round N (e.g. "this PR claims `verify-org-id-source.sh` is wired but the diff doesn't show the wiring" — but the wiring lives in `main` at line 65 of `run-all-gates.sh` from a 2026-04-04 commit), the same finding will recur verbatim in Round N+1, N+2, etc. until something in the diff itself disproves it. Round-N+1's prompt cannot teach ChatGPT what Round-N learned because it doesn't carry the Round-N transcript. PR #307 saw T3/T4/T6 — three rounds, three identical misreads, rejection rationale ("verified via `git blame`, wired 2026-04-04 in commit 89a818cc") had to be re-emitted each time.
+**Rule.** When a finding is rejected as a diff-misread once, add a `## Pre-triage verification` block to the session log with the exact verification command (`git blame -L X,Y file` / `grep -n term file` / etc.) and its output. On Round N+1+ recurrences, auto-reject as duplicate per playbook step 1a — do NOT re-engage the substance, do NOT re-verify, do NOT escalate to operator. The operator made the call once; ChatGPT will keep raising it; the coordinator's job is to absorb the noise. A third occurrence of the same misread is the moment to commit to "ignore class of finding for remainder of this review" rather than triple-handling it.
+**Why it matters:** at one repeat the cost is small (a re-verification + log entry). At three repeats (PR #307 actually got there) the cost is two extra rounds the operator paid for, plus context burn on a defect that doesn't exist. Calibrate engagement to information yield: same finding + same rationale = zero new information regardless of round number.

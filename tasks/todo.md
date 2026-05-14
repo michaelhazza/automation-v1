@@ -334,36 +334,59 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 
 ### Tier 1 — block at write time (16; gates / hooks)
 
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P1** — `scripts/verify-no-missing-deps.sh`: `depcheck --skip-missing=false`; fail on any import absent from `package.json`.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P2** — tighten `scripts/verify-no-db-in-routes.sh`: (a) skip `import type`; (b) refuse new baseline entries; (c) companion `verify-with-org-tx-or-scoped-db.sh`.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P3** — `scripts/verify-loc-cap.sh`: enforce Area 10 thresholds.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P4** — `scripts/verify-no-silent-catch.sh`: silent catches require `guard-ignore: no-silent-failures`.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P5** — `scripts/verify-canonical-retry.sh`: `retryCount` loops outside `withBackoff` require `guard-ignore: canonical-retry`.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P6** — `scripts/verify-canonical-logger.sh`: `console.(log\|warn\|error)` in `server/services`/`server/routes` requires `guard-ignore: canonical-logger`.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P7** — `scripts/verify-universal-skill-sync.sh`: `UNIVERSAL_SKILL_NAMES` ↔ `ACTION_REGISTRY` bidirectional.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P8** — `scripts/verify-frontend-design-budget.sh`: KPI/Sparkline/chart imports require admin-only allowlist.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P9** — `scripts/verify-any-budget.sh`: non-growing `: any` count per file.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P10** — `scripts/verify-marker-budget.sh`: non-growing marker count per file.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P11** — `scripts/verify-no-new-cycles.sh`: `madge --circular --json` baseline.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P12** — `scripts/verify-duplicate-blocks.sh`: `jscpd --min-tokens 15` baseline.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P13** — `scripts/verify-framework-context-block.sh`: §2 against `package.json` drift.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P14** — `scripts/verify-types-used.sh`: every exported event type in a discriminated union or used in code.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P15** — `scripts/verify-no-orphan-react-component.sh`: walk React Router from `App.tsx`; flag zero-ingress pages.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **P16** — `scripts/verify-knip-config.sh`: `knip.json` registers every dynamic entry surface.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P1** — `scripts/verify-no-missing-deps.sh`: `depcheck --skip-missing=false`; fail on any import absent from `package.json`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P2** — tighten `scripts/verify-no-db-in-routes.sh`: (a) skip `import type`; (b) refuse new baseline entries; (c) companion `verify-with-org-tx-or-scoped-db.sh`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P3** — `scripts/verify-loc-cap.sh`: enforce Area 10 thresholds.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P4** — `scripts/verify-no-silent-catch.sh`: silent catches require `guard-ignore: no-silent-failures`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P5** — `scripts/verify-canonical-retry.sh`: `retryCount` loops outside `withBackoff` require `guard-ignore: canonical-retry`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:covered-by-verify-no-raw-console] **P6** — `scripts/verify-canonical-logger.sh`: `console.(log\|warn\|error)` in `server/services`/`server/routes` requires `guard-ignore: canonical-logger`. Covered by pre-existing scripts/verify-no-raw-console.sh; see Chunk 3 implementation log for the scope-overlap evidence.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P7** — `scripts/verify-universal-skill-sync.sh`: `UNIVERSAL_SKILL_NAMES` ↔ `ACTION_REGISTRY` bidirectional.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P8** — `scripts/verify-frontend-design-budget.sh`: KPI/Sparkline/chart imports require admin-only allowlist.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P9** — `scripts/verify-any-budget.sh`: non-growing `: any` count per file.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P10** — `scripts/verify-marker-budget.sh`: non-growing marker count per file.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P11** — `scripts/verify-no-new-cycles.sh`: `madge --circular --json` baseline.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P12** — `scripts/verify-duplicate-blocks.sh`: `jscpd --min-tokens 15` baseline.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P13** — `scripts/verify-framework-context-block.sh`: §2 against `package.json` drift.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P14** — `scripts/verify-types-used.sh`: every exported event type in a discriminated union or used in code.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P15** — `scripts/verify-no-orphan-react-component.sh`: walk React Router from `App.tsx`; flag zero-ingress pages.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P16** — `scripts/verify-knip-config.sh`: `knip.json` registers every dynamic entry surface.
 
 ### Tier 2 — convention at design time (4; docs)
 
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:architecture.md] [status:open] **P17** — "Single org-id source" sub-section.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:open] **P18** — extend § Comments: "comments describing a completed refactor are residue".
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:open] **P19** — § Frontend: "prefer named exports for React components".
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:docs/capabilities.md] [status:open] **P20** — § Editorial Rules: explicit always-OK industry-terms list.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:architecture.md] [status:closed:pr:307] **P17** — "Single org-id source" sub-section.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:closed:pr:307] **P18** — extend § Comments: "comments describing a completed refactor are residue".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:closed:pr:307] **P19** — § Frontend: "prefer named exports for React components".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:docs/capabilities.md] [status:closed:pr:307] **P20** — § Editorial Rules: explicit always-OK industry-terms list.
 
 ### Tier 3 — lesson via context (4; KNOWLEDGE.md / ADR)
 
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P21** — pattern: per-critical-path coverage tier matrix; refresh quarterly.
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P22** — pattern: "Custom retry loops are pass-3 even when they look right".
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:open] **P23** — pattern: "Handoff depth-cap rejections need structured events".
-- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:ADR] [status:open] **P24** — ADR: "Service-layer extraction policy for routes touching `db/schema/`".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P21** — pattern: per-critical-path coverage tier matrix; refresh quarterly.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P22** — pattern: "Custom retry loops are pass-3 even when they look right".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P23** — pattern: "Handoff depth-cap rejections need structured events".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:ADR] [status:closed:pr:307] **P24** — ADR: "Service-layer extraction policy for routes touching `db/schema/`".
+
+### Warning→error promotion follow-ups (chunk 11 wired 14 gates as warning-first per Operator decision §C1)
+
+Each gate ships with `default_exit_code=2` (warning). Operator reviews CI signal during the one-week soak window post-merge; if no unexpected false positives, promote `DEFAULT_EXIT_CODE` from 2 to 1 in the gate script. P6 has no row here because it was dropped per §B1 (covered by pre-existing `verify-no-raw-console.sh`).
+
+Earliest promotion date: merge date + 7 days.
+
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-universal-skill-sync.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-framework-context-block.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-types-used.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-canonical-retry.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-any-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-marker-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-new-cycles.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-duplicate-blocks.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-knip-config.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-with-org-tx-or-scoped-db.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-orphan-react-component.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-missing-deps.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-loc-cap.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-frontend-design-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate-baseline] [status:open] **Extend baseline: scripts/.gate-baselines/with-org-tx-or-scoped-db.txt** — initial seed covered first ~80 service files (alphabetical A-B). Extend to cover all server/services/*, server/jobs/*, server/lib/*, server/adapters/* before promoting the gate to error per §C1.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:package.json] [status:open] **Declare pg in package.json** — chunk 6 P1 baseline caught `pg` package imported by 15+ scripts but not declared. Add `"pg": "^8.18.0"` to `optionalDependencies` (matches `docx`/`mammoth` precedent from PR #305 for dynamic-import patterns).
 
 ### Not feasible — rationale
 
@@ -1147,3 +1170,22 @@ Unknown field: Carry notes
 Current value: TBD — see tasks/todo.md#capabilities-backfill-tier-4-isolated-code-execution
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
+
+
+---
+
+## audit-prevention-gates-2026-05-14 / PR #307 — deferred from chatgpt-pr-review
+
+### BUDGET-EXPIRY-ENFORCEMENT-1 — Per-file budget gates do not enforce `# expires:` directives
+
+**Source:** chatgpt-pr-review Round 1 / T2 (escalated as Round 2 / F4 with operator-approved doc-softening remediation; full log: `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`)
+**Status:** doc/code mismatch CLOSED in Round 2 — `references/test-gate-policy.md § Per-file count baselines are out of scope` explicitly carves these gates out of the expiry framework; both baseline file headers now carry the NOTE callout. This follow-up is now about the **feature gap** (if we ever want calendar-expiry-driven promotion for per-file budgets), not about a doc/code mismatch.
+**Severity:** low (no doc/code mismatch any more; feature gap only fires if we decide we want calendar-expiry-driven promotion for per-file budgets in future)
+**Files:**
+- `scripts/lib/per-file-counter-pure.mjs` — `parsePerFileBudgetBaseline` strips `#`-comment lines including any `# expires:` directives (by design — see doc carve-out)
+- `scripts/verify-any-budget.sh` (P9) and `scripts/verify-marker-budget.sh` (P10) — promote on count growth, not calendar
+
+**Fix outline (if we ever do want expiry-driven promotion for these gates):** thread per-entry expiry through `parsePerFileBudgetBaseline` → `diffAgainstBaseline`, then have the calling shell scripts emit `[GUARD] WARNING / ERROR` per expired/past-grace entry. Apply same exit-code policy as `check_expiring_baseline` (current ∩ baseline > 0 → exit 2; new violation or past-grace → exit 1). Update `references/test-gate-policy.md § Per-file count baselines are out of scope` and the two baseline file headers when this lands.
+
+**Estimated effort if pursued:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
+

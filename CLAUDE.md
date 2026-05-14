@@ -85,6 +85,7 @@ Run only relevant checks unless the change spans client + server. Never skip a f
 - Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
 - Match existing style, even if you'd do it differently. No drive-by reformatting.
 - Never duplicate logic — if the same behaviour is needed in two or more places, extract it into a shared function, helper, or service before writing it twice.
+- **Comments describing a *completed* refactor are residue, the commit message is the right home.** If a comment block exists only to explain why some code USED to be different, delete it. Anchor case: the 2026-05-14 pre-v1-lockdown audit found a 44-line cluster in `server/services/agentExecutionService.ts:72-116` describing an import-removal refactor that shipped in migration 0106. The git history carries that. The code does not need to.
 
 ## 7. Autonomous Bug Fixing
 
@@ -413,6 +414,8 @@ See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are dur
 Consumer-simple product on enterprise-grade backend. Rich backend does NOT justify rich UI. Five hard rules per UI artifact: (1) start from the user's primary task, not the data model; (2) default to hidden — dashboards, KPIs, IDs, cost views deferred unless a workflow requires them; (3) one primary action per screen; (4) inline state beats dashboards (status dot > utilization chart); (5) re-check — would a non-technical operator complete the task without feeling overwhelmed? If not, cut information.
 
 **Full rationale, pre-design checklist, worked examples:** [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read before drafting a mockup or new page.
+
+- **Prefer named exports for React components.** Default-and-named dual exports create ambiguity that `knip` cannot reliably trace, leaving orphan components hidden until a manual audit catches them. Rename-shim cases (e.g. the subaccount-vs-client transition in `client/src/lib/auth.ts`) are time-limited exceptions: every such shim documents a sunset date in its header comment.
 
 ---
 

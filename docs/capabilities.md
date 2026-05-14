@@ -29,6 +29,32 @@ This document is written for external-ready, marketing- and sales-appropriate la
 4. **Vendor-neutral positioning even under objection.** Generic category language holds in written collateral regardless of which provider is named in the question.
 5. **Model-agnostic is the north star.** Frame Synthetos as routing to the best model per task across every frontier and open-source LLM. Never imply a preferred provider in customer-facing copy.
 
+#### Always-OK industry terms
+
+These terms are vendor-neutral standards and pass editorial review without modification:
+
+- Protocol / format: OAuth, HTTP, REST, GraphQL, SAML, SSO, OIDC, JWT, JSON, XML, CSV
+- Tooling categories: webhook, container, browser automation
+- Vendor-neutral product categories: SMTP, IMAP, calendar, CRM
+
+#### Provider names allowed only in factual sections
+
+Provider-specific names (Google, Microsoft, Stripe, HubSpot, Salesforce, Slack, etc.) appear ONLY in:
+
+- `## Skills Reference` — when a skill explicitly integrates with that provider
+- `## Integrations Reference` — when listing supported connectors
+
+Anywhere else (capability descriptions, agency narrative, marketing prose) a provider name is an editorial violation. Use the vendor-neutral category instead.
+
+#### Borderline cases requiring human judgement
+
+When unsure whether a partner-name mention is factual or marketing, route to the editor:
+
+- "Google Docs as a knowledge source", borderline; if Google Docs is the only supported source, factual; if it's one of many, replace with "document stores"
+- "Slack as a notification channel", borderline; same rule
+
+The default is vendor-neutral. Provider names are the exception, not the rule.
+
 ---
 
 ## Cluster list (closed — see `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.4.5` for mutation procedure)

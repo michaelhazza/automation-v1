@@ -1,0 +1,40 @@
+{
+  "_doc": "Allow-list for frontend-design-budget gate (P8). Files importing the listed enterprise or admin dashboard components must appear here with a reason. JSON does not allow comments — use this _doc key for explanatory prose. New imports require a PR that adds the file here. Components monitored: MetricCard, RunActivityChart, SuccessRateChart, SparkLine, PnlKpiCard, PnlSparkline, PnlTrendChart, SparklineChart, SpendTrendChart.",
+  "files": [
+    {
+      "path": "client/src/pages/UsagePage.tsx",
+      "components": ["RunActivityChart"],
+      "reason": "usage analytics page; activity chart is the primary content for operator audience"
+    },
+    {
+      "path": "client/src/pages/operate/HomePage.tsx",
+      "components": ["MetricCard", "RunActivityChart"],
+      "reason": "operator home page; metric cards and activity chart are the primary workflow entry point"
+    },
+    {
+      "path": "client/src/pages/SystemPnlPage.tsx",
+      "components": ["PnlKpiCard", "PnlTrendChart"],
+      "reason": "system-level P&L page; KPI cards and trend chart are the core content for billing operators"
+    },
+    {
+      "path": "client/src/pages/govern/SpendingPage.tsx",
+      "components": ["SpendTrendChart"],
+      "reason": "governance spending page; spend trend chart is the primary analytical view for finance operators"
+    },
+    {
+      "path": "client/src/components/clientpulse/NeedsAttentionRow.tsx",
+      "components": ["SparklineChart"],
+      "reason": "client pulse list row; sparkline provides at-a-glance health trend for CSM operators"
+    },
+    {
+      "path": "client/src/components/clientpulse/ProposeInterventionModal.tsx",
+      "components": ["SparklineChart"],
+      "reason": "intervention proposal modal; sparkline gives context on the client health trend triggering the intervention"
+    },
+    {
+      "path": "client/src/components/system-pnl/PnlByOrganisationTable.tsx",
+      "components": ["PnlSparkline"],
+      "reason": "P&L table row; sparkline provides per-org revenue trend for billing operators"
+    }
+  ]
+}

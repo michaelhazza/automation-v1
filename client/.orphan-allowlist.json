@@ -1,0 +1,4 @@
+{
+  "_doc": "Allowlist for the verify-no-orphan-react-component gate (P15). Files listed here are exempt from orphan detection. Paths are relative to the repository root. Add an entry here (with a reason) for intentional orphans — e.g. components exported as a library, demo/dev-only pages, or pages routed dynamically at runtime without a static lazy() import in App.tsx.",
+  "files": []
+}

@@ -149,6 +149,14 @@ req.user: { id, organisationId, role, email }  // from JWT
 req.orgId: string                              // resolved org (may differ from user.organisationId for system_admin)
 ```
 
+### Single org-id source
+
+**`req.user.organisationId` is read in exactly one place: `server/middleware/auth.ts`.**
+
+All other code — routes, services, jobs, helpers — reads `req.orgId`. The two values differ only when a system admin is acting on a non-owned org (`req.user.organisationId` = the admin's home org, `req.orgId` = the impersonated org from the URL). Reading the wrong one in tenant-scoped code is a silent cross-tenant leak.
+
+Enforced by `scripts/verify-org-id-source.sh`. Suppression for legitimate exceptions (the auth middleware itself, audit logs that record the acting user's home org) uses `guard-ignore: org-id-source reason="..."`.
+
 ### Two-tier permission model
 
 1. **Org-level**: `org_user_roles` → `permission_sets` → `permission_set_items` → `permissions`

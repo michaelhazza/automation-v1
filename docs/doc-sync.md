@@ -29,6 +29,7 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `docs/incident-response.md` | When the SEV classification matrix, on-call rotation, timeline-log format, post-mortem template, or escalation paths change. |
 | `docs/testing-transition-plan.md` | When migration triggers, test-inventory sequencing, per-area effort estimates, or phasing decisions change. |
 | `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | Every framework-level change ships with a version bump and changelog entry. Repo-specific changes (your own architecture.md edits, your own agent additions) DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only. |
+| `scripts/verify-*` (15 gates from audit-prevention-gates-2026-05-14; P6 dropped per §B1) | Triggers when adding/removing/renaming a gate, when changing suppression grammar, when changing baseline expiry policy. Update `references/test-gate-policy.md` if the gate posture changes |
 
 ---
 

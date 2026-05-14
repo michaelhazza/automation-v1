@@ -1,0 +1,155 @@
+# Baseline for P9 verify-any-budget.sh
+# Pre-existing `: any` / `as any` counts per file at gate-landing (2026-05-14).
+# Gate fails only when a file's count GROWS above its baselined value.
+# 72 files with non-zero counts at baseline.
+#
+# NOTE: the `# expires: 2026-08-14` directives below are INFORMATIONAL soft-deadlines
+# for human review only. The per-file count parser strips comment lines and the
+# gate does NOT enforce calendar expiry — only count growth. See
+# `references/test-gate-policy.md § Per-file count baselines are out of scope for
+# the expiry framework` and `tasks/todo.md § BUDGET-EXPIRY-ENFORCEMENT-1`.
+#
+# expires: 2026-08-14
+client/src/components/DriveFilePicker.tsx:3
+# expires: 2026-08-14
+client/src/components/HealthAuditWidget.tsx:2
+# expires: 2026-08-14
+client/src/components/system-incidents/FeedbackWidget.tsx:1
+# expires: 2026-08-14
+client/src/components/TaskModal.tsx:1
+# expires: 2026-08-14
+client/src/pages/AdminHealthFindingsPage.tsx:3
+# expires: 2026-08-14
+client/src/pages/AdminSubaccountDetailPage.tsx:4
+# expires: 2026-08-14
+client/src/pages/OrgChartPage.tsx:16
+# expires: 2026-08-14
+client/src/pages/PortalPage.tsx:1
+# expires: 2026-08-14
+client/src/pages/SystemIncidentsPage.tsx:3
+# expires: 2026-08-14
+client/src/pages/SystemModulesPage.tsx:1
+# expires: 2026-08-14
+client/src/pages/WorkspaceBoardPage.tsx:1
+# expires: 2026-08-14
+server/db/schema/goals.ts:1
+# expires: 2026-08-14
+server/db/schema/workflowRuns.ts:1
+# expires: 2026-08-14
+server/jobs/benchRegressionReplayJob.ts:1
+# expires: 2026-08-14
+server/jobs/bundleUtilizationJob.ts:1
+# expires: 2026-08-14
+server/jobs/ghlAutoEnrolLocationsPageJob.ts:1
+# expires: 2026-08-14
+server/jobs/memoryEntryDecayJob.ts:1
+# expires: 2026-08-14
+server/jobs/sandboxCeilingMonitorJob.ts:1
+# expires: 2026-08-14
+server/lib/idempotencyVersion.ts:1
+# expires: 2026-08-14
+server/lib/jobErrors.ts:1
+# expires: 2026-08-14
+server/lib/protectedBlocks.ts:1
+# expires: 2026-08-14
+server/routes/agentChargesRoutePure.ts:1
+# expires: 2026-08-14
+server/routes/auth.ts:1
+# expires: 2026-08-14
+server/routes/boardConfig.ts:3
+# expires: 2026-08-14
+server/routes/boardTemplates.ts:2
+# expires: 2026-08-14
+server/routes/githubWebhook.ts:2
+# expires: 2026-08-14
+server/routes/iee.ts:2
+# expires: 2026-08-14
+server/routes/inbox.ts:5
+# expires: 2026-08-14
+server/routes/organisations.ts:1
+# expires: 2026-08-14
+server/routes/subaccountAgents.ts:3
+# expires: 2026-08-14
+server/routes/tasks.ts:3
+# expires: 2026-08-14
+server/services/activityService.ts:2
+# expires: 2026-08-14
+server/services/agentExecutionEventService.ts:2
+# expires: 2026-08-14
+server/services/agentExecutionLoop.ts:1
+# expires: 2026-08-14
+server/services/agentExecutionService.ts:1
+# expires: 2026-08-14
+server/services/agentRunHandoffService.ts:1
+# expires: 2026-08-14
+server/services/agentScheduleService.ts:11
+# expires: 2026-08-14
+server/services/beliefConflictService.ts:1
+# expires: 2026-08-14
+server/services/benchRunService.ts:1
+# expires: 2026-08-14
+server/services/briefArtefactBackstopPure.ts:2
+# expires: 2026-08-14
+server/services/bundleResolutionService.ts:2
+# expires: 2026-08-14
+server/services/cachedContextOrchestrator.ts:8
+# expires: 2026-08-14
+server/services/contextAssemblyEnginePure.ts:1
+# expires: 2026-08-14
+server/services/crmQueryPlanner/planCache.ts:1
+# expires: 2026-08-14
+server/services/dlqMonitorService.ts:2
+# expires: 2026-08-14
+server/services/executionBudgetResolver.ts:2
+# expires: 2026-08-14
+server/services/externalDocumentResolverService.ts:1
+# expires: 2026-08-14
+server/services/ghlAgencyOauthService.ts:1
+# expires: 2026-08-14
+server/services/ghlWebhookMutationsService.ts:1
+# expires: 2026-08-14
+server/services/githubWebhookService.ts:2
+# expires: 2026-08-14
+server/services/hierarchyTemplateService.ts:2
+# expires: 2026-08-14
+server/services/ieeUsageService.ts:1
+# expires: 2026-08-14
+server/services/inboxService.ts:4
+# expires: 2026-08-14
+server/services/n8nImportServicePure.ts:1
+# expires: 2026-08-14
+server/services/pageIntegrationWorker.ts:2
+# expires: 2026-08-14
+server/services/paymentReconciliationJob.ts:1
+# expires: 2026-08-14
+server/services/priorityFeedService.ts:1
+# expires: 2026-08-14
+server/services/queueService.ts:77
+# expires: 2026-08-14
+server/services/resolvers/googleDriveResolver.ts:1
+# expires: 2026-08-14
+server/services/routerJobService.ts:6
+# expires: 2026-08-14
+server/services/scheduleCalendarServicePure.ts:3
+# expires: 2026-08-14
+server/services/skillAnalyzerService.ts:1
+# expires: 2026-08-14
+server/services/skillAnalyzerServicePure.ts:1
+# expires: 2026-08-14
+server/services/skillExecutorDelegationPure.ts:1
+# expires: 2026-08-14
+server/services/skillStudioService.ts:3
+# expires: 2026-08-14
+server/services/systemIncidentNotifyJob.ts:1
+# expires: 2026-08-14
+server/services/webhookAdapterService.ts:1
+# expires: 2026-08-14
+server/services/workflowConfidenceService.ts:1
+# expires: 2026-08-14
+server/services/workspace/workspaceMigrationService.ts:1
+# expires: 2026-08-14
+server/services/workspaceMemoryService.ts:1
+# expires: 2026-08-14
+server/tests/services/agentRunCancelService.unit.ts:2
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:1

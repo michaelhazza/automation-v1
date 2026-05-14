@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # verify-no-silent-failures.sh
 #
-# Detects silent failure patterns in server TypeScript code:
+# Detects silent failure patterns in server and client TypeScript code:
 #
 #   1. .catch(() => {}) — promise errors silently swallowed with no logging
 #   2. .catch(() => undefined/null) — promise errors returned as falsy values
@@ -17,6 +17,8 @@
 # Suppression:
 #   // guard-ignore-next-line: no-silent-failures reason="fire-and-forget cleanup"
 #   // guard-ignore: no-silent-failures reason="best-effort flush"
+#
+# Suppress format: $(format_suppression no-silent-failures)
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -29,15 +31,14 @@ GUARD_NAME="No Silent Failures"
 source "$SCRIPT_DIR/lib/guard-utils.sh"
 
 VIOLATIONS=0
+VIOLATION_KEYS=""
 
 # Track unique files scanned across all patterns.
 declare -A SEEN_FILES
 
 emit_header "$GUARD_NAME"
 
-# ── Pattern 1: .catch(() => {}) — swallowed promise errors ──────────────────
-
-# Helper: check file-level suppression (first line of file).
+# ── File-level suppression helper ────────────────────────────────────────────
 # Usage: is_file_suppressed <file>
 # Returns 0 if suppressed, 1 if not.
 is_file_suppressed() {
@@ -48,6 +49,22 @@ is_file_suppressed() {
     return 0
   fi
   return 1
+}
+
+# ── Pattern scan helper ───────────────────────────────────────────────────────
+# Emit a violation and record its key for baseline diffing.
+# Usage: record_violation <rel_path> <lineno> <message>
+record_violation() {
+  local rel_path="$1"
+  local lineno="$2"
+  local message="$3"
+  local key="${rel_path}:${lineno}:${message}"
+  emit_violation "$GUARD_ID" "warning" "$rel_path" "$lineno" \
+    "$message" \
+    "Log the error or add a suppression comment: $(format_suppression $GUARD_ID | head -1)"
+  VIOLATIONS=$((VIOLATIONS + 1))
+  VIOLATION_KEYS="${VIOLATION_KEYS}${key}
+"
 }
 
 # ── Pattern 1: .catch(() => {}) — swallowed promise errors ──────────────────
@@ -61,11 +78,10 @@ while IFS=: read -r file lineno line_content; do
   fi
 
   rel_path="${file#$ROOT_DIR/}"
-  emit_violation "$GUARD_ID" "warning" "$rel_path" "$lineno" \
-    "Swallowed promise error: .catch(() => {})" \
-    "Log the error or add a suppression comment with reason (e.g. fire-and-forget cleanup)."
-  VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*\{\s*\}\)' "$ROOT_DIR/server" --include='*.ts' 2>/dev/null || true)
+  record_violation "$rel_path" "$lineno" "Swallowed promise error: .catch(() => {})"
+done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*\{\s*\}\)' \
+           "$ROOT_DIR/server" "$ROOT_DIR/client/src" \
+           --include='*.ts' --include='*.tsx' 2>/dev/null || true)
 
 # ── Pattern 2: .catch(() => undefined) or .catch(() => null) ────────────────
 
@@ -78,11 +94,10 @@ while IFS=: read -r file lineno line_content; do
   fi
 
   rel_path="${file#$ROOT_DIR/}"
-  emit_violation "$GUARD_ID" "warning" "$rel_path" "$lineno" \
-    "Swallowed promise error: .catch(() => undefined/null)" \
-    "Log the error or add a suppression comment with reason."
-  VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*(undefined|null)\s*\)' "$ROOT_DIR/server" --include='*.ts' 2>/dev/null || true)
+  record_violation "$rel_path" "$lineno" "Swallowed promise error: .catch(() => undefined/null)"
+done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*(undefined|null)\s*\)' \
+           "$ROOT_DIR/server" "$ROOT_DIR/client/src" \
+           --include='*.ts' --include='*.tsx' 2>/dev/null || true)
 
 # ── Pattern 3: catch(e){} — empty try/catch ─────────────────────────────────
 
@@ -95,11 +110,10 @@ while IFS=: read -r file lineno line_content; do
   fi
 
   rel_path="${file#$ROOT_DIR/}"
-  emit_violation "$GUARD_ID" "warning" "$rel_path" "$lineno" \
-    "Empty catch block — error silently discarded" \
-    "Log the error, rethrow it, or add a suppression comment with reason."
-  VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE 'catch\s*\([^)]*\)\s*\{\s*\}' "$ROOT_DIR/server" --include='*.ts' 2>/dev/null || true)
+  record_violation "$rel_path" "$lineno" "Empty catch block — error silently discarded"
+done < <(grep -rnE 'catch\s*\([^)]*\)\s*\{\s*\}' \
+           "$ROOT_DIR/server" "$ROOT_DIR/client/src" \
+           --include='*.ts' --include='*.tsx' 2>/dev/null || true)
 
 # ── Pattern 4: .catch(() => { with multi-line empty body ────────────────────
 # Catches the pattern where .catch(() => { appears on one line and }) on the
@@ -122,15 +136,14 @@ while IFS=: read -r file lineno line_content; do
   fi
 
   rel_path="${file#$ROOT_DIR/}"
-  emit_violation "$GUARD_ID" "warning" "$rel_path" "$lineno" \
-    "Swallowed promise error: .catch(() => { with empty body" \
-    "Log the error or add a suppression comment with reason."
-  VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*\{\s*$' "$ROOT_DIR/server" --include='*.ts' 2>/dev/null || true)
+  record_violation "$rel_path" "$lineno" "Swallowed promise error: .catch(() => { with empty body"
+done < <(grep -rnE '\.catch\(\s*\(\)\s*=>\s*\{\s*$' \
+           "$ROOT_DIR/server" "$ROOT_DIR/client/src" \
+           --include='*.ts' --include='*.tsx' 2>/dev/null || true)
 
 FILES_SCANNED=${#SEEN_FILES[@]}
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 2)
+exit_code=$(check_expiring_baseline "$GUARD_ID" "$VIOLATION_KEYS")
 exit "$exit_code"

@@ -2,8 +2,43 @@
 # Shared utilities for architecture guard scripts
 # Source this at the top of each guard: source "$SCRIPT_DIR/lib/guard-utils.sh"
 #
-# Requires: jq
+# Requires: jq, node
 command -v jq >/dev/null 2>&1 || { echo "[GUARD] Error: jq is required but not installed" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "[GUARD] Error: node is required but not installed" >&2; exit 1; }
+
+# ── Suppression Annotation Grammar ──────────────────────────────────────────
+# All Tier-1 gates accept inline suppressions.  The guard-id must match the
+# gate's GUARD_ID variable (e.g. "no-db-in-routes", "canonical-retry").
+#
+# T1 PREFERRED — co-located on the offending line:
+#   // guard-ignore: <guard-id> reason="<rationale, ≤120 chars>"
+#   Example:
+#   import { db } from '../db/index.js'; // guard-ignore: no-db-in-routes reason="MCP transport requires direct DB"
+#
+# T0 DEPRECATED (legacy, no reason field) — gates emit error severity on T0-only suppressions:
+#   // guard-ignore: <guard-id>
+#   Example:
+#   import { db } from '../db/index.js'; // guard-ignore: no-db-in-routes
+#
+# ADR SHAPE — accepted for P2-baseline entries:
+#   // guard-ignore: <guard-id> ADR-<id> <rationale>
+#   Example:
+#   import { db } from '../db/index.js'; // guard-ignore: no-db-in-routes ADR-0042 direct-db required for MCP transport
+#
+# NEXT-LINE form — place directive on the line immediately ABOVE the violation:
+#   // guard-ignore-next-line: <guard-id> reason="<rationale>"
+#   Example:
+#   // guard-ignore-next-line: no-db-in-routes reason="MCP transport requires direct DB access"
+#   import { db } from '../db/index.js';
+#
+# FILE-SCOPED form — first line of file (suppresses all violations for that guard in that file):
+#   // guard-ignore-file: <guard-id> reason="<rationale>"
+#   Example (top of file):
+#   // guard-ignore-file: canonical-logger reason="CLI utility writes to stdout intentionally"
+#
+# Use format_suppression <guard-id> to print the T1 template, legacy template, and
+# next-line template for inclusion in gate error messages.
+# ────────────────────────────────────────────────────────────────────────────
 
 # ── jq portability shim ──────────────────────────────────────────────────────
 # jq on Windows (winget/native binary) under Git Bash has two hazards:
@@ -207,4 +242,126 @@ check_baseline() {
     fi
     echo "0"  # Pass — at or below baseline
   fi
+}
+
+# ── Per-gate expiring baseline ───────────────────────────────────────────────
+# Baseline files live at scripts/.gate-baselines/<guard-id>.txt
+# Format (see scripts/.gate-baselines/_TEMPLATE.txt):
+#   # expires: YYYY-MM-DD
+#   <relative-path>:<line-number>:<one-line-message>
+# Lines beginning with # are comments; every violation entry must be preceded
+# by an "# expires: YYYY-MM-DD" comment line.
+#
+# Exit codes returned (printed to stdout — caller uses the value):
+#   0 — all baseline entries current; no new violations
+#   1 — error: new violations above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only violations OR baseline entry expired within grace
+
+GATE_BASELINES_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/scripts/.gate-baselines"
+GATE_BASELINE_HELPERS="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/scripts/lib/gate-baseline-helpers.mjs"
+
+# Check current violations against a per-gate expiring baseline file.
+# Usage: check_expiring_baseline <guard_id> <current_violation_lines>
+#   guard_id              — matches <guard-id>.txt under scripts/.gate-baselines/
+#   current_violation_lines — newline-separated violation strings (may be empty)
+# Prints exit code to stdout. Exit-code policy mirrors
+# references/test-gate-policy.md § "Baseline expiry policy":
+#   0 — no current violations, no baseline expiry
+#   1 — error: new violation above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only violations OR baseline entry expired within grace
+# Emits diagnostic messages to stderr (per-entry expiry warnings and errors).
+check_expiring_baseline() {
+  local guard_id="$1"
+  local current_violations="$2"
+  local baseline_file="${GATE_BASELINES_DIR}/${guard_id}.txt"
+  local grace_days="${GATE_GRACE_DAYS:-30}"
+
+  # No baseline file → treat all violations as new.
+  if [ ! -f "$baseline_file" ]; then
+    if [ -n "$current_violations" ]; then
+      echo "1"
+    else
+      echo "0"
+    fi
+    return
+  fi
+
+  # Write current violations to a temp file so Node can read them safely
+  # (avoids shell-quoting and path-conversion hazards on Windows/Git Bash).
+  local tmp_violations
+  tmp_violations=$(mktemp)
+  printf '%s' "$current_violations" > "$tmp_violations"
+
+  # Delegate date math and expiry parsing to Node (bash date portability issue:
+  # BSD date vs GNU date have incompatible -d / -v flags; see plan §1 Risks).
+  local result
+  result=$(GATE_BASELINE_FILE="${baseline_file}" \
+           GATE_VIOLATIONS_FILE="${tmp_violations}" \
+           GATE_GRACE_DAYS="${grace_days}" \
+           GATE_BASELINE_HELPERS_PATH="${GATE_BASELINE_HELPERS}" \
+           node --input-type=module <<'NODEEOF'
+const { parseBaselineFile, isExpired, isPastGracePeriod } = await import(
+  'file://' + process.env.GATE_BASELINE_HELPERS_PATH
+);
+const { readFileSync } = await import('node:fs');
+
+const baselineText = readFileSync(process.env.GATE_BASELINE_FILE, 'utf8');
+const currentText  = readFileSync(process.env.GATE_VIOLATIONS_FILE, 'utf8');
+const entries      = parseBaselineFile(baselineText);
+const today        = new Date().toISOString().slice(0, 10);
+const graceDays    = Number(process.env.GATE_GRACE_DAYS) || 30;
+
+const currentKeys = new Set(
+  currentText.split('\n').map(l => l.trim()).filter(Boolean)
+);
+const baselineKeys   = new Set();
+let hasExpiredError   = false;
+let hasExpiredWarning = false;
+
+for (const entry of entries) {
+  if (entry.error) {
+    process.stderr.write('[GUARD] Malformed baseline entry: ' + entry.error + '\n');
+    continue;
+  }
+  baselineKeys.add(entry.key);
+  if (entry.expires && isPastGracePeriod(entry.expires, today, graceDays)) {
+    process.stderr.write('[GUARD] ERROR: baseline entry past grace period (' + graceDays + ' days): '
+      + entry.key + ' (expired ' + entry.expires + ')\n');
+    hasExpiredError = true;
+  } else if (entry.expires && isExpired(entry.expires, today)) {
+    process.stderr.write('[GUARD] WARNING: baseline entry expired: '
+      + entry.key + ' (expired ' + entry.expires + ')\n');
+    hasExpiredWarning = true;
+  }
+}
+
+// Exit-code policy per references/test-gate-policy.md § "Baseline expiry policy":
+//   past-grace expiry → exit-1 contribution (error)
+//   within-grace expiry → exit-2 contribution (warning)
+//   new violation above baseline → exit-1 contribution (error)
+//   baseline-only violations → exit-2 contribution (warning)
+const newViolations = [...currentKeys].filter(k => !baselineKeys.has(k));
+if (newViolations.length > 0 || hasExpiredError) {
+  process.stdout.write('1');
+} else if (hasExpiredWarning || baselineKeys.size > 0) {
+  process.stdout.write('2');
+} else {
+  process.stdout.write('0');
+}
+NODEEOF
+  )
+
+  rm -f "$tmp_violations"
+  echo "${result:-0}"
+}
+
+# Emit the canonical suppression-comment templates for a given guard-id.
+# Prints T1 template, legacy template, and next-line template (one per line).
+# Usage: format_suppression <guard_id>
+# Verifiable: format_suppression <id> | wc -l == 3
+format_suppression() {
+  local guard_id="$1"
+  printf '// guard-ignore: %s reason="<rationale, ≤120 chars>"\n' "$guard_id"
+  printf '// guard-ignore: %s\n' "$guard_id"
+  printf '// guard-ignore-next-line: %s reason="<rationale, ≤120 chars>"\n' "$guard_id"
 }

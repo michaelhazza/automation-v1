@@ -3,13 +3,16 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: NONE
+status: MERGE_READY
 last_updated: 2026-05-14
-last_merged_pr: #304
-last_merged_slug: development-lifecycle-governance-upgrade
-last_merged_branch: claude/ai-driven-dev-lifecycle-FRqBd
-last_merged_at: 2026-05-14T10:13:36Z
-last_merged_commit: 0ffbf081
+last_merge_ready_pr: #307
+last_merge_ready_slug: audit-prevention-gates-2026-05-14
+last_merge_ready_branch: audit-prevention-gates-2026-05-14
+last_merged_pr: #305
+last_merged_slug: pre-v1-lockdown-2026-05-14
+last_merged_branch: audit/full-pre-v1-lockdown-2026-05-14
+last_merged_at: 2026-05-14T07:36:27Z
+last_merged_commit: b48b49b9
 -->
 
 # Current Focus
@@ -22,7 +25,13 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Just merged:** PR #304 — `development-lifecycle-governance-upgrade` (merge commit `0ffbf081`, 2026-05-14T10:13:36Z). Markdown-only governance upgrade introducing the 9-step build lifecycle (Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge) enforced through `spec-coordinator` and `finalisation-coordinator` instructions plus `docs/doc-sync.md`. New `intent.md` schema (§7.1) for Standard+ builds; Lifecycle Declaration + ABCd S/M/L sizing (§7.2 / §7.3) in spec authoring; hard Duplication / Strategy gate (Step 3a) before specification; 10-cluster `docs/capabilities.md` Asset Register (47 capabilities backfilled with TBD-owner placeholders due 2026-08-14, plus the new `dev-lifecycle-governance` row added at Phase 3 finalisation); §6.2.1 eight-string Capability Registration verdict format blocking `MERGE_READY` if invalid; §7.5 Compound Learning Feedback proposal pass at Step 7a (non-blocking). Zero schema migrations, zero new routes / services / jobs / gate scripts. `FRAMEWORK_VERSION` 2.3.0 → 2.4.0. chatgpt-pr-review APPROVED after 3 rounds (5 applied / 4 rejected; rejected findings were all false positives from the code-only diff exclusion scope). KNOWLEDGE.md +2 patterns (code-only diff exclusion false positives; narrowed-case subfinding rule). **Phase 3 contract deviations:** chatgpt-pr-review sub-agent invoked `gh pr merge` itself using `--merge` (not the project-convention `--squash --admin --delete-branch`), skipping the MERGE_READY transition, ready-to-merge label, CI re-fire, and the squash-sha patch flow; the missing `dev-lifecycle-governance` Asset Register row was caught at post-merge recovery and added in a follow-up commit on main. 4 Compound Learning Feedback proposals in `tasks/builds/development-lifecycle-governance-upgrade/progress.md` targeting agent-instruction:finalisation-coordinator and hook-or-grep-gate. REVIEW_GAP: dual-reviewer skipped (Codex CLI unavailable) — remediation: accept.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY**
+
+**Just labelled ready-to-merge:** PR #307 — `audit-prevention-gates-2026-05-14` (label applied 2026-05-14T12:58:46Z). 14 new CI prevention-gates landed (P1-P24 minus P6, dropped per §B1), 4 doc rules (P17-P20), 3 KNOWLEDGE patterns (P21-P23), ADR-0024. Phase 3 finalisation: S2 merge clean (37-commit drift → operator-override "force"; KNOWLEDGE.md / current-focus.md auto-resolved per known-shape table). G4 regression guard PASS. chatgpt-pr-review 3 rounds → APPROVED: Round 1 implemented 4 high-severity fixes (T1 madge fail-closed, F1 with-org-tx caller-walk constrained to declaring file + regression fixtures, F2 types-used strips barrel re-exports + regression tests, F3 jscpd fail-closed); Round 2 implemented 2 fixes (T5 AST identifier walk replacing substring `.includes`, F4 budget-gate expiry framework doc-soften with `references/test-gate-policy.md` carve-out + baseline-file header NOTE callouts); Round 3 APPROVED with no new findings (1 auto-rejected as triple-occurrence of the same `verify-org-id-source.sh` diff-misread — script was wired into `run-all-gates.sh` 40 days pre-branch in commit `89a818cc`). Deferred: `BUDGET-EXPIRY-ENFORCEMENT-1` (per-file budget gates have no calendar-expiry mechanism — doc now correctly reflects this; future opt-in). Doc-sync sweep: 9 yes / 7 n/a / 1 no-with-grep-rationale (17 rows covered). 1 new KNOWLEDGE pattern appended (manual-mode ChatGPT has no session memory across rounds — auto-reject duplicates without re-engaging). tasks/todo.md: 23 closed-entry placeholder tags updated branch → pr:307. CI will fire on the post-Phase-3 commit; auto-merge follows green.
 
 **Prior merge:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
 
@@ -33,12 +42,6 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Prior merge:** PR #297 — `iee-browser-on-e2b` (squash-commit `8008abae`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
 
 **Paused build:** `support-desk-canonical` on `claude/support-ticket-structure-xMcy8`, PR [#277](https://github.com/michaelhazza/2025-automation/pull/277). Phase 2 (BUILD) complete; handoff at `tasks/builds/support-desk-canonical/handoff.md`. Recover by reverting `current-focus.md` to that build when ready to finalise PR #277.
-
-**Paused build / artefact record (REVIEW_GAP carry-forward):**
-
-```
-PR #304 (development-lifecycle-governance-upgrade): REVIEW_GAP: dual-reviewer | task-class: Significant | reason: Codex CLI not installed locally | operator-override: no | remediation: accept
-```
 
 ---
 
