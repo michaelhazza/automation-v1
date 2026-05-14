@@ -106,18 +106,18 @@ server/services/
   skillExecutorPure.ts            ← pre-existing, untouched
   skillExecutorDelegationPure.ts  ← pre-existing, untouched
   skillExecutor/
-    context.ts                    ← SkillExecutionContext + SkillExecutionParams + SkillHandler + requireSubaccountContext
+    context.ts                    ← SkillExecutionContext + SkillHandler + requireSubaccountContext (SkillExecutionParams stays private in registry.ts — see §5.7)
     pipeline.ts                   ← processorRegistry, runWithProcessors, registerProcessor, applyOnFailure*, handoff-sender plumbing
     gating.ts                     ← executeWithActionAudit, proposeReviewGatedAction, awaitReviewDecision, buildDenialMessage
     registry.ts                   ← SKILL_HANDLERS constant — imports from every handlers/* module and assembles
     adapter-registration.ts       ← module-load registerAdapter('worker', ...) side effect, side-effect-only
     handlers/
-      web.ts                      ← web_search, fetch_url, scrape_*, monitor_webpage, capture_screenshot
+      web.ts                      ← web_search, fetch_url, scrape_url, scrape_structured, monitor_webpage, capture_screenshot, run_playwright_test, analyze_endpoint
       workspace.ts                ← read_workspace, write_workspace
-      tasks.ts                    ← create_task, move_task, update_task, add_deliverable, reassign_task, read_inbox, triage_intake, executeReportBug
+      tasks.ts                    ← create_task, move_task, update_task, add_deliverable, reassign_task, read_inbox, triage_intake, report_bug
       handoff.ts                  ← spawn_sub_agents, trigger_process (delegation paths)
-      devContext.ts               ← read_codebase, search_codebase, run_tests, run_playwright_test, analyze_endpoint, proposeDevopsAction
-      pages.ts                    ← create_page, update_page, publish_page, methodology skills
+      devContext.ts               ← read_codebase, search_codebase, run_tests, proposeDevopsAction
+      pages.ts                    ← create_page, update_page, publish_page, methodology skills (executeMethodologySkill)
       workflowStudio.ts           ← workflow_read_existing, workflow_validate, workflow_simulate, workflow_estimate_cost, workflow_propose_save, workflow.run.start, importN8nWorkflow
       skillStudio.ts              ← skill_read_existing, skill_read_regressions, skill_validate, skill_simulate, skill_propose_save
       capabilities.ts             ← capability discovery skills (re-export thin shells calling existing capability handlers)
@@ -128,7 +128,39 @@ server/services/
       support.ts                  ← support.list_open_tickets, support.read_thread, support.propose_reply, support.add_internal_note, support.approve_draft, support.reject_draft, support.set_status, support.assign, support.tag, support.find_customer_history (+ buildSupportPrincipal helper)
       meta.ts                     ← search_tools, load_tool — BM25 tool discovery
       userOwnedAgentOwner.ts      ← resolveAgentOwner helper (no slugs — leaf utility imported by calendar.ts and slack.ts)
+      methodologyStubs.ts         ← all executeMethodologySkill consumers (template-only skills) — see §5.2.1
+      autoGatedStubs.ts           ← all executeWithActionAudit stub consumers (auto-gated read placeholders) — see §5.2.1
+      reviewGatedProposers.ts     ← all proposeReviewGatedAction inline thin-wrap consumers (gates that ONLY call proposeReviewGatedAction) — see §5.2.1
+      thinDispatchers.ts          ← thin dispatch slugs that `await import('...')` a sibling service and forward — see §5.2.1
+      systemMonitorShells.ts      ← thin shells over server/services/systemMonitor/skills/*.ts (11 slugs: read_agent_run, read_baseline, read_connector_state, read_dlq_recent, read_heuristic_fires, read_incident, read_logs_for_correlation_id, read_recent_runs_for_agent, read_skill_execution, write_diagnosis, write_event)
+      optimiserShells.ts          ← thin shells over server/services/optimiser/* (8 slugs: optimiser.scan_agent_budget, optimiser.scan_workflow_escalations, optimiser.scan_skill_latency, optimiser.scan_inactive_workflows, optimiser.scan_escalation_phrases, optimiser.scan_memory_citation, optimiser.scan_routing_uncertainty, optimiser.scan_cache_efficiency)
+      spendShells.ts              ← thin shells over server/services/spendSkillHandlers.ts (5 slugs: pay_invoice, purchase_resource, subscribe_to_service, top_up_balance, issue_refund)
+      configShells.ts             ← thin shells over server/tools/config/configSkillHandlers.ts + workflowSkillHandlers.ts (~30 slugs: config_create_agent, config_update_agent, config_activate_agent, config_link_agent, config_update_link, config_set_link_skills, config_set_link_instructions, config_set_link_schedule, config_set_link_limits, config_create_subaccount, config_create_scheduled_task, config_update_scheduled_task, config_attach_data_source, config_update_data_source, config_remove_data_source, config_restore_version, config_list_*, config_get_*, config_run_health_check, config_preview_plan, config_view_history, config_publish_workflow_output_to_portal, config_send_workflow_email_digest, config_update_organisation_config, config_deliver_workflow_output, config_weekly_digest_gather)
+      crm.ts                      ← crm.fire_automation, crm.send_email, crm.send_sms, crm.create_task, crm.query, read_crm, update_crm, analyse_pipeline, draft_followup, detect_churn_risk
+      orgInsights.ts              ← read_org_insights, write_org_insight, compute_health_score, detect_anomaly, compute_churn_risk, compute_staff_activity_pulse, scan_integration_fingerprints, generate_portfolio_report, trigger_account_intervention, assign_task, query_subaccount_cohort
+      output.ts                   ← output.recommend
+      threadContext.ts            ← update_thread_context
+      notifyOperator.ts           ← notify_operator (thin shell over notifyOperatorFanoutService.ts)
+      mediaTranscription.ts       ← transcribe_audio, fetch_paywalled_content, send_to_slack
+      capabilityDiscovery.ts      ← list_platform_capabilities, list_connections, check_capability_gap, request_feature, ask_clarifying_questions, ask_clarifying_question, challenge_assumptions, request_clarification (thin shells over server/tools/capabilities/*)
+      digest.ts                   ← weekly_digest_gather, smart_skip_from_website, canonical_dictionary
+      memoryBlock.ts              ← update_memory_block, read_docs (memory.ts already covers search_agent_history / read_priority_feed / read_data_source — split this off if memory.ts grows too wide)
+      financialReporting.ts       ← read_revenue, read_expenses (auto-gated stubs that pair with the analyse_financials methodology; placed here even though they are technically stubs because they share the financial-reporting domain with reviewGated proposers like update_financial_record)
 ```
+
+### 5.2.1. The "stub / thin-dispatcher" placement rule
+
+Approximately 70 of the 214 source slugs are NOT bespoke handlers — they are one-line stubs of three shapes. Each shape gets its own handlers/* module so the registry's spread-pattern assembly stays clean:
+
+| Shape | Module | Examples |
+|---|---|---|
+| `executeMethodologySkill(slug, input, { template, guidance })` — template-only skills that the LLM fills in | `handlers/methodologyStubs.ts` | `draft_post`, `analyse_performance`, `draft_ad_copy`, `analyse_financials`, `draft_content`, `audit_seo`, `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare`, `draft_report`, `synthesise_voc`, `generate_competitor_brief`, `draft_followup`, `detect_churn_risk`, `draft_sequence`, `generic_methodology`, `analyse_pipeline`, `draft_architecture_plan`, `draft_tech_spec`, `review_ux`, `review_code`, `write_tests`, `draft_requirements`, `derive_test_cases`, `classify_email`, `draft_reply` — full list assembled at chunk authoring time |
+| `executeWithActionAudit(slug, input, context, async () => stubBody)` — auto-gated stub returning `{status: 'stub'}` placeholders for unwired integrations | `handlers/autoGatedStubs.ts` | `search_knowledge_base`, `read_analytics`, `read_campaigns`, `enrich_contact` (and any other auto-gated stub returning `dataAvailability: 'stub'`) |
+| `proposeReviewGatedAction(slug, input, context)` — single-line gate dispatch where the actual work happens in the worker adapter or downstream service | `handlers/reviewGatedProposers.ts` | `publish_post`, `update_crm`, `update_financial_record`, `create_lead_magnet`, `deliver_report`, `configure_integration`, `propose_doc_update`, `write_docs`, `write_spec`, `update_bid`, `update_copy`, `pause_campaign`, `increase_budget`, `send_email`, `update_record`, `request_approval`, `write_patch`, `run_command`, `create_pr` |
+
+A slug that calls `await import('./otherService.js')` and forwards lives in `handlers/thinDispatchers.ts` unless its sibling service has a natural family home (then it goes in that family's module instead — e.g. spend dispatchers go to `spendShells.ts`, config dispatchers to `configShells.ts`, system-monitor dispatchers to `systemMonitorShells.ts`, optimiser dispatchers to `optimiserShells.ts`).
+
+This rule ensures every one of the 214 slugs maps to exactly one `handlers/<family>.ts` module, no slug stays inline in `registry.ts` after Chunk 14. If a future audit finds a slug not covered, it goes into the closest-fit module from the list above OR a new family module is added with a follow-up chunk; the spec's invariant is "no inline handlers in `registry.ts` post-split", not "exactly these modules forever".
 
 ### 5.3. Dependency direction (DAG, no cycles)
 
@@ -160,7 +192,7 @@ Concrete rules:
 - `context.ts` is a leaf — imports types only from `../../shared/types/**` and external libs. NO imports from `db`, `services`, or sibling sub-modules.
 - `pipeline.ts` imports `context.ts`, `skillExecutorPure.ts`, `actionRegistry`, `tracing` (for `createEvent`), `tripwire`, `incidentIngestor`, and the imports `enqueueHandoff` needs today — `db`, drizzle helpers (`eq`, `and`), `lib/queryHelpers` (`isActive`), the schema tables `subaccountAgents` / `agents` / `agentRuns`, and `config/limits` (`MAX_HANDOFF_DEPTH`). The `AGENT_HANDOFF_QUEUE` constant lives in `pipeline.ts` alongside `enqueueHandoff`. It does NOT import from `gating.ts` or any `handlers/*` (the gating module is a consumer of pipeline, not a peer).
 - `gating.ts` imports `context.ts`, `pipeline.ts`, `actionService`, `reviewService`, `hitlService`, `executionLayerService`, `actionRegistry`, `tracing`. It does NOT import any `handlers/*`.
-- Every `handlers/*.ts` imports `context.ts` (for the type), `gating.ts` (for `executeWithActionAudit` / `proposeReviewGatedAction`), and whatever services it dispatches to. It does NOT import any other `handlers/*` module. (Exception: `tasks.ts` may export `enqueueHandoff` for `handoff.ts` to consume — record the one-way edge explicitly in the chunk PR.)
+- Every `handlers/*.ts` imports `context.ts` (for the type), `gating.ts` (for `executeWithActionAudit` / `proposeReviewGatedAction`), and whatever services it dispatches to. It does NOT import any other `handlers/*` module, with two narrow exceptions: (a) `handlers/calendar.ts` and `handlers/slack.ts` may import `handlers/userOwnedAgentOwner.ts` for the shared `resolveAgentOwner` helper, and (b) `handlers/tasks.ts` and `handlers/handoff.ts` both import `enqueueHandoff` from `pipeline.ts` (per §5.5, not from each other). Record the cross-edges explicitly in each chunk PR.
 - `registry.ts` imports `context.ts` and every `handlers/*`. It exports `SKILL_HANDLERS` and the `skillExecutor` object (the `{ execute }` closure that dispatches by slug, handles the `mcp.*` prefix branch, and stashes `toolCallId` on the context — exactly the body of `skillExecutor.execute` today). The private `SkillExecutionParams` interface stays here, next to `execute`. No other logic — the §5.3 rule is "assembly + execute closure only".
 - `adapter-registration.ts` imports `context.ts` (for `SkillExecutionContext`), `executionLayerService` (`registerAdapter`), `adapters/workerAdapter` (`createWorkerAdapter`), `config/actionRegistry` (`resolveActionSlug`), the per-action approved executors from `handlers/delegation.ts`, and the page executors from `handlers/pages.ts` (`executeCreatePage`/`executeUpdatePage`/`executePublishPage` — the worker dispatch routes these three slugs to non-`*Approved` handlers in the page family). Two slugs use dynamic `await import(...)` inside the dispatch and stay as such: `config_update_organisation_config` (imports `configUpdateOrganisationService.executeApprovedOrganisationConfigUpdate`) and `notify_operator` (imports `notifyOperatorFanoutService.fanoutOperatorAlert`). Adapter-registration MAY NOT import the barrel `skillExecutor.ts` and MAY NOT import any other `handlers/*` module beyond the two named above.
 - The barrel imports `adapter-registration.ts` for its side effect (worker adapter registration MUST happen exactly once at barrel load).
@@ -206,13 +238,13 @@ The `skillExecutor` constant `{ execute }` lives in `registry.ts` so it closes o
 
 `server/services/skillExecutor.ts` is 6,133 LOC. It conflates seven concerns:
 
-1. **Public-surface declarations** (lines 137-243): the `SkillExecutionContext` interface (exported), `SkillHandler` type alias (exported), and the private `SkillExecutionParams` interface (declared but not exported — argument shape of `skillExecutor.execute`).
+1. **Public-surface declarations**: the `SkillExecutionContext` interface (exported, lines 137-229), the private `SkillExecutionParams` interface (declared but not exported, lines 231-243 — argument shape of `skillExecutor.execute`), and the `SkillHandler` type alias (exported, lines 426-429).
 2. **Module-load side effects** (lines 60-131): `registerAdapter('worker', ...)` dispatch switch — the review-gated worker handler. The switch covers ~20 action-type cases, mostly delegating to in-file `*Approved` executors, but also routes `create_page`/`update_page`/`publish_page` to in-file (non-`*Approved`) page executors, and dispatches `config_update_organisation_config` + `notify_operator` via inline `await import(...)` of sibling services.
 3. **Pipeline orchestration** (lines 257-414): `applyOnFailure`, `runWithProcessors`, `processorRegistry`, `registerProcessor`, `setHandoffJobSender`, on-failure dispatch.
 4. **Handler registry** (lines 439-2493): the `SKILL_HANDLERS` constant — built in THREE pieces, not one: the main literal at line 439 (~1,700 lines, most slugs), an `Object.assign(SKILL_HANDLERS, {...})` block at line 2210 (10 `support.*` slugs), and another `Object.assign(SKILL_HANDLERS, {...})` block at line 2374 (11 `calendar.*` + `slack.*` slugs). Total ~200 slugs. The §7 Chunk 14 (registry assembly) consolidates these three pieces into a single assembled map via the spread pattern.
 5. **Gate / audit wrappers** (lines 2547-2823): `executeWithActionAudit`, `proposeReviewGatedAction`, `awaitReviewDecision`, `buildDenialMessage`.
 6. **Per-handler implementations** (lines 2825-6133): ~50 individual async functions — `executeWebSearch`, `executeReadWorkspace`, `executeWriteWorkspace`, `executeCreateTask`, `executeMoveTask`, `executeReassignTask`, `executeSpawnSubAgents`, `executeFetchUrl`, `executeScrapeUrl`, `executeScrapeStructured`, `executeMonitorWebpage`, `executeReadCodebase`, `executeSearchCodebase`, `executeRunTests`, `executeAnalyzeEndpoint`, `executeReportBug`, `executeCaptureScreenshot`, `executeRunPlaywrightTest`, `executeCreatePage` / `executeUpdatePage` / `executePublishPage`, the methodology skills, the Workflow Studio executors, `executeImportN8nWorkflow`, the worker-approved-execute stubs for 10+ action types.
-7. **One-off helpers** (lines 250, 2197-2206, 2356-2372, 3617-3736, 4790, 5210-5298): `requireSubaccountContext`, `buildSupportPrincipal` (used by all support.* handlers), `resolveAgentOwner` (used by all calendar.* and slack.* handlers), `buildIdeaDescription`, `buildBugDescription`, `buildChoreDescription`, `inferTypeFromDescription`, `suggestDisposition`, `deriveSelectorGroup`, `proposeDevopsAction`, `redactSensitiveFields`, `serializeTask`.
+7. **One-off helpers** (locations in source): `requireSubaccountContext` (line 250), `buildSupportPrincipal` (line 2197 — used by all support.* handlers), `resolveAgentOwner` (line 2356 — used by all calendar.* and slack.* handlers), `serializeTask` (line 2965), `redactSensitiveFields` (line 3312 — used by `executeDocProposalApproved`/`executeWriteDocsApproved`), `buildIdeaDescription`/`buildBugDescription`/`buildChoreDescription`/`inferTypeFromDescription`/`suggestDisposition` (lines 3617-3736 — used by `executeTriageIntake`), `deriveSelectorGroup` (line 4790 — used by `executeScrapeUrl`), `proposeDevopsAction` (line 5210 — used by devContext handlers).
 
 The seven concerns map cleanly to the §5.2 module tree. No two concerns are entangled at runtime — the only shared mutable state is the processor registry and pg-boss sender, both of which move to `pipeline.ts`.
 
@@ -264,6 +296,22 @@ Per-chunk procedure:
 2. Update the slot in the in-barrel `SKILL_HANDLERS` literal to import from the new file (still in the barrel at this point).
 3. Builder runs G1 (lint + typecheck + build:server). No targeted tests required unless a handler-specific test exists.
 4. PR description names every moved function and every consumer updated.
+
+### Chunks 10a–10e — Stub-family and thin-shell modules
+
+These chunks land the high-volume "everything else" slugs identified in §5.2.1. The numbering uses `10a` … `10e` (decimal sub-chunks) to keep downstream chunk numbers stable; the operator may also collapse adjacent ones into a single PR if the diff is small.
+
+| Chunk | Module | Approx slug count |
+|---|---|---|
+| 10a | `handlers/methodologyStubs.ts` | ~30 (every `executeMethodologySkill` consumer) |
+| 10b | `handlers/autoGatedStubs.ts` + `handlers/reviewGatedProposers.ts` | ~25 combined (every inline `executeWithActionAudit` stub and every inline `proposeReviewGatedAction` gate) |
+| 10c | `handlers/systemMonitorShells.ts` + `handlers/optimiserShells.ts` + `handlers/spendShells.ts` + `handlers/configShells.ts` + `handlers/capabilityDiscovery.ts` | ~55 combined (thin shells over already-extracted sibling services) |
+| 10d | `handlers/crm.ts` + `handlers/orgInsights.ts` + `handlers/output.ts` + `handlers/threadContext.ts` + `handlers/notifyOperator.ts` + `handlers/memoryBlock.ts` + `handlers/financialReporting.ts` | ~25 combined |
+| 10e | `handlers/mediaTranscription.ts` + `handlers/digest.ts` + `handlers/thinDispatchers.ts` (catch-all for any leftover thin dispatchers) | ~10 combined |
+
+Per-sub-chunk procedure is the same as Chunks 4-10 above: move the slugs to the new file, update the in-barrel `SKILL_HANDLERS` literal slot, G1 the chunk. Each sub-chunk PR description enumerates the exact slug set moved.
+
+After Chunk 10e lands, the in-barrel `SKILL_HANDLERS` literal is empty (every slug has moved to a `handlers/*` module). The next chunks (11, 12, 13, 14, 15) operate on the now-emptied registry.
 
 ### Chunk 11 — Remaining handler shells (small)
 
@@ -388,13 +436,19 @@ The following files import from `server/services/skillExecutor` (verified by `gr
 - `server/services/__tests__/registerOptimiserSchedulePure.test.ts` — `vi.mock('../skillExecutor.js', ...)` — the barrel path is the mock target. The split must keep `server/services/skillExecutor.ts` resolvable so the mock continues to work.
 - `server/services/optimiser/__tests__/verificationMatrix.test.ts` — `vi.mock('../../skillExecutor.js', ...)` — same shape.
 
-**NOT importers (textual references only — these files mention "skillExecutor" as a string literal or in a comment but do NOT have a `from './skillExecutor.js'` import):**
+**NOT importers (textual references only — these files mention "skillExecutor" as a string literal, comment, log label, or filename but do NOT have a `from './skillExecutor.js'` import):**
 
 - `server/services/agentExecutionEventServicePure.ts` — no skillExecutor import at all (previous spec text was wrong)
 - `server/services/chargeRouterService.ts` — uses the string `'skillExecutor'` in a `sourceService` field only
 - `server/services/crmQueryPlanner/plannerEvents.ts` — uses the string `'skillExecutor'` in a `sourceService` field only
+- `server/services/notifyOperatorFanoutService.ts`, `server/services/reviewService.ts`, `server/middleware/errorHandling.ts`, `server/services/skillExecutorPure.ts`, `server/services/__tests__/skillExecutorPure.test.ts`, `server/tools/config/configSkillHandlers.ts` — these files mention "skillExecutor" in comments, log fields, or string literals but do NOT have a `from './skillExecutor.js'` import. Listed here so a textual `grep` against the next sweep does not surprise the reviewer.
 - `server/services/__tests__/skillExecutor.reassignTask.test.ts` — imports `skillExecutorDelegationPure` only (the filename uses the prefix but the test exercises the pure sibling)
 - `server/services/__tests__/skillExecutor.spawnSubAgents.test.ts` — same shape: `skillExecutorDelegationPure` only
+
+When running the Chunk 15 sweep, use this command to filter to real imports only and avoid the textual-reference noise:
+```bash
+grep -rnE "^import.*from\s+['\"]([^'\"]*)skillExecutor(\.js)?['\"]" server/
+```
 
 Any caller not in this list, surfaced during the Chunk 15 sweep, MUST be added to this section and re-validated. A missed caller is a spec gap, not a tolerable surprise.
 
