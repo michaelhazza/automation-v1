@@ -1,7 +1,7 @@
 ﻿// executionMode in code = 'Execution Environment' in the v1.2 product brief. controllerStyle in code = 'Controller' in the v1.2 product brief. See docs/synthetos-nomenclature.md
 
 import { createHash } from 'crypto';
-import { eq, and, isNull, count, inArray } from 'drizzle-orm';
+import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { recordIncident } from './incidentIngestor.js';
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -14,7 +14,6 @@ import {
   agentExecutionEvents,
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
-import { devContextService } from './devContextService.js';
 import { skillService } from './skillService.js';
 import { systemSkillService } from './systemSkillService.js';
 import { systemAgents } from '../db/schema/index.js';
@@ -51,16 +50,8 @@ import { buildForRun as buildHierarchyForRun, HierarchyContextBuildError } from 
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import {
   createDefaultPipeline,
-  checkWorkspaceLimits,
   type MiddlewareContext,
 } from './middleware/index.js';
-import { CONTROLLER_LIMITS } from '../config/controllerLimits.js';
-import {
-  resolvePolicyEnvelope,
-  persist as persistPolicyEnvelope,
-  ExecutionModeNotAllowedForAgentError,
-} from './policyEnvelopeResolver.js';
-import { executionModeToEnvironment } from '../../shared/types/executionEnvironment.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 // orgAgentConfigService import removed — deprecated post-migration 0106
 import {
@@ -116,6 +107,7 @@ import { buildTeamRoster, buildSmartBoardContext, buildTaskContext, buildAutonom
 import { buildBackendOptionsForMode } from './agentExecutionService/backendDispatch.js';
 import { validateAndPrepare } from './agentExecutionService/runLifecycle/validate.js';
 import { persistAndAnnounce } from './agentExecutionService/runLifecycle/persistRun.js';
+import { configureRun } from './agentExecutionService/runLifecycle/configure.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -142,220 +134,8 @@ export const agentExecutionService = {
     ctx.run = run;
 
     try {
-      // ── 2. Load agent config ────────────────────────────────────────────
-      const agent = await agentService.getAgent(request.agentId, request.organisationId);
-
-      let tokenBudget: number;
-      let maxToolCalls: number;
-      let timeoutMs: number;
-      let configSkillSlugs: string[];
-      let configCustomInstructions: string | null = null;
-
-      // Single config path — all runs load from subaccountAgents
-      let saLink: typeof subaccountAgents.$inferSelect | null = null;
-
-      {
-        const [link] = await db
-          .select()
-          .from(subaccountAgents)
-          .where(and(
-            eq(subaccountAgents.id, request.subaccountAgentId!),
-            eq(subaccountAgents.organisationId, request.organisationId),
-          ));
-
-        if (!link) throw Object.assign(new Error('Subaccount agent link not found'), { statusCode: 404, errorCode: 'SUBACCOUNT_AGENT_NOT_FOUND' });
-        saLink = link;
-
-        const controllerLimits = CONTROLLER_LIMITS[run.controllerStyle];
-        tokenBudget = Math.round(link.tokenBudgetPerRun * controllerLimits.defaultTokenBudgetMultiplier);
-        maxToolCalls = link.maxToolCallsPerRun;
-        timeoutMs = link.timeoutSeconds * 1000;
-        configSkillSlugs = (link.skillSlugs ?? []) as string[];
-        configCustomInstructions = link.customInstructions;
-      }
-
-      // ── 2a. Snapshot resolved config for reproducibility ──────────────
-      const resolvedConfig = {
-        tokenBudget,
-        maxToolCalls,
-        timeoutMs,
-        skillSlugs: configSkillSlugs,
-        customInstructions: configCustomInstructions,
-        executionScope: 'subaccount' as const,
-      };
-      const configHashValue = createHash('sha256').update(JSON.stringify(resolvedConfig)).digest('hex');
-
-      await db.update(agentRuns).set({
-        tokenBudget,
-        configSnapshot: resolvedConfig,
-        configHash: configHashValue,
-        resolvedSkillSlugs: configSkillSlugs,
-        resolvedLimits: { tokenBudget, maxToolCalls, timeoutMs },
-      }).where(eq(agentRuns.id, run.id));
-
-      // ── 2b. Workspace limit check (pre-run guard) ─────────────────────
-      const limitCheck = await checkWorkspaceLimits(request.subaccountId!, tokenBudget);
-      if (!limitCheck.allowed) {
-        const durationMs = Date.now() - startTime;
-        await db.update(agentRuns).set({
-          status: 'failed',
-          errorMessage: limitCheck.reason ?? 'Workspace limit exceeded',
-          errorDetail: {
-            type: 'workspace_limit',
-            dailyUsed: limitCheck.dailyUsed,
-            dailyLimit: limitCheck.dailyLimit,
-            requestedBudget: tokenBudget,
-          },
-          completedAt: new Date(),
-          durationMs,
-          updatedAt: new Date(),
-        }).where(eq(agentRuns.id, run.id));
-
-        return {
-          runId: run.id,
-          status: 'failed',
-          summary: null,
-          totalToolCalls: 0,
-          totalTokens: 0,
-          durationMs,
-          tasksCreated: 0,
-          tasksUpdated: 0,
-          deliverablesCreated: 0,
-        };
-      }
-
-      // ── 2c. Snapshot DEC hash + iteration count into triggerContext ──
-      try {
-        const { hash: decHash } = await devContextService.getContext(request.subaccountId!);
-
-        // Count prior runs for this task to determine current iteration
-        let iteration = 0;
-        if (request.taskId) {
-          const [{ total }] = await db
-            .select({ total: count() })
-            .from(agentRuns)
-            .where(and(
-              eq(agentRuns.taskId, request.taskId),
-              eq(agentRuns.subaccountId, request.subaccountId!),
-            ));
-          // Subtract 1 because current run is already inserted
-          iteration = Math.max(0, Number(total) - 1);
-        }
-
-        const existingCtx = (request.triggerContext ?? {}) as Record<string, unknown>;
-        await db.update(agentRuns).set({
-          triggerContext: {
-            ...existingCtx,
-            executionSnapshot: {
-              decHash,
-              iteration,
-              snapshotAt: new Date().toISOString(),
-            },
-          },
-          updatedAt: new Date(),
-        }).where(eq(agentRuns.id, run.id));
-      } catch {
-        // DEC not configured for this subaccount — skip snapshot (non-dev agents)
-      }
-
-      // ── 2d. Resolve and persist policy envelope (INV-19) ─────────────────
-      // Must complete before any tool call, LLM call, or IEE dispatch.
-      // On failure: run is transitioned to 'failed' and execution is aborted.
-      try {
-        const policyEnvelopeCtx = {
-          runId: run.id,
-          agentId: request.agentId,
-          subaccountAgentId: request.subaccountAgentId!,
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId!,
-          controllerStyle: run.controllerStyle,
-          executionMode: request.executionMode ?? 'api',
-          tokenBudget,
-          maxToolCalls,
-        };
-        const snapshot = await resolvePolicyEnvelope(policyEnvelopeCtx);
-        await persistPolicyEnvelope(run.id, snapshot);
-
-        // Enforce allowedEnvironments (spec §4.2.8). The envelope captures
-        // the constraint at run start; this gate rejects a run whose
-        // requested executionMode maps to an environment the agent is not
-        // permitted to use. Without this check, a Governance-tab restriction
-        // (e.g. browser-disabled) is silently ignored.
-        const requestedEnv = executionModeToEnvironment(
-          request.executionMode ?? 'api',
-        );
-        if (!snapshot.allowedEnvironments.includes(requestedEnv)) {
-          throw new ExecutionModeNotAllowedForAgentError(
-            request.executionMode ?? 'api',
-            requestedEnv,
-          );
-        }
-
-        tryEmitAgentEvent({
-          runId: run.id,
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId ?? null,
-          sourceService: 'agentExecutionService',
-          payload: {
-            eventType: 'foundation.policy_envelope.resolved',
-            critical: false,
-            runId: run.id,
-            schemaVersion: 1,
-            sourceCounts: {
-              activePolicyRuleIds: snapshot.activePolicyRuleIds.length,
-              availableCredentialIds: snapshot.availableCredentialIds.length,
-              allowedSkillSlugs: snapshot.allowedSkillSlugs.length,
-            },
-          },
-          linkedEntity: { type: 'agent', id: request.agentId },
-        });
-      } catch (envelopeErr) {
-        const durationMs = Date.now() - startTime;
-        const isEnvViolation = envelopeErr instanceof ExecutionModeNotAllowedForAgentError;
-        const failureType = isEnvViolation
-          ? 'execution_mode_not_allowed_for_agent'
-          : 'policy_envelope_resolution_failed';
-
-        tryEmitAgentEvent({
-          runId: run.id,
-          organisationId: request.organisationId,
-          subaccountId: request.subaccountId ?? null,
-          sourceService: 'agentExecutionService',
-          payload: {
-            eventType: isEnvViolation
-              ? 'foundation.execution_environment.rejected'
-              : 'foundation.policy_envelope.resolution_failed',
-            critical: false,
-            runId: run.id,
-            error: envelopeErr instanceof Error ? envelopeErr.message : String(envelopeErr),
-          },
-          linkedEntity: { type: 'agent', id: request.agentId },
-        });
-
-        await db.update(agentRuns).set({
-          status: 'failed',
-          errorMessage: envelopeErr instanceof Error ? envelopeErr.message : 'Policy envelope resolution failed',
-          errorDetail: {
-            type: failureType,
-            failureReason: failureType,
-          },
-          completedAt: new Date(),
-          durationMs,
-          updatedAt: new Date(),
-        }).where(eq(agentRuns.id, run.id));
-
-        return {
-          runId: run.id,
-          status: 'failed',
-          summary: null,
-          totalToolCalls: 0,
-          totalTokens: 0,
-          durationMs,
-          tasksCreated: 0,
-          tasksUpdated: 0,
-          deliverablesCreated: 0,
-        };
-      }
+      const configResult = await configureRun(request, ctx);
+      if (configResult.kind === 'workspace_limit_failed') return configResult.result;
 
       // ── 3. Load run context data (cascading scopes + task attachments + instructions) ──
       // Spec §7.1/§7.2. Pulls agent-wide, subaccount-scoped, scheduled-task-
@@ -372,7 +152,7 @@ export const agentExecutionService = {
         triggerContext: request.triggerContext,
         subaccountId: request.subaccountId ?? null,
         runId: run.id,
-        tokenBudget,
+        tokenBudget: ctx.tokenBudget!,
       });
 
       // Only eager sources flagged includedInPrompt: true are rendered into
@@ -450,8 +230,8 @@ export const agentExecutionService = {
       let systemSkillInstructions: string[] = [];
       let systemAgentRecord: typeof systemAgents.$inferSelect | null = null;
 
-      if (agent.systemAgentId) {
-        const [sa] = await db.select().from(systemAgents).where(eq(systemAgents.id, agent.systemAgentId));
+      if (ctx.agent!.systemAgentId) {
+        const [sa] = await db.select().from(systemAgents).where(eq(systemAgents.id, ctx.agent!.systemAgentId));
         if (sa) {
           systemAgentRecord = sa;
           const systemSlugs = (sa.defaultSystemSkillSlugs ?? []) as string[];
@@ -462,7 +242,7 @@ export const agentExecutionService = {
       }
 
       // Layer 2+3: Org skills + sub-account/org skills
-      const skillSlugs = configSkillSlugs;
+      const skillSlugs = ctx.configSkillSlugs!;
       const { tools: skillTools, instructions: skillInstructions, truncated: skillInstructionsTruncated } = await skillService.resolveSkillsForAgent(
         skillSlugs,
         request.organisationId,
@@ -566,7 +346,7 @@ export const agentExecutionService = {
       // Layer 1: System agent prompt (our IP — invisible to org/sub-account)
       const effectiveMasterPrompt = systemAgentRecord
         ? systemAgentRecord.masterPrompt
-        : agent.masterPrompt;
+        : ctx.agent!.masterPrompt;
 
       const basePrompt = buildSystemPrompt(
         effectiveMasterPrompt,
@@ -637,8 +417,8 @@ export const agentExecutionService = {
       }
 
       // Layer 2: Org additional prompt (invisible to sub-account)
-      if (agent.additionalPrompt) {
-        systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${agent.additionalPrompt}`);
+      if (ctx.agent!.additionalPrompt) {
+        systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${ctx.agent!.additionalPrompt}`);
       }
 
       // Layer 2a: Shared memory blocks — composes explicit attachments +
@@ -652,7 +432,7 @@ export const agentExecutionService = {
 
       // Derive agent domain early — needed for tier-2 block filtering (F1 §4)
       // and for workspace memory retrieval below.
-      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
+      const agentDomain = agentRoleToDomain(ctx.agent!.agentRole) ?? undefined;
 
       // Tier-1 baseline artefacts: pinned, hash-stable, always present when captured.
       // Spec: docs/sub-account-baseline-artefacts-spec.md §4.
@@ -688,7 +468,7 @@ export const agentExecutionService = {
           createEvent('baseline_artefact.tier_loaded', {
             organisation_id: request.organisationId,
             subaccount_id: request.subaccountId ?? null,
-            agent_role: agent.agentRole,
+            agent_role: ctx.agent!.agentRole,
             tier: blockTier,
             block_slug: block.name,
             token_count: approxTokens(block.content),
@@ -716,8 +496,8 @@ export const agentExecutionService = {
       }
 
       // Layer 3: Custom instructions (from subaccount link or org config)
-      if (configCustomInstructions) {
-        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${configCustomInstructions}`);
+      if (ctx.configCustomInstructions) {
+        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${ctx.configCustomInstructions}`);
       }
 
       // Add team roster (loaded fresh from DB every run)
@@ -1041,21 +821,21 @@ export const agentExecutionService = {
       // `BackendDispatchInput.backendOptions.loopContext`. See
       // `executionBackends/options.ts:ApiHeadlessLoopContext`.
       const closureContext: ExecutionClosureContext = {
-        agent,
+        agent: ctx.agent!,
         effectiveTools,
         pipeline,
         mcpClients,
         mcpLazyRegistry,
         runContextData,
-        saLink: saLink!,
+        saLink: ctx.saLink!,
         agentDomain,
-        configVersion: fingerprint(resolvedConfig),
+        configVersion: ctx.configVersion!,
         hierarchyContext,
         orgProcesses,
         request,
         startTime,
         isOrgSubaccountRun: ctx.isOrgSubaccountRun,
-        maxLoopIterations: CONTROLLER_LIMITS[run.controllerStyle].maxLoopIterations,
+        maxLoopIterations: ctx.maxLoopIterations!,
         // Routing context for the LLM router — built here because
         // `run.id` and `agent.name` are only in scope at the dispatch
         // site. Mirrors the pre-Chunk-5 inline construction.
@@ -1064,7 +844,7 @@ export const agentExecutionService = {
           subaccountId: request.subaccountId ?? undefined,
           runId: run.id,
           subaccountAgentId: request.subaccountAgentId ?? undefined,
-          agentName: agent.name,
+          agentName: ctx.agent!.name,
           sourceType: 'agent_run',
         },
         // Claude Code runner consumes a task prompt (workspace summary or
@@ -1082,9 +862,9 @@ export const agentExecutionService = {
           subaccountId: request.subaccountId ?? null,
           agentId: request.agentId,
           promptAssembly: { stablePrefix, dynamicSuffix },
-          tokenBudget,
-          maxToolCalls,
-          timeoutMs,
+          tokenBudget: ctx.tokenBudget!,
+          maxToolCalls: ctx.maxToolCalls!,
+          timeoutMs: ctx.timeoutMs!,
           backendOptions: buildBackendOptionsForMode(effectiveMode, request, closureContext),
         });
 

@@ -1,6 +1,8 @@
 import type { LoopParams } from '../agentExecutionLoop.js';
 import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
-import type { agentRuns } from '../../db/schema/index.js';
+import type { agentRuns, subaccountAgents } from '../../db/schema/index.js';
+import type { agentService } from '../agentService.js';
+import type { PolicyEnvelopeSnapshot } from '../../../shared/types/policyEnvelope.js';
 
 /**
  * Closure-context bundle assembled in `executeRun` and forwarded to each
@@ -225,7 +227,7 @@ export interface TaskWithAgent {
  * Extended by Chunks 5-9 — see DEFERRED AGENTEXEC-SPLIT-DEF-2 for shape
  * consolidation.
  */
-// Extended in Chunk 4+; Chunk 5 adds resolvedControllerStyleAllowed, controllerStyleSource, run
+// Extended in Chunk 4+; Chunk 5 adds resolvedControllerStyleAllowed, controllerStyleSource, run; Chunk 6 adds agent, saLink, tokenBudget, maxToolCalls, timeoutMs, configSkillSlugs, configCustomInstructions, configHash, configVersion, policyEnvelope, maxLoopIterations
 export interface RunExecutionContext {
   startTime: number;
   isOrgSubaccountRun: boolean;
@@ -234,6 +236,18 @@ export interface RunExecutionContext {
   resolvedControllerStyleAllowed?: string;
   controllerStyleSource?: 'subaccount_agent' | 'default' | string;
   run?: typeof agentRuns.$inferSelect;
+  // Populated by configureRun (Chunk 6)
+  agent?: Awaited<ReturnType<typeof agentService.getAgent>>;
+  saLink?: typeof subaccountAgents.$inferSelect;
+  tokenBudget?: number;
+  maxToolCalls?: number;
+  timeoutMs?: number;
+  configSkillSlugs?: string[];
+  configCustomInstructions?: string | null;
+  configHash?: string;
+  configVersion?: string;
+  policyEnvelope?: PolicyEnvelopeSnapshot;
+  maxLoopIterations?: number;
 }
 
 /**
