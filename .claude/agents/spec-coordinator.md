@@ -229,6 +229,43 @@ Required sections (checklist appendix is canonical — this is the local summary
 - Testing posture statement (defer-until-trigger, per `docs/spec-context.md`)
 - Execution-safety contracts (idempotency, retry, concurrency, terminal events) for any new write paths
 - Open questions
+- **Lifecycle Declaration** (Standard+ only — required per `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.2`; see template below)
+- **ABCd Lifecycle Estimate** (Standard+ only — required per `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.3`; see template below)
+
+### Lifecycle Declaration template (§7.2)
+
+Every Standard+ spec must include this block at the top of the spec, after frontmatter:
+
+```markdown
+## Lifecycle Declaration
+
+| Field | Value |
+|---|---|
+| Capability cluster | <one-or-more values from the cluster header in `docs/capabilities.md`, comma-separated> |
+| Capability owner | <handle, or placeholder per §7.4.3 of the governance spec> |
+| Lifecycle state on launch | <Inception or Growth — restricted at launch; see restriction note below> |
+| Risk surface | <copied verbatim from intent.md § Risk Surface — either `None.` or comma-separated §7.1.1 values> |
+| Review cadence | <e.g. quarterly, biannually, on-incident-only> |
+```
+
+**Launch-state restriction:** at first registration, only `Inception` (no production traffic yet) or `Growth` (live but actively iterating) are valid values for `Lifecycle state on launch`. The full six-state enum (`Inception`, `Growth`, `Mature`, `Declining`, `Sunset Candidate`, `Sunset`) is tracked on the Asset Register row in `docs/capabilities.md` and progresses across subsequent builds; the Lifecycle Declaration captures only the value at this build's launch.
+
+### ABCd Lifecycle Estimate template (§7.3)
+
+Every Standard+ spec must include this block inside the spec body:
+
+```markdown
+## ABCd Lifecycle Estimate
+
+| Dimension | Sizing | Notes |
+|---|---|---|
+| Acquire | S \| M \| L | <free text — name the dominant cost driver> |
+| Build | S \| M \| L | <free text — name the dominant cost driver> |
+| Carry | S \| M \| L | <free text — name the dominant cost driver> |
+| decommission | S \| M \| L | <free text — name the dominant cost driver> |
+```
+
+**Sizing restriction:** the `Sizing` column must be exactly one of `S`, `M`, or `L`. **Numeric estimates are prohibited** (false-precision class — they imply precision the estimate does not have). No half-buckets, no ranges, no numeric values. This is binding per spec §7.3.
 
 If the brief was UI-touching and mockups were produced, the spec MUST reference the prototype paths in its UI section and treat the mockups as the design source of truth.
 

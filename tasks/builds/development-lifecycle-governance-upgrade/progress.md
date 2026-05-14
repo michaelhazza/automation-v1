@@ -98,8 +98,58 @@ Step 3 reads brief, classifies: **Trivial** (single file, obvious change, no des
 
 ## Chunk 2 — Lifecycle Declaration + ABCd in spec authoring
 
-**Status:** PENDING
-**Files:** `.claude/agents/spec-coordinator.md` (Step 6), `docs/spec-authoring-checklist.md`
+**Status:** COMPLETE
+**Builder:** builder sub-agent (Sonnet 4.6)
+**Completed:** 2026-05-14
+**Files changed:**
+- `.claude/agents/spec-coordinator.md` (Step 6 section extended)
+- `docs/spec-authoring-checklist.md` (Section 12 added; Appendix extended; ToC updated)
+
+### Changes made
+
+**`.claude/agents/spec-coordinator.md` Step 6:**
+- Extended the required-sections list with two new bullet entries: "Lifecycle Declaration (Standard+ only — required per spec §7.2)" and "ABCd Lifecycle Estimate (Standard+ only — required per spec §7.3)".
+- Added "### Lifecycle Declaration template (§7.2)" subsection with the §7.2 five-field table reproduced verbatim and the launch-state restriction stated explicitly (`Inception` or `Growth` only at first registration).
+- Added "### ABCd Lifecycle Estimate template (§7.3)" subsection with the §7.3 four-dimension table reproduced verbatim and the S/M/L-only sizing restriction stated explicitly (numeric estimates prohibited, false-precision class).
+- Both templates reference the spec path `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.2` / `§7.3`.
+
+**`docs/spec-authoring-checklist.md`:**
+- Added item 12 to the Table of Contents.
+- Added "## Section 12 — Lifecycle Declaration and ABCd Estimate blocks (Standard+ only)" between Section 11 and the Appendix, covering:
+  - §12.1 Lifecycle Declaration block: what it is, when required, the 5 required fields and their rules, launch-state restriction.
+  - §12.2 ABCd Estimate block: what it is, when required, the 4 dimensions, S/M/L-only sizing constraint.
+  - Reviewer signal this prevents.
+- Appended two new boxes to the Appendix pre-review checklist:
+  - `[ ] **[Section 12]** Lifecycle Declaration present per spec §7.2 (5 required fields; launch state = Inception or Growth only)`
+  - `[ ] **[Section 12]** ABCd Estimate present with S/M/L sizing only per spec §7.3 (4 dimensions; no numeric values)`
+
+### Wording-matches-spec confirmation
+
+Read both files end-to-end. Confirmed:
+- The §7.2 five-field table (Capability cluster, Capability owner, Lifecycle state on launch, Risk surface, Review cadence) is reproduced verbatim in `spec-coordinator.md` Step 6.
+- The §7.3 four-dimension table (Acquire, Build, Carry, decommission) with `S | M | L` sizing is reproduced verbatim in `spec-coordinator.md` Step 6.
+- Launch-state restriction (`Inception` or `Growth` only) is stated explicitly in both `spec-coordinator.md` Step 6 and `spec-authoring-checklist.md` §12.1.
+- Numeric-estimates prohibition is stated explicitly in both files.
+- Both files reference the spec path `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.2` / `§7.3`.
+
+### `docs/spec-template.md` confirmation
+
+`docs/spec-template.md` was NOT created. Confirmed via Glob search: zero matches. This is the plan-locked decision from chatgpt-plan-review Round 1 F4. The schema lives in `docs/spec-authoring-checklist.md` Section 12 and in `.claude/agents/spec-coordinator.md` Step 6.
+
+### Grep-the-old-value pass results
+
+- Grep for "spec authoring rubric" in `.claude/agents/spec-coordinator.md`: **0 matches** — no stale references to update.
+- Grep for "spec authoring rubric" in `docs/spec-authoring-checklist.md`: **0 matches** — no stale references.
+- Grep for "Lifecycle Declaration" in `spec-coordinator.md`: **4 matches** — all in the new Step 6 content. Correct.
+- Grep for "ABCd" in `spec-coordinator.md`: **3 matches** — all in the new Step 6 content. Correct.
+- Grep for "Lifecycle Declaration|ABCd" in `spec-authoring-checklist.md`: **8 matches** — all in the new Section 12 and Appendix. Correct.
+- `docs/spec-template.md`: does not exist. Confirmed.
+
+### G1 gate result
+
+- `npx eslint .claude/agents/spec-coordinator.md docs/spec-authoring-checklist.md`: exit 0; 2 expected warnings ("File ignored because no matching configuration was supplied" — markdown files). No errors.
+- `npm run typecheck`: exit 0 (both tsconfigs). No TypeScript files touched.
+- Attempts: lint: 1, typecheck: 1.
 
 ---
 
