@@ -42,14 +42,14 @@ Note: same launch-state caveat as the companion spec — the capability "Agent R
 2. Decompose the 1,936-line `executeRun` method into cohesive phase functions along real execution-lifecycle boundaries (validation → persistence → configuration → preparation → dispatch → completion). NOT arbitrary LOC cuts.
 3. Adopt the §5 conventions from the pattern-setter spec (`tasks/builds/feat-split-skillexecutor/spec.md`). Where this build differs, the difference is justified in §5.
 4. Preserve the public API. Every caller named in §4 below must compile without source edits beyond following barrel re-exports.
-5. Preserve test coverage. No existing test loses an assertion; new test files added only as a side effect of test-collocation moves.
+5. Preserve test coverage. No existing test loses an assertion. No new test files are authored by this build (per §13 and `docs/spec-context.md` `runtime_tests: pure_function_only`). Existing tests stay; their import paths may shift but their assertions do not.
 6. Leverage the existing `agentExecutionServicePure.ts`, `agentExecutionLoop.ts`, `agentExecutionTypes.ts`, and `executionBackends/*` extractions by importing from them — do not duplicate their contents. This build does NOT modify any of those four siblings (see §2 and §5.4); any new pure-helper extraction that surfaces during a chunk is deferred to a follow-up build (`AGENTEXEC-SPLIT-DEF-*`).
 
 ## 2. Non-Goals
 
 - No behaviour change. The same run requests produce the same `agent_runs` rows, the same `agent_execution_events` sequence numbers, the same trigger events, the same backend dispatches, the same completion records.
 - No new features, no new run statuses, no new event types, no new metrics.
-- No public-surface changes — `agentExecutionService.executeRun`, `AgentRunRequest`, `AgentRunResult`, `resumeAgentRun`, `ResumeAgentRunOptions`, `ResumeAgentRunResult`, and the `LoopParams` / `LoopResult` re-exports retain identical types and call signatures.
+- No public-surface changes — `agentExecutionService.executeRun`, `agentExecutionService.startRunAsync`, `AgentRunRequest`, `AgentRunResult`, `resumeAgentRun`, `ResumeAgentRunOptions`, `ResumeAgentRunResult`, and the `LoopParams` / `LoopResult` re-exports retain identical types and call signatures.
 - No changes to the `ExecutionBackend` adapter contract or any backend adapter under `server/services/executionBackends/**`.
 - No changes to `agentExecutionLoop.ts` (the agentic loop body — already extracted in a prior build).
 - No changes to `agentExecutionServicePure.ts` (the pure helpers — already extracted).
@@ -455,7 +455,7 @@ Per `docs/spec-context.md`: testing posture is `static_gates_primary`. Verificat
 
 ## 14. Execution-Safety Contracts
 
-This build modifies no write paths. Existing contracts are preserved exactly:
+This build changes no write-path semantics, ordering, column set, or awaited/fire-and-forget behaviour. The code that performs each write moves into phase modules, but the write itself — its SQL, its columns, its sequence position relative to other side effects, and its awaited-vs-fire-and-forget shape — is byte-for-byte preserved. Existing contracts are preserved exactly:
 
 - Idempotency-key resolution: same lookup set, same INSERT key.
 - `agent_runs` INSERT order and column set: identical.
@@ -464,7 +464,7 @@ This build modifies no write paths. Existing contracts are preserved exactly:
 - Policy-envelope resolution: same `resolvePolicyEnvelope` + `persist` sequence, same `allowedEnvironments` gate, same emit-then-throw error path.
 - Fire-and-forget paths: `tryEmitAgentEvent` calls remain fire-and-forget. The single `void this.executeRun(...).catch(...)` in `startRunAsync` (lines 2376-2380) stays as-is — the existing `PLAN_GAP` comment is preserved verbatim.
 
-If a chunk would introduce or modify a write path, that chunk is out of scope and the spec must be revised before it lands.
+If a chunk would change any write-path semantic (SQL shape, column set, ordering, awaited-vs-fire-and-forget posture, error-suppression behaviour), that chunk is out of scope and the spec must be revised before it lands.
 
 ## 15. References
 
