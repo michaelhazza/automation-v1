@@ -1,8 +1,14 @@
 import type { LoopParams } from '../agentExecutionLoop.js';
-import type { DelegationScope, DelegationDirection } from '../../../shared/types/delegation.js';
-import type { agentRuns, subaccountAgents } from '../../db/schema/index.js';
+import type { DelegationScope, DelegationDirection, HierarchyContext } from '../../../shared/types/delegation.js';
+import type { agentRuns, subaccountAgents, tasks } from '../../db/schema/index.js';
 import type { agentService } from '../agentService.js';
 import type { PolicyEnvelopeSnapshot } from '../../../shared/types/policyEnvelope.js';
+import type { RunContextData } from '../runContextLoader.js';
+import type { RetrievalResult, RetrievalResultLoaded } from '../../../shared/types/retrieval.js';
+import type { getOrgProcessesForTools, AnthropicTool } from '../llmService.js';
+import type { MiddlewarePipeline } from '../middleware/types.js';
+import type { McpClientInstance } from '../mcpClientManager.js';
+import type { McpServerConfig } from '../../db/schema/mcpServerConfigs.js';
 
 /**
  * Closure-context bundle assembled in `executeRun` and forwarded to each
@@ -248,6 +254,26 @@ export interface RunExecutionContext {
   configVersion?: string;
   policyEnvelope?: PolicyEnvelopeSnapshot;
   maxLoopIterations?: number;
+  // Populated by loadRunContextAndHierarchy (Chunk 7a)
+  runContextData?: RunContextData;
+  retrievalResult?: RetrievalResult;
+  knowledgeLoaded?: RetrievalResultLoaded[];
+  orgProcesses?: Awaited<ReturnType<typeof getOrgProcessesForTools>>;
+  hierarchyContext?: Readonly<HierarchyContext>;
+  // Populated by prepareRun (Chunk 7b)
+  effectiveTools?: AnthropicTool[];
+  pipeline?: MiddlewarePipeline;
+  mcpClients?: Map<string, McpClientInstance> | null;
+  mcpLazyRegistry?: Map<string, McpServerConfig> | null;
+  workspaceContext?: string;
+  targetItem?: typeof tasks.$inferSelect | null;
+  agentDomain?: string;
+  injectedMemoryEntries?: Array<{ id: string; content: string }>;
+  appliedMemoryBlockIds?: string[];
+  stablePrefix?: string;
+  dynamicSuffix?: string;
+  systemPrompt?: string;
+  systemPromptTokens?: number;
 }
 
 /**
