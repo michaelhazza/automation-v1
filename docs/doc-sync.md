@@ -88,7 +88,7 @@ Every finalised `chatgpt-pr-review` and `chatgpt-spec-review` log must include t
 ```
 - KNOWLEDGE.md updated: yes (N entries) | no — <rationale>
 - architecture.md updated: yes (sections X, Y) | no — <rationale> | n/a
-- capabilities.md updated: yes: &lt;registration-outcome&gt; | n/a: &lt;reason&gt;  (§6.2.1 format — eight valid strings listed in the Capability Registration section above; any other phrasing is invalid and treated as a missing verdict)
+- capabilities.md updated: yes: <registration-outcome> | n/a: <reason>  (§6.2.1 format — eight valid strings listed in the Capability Registration section above; any other phrasing is invalid and treated as a missing verdict)
 - integration-reference.md updated: yes (slug X) | no — <rationale> | n/a
 - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no — <rationale> | n/a
 - spec-context.md updated: yes | no — <rationale> | n/a   # spec-review sessions only
