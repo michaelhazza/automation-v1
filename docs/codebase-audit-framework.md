@@ -9,7 +9,7 @@
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
 | Applies to | This repo (`automation-v1`) — Express + Vite + React + Drizzle + pg-boss stack |
-| Structure | Universal Rules → Protected Files → Layer 1 (9 areas) → Layer 2 (13 modules: 8 generic + 5 AutomationOS-specific) → Pipeline integration → Report template → Tooling |
+| Structure | Universal Rules → Protected Files → Layer 1 (10 areas) → Layer 2 (13 modules: 8 generic + 5 AutomationOS-specific) → Pipeline integration → Report template → Tooling |
 | Pairs with | `CLAUDE.md`, `architecture.md`, `KNOWLEDGE.md`, `docs/spec-context.md`, `docs/frontend-design-principles.md`, `docs/capabilities.md`, `.claude/agents/*` |
 
 ---
@@ -58,6 +58,7 @@ When tempted to expand, write a `KNOWLEDGE.md` entry instead.
    - Area 7: AI Residue Removal
    - Area 8: Circular Dependency Resolution
    - Area 9: Architectural Boundary Violations
+   - Area 10: God Files
 7. Layer 2 — Production Readiness Audit (generic modules)
    - Module A: Security Review
    - Module B: Performance Review
@@ -514,7 +515,8 @@ When areas run sequentially, use this order. It minimises rework and churn betwe
 | 6 | Legacy and dead path removal | Cleaner codebase reduces false positives |
 | 7 | AI residue removal | Low-risk, high-signal cleanup |
 | 8 | Circular dependency resolution | Easier to resolve after consolidation |
-| 9 | Architectural boundary violations | Last, may require rework informed by earlier areas |
+| 9 | Architectural boundary violations | Boundary fixes informed by earlier areas |
+| 10 | God files | Reporting-only pass; runs last so the register reflects post-cleanup LOC |
 
 When running areas in parallel via independent subagents, this order does not apply, but Rule 15 (parallel agent coordination) does.
 
@@ -808,6 +810,41 @@ Some duplication is intentional. Duplication beats coupling when:
 - Do not introduce new abstractions unless the violation is structural — flag for pass 3.
 - Do not modify any `scripts/gates/*.sh` to "make the gate pass". Failing gates are findings to fix, not noise to suppress.
 - Do not collapse the route → service → db cascade for "simplicity". The layer separation is the security model.
+
+---
+
+### Area 10 — God Files
+
+**Objective.** Surface files that have grown past a maintainable size threshold. Large files concentrate change risk, slow review, hide duplicate logic inside themselves, and make boundary violations easier to introduce. This area produces a register of god files and a recommended split; it does not perform the splits.
+
+**Thresholds (informational, not blocking).**
+
+| Layer | Soft cap | Hard cap |
+|---|---|---|
+| `server/services/*.ts` | 1,500 LOC | 2,500 LOC |
+| `server/routes/*.ts` | 800 LOC | 1,500 LOC |
+| `client/src/pages/*.tsx` | 600 LOC | 1,200 LOC |
+| `client/src/components/*.tsx` | 400 LOC | 800 LOC |
+| `shared/**/*.ts` | 500 LOC | 1,000 LOC |
+| `server/db/schema/*.ts` | n/a (one table per file) | n/a |
+
+Soft cap = surface as a low/medium finding for pass 3. Hard cap = surface as a high finding for pass 3 (still pass 3 — splitting a god file is never a high-confidence mechanical fix).
+
+**How to investigate.**
+
+- `find server client shared -name '*.ts' -o -name '*.tsx' | xargs wc -l | sort -rn | head -40`.
+- For each file over its hard cap, capture: LOC, top-level export count, distinct concerns the file mixes (use grep on `^export `, `^function `, `^class `, `^const .* =`), and whether the `*Pure.ts` companion pattern is already in place.
+- Cross-check Area 2 (Duplicate Logic) findings — duplicate logic often hides inside god files.
+
+**High-confidence fixes.**
+
+- None. Splitting a god file is always a pass-3 item: it touches imports across the codebase, alters call sites, and frequently surfaces hidden coupling. Route every finding to `tasks/todo.md` with a recommended split shape (e.g. "extract `*Pure.ts`", "split by domain noun", "extract route handlers into per-resource files").
+
+**What NOT to do.**
+
+- Do not split a god file inside an audit run. The blast radius exceeds Rule 7 in every case.
+- Do not flag the `*Pure.ts` companion as duplication — that pattern is intentional (`architecture.md` § Pure helper convention).
+- Do not flag generated files, schema files (one-table-per-file is the convention), or `migrations/`.
 
 ---
 

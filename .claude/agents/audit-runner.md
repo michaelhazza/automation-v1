@@ -35,9 +35,32 @@ The caller invokes you with one of:
 
 - `audit-runner: full` — full Layer 1 + selected Layer 2 modules. Use for quarterly or pre-major-release audits.
 - `audit-runner: hotspot <subsystem>` — single subsystem. Subsystems: `rls`, `agent-execution`, `queues`, `skills`, `webhooks`, `frontend`. Most audits should use this mode.
-- `audit-runner: targeted <area-list> [<module-list>]` — explicit Layer 1 areas (1–9) and/or Layer 2 modules (A–M). Example: `audit-runner: targeted areas 1,2,7 modules I,J`.
+- `audit-runner: targeted <area-list> [<module-list>]` — explicit Layer 1 areas (1–10) and/or Layer 2 modules (A–M). Example: `audit-runner: targeted areas 1,2,7 modules I,J`.
+
+Append `parallel` as a trailing token to enable parallel-mode (see "Parallel mode" below):
+
+- `audit-runner: hotspot rls parallel`
+- `audit-runner: hotspot frontend parallel`
 
 If the caller does not specify a mode, ask them once before proceeding. Do not guess.
+
+## Parallel mode
+
+Audit runs default to **exclusive** mode — only one audit branch may exist at a time. This is the safe default.
+
+When the caller passes `parallel`, the run cooperates with other concurrent audits:
+
+- The pre-flight branch-collision check is **relaxed** — the run does not halt if other `audit/*` branches exist, provided each is on a distinct scope.
+- The progress file is **scope-namespaced** so concurrent runs do not clobber each other (see step A.2 below).
+- The audit log and `tasks/todo.md` items are already scope-namespaced by timestamp / origin tag, so no further change is needed for those.
+
+**Parallel-mode preconditions** the caller is responsible for:
+
+1. Each concurrent run executes in its own git worktree (`git worktree add ../<repo>-<scope> audit/<branch>`). Multiple runs in the same working tree is unsupported.
+2. Scopes must not file-overlap with any other in-flight parallel run. The known non-overlapping pairings are `rls + queues + skills`, `agent-execution + webhooks + frontend`, or any subset thereof. `full` is never parallel-safe (it owns the entire codebase).
+3. Pass-2 PRs from parallel runs are merged in series, not in parallel — concurrent merges into `main` are still serialised by GitHub.
+
+If the caller invokes `parallel` without these preconditions met, the audit may still complete but pass-2 fixes can conflict at merge time. Surface this risk in the audit log under "Reconnaissance Map" when running in parallel mode.
 
 ## Pre-flight checks
 
@@ -45,7 +68,9 @@ Before doing anything else:
 
 - `git status` — working tree must be clean.
 - `git fetch origin main` — confirm you're not behind.
-- Check no other audit branch is already in flight (`git branch -a | grep audit/`). If one exists and is not yours, stop and ask the user.
+- Check no other audit branch is already in flight (`git branch -a | grep audit/`). If one exists and is not yours:
+  - **Exclusive mode (default):** stop and ask the user.
+  - **Parallel mode:** continue, but record the co-running scopes in the audit log under "Reconnaissance Map → Concurrent audits".
 - Verify `docs/codebase-audit-framework.md` exists and is readable. If missing, halt — the framework is your contract.
 - Read the latest `KNOWLEDGE.md` correction entries; if any contradicts your planned approach, prefer KNOWLEDGE.md.
 
@@ -58,7 +83,7 @@ Before doing anything else:
 0. **Build a TodoWrite task list immediately.** This is step zero, before reading the framework, before verifying paths, before anything else. The task list must be visible to the user from the moment the audit starts. Cover every area / module in scope plus fixed pipeline steps: context verification, each Layer 1 area, each Layer 2 module, findings gate, pass 2 fixes, pass 3 routing, KNOWLEDGE.md, completion gate, final handoff. Mark each `in_progress` when you start it and `completed` immediately when done. This list is your execution contract — do not skip ahead.
 
 1. Re-validate framework §2 context block against current repo state. Spot-check 3–5 facts (a script in `package.json`, an actual file path from §4 Protected Files, the framework version). If anything is stale, note it in the audit log and tell the user.
-2. **Write a progress file** at `tasks/audit-progress.md` (overwrite if it exists) with a checkbox list matching the TodoWrite task list — one line per area / module. After completing each area, update the checkbox from `[ ]` to `[x]` and commit the file with message `audit: progress — <area name>`. This file is the main session's window into your progress; keep it current.
+2. **Write a progress file** at `tasks/audit-progress-<scope-slug>-<ISO-timestamp>.md` (the same `<scope-slug>` and `<ISO-timestamp>` you use for the audit log filename, so log and progress file are paired and never clobber concurrent runs). Write a checkbox list matching the TodoWrite task list — one line per area / module. After completing each area, update the checkbox from `[ ]` to `[x]` and commit the file with message `audit: progress — <area name>`. This file is the main session's window into your progress; keep it current. **Do not write to `tasks/audit-progress.md` (un-namespaced) — that path is reserved for legacy single-run audits and would clobber any parallel run.**
 3. Resolve in-scope paths from the mode:
    - **Full** — `server/`, `client/`, `shared/` (entire codebase).
    - **Hotspot rls** — `server/db/`, `server/instrumentation.ts`, `server/lib/orgScopedDb.ts`, `server/config/rlsProtectedTables.ts`, `server/lib/agentRunVisibility.ts`, `server/lib/agentRunPermissionContext.ts`, `scripts/gates/verify-rls-*.sh`, `scripts/gates/verify-org-id-source.sh`, `scripts/gates/verify-no-db-in-routes.sh`, `scripts/gates/verify-subaccount-resolution.sh`. Layer 2 Module I.
