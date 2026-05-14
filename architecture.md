@@ -2665,6 +2665,8 @@ All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (conf
 <a id="skill-analyzer"></a>
 ## Skill Analyzer
 
+> **UI retired 2026-05-14 (PR #305):** the client wizard subtree (`client/src/components/skill-analyzer/*`) was deleted as dead code after PR #300 (`skill-merge-consolidation-pass`) superseded its workflow. The server pipeline below remains operational; UI-affordance prose in this section describes the underlying REST contract, not a live UI surface.
+
 System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
 
 Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
@@ -2683,7 +2685,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 
 The v2 cycle closed seven correctness holes in the Review + Execute flow. Key additions:
 
-- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; `client/src/components/skill-analyzer/mergeTypes.ts` mirrors it for optimistic UI preview. The server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
+- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; the server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
 - **Warning tier system** (config-driven). Tiers are `informational` | `standard` | `decision_required` | `critical`, mapped per warning code via `skill_analyzer_config.warning_tier_map`. Tier dictates the Approve-button gate: structured resolution (per-field accept/restore for demoted required fields; use-library / use-incoming for name mismatch; scope-down / flag-other / accept-overlap for graph collisions); single-click acknowledgment; or critical-phrase typed confirmation.
 - **Rule-based fallback merger.** When the LLM classifier is unavailable or returns an invalid proposal, `buildRuleBasedMerge` produces a deterministic merge (library-dominant name for DB slug stability; definition-bearing skill wins schema; H2-section union for instructions). Always emits `CLASSIFIER_FALLBACK` warning + low-confidence banner requiring reviewer acknowledgment. No more `proposedMerge=null` dead rows.
 - **Name consistency cascade.** `detectNameMismatch` compares top-level `name`, `definition.name`, and bare-identifier references in description/instructions. When a reviewer resolves via `use_library_name` / `use_incoming_name`, the chosen name cascades atomically into `proposedMergedContent.name`, `definition.name`, and `execution_resolved_name`; Execute reads `execution_resolved_name` as the canonical source to survive drift.
@@ -2756,9 +2758,6 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 | `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
 | `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
 | `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
-| `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Three-column merge view + `WarningResolutionBlock` with per-warning resolution controls |
-| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Review screen, `AgentChipBlock`, `ProposedAgentBanner` with Confirm/Reject |
-| `client/src/components/skill-analyzer/mergeTypes.ts` | Browser-safe mirror of the approval evaluator + warning types |
 
 ### Tests
 
