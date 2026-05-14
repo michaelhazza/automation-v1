@@ -13,28 +13,29 @@
 - [x] Create audit branch off origin/main
 - [x] Initialise audit log
 - [x] Write this progress file
-- [ ] Pass 1 — Area 1 (Dead Code Removal)
-- [ ] Pass 1 — Area 2 (Duplicate Logic)
-- [ ] Pass 1 — Area 3 (Type Definition Consolidation)
-- [ ] Pass 1 — Area 4 (Type Strengthening)
-- [ ] Pass 1 — Area 5 (Error Handling Audit)
-- [ ] Pass 1 — Area 6 (Legacy and Dead Path Removal)
-- [ ] Pass 1 — Area 7 (AI Residue Removal)
-- [ ] Pass 1 — Area 8 (Circular Dependency Resolution)
-- [ ] Pass 1 — Area 9 (Architectural Boundary Violations)
-- [ ] Pass 1 — Area 10 (God-file Register, informational)
-- [ ] Pass 1 — Module I (RLS Three-Layer Compliance)
-- [ ] Pass 1 — Module J (Idempotency, Queue & Job Discipline)
-- [ ] Pass 1 — Module K (Three-Tier Agent Invariants)
-- [ ] Pass 1 — Module L (Skill Registry & Visibility)
-- [ ] Pass 1 — Module M (Capabilities Editorial + Frontend Design)
-- [ ] Pass 1 — Module C (Test Coverage)
-- [ ] Aggregate prevention proposals (Rule 16)
-- [ ] Findings gate — summary + STOP
+- [x] Pass 1 — Area 1 (Dead Code Removal)
+- [x] Pass 1 — Area 2 (Duplicate Logic)
+- [x] Pass 1 — Area 3 (Type Definition Consolidation)
+- [x] Pass 1 — Area 4 (Type Strengthening)
+- [x] Pass 1 — Area 5 (Error Handling Audit)
+- [x] Pass 1 — Area 6 (Legacy and Dead Path Removal)
+- [x] Pass 1 — Area 7 (AI Residue Removal)
+- [x] Pass 1 — Area 8 (Circular Dependency Resolution) — deferred (madge runtime budget)
+- [x] Pass 1 — Area 9 (Architectural Boundary Violations)
+- [x] Pass 1 — Area 10 (God-file Register, informational)
+- [x] Pass 1 — Module I (RLS Three-Layer Compliance)
+- [x] Pass 1 — Module J (Idempotency, Queue & Job Discipline)
+- [x] Pass 1 — Module K (Three-Tier Agent Invariants)
+- [x] Pass 1 — Module L (Skill Registry & Visibility)
+- [x] Pass 1 — Module M (Capabilities Editorial + Frontend Design)
+- [x] Pass 1 — Module C (Test Coverage)
+- [x] Aggregate prevention proposals (Rule 16)
+- [ ] Findings gate — awaiting operator reply (`proceed` / `narrow scope` / `stop`)
 
-## Operator instructions
+## Status
 
-- Mode: exclusive (no parallel)
-- Stop at findings gate; pass 2 deferred until separate session
-- Area 10: informational only; register every file over hard cap; no splits proposed
-- Critical surface (RLS gaps, idempotency holes, three-tier invariant violations, customer-facing editorial breaches) surfaced prominently
+**Pass 1 complete.** Pass 2 not executed (operator instruction). Findings gate is OPEN — waiting on operator reply.
+
+- 1 critical / 5 high / 17 medium / 7 low / 7 informational (positive)
+- 24 symptom items + 24 prevention proposals routed for pass 3 (will append to `tasks/todo.md` on operator confirmation)
+- 4 KNOWLEDGE.md patterns drafted (will append on operator confirmation)
