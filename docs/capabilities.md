@@ -547,6 +547,7 @@ A dedicated AI assistant for individual users — monitors your calendar and inb
 - **Voice and tone** — learns your communication style and applies it when drafting replies and messages, so output sounds like you rather than a generic assistant.
 - **Personal connection privacy** — the assistant uses your personal connected accounts (calendar, email, Slack) exclusively. No other user or agent can access these credentials.
 - **One-time setup** — connects to your accounts in a guided first-run wizard; your personal assistant is available immediately once connections are established.
+- **Standing autonomous operator** — when configured in autonomous mode, your personal assistant operates continuously on your behalf: monitoring your accounts, taking actions within your approval settings, and reporting back when tasks are complete. All autonomous actions respect your configured approval policies; actions above your approval threshold pause for your review before executing.
 
 ### Sandboxed Runtime (IEE)
 

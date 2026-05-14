@@ -36,6 +36,7 @@ import {
   validateLinkedEntity,
   type LinkedEntityRef,
 } from './agentExecutionEventServicePure.js';
+import { runTraceProjectionForViewer } from './runTracePure.js';
 import {
   buildPermissionMask,
   resolveLinkedEntityLabels,
@@ -664,6 +665,40 @@ export async function streamEvents(
   const fromSeq = Math.max(1, opts.fromSeq ?? 1);
   const limit = Math.min(Math.max(1, opts.limit ?? 1000), 1000);
 
+  // Fetch the run's ownerUserId for the viewer projection (spec §5.4).
+  //
+  // Three-state result, MUST distinguish (Round 3 F9 + Round 4 F12):
+  //   - runRows.length === 0 → run not found, OR run belongs to a different
+  //     organisation. The lookup is org-scoped on `agent_runs.organisation_id`
+  //     so a caller passing a runId from another org sees the same empty
+  //     result as a missing run. Fail closed: return an empty page. Do NOT
+  //     coerce missing-row → null, which would put the projection on the
+  //     "subaccount-owned, return all" branch.
+  //   - runRows[0].ownerUserId === null → subaccount-owned run within THIS org,
+  //     all events visible to anyone with the org-scoped permission.
+  //   - runRows[0].ownerUserId === string → owner-owned run, projection applies.
+  //
+  // The org-scope (Round 4 F12) replaces relying on RLS / session context —
+  // service callers must not assume the underlying `db` handle is the right
+  // org-scoped one. The opts.forUser.organisationId is the authoritative org
+  // for this call.
+  const runRows = await db
+    .select({ ownerUserId: agentRuns.ownerUserId })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.id, runId),
+        eq(agentRuns.organisationId, opts.forUser.organisationId),
+      ),
+    )
+    .limit(1);
+
+  if (runRows.length === 0) {
+    return { events: [], hasMore: false, highestSequenceNumber: fromSeq - 1, highestTaskSequence: null };
+  }
+
+  const ownerUserId: string | null = runRows[0].ownerUserId;
+
   const rows = await db
     .select()
     .from(agentExecutionEvents)
@@ -684,7 +719,7 @@ export async function streamEvents(
     collectLinkedEntityIds(page),
   );
 
-  const events: AgentExecutionEvent[] = page.map((row) => {
+  const rawEvents: AgentExecutionEvent[] = page.map((row) => {
     const linkedEntity =
       row.linkedEntityType && row.linkedEntityId
         ? ({
@@ -725,12 +760,29 @@ export async function streamEvents(
     };
   });
 
-  const highestSequenceNumber =
-    events.length > 0 ? events[events.length - 1].sequenceNumber : fromSeq - 1;
+  // Apply viewer projection (spec §5.4 — service layer, first of two layers).
+  const projectedRun = runTraceProjectionForViewer(opts.forUser.id, {
+    ownerUserId,
+    events: rawEvents as unknown as import('./runTracePure.js').ProjectableEvent[],
+  });
+  const events = projectedRun.events as unknown as AgentExecutionEvent[];
 
-  const highestTaskSequence = events.reduce<number | null>((acc, e) => {
-    if (e.taskSequence == null) return acc;
-    return acc == null ? e.taskSequence : Math.max(acc, e.taskSequence);
+  // Cursor advance MUST be driven by the raw (unfiltered) page, not the
+  // projected events. For a non-owner viewer, the projection can redact every
+  // event in the page — leaving `events` empty while `hasMore` is still true.
+  // If we fell back to `fromSeq - 1` here, the client would retry with the
+  // same cursor and never make progress. By taking the last raw row's
+  // sequenceNumber we let the non-owner stream skip past owner-private pages
+  // and converge to the next viewable event.
+  const highestSequenceNumber =
+    page.length > 0 ? page[page.length - 1].sequenceNumber : fromSeq - 1;
+
+  // Task-sequence high-water mark is similarly derived from the raw page so
+  // task-scoped consumers advance past redacted windows. taskSequence is
+  // sparse (null on non-task events), so reduce across page rows that have it.
+  const highestTaskSequence = page.reduce<number | null>((acc, r) => {
+    if (r.taskSequence == null) return acc;
+    return acc == null ? r.taskSequence : Math.max(acc, r.taskSequence);
   }, null);
 
   return { events, hasMore, highestSequenceNumber, highestTaskSequence };
@@ -837,18 +889,72 @@ export async function streamEventsByTask(
     };
   });
 
-  const highestTaskSequence = events.length === 0
-    ? null
-    : events.reduce<number | null>((acc, e) => {
-        if (e.taskSequence == null) return acc;
-        return acc == null ? e.taskSequence : Math.max(acc, e.taskSequence);
+  // Apply viewer projection (spec §5.4 — service layer). Fetch ownerUserId from
+  // the run referenced by the first event; task-scoped events share the same run.
+  //
+  // Same three-state distinction as streamEvents (Round 3 F9 + Round 4 F12):
+  //   - missing run row → fail closed (return empty projected page).
+  //   - cross-org runId → org-scoped lookup returns empty → same fail-closed.
+  //   - ownerUserId IS NULL (within this org) → subaccount-owned, all visible.
+  //   - ownerUserId IS string → owner-owned, projection applies.
+  let ownerUserId: string | null = null;
+  if (events.length > 0) {
+    const runRows = await db
+      .select({ ownerUserId: agentRuns.ownerUserId })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.id, events[0].runId),
+          eq(agentRuns.organisationId, opts.forUser.organisationId),
+        ),
+      )
+      .limit(1);
+    if (runRows.length === 0) {
+      // Event rows exist but the run is gone (or RLS-filtered for another org).
+      // Fail closed — return an empty projected page; cursor high-water marks
+      // come from the raw page below so callers can advance past the gap.
+      const highestTaskSequenceClosed = page.reduce<number | null>((acc, r) => {
+        if (r.taskSequence == null) return acc;
+        return acc == null ? r.taskSequence : Math.max(acc, r.taskSequence);
       }, null);
+      const highestSequenceNumberClosed =
+        page.length > 0 ? page[page.length - 1].sequenceNumber : 0;
+      return {
+        events: [],
+        hasMore,
+        highestSequenceNumber: highestSequenceNumberClosed,
+        highestTaskSequence: highestTaskSequenceClosed,
+      };
+    }
+    ownerUserId = runRows[0].ownerUserId;
+  }
+  const projectedByTask = runTraceProjectionForViewer(opts.forUser.id, {
+    ownerUserId,
+    events: events as unknown as import('./runTracePure.js').ProjectableEvent[],
+  });
+  const projectedEvents = projectedByTask.events as unknown as AgentExecutionEvent[];
 
-  // highestSequenceNumber uses the per-run sequence of the last event in page.
+  // Cursor advance MUST be driven by the raw (unfiltered) page, not the
+  // projected events. For a non-owner viewer, the projection can redact every
+  // row in the page — leaving `projectedEvents` empty while `hasMore` is still
+  // true. If the high-water marks fell back to null / 0 in that case, callers
+  // that page via `(highestTaskSequence, highestSequenceNumber)` would retry
+  // the same private window forever instead of advancing past it. Taking
+  // values from the raw page lets the non-owner stream skip redacted
+  // windows and converge to the next viewable event. Mirrors the same fix in
+  // `streamEvents` above (spec §5.4 — projection invariant).
+  const highestTaskSequence = page.reduce<number | null>((acc, r) => {
+    if (r.taskSequence == null) return acc;
+    return acc == null ? r.taskSequence : Math.max(acc, r.taskSequence);
+  }, null);
+
+  // highestSequenceNumber uses the per-run sequence of the last raw row in
+  // the page (rows are ordered by (task_sequence, event_subsequence) ASC, so
+  // the last row's sequenceNumber is the appropriate high-water mark).
   const highestSequenceNumber =
-    events.length > 0 ? events[events.length - 1].sequenceNumber : 0;
+    page.length > 0 ? page[page.length - 1].sequenceNumber : 0;
 
-  return { events, hasMore, highestSequenceNumber, highestTaskSequence };
+  return { events: projectedEvents, hasMore, highestSequenceNumber, highestTaskSequence };
 }
 
 // ---------------------------------------------------------------------------

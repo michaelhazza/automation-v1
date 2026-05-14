@@ -1327,6 +1327,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0349_create_browser_warm_sessions.sql',
     rationale: 'Per-subaccount warm browser session rows (available → leased → terminated lifecycle) — dual-GUC (org + subaccount) RLS; cross-tenant leak exposes warm-session topology and idle cost attribution.',
   },
+  // 0353 — Personal Assistant V2 Operator: per-run operator file artefact pointers
+  {
+    tableName: 'operator_run_files',
+    schemaFile: 'operatorRunFiles.ts',
+    policyMigration: '0353_operator_run_files.sql',
+    rationale: 'Per-run operator file artefact pointers with R2 storage keys — content-sha256, MIME type, and emitted_by metadata are scoped per org. Cross-tenant leak exposes another org\'s operator run file paths and storage keys.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

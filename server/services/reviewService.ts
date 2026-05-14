@@ -9,6 +9,7 @@ import { emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 import { postReviewItemToSlack } from './slackConversationService.js';
 import { checkIdempotency, type ReviewStatus } from './reviewServicePure.js';
+import { isWrongApprover } from './actionServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Review Service — manages human review queue for gated actions
@@ -122,6 +123,22 @@ export const reviewService = {
     }
 
     // idempotencyOutcome === 'proceed' — run the normal write path.
+
+    // Cross-owner approver gate — if the action was explicitly designated for a
+    // specific approver (approver_user_id IS NOT NULL), only that user may approve.
+    // Prevents an initiating user or org admin from bypassing the executor-owner
+    // approval routing invariant (spec §5.5).
+    const [actionRow] = await db
+      .select({ approverUserId: actions.approverUserId })
+      .from(actions)
+      .where(and(eq(actions.id, preCheck.actionId), eq(actions.organisationId, organisationId)));
+
+    if (isWrongApprover(actionRow?.approverUserId, userId)) {
+      throw Object.assign(
+        new Error('This action is designated for a different approver'),
+        { statusCode: 403, errorCode: 'WRONG_APPROVER' },
+      );
+    }
 
     const pendingGuard = and(
       eq(reviewItems.id, reviewItemId),
@@ -316,6 +333,21 @@ export const reviewService = {
     }
 
     // idempotencyOutcome === 'proceed' — run the normal write path.
+
+    // Cross-owner approver gate — if the action was explicitly designated for a
+    // specific approver (approver_user_id IS NOT NULL), only that user may reject.
+    // Mirrors the identical gate in approveItem (spec §5.5).
+    const [actionRow] = await db
+      .select({ approverUserId: actions.approverUserId })
+      .from(actions)
+      .where(and(eq(actions.id, preCheck.actionId), eq(actions.organisationId, organisationId)));
+
+    if (isWrongApprover(actionRow?.approverUserId, userId)) {
+      throw Object.assign(
+        new Error('This action is designated for a different approver'),
+        { statusCode: 403, errorCode: 'WRONG_APPROVER' },
+      );
+    }
 
     const pendingGuard = and(
       eq(reviewItems.id, reviewItemId),

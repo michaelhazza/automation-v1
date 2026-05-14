@@ -20,6 +20,8 @@ import {
   InvalidStateTransitionError,
 } from './operatorSessionLifecycleServicePure.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
+import { operatorSessionInitialContextBundler } from './operatorSessionInitialContextBundler.js';
+import type { OperatorSessionInitialContextBundle } from './operatorSessionInitialContextBundlerPure.js';
 
 // ---------------------------------------------------------------------------
 // Audit action mapping — spec §7.5 / chunk 3 task description
@@ -102,5 +104,23 @@ export const operatorSessionLifecycleService = {
     });
 
     return { transitioned: true };
+  },
+
+  /**
+   * Build the initial-context bundle for an operator session start.
+   *
+   * Callers (e.g. operatorManagedBackend) include the returned bundle in the
+   * runtime boot payload. Full wiring is deferred to runtime integration work.
+   *
+   * Requires an active withOrgTx context.
+   */
+  async startSession(input: {
+    agentId: string;
+    ownerUserId: string;
+    subaccountAgentId: string;
+    organisationId: string;
+    subaccountId: string;
+  }): Promise<OperatorSessionInitialContextBundle> {
+    return operatorSessionInitialContextBundler.build(input);
   },
 };

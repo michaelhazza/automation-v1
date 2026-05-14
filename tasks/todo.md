@@ -85,6 +85,13 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 - [ ] **OAuth state security audit trail** — `auth.login.failure` / `auth.login.success` / OAuth state events / abuse events now live in `security_audit_events` (migration 0281). Architecture.md §Layer 4 documents the stream split. Operator action: confirm dashboards in Grafana / Mission Control surface the new stream before deprecating the legacy `audit_events` records.
 
+## From builder — 2026-05-13
+
+- **PA-V2-C4-1** — `cross_owner.ask_initiator_decision` action type is not registered in `server/config/actionRegistry/`. The `crossOwnerApprovalTimeoutSweep` ask_initiator branch wraps the `proposeAction` call in a try-catch and logs a warning if it fails. A registry entry is needed for the initiator-decision action to actually land in the approval queue. Suggest adding to `server/config/actionRegistry/agents.ts` or a new `crossOwner.ts` file.
+- **PA-V2-C4-2** — `server/services/agentExecutionEventServicePure.ts` has no validator cases for `cross_owner_substep.awaiting_initiator_decision` or `cross_owner_substep.completed`. The `validateEventPayload` switch hits `default: never` and returns `{ ok: false }`, silently dropping these events. Needs two new case branches added to the switch statement.
+- **PA-V2-C4-3** — `server/services/actionService.ts` line 2: `createHash` imported from `'crypto'` but unused — pre-existing dead import, not introduced by this chunk.
+- **PA-V2-C4-4** — `listPendingApprovalsForUser` spec says apply `isActive(actions)` but the `actions` table has no `deletedAt` column so the filter was not applied. Spec note is incorrect — actions are not soft-deletable in the current schema.
+
 ---
 
 ## Closed by memory-improvements (PR #298, 2026-05-13)
@@ -113,6 +120,110 @@ These are noted to prevent re-discovery — none are urgent.
 - No refresh token rotation on OAuth integrations.
 
 ---
+
+## Deferred spec decisions — personal-assistant-v2-operator
+
+From `spec-reviewer` iteration 1 against `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md` (2026-05-13). PA-V2-OP-S1 and PA-V2-OP-S2 RESOLVED 2026-05-13 by operator via spec-coordinator decision prompt; the spec now encodes both decisions directly. Items below retained for audit trail.
+
+- RESOLVED 2026-05-13: **PA-V2-OP-S1** — strategy (a): new table `operator_run_files`. Migration 0353 creates the table keyed on `agent_run_id → agent_runs.id` with full column set, UNIQUE `(agent_run_id, path)`, RLS policy filtering on the row's own `organisation_id`, plus an entry in `server/config/rlsProtectedTables.ts`. Spec §4.1 + §6.1 + §13 #1 updated. No longer blocks Chunk 7.
+
+- RESOLVED 2026-05-13: **PA-V2-OP-S2** — strategy (a): extend `delegation_outcomes`. Migration 0352 (`0352_delegation_outcomes_cross_owner_state.sql`) adds three columns: `cross_owner_approval_timeout_policy TEXT NULL`, `substep_status TEXT NOT NULL DEFAULT 'proposed'` (canonical §9.7 vocabulary), `terminal_at TIMESTAMPTZ NULL`, plus a partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` for the §9.4 uniqueness predicate. Spec §4.1 + §5.4 + §9.4 + §13 #2 updated. No longer blocks Chunk 3.
+   
+   Spec-reviewer (iteration 3) recommends strategy (a). Operator/architect input needed; spec encodes both options in §13 open question #2.
+
+- [ ] **PA-V2-OP-INFO-1** — The orchestrator routing module path was previously TBD in §4.3. Spec-reviewer resolved it to `server/tools/capabilities/capabilityDiscoveryHandlers.ts` (entry point: `executeCheckCapabilityGap`, dispatched by `server/services/skillExecutor.ts:1767-1770`). Informational only; recorded here so the next implementer/audit can confirm the path before Chunk 2 begins.
+
+- [ ] **PA-V2-OP-INFO-2** — During spec authoring §13 listed an open authoring question: whether `runTraceProjectionForViewer` deserves a dedicated `*Pure.ts` split. Defers to the implementer's judgement on test surface during Chunk 3. No action needed pre-implementation.
+
+## From builder — 2026-05-13
+
+- **PA-V2-OP-C3-NOTE-1** — `GET /api/agent-runs/:id/trace-events` was not modified by Chunk 3. The spec says to apply `runTraceProjectionForViewer` to both `trace-events` and `trace` endpoints, but `trace-events` returns a `toolCallsLog` (LLM tool call objects without an `eventType` field — already role-projected via `projectForRole`). Applying the viewer projection to this endpoint would require either a different projection strategy or a new endpoint-specific filter. The `trace` endpoint was modified as specified. The `trace-events` gap should be reviewed when the full privacy model for LLM payload drilldown is defined (spec §5.4 may need a supplementary clause for tool-call payloads).
+- **PA-V2-OP-C3-NOTE-2** — `authorise()` in `executeCheckCapabilityGap` returns `fail_closed` (with `clarifying_question`) whenever no cross-owner signal is detected (no possessive pattern AND no trusted tool-call payload). This means every `check_capability_gap` call with intent text that doesn't include a possessive name reference will receive a `cross_owner_clarification_required` error. If this proves too aggressive in production (false-positive clarification prompts for ordinary tasks), the fix is to make `authorise` return a fourth outcome (`{ authorised: false, clarifying_question: null }`) when no cross-owner intent was detected, and only surface the question when a pattern was detected but couldn't be resolved. Needs spec amendment.
+
+---
+
+## Cross-owner approver wiring (adversarial finding, post-V2-build)
+
+`server/services/actionServicePure.ts:14` — `deriveApproverUserId` is exported and tested but never called from production code. The spec (§5.5) requires cross-owner action proposals to set `approver_user_id = executor_agent.owner_user_id`. The wiring requires:
+1. Adding `executorOwnerUserId?: string | null` to `MiddlewareContext` in `server/services/middleware/types.ts`
+2. Populating it in the agent execution loop when the run has `agentRuns.ownerUserId` set AND the run is a cross-owner sub-run (detected via `agentRuns.parentRunId` + `delegation_outcomes.substep_status = 'awaiting_cross_owner_approval'`)
+3. Calling `deriveApproverUserId({ isCrossOwner: ..., executorOwnerUserId: ctx.executorOwnerUserId })` in `proposeActionMiddleware.ts` and passing the result as `approverUserId` to `actionService.proposeAction`
+
+Risk: without this wiring, cross-owner EA actions default to `approver_user_id = NULL` (initiator-defaulted path), meaning any org user with REVIEW_APPROVE can approve them rather than exclusively the executor's owner.
+
+Workaround: Fix 5 (approveItem gate in reviewService) partially mitigates this by blocking wrong approvers, but only after an explicit approver is set. When approverUserId is NULL, Fix 5 is a no-op (the `!== null` guard doesn't fire).
+
+Discovered by: adversarial-reviewer, 2026-05-14.
+
+## Deferred from spec-conformance review — personal-assistant-v2-operator (2026-05-13)
+
+**Captured:** 2026-05-13T20:55:39Z
+**Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v2-operator-full-2026-05-13T20-55-39Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-13-personal-assistant-v2-operator-spec.md`
+
+- [ ] **PA-V2-CONFORMANCE-1** — `operator_run_files.subaccount_id` nullability divergence
+  - Spec section: §4.1 (migration 0353 column list)
+  - Gap: Spec specifies `subaccount_id UUID NOT NULL`. Migration 0353 adds the column as NULL (and Drizzle schema `server/db/schema/operatorRunFiles.ts` mirrors this without `.notNull()`). Spec inventory is explicit about NOT NULL.
+  - Suggested approach: Author a new follow-up migration (0357 or later) to backfill any NULL `subaccount_id` from `agent_runs.subaccount_id`, then add `SET NOT NULL`. Update Drizzle schema in the same PR. Alternative: amend spec §4.1 if the operator decides the looser constraint is correct (a backfill via FK may surface migration-time pain that the spec did not anticipate).
+
+- [ ] **PA-V2-CONFORMANCE-2** — Initial-context bundler reads timezone from `subaccount_agents.scheduleTimezone`, not `users` table
+  - Spec section: §5.8 (`owner_identity.timezone`), §4.2 bundler row ("Reads ... `users WHERE id = ea.owner_user_id` for timezone + working hours")
+  - Gap: `server/services/operatorSessionInitialContextBundler.ts:115-128` reads `subaccount_agents.scheduleTimezone`. Spec said to read `users` for timezone. `working_hours` and `recent_activity_summary` are hard-coded to null/omitted (spec said to populate them from `users` table and the existing summary store).
+  - Suggested approach: confirm which is the canonical timezone source for the EA's owner (the spec was written before this implementation choice was finalised; if `users` doesn't carry a timezone field today, amend spec to point at `subaccount_agents` and add a note in §5.8 about the data source). Working-hours/recent-activity-summary are explicitly deferred — call this out in the spec or in the bundler comment, not silently.
+
+- [ ] **PA-V2-CONFORMANCE-3** — `operatorSessionLifecycleService.startSession` has zero production callers
+  - Spec section: §4.3 ("At session start (`operator_runs` insert path), call `operatorSessionInitialContextBundler` for EA-templated operator sessions; serialise into the operator runtime's start payload.")
+  - Gap: `startSession` exists in `server/services/operatorSessionLifecycleService.ts:117-125` and delegates to the bundler, but no code in `server/` invokes it. The "operator_runs insert path" never reads the bundle.
+  - Suggested approach: Wire `startSession` into the operator-run insertion path (likely `operatorSessionService.ts` or `operatorChainResumeService.ts`). If the operator runtime is infra-managed and runtime integration is genuinely out of scope for V1 CI, document the deferral explicitly in `tasks/builds/personal-assistant-v2-operator/handoff.md` and amend spec §4.3 to mark the row "deferred to runtime integration."
+
+- [ ] **PA-V2-CONFORMANCE-4** — `operatorSessionService.handleFileWriteToolCall` has zero production callers
+  - Spec section: §4.3 ("Wire the file-event bridge into the operator-session tool-registry handler so file-write tool calls trigger `operatorSandboxFileEventBridge.handle*` before returning to the runtime.")
+  - Gap: `handleFileWriteToolCall` exists in `server/services/operatorSessionService.ts:625-637` and routes to the bridge, but no code path invokes it. The operator-runtime tool-registry does not call back into this handler.
+  - Suggested approach: same as PA-V2-CONFORMANCE-3 — runtime tool-registry wiring is the missing piece. Either ship the wiring (likely in operatorSessionService at the runtime ↔ host bridge boundary) or document the deferral in handoff.md and spec §4.3.
+
+- [ ] **PA-V2-CONFORMANCE-5** — File event payload shape diverges from spec §5.7 sketch
+  - Spec section: §5.7 (`OperatorFileEvent` type)
+  - Gap: Code in `shared/types/operatorEvents.ts` uses `eventType` (spec: `type`), `sizeBytes` (spec: `size`), and OMITS `emittedAt` entirely. The `eventType`/`sizeBytes` renames bring the payload into convention with the rest of `AGENT_EXECUTION_EVENT_CRITICALITY` (enforced by `verify-operator-event-registry.sh`) — likely deliberate convergence. `emittedAt` absence is harder to justify: spec lists it as a required field.
+  - Suggested approach: amend spec §5.7 contract to use the registry-conventional field names (`eventType`, `sizeBytes`); decide whether `emittedAt` should be added to the payload (it's somewhat redundant with the row-level `eventTimestamp` set by `appendEvent`, but the spec said the FE consumes it). Two cleanest paths: (a) add `emittedAt: new Date().toISOString()` inside the `appendEvent` payload in `operatorSandboxFileEventBridge.ts` to satisfy spec; (b) amend spec to drop `emittedAt` from the payload contract and document `eventTimestamp` as the canonical source.
+
+- [ ] **PA-V2-CONFORMANCE-6** — `runTraceProjectionForViewer` does not strip per-state timestamps from cross-owner substep rows
+  - Spec section: §5.4 ("Initiator-visible lifecycle timing invariant")
+  - Gap: The projection helper at `server/services/runTracePure.ts:26-42` filters only by event-type prefix. The spec requires an allow-list of timestamp fields when projecting cross-owner sub-step ROWS (not events) to the initiator (`authorised_at`, `routed_at`, `executing_started_at` and any other lifecycle-state timing field on `delegation_outcomes` must be owner-private by default).
+  - Suggested approach: extend the projection helper with a substep-row projection mode that takes a `delegation_outcomes` row and returns a redacted shape with only coarse status visible. Apply it in `agentExecutionEventService` whenever a cross-owner sub-step row is serialised on the read path. Add a pure-function test exercising the allow-list. Open question for the implementer: do any read paths surface `delegation_outcomes` rows directly to the initiator today? If not, this can be deferred until a consumer is added — capture as a precondition note in `architecture.md` so the next consumer wires it.
+
+- [ ] **PA-V2-CONFORMANCE-7** — `recomputeCapabilityMapWithOwner(tx?)` is not invoked from any `agents.ownerUserId` write path
+  - Spec section: §6.4 ("When `agents.owner_user_id` is changed (rare — typically only on re-seeding or user reassignment), `capability_map.owner_user_id` MUST be recomputed in the same transaction.")
+  - Gap: The function exists with a `tx` parameter, but `agents.ownerUserId` has no current mutation surface in production code, so the invariant is unenforced. If a future surface lands without invoking the recompute, the capability map will silently drift. The `verify-capability-map-shape.sh` gate would catch the drift after the fact, but not at write time.
+  - Suggested approach: add an architecture.md note + an `architecture-rules` test that asserts any future `agents.ownerUserId` write site calls `recomputeCapabilityMapWithOwner(subaccountAgentId, tx)` inside the same transaction. Or accept the gate-only enforcement and document.
+
+- [ ] **PA-V2-CONFORMANCE-8** — Sandbox file-watcher IPC will not deliver events
+  - Spec section: §4.5 (sandbox-template change)
+  - Gap: `infra/sandbox-templates/operator-session/entrypoint.sh:9` launches `node /workspace/file-watcher.js &` as a backgrounded shell process. `process.send` requires `child_process.fork()`, so the watcher's `sendIpc` calls fall through to the "IPC not available" branch and the events are dropped.
+  - Suggested approach: the sandbox-template is explicitly infra-managed (Dockerfile header: "PLACEHOLDER: not built by V1 CI. Real build and publish is managed by the Operator Backend infra pipeline."). Either replace the entrypoint with a Node parent process that forks the watcher and bridges IPC over the runtime ↔ host channel, or document the runtime-side contract the infra pipeline must satisfy. Tracked here so future infra work doesn't ship the watcher in a non-functional state.
+
+- [ ] **PA-V2-LIST-APPROVALS-V1-ARM** — wire V1 initiator-defaulted arm into listPendingApprovalsForUser
+  - Origin: chatgpt-pr-review Round 1 F5 (PR #299, personal-assistant-v2-operator).
+  - Context: `listPendingApprovalsForUser` in `server/services/actionService.ts` was shipped with only the explicit-approver arm (`approver_user_id = $userId`). The earlier Arm 2 (`approver_user_id IS NULL`) was removed because it had no V1 initiator predicate and would have exposed every default-approver action in the org/subaccount to any caller.
+  - When to wire: when a caller actually needs the V1 default-approver path through this function. Today the V1 default approver flow is handled elsewhere; this function's scope is the V2 cross-owner approval queue only.
+  - Suggested approach: JOIN actions → agent_runs to derive the run's initiator (column TBD — `agent_runs` has `actingAsUserId` + the principal model; check whichever V1 uses today as the default-approver). Add an Arm 2 that returns `approver_user_id IS NULL` rows where the run's initiator equals `$userId`. Keep the org filter mandatory.
+
+- [ ] **PA-V2-WATCHER-HOST-BRIDGE** — host-side IPC handler that reads sandbox file content
+  - Origin: chatgpt-pr-review Round 1 F1 (PR #299, personal-assistant-v2-operator).
+  - Context: `infra/sandbox-templates/operator-session/file-watcher.js` sends metadata-only IPC payloads (path, sha256-hint, sizeBytes, emittedBy). The canonical `operatorSandboxFileEventBridge.handleWatcherEvent` requires `content: Buffer`. A host-side bridge is needed to read the file from the sandbox shared volume and call `handleWatcherEvent` with the populated payload.
+  - Why deferred: the operator-session sandbox template is explicitly placeholder-only (`README.md`, `Dockerfile`, `entrypoint.sh` all declare PLACEHOLDER status; real implementation lands with the Operator Backend infra pipeline). Pairs with `PA-V2-CONFORMANCE-8` (same infra deliverable, same template).
+  - Suggested approach: spawn watcher.js via `child_process.fork()` from a Node parent (replaces the current sh-backgrounded approach). The parent receives the metadata payload, opens the file from the mounted sandbox volume, calls `handleWatcherEvent({ ...payload, content })` against the canonical bridge. Apply a size cap (10 MB suggested) before reading.
+
+- [ ] **PA-V2-OPERATOR-TEMPLATE-PROMOTION** — promote operator-session template to a CI-built artefact
+  - Origin: chatgpt-pr-review Round 1 T2 (PR #299, personal-assistant-v2-operator).
+  - Context: `infra/sandbox-templates/operator-session/` currently contains active runtime logic (chokidar watcher, Dockerfile, entrypoint.sh) but is documented as PLACEHOLDER and is not built/scanned/tested by V1 CI. ChatGPT flagged this as a grey-zone risk — production-relevant code outside CI coverage, especially the sandbox-side file-access path.
+  - Why deferred: real implementation lands with the operator-backend spec; this PR is intentionally consistent with the placeholder framing per the template's own README (`Placeholder scaffolding. Real implementation lands with the Operator Backend spec; V1 CI does not build, scan, or publish this template.`).
+  - Suggested approach: once operator-backend activates this directory, extend `verify-template-version-coherence` to include the path, add a Dockerfile build job in CI, run security scans on the built image, and add an integration test that the watcher's IPC payload matches `WatcherFileEventInput`'s expected shape.
+
+- [ ] **PA-V2-EVENT-IDEMPOTENCY** — content-keyed idempotency in appendEvent
+  - Origin: chatgpt-pr-review Round 3 F10/F11 residual edge case (PR #299, personal-assistant-v2-operator).
+  - Context: `appendEvent` in `server/services/agentExecutionEventService.ts` has no content-based dedupe key. The current claim+emit pattern in `crossOwnerApprovalTimeoutSweep` uses a stale-claim TTL (5 min) to retry crashed emissions, which means a process crash AFTER successful `appendEvent` but BEFORE the `emitted_at` UPDATE will produce a duplicate event when a future sweep re-claims past the staleness threshold.
+  - Why deferred: full event-idempotency support requires extending the `agent_execution_events` schema with an optional `idempotency_key` column + unique index, plus an `appendEvent` API extension. That's a broader refactor than the PA-V2 build should carry, and the residual risk in this build is small (single-process transient between two adjacent DB writes; pg-boss singleton serialisation reduces concurrent-sweep risk further).
+  - Suggested approach: add `agent_execution_events.idempotency_key` (nullable text) + `UNIQUE(run_id, event_type, idempotency_key) WHERE idempotency_key IS NOT NULL`; extend `appendEvent` to accept an optional `idempotencyKey` field that, when set, suppresses duplicate writes via `ON CONFLICT DO NOTHING RETURNING 1`. Then the sweep can append events idempotently and drop the stale-claim TTL altogether.
 
 ## Blockers
 
