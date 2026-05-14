@@ -175,7 +175,14 @@ export default function Layout({ user, children }: LayoutProps) {
       <CreateClientModal
         open={showCreateClient}
         onClose={() => setShowCreateClient(false)}
-        onCreated={(client) => { identity.addSubaccount(client); identity.selectClient(client); }}
+        onCreated={(client) => {
+          identity.addSubaccount(client);
+          identity.selectClient(client);
+          // Background refetch syncs server-side normalisation (slug / status /
+          // ordering / enrichment). Pre-refactor Layout.tsx ran an /api/subaccounts
+          // refetch right after the create.
+          void identity.refreshSubaccounts();
+        }}
       />
       <NewBriefModal
         open={showNewBrief}

@@ -26,6 +26,7 @@ export interface LayoutIdentity {
   selectClientFromPalette(id: string, name: string): void;
   clearClient(): void;
   addSubaccount(sa: ClientOption): void;
+  refreshSubaccounts(): Promise<void>;
   logout(): Promise<void>;
 }
 
@@ -116,6 +117,19 @@ export function useLayoutIdentity(user: User): LayoutIdentity {
     setSubaccounts(prev => (prev.some(s => s.id === sa.id) ? prev : [...prev, sa]));
   }, []);
 
+  // Background refetch used after CreateClientModal commits, so server-side
+  // normalisation (slug, status, ordering, enrichment) lands in the rail.
+  // Pairs with addSubaccount's optimistic insert.
+  const refreshSubaccounts = useCallback(async () => {
+    if (!hasOrgContext) return;
+    try {
+      const { data } = await api.get('/api/subaccounts');
+      setSubaccounts(data);
+    } catch (err) {
+      console.error('[Layout] Failed to refresh subaccounts:', err);
+    }
+  }, [hasOrgContext]);
+
   const logout = useCallback(async () => {
     try { await api.post('/api/auth/logout'); } finally {
       disconnectSocket();
@@ -137,6 +151,7 @@ export function useLayoutIdentity(user: User): LayoutIdentity {
     selectClientFromPalette,
     clearClient,
     addSubaccount,
+    refreshSubaccounts,
     logout,
   };
 }

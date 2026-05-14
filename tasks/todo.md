@@ -1518,3 +1518,13 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Spec:** `tasks/builds/feat-split-subaccountknowledgepage/spec.md`
 
 - [x] **REQ #1 — `ReferencesTab.tsx` exceeds the §10 Chunk 4 conditional extraction threshold.** RESOLVED 2026-05-15: extracted `RenameReferenceModal.tsx` per spec §10 Chunk 4 with the named prop shape (`subaccountId`, `reference`, `initialTitle`, `onClose`, `onRenamed`). The modal owns its `title` state seeded from `initialTitle`, calls `api.patch` + `toast.success('Reference renamed')` + `await onRenamed()` directly. `ReferencesTab.tsx` now shrunk and the rename modal is fully self-contained. Typecheck + build clean.
+
+---
+
+## 2026-05-15 — page-splits chatgpt-pr-review Round 1 deferrals
+
+**Captured:** 2026-05-15 (PR #313 chatgpt-pr-review Round 1)
+**Source log:** `tasks/review-logs/chatgpt-pr-review-page-splits-2026-05-14T21-53-53Z.md`
+
+- [ ] **PAGE-SPLITS-T1 — Consolidate duplicate `formatTime` / `formatConvDate` helpers across agent-chat and config-assistant.** ChatGPT-suggested follow-up. The page-split refactor authored these helpers separately under `client/src/components/agent-chat/format.ts` and `client/src/components/config-assistant/format.ts` to keep each split atomic. Move to a shared `client/src/components/chat/format.ts` (or `lib/dateFormat.ts`) in a follow-up. Acceptable for this PR.
+- [ ] **PAGE-SPLITS-T2 — Tighten weak error handling in extracted components.** Pre-existing weak error handling (swallowed `create-project` errors, `category`/`workflow` delete calls without catch) was carried through unchanged by the splits. Not introduced by PR #313 but worth a cleanup pass.

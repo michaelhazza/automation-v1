@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
 import type { ClientOption } from '../../../hooks/useLayoutIdentity';
 
@@ -13,6 +13,18 @@ export function CreateClientModal({ open, onClose, onCreated }: CreateClientModa
   const [newClientSlug, setNewClientSlug] = useState('');
   const [createClientError, setCreateClientError] = useState('');
   const [createClientLoading, setCreateClientLoading] = useState(false);
+
+  // Pre-split Layout.tsx reset these on every open. The extracted modal stays
+  // mounted across close/reopen, so without an open-effect reset stale values
+  // (failed-create errors, half-filled fields) reappear next time.
+  useEffect(() => {
+    if (open) {
+      setNewClientName('');
+      setNewClientSlug('');
+      setCreateClientError('');
+      setCreateClientLoading(false);
+    }
+  }, [open]);
 
   if (!open) return null;
 

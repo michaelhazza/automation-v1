@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { BriefCreationEnvelope } from '../../../../../shared/types/briefFastPath.js';
 import api from '../../../lib/api';
 import type { LayoutIdentity, OrgOption, ClientOption } from '../../../hooks/useLayoutIdentity';
@@ -20,14 +20,27 @@ export function NewBriefModal({ open, onClose, identity, orgs, subaccounts, onSu
   const [briefOrgOverride, setBriefOrgOverride] = useState<OrgOption | null>(null);
   const [briefSubaccountOverride, setBriefSubaccountOverride] = useState<ClientOption | null>(null);
 
-  // Seed override state when the modal opens, matching the previous handleOpenNewBrief logic
+  // Seed override state on the closed -> open transition, then re-seed if orgs
+  // or subaccounts arrive after open (covers the in-flight-data race) or if
+  // identity changes while the modal is open. We track previous-open via a ref
+  // so the reseed fires exactly once per open cycle rather than on every render.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
-      setBriefOrgOverride(orgs.find((o) => o.id === identity.activeOrgId) ?? null);
-      setBriefSubaccountOverride(subaccounts.find((s) => s.id === identity.activeClientId) ?? null);
+    if (!open) { wasOpenRef.current = false; return; }
+    const opening = !wasOpenRef.current;
+    wasOpenRef.current = true;
+    const nextOrg = orgs.find((o) => o.id === identity.activeOrgId) ?? null;
+    const nextSub = subaccounts.find((s) => s.id === identity.activeClientId) ?? null;
+    if (opening) {
+      setBriefOrgOverride(nextOrg);
+      setBriefSubaccountOverride(nextSub);
+      return;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    // Already open. Patch only when the previous seed was null (initial open
+    // had no data yet) or when the activeOrg/activeClient changed underneath.
+    setBriefOrgOverride((prev) => (prev === null ? nextOrg : prev));
+    setBriefSubaccountOverride((prev) => (prev === null ? nextSub : prev));
+  }, [open, orgs, subaccounts, identity.activeOrgId, identity.activeClientId]);
 
   if (!open || !identity.activeClientId) return null;
 
