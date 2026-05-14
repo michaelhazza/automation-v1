@@ -56,6 +56,15 @@ jobs:
         run: npx tsx scripts/verify-workspace-actor-coverage.ts
 
       - name: Run tests
+        env:
+          # Enable regression-only mode on the static gate suite — fails only
+          # when a guard's current violation count exceeds its baseline in
+          # `scripts/guard-baselines.json`. Without this, every gate exits
+          # non-zero on the slightest count > 0, which is the wrong gate
+          # semantic for a programme that lands gates incrementally and
+          # tightens baselines over time. See `scripts/lib/guard-utils.sh`
+          # `check_baseline()` for the contract.
+          GUARD_BASELINE: 'true'
         run: npm test
 
   integration_tests:

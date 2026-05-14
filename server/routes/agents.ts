@@ -33,6 +33,11 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 
+// Audit F5 (2026-05-14, [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z]):
+// this route has no requireOrgPermission(AGENTS_VIEW) gate. Branches:
+// (a) ownerScope=user → list caller's own agents (always allowed);
+// (b) default → service-layer filters via listAgents/listAllAgents on req.orgId.
+// Deferred to product decision (see tasks/todo.md F5).
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
   if (req.query.ownerScope === 'user') {
     const rows = await agentService.listOwnedByUser(req.orgId!, req.user!.id);
