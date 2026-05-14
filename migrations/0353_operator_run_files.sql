@@ -64,8 +64,7 @@ ALTER TABLE operator_run_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operator_run_files FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS operator_run_files_org_isolation ON operator_run_files;
-CREATE POLICY operator_run_files_org_isolation
-  ON operator_run_files
+CREATE POLICY operator_run_files_org_isolation ON operator_run_files
   USING (
     current_setting('app.organisation_id', true) IS NOT NULL
     AND current_setting('app.organisation_id', true) <> ''
