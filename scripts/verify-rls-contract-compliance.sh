@@ -84,6 +84,15 @@ WHITELIST=(
   "server/routes/systemEngines.ts"
   "server/routes/projects.ts"
   "server/routes/llmUsage.ts"
+  # Operator Backend task-action routes import db for the readAgentRunOrThrow
+  # helper + dual-GUC transactions (fresh-profile-restart, extend-budget).
+  # Pattern matches existing complex routes above; full extraction into
+  # services would require a new agentRunReadService and is tracked as
+  # deferred backlog (H2). Spec §6.5b.
+  "server/routes/operatorTasks.ts"
+  # Operator Backend progress poll route: dual-GUC tx on operator_runs read.
+  # Spec §7.3 R2-F1.
+  "server/routes/operatorSessions.ts"
 )
 
 is_allowlisted_path() {

@@ -11,6 +11,7 @@ import { WorkflowsTab } from '../components/admin-subaccount-detail/WorkflowsTab
 import { CategoriesTab } from '../components/admin-subaccount-detail/CategoriesTab';
 import { BoardConfigTab } from '../components/admin-subaccount-detail/BoardConfigTab';
 import { AdminTab } from '../components/admin-subaccount-detail/AdminTab';
+import OperatorSettingsTab from './govern/operatorSettings/OperatorSettingsTab';
 import type { Subaccount, Category, ProcessLink, OrgProcess, ActiveTab } from '../components/admin-subaccount-detail/types';
 import { TAB_LABELS } from '../components/admin-subaccount-detail/types';
 
@@ -27,9 +28,18 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [loading, setLoading] = useState(true);
 
   const [searchParams] = useSearchParams();
+  const canSeeOperatorTab = mode === 'admin' && (
+    _user.role === 'org_admin' || _user.role === 'manager' ||
+    _user.role === 'subaccount_admin' || _user.role === 'system_admin'
+  );
+  const canEditOperatorSettings =
+    _user.role === 'org_admin' || _user.role === 'subaccount_admin' || _user.role === 'system_admin';
+  const adminTabs: ActiveTab[] = ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board'];
+  if (canSeeOperatorTab) adminTabs.push('operator');
+  adminTabs.push('usage', 'workspace', 'admin');
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['board', 'categories']
-    : ['onboarding', 'engines', 'workflows', 'agents', 'beliefs', 'categories', 'tags', 'board', 'usage', 'workspace', 'admin'];
+    : adminTabs;
   const initialTab = (() => {
     const t = searchParams.get('tab') as ActiveTab | null;
     return t && visibleTabs.includes(t) ? t : visibleTabs[0];
@@ -171,6 +181,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       {/* Workspace */}
       {activeTab === 'workspace' && subaccountId && (
         <WorkspaceTabContent subaccountId={subaccountId} />
+      )}
+
+      {/* Operator Settings */}
+      {activeTab === 'operator' && subaccountId && (
+        <OperatorSettingsTab subaccountId={subaccountId} canEdit={canEditOperatorSettings} />
       )}
     </div>
   );

@@ -1,0 +1,18 @@
+# Gate baseline file — no-missing-deps.txt
+#
+# PURPOSE: Pre-existing packages imported but not declared in package.json.
+# Suppression path: add to optionalDependencies (preferred over baselining).
+#   This is the established pattern for dynamic-only imports (docx, mammoth).
+#   For script-only transitive deps, optionalDependencies is also the right tier.
+#
+# FORMAT:
+#   # expires: YYYY-MM-DD
+#   <package-name>:0:<reason>
+#
+# HOW TO REMOVE AN ENTRY:
+#   1. Add the package to package.json optionalDependencies.
+#   2. Remove this entry.
+#   3. Run verify-no-missing-deps.sh to confirm gate passes.
+
+# expires: 2026-11-14
+pg:0:imported but not declared in package.json

@@ -15,6 +15,7 @@ import { AgentsTab } from '../components/usage/tabs/AgentsTab';
 import { ModelsTab } from '../components/usage/tabs/ModelsTab';
 import { RunsTab } from '../components/usage/tabs/RunsTab';
 import { IeeTab } from '../components/usage/tabs/IeeTab';
+import MemoryUtilityTab from './MemoryUtilityTab';
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
@@ -121,6 +122,9 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
 
       {/* Tab: IEE Execution (rev 6 §11.8) */}
       {tab === 'iee' && <IeeTab rows={data.iee.rows} summary={data.iee.summary} loading={data.iee.tabLoading} filters={data.iee.filters} onFilterChange={data.setIeeFilters} />}
+
+      {/* Tab: Memory Utility */}
+      {tab === 'memory_utility' && <MemoryUtilityTab />}
     </div>
   );
 }

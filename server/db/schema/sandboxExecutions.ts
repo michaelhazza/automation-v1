@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
 
@@ -57,6 +57,11 @@ export const sandboxExecutions = pgTable(
     // Incremented on every lease reclaim. Cap at MAX_START_ATTEMPTS → provider_unavailable.
     startAttemptCount: integer('start_attempt_count').notNull().default(0),
 
+    // Operator Backend adoption seam (spec §7.1, Chunk 4 sandbox primitive extension).
+    // Set by adoptOrStart() callers; the Operator Backend passes operator_run_id.
+    // UNIQUE: a given start-key binds to exactly one sandbox execution (conflict detection).
+    sandboxStartKey: text('sandbox_start_key'),
+
     // Soft-delete flag (spec §17.4)
     isActive: boolean('is_active').notNull().default(true),
 
@@ -78,6 +83,10 @@ export const sandboxExecutions = pgTable(
     providerSandboxIdIdx: index('sandbox_executions_provider_sandbox_id_idx')
       .on(table.providerSandboxId)
       .where(sql`${table.providerSandboxId} IS NOT NULL`),
+    // Unique partial index: one sandbox per start-key (adoption seam, Chunk 4).
+    sandboxStartKeyIdx: uniqueIndex('sandbox_executions_start_key_idx')
+      .on(table.sandboxStartKey)
+      .where(sql`${table.sandboxStartKey} IS NOT NULL`),
   }),
 );
 

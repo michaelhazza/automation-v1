@@ -8,7 +8,6 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { sql } from 'drizzle-orm';
 import { authenticate, checkOrgPermission } from '../middleware/auth.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -18,9 +17,6 @@ import { integrationConnectionService } from '../services/integrationConnectionS
 import { resumeFromIntegrationConnect } from '../services/agentResumeService.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
-// guard-ignore-next-line: rls-contract-compliance reason="db.transaction is used to open a proper org-scoped tx with GUC propagation on the pre-auth GHL callback path; no authenticated org context is available for getOrgScopedDb"
-import { db } from '../db/index.js';
-import { withOrgTx } from '../instrumentation.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const router = Router();
@@ -422,28 +418,11 @@ router.get('/api/oauth/callback', asyncHandler(async (req, res) => {
   });
 
   // Fire sub-account enumeration + enrolment. Best-effort — connection stays active
-  // even if enumeration fails. Hard timeout: 15s. Wrapped in a proper db.transaction
-  // with set_config so that any downstream service call that reads getOrgTxContext()
-  // receives the correct org context and GUC (S-P0-4 / AR-3.1 fix).
+  // even if enumeration fails. Hard timeout: 15s. GUC propagation and org-scoped
+  // tx context are handled inside enrolAgencyLocationsInOrgTx (S-P0-4 / AR-3.1 fix).
   try {
-    const svc = await import('../services/ghlAgencyOauthService.js') as unknown as {
-      autoEnrolAgencyLocations?: (orgId: string, connection: unknown, correlationId: string) => Promise<unknown>;
-    };
-    if (typeof svc.autoEnrolAgencyLocations === 'function') {
-      // guard-ignore-next-line: rls-contract-compliance reason="db.transaction opens an org-scoped tx with set_config GUC on the pre-auth GHL OAuth callback path — no authenticated org context exists for getOrgScopedDb (AR-3.1 fix, S-P0-4)"
-      await db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('app.organisation_id', ${ghlOrgId}, true)`);
-        await withOrgTx(
-          { tx, organisationId: ghlOrgId, source: 'oauth:callback:ghl:enrol' },
-          () => Promise.race([
-            svc.autoEnrolAgencyLocations!(ghlOrgId, connection, `oauth_callback:${connection.id}`),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('autoEnrolAgencyLocations timeout')), 15_000),
-            ),
-          ]),
-        );
-      });
-    }
+    const { enrolAgencyLocationsInOrgTx } = await import('../services/ghlAgencyOauthService.js');
+    await enrolAgencyLocationsInOrgTx(ghlOrgId, connection, `oauth_callback:${connection.id}`);
   } catch (err) {
     logger.warn('ghl.oauth.callback_enrol_failed', {
       event: 'ghl.oauth.callback_enrol_failed',

@@ -809,4 +809,32 @@ export const coreActions: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   }),
+
+  // ── Cross-owner delegation — PA-V2-operator spec §7.4 ──────────────────────
+  // System-generated action created by crossOwnerApprovalTimeoutSweep when a
+  // cross-owner sub-step times out and the timeout_policy is 'ask_initiator'.
+  // The initiator sees this in listPendingApprovalsForUser and must approve or
+  // reject the delegation continuation. Not an LLM-callable tool.
+  'cross_owner.ask_initiator_decision': {
+    actionType: 'cross_owner.ask_initiator_decision',
+    description: 'A cross-owner delegation sub-step has timed out. The run initiator must decide whether to continue, approve retrospectively, or abandon the sub-step.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    riskTier: 2,
+    createsBoardTask: false,
+    readPath: 'none',
+    payloadFields: ['substepId', 'parentRunId'],
+    parameterSchema: z.object({
+      substepId: z.string().describe('delegation_outcomes row ID for this sub-step'),
+      parentRunId: z.string().describe('Parent agent run ID that owns this delegation'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    idempotencyStrategy: 'keyed_write',
+    sideEffectClass: 'write',
+    verify: null,
+    verifyNullJustification: 'System-generated delegation decision request — outcome is a human decision, not a deterministic side effect; no post-action check is possible.',
+    reversible: true,
+    blastRadius: 'tenant',
+  },
 };

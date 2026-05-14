@@ -1,19 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
-import {
-  permissionSets,
-  permissionSetItems,
-  orgUserRoles,
-  permissions,
-  users,
-  subaccountUserAssignments,
-} from '../db/schema/index.js';
-import { eq, and, isNull, inArray } from 'drizzle-orm';
-import { configHistoryService } from '../services/configHistoryService.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { permissionSetService } from '../services/permissionSetService.js';
 
 const router = Router();
 
@@ -27,8 +17,8 @@ router.get(
   '/api/permissions',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
-  asyncHandler(async (req, res) => {
-    const rows = await db.select().from(permissions);
+  asyncHandler(async (_req, res) => {
+    const rows = await permissionSetService.listPermissionsCatalogue();
     res.json(rows);
   })
 );
@@ -44,41 +34,8 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const sets = await db
-      .select()
-      .from(permissionSets)
-      .where(and(eq(permissionSets.organisationId, organisationId), isNull(permissionSets.deletedAt)));
-
-    if (sets.length === 0) {
-      res.json([]);
-      return;
-    }
-
-    const setIds = sets.map((s) => s.id);
-    const items = await db
-      .select()
-      .from(permissionSetItems)
-      .where(inArray(permissionSetItems.permissionSetId, setIds));
-
-    const itemsBySet = new Map<string, string[]>();
-    for (const item of items) {
-      const existing = itemsBySet.get(item.permissionSetId) ?? [];
-      existing.push(item.permissionKey);
-      itemsBySet.set(item.permissionSetId, existing);
-    }
-
-    res.json(
-      sets.map((s) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        isDefault: s.isDefault,
-        permissionKeys: itemsBySet.get(s.id) ?? [],
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt,
-      }))
-    );
+    const sets = await permissionSetService.listForOrg(req.orgId!);
+    res.json(sets);
   })
 );
 
@@ -92,7 +49,6 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
     // guard-ignore-next-line: input-validation reason="manual validation enforced: name required check, permissionKeys Array.isArray guard"
     const { name, description, permissionKeys } = req.body as {
       name?: string;
@@ -105,42 +61,12 @@ router.post(
       return;
     }
 
-    const [ps] = await db
-      .insert(permissionSets)
-      .values({
-        organisationId,
-        name,
-        description: description ?? null,
-        isDefault: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
-    if (permissionKeys && permissionKeys.length > 0) {
-      await db.insert(permissionSetItems).values(
-        permissionKeys.map((key) => ({
-          permissionSetId: ps.id,
-          permissionKey: key,
-          createdAt: new Date(),
-        }))
-      );
-    }
-
-    await configHistoryService.recordHistory({
-      entityType: 'permission_set', entityId: ps.id, organisationId,
-      snapshot: { ...ps, permissionKeys: permissionKeys ?? [] } as unknown as Record<string, unknown>,
-      changedBy: req.user?.id ?? null, changeSource: 'ui',
-    });
-
-    res.status(201).json({
-      id: ps.id,
-      name: ps.name,
-      description: ps.description,
-      isDefault: ps.isDefault,
-      permissionKeys: permissionKeys ?? [],
-      createdAt: ps.createdAt,
-    });
+    const result = await permissionSetService.create(
+      req.orgId!,
+      { name, description, permissionKeys },
+      req.user?.id ?? null,
+    );
+    res.status(201).json(result);
   })
 );
 
@@ -153,37 +79,12 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const [ps] = await db
-      .select()
-      .from(permissionSets)
-      .where(
-        and(
-          eq(permissionSets.id, req.params.id),
-          eq(permissionSets.organisationId, organisationId),
-          isNull(permissionSets.deletedAt)
-        )
-      );
-
+    const ps = await permissionSetService.getById(req.orgId!, req.params.id);
     if (!ps) {
       res.status(404).json({ error: 'Permission set not found' });
       return;
     }
-
-    const items = await db
-      .select()
-      .from(permissionSetItems)
-      .where(eq(permissionSetItems.permissionSetId, ps.id));
-
-    res.json({
-      id: ps.id,
-      name: ps.name,
-      description: ps.description,
-      isDefault: ps.isDefault,
-      permissionKeys: items.map((i) => i.permissionKey),
-      createdAt: ps.createdAt,
-      updatedAt: ps.updatedAt,
-    });
+    res.json(ps);
   })
 );
 
@@ -197,40 +98,17 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const [ps] = await db
-      .select()
-      .from(permissionSets)
-      .where(
-        and(
-          eq(permissionSets.id, req.params.id),
-          eq(permissionSets.organisationId, organisationId),
-          isNull(permissionSets.deletedAt)
-        )
-      );
-
-    if (!ps) {
+    const { name, description } = req.body as { name?: string; description?: string };
+    const updated = await permissionSetService.update(
+      req.orgId!,
+      req.params.id,
+      { name, description },
+      req.user?.id ?? null,
+    );
+    if (!updated) {
       res.status(404).json({ error: 'Permission set not found' });
       return;
     }
-
-    await configHistoryService.recordHistory({
-      entityType: 'permission_set', entityId: ps.id, organisationId,
-      snapshot: ps as unknown as Record<string, unknown>,
-      changedBy: req.user?.id ?? null, changeSource: 'ui',
-    });
-
-    const { name, description } = req.body as { name?: string; description?: string };
-    const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) update.name = name;
-    if (description !== undefined) update.description = description;
-
-    const [updated] = await db
-      .update(permissionSets)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(permissionSets.id, ps.id))
-      .returning();
-
     res.json(updated);
   })
 );
@@ -244,42 +122,19 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const [ps] = await db
-      .select()
-      .from(permissionSets)
-      .where(
-        and(
-          eq(permissionSets.id, req.params.id),
-          eq(permissionSets.organisationId, organisationId),
-          isNull(permissionSets.deletedAt)
-        )
-      );
-
-    if (!ps) {
+    const result = await permissionSetService.delete(
+      req.orgId!,
+      req.params.id,
+      req.user?.id ?? null,
+    );
+    if (!result.found) {
       res.status(404).json({ error: 'Permission set not found' });
       return;
     }
-
-    // Block deletion if in use by org user roles
-    const [inUse] = await db
-      .select({ id: orgUserRoles.id })
-      .from(orgUserRoles)
-      .where(eq(orgUserRoles.permissionSetId, ps.id));
-
-    if (inUse) {
+    if (result.inUse) {
       res.status(409).json({ error: 'Cannot delete a permission set that is assigned to one or more users' });
       return;
     }
-
-    await configHistoryService.recordHistory({
-      entityType: 'permission_set', entityId: ps.id, organisationId,
-      snapshot: ps as unknown as Record<string, unknown>,
-      changedBy: req.user?.id ?? null, changeSource: 'ui', changeSummary: 'Entity soft-deleted',
-    });
-
-    const now = new Date();
-    await db.update(permissionSets).set({ deletedAt: now, updatedAt: now }).where(eq(permissionSets.id, ps.id));
     res.json({ message: 'Permission set deleted' });
   })
 );
@@ -296,45 +151,18 @@ router.put(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const [ps] = await db
-      .select()
-      .from(permissionSets)
-      .where(
-        and(
-          eq(permissionSets.id, req.params.id),
-          eq(permissionSets.organisationId, organisationId),
-          isNull(permissionSets.deletedAt)
-        )
-      );
-
-    if (!ps) {
-      res.status(404).json({ error: 'Permission set not found' });
-      return;
-    }
-
     const { permissionKeys } = req.body as { permissionKeys?: string[] };
     if (!Array.isArray(permissionKeys)) {
       res.status(400).json({ error: 'Validation failed', details: 'permissionKeys must be an array' });
       return;
     }
 
-    // Replace all items atomically
-    await db.delete(permissionSetItems).where(eq(permissionSetItems.permissionSetId, ps.id));
-
-    if (permissionKeys.length > 0) {
-      await db.insert(permissionSetItems).values(
-        permissionKeys.map((key) => ({
-          permissionSetId: ps.id,
-          permissionKey: key,
-          createdAt: new Date(),
-        }))
-      );
+    const result = await permissionSetService.replaceItems(req.orgId!, req.params.id, permissionKeys);
+    if (!result) {
+      res.status(404).json({ error: 'Permission set not found' });
+      return;
     }
-
-    await db.update(permissionSets).set({ updatedAt: new Date() }).where(eq(permissionSets.id, ps.id));
-
-    res.json({ id: ps.id, permissionKeys });
+    res.json(result);
   })
 );
 
@@ -349,24 +177,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.USERS_VIEW),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const rows = await db
-      .select({
-        roleId: orgUserRoles.id,
-        userId: orgUserRoles.userId,
-        permissionSetId: orgUserRoles.permissionSetId,
-        assignedAt: orgUserRoles.createdAt,
-        email: users.email,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        status: users.status,
-        permissionSetName: permissionSets.name,
-      })
-      .from(orgUserRoles)
-      .innerJoin(users, eq(users.id, orgUserRoles.userId))
-      .innerJoin(permissionSets, eq(permissionSets.id, orgUserRoles.permissionSetId))
-      .where(eq(orgUserRoles.organisationId, organisationId));
-
+    const rows = await permissionSetService.listOrgMembers(req.orgId!);
     res.json(rows);
   })
 );
@@ -381,7 +192,6 @@ router.put(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
     const { permissionSetId } = req.body as { permissionSetId?: string };
 
     if (!permissionSetId) {
@@ -389,70 +199,21 @@ router.put(
       return;
     }
 
-    // Verify user belongs to org
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(
-        and(
-          eq(users.id, req.params.userId),
-          eq(users.organisationId, organisationId),
-          isNull(users.deletedAt)
-        )
-      );
+    const result = await permissionSetService.assignOrgRole(req.orgId!, req.params.userId, permissionSetId);
 
-    if (!user) {
+    if (result.status === 'user_not_found') {
       res.status(404).json({ error: 'User not found in this organisation' });
       return;
     }
-
-    // Verify permission set belongs to org
-    const [ps] = await db
-      .select({ id: permissionSets.id })
-      .from(permissionSets)
-      .where(
-        and(
-          eq(permissionSets.id, permissionSetId),
-          eq(permissionSets.organisationId, organisationId),
-          isNull(permissionSets.deletedAt)
-        )
-      );
-
-    if (!ps) {
+    if (result.status === 'permission_set_not_found') {
       res.status(404).json({ error: 'Permission set not found in this organisation' });
       return;
     }
 
-    // Upsert: update if exists, insert if not
-    const [existing] = await db
-      .select()
-      .from(orgUserRoles)
-      .where(
-        and(
-          eq(orgUserRoles.organisationId, organisationId),
-          eq(orgUserRoles.userId, req.params.userId)
-        )
-      );
-
-    if (existing) {
-      const [updated] = await db
-        .update(orgUserRoles)
-        .set({ permissionSetId, updatedAt: new Date() })
-        .where(eq(orgUserRoles.id, existing.id))
-        .returning();
-      res.json(updated);
+    if (result.status === 'created') {
+      res.status(201).json(result.row);
     } else {
-      const [created] = await db
-        .insert(orgUserRoles)
-        .values({
-          organisationId,
-          userId: req.params.userId,
-          permissionSetId,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning();
-      res.status(201).json(created);
+      res.json(result.row);
     }
   })
 );
@@ -466,23 +227,11 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT),
   asyncHandler(async (req, res) => {
-    const organisationId = req.orgId!;
-    const [existing] = await db
-      .select()
-      .from(orgUserRoles)
-      .where(
-        and(
-          eq(orgUserRoles.organisationId, organisationId),
-          eq(orgUserRoles.userId, req.params.userId)
-        )
-      );
-
-    if (!existing) {
+    const removed = await permissionSetService.removeOrgRole(req.orgId!, req.params.userId);
+    if (!removed) {
       res.status(404).json({ error: 'Role assignment not found' });
       return;
     }
-
-    await db.delete(orgUserRoles).where(eq(orgUserRoles.id, existing.id));
     res.json({ message: 'Org role removed' });
   })
 );
@@ -517,13 +266,8 @@ router.get(
       return;
     }
 
-    const rows = await db
-      .select({ permissionKey: permissionSetItems.permissionKey })
-      .from(orgUserRoles)
-      .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, orgUserRoles.permissionSetId))
-      .where(and(eq(orgUserRoles.userId, req.user!.id), eq(orgUserRoles.organisationId, organisationId)));
-
-    res.json({ permissions: rows.map(r => r.permissionKey) });
+    const keys = await permissionSetService.getMyOrgPermissions(organisationId, req.user!.id);
+    res.json({ permissions: keys });
   })
 );
 
@@ -543,15 +287,8 @@ router.get(
     }
 
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const subaccountId = subaccount.id;
-
-    const rows = await db
-      .select({ permissionKey: permissionSetItems.permissionKey })
-      .from(subaccountUserAssignments)
-      .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, subaccountUserAssignments.permissionSetId))
-      .where(and(eq(subaccountUserAssignments.userId, req.user!.id), eq(subaccountUserAssignments.subaccountId, subaccountId)));
-
-    res.json({ permissions: rows.map(r => r.permissionKey) });
+    const keys = await permissionSetService.getMySubaccountPermissions(subaccount.id, req.user!.id);
+    res.json({ permissions: keys });
   })
 );
 

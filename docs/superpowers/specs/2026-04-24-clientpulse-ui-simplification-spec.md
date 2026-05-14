@@ -50,7 +50,7 @@ ClientPulse shipped in Sessions 1 and 2 before `docs/frontend-design-principles.
 - Any behavioural change to the agent execution pipeline
 - Briefing/digest per-client email templates (deferred — see §11)
 
-**Mockup set** (all in `prototypes/pulse/`):
+**Mockup set** (all in `_archive/prototypes/pulse/`):
 - Current-state references: `current-main-dashboard.html`, `current-clientpulse-dashboard.html`
 - Proposed designs: `home-dashboard.html`, `clientpulse-mockup-dashboard.html`, `run-detail.html`
 - Feature pages: all `clientpulse-mockup-*.html` files
@@ -89,7 +89,7 @@ Two separate tables on the current home dashboard (Recent Activity + implicit ru
 
 ### §1.5 Run detail is the existing `AgentRunLivePage`
 
-No new run-detail page is built. The existing `AgentRunLivePage` (route `/runs/:runId/live`) is the destination of "View log →" links from the activity feed. The mockup `prototypes/pulse/run-detail.html` documents the target visual state — the run meta bar (§5.1) is shipped in this spec (covered by ship gate G5); the two-column layout is an optional polish item that MAY be applied but is not gated.
+No new run-detail page is built. The existing `AgentRunLivePage` (route `/runs/:runId/live`) is the destination of "View log →" links from the activity feed. The mockup `_archive/prototypes/pulse/run-detail.html` documents the target visual state — the run meta bar (§5.1) is shipped in this spec (covered by ship gate G5); the two-column layout is an optional polish item that MAY be applied but is not gated.
 
 ---
 
@@ -97,8 +97,8 @@ No new run-detail page is built. The existing `AgentRunLivePage` (route `/runs/:
 
 **File:** `client/src/pages/DashboardPage.tsx`
 **Route:** `/` (repointed by this spec; currently redirects to `/admin/pulse` — see §10 router change)
-**Mockup:** `prototypes/pulse/home-dashboard.html`
-**Current-state reference:** `prototypes/pulse/current-main-dashboard.html`
+**Mockup:** `_archive/prototypes/pulse/home-dashboard.html`
+**Current-state reference:** `_archive/prototypes/pulse/current-main-dashboard.html`
 
 ### §2.1 What changes
 
@@ -283,8 +283,8 @@ The distinction between "task-driven" and "informational" is intent-based: if th
 
 **File:** `client/src/pages/ClientPulseDashboardPage.tsx`
 **Route:** `/clientpulse`
-**Mockup:** `prototypes/pulse/clientpulse-mockup-dashboard.html`
-**Current-state reference:** `prototypes/pulse/current-clientpulse-dashboard.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-dashboard.html`
+**Current-state reference:** `_archive/prototypes/pulse/current-clientpulse-dashboard.html`
 
 ### §3.1 What stays
 
@@ -421,7 +421,7 @@ If the project already has an established token convention (e.g. Tailwind colour
 
 **New component:** `client/src/components/UnifiedActivityFeed.tsx`
 **Used by:** `DashboardPage.tsx` (home dashboard)
-**Mockup:** `prototypes/pulse/home-dashboard.html` — "Recent activity" section
+**Mockup:** `_archive/prototypes/pulse/home-dashboard.html` — "Recent activity" section
 
 ### §4.1 Purpose
 
@@ -546,7 +546,7 @@ Error state: silent retry, no error panel shown on the home dashboard (non-criti
 
 **Existing file:** `client/src/pages/AgentRunLivePage.tsx`
 **Route:** `/runs/:runId/live`
-**Mockup:** `prototypes/pulse/run-detail.html`
+**Mockup:** `_archive/prototypes/pulse/run-detail.html`
 
 ### §5.1 No new page — polish only
 
@@ -578,11 +578,11 @@ The run detail page is reached from:
 
 ## §6. ClientPulse feature page simplifications
 
-All pages below have updated mockups in `prototypes/pulse/`. Each entry lists: the mockup, the built file(s), and the specific changes required.
+All pages below have updated mockups in `_archive/prototypes/pulse/`. Each entry lists: the mockup, the built file(s), and the specific changes required.
 
 ### §6.1 Settings page — 5-tab restructure
 
-**Mockup:** `prototypes/pulse/clientpulse-mockup-settings.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-settings.html`
 **Built file:** `client/src/pages/ClientPulseSettingsPage.tsx` (or equivalent settings route)
 **Change:** Replace the 10-block vertical scroll layout with a 5-tab layout:
 
@@ -600,7 +600,7 @@ Factor labels on the Scoring tab must be human-readable strings — no raw confi
 
 ### §6.2 Drilldown — panel trim + pending hero
 
-**Mockup:** `prototypes/pulse/clientpulse-mockup-drilldown.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-drilldown.html`
 **Built file:** `client/src/pages/ClientPulseDrilldownPage.tsx`
 **Changes:**
 - Add `PendingHero` banner above the health score card when `hasPendingIntervention === true` (see §6.2.1 for contract + backend data additions).
@@ -655,7 +655,7 @@ The shared hook is a new file: `client/src/hooks/usePendingIntervention.ts`. Add
 
 ### §6.3 Clients list page
 
-**Mockup:** `prototypes/pulse/clientpulse-mockup-clients-list.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-clients-list.html`
 **Built file:** Not built (new page). Route: `/clientpulse/clients`
 **What to build:** Filterable list of all clients with health-band filter chips (All / Critical / At Risk / Watch / Healthy) + search input. Each row: colour dot, client name, sparkline, health score + delta, last action, arrow link to drilldown. Pagination: load-more pattern (not offset pagination).
 
@@ -663,29 +663,29 @@ The shared hook is a new file: `client/src/hooks/usePendingIntervention.ts`. Add
 
 ### §6.4 Propose intervention modal
 
-**Mockup:** `prototypes/pulse/clientpulse-mockup-propose-intervention.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-propose-intervention.html`
 **Built file:** `client/src/components/clientpulse/ProposeInterventionModal.tsx`
 **Changes:** Remove `s.contribution` render (§8.2). Add 90-day trend mini-chart in the modal header context section (so the operator sees trend before approving). No other structural changes.
 
 ### §6.5 Subaccount blueprints + organisation templates tables
 
-**Mockups:** `prototypes/pulse/clientpulse-mockup-subaccount-blueprints.html`, `clientpulse-mockup-organisation-templates.html`
+**Mockups:** `_archive/prototypes/pulse/clientpulse-mockup-subaccount-blueprints.html`, `clientpulse-mockup-organisation-templates.html`
 **Built files:** `client/src/pages/SubaccountBlueprintsPage.tsx` and `client/src/pages/SystemOrganisationTemplatesPage.tsx`
 **Change:** Trim table to 4 columns maximum (remove "Operational config" column — it is informational and already viewable in the blueprint detail). Merge "Browse shared library" into the "+ New" modal flow rather than a separate button.
 
 ### §6.6 Fire automation editor
 
-**Mockup:** `prototypes/pulse/clientpulse-mockup-fire-automation.html`
+**Mockup:** `_archive/prototypes/pulse/clientpulse-mockup-fire-automation.html`
 **Built file:** `client/src/components/clientpulse/FireAutomationEditor.tsx` (line ~39)
 **Change:** Remove the raw automation ID (`a.id`) from the picker display. Show only the human-readable automation name. (See §8.1.)
 
 ### §6.7 Config assistant chat, email authoring, send SMS, create task, operator alert
 
-Mockup-only changes already applied in `prototypes/pulse/`. No built-code changes required for these pages — the existing components match the simplified mockup intent. Review during implementation to confirm parity.
+Mockup-only changes already applied in `_archive/prototypes/pulse/`. No built-code changes required for these pages — the existing components match the simplified mockup intent. Review during implementation to confirm parity.
 
 ### §6.8 Onboarding pages — audit-only
 
-**Mockups:** `prototypes/pulse/clientpulse-mockup-onboarding-orgadmin.html`, `clientpulse-mockup-onboarding-sysadmin.html`
+**Mockups:** `_archive/prototypes/pulse/clientpulse-mockup-onboarding-orgadmin.html`, `clientpulse-mockup-onboarding-sysadmin.html`
 **Built files:** `client/src/pages/OnboardingWizardPage.tsx`, `client/src/pages/OnboardingCelebrationPage.tsx`
 **Scope:** Audit-only. Confirm celebration copy and any wizard microcopy do not expose internal identifiers, raw config-key names, or specific LLM / AI provider names (per `docs/capabilities.md` editorial rules). If the audit finds nothing to change, this item ships no code. If it finds something, the files change — add them to §10 at that time. This spec does NOT pre-commit file edits for onboarding.
 
@@ -720,7 +720,7 @@ These verifications are folded into G6 — G6 does not pass until all five check
 
 ### §7.2 Mockups deleted or marked deferred
 
-Detailed list moved to §11 (canonical Deferred Items). At a glance: four mockups were deleted from the design set (template-editor, inline-edit, weekly-digest, capability-showcase); four remain in `prototypes/pulse/` as deferred or retired (briefing-per-client, digest-per-client, intelligence-briefing, operator-alert-received).
+Detailed list moved to §11 (canonical Deferred Items). At a glance: four mockups were deleted from the design set (template-editor, inline-edit, weekly-digest, capability-showcase); four remain in `_archive/prototypes/pulse/` as deferred or retired (briefing-per-client, digest-per-client, intelligence-briefing, operator-alert-received).
 
 ---
 
@@ -831,7 +831,7 @@ Both surfaces render `s.contribution` as a decimal float (e.g. `0.34` in the mod
 
 ### Mockup set (reference only — not shipped)
 
-All in `prototypes/pulse/`. Current-state references: `current-main-dashboard.html`, `current-clientpulse-dashboard.html`. Proposed: `home-dashboard.html`, `clientpulse-mockup-dashboard.html`, `run-detail.html`, plus all `clientpulse-mockup-*.html` feature pages.
+All in `_archive/prototypes/pulse/`. Current-state references: `current-main-dashboard.html`, `current-clientpulse-dashboard.html`. Proposed: `home-dashboard.html`, `clientpulse-mockup-dashboard.html`, `run-detail.html`, plus all `clientpulse-mockup-*.html` feature pages.
 
 ---
 
@@ -851,11 +851,11 @@ Single source of truth for everything the spec mentions but does NOT ship in thi
 - **Two-column layout on `AgentRunLivePage`.** §5.1 lists this as MAY ship (no gate). Optional polish; not part of this session's baseline deliverable.
 - **"Home / Run detail" breadcrumb on `AgentRunLivePage`.** Same status as the two-column layout — MAY ship, no gate.
 - **Workspace feature card grid as a data-driven registry.** §1.2 states v1 ships a hard-coded 2-card set (ClientPulse + Settings). Graduate to a registry-driven grid when a third or fourth workspace lands.
-- **Per-client briefing email** (`prototypes/pulse/clientpulse-mockup-briefing-per-client.html`). Mockup kept; no build. Ship only if an operator asks for automated per-client forward-looking briefings.
-- **Per-client digest email** (`prototypes/pulse/clientpulse-mockup-digest-per-client.html`). Mockup kept; no build. Ship only if an operator asks for per-client weekly retrospective digests.
-- **Org-level intelligence briefing email** (`prototypes/pulse/clientpulse-mockup-intelligence-briefing.html`). Mockup kept; no build. Ship a minimal variant only if explicitly requested.
-- **Operator-alert-received email surface** (`prototypes/pulse/clientpulse-mockup-operator-alert-received.html`). Retired — approval workflow absorbed by home dashboard §2.2. The mockup file is kept as historical reference only.
-- **Deleted mockups** (not in `prototypes/pulse/` at all):
+- **Per-client briefing email** (`_archive/prototypes/pulse/clientpulse-mockup-briefing-per-client.html`). Mockup kept; no build. Ship only if an operator asks for automated per-client forward-looking briefings.
+- **Per-client digest email** (`_archive/prototypes/pulse/clientpulse-mockup-digest-per-client.html`). Mockup kept; no build. Ship only if an operator asks for per-client weekly retrospective digests.
+- **Org-level intelligence briefing email** (`_archive/prototypes/pulse/clientpulse-mockup-intelligence-briefing.html`). Mockup kept; no build. Ship a minimal variant only if explicitly requested.
+- **Operator-alert-received email surface** (`_archive/prototypes/pulse/clientpulse-mockup-operator-alert-received.html`). Retired — approval workflow absorbed by home dashboard §2.2. The mockup file is kept as historical reference only.
+- **Deleted mockups** (not in `_archive/prototypes/pulse/` at all):
   - `clientpulse-mockup-template-editor.html` — built pattern is simpler inline editing; no separate editor page.
   - `clientpulse-mockup-inline-edit.html` — pattern not needed.
   - `clientpulse-mockup-weekly-digest.html` — org-level email digest deferred (see intelligence briefing above).

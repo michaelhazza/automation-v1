@@ -15,7 +15,7 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | Doc | Update when… |
 |-----|-------------|
 | `architecture.md` | Service boundaries, route conventions, three-tier agent model, orchestrator routing, task system, RLS / schema invariants, run-continuity, agent fleet, key-files-per-domain, audit framework |
-| `docs/capabilities.md` | Any add / remove / rename of a product capability, agency capability, skill, or integration. **Editorial Rules apply** — see § *Editorial Rules* in that file. External-ready prose only; no engineer-facing primitives. |
+| `docs/capabilities.md` | **Capability Registration trigger** (spec-section references §6.2.1 / §7.4.1 / §7.4.4 resolve to `tasks/builds/development-lifecycle-governance-upgrade/spec.md`). Update when any merge creates, mutates, splits, or merges a capability surface — i.e. anything that would change an Asset Register row's spec §7.4.1 fields (Capability ID/slug, Name, Description, Owner, Cluster, Lifecycle state, Launch source, Risk surface, Last review date, Carry notes, Decommission notes, Related docs). **Editorial Rules apply** — see § *Editorial Rules* in that file. External-ready prose only; no engineer-facing primitives.<br><br>**Verdict format (§6.2.1 combined format):** exactly one of these eight strings — no other phrasing is valid:<br>- `yes: create new capability record`<br>- `yes: update existing capability record`<br>- `yes: split existing capability record`<br>- `yes: merge with existing capability record`<br>- `n/a: docs-only change`<br>- `n/a: test-only change`<br>- `n/a: internal refactor with no capability surface change`<br>- `n/a: build / tooling change only`<br><br>A `yes`-class verdict requires that the Asset Register row(s) follow spec §7.4.1 and that one of the §7.4.4 registration outcomes is named explicitly. A `n/a`-class verdict requires that one of the four reasons above is named explicitly. Any other phrasing is invalid and treated as a missing verdict — which blocks `MERGE_READY`. |
 | `docs/integration-reference.md` | Any change to integration behaviour: new scope, new skill, changed status, new write capability, new OAuth provider, new MCP preset, new capability slug, new alias. Update `last_verified`. |
 | `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | Any change touching build discipline, conventions, agent fleet, review pipeline, locked rules (RLS, service-tier, gates, migrations, §8 development discipline). Also triggered by `[missing-doc] > 2`. |
 | `CONTRIBUTING.md` | Any change to lint-suppression policy, `// reason:` comment format, acceptable / forbidden disable patterns, or addition of new contributor-facing conventions. |
@@ -26,7 +26,24 @@ Enforced at finalisation by `chatgpt-pr-review` (step 6), `chatgpt-spec-review` 
 | `docs/context-packs/` | When a context pack's referenced section anchor changes in `architecture.md`, or when a new mode is needed. Re-run anchor regeneration if section names changed. |
 | `references/test-gate-policy.md` | When the test-gate posture changes (a new umbrella command becomes forbidden, a new local check becomes allowed). |
 | `references/spec-review-directional-signals.md` | When `spec-reviewer` surfaces the same scope/sequencing/posture call >2 times — add a signal so the classifier catches it. |
+| `docs/incident-response.md` | When the SEV classification matrix, on-call rotation, timeline-log format, post-mortem template, or escalation paths change. |
+| `docs/testing-transition-plan.md` | When migration triggers, test-inventory sequencing, per-area effort estimates, or phasing decisions change. |
 | `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | Every framework-level change ships with a version bump and changelog entry. Repo-specific changes (your own architecture.md edits, your own agent additions) DO NOT bump the framework version — that tracks the agent-fleet/conventions layer only. |
+| `scripts/verify-*` (15 gates from audit-prevention-gates-2026-05-14; P6 dropped per §B1) | Triggers when adding/removing/renaming a gate, when changing suppression grammar, when changing baseline expiry policy. Update `references/test-gate-policy.md` if the gate posture changes |
+
+---
+
+## Event registry conventions
+
+### `operator-session.*` lifecycle event namespace (operator-backend, 2026-05)
+
+Hyphenated lifecycle events (`operator-session.*`) are distinct from dotted incident/audit events (`operator.*`, `task.operator.*`, `subaccount.operator_settings.*`). The separation is enforced by a CI gate.
+
+**Single source of truth:** `shared/types/operatorBackendEvents.ts` — the discriminated union for all `operator-session.*` event-name literals. Any file that needs to reference an event name literal MUST import from this file; it MUST NOT declare a string literal inline (even if the string is identical).
+
+**CI gate:** `scripts/gates/verify-operator-event-registry.sh` — greps the repo for naked `operator-session.*` string literals outside the registry file and the explicitly allow-listed paths (the registry file itself, test fixtures, this spec, plan, and brief). Non-empty output from the gate = CI failure.
+
+**Why this matters:** before this gate, event-name strings drifted across handlers and services, making it impossible to enumerate all producers or consumers of an event without a full-text search. The single-source-of-truth pattern prevents silent drift. Future event families that span multiple producers and consumers should adopt the same pattern: one `shared/types/<domain>Events.ts` file + one CI gate in `scripts/gates/verify-<domain>-event-registry.sh`.
 
 ---
 
@@ -72,7 +89,7 @@ Every finalised `chatgpt-pr-review` and `chatgpt-spec-review` log must include t
 ```
 - KNOWLEDGE.md updated: yes (N entries) | no — <rationale>
 - architecture.md updated: yes (sections X, Y) | no — <rationale> | n/a
-- capabilities.md updated: yes (sections X) | no — <rationale> | n/a
+- capabilities.md updated: yes: <registration-outcome> | n/a: <reason>  (§6.2.1 format — eight valid strings listed in the Capability Registration section above; any other phrasing is invalid and treated as a missing verdict)
 - integration-reference.md updated: yes (slug X) | no — <rationale> | n/a
 - CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes | no — <rationale> | n/a
 - spec-context.md updated: yes | no — <rationale> | n/a   # spec-review sessions only

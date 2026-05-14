@@ -1459,7 +1459,7 @@ Final verification pass against the 16 ship gates (G1–G16) in §9. No new code
 - [ ] **8.2.5 — G5:** Open any completed run → meta bar shows agent name + status + duration + event count + started timestamp.
 - [ ] **8.2.6 — G6:** Navigate `/admin/pulse` → lands `/`. Navigate `/admin/subaccounts/<id>/pulse` → lands `/`. Click former-Pulse nav item → lands `/`. Open brief detail + click `← Back` → lands `/`. Zero `/admin/pulse` references outside `App.tsx` redirects.
 - [ ] **8.2.7 — G7:** Propose one intervention → PENDING chip appears on that client's row + row floats to top.
-- [ ] **8.2.8 — G8:** Sparklines render correct colour per band — visual check against `prototypes/pulse/clientpulse-mockup-dashboard.html`.
+- [ ] **8.2.8 — G8:** Sparklines render correct colour per band — visual check against `_archive/prototypes/pulse/clientpulse-mockup-dashboard.html`.
 - [ ] **8.2.9 — G9:** Already covered by grep in 8.1.7 + 8.1.8.
 - [ ] **8.2.10 — G10:** Open settings → 5 tabs present, block mapping correct (§6.1 table). No raw config-key names visible.
 - [ ] **8.2.11 — G11:** Propose intervention → drilldown shows PendingHero → click Approve → hero hides, review item status flips.

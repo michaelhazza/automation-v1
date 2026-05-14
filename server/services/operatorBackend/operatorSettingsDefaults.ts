@@ -1,0 +1,3 @@
+export const AUTO_EXTEND_GRACE_MINUTES = 30;
+export const MAX_CHAIN_LENGTH = 100;
+export const MAX_WALL_CLOCK_PER_TASK_DAYS = 30;

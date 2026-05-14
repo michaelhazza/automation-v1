@@ -122,6 +122,12 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+import operatorSessionsRouter from './routes/operatorSessions.js';
+import subaccountOperatorSettingsRouter from './routes/subaccountOperatorSettings.js';
+import subaccountIeeBrowserSettingsRouter from './routes/subaccountIeeBrowserSettings.js';
+import adminIeeBrowserRolloutRouter from './routes/adminIeeBrowserRollout.js';
+import operatorTasksRouter from './routes/operatorTasks.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import activityRouter from './routes/activity.js';
 import skillStudioRouter from './routes/skillStudio.js';
@@ -162,6 +168,10 @@ import memoryInspectorRouter from './routes/memoryInspector.js';
 import portfolioRollupRouter from './routes/portfolioRollup.js';
 // Memory & Briefings Phase 5 — memory block version history + diff + reset (S24)
 import memoryBlockVersionsRouter from './routes/memoryBlockVersions.js';
+// Memory improvements spec §4 Phase 1 — block sources / lineage route
+import memoryBlockSourcesRouter from './routes/memoryBlockSources.js';
+// Memory improvements spec §4 Phase 2/4 — memory utility dashboard route
+import memoryUtilityRouter from './routes/memoryUtility.js';
 import pulseRouter from './routes/pulse.js';
 // Universal Brief routes (Phase 2 + Phase 5)
 import briefsRouter from './routes/briefs.js';
@@ -370,6 +380,8 @@ app.use(dropZoneRouter);
 app.use(memoryInspectorRouter);
 app.use(portfolioRollupRouter);
 app.use(memoryBlockVersionsRouter);
+app.use(memoryBlockSourcesRouter);
+app.use(memoryUtilityRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);
@@ -427,6 +439,12 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+// Operator Backend — progress polling, settings, task actions (Chunk 7)
+app.use(operatorSessionsRouter);
+app.use(subaccountOperatorSettingsRouter);
+app.use(subaccountIeeBrowserSettingsRouter);
+app.use(adminIeeBrowserRolloutRouter);
+app.use(operatorTasksRouter);
 app.use(skillAnalyzerRouter);
 app.use(activityRouter);
 app.use(pulseRouter);
@@ -516,12 +534,22 @@ app.use('/api', (req, res) => {
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
 import { ZodError } from 'zod';
+import { mapOperatorBackendErrorToHttp } from './services/operatorBackendErrors.js';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
+  let extraBody: Record<string, unknown> | null = null;
 
-  if (err instanceof ZodError) {
+  // Operator backend typed errors — checked before generic Error branch so
+  // the richer body (kind, current_state / cap, current, subaccount_id) is used.
+  const operatorMapped = mapOperatorBackendErrorToHttp(err);
+  if (operatorMapped) {
+    statusCode = operatorMapped.statusCode;
+    errorCode = operatorMapped.errorCode;
+    message = err instanceof Error ? err.message : String(err);
+    extraBody = operatorMapped.body;
+  } else if (err instanceof ZodError) {
     statusCode = 400;
     errorCode = 'validation_error';
     message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
@@ -569,6 +597,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     error: {
       code: errorCode,
       message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+      ...(extraBody ?? {}),
     },
     correlationId,
   });
@@ -697,14 +726,54 @@ async function start() {
     const { claudeCodeBackend } = await import('./services/executionBackends/claudeCodeBackend.js');
     const { ieeBrowserBackend } = await import('./services/executionBackends/ieeBrowserBackend.js');
     const { ieeDevBackend } = await import('./services/executionBackends/ieeDevBackend.js');
+    const { operatorManagedBackend } = await import('./services/executionBackends/operatorManagedBackend.js');
     executionBackendRegistry.register(apiBackend);
     executionBackendRegistry.register(headlessBackend);
     executionBackendRegistry.register(claudeCodeBackend);
     executionBackendRegistry.register(ieeBrowserBackend);
     executionBackendRegistry.register(ieeDevBackend);
+    executionBackendRegistry.register(operatorManagedBackend);
   } catch (err) {
     console.error('[boot] failed to register execution backends', err);
     throw err;
+  }
+
+  // Operator Backend pg-boss handlers (Spec D — operator_managed adapter)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionCompletedHandler } = await import('./jobs/operatorSessionCompletedHandler.js');
+      await registerOperatorSessionCompletedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-completed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionDispatchNextChainLinkHandler } = await import('./jobs/operatorSessionDispatchNextChainLinkHandler.js');
+      await registerOperatorSessionDispatchNextChainLinkHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-dispatch-next-chain-link handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorSessionProgressedHandler } = await import('./jobs/operatorSessionProgressedHandler.js');
+      await registerOperatorSessionProgressedHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-session-progressed handler', err);
+    }
+  }
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { registerOperatorTaskProfileGcHandler } = await import('./jobs/operatorTaskProfileGcHandler.js');
+      await registerOperatorTaskProfileGcHandler(boss);
+    } catch (err) {
+      console.error('[boot] failed to register operator-task-profile-gc handler', err);
+    }
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
@@ -727,7 +796,7 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const pgboss = await getPgBoss();
-      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler } = await import('./jobs/workflowGateStallNotifyJob.js');
+      const { WORKFLOW_GATE_STALL_NOTIFY_QUEUE, workflowGateStallNotifyHandler, eaDraftStallResetHandler, crossOwnerApprovalTimeoutSweep } = await import('./jobs/workflowGateStallNotifyJob.js');
       const { createWorker } = await import('./lib/createWorker.js');
       await createWorker({
         queue: WORKFLOW_GATE_STALL_NOTIFY_QUEUE,
@@ -735,6 +804,7 @@ async function start() {
         handler: async (job) => {
           await workflowGateStallNotifyHandler(job as import('pg-boss').Job<import('./jobs/workflowGateStallNotifyJob.js').WorkflowGateStallNotifyPayload>);
           await eaDraftStallResetHandler();
+          await crossOwnerApprovalTimeoutSweep();
         },
       });
     } catch (err) {
@@ -819,6 +889,15 @@ async function start() {
       registerSupportEvalDailyJob(boss);
     } catch (err) {
       console.error('[boot] failed to register support-eval-daily worker', err);
+    }
+  }
+  // IEE browser — daily cost rollup (Chunk 15B)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerIeeBrowserDailyRollupJob } = await import('./jobs/ieeBrowserDailyRollupJob.js');
+      await registerIeeBrowserDailyRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register iee-browser daily rollup job', err);
     }
   }
   // operator-session-identity chunk 6 — token refresh worker

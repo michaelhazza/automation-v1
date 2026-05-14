@@ -155,7 +155,7 @@ All existing functionality (OAuth connect, web login Add/Edit/Test, API key mana
 
 All UI surfaces in this spec were designed across 13 mockup rounds. These files are the design source of truth for the builder. Spec prose supersedes mockups where they conflict; mockups win over prose where the spec is silent on visual detail.
 
-**Root:** `prototypes/operator-session-identity/`
+**Root:** `_archive/prototypes/operator-session-identity/`
 
 | Screen | File | What it shows |
 |---|---|---|

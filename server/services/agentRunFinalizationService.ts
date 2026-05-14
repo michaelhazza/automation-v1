@@ -33,6 +33,7 @@ import { actions } from '../db/schema/actions.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
 import { subaccountAgents } from '../db/schema/subaccountAgents.js';
 import { logger } from '../lib/logger.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import {
   mapIeeStatusToAgentRunStatus,
   buildSummaryFromIeeRun,
@@ -152,8 +153,21 @@ export async function updateMeaningfulRunTracking(
 export async function finaliseAgentRunFromBackend(args: {
   backendId: ExecutionBackendId;
   backendTaskId: string;
+  /** Required for operator_managed backend — needed to set dual RLS GUC before loadTerminalState. */
+  organisationId?: string;
+  /** Required for operator_managed backend — needed to set dual RLS GUC before loadTerminalState. */
+  subaccountId?: string;
 }): Promise<boolean> {
-  const { backendId, backendTaskId } = args;
+  const { backendId, backendTaskId, organisationId, subaccountId } = args;
+
+  if (backendId === 'operator_managed') {
+    if (!organisationId || !subaccountId) {
+      throw new Error(
+        'finaliseAgentRunFromBackend: organisationId and subaccountId are required for operator_managed backend',
+      );
+    }
+  }
+
   const adapter = executionBackendRegistry.resolve(backendId);
 
   // Capability-gate sanity check. The registry's `register()` already
@@ -176,6 +190,10 @@ export async function finaliseAgentRunFromBackend(args: {
   let finalised = false;
 
   await db.transaction(async (tx) => {
+    if (backendId === 'operator_managed') {
+      await setOrgAndSubaccountGUC(tx, organisationId!, subaccountId!);
+    }
+
     const terminalState = await adapter.loadTerminalState!(tx, backendTaskId);
     if (!terminalState) {
       logger.warn('agentRunFinalization.terminal_state_missing', {

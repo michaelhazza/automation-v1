@@ -50,6 +50,10 @@ test('critical event types are exactly the spec §5.3 set', () => {
     'handoff.decided',
     'run.event_limit_reached',
     'run.completed',
+    // PA-V2-operator spec §7.4 — cross-owner sub-step events are critical so
+    // the retry tier re-delivers them if the consumer misses the SSE frame.
+    'cross_owner_substep.awaiting_initiator_decision',
+    'cross_owner_substep.completed',
   ]);
   for (const [type, crit] of Object.entries(AGENT_EXECUTION_EVENT_CRITICALITY)) {
     const expected = expectedCritical.has(type as AgentExecutionEventType);

@@ -132,7 +132,7 @@ export interface IeeUsageSummary {
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
 
-export type Tab = 'overview' | 'agents' | 'models' | 'runs' | 'routing' | 'iee';
+export type Tab = 'overview' | 'agents' | 'models' | 'runs' | 'routing' | 'iee' | 'memory_utility';
 
 export type FallbackChainEntry = { provider: string; model: string; error?: string; success?: boolean };
 

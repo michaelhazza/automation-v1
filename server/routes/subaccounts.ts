@@ -2,17 +2,6 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { db } from '../db/index.js';
-import {
-  subaccounts,
-  subaccountCategories,
-  subaccountAutomationLinks,
-  subaccountUserAssignments,
-  automations,
-  users,
-  permissionSets,
-} from '../db/schema/index.js';
-import { eq, and, isNull, desc } from 'drizzle-orm';
 import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
@@ -20,6 +9,32 @@ import { agentScheduleService } from '../services/agentScheduleService.js';
 import { isBaselineSlug } from '../../shared/constants/baselineArtefacts.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { logger } from '../lib/logger.js';
+import {
+  listSubaccounts,
+  createSubaccount,
+  updateSubaccount,
+  softDeleteSubaccount,
+  updateSubaccountSettings,
+  listSubaccountCategories,
+  createSubaccountCategory,
+  getSubaccountCategory,
+  updateSubaccountCategory,
+  softDeleteSubaccountCategory,
+  listSubaccountAutomationLinks,
+  listSubaccountNativeAutomations,
+  findOrgAutomation,
+  createSubaccountAutomationLink,
+  getSubaccountAutomationLink,
+  updateSubaccountAutomationLink,
+  deleteSubaccountAutomationLink,
+  listSubaccountMembers,
+  findOrgUser,
+  findOrgPermissionSet,
+  createSubaccountMemberAssignment,
+  getSubaccountMemberAssignment,
+  updateSubaccountMemberAssignment,
+  deleteSubaccountMemberAssignment,
+} from '../services/subaccountService.js';
 
 const router = Router();
 
@@ -35,11 +50,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     const organisationId = req.orgId!;
-    const rows = await db
-      .select()
-      .from(subaccounts)
-      .where(and(eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)))
-      .orderBy(desc(subaccounts.createdAt));
+    const rows = await listSubaccounts(organisationId);
 
     res.json(
       rows.map((sa) => ({
@@ -82,18 +93,12 @@ router.post(
 
     const derivedSlug = slug ?? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-    const [sa] = await db
-      .insert(subaccounts)
-      .values({
-        organisationId,
-        name,
-        slug: derivedSlug,
-        status: (status as 'active' | 'suspended' | 'inactive') ?? 'active',
-        settings: settings ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const sa = await createSubaccount(organisationId, {
+      name,
+      slug: derivedSlug,
+      status: (status as 'active' | 'suspended' | 'inactive') ?? 'active',
+      settings: settings ?? null,
+    });
 
     await configHistoryService.recordHistory({
       entityType: 'subaccount', entityId: sa.id, organisationId,
@@ -227,12 +232,7 @@ router.patch(
       update.runRetentionDays = runRetentionDays;
     }
 
-    const [updated] = await db
-      .update(subaccounts)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(subaccounts.id, sa.id))
-      .returning();
-
+    const updated = await updateSubaccount(sa.id, req.orgId!, update);
     res.json(updated);
   })
 );
@@ -253,8 +253,7 @@ router.delete(
       return;
     }
 
-    const now = new Date();
-    await db.update(subaccounts).set({ deletedAt: now, updatedAt: now }).where(eq(subaccounts.id, sa.id));
+    await softDeleteSubaccount(sa.id, req.orgId!);
     res.json({ message: 'Subaccount deleted' });
   })
 );
@@ -290,11 +289,7 @@ router.put(
     const currentSettings = (sa.settings ?? {}) as Record<string, unknown>;
     const newSettings = { ...currentSettings, devContext };
 
-    await db.update(subaccounts).set({
-      settings: newSettings,
-      updatedAt: new Date(),
-    }).where(eq(subaccounts.id, sa.id));
-
+    await updateSubaccountSettings(sa.id, req.orgId!, newSettings);
     res.json({ devContext });
   })
 );
@@ -328,11 +323,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const rows = await db
-      .select()
-      .from(subaccountCategories)
-      .where(and(eq(subaccountCategories.subaccountId, req.params.subaccountId), isNull(subaccountCategories.deletedAt)));
-
+    const rows = await listSubaccountCategories(req.params.subaccountId);
     res.json(rows);
   })
 );
@@ -354,18 +345,7 @@ router.post(
       return;
     }
 
-    const [cat] = await db
-      .insert(subaccountCategories)
-      .values({
-        subaccountId: req.params.subaccountId,
-        name,
-        description: description ?? null,
-        colour: colour ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
+    const cat = await createSubaccountCategory(req.params.subaccountId, { name, description, colour });
     res.status(201).json(cat);
   })
 );
@@ -382,17 +362,7 @@ router.patch(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { name, description, colour } = req.body as { name?: string; description?: string; colour?: string };
 
-    const [cat] = await db
-      .select()
-      .from(subaccountCategories)
-      .where(
-        and(
-          eq(subaccountCategories.id, req.params.categoryId),
-          eq(subaccountCategories.subaccountId, req.params.subaccountId),
-          isNull(subaccountCategories.deletedAt)
-        )
-      );
-
+    const cat = await getSubaccountCategory(req.params.categoryId, req.params.subaccountId);
     if (!cat) {
       res.status(404).json({ error: 'Category not found' });
       return;
@@ -403,12 +373,7 @@ router.patch(
     if (description !== undefined) update.description = description;
     if (colour !== undefined) update.colour = colour;
 
-    const [updated] = await db
-      .update(subaccountCategories)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(subaccountCategories.id, cat.id))
-      .returning();
-
+    const updated = await updateSubaccountCategory(cat.id, update);
     res.json(updated);
   })
 );
@@ -423,28 +388,14 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [cat] = await db
-      .select()
-      .from(subaccountCategories)
-      .where(
-        and(
-          eq(subaccountCategories.id, req.params.categoryId),
-          eq(subaccountCategories.subaccountId, req.params.subaccountId),
-          isNull(subaccountCategories.deletedAt)
-        )
-      );
 
+    const cat = await getSubaccountCategory(req.params.categoryId, req.params.subaccountId);
     if (!cat) {
       res.status(404).json({ error: 'Category not found' });
       return;
     }
 
-    const now = new Date();
-    await db
-      .update(subaccountCategories)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(eq(subaccountCategories.id, cat.id));
-
+    await softDeleteSubaccountCategory(cat.id);
     res.json({ message: 'Category deleted' });
   })
 );
@@ -464,38 +415,10 @@ router.get(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
-    // Linked org automations
-    const links = await db
-      .select({
-        linkId: subaccountAutomationLinks.id,
-        processId: subaccountAutomationLinks.processId,
-        subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
-        isActive: subaccountAutomationLinks.isActive,
-        linkCreatedAt: subaccountAutomationLinks.createdAt,
-        processName: automations.name,
-        processStatus: automations.status,
-        processDescription: automations.description,
-        processWebhookPath: automations.webhookPath,
-      })
-      .from(subaccountAutomationLinks)
-      .innerJoin(automations, eq(automations.id, subaccountAutomationLinks.processId))
-      .where(eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId));
+    const linkedProcesses = await listSubaccountAutomationLinks(req.params.subaccountId);
+    const nativeProcesses = await listSubaccountNativeAutomations(req.params.subaccountId);
 
-    // Subaccount-native automations
-    const nativeProcesses = await db
-      .select()
-      .from(automations)
-      .where(
-        and(
-          eq(automations.subaccountId, req.params.subaccountId),
-          isNull(automations.deletedAt)
-        )
-      );
-
-    res.json({
-      linkedProcesses: links,
-      nativeProcesses,
-    });
+    res.json({ linkedProcesses, nativeProcesses });
   })
 );
 
@@ -517,12 +440,7 @@ router.post(
       return;
     }
 
-    // Verify process belongs to this org
-    const [process] = await db
-      .select()
-      .from(automations)
-      .where(and(eq(automations.id, processId), eq(automations.organisationId, req.orgId!), isNull(automations.deletedAt)));
-
+    const process = await findOrgAutomation(processId, req.orgId!);
     if (!process) {
       res.status(404).json({ error: 'Process not found or not accessible' });
       return;
@@ -534,17 +452,11 @@ router.post(
       return;
     }
 
-    const [link] = await db
-      .insert(subaccountAutomationLinks)
-      .values({
-        subaccountId: req.params.subaccountId,
-        processId,
-        subaccountCategoryId: subaccountCategoryId ?? null,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const link = await createSubaccountAutomationLink({
+      subaccountId: req.params.subaccountId,
+      processId,
+      subaccountCategoryId,
+    });
 
     res.status(201).json(link);
   })
@@ -562,16 +474,7 @@ router.patch(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { isActive, subaccountCategoryId } = req.body as { isActive?: boolean; subaccountCategoryId?: string | null };
 
-    const [link] = await db
-      .select()
-      .from(subaccountAutomationLinks)
-      .where(
-        and(
-          eq(subaccountAutomationLinks.id, req.params.linkId),
-          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId)
-        )
-      );
-
+    const link = await getSubaccountAutomationLink(req.params.linkId, req.params.subaccountId);
     if (!link) {
       res.status(404).json({ error: 'Process link not found' });
       return;
@@ -581,12 +484,7 @@ router.patch(
     if (isActive !== undefined) update.isActive = isActive;
     if (subaccountCategoryId !== undefined) update.subaccountCategoryId = subaccountCategoryId;
 
-    const [updated] = await db
-      .update(subaccountAutomationLinks)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(subaccountAutomationLinks.id, link.id))
-      .returning();
-
+    const updated = await updateSubaccountAutomationLink(link.id, update);
     res.json(updated);
   })
 );
@@ -601,22 +499,14 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [link] = await db
-      .select()
-      .from(subaccountAutomationLinks)
-      .where(
-        and(
-          eq(subaccountAutomationLinks.id, req.params.linkId),
-          eq(subaccountAutomationLinks.subaccountId, req.params.subaccountId)
-        )
-      );
 
+    const link = await getSubaccountAutomationLink(req.params.linkId, req.params.subaccountId);
     if (!link) {
       res.status(404).json({ error: 'Process link not found' });
       return;
     }
 
-    await db.delete(subaccountAutomationLinks).where(eq(subaccountAutomationLinks.id, link.id));
+    await deleteSubaccountAutomationLink(link.id);
     res.json({ message: 'Process link removed' });
   })
 );
@@ -633,23 +523,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const rows = await db
-      .select({
-        assignmentId: subaccountUserAssignments.id,
-        userId: subaccountUserAssignments.userId,
-        permissionSetId: subaccountUserAssignments.permissionSetId,
-        assignedAt: subaccountUserAssignments.createdAt,
-        email: users.email,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        status: users.status,
-        permissionSetName: permissionSets.name,
-      })
-      .from(subaccountUserAssignments)
-      .innerJoin(users, eq(users.id, subaccountUserAssignments.userId))
-      .innerJoin(permissionSets, eq(permissionSets.id, subaccountUserAssignments.permissionSetId))
-      .where(eq(subaccountUserAssignments.subaccountId, req.params.subaccountId));
-
+    const rows = await listSubaccountMembers(req.params.subaccountId);
     res.json(rows);
   })
 );
@@ -672,38 +546,23 @@ router.post(
       return;
     }
 
-    // Verify user belongs to same org
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.id, userId), eq(users.organisationId, sa.organisationId), isNull(users.deletedAt)));
-
+    const user = await findOrgUser(userId, sa.organisationId);
     if (!user) {
       res.status(404).json({ error: 'User not found in this organisation' });
       return;
     }
 
-    // Verify permission set belongs to same org
-    const [ps] = await db
-      .select({ id: permissionSets.id })
-      .from(permissionSets)
-      .where(and(eq(permissionSets.id, permissionSetId), eq(permissionSets.organisationId, sa.organisationId), isNull(permissionSets.deletedAt)));
-
+    const ps = await findOrgPermissionSet(permissionSetId, sa.organisationId);
     if (!ps) {
       res.status(404).json({ error: 'Permission set not found in this organisation' });
       return;
     }
 
-    const [assignment] = await db
-      .insert(subaccountUserAssignments)
-      .values({
-        subaccountId: req.params.subaccountId,
-        userId,
-        permissionSetId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const assignment = await createSubaccountMemberAssignment({
+      subaccountId: req.params.subaccountId,
+      userId,
+      permissionSetId,
+    });
 
     res.status(201).json(assignment);
   })
@@ -727,38 +586,19 @@ router.patch(
       return;
     }
 
-    const [assignment] = await db
-      .select()
-      .from(subaccountUserAssignments)
-      .where(
-        and(
-          eq(subaccountUserAssignments.subaccountId, req.params.subaccountId),
-          eq(subaccountUserAssignments.userId, req.params.userId)
-        )
-      );
-
+    const assignment = await getSubaccountMemberAssignment(req.params.subaccountId, req.params.userId);
     if (!assignment) {
       res.status(404).json({ error: 'Member assignment not found' });
       return;
     }
 
-    // Verify the new permission set belongs to the same org
-    const [ps] = await db
-      .select({ id: permissionSets.id })
-      .from(permissionSets)
-      .where(and(eq(permissionSets.id, permissionSetId), eq(permissionSets.organisationId, sa.organisationId), isNull(permissionSets.deletedAt)));
-
+    const ps = await findOrgPermissionSet(permissionSetId, sa.organisationId);
     if (!ps) {
       res.status(404).json({ error: 'Permission set not found in this organisation' });
       return;
     }
 
-    const [updated] = await db
-      .update(subaccountUserAssignments)
-      .set({ permissionSetId, updatedAt: new Date() })
-      .where(eq(subaccountUserAssignments.id, assignment.id))
-      .returning();
-
+    const updated = await updateSubaccountMemberAssignment(assignment.id, permissionSetId);
     res.json(updated);
   })
 );
@@ -773,22 +613,14 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const [assignment] = await db
-      .select()
-      .from(subaccountUserAssignments)
-      .where(
-        and(
-          eq(subaccountUserAssignments.subaccountId, req.params.subaccountId),
-          eq(subaccountUserAssignments.userId, req.params.userId)
-        )
-      );
 
+    const assignment = await getSubaccountMemberAssignment(req.params.subaccountId, req.params.userId);
     if (!assignment) {
       res.status(404).json({ error: 'Member assignment not found' });
       return;
     }
 
-    await db.delete(subaccountUserAssignments).where(eq(subaccountUserAssignments.id, assignment.id));
+    await deleteSubaccountMemberAssignment(assignment.id);
     res.json({ message: 'Member removed from subaccount' });
   })
 );

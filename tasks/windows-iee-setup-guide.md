@@ -8,7 +8,7 @@ This guide is the companion to `docs/iee-development-spec.md`. It is the exact, 
 >
 > Treat the body of each step as authoritative — including the warning callouts. They exist because someone hit that exact failure mode in real setup before.
 
-The result: two services running locally via Docker Compose — the main app and the IEE worker — connected to a **native Windows PostgreSQL** install via `host.docker.internal`. Same code that will later run against Neon + a DigitalOcean VPS.
+The result: two services running locally via Docker Compose — the main app and the IEE worker — connected to a **native Windows PostgreSQL** install via `host.docker.internal`. Same code that will later run against Neon + e2b sandboxes.
 
 > Why no bundled Postgres? The original draft used a `postgres` Compose service. We moved to host PostgreSQL because the real, populated dev database lives on the Windows host and importing a 200+ MB dump into a fresh container on every reset was painful. The `postgres` service has been removed from `docker-compose.yml` entirely — only `app` and `worker` remain. If you want to re-enable it, add a `postgres:` service back (image, healthcheck, named volume) and revert the `DATABASE_URL` overrides on `app` and `worker` so they point at it.
 
@@ -464,16 +464,14 @@ docker stats
 |---|---|---|
 | App | `app` Compose service, port 3000 (API) + 5000 (Vite) | Replit |
 | Postgres + pg-boss | Native Windows install via `host.docker.internal` | Neon (managed) |
-| IEE worker | `worker` Compose service | DigitalOcean VPS, Docker |
+| IEE worker | `worker` Compose service | e2b sandboxes |
 | `DATABASE_URL` (inside containers) | `postgresql://postgres:...@host.docker.internal:5432/automation_os` | Neon connection string with `?sslmode=require` |
-| `BROWSER_SESSION_DIR` | `worker_sessions` named volume | VPS filesystem path (`/var/browser-sessions`) |
+| `BROWSER_SESSION_DIR` | `worker_sessions` named volume | e2b sandbox ephemeral volume |
 | Migrations | `npm run migrate` from Windows shell (host DB) | `npm run migrate` from a dev machine pointed at Neon |
 
 When promoting to production:
 1. Create a Neon project. Apply the schema once via `DATABASE_URL=<neon-url> npm run migrate` from a dev machine. Bootstrap the `schema_migrations` table first if Neon was seeded from a dump (see Step 6.2 note).
-2. Set `DATABASE_URL` to the Neon URL in **both** Replit Secrets and the VPS `.env`.
-3. On the VPS, clone the same repo and run `docker compose -f docker-compose.vps.yml up -d --build` (worker-only Compose file — see spec §10.5).
-4. Replit's app enqueues jobs. The VPS worker consumes them. No code changes between local and production — only env values.
+2. Rollout is operator-gated via the IEE browser settings tab (Operator > IEE browser). Set `rollout_approved=true` for the target subaccount via the admin rollout route. See `docs/iee-on-e2b-rollout.md`.
 
 ---
 

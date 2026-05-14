@@ -21,7 +21,7 @@
 - `docs/automation-os-system-agents-master-brief-v7.1.md`
 - `docs/riley-observations-dev-spec.md` (W3 telemetry would enrich this; not blocking)
 
-**Prototypes:** `prototypes/subaccount-optimiser/home-dashboard.html` (org context, cross-client rollup); `prototypes/subaccount-optimiser/home-dashboard-subaccount-context.html` (sub-account context, single-client view)
+**Prototypes:** `_archive/prototypes/subaccount-optimiser/home-dashboard.html` (org context, cross-client rollup); `_archive/prototypes/subaccount-optimiser/home-dashboard-subaccount-context.html` (sub-account context, single-client view)
 
 ---
 
@@ -582,7 +582,7 @@ The "See all 12 →" link in v1 expands the section inline (not navigating away)
 
 ### Mockups
 
-Two HTML prototypes in `prototypes/subaccount-optimiser/`:
+Two HTML prototypes in `_archive/prototypes/subaccount-optimiser/`:
 - `home-dashboard.html` — org context, cross-client rollup
 - `home-dashboard-subaccount-context.html` — sub-account context (Smith Dental selected)
 

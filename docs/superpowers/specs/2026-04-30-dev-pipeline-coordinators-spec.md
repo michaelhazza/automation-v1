@@ -193,14 +193,14 @@ Derive a kebab-case slug from the brief title (e.g. brief "Add live agent execut
 
 Create `tasks/builds/{slug}/` if it doesn't exist. Create `tasks/builds/{slug}/progress.md` with an initial header and the phase-1 status table.
 
-**Why before mockup loop:** the slug and directory must exist before invoking `mockup-designer`, which writes to `prototypes/{slug}/` and `tasks/builds/{slug}/mockup-log.md`.
+**Why before mockup loop:** the slug and directory must exist before invoking `mockup-designer`, which writes to `_archive/prototypes/{slug}/` and `tasks/builds/{slug}/mockup-log.md`.
 
 ### §1.8 Step 5 — Mockup loop (conditional)
 
 Invoke `mockup-designer` (see §4.2) as a sub-agent. The sub-agent:
 
 1. Reads `docs/frontend-design-principles.md` and the brief
-2. Decides on format — single-file (`prototypes/{slug}.html`) vs multi-screen directory (`prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — per §9 convention
+2. Decides on format — single-file (`_archive/prototypes/{slug}.html`) vs multi-screen directory (`_archive/prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — per §9 convention
 3. Produces an initial draft and returns a summary plus the file path(s)
 
 The coordinator then enters an **open-ended manual loop**:
@@ -1005,7 +1005,7 @@ Notes for caller: [anything the caller should know — e.g. "noticed a related i
 
 ```yaml
 name: mockup-designer
-description: Produces hi-fi clickable HTML prototypes for UI-touching briefs. Runs on Sonnet. Reads frontend-design-principles.md and applies the five hard rules. Iterates with the operator round-by-round until the operator says "complete". Output is either a single-file static screen (prototypes/{slug}.html) or a multi-screen clickable directory (prototypes/{slug}/index.html + numbered pages + _shared.css).
+description: Produces hi-fi clickable HTML prototypes for UI-touching briefs. Runs on Sonnet. Reads frontend-design-principles.md and applies the five hard rules. Iterates with the operator round-by-round until the operator says "complete". Output is either a single-file static screen (_archive/prototypes/{slug}.html) or a multi-screen clickable directory (_archive/prototypes/{slug}/index.html + numbered pages + _shared.css).
 tools: Read, Glob, Grep, Bash, Edit, Write, TodoWrite
 model: sonnet
 ```
@@ -1022,8 +1022,8 @@ model: sonnet
 
 At the start of round 1, decide format per §9:
 
-- **Single-file** (`prototypes/{slug}.html`) — when the brief mentions one screen, no flow, no navigation
-- **Multi-screen directory** (`prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — when the brief mentions a workflow, multiple screens, or navigation between states
+- **Single-file** (`_archive/prototypes/{slug}.html`) — when the brief mentions one screen, no flow, no navigation
+- **Multi-screen directory** (`_archive/prototypes/{slug}/index.html` + numbered pages + `_shared.css`) — when the brief mentions a workflow, multiple screens, or navigation between states
 
 Record the decision in the round-1 return summary so the operator can override if they disagree.
 
@@ -1058,14 +1058,14 @@ Caller (spec-coordinator) controls the loop. Mockup-designer does NOT decide whe
 
 #### §4.2.6 Tailwind / styling convention
 
-Match the existing prototypes' styling convention. Inspect `prototypes/agent-as-employee/_shared.css` and `prototypes/pulse/*.html` for the current pattern. If a `_shared.css` exists for the slug's directory, link it from every page. If a single-file mockup, embed styles in `<style>` tags inline (matches the existing `prototypes/system-costs-page.html` style).
+Match the existing prototypes' styling convention. Inspect `_archive/prototypes/agent-as-employee/_shared.css` and `_archive/prototypes/pulse/*.html` for the current pattern. If a `_shared.css` exists for the slug's directory, link it from every page. If a single-file mockup, embed styles in `<style>` tags inline (matches the existing `_archive/prototypes/system-costs-page.html` style).
 
 Do not introduce new design systems or import external CSS frameworks the rest of the prototypes don't use.
 
 #### §4.2.7 Rules
 
 - Never invoke other agents.
-- Never modify the brief or the spec — this sub-agent only writes to `prototypes/` and `tasks/builds/{slug}/mockup-log.md`.
+- Never modify the brief or the spec — this sub-agent only writes to `_archive/prototypes/` and `tasks/builds/{slug}/mockup-log.md`.
 - Never declare the mockup "complete" — only the operator decides that.
 - If a brief asks for behaviour that violates the five hard rules (e.g. "build a dashboard with five KPI tiles"), implement it AND flag the violation in the round summary. Do not silently sanitise the brief.
 
@@ -1839,7 +1839,7 @@ This is a documented escape hatch, NOT a default. Coordinators do not auto-sync 
 Two locations exist on disk for design artifacts:
 
 - **`tasks/mockups/`** — 1 file: `org-chart-redesign.html`. Single static screen.
-- **`prototypes/`** — mix:
+- **`_archive/prototypes/`** — mix:
   - Flat single-pagers: `brief-endtoend.html`, `delegation-graph.html`, `system-costs-page.html`
   - Multi-screen clickable directories: `agent-as-employee/` (16 pages), `cached-context/` (5 pages), `pulse/` (10+ pages), `riley-observations/`
 
@@ -1847,12 +1847,12 @@ The mockups vs prototypes distinction was never enforced. Both directories serve
 
 ### §9.2 Target state — single location, format-driven convention
 
-**Consolidate to `prototypes/` only. Retire `tasks/mockups/`.**
+**Consolidate to `_archive/prototypes/` only. Retire `tasks/mockups/`.**
 
 Convention going forward:
 
-- **`prototypes/{slug}.html`** — single static screen (one screen, no flow, no navigation)
-- **`prototypes/{slug}/`** — multi-screen clickable directory, with:
+- **`_archive/prototypes/{slug}.html`** — single static screen (one screen, no flow, no navigation)
+- **`_archive/prototypes/{slug}/`** — multi-screen clickable directory, with:
   - `index.html` — entry page linking to all numbered screens
   - Numbered screen files: `01-{name}.html`, `02-{name}.html`, ...
   - `_shared.css` — shared styling for the slug's directory
@@ -1863,9 +1863,9 @@ The `mockup-designer` sub-agent (§4.2) selects format based on the brief. The c
 
 In the same commit that lands this spec:
 
-1. Move `tasks/mockups/org-chart-redesign.html` → `prototypes/org-chart-redesign.html`
+1. Move `tasks/mockups/org-chart-redesign.html` → `_archive/prototypes/org-chart-redesign.html`
    ```bash
-   git mv tasks/mockups/org-chart-redesign.html prototypes/org-chart-redesign.html
+   git mv tasks/mockups/org-chart-redesign.html _archive/prototypes/org-chart-redesign.html
    ```
 2. Remove the empty `tasks/mockups/` directory:
    ```bash
@@ -1875,7 +1875,7 @@ In the same commit that lands this spec:
    ```bash
    grep -r "tasks/mockups" . --exclude-dir=node_modules --exclude-dir=.git
    ```
-   Update each reference to `prototypes/` accordingly. Likely files: `CLAUDE.md`, `architecture.md`, `docs/doc-sync.md`, any spec or plan that references the path.
+   Update each reference to `_archive/prototypes/` accordingly. Likely files: `CLAUDE.md`, `architecture.md`, `docs/doc-sync.md`, any spec or plan that references the path.
 
 ### §9.4 Update docs/doc-sync.md if needed
 
@@ -1885,7 +1885,7 @@ In the same commit that lands this spec:
 
 ### §9.5 What this does NOT change
 
-- Existing prototype directories (`prototypes/agent-as-employee/`, `prototypes/cached-context/`, etc.) stay where they are. No renaming, no restructuring.
+- Existing prototype directories (`_archive/prototypes/agent-as-employee/`, `_archive/prototypes/cached-context/`, etc.) stay where they are. No renaming, no restructuring.
 - The styling convention inside individual prototypes is unchanged. `mockup-designer` matches whatever exists.
 - The operator's existing manual workflow (writing mockups by hand in either location) continues to work; the only change is that there is now one canonical location instead of two.
 
@@ -1904,7 +1904,7 @@ In the same commit that lands this spec:
 | `.claude/agents/builder.md` | Sonnet sub-agent for chunk implementation | §4.1 |
 | `.claude/agents/mockup-designer.md` | Sonnet sub-agent for hi-fi prototypes | §4.2 |
 | `.claude/agents/chatgpt-plan-review.md` | Manual-mode wrapper for ChatGPT plan review | §4.3 |
-| `prototypes/org-chart-redesign.html` | Migrated from `tasks/mockups/` | §9.3 |
+| `_archive/prototypes/org-chart-redesign.html` | Migrated from `tasks/mockups/` | §9.3 |
 
 #### §10.1.2 Rewritten files
 
@@ -1935,7 +1935,7 @@ In the same commit that lands this spec:
 
 | Path | Reason |
 |---|---|
-| `tasks/mockups/org-chart-redesign.html` | Migrated to `prototypes/org-chart-redesign.html` per §9.3 |
+| `tasks/mockups/org-chart-redesign.html` | Migrated to `_archive/prototypes/org-chart-redesign.html` per §9.3 |
 | `tasks/mockups/` (empty directory) | Retired per §9.3 |
 
 #### §10.1.6 Pre-shipment dependencies (separate PRs)
@@ -1982,7 +1982,7 @@ Each criterion below is deterministic — checkable by file inspection or a shor
 #### §10.2.4 Housekeeping complete
 
 - [ ] `tasks/mockups/` directory does not exist
-- [ ] `prototypes/org-chart-redesign.html` exists
+- [ ] `_archive/prototypes/org-chart-redesign.html` exists
 - [ ] No file in the repo (except git history) references `tasks/mockups/`:
   ```bash
   grep -rn "tasks/mockups" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=docs/superpowers/specs
@@ -2061,7 +2061,7 @@ Step 6 — All new features start on the NEW pipeline
 If the new pipeline causes problems on `main`:
 
 1. Revert the pipeline PR (single commit revert per `rollout_model: commit_and_revert` in `docs/spec-context.md`)
-2. Revert the housekeeping migration (`prototypes/org-chart-redesign.html` → `tasks/mockups/org-chart-redesign.html`) only if the housekeeping is the source of the problem
+2. Revert the housekeeping migration (`_archive/prototypes/org-chart-redesign.html` → `tasks/mockups/org-chart-redesign.html`) only if the housekeeping is the source of the problem
 3. Cache enablements stay — they don't depend on the pipeline
 
 The cleanup branch is upstream of this work and stays regardless.

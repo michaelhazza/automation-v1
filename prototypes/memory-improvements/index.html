@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Memory System Improvements: Mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: 'Inter', sans-serif; font-size: 14px; color: #1e293b; background: #f4f6fb; }
+  body { padding: 40px 48px; max-width: 1100px; margin: 0 auto; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe;
+    border-radius: 5px; padding: 3px 8px; margin-bottom: 12px;
+  }
+  h1 { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .desc { font-size: 14px; color: #64748b; max-width: 720px; line-height: 1.6; margin-bottom: 32px; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .card {
+    background: white; border: 1px solid #e8ecf0; border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all 0.15s; position: relative;
+  }
+  .card:hover { border-color: #818cf8; box-shadow: 0 4px 16px rgba(99,102,241,0.12); transform: translateY(-1px); }
+  .card-title-link { color: #0f172a; font-size: 15px; font-weight: 700; text-decoration: none; }
+  .card-title-link::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: 12px; }
+  .card-num { font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 4px; }
+  .card-file {
+    display: inline-block; font-size: 11px; font-family: monospace; color: #94a3b8;
+    background: #f1f5f9; border-radius: 4px; padding: 2px 7px; margin-top: 8px;
+  }
+  .card-desc { font-size: 12.5px; color: #64748b; line-height: 1.55; margin-top: 8px; }
+  .card-proposal {
+    display: inline-flex; align-items: center; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; border-radius: 4px; padding: 2px 7px;
+    margin-top: 10px;
+  }
+  .prop-a { background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; }
+  .prop-b { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+  .prop-d { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+  a { text-decoration: none; }
+  .info {
+    background: #fefce8; border: 1px solid #fde68a; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 28px; font-size: 12.5px; color: #78350f; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Phase 1: Memory System Improvements</div>
+  <h1>Mockups for review</h1>
+  <p class="desc">
+    Two operator-facing mockups for Proposal A (synthesis lineage) and Proposal B2
+    (citation utility dashboard). Proposal D has no UI in Rev 6.1 — it ships as a
+    backend algorithm change behind a single env flag. The Mockup 3 tombstone below
+    retains the retired Rev 5 design for git-history reference.
+    Brief: <code>tasks/builds/memory-improvements/brief.md</code>.
+  </p>
+
+  <div class="info">
+    <strong>Reading order (Rev 6):</strong> Surface 1 (Memory Block Detail + Sources tab) sets context for
+    what the "Auto" source pill links to. Surface 2 (Citation utility dashboard) is the success-metric
+    dashboard for retrieval improvements. Surface 3 was retired in brief Rev 6 — Proposal D ships as
+    a backend env flag with no UI.
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-num">MOCKUP 1</div>
+      <a href="memory-block-detail.html" class="card-title-link">Memory Block Detail: Sources tab</a>
+      <div class="card-file">memory-block-detail.html</div>
+      <div class="card-desc">
+        MemoryBlockDetailPage extended with a third "Sources" tab for auto-synthesised blocks.
+        Lists source workspace-memory entries with excerpts, run links, timestamps, and quality scores.
+        Bidirectional lineage (which other blocks an entry contributed to) behind a per-row expander.
+        Clicking the "Auto-synthesised" pill in the block header navigates to this tab.
+      </div>
+      <div class="card-proposal prop-a">Proposal A</div>
+    </div>
+
+    <div class="card">
+      <div class="card-num">MOCKUP 2</div>
+      <a href="citation-utility-dashboard.html" class="card-title-link">Citation Utility Dashboard</a>
+      <div class="card-file">citation-utility-dashboard.html</div>
+      <div class="card-desc">
+        A new "Memory Utility" tab on the existing UsagePage. Two line charts (entry utility % and
+        block utility %, rolling 30 days, per workspace). Per-agent breakdown table with injected
+        count, cited count, utility %, and run count. Agents with fewer than 10 runs suppressed.
+        Admin-only tab. Directional-metric caveat is dismissable.
+      </div>
+      <div class="card-proposal prop-b">Proposal B2</div>
+    </div>
+
+    <div class="card" style="opacity:0.7">
+      <div class="card-num">MOCKUP 3 — RETIRED</div>
+      <div class="card-title-link" style="color:#666;text-decoration:line-through">AKR Ranker Mode + Shadow Comparison</div>
+      <div class="card-file">akr-ranker-settings.html (deleted in Rev 6)</div>
+      <div class="card-desc">
+        Proposal D now ships as a backend algorithm change behind a single env on/off flag.
+        No user-facing UI. The previous mockup (four-mode rollout selector + shadow-mode
+        comparison panel) was retired in brief Rev 6 after CEO review identified it as
+        over-engineering for a pre-production codebase. The shapes are preserved in git
+        history (Rev 5.x) for re-evaluation when the codebase approaches live-user readiness.
+      </div>
+      <div class="card-proposal prop-d">Proposal D — no UI</div>
+    </div>
+  </div>
+</body>
+</html>

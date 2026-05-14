@@ -1,0 +1,40 @@
+You are reviewing iteration 3 of a draft specification document. Iterations 1 and 2 fixed 23 mechanical defects. The remaining open item is `PA-V2-OP-S1` in `tasks/todo.md` — the schema strategy for `execution_files` vs a new `operator_run_files` table — already routed to operator. Do NOT re-raise it.
+
+This iteration is a final consistency pass. Look for:
+
+1. **Stale or vague language introduced by iterations 1 and 2.** Phrases like "§13 #1 backing-store table" were added to make the spec strategy-neutral. Do those phrases survive scrutiny? Are there any references that should have been neutralised but weren't?
+
+2. **Internal contradictions across the spec.** Same concept described two different ways. Specifically check:
+   - The `cross_owner_substep.awaiting_initiator_decision` event is now described in §4.6 (shared types), §5.6 (stall job), §9.4 (terminal-event guarantee), and §10 (event-registry gate). Are all four descriptions consistent?
+   - The `CROSS_OWNER_DELEGATION_REQUEST` producer is now `crossOwnerDelegationRequestAssembler.build(...)`. Are all producer/consumer descriptions consistent?
+   - The `runTraceProjectionForViewer` is now wired into `agentExecutionEventService.ts`, `server/routes/taskEventStream.ts`, and `server/routes/agentRuns.ts`. Are these consistent with §5.4 + §6.5?
+
+3. **File-inventory drift.** §4.8 was added in iteration 1 and expanded in iteration 2 with paths from §1, §13, Appendix A. Are there any remaining prose mentions of files/paths/columns not in §4?
+
+4. **Sequencing-ordering bugs.** Iteration 2 moved the assembler to Chunk 3. Does Chunk 4 (approval-owner routing) now depend on Chunk 3 outputs correctly?
+
+5. **Load-bearing claims without mechanism.** Iteration 1 fixed many; iterations may have left some. Re-scan.
+
+6. **Self-consistency pass §11.** Does §11 still accurately summarise the spec given iterations 1 + 2 edits?
+
+Project context (do NOT re-derive):
+
+- Pre-production codebase. No live users. No staged rollouts. No feature flags for migrations.
+- Testing posture: static gates primary, pure-function unit tests only. No E2E / supertest / frontend tests.
+- Architecture: prefer existing primitives.
+
+Treat OUT OF SCOPE:
+- Feature flags, staged rollouts, frontend tests, E2E tests, supertest, performance baselines, composition tests, kill switches, canary deploys, multi-region/HA, new abstractions duplicating existing primitives.
+- The `execution_files` schema decision (PA-V2-OP-S1) — already operator-routed.
+
+For each finding, give:
+1. Short title.
+2. Section heading or line range.
+3. Defect (what's wrong).
+4. Minimum fix.
+5. Severity: critical | important | minor | nit.
+
+If no new mechanical defects are found, say so explicitly. Do not invent findings.
+
+The spec is:
+

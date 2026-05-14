@@ -96,9 +96,8 @@ async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
     normalised.includes('officedocument.wordprocessingml') ||
     normalised.endsWith('docx')
   ) {
-    // Dynamic import to avoid hard dependency at test time
-     
-    // @ts-expect-error — optional peer dep, not declared in this project's deps
+    // Dynamic import — `mammoth` is declared as an optionalDependency in
+    // package.json. Test runs and DOCX-disabled deploys can skip the dep.
     const mammoth = await (import('mammoth') as Promise<any>).catch(() => null) as {
       extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }>;
     } | null;

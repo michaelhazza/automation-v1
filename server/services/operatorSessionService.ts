@@ -21,13 +21,16 @@
 
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { integrationConnections } from '../db/schema/index.js';
+import { db } from '../db/index.js';
+import { integrationConnections, operatorRuns } from '../db/schema/index.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import type { OperatorSessionConsent } from '../db/schema/index.js';
 import type { AiSubscriptionConnection } from '../../shared/types/govern.js';
 import { auditService } from './auditService.js';
 import { operatorSessionConsentService } from './operatorSessionConsentService.js';
 import { operatorSessionLifecycleService } from './operatorSessionLifecycleService.js';
+import { operatorSandboxFileEventBridge } from './operatorSandboxFileEventBridge.js';
 import { OPERATOR_SESSION_PROVIDERS } from '../config/operatorSessionProviders.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
@@ -616,6 +619,40 @@ export const operatorSessionService = {
       to: 'connected_needs_consent',
       cause: 'disclosure_bumped',
       actorUserId: null,
+    });
+  },
+
+  async handleFileWriteToolCall(input: {
+    agentRunId: string;
+    organisationId: string;
+    subaccountId: string;
+    ownerUserId: string | null;
+    path: string;
+    content: Buffer;
+  }): Promise<void> {
+    await operatorSandboxFileEventBridge.handleToolCallEvent({
+      ...input,
+      emittedBy: 'tool_call',
+    });
+  },
+
+  async getRunProgress(params: { operatorRunId: string; subaccountId: string; orgId: string }) {
+    const { operatorRunId, subaccountId, orgId } = params;
+    return db.transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
+      const [found] = await tx
+        .select({
+          id: operatorRuns.id,
+          chainSeq: operatorRuns.chainSeq,
+          status: operatorRuns.status,
+          lastProgressAt: operatorRuns.lastProgressAt,
+          stepCount: operatorRuns.stepCount,
+          failureReason: operatorRuns.failureReason,
+        })
+        .from(operatorRuns)
+        .where(and(eq(operatorRuns.id, operatorRunId), eq(operatorRuns.subaccountId, subaccountId)))
+        .limit(1);
+      return found ?? null;
     });
   },
 };

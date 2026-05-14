@@ -5,6 +5,7 @@ import TaskCard from '../components/TaskCard';
 import TaskModal from '../components/TaskModal';
 import Modal from '../components/Modal';
 import { type User } from '../lib/auth';
+import { OperatorFilterToggle } from '../components/operator/OperatorFilterToggle';
 
 interface BoardColumn {
   key: string;
@@ -32,6 +33,7 @@ interface Task {
   assignedAgentId: string | null;
   dueDate: string | null;
   createdAt: string;
+  executionBackendId?: string | null;
 }
 
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none bg-white focus:ring-2 focus:ring-indigo-500';
@@ -54,6 +56,9 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
 
   // Drag state
   const [dragItem, setDragItem] = useState<string | null>(null);
+
+  // Operator filter — binary toggle, default off (mockup r12)
+  const [operatorFilterOn, setOperatorFilterOn] = useState(false);
 
   const load = useCallback(async () => {
     if (!subaccountId) return;
@@ -163,8 +168,12 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     );
   }
 
+  const visibleTasks = operatorFilterOn
+    ? tasks.filter(t => t.executionBackendId === 'operator_managed')
+    : tasks;
+
   const getColumnTasks = (key: string) =>
-    tasks.filter(i => i.status === key).sort((a, b) => a.position - b.position);
+    visibleTasks.filter(i => i.status === key).sort((a, b) => a.position - b.position);
 
   return (
     <div className="h-full flex flex-col">
@@ -175,15 +184,18 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
             {subaccountName} — Workspace
           </h1>
           <div className="text-[13px] text-slate-400 mt-0.5">
-            {tasks.length} task{tasks.length !== 1 ? 's' : ''} across {columns.length} columns
+            {visibleTasks.length} task{visibleTasks.length !== 1 ? 's' : ''} across {columns.length} columns
           </div>
         </div>
-        <button
-          onClick={() => setShowCreateForm(true)}
-          className="px-5 py-2.5 bg-indigo-500 text-white border-0 rounded-lg cursor-pointer text-[14px] font-semibold hover:bg-indigo-600 transition-colors"
-        >
-          + New Task
-        </button>
+        <div className="flex items-center gap-3">
+          <OperatorFilterToggle value={operatorFilterOn} onChange={setOperatorFilterOn} />
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="px-5 py-2.5 bg-indigo-500 text-white border-0 rounded-lg cursor-pointer text-[14px] font-semibold hover:bg-indigo-600 transition-colors"
+          >
+            + New Task
+          </button>
+        </div>
       </div>
 
       {/* Board — fills width on desktop, horizontal scroll on mobile */}

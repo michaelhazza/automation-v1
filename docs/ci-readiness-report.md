@@ -259,13 +259,12 @@ Pinning to the latest 20.x LTS line matches both the Dockerfile and the Replit p
 automation-v1/
   .claude/                Claude Code agent + skill definitions
   .github/                pull_request_template.md only (no workflows)
-  attached_assets/
+  _archive/               Historical prototypes and assets (preserved for git history)
   client/                 React + Vite frontend
   companies/
   db-init/
   docs/                   Specs, briefs, this report
   migrations/             247 numbered SQL migrations
-  prototypes/
   reports/
   scripts/                Migration runner, gates, QA scripts, seeds
   server/                 Express + Drizzle backend (the bulk of test files)

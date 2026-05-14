@@ -141,6 +141,31 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
         )}
       </div>
 
+      {/* Suspended banner (r11): shown when any connected subscription is not usable.
+          "Suspended" label only — provider name not shown in customer-facing copy per
+          open question 6 resolution in the plan. */}
+      {sorted && sorted.some(r => r.usabilityState !== 'connected_usable' && r.usabilityState !== 'connected_unverified') && (
+        <div className="flex items-start gap-3 p-3.5 mb-3 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-800">
+          <svg className="flex-shrink-0 mt-0.5 text-red-500" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+          </svg>
+          <div className="flex-1">
+            <span className="font-semibold">Suspended</span>
+            <span className="mx-1">—</span>
+            <span>One or more AI Subscriptions are unavailable. Sign back in to restore access.</span>
+          </div>
+          <button
+            onClick={() => {
+              const suspended = sorted.find(r => r.usabilityState !== 'connected_usable' && r.usabilityState !== 'connected_unverified');
+              if (suspended) setSelectedRow(suspended);
+            }}
+            className="shrink-0 px-3 py-1 text-[12px] font-semibold text-red-700 border border-red-300 bg-white hover:bg-red-50 rounded cursor-pointer"
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         {isLoading ? (

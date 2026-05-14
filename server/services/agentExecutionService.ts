@@ -252,6 +252,10 @@ function buildBackendOptionsForMode(
         backendId: 'iee_dev',
         ieeTask: request.ieeTask as never,
       };
+    case 'operator_managed':
+      // operator_managed runs are dispatched by the operator backend service,
+      // not through this function. Reaching here is a programming error.
+      throw new Error(`buildBackendOptionsForMode: 'operator_managed' runs must be dispatched via operatorRunService, not agentExecutionService`);
     default: {
       const _exhaustive: never = mode;
       void _exhaustive;
@@ -1354,6 +1358,14 @@ export const agentExecutionService = {
       );
       memory = memoryWithTracking.promptText;
       const injectedMemoryEntries = memoryWithTracking.injectedEntries;
+      // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV.
+      // Fire-and-forget: transient failure leaves the row NULL (counted as
+      // unmeasured by the MV), which is the spec-correct graceful degradation.
+      void db
+        .update(agentRuns)
+        .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
+        .where(eq(agentRuns.id, run.id))
+        .catch(() => {});
       if (memory) {
         dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
       }

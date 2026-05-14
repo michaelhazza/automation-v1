@@ -12,7 +12,8 @@ export function TabBar({ active, onChange }: TabBarProps) {
     { id: 'models',   label: 'Models' },
     { id: 'runs',     label: 'Runs' },
     { id: 'routing',  label: 'Routing' },
-    { id: 'iee',      label: 'IEE Execution' },
+    { id: 'iee',            label: 'IEE Execution' },
+    { id: 'memory_utility', label: 'Memory Utility' },
   ];
   return (
     <div className="flex gap-0.5 border-b border-slate-200 mb-6">

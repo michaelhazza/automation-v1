@@ -78,6 +78,9 @@ export const FailureReason = z.enum([
   'sandbox_provider_unavailable',  // provider unreachable / ambiguous-terminal after backoff cap
   'sandbox_credential_denied',     // credential broker refused issuance for this sandbox execution
   'sandbox_input_rejected',        // preflight input validation failed — pre-row, no sandbox started
+  // IEE Browser on e2b additions (spec §8.4, §13.5).
+  'iee_browser_launch_disabled',   // dispatch-layer check: settings.status !== 'on' or rolloutApproved === false
+  'profile_harvest_failed',        // browser profile volume could not be snapshotted post-task
   'unknown',
 ]);
 

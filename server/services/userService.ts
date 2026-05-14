@@ -325,6 +325,94 @@ export class UserService {
 
     return { message: 'User deleted successfully' };
   }
+
+  async listSystemAdmins() {
+    const rows = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        role: users.role,
+        status: users.status,
+        lastLoginAt: users.lastLoginAt,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(and(eq(users.role, 'system_admin'), isNull(users.deletedAt)));
+
+    return rows;
+  }
+
+  async inviteSystemAdmin(
+    callerOrgId: string,
+    invitedByUserId: string,
+    data: { email: string; firstName?: string; lastName?: string }
+  ) {
+    const existing = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.email, data.email.toLowerCase()), isNull(users.deletedAt)));
+
+    if (existing.length > 0) {
+      throw { statusCode: 409, message: 'A user with this email already exists on the platform' };
+    }
+
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteExpiresAt = new Date(Date.now() + env.INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
+    const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        organisationId: callerOrgId,
+        email: data.email.toLowerCase(),
+        passwordHash: tempHash,
+        firstName: data.firstName ?? '',
+        lastName: data.lastName ?? '',
+        role: 'system_admin',
+        status: 'pending',
+        inviteToken,
+        inviteExpiresAt,
+        invitedByUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    try {
+      await emailService.sendInvitationEmail(data.email, inviteToken, 'Automation OS');
+    } catch (err) {
+      console.error('[EMAIL] Failed to send system admin invitation email to', data.email, ':', err instanceof Error ? err.message : 'Unknown error');
+    }
+
+    return {
+      id: newUser.id,
+      email: newUser.email,
+      role: newUser.role,
+      status: newUser.status,
+      inviteExpiresAt: newUser.inviteExpiresAt,
+    };
+  }
+
+  async resetUserPassword(id: string, newPassword: string) {
+    const [user] = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(eq(users.id, id), isNull(users.deletedAt)));
+
+    if (!user) {
+      throw { statusCode: 404, message: 'User not found' };
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await db
+      .update(users)
+      .set({ passwordHash, status: 'active', updatedAt: new Date() })
+      .where(eq(users.id, id));
+
+    return { message: 'Password reset successfully', email: user.email };
+  }
 }
 
 export const userService = new UserService();

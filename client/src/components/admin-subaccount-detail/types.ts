@@ -30,11 +30,11 @@ export interface OrgProcess {
   status: string;
 }
 
-export type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'usage' | 'admin' | 'workspace';
+export type ActiveTab = 'onboarding' | 'engines' | 'workflows' | 'agents' | 'beliefs' | 'categories' | 'tags' | 'board' | 'operator' | 'usage' | 'admin' | 'workspace';
 
 export const TAB_LABELS: Record<ActiveTab, string> = {
   onboarding: 'Onboarding', engines: 'Engines', workflows: 'Workflows', agents: 'Agents', beliefs: 'Beliefs',
-  categories: 'Categories', tags: 'Tags', board: 'Board Config', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
+  categories: 'Categories', tags: 'Tags', board: 'Board Config', operator: 'Operator', usage: 'Usage & Costs', admin: 'Admin', workspace: 'Workspace',
 };
 
 export interface SettingsForm {

@@ -6,6 +6,8 @@ import { users } from './users';
 import { agentRuns } from './agentRuns';
 import { executions } from './executions';
 import { ieeRuns } from './ieeRuns';
+import { operatorRuns } from './operatorRuns';
+import { browserWarmSessions } from './browserWarmSessions';
 
 // ---------------------------------------------------------------------------
 // llm_requests — append-only financial ledger
@@ -60,8 +62,11 @@ export const llmRequests = pgTable(
     featureTag:     text('feature_tag').notNull().default('unknown'),
     // Spec §11.7.1 — distinguishes LLM calls made on the main app side from
     // those made by the IEE worker side, so the run-detail Cost panel can
-    // split LLM cost between app and worker for the same run.
-    callSite:       text('call_site').notNull().default('app').$type<'app' | 'worker'>(),
+    // split LLM cost between app and worker for the same run. After the
+    // worker-substrate retirement (iee-browser-on-e2b migration), browser
+    // sandbox costs are written by app-side services; the `iee-browser-warm-pool`
+    // value tags warm-session idle-cost rows specifically (browserWarmPool).
+    callSite:       text('call_site').notNull().default('app').$type<'app' | 'worker' | 'iee-browser-warm-pool'>(),
     agentName:      text('agent_name'),
     taskType:       text('task_type').notNull().default('general'),
 
@@ -156,6 +161,21 @@ export const llmRequests = pgTable(
     // Monotonically increasing per sandbox_execution_id for 'sandbox_compute_correction' rows.
     // Always NULL for 'sandbox_compute' and all non-sandbox rows.
     correctionSequence:     integer('correction_sequence'),
+
+    // Operator Backend attribution (migration 0339) — spec §4.10, §3.12.
+    // Populated for subscription_mediated and sandbox_compute rows written by
+    // the operator backend cost-writer.
+    operatorRunId:  uuid('operator_run_id').references(() => operatorRuns.id),
+    // Cost-accounting boundary within a chain link (e.g. 'pre_fallback' /
+    // 'post_fallback'). Part of the idempotency key for operator rows.
+    boundary:       text('boundary'),
+
+    // IEE Browser cost-row discriminator (migration 0348) — spec §8.6.
+    // subtype non-null only when source_type = 'sandbox_compute'.
+    // Values: 'task' (written by sandboxHarvestService) | 'warm_pool' (written by browserWarmPool.terminate).
+    // FK warm_session_id → browser_warm_sessions(id) lands in migration 0350 (after 0349 creates the target).
+    subtype:        text('subtype'),
+    warmSessionId:  uuid('warm_session_id').references(() => browserWarmSessions.id, { onDelete: 'restrict' }),
   },
   (table) => ({
     orgMonthIdx:          index('llm_requests_org_month_idx').on(table.organisationId, table.billingMonth),
@@ -192,6 +212,19 @@ export const llmRequests = pgTable(
     sandboxCorrectionSequenceUniqueIdx: uniqueIndex('llm_requests_sandbox_correction_sequence_unique_idx')
       .on(table.sandboxExecutionId, table.correctionSequence)
       .where(sql`${table.sourceType} = 'sandbox_compute_correction'`),
+    // Operator Backend — covering index for per-chain-link cost reads (migration 0339)
+    operatorRunIdIdx: index('llm_requests_operator_run_id_idx')
+      .on(table.operatorRunId)
+      .where(sql`${table.operatorRunId} IS NOT NULL`),
+    // Operator Backend — idempotency UNIQUE index (migration 0339)
+    operatorRunSourceBoundaryUniqueIdx: uniqueIndex('llm_requests_operator_run_source_boundary_unique_idx')
+      .on(table.operatorRunId, table.sourceType, table.boundary)
+      .where(sql`${table.operatorRunId} IS NOT NULL AND ${table.boundary} IS NOT NULL`),
+    // IEE Browser idle-cost-row idempotency — one cost row per warm session (migration 0350).
+    // Re-runs of warm-session teardown hit 23505 and treat it as "already written" no-op.
+    warmSessionIdUniqueIdx: uniqueIndex('llm_requests_warm_session_id_unique_idx')
+      .on(table.warmSessionId)
+      .where(sql`${table.subtype} = 'warm_pool'`),
   }),
 );
 

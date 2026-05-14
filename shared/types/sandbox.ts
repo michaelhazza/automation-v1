@@ -168,10 +168,23 @@ export interface SandboxInputFile {
  * (may be an empty array). `sandboxExecutionId` is caller-generated; if a row already
  * exists in `sandbox_executions` with the same ID, its pinned policy / ceilings / template
  * wins on read (idempotent retry contract — spec §20.1).
+ *
+ * `sandboxStartKey`, when set, enables idempotent adoption via `adoptOrStart()`: the
+ * service will return the existing sandbox row keyed on this token if one exists in a
+ * live state (`pending` / `running` / `harvesting`), rather than starting a fresh one.
+ * The Operator Backend sets `sandboxStartKey = operator_run_id` so that a dispatch crash
+ * and retry re-adopts the already-started sandbox rather than creating a duplicate.
+ * Non-operator callers leave this field absent; behaviour is byte-identical to the V1 baseline.
  */
 export interface SandboxRunTaskInput {
   /** Caller-generated UUID. Used as the idempotency key across harvest + cost-ledger writes. */
   sandboxExecutionId: string;
+  /**
+   * Optional idempotency token for adoption-based dispatch-crash recovery (Operator Backend).
+   * When set, `adoptOrStart()` prefers an existing sandbox row keyed by this token.
+   * Non-operator callers omit this field; `runTask()` behaviour is unchanged.
+   */
+  sandboxStartKey?: string;
   organisationId: string;
   subaccountId: string;
   runId: string;
@@ -191,6 +204,38 @@ export interface SandboxRunTaskInput {
    * In V1 this is a string key resolved by the harvest service to a registered schema.
    */
   outputSchemaRef: string;
+  /**
+   * Browser profile volume mount descriptor (IEE-browser, spec §8.1 extension).
+   * Non-null only when templateName = 'iee-browser'. Non-browser tasks leave this absent;
+   * the sandbox harness ignores it. sessionProfileId authorises the mount; volumeId and
+   * userDataDirInSandbox are the physical parameters.
+   */
+  profileMount?: {
+    sessionProfileId: string;       // uuid of the iee_browser_session_profiles row
+    volumeId: string;
+    userDataDirInSandbox: string;   // '/workspace/profile'
+  };
+  /**
+   * Warm-session checkout ID (IEE-browser, spec §8.1 extension).
+   * UUID of the browser_warm_sessions row leased for this task, or null for cold-start.
+   * Non-browser tasks leave this absent.
+   */
+  warmSessionCheckoutId?: string | null;
+  /**
+   * Browser task envelope (IEE-browser, spec §8.1 extension).
+   * The actual task instructions (URL, actions, contract, etc.) threaded from
+   * `backendOptions.ieeTask` to the in-sandbox harness via /workspace/input.json.
+   * Non-browser tasks leave this absent. Shape is provider-opaque (the harness
+   * validates the envelope it expects).
+   */
+  browserTaskPayload?: unknown;
+  /**
+   * Provider-assigned sandbox ID of a pre-warmed sandbox (warm-pool dispatch).
+   * When set, the provider MUST skip createSandbox() and adopt this sandbox
+   * instead — semantically the warm-pool lease's whole point. Non-warm-pool
+   * dispatches leave this absent and the provider creates a fresh sandbox.
+   */
+  leasedProviderSandboxId?: string;
 }
 
 /**
