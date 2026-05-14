@@ -79,7 +79,7 @@ client/src/pages/UsagePage.tsx                          ← host only (~150–20
 client/src/components/usage/
   ├─ types.ts                                           ← 11 interfaces + `Tab` union + `FallbackChainEntry` + `RoutingFilters` + `IeeFilters` type aliases
   ├─ format.ts                                          ← formatCents, formatTokens, monthLabel, prevMonth, nextMonth, parseFallbackChain, anomalyColor
-  ├─ constants.ts                                       ← ANOMALY_THRESHOLDS, TIER_COLORS, REASON_COLORS, STATUS_COLORS
+  ├─ constants.ts                                       ← ANOMALY_THRESHOLDS, TIER_COLORS, REASON_COLORS, STATUS_COLORS, SHIMMER_CLASS
   ├─ __tests__/
   │   └─ format.test.ts                                 ← Vitest tests for the 7 pure helpers (§9)
   ├─ MonthNavigator.tsx                                 ← prev/next + month label (uses ChevLeft/ChevRight inline)
@@ -356,7 +356,7 @@ Test file: `client/src/components/usage/__tests__/format.test.ts` — one focuse
 | `parseFallbackChain` | `null` input returns `null`; valid JSON array returns the parsed array; malformed JSON returns `null` (no throw); non-array JSON returns `null` |
 | `anomalyColor` | Value below `warn` returns slate band; value `>= warn` and `< danger` returns amber band; value `>= danger` returns red band |
 
-Constants move to `constants.ts`: `ANOMALY_THRESHOLDS`, `TIER_COLORS`, `REASON_COLORS`, `STATUS_COLORS`. No tests — they are static lookup tables.
+Constants move to `constants.ts`: `ANOMALY_THRESHOLDS`, `TIER_COLORS`, `REASON_COLORS`, `STATUS_COLORS`, and `SHIMMER_CLASS`. The `SHIMMER_CLASS` string is today's host-local `shimmer` constant (UsagePage.tsx line 354) — `'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded-lg'` — copied byte-for-byte. Every extracted tab and atom that needs the shimmer string imports `SHIMMER_CLASS` directly from `constants.ts`; this removes today's prop-drilling of `shimmer` into `<RoutingTab>` (UsagePage.tsx line 701, `RoutingTabProps.shimmer: string`) — the new `<RoutingTab>` does not take a `shimmer` prop. No tests — they are static lookup tables.
 
 ## 10. Migration plan (chunked)
 
@@ -367,7 +367,7 @@ Each chunk is independently revertible. Order: types and helpers first, atoms se
 - Move all 11 interfaces + `Tab` union + `FallbackChainEntry` type alias to `client/src/components/usage/types.ts`.
 - Add two new named type aliases to `types.ts`: `RoutingFilters` and `IeeFilters` per §8.0. `RoutingFilters` replaces today's inline `Record<string, string>` annotation on the host's `routingFilters` state and on all routing prop sites; `IeeFilters` replaces today's inline literal type on the host's `ieeFilters` state and on the `IeeTab` filter props. Behaviour is unchanged — keys remain the same — only the type-annotation is tightened.
 - Move all 7 pure helpers to `format.ts`. Add `__tests__/format.test.ts` per §9.
-- Move the four colour-map constants to `constants.ts`.
+- Move the four colour-map constants to `constants.ts`. Also export `SHIMMER_CLASS` — today's host-scoped `shimmer` string at UsagePage.tsx line 354, copied byte-for-byte. This removes the `shimmer` prop drilled into `<RoutingTab>` today; subsequent chunks (5, 6) import `SHIMMER_CLASS` directly from `constants.ts` in each tab/atom that needs it.
 - Host imports from new paths.
 - **Done when:** host file shrinks by ~150 LOC; `npx vitest run client/src/components/usage/__tests__/format.test.ts` passes; lint + typecheck + build:client clean.
 
@@ -417,7 +417,7 @@ Each chunk is independently revertible. Order: types and helpers first, atoms se
 
 - **Consolidate `formatCents` / `formatTokens` with `client/src/lib/formatMoney.ts`.** The two could share a helper; deferring because the call surface here uses a few subtle conventions (`'—'` for nullish, sub-$1.00 padding, etc.) and verifying drift across all current consumers is unrelated to the LOC pressure. Reason: scope discipline.
 - **Centralise tab-bar primitive shared with `AdminSubaccountDetailPage`.** Both pages render almost-identical tab bars. Defer until a third page needs the same primitive. Reason: premature abstraction otherwise.
-- **Replace inline shimmer string with a reusable `<Shimmer>` atom.** Today the page builds the shimmer via the `shimmer` Tailwind class constant. The atom is small; not in scope here.
+- **Replace inline shimmer string with a reusable `<Shimmer>` atom.** This refactor exports the shimmer string as `SHIMMER_CLASS` from `constants.ts` (so every extracted tab uses the same value), but does NOT introduce a `<Shimmer>` component atom — callers still build divs and apply the class string themselves, exactly as today. A future refactor can extract the small `<Shimmer width height ...>` atom; not in scope here.
 - **Move `RoutingFilters` to controlled-via-URL filters.** Would let users bookmark filtered views. Out of scope; product decision needed first.
 
 ## 12. Self-consistency check
