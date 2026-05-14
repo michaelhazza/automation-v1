@@ -51,4 +51,4 @@ All 14 Codex findings are mechanical (count/wording cleanup or stale rewrite fra
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED: 0
-- Spec commit after iteration: pending (recorded after Step 8b).
+- Spec commit after iteration: `e351d997`

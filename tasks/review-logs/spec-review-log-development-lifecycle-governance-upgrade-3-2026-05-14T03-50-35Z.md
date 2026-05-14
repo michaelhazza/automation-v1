@@ -33,7 +33,7 @@
 - Ambiguous findings: 0
 - Reclassified → directional: 0
 - Autonomous decisions: 0
-- Spec commit after iteration: pending (recorded after Step 8b).
+- Spec commit after iteration: `4adb13b9`
 
 ---
 
