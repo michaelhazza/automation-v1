@@ -6,6 +6,8 @@
 - PR: #304 — https://github.com/michaelhazza/automation-v1/pull/304
 - Mode: manual
 - Started: 2026-05-14T03:57:57Z
+- Finalised: 2026-05-14T04:40:00Z
+- **Verdict:** APPROVED (3 rounds; ChatGPT returned APPROVED on Round 3 with two low-severity polish items, both auto-applied)
 
 ---
 
@@ -168,3 +170,68 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0).
 - [auto] F3-2: §12 G2 acceptance row now reads "`stop` / `merge with existing capability` outcomes hard-escalate to operator; `revise` outcome triggers the §6.1 Step 3a Soft-gate pause-and-rerun loop".
 
 ---
+
+## Final Summary
+
+### Consistency check (across all rounds)
+
+Scanned all 23 final decisions (Round 1: 10 + 5 integrity; Round 2: 5; Round 3: 2) for contradictions across rounds. **0 inconsistencies found.** All decisions trended in the same direction — every finding was applied (4 user-approved + 19 auto-applied), zero rejections, zero deferrals. The R2 and R3 findings were all continuations of R1 decisions (count cleanup, source-of-truth consolidation, revise soft-gate documentation), so the trajectory is reinforcing rather than contradicting.
+
+### Implementation readiness checklist
+
+| Check | Status | Evidence |
+|---|---|---|
+| All inputs defined | ✅ | Every artefact in §7 names a Producer; §6.1.1 names Inputs / Sources / Decision criteria explicitly |
+| All outputs defined | ✅ | Every artefact in §7 names a Consumer + has a worked example or schema (§7.1, §7.2, §7.3, §7.4, §7.5); §6.2.1 enumerates the 8 valid verdict strings |
+| Failure modes covered | ✅ | Hard gate (stop / merge), Soft gate (revise pause-and-loop), missing-verdict block on `MERGE_READY`, owner-placeholder rejection, multi-cluster + mixed-lifecycle tie-break |
+| Ordering guarantees explicit | ✅ | §6.1 order invariant (Step 3 → 3a → 4 → 5 → 6); §6.2 order invariant (Step 6 → 7 → 7a → 8 → 9 → 10); §10 dependency graph (Chunks 1→3, 4→5→6, 1-6→7) |
+| No unresolved forward references | ✅ | R1 F2 fixed §6.5 → §7.4; R2 + R3 closed all stale "7-8" / "six fixed" / "stop/merge-only" references; integrity-check pass at finalisation greps clean |
+
+**All 5 checks pass. Spec is implementation-ready.** Proceed to architect plan authoring.
+
+### Final counts (rounds 1-3 + integrity-check)
+
+- Rounds: **3** (ChatGPT verdict per round: CHANGES_REQUESTED → CHANGES_REQUESTED → APPROVED)
+- ChatGPT findings: **17** (R1: 10, R2: 5, R3: 2)
+- Integrity-check findings: **6** (R1: 5, R2: 0, R3: 1 spot-check pass with 0 issues)
+- **Total decisions: 23**
+- Auto-accepted (technical): **19 applied** | 0 rejected | 0 deferred
+- User-decided (technical-escalated, all R1): **4 applied** | 0 rejected | 0 deferred
+- Index write failures: **0** (clean)
+
+### Doc sync sweep
+
+This spec is a self-contained planning document — it proposes restructuring `docs/capabilities.md` and editing process docs (`CLAUDE.md`, `architecture.md`) at Chunks 4 and 7 of implementation, but the spec itself ships no changes to those docs. The implementation chunks will trigger doc-sync verdicts at their respective finalisations.
+
+| Doc | Verdict | Rationale |
+|---|---|---|
+| `architecture.md` | n/a | No agent fleet, service boundary, route, RLS, or schema change in this spec; Chunk 7 of implementation will update agent-fleet / lifecycle pointers |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | n/a | No build-discipline / convention / pipeline change at spec-author time; Chunk 7 of implementation will update CLAUDE.md lifecycle prose |
+| `docs/capabilities.md` | n/a | Spec proposes restructuring it at Chunk 4; restructuring lands then, not now |
+| `docs/integration-reference.md` | n/a | No integration / OAuth / scope / skill change |
+| `docs/spec-context.md` | n/a | No framing-assumption change (testing posture, primitives, rollout model unchanged); `last_reviewed_at: 2026-05-11` is < 60 days old, no staleness bump needed |
+| `docs/frontend-design-principles.md` | n/a | No UI |
+| `KNOWLEDGE.md` | yes (1 new pattern) | Added: "Pattern: When fixing a load-bearing count or canonical-source reference in a spec, grep the entire spec for every instance — local Edit alone leaves stale references in adjacent sections" |
+| `docs/decisions/` | n/a | This spec extends the canonical pipeline (`2026-04-30-dev-pipeline-coordinators-spec.md`); the pipeline ADR is the authoritative architectural decision and is unchanged |
+| `docs/context-packs/` | n/a | No anchor changes in `architecture.md` |
+| `references/test-gate-policy.md` | n/a | No test-gate posture change |
+| `references/spec-review-directional-signals.md` | n/a | No `spec-reviewer` directional signal repeated > 2 times |
+| `docs/incident-response.md` | n/a | No incident-response change |
+| `docs/testing-transition-plan.md` | n/a | No testing-transition trigger change |
+| `CONTRIBUTING.md` | n/a | No lint-suppression / disable-pattern change |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | n/a | This is a repo-specific spec (not a framework-level change to the agent fleet itself) |
+
+All verdicts substantiated; doc-sync gate clean.
+
+### KNOWLEDGE.md pattern extraction
+
+**1 new pattern** added to KNOWLEDGE.md — a generalisation of the §18 / §18b pattern (line 919) covering load-bearing-value cleanup more broadly. See KNOWLEDGE.md `## Pattern: Spec-edit grep sweep — load-bearing values (counts, canonical sources, escalation enums) leave stale references unless explicitly grepped`.
+
+### Deferred items routed to `tasks/todo.md`
+
+**None this session.** Zero auto-defers, zero user-defers across all 3 rounds. The spec's own §14 Deferred Items section captures spec-level deferrals (architectural choices to revisit) — those are already in the spec body and do not need to be re-routed via this session log.
+
+### Notable
+- ChatGPT caught the headline blocker (R1 F1: `tasks/todo.md` count contradiction) that 3 prior `spec-reviewer` (Codex) iterations missed. Two evaluators in series catch a wider class than one evaluator running 3 times.
+- The duplicate-findings memory rule fired on R2 and R3, auto-applying 7 continuation findings (3 from R2 + 2 from R3 = 5 ChatGPT findings + 2 cross-round continuations) without re-escalation. Saved ~7 user prompts.
+- Round 1 integrity-check found 5 issues my round-1 edits introduced — would have surfaced as R2 findings if not caught.

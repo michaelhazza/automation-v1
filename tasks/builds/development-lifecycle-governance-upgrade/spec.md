@@ -1,8 +1,8 @@
 # Spec: Development Lifecycle Governance Upgrade
 
-**Status:** reviewing
+**Status:** approved (locked — chatgpt-spec-review final 2026-05-14T04:35:00Z; verdict APPROVED after 3 rounds)
 **Spec date:** 2026-05-14
-**Last updated:** 2026-05-14 (spec-reviewer iteration 3)
+**Last updated:** 2026-05-14 (chatgpt-spec-review final — APPROVED, 3 rounds, 18 findings + 5 integrity-check; 4 user-decided + 19 auto-applied)
 **Author:** main session (operator-directed)
 **Build slug:** `development-lifecycle-governance-upgrade`
 **Source brief:** [`tasks/ai-dlc-governance-brief.md`](../../ai-dlc-governance-brief.md) (locked 2026-05-14)
@@ -752,4 +752,4 @@ The following are remaining open questions after iteration 1 of spec review. Pre
 
 ---
 
-End of spec. Status: **reviewing** — see frontmatter for the canonical status.
+End of spec. Status: **approved (locked)** — see frontmatter for the canonical status.
