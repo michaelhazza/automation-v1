@@ -15,7 +15,7 @@
 
 - Visual change of any kind.
 - WebSocket protocol change — `useSocketRoom('workflow-run', runId, events, onReconnectSync)` keeps the same eight event handlers, the same `onReconnectSync` resync callback, and the same reconnect semantics provided by `useSocket.ts`.
-- New runtime tests beyond a single targeted Vitest file for `formatDuration` (the only pure helper this refactor extracts). The single test file covers the three edge cases listed in §9. No frontend / API / E2E tests are added.
+- New runtime tests beyond a single targeted Vitest file for `formatDuration` (the only pure helper this refactor extracts). The single test file covers the five cases tabled in §9. No frontend / API / E2E tests are added.
 
 ## 3. Existing primitives reused
 
@@ -66,14 +66,14 @@ Host import path in `App.tsx` is unchanged.
 ```
 WorkflowRunPage (host, ~180 LOC)
 │
-├── <RunHeader run, onCancel, onReplay, onPortalToggle />
+├── <RunHeader … />                                              ← see §8.1 for the full prop list (abbreviated here)
 ├── two-pane body
-│    ├── <StepDag stepRuns, stepDefById, selectedStepRunId, onSelectStepRun />
+│    ├── <StepDag … />                                            ← see §8.2
 │    └── <StepDetailPane stepRun, stepDef />
 └── <HitlActionBar stepRun, runId, stepDef, onActionTaken />     ← sticky, conditional on stepRun.status
 ```
 
-The host's job: call `useWorkflowRunEnvelope(subaccountId, runId)`, derive `selectedStepRunId` local state, compose the four components, and supply the four header callbacks (`onCancel` / `onReplay` / `onPortalToggle` and the HITL `onActionTaken`) which all call `refetch()` on success.
+The host's job: call `useWorkflowRunEnvelope(subaccountId, runId)` (which returns `selectedStepRunId` + `setSelectedStepRunId` as well as the envelope — see §7), compose the four region components, and supply the four header callbacks (`onCancel` / `onReplay` / `onPortalToggle` and the HITL `onActionTaken`) which all call `refetch()` on success.
 
 ## 7. Data-fetching ownership
 
@@ -106,13 +106,13 @@ props: {
   definition: Envelope['definition'];
   stepRuns: StepRun[];               // for the completedSteps / totalSteps line
   socketConnected: boolean;          // for the "⚠ polling" pill
-  subaccountId: string;              // for the back-link href and portal-toggle API call
+  subaccountId: string;              // for the back-link href only
   onCancel(): void;
   onReplay(): void;
   onPortalToggle(): Promise<void>;
 }
 ```
-Renders the back-link, title block (name + version + onboarding / portal-visible pills), the metadata line (`completedSteps / totalSteps · mode … · started …`), the status pill, the optional `⚠ polling` indicator, the kebab dropdown (Cancel / Replay / Portal toggle / Edit template in Studio), and the run-error box. Owns the kebab open/closed local state and the document-level click-to-close effect. Owns the two `ConfirmDialog` modals for Cancel and Replay. `onPortalToggle()` is `async` because today's implementation awaits the PATCH before refetching — the host's handler does the PATCH + toast + `refetch()`, the header just invokes it.
+Renders the back-link, title block (name + version + onboarding / portal-visible pills), the metadata line (`completedSteps / totalSteps · mode … · started …`), the status pill, the optional `⚠ polling` indicator, the kebab dropdown (Cancel / Replay / Portal toggle / Edit template in Studio), and the run-error box. Owns the kebab open/closed local state, the document-level click-to-close effect, and the two `ConfirmDialog` modals for Cancel and Replay (the header renders the modals and triggers `onCancel()` / `onReplay()` on confirm; the host owns the action handlers themselves — `handleCancelRun` / `handleReplayRun` — which fire the toasts and call `refetch()`). `onPortalToggle()` is `async` because today's implementation awaits the PATCH before refetching — the host's handler does the PATCH + toast + `refetch()`, the header just invokes it.
 
 ### 8.2 `<StepDag>`
 ```
@@ -227,7 +227,7 @@ The type aliases and interfaces at lines 24-120 (`StepType`, `SideEffectType`, `
 | Portal toggle off | `toast.success('Hidden from portal')` | WorkflowRunPage.tsx:528-532 |
 | Portal toggle failed | `toast.error(server.error ?? 'Failed to toggle portal visibility')` | WorkflowRunPage.tsx:535-538 |
 
-Toasts that move with their handler: the four HITL toasts go to `HitlActionBar`. The two cancel toasts and two replay toasts stay in the host (they fire after `ConfirmDialog`s the host owns). The three portal-toggle toasts stay in the host (the toggle handler stays host-owned because it lives inside the kebab menu's JSX, which moves to `RunHeader` — see Chunk 4 note: the header invokes `onPortalToggle()`, host runs the PATCH + toasts + refetch).
+Toasts that move with their handler: the four HITL toasts go to `HitlActionBar`. All seven other toasts (two cancel, two replay, three portal-toggle) stay in the host. Pattern: the kebab UI and the two `ConfirmDialog` modals move to `RunHeader`; the mutation + toast + `refetch()` implementation stays host-owned and is invoked via the `onCancel` / `onReplay` / `onPortalToggle` callbacks. This keeps the API mutations co-located with the `refetch()` they need to call.
 
 ## 13. Acceptance criteria
 
