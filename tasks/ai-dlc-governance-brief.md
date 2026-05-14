@@ -101,6 +101,8 @@ This stays lightweight. It is not a replacement for the spec.
 
 ### 6.2 Lightweight Elaboration
 
+> **v1 implementation note (2026-05-14):** Elaboration is captured *inside* Intent intake for v1 — it is not represented as a separate lifecycle step. The brief's references to a distinct "Elaboration" stage (including the lifecycle ordering in §1 and §9 Chunk 7) describe the conceptual decomposition, not the runtime contract. The runtime lifecycle implemented in `CLAUDE.md`, `spec-coordinator.md`, and `feature-coordinator.md` is: Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Finalisation → Merge → Capability Registration → Compound Learning. The elaboration checks below run as fields/prompts within the Intent intake schema rather than as a standalone stage.
+
 A Stage 0 ritual before specification. Not a formal workshop for every build. The required outcome: product, engineering, and risk perspectives have been considered before the spec is written.
 
 - Trivial / Standard: operator may complete inline, single-pass.
