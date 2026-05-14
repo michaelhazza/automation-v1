@@ -135,4 +135,4 @@ Codex raw output saved at: `C:\Users\micha\.claude\projects\c--Files-Projects-au
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED: 0
-- Spec commit after iteration: (set after edit + commit)
+- Spec commit after iteration: `7be1b1ca`

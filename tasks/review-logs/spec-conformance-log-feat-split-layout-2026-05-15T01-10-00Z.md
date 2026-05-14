@@ -7,6 +7,7 @@
 **Scope:** all-of-spec — caller invoked the full feat-split-layout refactor verification.
 **Changed-code set:** 27 files (Layout.tsx + 13 layout/ files + 8 hooks + 4 modals + 1 test)
 **Run at:** 2026-05-15T01:10:00Z
+**Commit at finish:** `835afa55`
 
 ---
 

@@ -7,6 +7,7 @@
 **Scope:** all spec (single-phase frontend refactor, completed implementation; caller confirmed via invocation)
 **Changed-code set:** 24 files (1 modified `UsagePage.tsx` host + 23 new files under `client/src/components/usage/` and `client/src/hooks/useUsageData.ts`)
 **Run at:** 2026-05-15T15:48:12Z
+**Commit at finish:** `960bc282`
 
 ---
 

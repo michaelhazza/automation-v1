@@ -16,6 +16,7 @@
 - `client/src/components/skill-analyzer/resultsStep/ProposedAgentBanner.tsx` (new)
 
 **Run at:** 2026-05-14T17:28:11Z
+**Commit at finish:** `807060b8`
 
 > Other modified files on the branch (Layout split, AdminSubaccountDetailPage split, SubaccountKnowledgePage split, UsagePage split, WorkflowRunPage split, KNOWLEDGE.md, tasks/* meta files) belong to unrelated split-refactor sessions and are explicitly excluded from this run's scope. They have their own conformance logs.
 

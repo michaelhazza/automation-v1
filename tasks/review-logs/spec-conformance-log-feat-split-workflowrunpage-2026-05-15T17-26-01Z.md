@@ -7,6 +7,7 @@
 **Scope:** Full spec — single-phase refactor, all 6 chunks per `plan.md`
 **Changed-code set:** 8 files (1 host, 1 hook, 6 component-folder files incl. test)
 **Run at:** 2026-05-15T17-26-01Z
+**Commit at finish:** 58373a41
 
 ## Summary
 

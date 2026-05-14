@@ -7,6 +7,7 @@
 **Scope:** All spec (single-phase refactor; caller-confirmed via explicit file list in invocation)
 **Changed-code set:** 10 files (1 host + 8 tab components + 1 types module)
 **Run at:** 2026-05-15T14:26:25Z
+**Commit at finish:** `b4a52abd`
 
 ## Summary
 

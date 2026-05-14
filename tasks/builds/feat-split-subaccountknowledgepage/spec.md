@@ -11,13 +11,23 @@ The spec-authoring checklist sections 0 (verify present state), 4 (RLS), 5 (exec
 ## 1. Goals
 
 - Decompose `client/src/pages/SubaccountKnowledgePage.tsx` (1,160 LOC) into a thin host plus per-tab files under `client/src/components/subaccount-knowledge/`, matching the convention established by batch-1 specs (`pulse/`, `baseline/`, `admin-subaccount-detail/`).
-- Preserve every user-visible behaviour: 3-tab layout (References / Insights / Memory Blocks), promote/demote affordances, rename modal, delete-confirm dialogs, EditArtefactDrawer (in the baseline-artefacts region of the header), baseline-artefacts status badge.
+- Preserve every user-visible behaviour, with three accepted minor deltas listed in §2 and detailed in §12: (a) the `Insights (N)` count in the tab bar appears only while the Insights tab is active, (b) modal-open and draft-form state in an inactive tab is discarded on tab switch, (c) one post-promote `loadInsights()` network call is dropped because the InsightsTab unmounts immediately after promote. The headline affordances are preserved: 3-tab layout (References / Insights / Memory Blocks), promote/demote affordances, rename modal, delete-confirm dialogs, EditArtefactDrawer (in the baseline-artefacts region of the header), baseline-artefacts status badge.
 
 ## 2. Non-goals
 
-- Visual change of any kind.
-- API change — every `GET/POST/PATCH/DELETE` call preserved.
+- Visual change of any kind to elements that exist in both before and after.
+- API change. Endpoint inventory is preserved — every `GET/POST/PATCH/DELETE` call site keeps its URL, method, and payload shape verbatim. The only call-timing change is described in §8.3 (post-promote-insight `loadInsights()` is dropped because the tab unmounts; mount-effect re-fetches on next visit).
 - New tests beyond pure-helper Vitest coverage for the 3 pure helpers (`referenceTitle`, `referencePreview`, `renameReferenceHtml`).
+
+### 2.1 Accepted minor deltas
+
+These are intentional consequences of the per-tab ownership split and are documented up-front so future readers don't treat them as bugs:
+
+- **Insights count.** Tab bar shows `Insights` (no `(N)`) while the Insights tab is inactive. Detailed in §12.
+- **Modal / draft persistence.** Switching tabs unmounts the previous tab. Open modals and unsaved form-field edits inside that tab are discarded. Detailed in §6.
+- **Promote-insight network call.** The post-promote `loadInsights()` refetch is dropped (the tab is unmounting). Next visit to Insights re-fetches via its mount-effect. Detailed in §8.3.
+
+If a reviewer or implementer believes any of these deltas is unacceptable, raise it before Chunk 1 — the alternative (keeping the host as a state mirror for every tab's data) defeats the refactor.
 
 ## 3. Existing primitives reused
 

@@ -16,6 +16,7 @@
   - `client/src/components/subaccount-knowledge/ReferencesTab.tsx` (new, 407 LOC)
   - `client/src/components/subaccount-knowledge/__tests__/format.test.ts` (new, 87 LOC, 17 tests passing)
 **Run at:** 2026-05-15T17:21:49Z
+**Commit at finish:** 632963a8
 
 ---
 
