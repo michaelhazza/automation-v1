@@ -19,7 +19,9 @@ const db = {
 const records = { tableName: 'records' };
 
 // Unsafe: db.select() inside `load()` with no withOrgTx wrapper for `load`.
-async function load(): Promise<unknown[]> {
+// Exported so eslint's no-unused-vars accepts it; the analyser still flags the
+// inner db.select() because no withOrgTx(...) call in this file references `load`.
+export async function load(): Promise<unknown[]> {
   return db.select().from(records);
 }
 
