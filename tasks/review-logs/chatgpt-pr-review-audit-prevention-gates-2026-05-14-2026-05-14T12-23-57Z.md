@@ -171,3 +171,80 @@
 - Targeted Vitest runs: 7/7 with-org-tx-analyser tests pass (new substring-collision regression added).
 - G3 lint/typecheck: skipped per operator decision (changes are 1 AST analyser tweak + doc/comment edits; targeted Vitest passes are the operative signal).
 
+---
+
+## Round 3 — 2026-05-14T13-15-00Z
+
+**Verdict:** APPROVED (0 Blocking / 1 Should-fix — auto-rejected as triple-duplicate diff-misread)
+**Top themes:** prior-finding duplicate (third occurrence)
+
+### ChatGPT Feedback (raw)
+
+> Yes. No new blocker from this pass.
+>
+> The prior F4 is resolved by explicitly carving per-file count baselines out of the expiry framework and documenting that any-budget.txt / marker-budget.txt expiry comments are informational only, with real enforcement deferred to BUDGET-EXPIRY-ENFORCEMENT-1. The actual baseline files now say the same thing, so the doc/implementation contradiction is gone.
+>
+> The prior T5 is resolved. isCalledViaOrgScope() now walks identifier nodes instead of using textual argText.includes(funcName), which closes the substring/comment/string-literal false-positive.
+>
+> One remaining should-fix:
+>
+> **T6**: verify-org-id-source.sh is still documented but not wired into run-all-gates.sh. architecture.md says the single org-id source invariant is enforced by `scripts/verify-org-id-source.sh`, but the new audit gate block in run-all-gates.sh still does not include it. Recommendation: add `run_gate "$SCRIPT_DIR/verify-org-id-source.sh"` or soften the architecture claim until it is wired.
+>
+> Verdict: mergeable after T6 if they want docs-to-CI consistency locked. Otherwise, acceptable as a small follow-up, but I'd fix it now because it is a one-line wiring/doc consistency issue.
+
+### Pre-triage verification (per playbook step 1b)
+
+- **T6** — REJECTED — diff-misread (substantive duplicate of Round 1 T3 AND Round 2 T4, same finding, no new evidence — third occurrence). Triple-verified: `git blame -L 65,66 scripts/run-all-gates.sh` returns commit `89a818cc` ("Implement architecture guard system with security fixes", Claude, 2026-04-04 09:14:28 +0000). The line `run_gate "$SCRIPT_DIR/verify-org-id-source.sh"` has been at line 65 of `scripts/run-all-gates.sh` continuously since 2026-04-04 — 40 days before this branch began. ChatGPT's persistent misread is consistent with the diff-only-reviewer false-positive pattern documented in KNOWLEDGE.md `[2026-05-14] diff-only reviewer blind spots on deletion-heavy + manifest-only PRs` from PR #305. ChatGPT only sees the unified diff; the script's pre-existing wiring lives in `main` and is invisible to the review surface.
+
+### Recommendations and Decisions
+
+| ID | Triage | Severity | Scope | Recommendation | Final Decision | Rationale |
+|----|--------|----------|-------|----------------|----------------|-----------|
+| T6 | technical (auto-reject, third-time duplicate of R1/T3 + R2/T4) | low (per ChatGPT) | standard | reject (diff-misread, third-time duplicate) | auto (reject — duplicate of Round 1 / T3 and Round 2 / T4) | Triple-verified via git blame: script wired since 2026-04-04 (commit `89a818cc`). No code change. Per playbook step 1a duplicate-detection rule, no escalation despite ChatGPT's continued language. |
+
+### Final Summary
+
+**Overall verdict:** APPROVED across 3 rounds.
+
+**Round-by-round outcomes:**
+- Round 1: CHANGES_REQUESTED (3 Blocking / 3 Should-fix) → 4 implemented (T1 + F1 + F2 + F3 with regression tests), 1 deferred (T2 → tasks/todo.md), 1 auto-rejected (T3 diff-misread).
+- Round 2: CHANGES_REQUESTED (1 Blocking / 2 Should-fix) → 2 implemented (T5 analyser fix + F4 doc-soften), 1 auto-rejected (T4 — Round 1 T3 duplicate).
+- Round 3: APPROVED, no new findings. 1 auto-rejected (T6 — third-time Round 1 T3 duplicate).
+
+**Code changes summary:**
+- Gate scripts hardened to fail closed on tool errors: `verify-no-new-cycles.sh` (T1), `verify-duplicate-blocks.sh` (F3).
+- With-org-tx analyser: caller-walk constrained to declaring file (F1) + AST identifier walk replacing substring `.includes` (T5); 2 regression fixtures + 2 test cases added.
+- Types-used analyser: `stripReExports` helper added; barrel re-exports no longer count as usage (F2); 2 regression test cases + 7 unit tests added.
+- `passing.ts` fixture corrected to actually exercise `db.select()` (closes pr-reviewer Round 2 Should-fix #2).
+- Doc clarifications: `references/test-gate-policy.md` carves per-file count baselines out of the expiry framework (F4); both budget baseline file headers carry a NOTE callout (F4).
+
+**Deferred backlog from this review:**
+- `BUDGET-EXPIRY-ENFORCEMENT-1` in `tasks/todo.md` — future opt-in feature gap (no current doc/code mismatch).
+
+**Spec deviations:** none introduced by review fixes. F4's doc-soften is a clarification of the existing spec §13 Q1 intent, not a deviation.
+
+**Files changed across all rounds:**
+- `scripts/verify-no-new-cycles.sh`
+- `scripts/verify-duplicate-blocks.sh`
+- `scripts/lib/with-org-tx-analyser.mjs`
+- `scripts/lib/types-used-pure.mjs`
+- `scripts/__fixtures__/with-org-tx/passing.ts`
+- `scripts/__fixtures__/with-org-tx/name-collision-unsafe.ts` (new)
+- `scripts/__fixtures__/with-org-tx/name-collision-safe.ts` (new)
+- `scripts/__fixtures__/with-org-tx/substring-collision.ts` (new)
+- `scripts/__tests__/with-org-tx-analyser.test.ts`
+- `scripts/__tests__/types-used-pure.test.ts`
+- `scripts/.gate-baselines/any-budget.txt`
+- `scripts/.gate-baselines/marker-budget.txt`
+- `references/test-gate-policy.md`
+- `tasks/todo.md`
+- `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md` (this log)
+
+**Operator close-of-review signal:** "close the review after this and progress to finalisation and merge, don't ask me any more questions" — received 2026-05-14T13:15Z. Closing the review here and proceeding to Step 6 (doc-sync sweep) and beyond.
+
+### Round 3 done
+
+- Auto-accepted: 0 implemented, 1 auto-rejected (T6 — third-time Round 1 T3 duplicate).
+- User-decided: none (operator-explicit close-of-review signal).
+- No code changes this round. Log-only commit follows.
+
