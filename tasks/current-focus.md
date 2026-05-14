@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
-last_updated: 2026-05-14T00:00:00Z
+active_spec: tasks/builds/skill-merge-consolidation-pass/spec.md
+active_plan: tasks/builds/skill-merge-consolidation-pass/plan.md
+build_slug: skill-merge-consolidation-pass
+branch: claude/improve-skill-analyzer-RiFpB
+status: BUILDING
+last_updated: 2026-05-13T23:59:14Z
 last_merged_pr: #297
 last_merged_slug: iee-browser-on-e2b
 last_merged_branch: claude/migrate-browser-e2b-snI99
@@ -22,7 +22,13 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Status:** **NONE** — no active build. Spec-coordinator entry available for the next brief.
+**Active spec:** tasks/builds/skill-merge-consolidation-pass/spec.md
+**Active plan:** tasks/builds/skill-merge-consolidation-pass/plan.md (pending — architect to write)
+**Active build slug:** skill-merge-consolidation-pass
+**Branch:** claude/improve-skill-analyzer-RiFpB
+**Status:** **BUILDING**
+
+**Active build:** `skill-merge-consolidation-pass` — adds a conditional LLM consolidation pass to the skill analyzer's merge pipeline. Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. Spec at `tasks/builds/skill-merge-consolidation-pass/spec.md` (3 ChatGPT review rounds complete). Phase 1 handoff bridged 2026-05-13 (spec was authored directly without spec-coordinator; operator confirmed "bridge and proceed" before Phase 2 launch). Task class: Significant.
 
 **Just merged:** PR #297 — `iee-browser-on-e2b` (squash-commit `8008abae`, 2026-05-14). IEE browser substrate redirect from DigitalOcean to e2b sandboxes: 3 new tables (session profiles, per-subaccount settings, warm sessions), dispatch seam in `_ieeShared.ts::ieeDispatchBrowser`, profile manager + warm pool service scaffolds (RUNTIME-DISABLED until SDK lands), DigitalOcean retirement + CI gate. chatgpt-pr-review APPROVED after 4 rounds (28 findings closed); 9 deferred items as IEE-DEF-1..9. Phase 3 handoff: `tasks/builds/iee-browser-on-e2b/handoff.md`.
 
