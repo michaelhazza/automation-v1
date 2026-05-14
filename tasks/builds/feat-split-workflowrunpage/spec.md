@@ -70,7 +70,7 @@ WorkflowRunPage (host, ~180 LOC)
 ├── two-pane body
 │    ├── <StepDag … />                                            ← see §8.2
 │    └── <StepDetailPane stepRun, stepDef />
-└── <HitlActionBar stepRun, runId, stepDef, onActionTaken />     ← host renders this only when selectedStep?.status === 'awaiting_input' || 'awaiting_approval'; the component itself assumes non-null actionable stepRun
+└── <HitlActionBar stepRun, runId, stepDef, onActionTaken />     ← host renders this only when (selectedStep?.status === 'awaiting_input' || selectedStep?.status === 'awaiting_approval'); the component itself assumes a non-null actionable stepRun
 ```
 
 The host's job: call `useWorkflowRunEnvelope(subaccountId, runId)` (which returns `selectedStepRunId` + `setSelectedStepRunId` as well as the envelope — see §7), compose the four region components, and supply the four header callbacks (`onCancel` / `onReplay` / `onPortalToggle` and the HITL `onActionTaken`) which all call `refetch()` on success.
@@ -109,9 +109,9 @@ props: {
   stepRuns: StepRun[];               // for the completedSteps / totalSteps line
   socketConnected: boolean;          // for the "⚠ polling" pill
   subaccountId: string;              // for the back-link href only
-  onCancel(): void;
-  onReplay(): void;
-  onPortalToggle(): Promise<void>;
+  onCancel(): void | Promise<void>;       // host's handleCancelRun is async; header invokes it from the Cancel ConfirmDialog
+  onReplay(): void | Promise<void>;       // host's handleReplayRun is async; header invokes it from the Replay ConfirmDialog
+  onPortalToggle(): void | Promise<void>; // host's portal-toggle handler is async; header invokes it from the kebab item
 }
 ```
 Renders the back-link, title block (name + version + onboarding / portal-visible pills), the metadata line (`completedSteps / totalSteps · mode … · started …`), the status pill, the optional `⚠ polling` indicator, the kebab dropdown (Cancel / Replay / Portal toggle / Edit template in Studio), and the run-error box.
@@ -156,7 +156,7 @@ props: {
   onActionTaken(): Promise<void>;    // calls refetch() in the host
 }
 ```
-**Render contract.** The host decides whether to render `<HitlActionBar>` (guard: `selectedStep?.status === 'awaiting_input' || 'awaiting_approval'`). The component itself does not re-check the status — it assumes the host's guard already passed and that `stepRun` is the actionable step. This keeps the conditional in one place and lets the component focus on the form state.
+**Render contract.** The host decides whether to render `<HitlActionBar>` (guard: `selectedStep?.status === 'awaiting_input' || selectedStep?.status === 'awaiting_approval'`). The component itself does not re-check the status — it assumes the host's guard already passed and that `stepRun` is the actionable step. This keeps the conditional in one place and lets the component focus on the form state. (Today's host renders this same conditional inline at WorkflowRunPage.tsx:649-651, preserved verbatim.)
 
 Owns the action-form local state internally (`inputFormOpen`, `inputFormData`, `editApproveOpen`, `editApproveData`, `actionSubmitting`, `actionError`) and the effect that resets the forms when `stepRun.id` changes (preserved from WorkflowRunPage.tsx:293-299).
 
@@ -168,7 +168,7 @@ On 2xx, the bar fires `onActionTaken()` which triggers the host's `refetch()`. O
 
 ## 9. Pure-helper / constant extraction
 
-Move `formatDuration` to `format.ts` (today's lines 838-849). Test file `__tests__/format.test.ts` is one Vitest file covering the three edge cases of the pure helper:
+Move `formatDuration` to `format.ts` (today's lines 838-849). Test file `__tests__/format.test.ts` is one Vitest file covering the five cases of the pure helper:
 
 | Case | Input | Expected |
 |---|---|---|
@@ -249,9 +249,8 @@ Toasts that move with their handler: the four HITL success toasts go to `HitlAct
 
 - Host shrinks to ≤ 200 LOC.
 - §5 directory diff matches exactly: 4 region files (`RunHeader.tsx`, `StepDag.tsx`, `StepDetailPane.tsx`, `HitlActionBar.tsx`) + `types.ts` + `format.ts` + `__tests__/format.test.ts` under `client/src/components/workflow-run/`, plus `useWorkflowRunEnvelope.ts` under `client/src/hooks/`. No extras, no missing files.
-- G1 gates green locally: `npm run lint`, `npm run typecheck`, `npm run build:client`, and `npx vitest run client/src/components/workflow-run/__tests__/format.test.ts`. CI runs the full gate suite.
+- Mandatory automated checks (gate the merge): `npm run lint`, `npm run typecheck`, `npm run build:client`, and `npx vitest run client/src/components/workflow-run/__tests__/format.test.ts` all pass locally. The full CI suite runs as the pre-merge gate (per CLAUDE.md test-gates-are-CI-only).
 - `App.tsx` import path for `WorkflowRunPage` unchanged; default-export signature still `(_props: { user: User }) => JSX.Element`.
-- Mandatory automated checks (gate the merge): the four `npx` commands above + the format test pass. The full CI suite runs as the merge gate.
 - Author-side manual smoke (mandatory before opening the PR; not automated): run loads, step selection works, status pills correct, cancel / replay / portal actions fire and refresh, HITL approve / reject / edited approve / submit input actions succeed (success toasts fire, failure surfaces inline `actionError` with no toast), the "⚠ polling" indicator appears when the WS disconnects on a non-terminal run, and the 12s poll fires while disconnected.
 
 ## 14. Open questions
