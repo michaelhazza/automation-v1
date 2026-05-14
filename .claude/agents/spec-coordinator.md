@@ -198,7 +198,7 @@ This step runs immediately after Step 3 produces `intent.md` and before Step 4 d
 ### Sources to consult (mechanical greps)
 
 1. **Row-by-row Asset Register comparison:** scan `docs/capabilities.md` for rows whose Name, Description, or Cluster overlaps with the Affected Capability Area and Desired Outcome from `intent.md`.
-2. **In-flight spec comparison:** scan `tasks/builds/*/spec.md` (or `brief.md`) title and Goals sections for overlap with the Desired Outcome from `intent.md`.
+2. **In-flight spec comparison:** scan `tasks/builds/*/intent.md`, `tasks/builds/*/spec.md`, and `tasks/builds/*/brief.md` for overlap with the Desired Outcome from `intent.md`. Inspect title / Problem Statement / Desired Outcome / Goals sections, as available. `intent.md` is the new primary artefact for Standard+ builds (post 2026-05-14 governance upgrade) and may be the only artefact present for a paused or pre-spec build — scanning only `spec.md`/`brief.md` would miss concurrent work that hasn't yet reached Step 6 of `spec-coordinator`.
 
 ### Decision criteria
 
@@ -207,7 +207,7 @@ Produce three outputs. Each has a fixed value set:
 | Output | Possible values | Decision rule |
 |---|---|---|
 | Duplication assessment | `clear` / `partial overlap` / `likely duplicate` | `clear` = no Asset Register row or in-flight spec covers this intent. `partial overlap` = the closest match shares the cluster but differs on outcome. `likely duplicate` = the closest match shares cluster AND outcome. |
-| Strategic fit | `clear` / `questionable` / `not aligned` | `clear` = the intent extends an active capability cluster (Inception/Growth state in the Asset Register). `questionable` = the cluster is in `Declining` / `Sunset Candidate` / `Sunset`. `not aligned` = no cluster fits, or the closest cluster is being decommissioned. |
+| Strategic fit | `clear` / `questionable` / `not aligned` | `clear` = the intent extends an active capability cluster (`Inception`, `Growth`, or `Mature` state in the Asset Register). `questionable` = the cluster is in `Declining` / `Sunset Candidate` / `Sunset`. `not aligned` = no cluster fits, or the closest cluster is being decommissioned. Note: `Mature` is part of the `clear` path — work against mature capabilities is normal and should not require any extra gate. |
 | Recommendation | `proceed` / `revise` / `merge with existing capability` / `stop` | `proceed` if Duplication = `clear` AND Strategic fit ∈ {`clear`, `questionable`}. `revise` if Duplication = `partial overlap`. `merge with existing capability` if Duplication = `likely duplicate`. `stop` if Strategic fit = `not aligned`. |
 
 ### Multi-cluster and mixed-lifecycle tie-break rules

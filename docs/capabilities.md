@@ -31,7 +31,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
 
 ---
 
-## Cluster list (closed — see §7.4.5 for mutation procedure)
+## Cluster list (closed — see `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.4.5` for mutation procedure)
 
 1. Workflow Engine
 2. Approvals
@@ -44,7 +44,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
 9. Memory & Knowledge
 10. Audit & Governance
 
-To add a cluster: follow spec §7.4.5 — extend this list, author an ADR under `docs/decisions/`, and update `docs/spec-authoring-checklist.md` Appendix in the same PR.
+To add a cluster: follow `tasks/builds/development-lifecycle-governance-upgrade/spec.md §7.4.5` — extend this list, author an ADR under `docs/decisions/`, and update `docs/spec-authoring-checklist.md` Appendix in the same PR.
 
 ---
 
