@@ -20,26 +20,45 @@ export function NewBriefModal({ open, onClose, identity, orgs, subaccounts, onSu
   const [briefOrgOverride, setBriefOrgOverride] = useState<OrgOption | null>(null);
   const [briefSubaccountOverride, setBriefSubaccountOverride] = useState<ClientOption | null>(null);
 
-  // Seed override state on the closed -> open transition, then re-seed if orgs
-  // or subaccounts arrive after open (covers the in-flight-data race) or if
-  // identity changes while the modal is open. We track previous-open via a ref
-  // so the reseed fires exactly once per open cycle rather than on every render.
+  // Seed override state on the closed -> open transition; while the modal is
+  // open, sync the override to current activeOrg/activeClient ONLY if the user
+  // hasn't manually picked a different value. Tracking what we last seeded
+  // (`prevSeededRef`) lets us distinguish "untouched seed" from "manual pick".
+  // Covers three cases:
+  //   1. In-flight data race — first seed was null because orgs/subaccounts
+  //      hadn't loaded yet; patch when they arrive (current === null branch).
+  //   2. Identity changes while modal is open — active org/client moved to a
+  //      new value; if the override still equals the previously-seeded ID,
+  //      treat it as untouched and re-sync (current.id === prev.id branch).
+  //   3. User manually overrode — current.id no longer equals the last seed;
+  //      leave it alone.
   const wasOpenRef = useRef(false);
+  const prevSeededRef = useRef<{ orgId: string | null; clientId: string | null } | null>(null);
   useEffect(() => {
-    if (!open) { wasOpenRef.current = false; return; }
+    if (!open) {
+      wasOpenRef.current = false;
+      prevSeededRef.current = null;
+      return;
+    }
     const opening = !wasOpenRef.current;
     wasOpenRef.current = true;
     const nextOrg = orgs.find((o) => o.id === identity.activeOrgId) ?? null;
     const nextSub = subaccounts.find((s) => s.id === identity.activeClientId) ?? null;
-    if (opening) {
-      setBriefOrgOverride(nextOrg);
-      setBriefSubaccountOverride(nextSub);
-      return;
-    }
-    // Already open. Patch only when the previous seed was null (initial open
-    // had no data yet) or when the activeOrg/activeClient changed underneath.
-    setBriefOrgOverride((prev) => (prev === null ? nextOrg : prev));
-    setBriefSubaccountOverride((prev) => (prev === null ? nextSub : prev));
+    const prev = prevSeededRef.current;
+    prevSeededRef.current = { orgId: identity.activeOrgId, clientId: identity.activeClientId };
+
+    setBriefOrgOverride((current) => {
+      if (opening) return nextOrg;
+      if (current === null) return nextOrg;
+      if (current.id === prev?.orgId) return nextOrg;
+      return current;
+    });
+    setBriefSubaccountOverride((current) => {
+      if (opening) return nextSub;
+      if (current === null) return nextSub;
+      if (current.id === prev?.clientId) return nextSub;
+      return current;
+    });
   }, [open, orgs, subaccounts, identity.activeOrgId, identity.activeClientId]);
 
   if (!open || !identity.activeClientId) return null;

@@ -60,3 +60,31 @@ F3 is worth tightening if this PR is explicitly claiming no behaviour change, bu
 - Both T deferrals routed to `tasks/todo.md` with explicit follow-up tags.
 - No user-facing product-surface decisions surfaced.
 
+### Round 2 — 2026-05-15
+
+**Verdict:** `APPROVED_AFTER_FIXES` — "No blocking findings. F1 and F2 look properly closed... Approve after F4, or merge with F4 deferred if this edge case is acceptable."
+
+**Findings:**
+
+| ID | Title | Severity | Category | Triage | Recommendation | Action |
+|---|---|---|---|---|---|---|
+| F4 | NewBriefModal F3 fix still misses identity-changes-while-open case (only patches null overrides; non-null overrides become stale on org/client switch) | should-fix | state-management | technical | IMPLEMENT | Applied: added `prevSeededRef` to track last-seeded active IDs; setter now syncs when current override matches the previous seed (untouched), otherwise leaves manual overrides alone |
+
+**ChatGPT Feedback (raw):**
+
+```
+Round 2 verdict: No blocking findings. F1 and F2 look properly closed: CreateClientModal now resets stale local state on open, and the identity hook now exposes refreshSubaccounts() with Layout calling it after the optimistic client insert/select.
+
+Should-fix
+F4 — NewBriefModal full-deps fix still does not handle non-null identity changes while open
+
+Fix: Track the previously seeded active IDs and update only if the user has not manually changed the override.
+
+Final posture
+Approve after F4, or merge with F4 deferred if this edge case is acceptable. No evidence of blocking behaviour drift in the Round 2 changes.
+```
+
+**Decisions log:**
+- F4 auto-implemented per operator preference (technical, edge-case state correctness). The fix tracks the last-seeded `{orgId, clientId}` in a ref so we can distinguish "untouched seed" from "user-chosen override" and re-sync only the former when identity moves.
+- No user-facing product-surface decisions surfaced.
+
