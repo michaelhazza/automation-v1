@@ -1,18 +1,15 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: MERGE_READY
-last_updated: 2026-05-12T21:58:47Z
-last_merge_ready_pr: #291
-last_merge_ready_slug: personal-assistant-v1
-last_merge_ready_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_pr: #284
-last_merged_slug: pre-test-hardening
-last_merged_branch: claude/review-preprod-spec-CmHez
-last_merged_at: 2026-05-11T01:28:16Z
-last_merged_commit: 37067df9
+active_spec: tasks/builds/page-splits/spec.md
+active_plan: tasks/builds/page-splits/plan.md
+build_slug: page-splits
+branch: claude/synthetos-personal-assistant-0kaIM
+status: REVIEWING
+last_updated: 2026-05-15T00:00:00Z
+last_merged_pr: #291
+last_merged_slug: personal-assistant-v1
+last_merged_branch: claude/synthetos-personal-assistant-0kaIM
+last_merged_at: 2026-05-12T23:33:50Z
+last_merged_commit: 9002174e
 -->
 
 # Current Focus
@@ -27,13 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **MERGE_READY** — PR [#291](https://github.com/michaelhazza/automation-v1/pull/291) (`personal-assistant-v1`) finalised 2026-05-12T21:58:47Z. ready-to-merge label about to be applied; CI will fire on the final Phase 3 commit.
+**Active spec:** `tasks/builds/page-splits/spec.md`
+**Active plan:** `tasks/builds/page-splits/plan.md`
+**Active build slug:** `page-splits`
+**Branch:** `claude/synthetos-personal-assistant-0kaIM` (branch name stale; carries over from EA V1 #291)
+**Status:** **REVIEWING** — Phase 3 finalisation in progress for the page-splits aggregate build. 16 client-side page-level files split along tab / region / atom seams; no functional change. Phase 1 + Phase 2 ran outside the standard `feature-coordinator` pipeline (per-sub-build `spec-reviewer` + `spec-conformance` only); `chatgpt-pr-review` is the primary code-review pass during Phase 3. S2 force-sync of 117 commits from main completed on `40856dab` (auto-resolved doc/task per playbook; manually resolved 6 code-area conflicts including dropping the orphaned `client/src/components/skill-analyzer/` subtree to match main's PR #305 dead-code deletion, and grafting main's new `OperatorSettingsTab` + `MemoryUtilityTab` into the split structure). G4 lint PASS; G4 typecheck deferred to CI due to a local npm-install Windows bug (missing `docx` / `mammoth` / `parse-json` / `sarif` deps from main's PR #305). Reconstructed Phase 2 handoff at `tasks/builds/page-splits/handoff.md`.
 
-**Just merge-ready:** PR #291 — `personal-assistant-v1`. Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
+**Just merged:** PR #291 — `personal-assistant-v1` (squash-commit `9002174e`, merged 2026-05-12T23:33:50Z). Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
 
 **Phase 1 complete (2026-05-12):** Spec authored for the Executive Assistant V1 build (~2000 lines, 27 sections). spec-reviewer ran 5 iterations (cap; 52 mechanical fixes); 3 directional decisions ratified (Calendar push deferred → 1-min lookahead scan; Slack auto-send dropdown deferred → fixed policy; risk-tier ceiling 5 → 6). chatgpt-spec-review ran 2 rounds (8 findings, all auto-applied — F1/F2/F3/F4/T1 in round 1, F1/F2/T1 in round 2); APPROVED at round 2. Spec status → accepted. Phase 2 handoff at `tasks/builds/personal-assistant-v1/handoff.md`.
 
@@ -101,7 +98,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-11T00:44:16Z (Phase 3 close for `pre-test-hardening` PR #284 → MERGE_READY; ready-to-merge label about to be applied)
+**Last updated:** 2026-05-15 (Phase 3 finalisation in progress for `page-splits`; current-focus.md transitioned MERGE_READY-for-#291 → REVIEWING-for-page-splits; PR #291 was merged 2026-05-12 but its post-merge state cleanup was never written and is now folded into this transition)
 
 ---
 
