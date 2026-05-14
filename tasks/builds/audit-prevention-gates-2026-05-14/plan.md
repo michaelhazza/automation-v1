@@ -26,11 +26,13 @@
 11. Chunk 7 — Documentation rules (P17–P20)
 12. Chunk 8 — KNOWLEDGE entries (P21–P23)
 13. Chunk 9 — ADR P24
-14. Chunk 10 — Doc-sync + tasks/todo.md close-out
-15. Chunk 11 — Wiring (run-all-gates.sh registration)
-16. Open questions deferred to executor
-17. Executor notes
-18. Self-consistency notes
+14. Chunk 10 — Doc-sync registration + test-gate policy update (no `tasks/todo.md` touches)
+15. Chunk 11 — Wiring (`run-all-gates.sh` registration)
+16. Chunk 12 — `tasks/todo.md` close-out (lands LAST, after wiring)
+17. Open questions deferred to executor
+18. Executor notes
+19. Self-consistency notes
+20. Plan-review revision history
 
 ---
 
@@ -55,7 +57,8 @@ Key reuse / extension decisions:
 - **`scripts/.gate-baselines/` directory does not yet exist.** Spec §3 introduces it as the canonical per-gate baseline file location, distinct from the legacy single-file `scripts/guard-baselines.json` that `check_baseline` reads. Chunk 1 creates the directory and a new helper `check_expiring_baseline` that consumes the per-gate `.txt` files alongside the existing JSON baseline (both formats coexist during transition).
 - **Tool dependencies (`depcheck`, `madge`, `jscpd`, `knip`) are not yet in `package.json`.** `ts-morph ~28.0.0` IS already installed (line 87). Tool-baselined chunks add their deps to `devDependencies` in the same chunk that authors the gate.
 - **Convention pin:** new gates live at `scripts/verify-<id>.sh` (matches the dominant pattern in the existing tree). Do not nest under `scripts/gates/` — that sub-tree exists for older non-conforming scripts and is being held flat per `run-all-gates.sh`.
-- **Warning-first rollout.** Every new gate ships with `default_exit_code=2` (warning) per the existing `check_baseline` convention. Chunk 11 (final wiring) keeps them as warnings; operator-initiated promotion to error (exit 1) is a follow-up PR per the recommendation in Open questions §5.
+- **Warning-first rollout.** Every new gate ships with `default_exit_code=2` (warning) per the existing `check_baseline` convention. Chunk 11 (final wiring) keeps them as warnings; operator-initiated promotion to error (exit 1) is a follow-up PR per the recommendation in Open questions §5. Standard language across all per-gate descriptions: drift / violation paths read "emit violation and exit 2 during warning-first rollout; promote to exit 1 later." Sync gates (P7, P13, P14) follow the same posture — "fail" in their scope text means "emit violation + warning exit," not "hard fail from day one."
+- **Local gate execution policy (resolves apparent contradiction in earlier drafts).** Newly authored or modified `scripts/verify-*.sh` gates MAY be smoke-run *individually* by the chunk author to confirm exit-code wiring and baseline seeding — e.g. `bash scripts/verify-canonical-retry.sh` against the current tree. This is the ONLY exception. Full gate orchestrators remain CI-only and MUST NOT be run locally: `scripts/run-all-gates.sh`, `scripts/run-all-qa-tests.sh`, `scripts/run-all-unit-tests.sh`, `npm run test:gates`, `npm run test:qa`, `npm run test:unit`, the umbrella `npm test`. Per-chunk verification commands in this plan never include orchestrators; the per-script smoke run is a definition-of-done check inside the chunk author's local loop, not a verification command. CI runs the full suite on PR open.
 
 Patterns applied (and only where needed):
 - **Single responsibility** — one gate per concern; one script per gate.
@@ -71,16 +74,17 @@ Patterns applied (and only where needed):
 | 1 | Shared infrastructure: extend `guard-utils.sh`, create baseline dir, document grammar | Significant | 4 | — | Yes — `parseBaselineFile` / `isExpired` / `isPastGracePeriod` date math |
 | 2 | Sync gates: P7 universal-skill, P13 framework-context, P14 types-used | Significant | 6 + 3 tests | 1 | Yes — three pure JSON/AST diff helpers |
 | 3 | Static-grep gates batch: P4 (tighten existing), P5, P6, P9, P10 | Significant | 10 + 1 test | 1 | Yes — `per-file-counter-pure` covers all five |
-| 4 | Tool-baselined gates: P11 madge, P12 jscpd, P16 knip — including dev-dep adds | Significant | 8 | 1 | N/A — gates are tool wrappers; baseline parsing covered in chunk 1 |
+| 4 | Tool-baselined gates: P11 madge, P12 jscpd, P16 knip — including dev-dep adds | Significant | 8 | 1, **3** (reuses `per-file-counter-pure.mjs` for count-diff) | N/A — gates are tool wrappers; count-diff is covered by chunk 3's `per-file-counter-pure` Vitest |
 | 5 | AST gates: P2 tighten + companion `verify-with-org-tx-or-scoped-db.sh`, P15 orphan React component | Significant | 6 + 2 tests | 1 | Yes — `ts-morph` analyser pure helpers for both gates |
 | 6 | Remaining gates: P1 missing-deps (depcheck), P3 loc-cap, P8 frontend-design-budget | Significant | 8 + 2 tests | 1 | Yes — LoC counter + allow-list lookup helpers (P1 has no pure helper — tool wrapper) |
 | 7 | Docs P17–P20: architecture.md / CLAUDE.md / capabilities.md | Standard | 3 | — (independent) |  No |
 | 8 | KNOWLEDGE entries P21–P23 (append-only) | Trivial | 1 | — (independent) | No |
 | 9 | ADR P24: service-layer extraction for routes touching `db/schema/` | Trivial | 2 | — (independent) | No |
-| 10 | Doc-sync registration + `tasks/todo.md` close-out | Trivial | 2 | 1–9 | No |
+| 10 | Doc-sync registration (no `tasks/todo.md` touches) + `references/test-gate-policy.md` baseline-expiry policy note | Trivial | 3 | 1–9 | No |
 | 11 | Wiring: `run-all-gates.sh` registration | Trivial | 1 | 1–6, 10 | No |
+| 12 | `tasks/todo.md` close-out (mark P1–P24 `[x]` with PR reference) + deferred-items append (warning→error follow-up) | Trivial | 1 | 11 | No |
 
-Total: 11 chunks. Spec §12 proposed 10 batches; I split the spec's batch 10 ("wiring") into chunks 10 + 11 because doc-sync registration must close out P17–P20 (so it lands AFTER the doc chunks) but the gate-wiring step depends on every gate chunk landing first — those two prerequisite sets do not overlap cleanly, so they ship in two commits.
+Total: 12 chunks. Spec §12 proposed 10 batches; the plan splits the spec's batch 10 ("wiring") into three: chunk 10 = doc-sync only (lands after doc chunks 7-9), chunk 11 = gate wiring (lands after every gate chunk), chunk 12 = todo close-out (lands LAST so P1-P16 are not marked closed until the gates are actually CI-active per chunk 11's wiring step). Earlier draft conflated chunks 10 + 12; reviewer correctly flagged the close-out-before-wiring ordering bug.
 
 The spec's chunks 2-5 (batches A-E) are regrouped into chunks 3, 4, 5, 6 below to keep AST work (chunk 5) and tool-baselined work (chunk 4) cleanly separated — they have different dependency surfaces (`ts-morph` vs npm devDeps) and different verification shapes.
 
@@ -140,11 +144,13 @@ npx vitest run scripts/__tests__/gate-baseline-helpers.test.ts
 
 ### Scope
 
-Three "must stay in sync" gates that compare two parts of the codebase and fail on drift. All three are deterministic JSON/TS reads, no AST.
+Three "must stay in sync" gates that compare two parts of the codebase and emit violations on drift. All three are deterministic JSON/TS reads, no AST.
 
-- **P7 `verify-universal-skill-sync.sh`** — read `server/config/universalSkills.ts` `UNIVERSAL_SKILL_NAMES` array; read `server/config/actionRegistry.ts` ACTION_REGISTRY entries with `isUniversal: true`; assert bidirectional set equality. No suppression — must stay in sync.
-- **P13 `verify-framework-context-block.sh`** — parse `docs/codebase-audit-framework.md` §2 (the AutomationOS context block table) for declared versions; cross-reference against `package.json` declared versions for the facts that have a `package.json` source of truth (TypeScript, Express, React, Vite, Drizzle, postgres, pg-boss, Socket.io, Zod, Playwright, MCP SDK, Langfuse, Vitest). Fail on any mismatch. No suppression.
-- **P14 `verify-types-used.sh`** — walk `shared/types/*.ts`; for each exported type/interface/const, check if (a) it appears in a discriminated union (referenced as `| ThisType` or `type Union = A | B`) OR (b) it is imported from any production-code file under `server/`, `client/`, or `worker/`. Allow per-export `guard-ignore: types-used reason="..."`.
+**Posture (all three gates, per Architecture-notes "Warning-first rollout"):** on drift detection, emit violation and exit 2 (warning) during the warning-first rollout window. Operator promotes to exit 1 (error) per gate after the one-week soak (Open questions §5). "Must stay in sync" / "no suppression" semantics below refer to the absence of a per-finding `guard-ignore` escape hatch — NOT to immediate hard-fail behaviour. (T4 fix from plan review: earlier draft conflated "no suppression" with "hard fail from day one"; the two are independent.)
+
+- **P7 `verify-universal-skill-sync.sh`** — read `server/config/universalSkills.ts` `UNIVERSAL_SKILL_NAMES` array; read `server/config/actionRegistry.ts` ACTION_REGISTRY entries with `isUniversal: true`; assert bidirectional set equality. No per-finding suppression — the design intent is that these two declarations must mirror each other; if they drift, fix the source, do not suppress.
+- **P13 `verify-framework-context-block.sh`** — parse `docs/codebase-audit-framework.md` §2 (the AutomationOS context block table) for declared versions; cross-reference against `package.json` declared versions for the facts that have a `package.json` source of truth (TypeScript, Express, React, Vite, Drizzle, postgres, pg-boss, Socket.io, Zod, Playwright, MCP SDK, Langfuse, Vitest). Emit violation on any mismatch. No per-finding suppression — fix the source.
+- **P14 `verify-types-used.sh`** — walk `shared/types/*.ts`; for each exported type/interface/const, check if (a) it appears in a discriminated union (referenced as `| ThisType` or `type Union = A | B`) OR (b) it is imported from any production-code file under `server/`, `client/`, or `worker/`. Allow per-export `guard-ignore: types-used reason="..."` (this is the one gate of the three that has a per-export escape hatch, because dead-but-intentional exports for downstream consumers are a known false-positive class).
 
 ### Files
 
@@ -198,7 +204,7 @@ Five small grep-based gates that all share the same shape: grep for a forbidden 
 - **P5 `verify-canonical-retry.sh`** — grep for `retryCount`-style loops outside `server/lib/withBackoff.ts`. Pattern: declarations matching `retryCount`, `retryAttempts`, `retries\s*=\s*\d+` in any `.ts` file under `server/`. Suppression: `guard-ignore: canonical-retry reason="..."` or T1 form.
 - **P6 `verify-canonical-logger.sh`** — grep for `console\.(log|warn|error)` in `server/services/**` and `server/routes/**`. Production code only — exclude `__tests__/`, `scripts/`, anything matching `*.test.ts`. Suppression: `guard-ignore: canonical-logger reason="..."`. Use existing `verify-no-raw-console.sh` as reference; see Open questions §6 for collision check.
 - **P9 `verify-any-budget.sh`** — count `: any` and `as any` per file across `server/`, `client/`, `shared/`. Per-file baseline: non-growing. New per-line suppression: `guard-ignore: type-strengthening reason="..."`.
-- **P10 `verify-marker-budget.sh`** — count occurrences of `TODO`, `FIXME`, `HACK`, `TEMP`, `LEGACY`, `DEPRECATED` per file. Per-file baseline: non-growing. Suppression: PR-time `Marker-Reason: <rationale>` commit-body trailer (gate-time check only — see Open questions §3).
+- **P10 `verify-marker-budget.sh`** — count occurrences of `TODO`, `FIXME`, `HACK`, `TEMP`, `LEGACY`, `DEPRECATED` per file. Per-file baseline: non-growing. **Suppression: gate-time parsing of `git log -1 --pretty=%B` for a `Marker-Reason: <rationale>` trailer.** When the most recent commit body contains a `Marker-Reason:` line, the gate treats count growth as authorised and exits 2 (warning) instead of exit 1 (error). When the body lacks the trailer AND counts grew above baseline, the gate exits with the configured `default_exit_code` (2 during warning-first rollout per Architecture-notes "Warning-first rollout"; promotable to 1 later per Open questions §5). No PR-time hook, no lint-staged config — gate-time only. (T3 fix from plan review: spec / scope / DoD wording was inconsistent across the earlier draft; this is the locked contract.)
 
 ### Files
 
@@ -233,7 +239,7 @@ npx vitest run scripts/__tests__/per-file-counter-pure.test.ts
 - Five gate scripts exist with the conventional structure (`emit_header`, loop, `emit_summary`, `check_baseline`/`check_expiring_baseline` for exit code).
 - `verify-no-silent-failures.sh` scope expanded to include `client/src/`. Run against current codebase produces a baseline file at `scripts/.gate-baselines/no-silent-failures.txt` with every current violation listed; each violation entry preceded by `# expires: 2026-08-14`.
 - Vitest test covers: (a) zero violations → empty result; (b) baseline match → no diff; (c) one new violation above baseline → exactly that violation surfaced; (d) all-suppressed file → zero violations counted.
-- Spec P10's "Marker-Reason: commit-body trailer" check is NOT implemented in this chunk (deferred to a separate PR-time hook — see Open questions §3). The marker-budget gate fires on raw count growth only.
+- P10's `Marker-Reason: <rationale>` commit-body trailer IS implemented in this chunk: `verify-marker-budget.sh` reads `git log -1 --pretty=%B`, greps for `^Marker-Reason: `, and downgrades count-growth violations to warning when the trailer is present. Tests cover: (a) no growth → exit 0; (b) growth without trailer → exit 1 (or 2 during warning-first rollout); (c) growth with trailer → exit 2 (warning, downgraded). (T3 fix from plan review: contract was inconsistent in earlier draft; this DoD locks it.)
 
 ### Risks
 
@@ -267,7 +273,7 @@ Three gates wrap third-party static-analysis tools, baseline their JSON output, 
 
 ### Module shape
 
-- *Public interface:* three gate scripts. No pure-JS helpers authored in this chunk — the gates are literal tool wrappers + a count diff. The count-diff logic is reused from chunk 3's `per-file-counter-pure.mjs`.
+- *Public interface:* three gate scripts. No pure-JS helpers authored in this chunk — the gates are literal tool wrappers + a count diff. The count-diff logic is imported from chunk 3's `scripts/lib/per-file-counter-pure.mjs`, which is why this chunk depends on chunk 3 (see chunk table).
 - *What stays hidden:* the per-tool JSON shapes, the configuration of each tool (clone-density thresholds, knip entry-point list).
 
 ### Verification commands
@@ -360,13 +366,14 @@ npx vitest run scripts/__tests__/with-org-tx-analyser.test.ts scripts/__tests__/
 
 Three gates that don't fit the earlier batches cleanly.
 
-- **P1 `verify-no-missing-deps.sh`** — wrap `npx depcheck --skip-missing=false --json`. Fail on any imported package that isn't in `package.json`. Add `depcheck` to devDependencies. Per-package suppression via `guard-ignore: no-missing-deps reason="..."` on the import line OR by declaring the package in `optionalDependencies`.
+- **P1 `verify-no-missing-deps.sh`** — wrap `npx depcheck --skip-missing=false --json`. Fail on any imported package that isn't in `package.json`. Add `depcheck` to devDependencies. **Suppression path:** declare the package in `optionalDependencies` (which is the documented pattern for dynamic-only imports — see how the audit landed `docx` and `mammoth` as optionalDependencies). No per-line `guard-ignore` for this gate — depcheck reports missing-package names, not import-line locations, so a per-line suppression has no anchor point. (T2 fix from plan review: the spec's "per-line `guard-ignore`" wording for P1 has no implementable mapping back to import sites without a separate scanner; package-tier declaration via `optionalDependencies` is the realistic surface.)
 - **P3 `verify-loc-cap.sh`** — per-layer LoC caps from `docs/codebase-audit-framework.md` § Area 10. Soft cap = warning (exit 2 contribution); hard cap = error (exit 1 contribution). Exclusions: `server/db/schema/*.ts`, `server/config/rlsProtectedTables.ts`, generated files (filename matching `*.generated.ts`, OR file starts with `// AUTO-GENERATED` header), `migrations/*.sql` (per spec §13 question 4 — recommended yes), `tasks/**`, `docs/**`. Allow-list growth requires an ADR (gate-time check: if a file crosses the hard cap and isn't in `scripts/.gate-baselines/loc-cap.txt`, fail unless commit body contains `ADR-`).
 - **P8 `verify-frontend-design-budget.sh`** — grep `client/src/**/*.tsx` for imports of `KpiCard`, `KpiTile`, `Sparkline`, and chart components (operator confirms the exact list from `client/src/components/ui/*` during impl). Files importing any of these must appear in `docs/frontend-design-allowlist.json` (new file). No per-line suppression — allow-list is the surface.
 
 ### Files
 
 - `package.json` — add `depcheck` to devDependencies
+- `package-lock.json` — modify (regenerated by `npm install` after adding `depcheck`; commit alongside `package.json` in the same chunk)
 - `scripts/verify-no-missing-deps.sh` — new
 - `scripts/verify-loc-cap.sh` — new
 - `scripts/verify-frontend-design-budget.sh` — new
@@ -389,10 +396,11 @@ Three gates that don't fit the earlier batches cleanly.
 ```
 npm run lint
 npm run typecheck
+npm install
 npx vitest run scripts/__tests__/loc-cap-pure.test.ts scripts/__tests__/frontend-design-allowlist-pure.test.ts
 ```
 
-P1 has no pure helper — `verify-no-missing-deps.sh` is a tool wrapper with `depcheck` doing the work. Marked `N/A — gate is a literal tool wrapper with no pure helper` per the `audit-runner.md` exemption.
+`npm install` regenerates `package-lock.json` after the `depcheck` devDependency add (mirrors chunk 4's pattern; T1 fix from plan review). P1 has no pure helper — `verify-no-missing-deps.sh` is a tool wrapper with `depcheck` doing the work. Marked `N/A — gate is a literal tool wrapper with no pure helper` per the `audit-runner.md` exemption.
 
 ### Definition of done
 
@@ -677,13 +685,13 @@ npm run lint
 
 ---
 
-## Chunk 10 — Doc-sync registration + `tasks/todo.md` close-out
+## Chunk 10 — Doc-sync registration + test-gate policy update (no `tasks/todo.md` touches)
 
 ### Scope
 
-Two doc-housekeeping edits, sequenced AFTER chunks 7-9 so the new docs exist to be referenced.
+Three doc-housekeeping edits, sequenced AFTER chunks 7-9 so the new docs exist to be referenced. **NO `tasks/todo.md` touches in this chunk** — that close-out moves to chunk 12 so it lands after the gates become CI-active (chunk 11 wiring).
 
-- **`docs/doc-sync.md`** — add a new row to the "Reference docs and update triggers" table for each of the new gates from chunks 2-6. Single canonical row:
+- **`docs/doc-sync.md`** — add a new row to the "Reference docs and update triggers" table for the new gates from chunks 2-6. Single canonical row:
 
 ```
 | `scripts/verify-*` (16 gates from audit-prevention-gates-2026-05-14) | Triggers when adding/removing/renaming a gate, when changing suppression grammar, when changing baseline expiry policy. Update `references/test-gate-policy.md` if the gate posture changes |
@@ -691,21 +699,16 @@ Two doc-housekeeping edits, sequenced AFTER chunks 7-9 so the new docs exist to 
 
 Plus add doc-anchor cross-references where the spec calls for them (architecture.md § "Single org-id source" pairs with `verify-org-id-source.sh`; etc.).
 
-- **`tasks/todo.md`** — mark P1–P24 as `[x]` and append the closing PR number. Format per existing convention:
-
-```
-- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:PR#NNN] **P1** — ...
-```
-
-(Executor fills `PR#NNN` once the PR exists. If the executor runs locally before the PR opens, mark as `[status:closed:branch:feat/audit-prevention-gates-2026-05-14]` and update on PR open.)
-
-- Add a deferred-items append at the end of the prevention-proposal section listing any gates that landed warning-only and need follow-up promotion to error. Per the rollout recommendation (Open questions §5), ALL new gates ship warning-first; one-week-soak follow-up PR is a deferred item.
+- **`references/test-gate-policy.md`** — add a short policy update covering the contracts this build introduces. Specifically:
+  - **Baseline expiry policy.** Every per-gate baseline entry under `scripts/.gate-baselines/<guard-id>.txt` carries an `# expires: YYYY-MM-DD` directive. Entries become warning at expiry; entries become error after `GATE_GRACE_DAYS` (default 30) past expiry. Cross-reference `scripts/lib/guard-utils.sh` `check_expiring_baseline` (introduced by chunk 1).
+  - **Suppression annotation grammar.** Four forms supported: T0 deprecated, T1 preferred, legacy with `reason="..."`, next-line, file-scoped. Cross-reference the header comment block in `guard-utils.sh`.
+  - **Warning-first promotion policy.** New gates ship with `default_exit_code=2` (warning). Promotion to `exit 1` (error) is per-gate, operator-initiated, after a minimum one-week soak post-merge. Cross-reference Open questions §5 of the prevention-gates plan.
+  - The existing policy document keeps the canonical "test gates are CI-only" rule unchanged; this update lives in a new sub-section near the end of the policy file.
 
 ### Files
 
 - `docs/doc-sync.md` — modify
-- `tasks/todo.md` — modify (24 lines checked off + deferred-items append)
-- `references/test-gate-policy.md` — modify only if the gate posture changes (it does not in this build; the warning-vs-error rollout is per-gate baselined, not posture-changing)
+- `references/test-gate-policy.md` — modify (append sub-section per above)
 
 ### Module shape
 
@@ -719,13 +722,14 @@ npm run lint
 
 ### Definition of done
 
-- All 24 prevention proposals (P1–P24) marked `[x]` in `tasks/todo.md` with closing reference.
-- `docs/doc-sync.md` has the new doc-sync row.
-- Deferred section listing the one-week-soak follow-up items appended to `tasks/todo.md`.
+- `docs/doc-sync.md` has the new doc-sync row referencing the audit-prevention-gates spec slug.
+- `references/test-gate-policy.md` has the three-bullet baseline-expiry + suppression-grammar + warning-first-promotion sub-section.
+- No `tasks/todo.md` changes in this chunk (close-out lands in chunk 12 after wiring).
 
 ### Risks
 
 - **Drift between docs/doc-sync.md and the actual gate list.** Mitigation: doc-sync row references the audit-prevention-gates spec by slug, not by enumerating each gate name. If the spec moves or is archived, doc-sync still resolves.
+- **References/test-gate-policy.md is a high-leverage doc** (loaded into many agent sessions). Mitigation: append-only sub-section at end of file; do not rewrite existing content; the canonical "CI-only" rule stays unchanged.
 
 ---
 
@@ -754,12 +758,61 @@ No new tests authored — this is the orchestrator stitch. The gates' own logic 
 ### Definition of done
 
 - `run-all-gates.sh` has new `run_gate` invocations (one per gate from chunks 2-6), grouped under a new section header `# ── Audit prevention gates (2026-05-14 lockdown) ──`.
-- Order follows the chunk order: chunk 2 (P7, P13, P14), chunk 3 (P4 already wired — skip; P5, P6, P9, P10), chunk 4 (P11, P12, P16), chunk 5 (P2 already wired — skip; new companion `verify-with-org-tx-or-scoped-db.sh`, P15), chunk 6 (P1, P3, P8). Net new `run_gate` lines: 14 (P4 and P2 are tightenings of already-wired gates).
+- Order follows the chunk order: chunk 2 (P7, P13, P14 = 3), chunk 3 (P4 already wired — skip; P5, P6, P9, P10 = 4), chunk 4 (P11, P12, P16 = 3), chunk 5 (P2 tighten already wired — skip; new companion `verify-with-org-tx-or-scoped-db.sh`, P15 = 2), chunk 6 (P1, P3, P8 = 3). **Net new `run_gate` lines: 15.** (P4 and P2 are tightenings of already-wired gates and remain at their existing call sites.) If Open question §6 resolves with "drop P6 because `verify-no-raw-console.sh` already covers it", the count drops to 14 and the chunk 3 `run_gate` group loses one entry; executor confirms during chunk 3 implementation and adjusts chunk 11 accordingly.
 
 ### Risks
 
-- **CI minutes inflation.** Adding 14 new gates increases gate-run time. Each gate is small individually; cumulative cost is bounded by `madge`, `jscpd`, `knip`, and the two `ts-morph` gates (the slowest five). Mitigation: monitor first week of post-merge CI runs; if total gate time exceeds the workflow timeout, split into a separate "audit-prevention-gates" workflow that runs in parallel. Not blocking for this build.
+- **CI minutes inflation.** Adding 15 new gates increases gate-run time. Each gate is small individually; cumulative cost is bounded by `madge`, `jscpd`, `knip`, and the two `ts-morph` gates (the slowest five). Mitigation: monitor first week of post-merge CI runs; if total gate time exceeds the workflow timeout, split into a separate "audit-prevention-gates" workflow that runs in parallel. Not blocking for this build.
 - **Order matters for exit-code interpretation.** `run-all-gates.sh` accumulates pass/warn/fail counts; the audit-prevention gates ship warning-first, so they should ALL exit 2 on the first CI run after merge. Operator promotes to error per gate after one-week soak (Open questions §5).
+
+---
+
+## Chunk 12 — `tasks/todo.md` close-out (lands LAST, after wiring)
+
+### Scope
+
+Mark P1–P24 as `[x]` in `tasks/todo.md` and append the closing PR/branch reference. This is the LAST chunk of the build because it MUST land after chunk 11 wiring — until the gates are registered in `scripts/run-all-gates.sh`, the prevention proposals P1–P16 are not actually CI-active and marking them closed is premature. Earlier draft (where doc-sync + close-out shared one chunk) had this ordering bug.
+
+- **`tasks/todo.md`** — mark P1–P24 as `[x]` with the closing reference. Format per existing convention:
+
+```
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:PR#NNN] **P1** — ...
+```
+
+(Executor fills `PR#NNN` once the PR exists. If the executor runs locally before the PR opens, mark as `[status:closed:branch:feat/audit-prevention-gates-2026-05-14]` and update on PR open.)
+
+- Append a new deferred-items sub-section at the end of the prevention-proposal section listing the warning→error promotion follow-ups. Per the rollout recommendation (Open questions §5), ALL 15 newly wired gates ship warning-first; each needs a one-week-soak follow-up PR to promote to error. Template entry:
+
+```
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: <guard-id>** — earliest promotion date: <merge date + 7 days>. Operator reviews CI signal for the first week; if no unexpected false positives, promote `default_exit_code` from 2 to 1 in `scripts/verify-<guard-id>.sh`.
+```
+
+One row per gate (15 gates: P5, P6, P9, P10, P7, P13, P14, P11, P12, P16, P15, the P2 companion, P1, P3, P8). If chunk 3 confirms the P6 / `verify-no-raw-console.sh` collision and drops P6, the list is 14.
+
+### Files
+
+- `tasks/todo.md` — modify (24 lines checked off + 14-or-15 deferred warning→error rows appended)
+
+### Module shape
+
+N/A — doc housekeeping.
+
+### Verification commands
+
+```
+npm run lint
+```
+
+### Definition of done
+
+- All 24 prevention proposals (P1–P24) marked `[x]` in `tasks/todo.md` with closing reference (`PR#NNN` or branch slug).
+- Each newly wired gate from chunk 11 has a corresponding warning→error promotion follow-up row appended to the prevention-proposals section (14 or 15 rows depending on P6 resolution).
+- File is append-only with respect to historical sections per CLAUDE.md §3 and the framework's "append-only" rule.
+
+### Risks
+
+- **PR number is unknown until the PR opens.** Mitigation: the executor lands chunk 12 with the branch-slug status placeholder; updates it to `PR#NNN` in the same branch on PR creation (one extra commit on the branch).
+- **The warning→error follow-up list could drift from the actual run-all-gates.sh entries.** Mitigation: chunk 11's wiring is the source of truth; chunk 12's executor verifies the count matches chunk 11's net-new `run_gate` count before committing.
 
 ---
 
@@ -773,9 +826,9 @@ The spec proposes a new `scripts/verify-no-silent-catch.sh` (P4). The existing `
 
 JSON file (`client/.orphan-allowlist.json`) vs co-located comment (`// orphan-allowed: <reason>`). **Recommended default: JSON.** One-line rationale: centralised allow-list creates a single review surface (one file in the diff signals "we're widening the orphan budget"); co-located comments make growth invisible.
 
-### 3. P10 commit-body trailer parsing (spec §13 open question 3)
+### 3. P10 commit-body trailer parsing (spec §13 open question 3) — RESOLVED
 
-PR-time hook (via lint-staged or a GitHub Action) vs gate-time only. **Recommended default: gate-time only.** One-line rationale: PR-time hooks add tooling complexity (lint-staged config, hook installs across local clones) for marginal earlier signal; gate-time catches the violation at the same effective merge gate.
+PR-time hook vs gate-time only. **Resolved at plan revision: gate-time only, parsing via `git log -1 --pretty=%B` for `Marker-Reason:` trailer.** Locked into Chunk 3 scope and DoD (T3 fix from plan review). One-line rationale: PR-time hooks add tooling complexity for marginal earlier signal; gate-time catches the violation at the same effective merge gate. No further executor decision needed.
 
 ### 4. P18 placement in CLAUDE.md (no "## Comments" section exists)
 
@@ -795,13 +848,14 @@ Depends on `git log -1 --pretty=%B` being available in CI. **Recommended default
 
 ### 8. Sequencing: one PR vs many (spec §13 open question 6)
 
-Spec proposes batch-per-PR. The plan assumes a single PR for all 11 chunks. **Recommended default: single PR.** One-line rationale: the chunks have shared infrastructure (chunk 1) that all subsequent chunks depend on; splitting into multiple PRs creates merge-order coupling without reducing blast radius (gates ship warning-first regardless). If CI minutes inflation becomes acute, the operator can split chunks 4 + 5 (the heavy tool/AST chunks) into a follow-up PR — that decision lands at code-review time, not plan-authoring time.
+Spec proposes batch-per-PR. The plan assumes a single PR for all 12 chunks. **Recommended default: single PR.** One-line rationale: the chunks have shared infrastructure (chunk 1) that all subsequent chunks depend on; splitting into multiple PRs creates merge-order coupling without reducing blast radius (gates ship warning-first regardless). If CI minutes inflation becomes acute, the operator can split chunks 4 + 5 (the heavy tool/AST chunks) into a follow-up PR — that decision lands at code-review time, not plan-authoring time.
 
 ---
 
 ## Executor notes
 
-- Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not.
+- Test gates and whole-repo orchestrators (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/run-all-gates.sh`, `scripts/run-all-qa-tests.sh`, `scripts/run-all-unit-tests.sh`, `scripts/gates/*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not.
+- **One exception, scoped narrowly:** per Architecture-notes "Local gate execution policy", a chunk author MAY smoke-run an INDIVIDUAL `scripts/verify-*.sh` gate that is newly authored OR modified in THAT chunk, against the current tree, to confirm exit-code wiring and baseline seeding before commit. This is a per-script invocation only (e.g. `bash scripts/verify-canonical-retry.sh`), never a glob (`scripts/verify-*.sh`) or orchestrator. It does NOT appear in the chunk's "Verification commands" block — those stay lint / typecheck / targeted Vitest. The per-script smoke run is a local sanity check by the author, not a contract gate.
 - Pre-existing violations are seeded into per-gate baseline files at chunk landing time. Each baseline entry MUST carry an `# expires: YYYY-MM-DD` directive on the preceding line. The `# expires:` dates suggested above (2026-08-14 = 90-day, 2026-11-14 = 180-day) are starting points; the operator can adjust at plan-gate review.
 - Per-chunk verification is limited to `npm run lint`, `npm run typecheck`, and targeted `npx vitest run` of the test files authored in that chunk. Do NOT run the full Vitest suite, do NOT run gate orchestrators, do NOT run `scripts/run-all-gates.sh`. CI runs all of those on PR open.
 - The branch name is `feat/audit-prevention-gates-2026-05-14`. The PR opens against `main` (audit findings are batched per the spec, not landed on the audit branch).
@@ -813,8 +867,33 @@ Spec proposes batch-per-PR. The plan assumes a single PR for all 11 chunks. **Re
 ## Self-consistency notes
 
 - Every chunk's "Files" list is enumerable from the spec §3 / §4 / §5 / §6 / §12 tables — no file added without spec backing.
-- Every chunk's "Verification commands" stays within the CI-only constraint: lint, typecheck, targeted Vitest, plus `npm install` in chunk 4 (lockfile regen). No `scripts/verify-*.sh` invocations, no orchestrator scripts.
+- Every chunk's "Verification commands" stays within the CI-only constraint: lint, typecheck, targeted Vitest, plus `npm install` in chunks that add deps (chunks 4, 6). No `scripts/verify-*.sh` invocations in verification commands, no orchestrator scripts. Per-script smoke-runs of newly authored gates are permitted outside the verification block per the Architecture-notes "Local gate execution policy".
 - Every baseline file mentioned has an `# expires:` policy.
-- Chunk dependencies are forward-only: chunks 2-6 depend on chunk 1; chunks 7-9 are independent; chunk 10 depends on 7-9; chunk 11 depends on 2-6.
-- Spec §9 acceptance criteria coverage: AC1 (16 gates exist) → chunks 2-6 + 11. AC2 (baselines with expiry) → chunks 2-6. AC3 (suppression grammar documented) → chunk 1. AC4 (doc updates P17-P20) → chunk 7. AC5 (KNOWLEDGE entries) → chunk 8. AC6 (ADR-0024) → chunk 9. AC7 (todo.md closed) → chunk 10. AC8 (doc-sync lists new gates) → chunk 10. AC9 (reviewers approve) → standard pipeline.
+- Chunk dependencies are forward-only: chunks 2, 3, 5, 6 depend on chunk 1; chunk 4 depends on chunks 1 and 3 (reuses `per-file-counter-pure.mjs`); chunks 7-9 are independent; chunk 10 depends on 7-9; chunk 11 depends on 1-6 and 10; chunk 12 depends on 11 (close-out lands AFTER wiring so prevention proposals are not marked closed before the gates are CI-active).
+- Spec §9 acceptance criteria coverage: AC1 (16 gates exist) → chunks 2-6 + 11. AC2 (baselines with expiry) → chunks 2-6. AC3 (suppression grammar documented) → chunk 1. AC4 (doc updates P17-P20) → chunk 7. AC5 (KNOWLEDGE entries) → chunk 8. AC6 (ADR-0024) → chunk 9. AC7 (todo.md closed) → chunk 12 (after wiring). AC8 (doc-sync lists new gates) → chunk 10. AC9 (reviewers approve) → standard pipeline.
+
+---
+
+## Plan-review revision history
+
+### 2026-05-14 — Revision 1 (4 blocking + 5 should-fix issues addressed)
+
+Reviewer flagged contract-level contradictions in the initial plan; the revisions below lock the contracts cleanly before execution.
+
+**Blocking issues addressed:**
+
+- **F1.** Local gate execution was both required (chunks 4 + 6 wanted per-script smoke runs) and forbidden (executor notes banned all `scripts/verify-*.sh`). Resolution: Architecture-notes "Local gate execution policy" carves out per-script smoke runs of *newly authored or modified* gates as the single exception; orchestrators (`scripts/run-all-gates.sh`, `scripts/run-all-qa-tests.sh`, `npm run test:gates`, etc.) remain CI-only. Smoke runs never appear in a chunk's "Verification commands" block; they are author-local sanity checks only.
+- **F2.** Chunk 4 imports `per-file-counter-pure.mjs` (introduced in chunk 3) but the chunk table listed only chunk 1 as a dependency. Resolution: chunk 4 dependency updated to "1, 3".
+- **F3.** Chunk 11 declared "14 net new run_gate lines" but the listed gates summed to 15. Resolution: count corrected to 15 with the P6-conditional caveat (if `verify-no-raw-console.sh` collision is confirmed during chunk 3, P6 drops and the count returns to 14).
+- **F4.** Chunk 10 was marking P1-P24 closed in `tasks/todo.md` BEFORE chunk 11 wired the gates into `run-all-gates.sh` — so the proposals were being marked closed before they were CI-active. Resolution: split into chunks 10 (doc-sync only) and 12 (todo close-out, lands LAST after chunk 11 wiring). Total chunks now 12, not 11.
+
+**Should-fix issues addressed:**
+
+- **T1.** Chunk 6 added `depcheck` as a devDependency but did not include `package-lock.json` or `npm install`. Resolution: both added (mirrors chunk 4's pattern).
+- **T2.** P1 claimed per-line `guard-ignore` suppression but `depcheck` reports missing-package names, not import-line locations — per-line suppression has no anchor point. Resolution: per-line suppression removed; `optionalDependencies` declaration is the documented suppression path (the audit's own `docx` and `mammoth` precedent).
+- **T3.** P10 `Marker-Reason` trailer handling was inconsistent across scope / DoD / open question (scope said "PR-time", DoD said "not implemented", open question said "gate-time only"). Resolution: locked to gate-time `git log -1 --pretty=%B` trailer parsing; scope + DoD updated; Open question §3 marked RESOLVED.
+- **T4.** Sync gates (P7, P13, P14) said "fail on drift" and "no suppression", which read as hard-fail-from-day-one despite Architecture-notes "warning-first rollout". Resolution: standardised wording — "emit violation and exit 2 during warning-first rollout; promote to exit 1 later". "No suppression" clarified as "no per-finding escape hatch" (independent of immediate exit-code).
+- **T5.** `references/test-gate-policy.md` predates the baseline-expiry, suppression-grammar, and warning-first-promotion contracts this build introduces. Resolution: added to chunk 10 files; appends a three-bullet sub-section covering the new policy surfaces; keeps the canonical "test gates are CI-only" rule unchanged.
+
+Net effect on chunk count and dependencies: 11 → 12 chunks; chunk 4 now depends on chunks 1 + 3 (was 1 only); chunk 12 is new and depends on chunk 11.
 - Spec §13 open questions: 1 → answered in chunk 1 (30-day grace, baseline-per-entry, `GATE_GRACE_DAYS` env). 2 → answered in Open questions §2 (JSON). 3 → answered in Open questions §3 (gate-time only). 4 → answered in chunk 6 (`migrations/*.sql` excluded). 5 → answered in Open questions §5 (manual one-week soak). 6 → answered in Open questions §8 (single PR).
