@@ -147,6 +147,22 @@ run_gate "$SCRIPT_DIR/gates/verify-runtime-check-coverage.sh"
 # ── Trust & Verification Layer Stage 2 — scorecard RLS coverage ──
 run_gate "$SCRIPT_DIR/gates/verify-scorecard-rls.sh"
 
+# ── Audit prevention gates (2026-05-14 lockdown) ──
+run_gate "$SCRIPT_DIR/verify-universal-skill-sync.sh"
+run_gate "$SCRIPT_DIR/verify-framework-context-block.sh"
+run_gate "$SCRIPT_DIR/verify-types-used.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-retry.sh"
+run_gate "$SCRIPT_DIR/verify-any-budget.sh"
+run_gate "$SCRIPT_DIR/verify-marker-budget.sh"
+run_gate "$SCRIPT_DIR/verify-no-new-cycles.sh"
+run_gate "$SCRIPT_DIR/verify-duplicate-blocks.sh"
+run_gate "$SCRIPT_DIR/verify-knip-config.sh"
+run_gate "$SCRIPT_DIR/verify-with-org-tx-or-scoped-db.sh"
+run_gate "$SCRIPT_DIR/verify-no-orphan-react-component.sh"
+run_gate "$SCRIPT_DIR/verify-no-missing-deps.sh"
+run_gate "$SCRIPT_DIR/verify-loc-cap.sh"
+run_gate "$SCRIPT_DIR/verify-frontend-design-budget.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 
