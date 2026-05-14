@@ -1,225 +1,355 @@
-# AI-DLC + Lifecycle Governance — Brief for Diagramming
+# Brief: Development Lifecycle Governance Upgrade
 
-Source inputs: AWS Summit Sydney 2026 AI-DLC talk (Teddy / Kenny / Stephen Brown), Skyjed *Build at 15-20x Speed* whitepaper, Skyjed *Product Lifecycle Governance Playbook 4.0*.
+**Slug:** `development-lifecycle-governance-upgrade`
+**Status:** Draft for specification
+**Supersedes:** previous draft of this file (AI-DLC + Skyjed synthesis, 2026-05-14)
+**Extends, does not replace:** `docs/2026-04-30-dev-pipeline-coordinators-spec.md` (canonical pipeline contract)
 
-Audience for the diagrams: leadership / strategic review. The two flows below are written as labelled stages with explicit inputs, actors, gates, and outputs so a diagramming LLM can render them as side-by-side flowcharts.
+**Purpose:** Upgrade the SynthetOS development lifecycle so it remains fully backwards-compatible with the current spec, build, review and finalisation process, while adding lightweight intent governance, capability registration, and compound learning.
+
+---
 
 ## Contents
 
-1. Current development flow (as built in this codebase)
-2. Proposed development flow (AI-DLC + Skyjed-informed)
-3. Gold nuggets from the talk and papers worth applying
-4. Recommended sequencing
-5. Diagram-ready node lists (for the LLM that will draw the flowcharts)
+1. Executive Summary
+2. Why This Matters
+3. Current State (diagram)
+4. Near-Term Target (diagram)
+5. Design Principle
+6. Scope (in scope)
+7. Out of Scope
+8. Backwards Compatibility
+9. Proposed Implementation Shape (chunks)
+10. Acceptance Criteria
+11. Recommended Specification Focus
+12. Final Positioning
 
 ---
 
-## 1. Current development flow (as built in this codebase)
+## 1. Executive Summary
 
-### Stage 0 — Intake
-- Actor: operator (human) + main Claude session.
-- Input: free-text brief or rough spec topic.
-- No cross-functional ritual. Single-author intake.
-- Output: build slug, `tasks/builds/{slug}/brief.md`.
+SynthetOS already has a strong AI-assisted development lifecycle: specification, build planning, construction, review, hardening, finalisation, documentation sync, knowledge capture, and merge readiness. This stays intact.
 
-### Stage 1 — Specification (Phase 1 / `spec-coordinator`)
-- Steps: context load, S0 branch sync + freshness check, brief intake + UI-touch detection, mockup loop (if UI-touch, via `mockup-designer`), spec authoring, `spec-reviewer` (Codex loop, max 5 iterations), `chatgpt-spec-review` (manual ChatGPT-web rounds), handoff write.
-- Output: `tasks/builds/{slug}/spec.md`, `handoff.md` (`PHASE_1_COMPLETE`), `current-focus.md` → `BUILDING`.
+The gap is not in the build pipeline. The gap is that shipped work is not consistently governed as an ongoing capability after merge. Capabilities lack clear ownership, lifecycle state, risk context, carry cost, review status, and learning feedback.
 
-### Stage 2 — Construction (Phase 2 / `feature-coordinator`)
-- Steps: context load, S1 sync + migration-collision check, `architect` decomposes spec into chunks (<5 files each), `chatgpt-plan-review` (manual), plan gate (operator approves), per-chunk `builder` loop (Sonnet) with G1 gate (lint + typecheck + targeted unit tests), G2 integrated lint/typecheck, branch-level GRADED review pass.
-- Review pass order: `spec-conformance`, `adversarial-reviewer` (if §5.1.2 security surface), `pr-reviewer`, `reality-checker`, fix-loop + G3, `dual-reviewer` (Codex, if available; else `REVIEW_GAP`).
-- Output: implemented code on branch, `plan.md`, `progress.md`, `handoff.md` (`PHASE_2_COMPLETE`), `current-focus.md` → `REVIEWING`.
+This upgrade adds a **lightweight governance wrapper** around the existing lifecycle. It does not replace the lifecycle. The near-term target is:
 
-### Stage 3 — Finalisation (Phase 3 / `finalisation-coordinator`)
-- Steps: context load + `REVIEW_GAP` check, S2 branch sync (auto-resolve append-only artefacts), G4 regression guard (`audit-runner` hotspot on changed files), PR existence check / create, `chatgpt-pr-review` (manual rounds), full doc-sync sweep per `docs/doc-sync.md`, `KNOWLEDGE.md` pattern extraction, `tasks/todo.md` cleanup, `current-focus.md` → `MERGE_READY` + apply `ready-to-merge` label (CI runs).
-- Output: PR ready, branch sync verified, docs aligned, knowledge logged.
-
-### Cross-cutting layers (current)
-- **Task classification** (Trivial / Standard / Significant / Major) scales the reviewer matrix.
-- **Append-only artefacts** under `tasks/builds/{slug}/`.
-- **Compound engineering** lives in `KNOWLEDGE.md` (append-only, human-curated; lessons feed future sessions via context load, not automatic agent updates).
-- **ADRs** under `docs/decisions/` for durable choices.
-- **Context packs** for mode-scoped loading.
-- **Code intelligence cache** (`references/project-map.md`, import-graph JSON) for fast cross-file reasoning, referenced in CLAUDE.md but not yet populated in this repo.
-- **Capabilities registry** (`docs/capabilities.md`) is a list only. No lifecycle stamps, no health score, no cost-of-carry, no decommission tracking, no shadow-portfolio audit.
-
-### What current flow does well
-1. Three-phase split with explicit gates (S0/S1/S2 sync, G1-G4 quality) matches AI-DLC Inception / Construction / Operations cleanly at the *project* level.
-2. Plan-first principle is enforced. `spec-reviewer`, `chatgpt-spec-review`, `chatgpt-plan-review` all gate before code is written.
-3. Human-in-the-loop at moments that matter: plan gate, operator approval on user-facing findings, MERGE_READY gate.
-4. AI treated as specialist team, human as orchestrator (`builder` is Sonnet, reviewers are specialised, main session is the developer).
-5. Parallel reviewer specialisation already mirrors the AI-DLC "collective context" idea at the *review* end.
-
-### What current flow lacks
-- **Inception is single-author.** No Mob Elaboration ritual, no structured cross-functional intent-gathering session (product, engineering, design, target-user-proxy) before the spec is drafted. The brief enters as one person's interpretation.
-- **No portfolio-level lifecycle.** Every cycle ends at "merged"; there is no Stage 4 that registers the new capability in a governed asset register with a lifecycle state, owner, and health score.
-- **No ABCd cost framing.** Specs and plans estimate Build effort only. Carry cost (ongoing test, monitoring, compliance) and decommission cost are invisible at decision time.
-- **No shadow-portfolio audit.** `audit-runner` works at code level; nothing maps production surface (routes, endpoints, capabilities) back to `docs/capabilities.md` to surface live-but-ungoverned features.
-- **No decommission practice.** There is no fourth coordinator for deprecation; sunsets happen ad-hoc or not at all, so decommission debt accumulates silently.
-- **No continuous regulatory / compliance monitoring.** `adversarial-reviewer` runs diff-based on §5.1.2 surface; it does not re-evaluate the existing portfolio when regulations or threat models shift.
-- **No portfolio coherence check.** Each feature is governed; the portfolio-as-whole has no scheduled coherence review against current strategy, so Ghost R&D risk is real.
-- **Compound engineering is manual.** Corrections land in `KNOWLEDGE.md`, but nothing auto-decides whether the correction also warrants an agent-definition edit, a hook, a regression test, or a doc update. The "play it back to the entire solution" pattern from the talk is partly missing.
-- **Parallel streams unstructured.** Worktrees exist; there is no formal pattern for running a primary spec-driven stream + change-request side stream + vibe-coding stream concurrently without collision. `current-focus.md` is sprint-singular.
+> Current build lifecycle + structured intent + lightweight elaboration + duplication / strategy check + lifecycle-aware spec fields + capability registration before merge + compound learning feedback.
 
 ---
 
-## 2. Proposed development flow (AI-DLC + Skyjed-informed)
+## 2. Why This Matters
 
-Re-cast as a continuous loop, not a linear pipeline. Three project-level phases remain, plus a portfolio-level governance loop and a compound-learning loop running underneath.
+AI-speed development compresses the build cycle, but it does not remove lifecycle obligations. The Skyjed material names this the **governance gap**: features ship faster than the organisation can track ownership, lifecycle cost, risk, performance, strategic alignment, and decommission readiness.
 
-### Stage 0 — Mob Elaboration (NEW)
-- Actor: operator + product proxy + engineering proxy + (if UI) design proxy + (if regulated surface) compliance proxy. Roles can collapse onto one human; the *ritual* is what matters.
-- Process: collective brain-dump, AI-led Q&A unpacking ambiguity, reverse-engineering pass against existing codebase patterns, capabilities, and constraints, validated assumptions log.
-- Gate: Ghost-R&D check. Capability-similarity scan against `docs/capabilities.md` plus code-pattern search via the code intelligence cache. Surface any overlap before drafting spec.
-- Output: `tasks/builds/{slug}/intent.md` (collective context, validated assumptions, ABCd lifecycle cost estimate, regulatory obligations).
+The current SynthetOS lifecycle already aligns with the AI-DLC principle of *plan first, execute second, verify continuously*. The AWS / Skyjed talk explicitly warns against single-shotting complex work to AI and recommends human alignment, AI planning, execution against agreed plans, and human verification.
 
-### Stage 1 — Specification (enhanced)
-- Existing flow, plus:
-  - Spec template now includes an **ABCd table** (Acquire / Build / Carry / decommission estimated cost or effort).
-  - Spec template now includes a **lifecycle declaration** (which capability cluster, intended maturity stage on launch, intended sunset criteria).
-  - Spec-reviewer adds a "duplication-vs-portfolio" check as a Ghost R&D blocker.
+This upgrade preserves that strength and adds portfolio-level governance so SynthetOS can scale without accumulating unmanaged capabilities.
 
-### Stage 2 — Construction (enhanced)
-- Existing per-chunk loop, plus:
-  - **Mob Construction option** for risky chunks (schema migration, RLS change, cross-cutting): invoke `mob-builder`, which runs two `builder` sub-agents in parallel against the same chunk, with `dual-reviewer` adjudicating. The existing `dual-reviewer` is the seed.
-  - **Parallel-stream framework**: `current-focus.md` becomes multi-stream. A `stream-coordinator` registers each active stream (primary / change-request / experiment), allocates worktrees, and prevents file collision. Enables the three-streams-in-parallel pattern Stephen described.
+---
 
-### Stage 3 — Finalisation (enhanced)
-- Existing flow, plus:
-  - **Capability registration step**: before `MERGE_READY`, update `docs/capabilities.md` with lifecycle state, owner, ABCd actuals, regulatory obligations, and an initial Lifecycle Health Score baseline.
-  - **Compound-engineering playback**: a `lessons-feedback` agent runs after `KNOWLEDGE.md` pattern extraction. For each new lesson it decides, and proposes, whether to also (a) update an agent definition, (b) add a hook, (c) add a doc-sync trigger, (d) add a regression test, (e) update a context pack. Operator approves before changes apply.
+## 3. Current State Diagram
 
-### Stage 4 — Operations & Portfolio Governance (NEW, continuous)
-Runs continuously, not per-build. Outputs are visible to leadership.
+Reference: attached "Current Development Lifecycle" diagram. Linear pipeline — Operator Intent → Specification → Build Planning → Construction → Review and Hardening → Finalisation → Merge. Strength: strong control over specs, plans, builds, reviews, tests, merge readiness. Gap: limited governance of the capability after merge.
 
-- **Live Asset Register**: `docs/capabilities.md` becomes lifecycle-stamped (Inception / Growth / Mature / Declining / Sunset-candidate / Sunset), with owner, last-review-date, ABCd actuals, current Lifecycle Health Score. Updated on every merge by a new `capability-registrar` agent.
-- **Lifecycle Health Score** (Skyjed framework): scored per capability on four dimensions, namely strategic alignment, performance signals (errors, usage, support load), risk exposure (security debt, dependency age, regulatory drift), and lifecycle-stage appropriateness. Surfaces in a `tasks/portfolio-health.md` dashboard.
-- **Shadow-portfolio audit** (new `audit-runner` mode `portfolio-shadow`): scheduled (for example, monthly) cross-reference of production surface (routes, endpoints, feature flags, exposed agents/skills) against the Asset Register. Any live-but-ungoverned surface is flagged with an owner-assignment task.
-- **Decommission coordinator** (Phase D, new): mirrors `feature-coordinator` in reverse. Steps: candidate identification, dependency / customer-impact assessment, deprecation comms + dual-running plan, execute sunset, archive ADR + remove from Asset Register. Decommission debt is then visible and shrinkable.
-- **Regulatory / compliance continuous monitor**: extends `adversarial-reviewer` with a regulatory-rules table per capability cluster. Runs on schedule against the full portfolio, not only against branch diffs. Surfaces drift when the threat model or rule set changes.
-- **Portfolio coherence review** (quarterly): coherence-check coordinator maps capabilities by current strategic priorities, flags obsolete-priority concentrations and current-priority gaps. Drives strategic decommission candidates.
+## 4. Near-Term Target Diagram
 
-### Stage 5 — Compound Learning Loop (NEW, continuous, underneath all stages)
-- Trigger sources: corrections (existing `KNOWLEDGE.md` hook), reviewer findings repeated more than twice, post-incident write-ups (`incident-commander`).
-- Routed by `lessons-feedback` agent into the right artefact (agent def / hook / test / doc / context pack / capability health rule).
-- Operator approves; changes ship as a regular Trivial/Standard PR.
-- Closes Stephen's "compound engineering" gap by turning one correction into systemic immunisation, not just an appendix entry.
+Reference: attached "Proposed Development Lifecycle" diagram. Same backbone, plus: Clarify Intent → Align Product/Engineering/Risk Context → Duplication or Strategic Drift check → Write and Review Spec → Approve Build Plan → Build with AI Agents → Run Quality and Review Gates → Finalise Docs and Knowledge → Merge → Register Capability → Govern Capability Portfolio. Compound Learning Feedback feeds **forward** into future builds (template / agent / hook / test updates), not back into the current spec.
 
-### New / enhanced actors summary
-| Actor | New / Enhanced | Role |
+---
+
+## 5. Design Principle
+
+The current lifecycle is the build engine. The proposed additions are the governance wrapper. Nothing in this upgrade should weaken or bypass existing lifecycle gates.
+
+This mirrors the SynthetOS architecture principle: the Control Plane governs and the Execution Plane executes. The development lifecycle should follow the same pattern.
+
+---
+
+## 6. Scope (in scope)
+
+### 6.1 Structured Intent (replaces today's `brief.md` for Standard+ builds)
+
+For non-trivial builds, the existing `tasks/builds/{slug}/brief.md` becomes a structured `intent.md`. Trivial builds may keep the freeform `brief.md`. The spec must state the cutover rule clearly so future sessions do not maintain both.
+
+Required `intent.md` sections:
+
+| Field | Purpose |
+|---|---|
+| Problem statement | What are we solving? |
+| Desired outcome | What should be true when complete? |
+| Non-goals | What are we explicitly not doing? |
+| Affected capability area | Which existing capability cluster does this touch? (must reference the closed cluster list in §6.5) |
+| User / operator impact | Who benefits or is affected? |
+| Risk surface | From the §5.1.2 taxonomy below — must match the adversarial-reviewer auto-trigger vocabulary |
+| Key assumptions | What must be true for the work to make sense? |
+| Open questions | What needs resolution before spec approval? |
+| Duplication / strategy check | Output of §6.3 |
+
+**Risk surface taxonomy (canonical, reused from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2):**
+server/db/schema, server/routes, auth/permission services, middleware, RLS migrations, webhook handlers, billing surfaces, external messaging, agent runtime, approvals. Selecting any of these flags the build for `adversarial-reviewer` auto-invocation during construction — the intent declaration and the construction-time trigger share one vocabulary.
+
+This stays lightweight. It is not a replacement for the spec.
+
+### 6.2 Lightweight Elaboration
+
+A Stage 0 ritual before specification. Not a formal workshop for every build. The required outcome: product, engineering, and risk perspectives have been considered before the spec is written.
+
+- Trivial / Standard: operator may complete inline, single-pass.
+- Significant / Major: require an explicit elaboration pass with notes captured into `intent.md`.
+
+Minimum checks:
+- **Product:** is this valuable and aligned with the current roadmap?
+- **Engineering:** does this fit the current architecture? Any obvious conflicts with existing patterns?
+- **Risk:** does this touch auth, data, execution, billing, approvals, or customer-impact surfaces?
+
+### 6.3 Duplication and Strategy Check (hard gate)
+
+Before spec authoring proceeds, check whether the requested capability duplicates or overlaps existing product surface, and whether it still serves the current strategy.
+
+Sources consulted:
+- `docs/capabilities.md` (Asset Register)
+- Relevant architecture docs
+- Existing build artefacts under `tasks/builds/`
+- Code search / code intelligence cache (`references/project-map.md`, import-graph) if available
+
+**Expected output (captured in `intent.md`):**
+
+| Field | Allowed values |
+|---|---|
+| Duplication check | clear / partial overlap / likely duplicate |
+| Strategic fit | clear / questionable / not aligned |
+| Recommendation | proceed / revise / merge with existing capability / stop |
+
+**Hard gate behaviour:** if recommendation is `stop` or `merge with existing`, `spec-coordinator` must escalate to the operator before authoring proceeds. Advisory-only is not acceptable — without a gate this check will be skipped under time pressure.
+
+The goal is to prevent Ghost R&D, named in the Skyjed playbook as a predictable failure mode when AI-speed development outpaces portfolio governance.
+
+### 6.4 Lifecycle-Aware Spec Authoring
+
+There is no checked-in spec template file today — specs are authored freeform by `spec-coordinator`. The lifecycle and ABCd blocks must therefore land in **authoring instructions**, not a template file alone. Required changes:
+
+- `.claude/agents/spec-coordinator.md` Step 6 (authoring instructions) — add a mandatory "Lifecycle Declaration" and "ABCd Lifecycle Estimate" section to every spec it produces.
+- `docs/spec-authoring-checklist.md` — add the same two sections to the pre-authoring rubric.
+- Optional: a new `docs/spec-template.md` reference file that the agent and operator can copy from. Decide during spec phase whether the file is worth the maintenance cost.
+
+**Lifecycle Declaration block (required in every Standard+ spec):**
+
+| Field | Required |
+|---|---|
+| Capability cluster | yes (from §6.5 closed list) |
+| Capability owner | yes (or explicit placeholder) |
+| Lifecycle state on launch | yes (Inception / Growth) |
+| Risk surface | yes (from §6.1 taxonomy) |
+| Review cadence | yes |
+
+**ABCd Lifecycle Estimate block (required in every Standard+ spec):**
+
+| Dimension | Sizing | Notes |
 |---|---|---|
-| Mob Elaboration ritual | New | Stage 0 cross-functional intent gathering |
-| `capability-registrar` | New | Updates Asset Register on every merge |
-| `lessons-feedback` | New | Compound-engineering playback router |
-| `portfolio-health` dashboard | New | Lifecycle Health Score view for leadership |
-| `decommission-coordinator` | New | Phase D sunset orchestrator |
-| `stream-coordinator` | New | Multi-stream worktree allocator |
-| `mob-builder` | New | Parallel-builder pattern for risky chunks |
-| `adversarial-reviewer` | Enhanced | Adds portfolio-wide scheduled regulatory monitor |
-| `audit-runner` | Enhanced | Adds `portfolio-shadow` audit mode |
-| `docs/capabilities.md` | Enhanced | Becomes lifecycle-stamped Asset Register |
-| Spec template | Enhanced | Adds ABCd table + lifecycle declaration |
+| Acquire | S / M / L | cost to understand, scope, and decide |
+| Build | S / M / L | cost to implement and integrate |
+| Carry | S / M / L | ongoing maintenance, monitoring, support, compliance |
+| decommission | S / M / L | cost and complexity of safe retirement |
+
+**Sizing is deliberately three-bucket (S / M / L), not numeric.** The point is making Carry and decommission cost *visible* before launch, not pseudo-precise accounting. Numeric estimates degrade to noise within two sprints.
+
+### 6.5 Capability Registration Before Merge (via doc-sync)
+
+Before `finalisation-coordinator` transitions to `MERGE_READY`, `docs/capabilities.md` must be updated so every shipped capability is registered as a governed asset.
+
+**Integration point:** add a new row to the trigger table in `docs/doc-sync.md`. Capability registration is verdicted by the existing doc-sync investigation procedure — single enforcement mechanism, not two parallel ones. The verdict supports the same `yes / no / n/a with reason` pattern doc-sync already uses.
+
+**Valid `n/a` reasons (must be captured in the verdict):**
+- docs-only change
+- test-only change
+- internal refactor with no capability surface change
+- build / tooling change only
+
+**Asset Register fields (`docs/capabilities.md`):**
+
+| Field | Required |
+|---|---|
+| Capability ID / slug | yes |
+| Name | yes |
+| Description | yes |
+| Owner | yes (or explicit placeholder) |
+| Capability cluster | yes |
+| Lifecycle state | yes |
+| Launch source | yes — link to build slug or PR |
+| Risk surface | yes |
+| Last review date | yes |
+| Carry cost notes | yes |
+| Decommission notes | yes |
+| Related docs | yes |
+
+**Lifecycle states:** Inception, Growth, Mature, Declining, Sunset Candidate, Sunset. Most new capabilities launch as Inception or Growth.
+
+**Closed starter list of capability clusters (seeded in `docs/capabilities.md` before the gate goes live):**
+Workflow Engine, Approvals, Identity & Auth, Reporting, Integrations, Agent Runtime, Admin & Ops, Billing, Memory & Knowledge, Audit & Governance.
+
+Builds may not invent new cluster names without updating this list in the same PR. Without a closed list the register fragments within a quarter.
+
+**Auto-population hint:** at finalisation, the capability-registration step should pre-fill the Asset Register row from `intent.md` (capability area, risk surface) and the spec's Lifecycle Declaration (owner, cluster, state, review cadence). Operator confirms; operator does not re-type.
+
+### 6.6 Compound Learning Feedback (feed-forward)
+
+After `finalisation-coordinator` runs `KNOWLEDGE.md` pattern extraction (existing Step 7), add a lightweight feedback decision step.
+
+**Critical framing: feed-forward, not feedback-into-current-spec.** Lessons update templates, agents, hooks, tests, and docs that affect *future* builds. They do not mutate the current spec — the current build is finalising. The diagram's "lessons" arrow goes to a future-builds connector, not back into the current spec.
+
+For each meaningful lesson, decide whether it should update:
+
+| Target | Example |
+|---|---|
+| Spec authoring instructions | add a missing lifecycle field |
+| Plan template | add a required sequencing check |
+| Agent instruction (fixed shortlist) | `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `pr-reviewer`, `architect`, `builder` |
+| Hook / grep gate | catch recurring mistake automatically |
+| Regression test | add protection for the specific failure mode |
+| Context pack | improve future context loading |
+| Documentation | update architecture or process docs |
+| No further action | lesson logged but does not warrant systemic change |
+
+**Agent target is a fixed shortlist of six.** The full fleet is ~25 agents — opening the decision to all of them slows the operator and dilutes the feedback. If a different agent genuinely needs an update, surface it as a separate follow-up in `tasks/todo.md`.
+
+**Initial behaviour:** the step produces a proposed list of follow-up changes for operator approval. No auto-apply in v1.
 
 ---
 
-## 3. Gold nuggets from the talk and papers worth applying
+## 7. Out of Scope (deferred to later builds)
 
-1. **Collective context before code.** The largest delta in the talk was framing Inception as a *cross-functional ritual*, not a brief handoff. We already gate plans well; we don't gate *intent* well.
-2. **AI as team member, human as orchestrator.** We already do this; the talk validates the architecture. No change needed, but worth naming explicitly in onboarding/README.
-3. **Compound engineering as a closed loop.** Stephen called this out as a *primary* differentiator. `KNOWLEDGE.md` is the right substrate; the missing piece is the agent that routes a lesson to the right artefact.
-4. **Parallel streams without context collision.** Three concurrent workstreams was a striking productivity claim. We have worktrees; we lack the lightweight stream-coordinator.
-5. **ABCd lifecycle economics.** Making Carry and decommission visible at *decision time* (in spec / plan) is a small artefact change with outsized governance leverage.
-6. **Lifecycle Health Score.** The single most useful import from Skyjed for leadership visibility. Converts code review (per-PR) into capability review (continuous).
-7. **Shadow portfolio audit.** The failure mode (features live, ungoverned, accumulating risk) is real even in small codebases. A scheduled audit costs almost nothing and prevents the slow-drift class of failure.
-8. **Decommission as first-class workflow.** Most engineering orgs have no decommission rigour. Building it as a coordinator (not a vibe) is a durable advantage.
-9. **Continuous regulatory monitoring.** For Syntheos / Automation OS the regulatory surface is lower than financial services, but the *principle*, namely re-evaluate the portfolio when the rule set changes, not just at build time, applies to security/threat-model drift.
-10. **Portfolio coherence as a metric.** Quarterly check that the capability portfolio still serves current strategy. Drives strategic decommission, not just operational sunset.
+Do not include in the near-term spec:
 
----
-
-## 4. Recommended sequencing (if we pursue this)
-
-Not a commitment, just a recommended order if the user wants to act:
-
-1. **Quick wins** (one or two sessions each): ABCd table in spec template; lifecycle declaration in spec template; `capability-registrar` agent; lifecycle stamps added to `docs/capabilities.md`; `portfolio-shadow` audit-runner mode.
-2. **Medium** (one build cycle each): `lessons-feedback` compound-engineering agent; Mob Elaboration ritual codified as Stage 0 playbook; `portfolio-health.md` dashboard with Lifecycle Health Score.
-3. **Larger** (multi-cycle): `decommission-coordinator`; `stream-coordinator` and multi-stream `current-focus.md`; `mob-builder` parallel-builder pattern; quarterly coherence review automation.
+| Excluded item | Reason |
+|---|---|
+| Decommission coordinator | Premature until the Asset Register exists and has real entries to act on |
+| Automated Lifecycle Health Score | Start with fields and manual review; scoring engine is a later build |
+| Regulatory continuous monitor | Too heavy for v1; later iteration can become a policy / security-drift monitor |
+| Stream coordinator | Multi-stream parallel work increases process complexity; defer |
+| Mob-builder | Useful only for risky chunks once the normal lifecycle is stable |
+| Quarterly portfolio coherence automation | Begin as manual leadership review later |
+| ML-based lifecycle scoring | Not needed for v1 |
+| Full portfolio dashboard UI | Markdown register is enough for v1 |
 
 ---
 
-## 5. Diagram-ready node lists (for the LLM that will draw the flowcharts)
+## 8. Backwards Compatibility (hard requirement)
 
-### Current flow nodes (left diagram)
+The implementation must preserve every existing stage and gate:
 
-Linear left-to-right pipeline:
+| Current stage / artefact | Must remain |
+|---|---|
+| Specification | yes |
+| Spec review loops (`spec-reviewer`, `chatgpt-spec-review`) | yes |
+| Build planning (`architect`) | yes |
+| Human plan gate | yes |
+| Chunked construction (`builder`) | yes |
+| G1 / G2 / G3 / G4 gates | yes |
+| Reviewer matrix (GRADED posture per CLAUDE.md) | yes |
+| `finalisation-coordinator` | yes |
+| `docs/doc-sync.md` sweep | yes (extended, not replaced) |
+| `KNOWLEDGE.md` pattern extraction | yes (extended, not replaced) |
+| `MERGE_READY` label flow | yes |
 
-```
-Brief
-  → Phase 1: spec-coordinator
-      [S0 sync, mockup-loop (conditional), spec-reviewer, chatgpt-spec-review]
-  → handoff
-  → Phase 2: feature-coordinator
-      [S1 sync, architect, chatgpt-plan-review, plan-gate,
-       builder × N + G1, G2,
-       spec-conformance, adversarial (conditional), pr-reviewer,
-       reality-checker, fix-loop + G3, dual-reviewer (conditional)]
-  → handoff
-  → Phase 3: finalisation-coordinator
-      [S2 sync, G4 audit, chatgpt-pr-review, doc-sync, KNOWLEDGE.md,
-       MERGE_READY label]
-  → Merge → END
-```
+New governance steps **wrap or extend** the lifecycle. They must not replace existing gates.
 
-Underlying constant (bottom band): `KNOWLEDGE.md` (manual append-only).
+---
 
-### Proposed flow nodes (right diagram)
+## 9. Proposed Implementation Shape (chunks)
 
-Two horizontal tracks plus a band underneath:
+The spec author should refine these; this is a starting decomposition for the architect.
 
-**Top track (per-feature, same three phases, enhanced):**
+### Chunk 1: Structured intent artefact
+- Rename / reshape `tasks/builds/{slug}/brief.md` → `intent.md` for Standard+ builds; preserve `brief.md` path for Trivial.
+- Update `spec-coordinator` Step 3 (brief intake) to require `intent.md` with the §6.1 fields when classification is Standard or higher.
+- Add a minimal intent template the agent fills with operator help.
 
-```
-Stage 0: Mob Elaboration
-    [collective brain-dump, AI Q&A, reverse-engineer, Ghost-R&D check]
-    → intent.md (incl. ABCd estimate + regulatory obligations)
-  → Phase 1: spec-coordinator (+ABCd table, +lifecycle declaration,
-                               +portfolio-duplication check)
-  → Phase 2: feature-coordinator (+mob-builder option for risky chunks,
-                                  +stream-coordinator)
-  → Phase 3: finalisation-coordinator (+capability-registrar,
-                                       +lessons-feedback)
-  → Merge → Asset Register entry
-```
+### Chunk 2: Lifecycle-aware spec authoring
+- Update `.claude/agents/spec-coordinator.md` Step 6 to require a Lifecycle Declaration block and an ABCd Lifecycle Estimate block in every Standard+ spec.
+- Update `docs/spec-authoring-checklist.md` accordingly.
+- Decide during spec phase whether to add a `docs/spec-template.md` reference file.
 
-**Bottom track (continuous, portfolio-level, runs underneath):**
+### Chunk 3: Duplication and Strategy Check gate
+- Extend `spec-coordinator` to run §6.3 before authoring.
+- Capture the three required outputs in `intent.md`.
+- Implement the hard gate: `stop` or `merge with existing` escalates to operator before authoring proceeds.
 
-```
-Live Asset Register (lifecycle-stamped docs/capabilities.md)
-  ↔ Lifecycle Health Score (4 dims)
-  ↔ Shadow-portfolio audit (scheduled audit-runner mode)
-  ↔ Regulatory continuous monitor (extended adversarial-reviewer)
-  ↔ Portfolio coherence review (quarterly)
-  ↔ Decommission coordinator (Phase D)
-```
+### Chunk 4: Asset Register upgrade
+- Convert `docs/capabilities.md` into the Asset Register structure (§6.5 fields).
+- Seed the closed capability-cluster list before the gate goes live.
+- Backfill existing capabilities into the new structure as a one-time pass.
 
-**Underlying band (touches both tracks):**
+### Chunk 5: Capability Registration gate via doc-sync
+- Add the new trigger row to `docs/doc-sync.md`.
+- Extend `finalisation-coordinator` Step 6 (doc-sync sweep) to investigate / verdict capability registration with valid `n/a` reasons.
+- Implement auto-population of the Asset Register row from `intent.md` + Lifecycle Declaration.
 
-```
-Compound Learning Loop
-  (lessons-feedback agent routes corrections →
-   agent defs / hooks / tests / docs / context packs)
-```
+### Chunk 6: Compound Learning Feedback step
+- Extend `finalisation-coordinator` after Step 7 (KNOWLEDGE.md extraction) with the §6.6 decision step.
+- Use the fixed shortlist of six agents.
+- Frame as feed-forward — output is a proposal list for operator approval, no auto-apply in v1.
 
-**Edge labels between tracks:**
-- Every per-feature merge writes into the Asset Register.
-- Every Asset Register signal (declining health, regulatory drift, coherence flag) can launch either a feature cycle (improve) or a Phase D cycle (decommission).
-- Every correction (from review, incident, or operator) feeds the Compound Learning Loop, which can update any agent or doc used in either track.
+### Chunk 7: Process documentation sync
+- Update `CLAUDE.md`, `architecture.md`, and any context-pack references to describe the revised lifecycle:
+  Intent → Elaboration → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Finalisation → Merge → Capability Registration → Compound Learning.
+- Update `current-focus.md` schema to optionally reference the capability being touched.
 
-### Suggested visual treatment
-- Current diagram: linear arrow chain, single colour, single lane.
-- Proposed diagram: two lanes (per-feature on top, portfolio-governance on bottom), with vertical arrows connecting them at merge points and at health-trigger points; the compound-learning band sits beneath both with dashed upward arrows touching every named agent.
-- Use one accent colour for *new* nodes (Mob Elaboration, capability-registrar, lessons-feedback, Asset Register, Health Score, Shadow audit, Regulatory monitor, Coherence review, Decommission coordinator, stream-coordinator, mob-builder) so the delta vs current is obvious at a glance.
+---
+
+## 10. Acceptance Criteria
+
+A spec created from this brief must satisfy:
+
+### Functional
+- Non-trivial builds produce a structured `intent.md` (or equivalent intent section).
+- Specs include the Lifecycle Declaration block.
+- Specs include the ABCd Lifecycle Estimate block (S / M / L sizing).
+- `docs/capabilities.md` supports Asset Register records per §6.5.
+- Finalisation requires capability registration before `MERGE_READY`, unless an explicit `n/a` reason is captured in the doc-sync verdict.
+- Finalisation includes compound-learning feedback routing after `KNOWLEDGE.md` extraction.
+
+### Backwards Compatibility
+- Existing spec, plan, build, review, and finalisation flow remains intact.
+- Existing gates (S0/S1/S2, G1/G2/G3/G4) are not removed or weakened.
+- Existing reviewer matrix (GRADED posture) is preserved.
+- Existing `KNOWLEDGE.md` extraction is preserved.
+- Existing `MERGE_READY` flow is preserved.
+
+### Governance
+- Every shipped capability has an owner (or an explicit owner placeholder).
+- Every shipped capability has a lifecycle state.
+- Every shipped capability has risk-surface notes drawn from the §6.1 taxonomy.
+- Every shipped capability has carry-cost notes.
+- Every shipped capability has decommission notes, even if minimal.
+- Every exempted build has a clear reason in the doc-sync verdict.
+
+---
+
+## 11. Recommended Specification Focus
+
+The development specification should focus on process artefacts, templates, and gates first. Avoid building complex automation in v1.
+
+Priority order for the spec author:
+
+1. Template / authoring-instruction changes (`spec-coordinator`, `spec-authoring-checklist`).
+2. Finalisation checklist changes (`finalisation-coordinator` Steps 6 and 7+).
+3. Asset Register structure (`docs/capabilities.md`).
+4. Capability Registration gate (via `docs/doc-sync.md`).
+5. Compound Learning Feedback step.
+6. Light validation scripts only if simple.
+
+Do **not** start with dashboards, scoring engines, ML, scheduled audits, or new coordinators.
+
+---
+
+## 12. Final Positioning
+
+This upgrade makes SynthetOS development more governable without slowing the existing build engine.
+
+> We are not replacing the current AI-assisted development lifecycle. We are preserving the current lifecycle and adding the missing governance wrapper: better intent, less duplication, lifecycle-aware specs, capability registration, and compound learning.
+
+This is the smallest practical step toward governed speed.
 
 ---
 
