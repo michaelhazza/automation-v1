@@ -9,12 +9,15 @@
 ## Contents
 
 1. One-paragraph summary
-2. Why now, why this shape
+2. Context
+   - 2.1 Glossary
+   - 2.2 What exists today (with file paths)
+   - 2.3 Why now, why this shape
 3. Architectural decisions
    - 3.1 Amendment primitive (new)
    - 3.2 Post-failure root-cause synthesis
    - 3.3 Multi-agent peer review on the amendment
-   - 3.4 Morning review queue
+   - 3.4 Morning review queue, reviewer permissions, review surfaces
    - 3.5 Evaluation harness changes
    - 3.6 Asymmetric structural-removal guard
    - 3.7 Bounded loops
@@ -33,7 +36,49 @@ We are adding a reviewed amendment proposal loop on top of the existing scorecar
 
 The framing is "agents propose, humans approve." We do not ship anything that hints at autonomous self-modification.
 
-## 2. Why now, why this shape
+## 2. Context
+
+### 2.1 Glossary
+
+- **Organisation (org).** A Synthetos customer. The typical customer is a digital agency. One organisation has many subaccounts.
+- **Subaccount.** One operational workspace owned by an organisation, usually one per end-client of the agency. Subaccounts run independently: their own agents, runs, data, scorecards, memory.
+- **System tier.** Synthetos-owned, shared across every organisation and subaccount. The 100+ system skills live here.
+- **System skill.** A skill defined at the system tier. Inherited by every org and subaccount until forked.
+- **Fork (current behaviour).** When a subaccount or org customises a system skill today, the system creates a complete independent copy in the `skills` table. The customisation fully replaces the system text for that tier. No layering, no inheritance from future system updates.
+- **Amendment (new, this brief).** A typed overlay row that extends a system skill at the org or subaccount tier **without** forking. Composed at runtime onto the system base text. Preserves inheritance from future system updates.
+- **Scorecard.** A rubric of quality checks (slug, name, pass mark) that an LLM judge applies to sampled runs to produce a pass / fail / inconclusive verdict.
+- **RCA (root-cause analysis).** A structured record explaining why a specific scorecard fail occurred. Produced by the proposed `failure_post_mortem` job.
+- **Pre-launch.** Synthetos has no live external customers yet. `docs/spec-context.md` carries the operational posture: `rollout_model: commit_and_revert`, `staged_rollout: never_for_this_codebase_yet`. Affects risk tolerance and constrains some Phase 2 work (notably ring rollout for upward promotion).
+
+### 2.2 What exists today (with file paths)
+
+Everything below is operational on `main`. The brief builds on top of it; no rework of these subsystems is in scope.
+
+**Three-tier skill model (the substrate this brief modifies):**
+- `server/db/schema/systemSkills.ts` — `system_skills` table (system tier).
+- `server/db/schema/skills.ts` — `skills` table (org and subaccount tiers; scope distinguished by `org_id` / `subaccount_id` nullness).
+- `server/services/skillService.ts`, function `resolveSkillsForAgent()` around line 115 — runtime resolution. Strict precedence (subaccount > org > system); **picks one row per slug; does not merge text from multiple tiers**. This is the fork-on-customise behaviour the amendment primitive replaces for the layered case.
+- `server/db/schema/skillVersions.ts` — `skill_versions` table, per-tier independent version chains, immutable snapshots on every save.
+- `server/lib/skillVisibility.ts` — `visibility` enum (`none` / `basic` / `full`); gates UI surface only, not runtime.
+
+**Scorecard subsystem (the trigger for the new loop):**
+- `server/db/schema/scorecards.ts` — rubric storage; `quality_checks` JSONB array (slug, name, passMark, enabled).
+- `server/db/schema/scorecardJudgements.ts` — immutable verdict rows with frozen rubric snapshot.
+- `server/jobs/scorecardJudgeJob.ts` — LLM-as-judge worker; Claude Haiku; per-check JSON scoring 0.0-1.0; verdict = `pass` / `fail` / `inconclusive` against pass mark (default 0.7).
+- `server/services/scorecardService.ts` — CRUD and attachment.
+
+**Correction pattern detector (the second clustering input):**
+- `server/jobs/correctionPatternDetectorJob.ts` — daily; clusters operator corrections by embedding similarity; today only suggests tightening pass marks. Phase 1 adds the failed-check-id + entity-type second dimension here.
+
+**Memory layer (where RCA records and durable learnings live):**
+- `server/services/memoryBlockService.ts`, `server/services/memoryEntryQualityService.ts`.
+- Typed entries (`observation`, `issue`, `preference`, `pattern`, `decision`) with type-specific decay.
+- New entry type `learned_failure_mode` proposed in this brief.
+
+**Bench infrastructure (regression-set primitive, partially reusable):**
+- `server/jobs/benchExecuteJob.ts`, `server/db/schema/benchRuns.ts` — runs candidate models against sampled past runs; same judge logic. Phase 1 reuses the sampling and replay primitives, not the model-comparison logic.
+
+### 2.3 Why now, why this shape
 
 The deep-research synthesis returned a clear convergent picture:
 
@@ -134,12 +179,29 @@ Before an amendment reaches the operator's morning review queue, a second propos
 
 If false, the amendment is dropped and the failure is logged for later analysis. Cheap defence against task-redefinition and judge-gaming.
 
-### 3.4 Morning review queue
+### 3.4 Morning review queue, reviewer permissions, review surfaces
 
-A new admin surface per subaccount: a list of draft amendments grouped by skill, with one-click accept / edit / reject.
+Three things to keep distinct: the **scope** of the amendment, **who is permitted to review** it, and **where they see it**.
 
-**Each draft shows:**
+**Amendment scope.** Phase 1 amendments are subaccount-scoped only. An accepted amendment only affects runs inside that one subaccount. Org-scoped amendments are supported in the schema but no proposer writes them yet, and no UI exposes them. System-scoped changes are out of scope (deferred to upward promotion + ring rollout).
+
+**Reviewer permissions.** Two roles may act on a subaccount's queue:
+- **Subaccount admin** (the local admin of that subaccount; could be agency staff assigned to that client, or in self-serve cases the client themselves). Sees only their own subaccount's queue.
+- **Org admin** (e.g. the agency owner), acting in any subaccount belonging to their org. Sees that subaccount's queue when scoped to it, and the cross-subaccount roll-up below.
+
+Audit trail must record which role actually clicked accept / edit / reject, not just the user.
+
+**Review surfaces (two, both Phase 1).**
+
+*Surface A: in-workspace queue.* Inside a subaccount workspace, a screen lists pending amendments for that subaccount. This is the surface a subaccount admin uses day-to-day.
+
+*Surface B: cross-subaccount roll-up at org level.* For org admins (agency owners), a single screen aggregates pending amendments across **every** subaccount they own, scope-filtered by permission. Same underlying rows in `skill_amendments`, different query. Needed because an agency owner with 30 clients should not have to open 30 workspaces every morning.
+
+The roll-up is in Phase 1 deliberately. Without it, adoption dies on the org-admin persona, and that persona is the one most likely to evaluate whether the loop is producing value.
+
+**Each draft (on either surface) shows:**
 - The skill being amended.
+- The subaccount it applies to (relevant on the roll-up; redundant on the in-workspace view).
 - The proposed amendment, with its kind tag.
 - The failure that triggered it (run ID, scorecard check, judge's reasoning).
 - The root-cause record.
@@ -203,7 +265,7 @@ Estimated rough size: 6 to 10 weeks of focused build for one engineer, longer if
 ## 6. Open questions for the dev session
 
 1. **Existing forks.** Today, customisations are forks (full copies). On migration: do we leave existing forks alone (frozen artefacts), auto-detect which ones could be expressed as amendments and offer conversion, or force-migrate? Recommended: leave alone, offer conversion in the UI.
-2. **Org-tier amendments.** Phase 1 supports them in the schema. Do we ship org-tier review queue too, or subaccount only? Recommended: subaccount only in Phase 1; org-tier added when an organisation actually wants it.
+2. **Org-tier amendments (different from the org roll-up).** Phase 1 includes the cross-subaccount roll-up review surface for org admins (see §3.4) but **not** org-scoped amendments themselves. An org admin can review and accept amendments that still apply only to one subaccount. True org-tier amendments (one accept applies to all subaccounts in the org) are deferred until there is concrete demand. Recommended: leave deferred; revisit when an agency owner explicitly asks for "this rule should apply across all my clients."
 3. **Per-agent vs per-skill amendments.** The schema is per-skill. Some failures may suggest per-agent context changes (a belief, a baseline note). Recommended: route those into the existing memory / beliefs system, not into amendments. Amendments are skill-scoped only.
 4. **Judge identity for the regression set.** Same Haiku judge or a rotated ensemble? Recommended: Haiku for primary regression, rotated ensemble on a sample for divergence detection.
 5. **Operator workload.** How many amendments per week per subaccount is realistic for a non-technical operator to review? Tune the cap based on early observation.
