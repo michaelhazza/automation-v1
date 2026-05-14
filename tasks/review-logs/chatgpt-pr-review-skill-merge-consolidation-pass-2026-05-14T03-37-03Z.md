@@ -131,4 +131,43 @@ None this round — all findings classified as technical.
 
 ChatGPT's "ready to merge" verdict stands conditional on F6 being verified, which it is.
 
+### Round 2 commit
+
+- `ccf7f69a` — chore(chatgpt-pr-review): Round 2 log — F6 verified by grep, no code change.
+
+---
+
+## Session closed — operator signalled `done` 2026-05-14T04:00:00Z
+
+Operator pasted Round 2 ChatGPT response with verdict "ready to merge after F6 verified", and after F6 was verified-by-grep with no code change required, operator explicitly signalled `finished, close review and move to finalisation`. Per the chatgpt-pr-review iterative-loop discipline (locked 2026-05-09), this is the only valid trigger for session close.
+
+## Final Summary
+
+**Verdict:** APPROVED
+**Total rounds:** 2
+**Findings raised:** 6 (F1–F6)
+**Findings auto-implemented:** 1 (F4 — canonicalJSON helper + regression test)
+**Findings rejected:** 4 (F1, F2, F3, F6 — all on code-cited or grep-verified rationale)
+**Findings deferred to backlog:** 1 (F5 — SKILL-MERGE-RATIONALE-1)
+**User-facing findings:** 0
+
+### Doc-sync verdicts (this session)
+
+- KNOWLEDGE.md updated: yes (1 entry — "Canonicalise JSON before deep-equality on LLM-echoed objects" — F4 pattern)
+- architecture.md updated: no — checked `canonicalJSON|sortKeys|consolidation`; no new pattern, no service-boundary change, no agent-fleet change. Pattern is internal-pure-utility, not architectural.
+- capabilities.md updated: no — F4 was a defensive correctness fix on an internal parser; no user-facing capability change, no skill / integration add-remove-rename.
+- integration-reference.md updated: n/a — no integration behaviour change.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked `canonicalJSON|JSON.stringify.*sort|deep-equal`; no build-discipline / convention / agent-fleet / review-pipeline / locked-rule change.
+- frontend-design-principles.md updated: n/a — no UI pattern change in this round (the only UI surface was already in Phase 2 and recorded in the handoff).
+- spec-context.md updated: n/a — this is a PR review session, not a spec review.
+
+Note: the broader Phase 3 doc-sync sweep (Step 6 of finalisation-coordinator) runs separately and is the authoritative system of record. The verdicts above cover only this session's changes; the Step 6 sweep cross-checks the entire feature change-set.
+
+### Commits authored by this session
+
+- `b0470e30` — Round 1 fix: F4 canonicalJSON helper + regression test
+- `ccf7f69a` — Round 2 log update: F6 verified-by-grep
+- (this commit) — Final Summary + KNOWLEDGE.md entry
+
+
 
