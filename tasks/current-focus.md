@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: tasks/builds/audit-prevention-gates-2026-05-14/spec.md
+active_plan: tasks/builds/audit-prevention-gates-2026-05-14/plan.md
+build_slug: audit-prevention-gates-2026-05-14
+branch: audit-prevention-gates-2026-05-14
+status: BUILDING
 last_updated: 2026-05-14
 last_merged_pr: #305
 last_merged_slug: pre-v1-lockdown-2026-05-14
@@ -22,11 +22,13 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** `tasks/builds/audit-prevention-gates-2026-05-14/spec.md`
+**Active plan:** `tasks/builds/audit-prevention-gates-2026-05-14/plan.md`
+**Active build slug:** `audit-prevention-gates-2026-05-14`
+**Branch:** `audit-prevention-gates-2026-05-14`
+**Status:** **BUILDING**
+
+**Active build:** Audit Prevention Gates — operator-override Light path launched 2026-05-14T07:46:04Z. Closes the 24 Rule-16 prevention proposals from the pre-v1-lockdown audit (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`). Major class: 12 chunks, 16 CI gate scripts, 4 documentation rules (P17-P20 in `architecture.md`/`CLAUDE.md`/`docs/capabilities.md`), 3 KNOWLEDGE patterns (P21-P23), 1 ADR (P24 service-layer extraction). Pre-authored spec + plan; architect / chatgpt-plan-review / plan-gate steps no-op under operator override. Pause cadence: fully autonomous (no per-chunk pauses) — stops only on G1/G2 failures, plan-gaps, or post-G2 spec-validity checkpoint.
 
 **Just merged:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
 
