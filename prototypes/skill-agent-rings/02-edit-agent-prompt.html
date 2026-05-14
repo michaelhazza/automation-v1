@@ -1,21 +1,27 @@
 <!doctype html>
 <!--
-  Mock 02 / 09 — Edit agent prompt (save creates rev in Dev)
-  =============================================================
-  This is the existing admin agent edit page (AdminAgentEditPage.tsx) →
-  "Prompts" tab. One change: "Save" now says "Save to Dev" and explains
-  that saving does not affect any organisation yet.
+  Mock 02 / 10 — System agent edit page with "Save to Dev" footer
+  ==================================================================
+  Existing surface: client/src/pages/SystemAgentEditPage.tsx (~743 lines).
+  It's a single long form with <Card> sections — Basic Information, Hierarchy,
+  Prompt, Skills, Model, Schedule. NOT tabbed.
+
+  This mockup shows ONE change to that existing form: the footer save action
+  now reads "Save to Dev" and the helper line under the footer explains what
+  that means. Everything else in the page is unchanged — the cards above
+  ("Basic Information", "Model", etc.) are deliberately collapsed to
+  "…existing sections above…" so it's obvious this is a surgical addition.
 
   Primary task: "edit the agent's master prompt without worrying about
   breaking anything for clients."
 
   Frontend-principles compliance: admin-only. One primary action (Save to Dev).
-  One inline clarification. No new panels, no metrics.
+  One inline clarification line. No new cards, no metrics.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Mock 02 — Edit agent prompt</title>
+<title>Mock 02 — System agent edit page</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -24,48 +30,40 @@
   .pill-prod { background:#eef2ff; color:#4338ca; font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; letter-spacing:0.04em; }
   .diff-add { background:#ecfdf5; border-left:3px solid #10b981; padding:2px 6px; display:inline-block; border-radius:0 3px 3px 0; }
   .new-pill { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#4338ca; margin-left:6px; vertical-align:1px; }
+  .card { background:white; border:1px solid #e2e8f0; border-radius:10px; }
 </style>
 </head>
 <body class="min-h-screen">
 
 <div class="mx-auto max-w-[820px] p-6">
   <div class="flex justify-between items-baseline mb-4 text-[13px]">
-    <h1 class="text-[15px] font-semibold text-slate-900">Mock 02 · Edit agent prompt</h1>
+    <h1 class="text-[15px] font-semibold text-slate-900">Mock 02 · System agent edit</h1>
     <a href="index.html" class="text-indigo-600 hover:text-indigo-800 no-underline">← All mocks</a>
   </div>
 
-  <!-- Breadcrumb -->
+  <!-- Breadcrumb (existing shell) -->
   <div class="text-[12px] text-slate-500 mb-2">
-    Synthetos admin <span class="text-slate-300 mx-1">›</span> <a href="01-system-agents-library.html" class="text-indigo-600 no-underline">System agents</a> <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">Outreach Agent</span>
+    Synthetos admin <span class="text-slate-300 mx-1">›</span> <a href="01-system-agents-library.html" class="text-indigo-600 no-underline">Agents</a> <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">Outreach Agent</span>
   </div>
 
-  <div class="bg-white border border-slate-200 rounded-lg">
-    <!-- Tab bar -->
-    <div class="px-6 pt-4 border-b border-slate-200">
-      <div class="flex gap-4 -mb-px">
-        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">General</button>
-        <button class="py-2 px-1 text-[13px] font-semibold border-b-2 border-indigo-600 text-indigo-600">Prompts</button>
-        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Skills</button>
-        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Rollout</button>
-        <button class="py-2 px-1 text-[13px] font-medium text-slate-500 hover:text-slate-700">Advanced</button>
+  <!-- Truncation marker for "…existing cards above…" -->
+  <div class="text-[11.5px] text-slate-400 italic mb-3 px-1">…Basic Information, Hierarchy cards above…</div>
+
+  <!-- EXISTING CARD: "Prompt" — only structural change is the badge in header + Save to Dev footer below -->
+  <div class="card mb-3">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-baseline justify-between">
+      <div>
+        <h3 class="text-[14px] font-semibold text-slate-900">Prompt</h3>
+        <p class="text-[12px] text-slate-500 mt-0.5">Applies to every organisation running this agent.</p>
+      </div>
+      <div class="text-[12px] text-slate-500">
+        Editing → will become <span class="pill-dev">rev 47 · dev</span>
       </div>
     </div>
-
-    <!-- Editor body -->
-    <div class="px-6 py-5">
-      <!-- Heading with state line -->
-      <div class="flex items-baseline justify-between">
-        <div>
-          <h3 class="text-[14px] font-semibold text-slate-900">Master prompt</h3>
-          <p class="text-[12px] text-slate-500 mt-0.5">Applies to every organisation running this agent.</p>
-        </div>
-        <div class="text-[12px] text-slate-500">
-          Editing → will become <span class="pill-dev">rev 47 · dev</span>
-        </div>
-      </div>
-
-      <!-- Prompt textarea -->
-      <div class="mt-4 font-mono text-[12px] bg-slate-50 border border-slate-200 rounded-lg p-4 leading-relaxed whitespace-pre-wrap text-slate-700">You are the Outreach Agent. Your job is to draft
+    <div class="p-5">
+      <!-- Master prompt textarea (existing field, contents truncated for the mockup) -->
+      <label class="block text-[12.5px] font-medium text-slate-700 mb-1">Master prompt</label>
+      <div class="font-mono text-[12px] bg-slate-50 border border-slate-200 rounded-lg p-4 leading-relaxed whitespace-pre-wrap text-slate-700">You are the Outreach Agent. Your job is to draft
 personalised outbound emails for each lead.
 
   1. Read the lead's CRM record and recent activity.
@@ -74,36 +72,32 @@ personalised outbound emails for each lead.
      (event attended, page viewed). Never fabricate.</span>
   4. Keep the email under 120 words, one CTA.</div>
 
-      <!-- Change description -->
+      <!-- Change description — required for promotion -->
       <div class="mt-4">
-        <label class="block text-[12.5px] font-medium text-slate-700 mb-1">Change description<span class="text-slate-400 font-normal"> · required to promote</span></label>
+        <label class="block text-[12.5px] font-medium text-slate-700 mb-1">Change description<span class="text-slate-400 font-normal"> · required to promote</span><span class="new-pill">new</span></label>
         <input type="text" value="Adds explicit signal-reference step; reduces generic openers." class="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13.5px]" />
       </div>
-
-      <!-- Advanced section (collapsed) — for the progressive-disclosure rule -->
-      <details class="mt-5 border-t border-slate-100 pt-4">
-        <summary class="text-[12.5px] font-medium text-slate-700 cursor-pointer">Advanced</summary>
-        <div class="mt-3 text-[12px] text-slate-500 space-y-1.5">
-          <div>Additional prompt (org-editable):&nbsp; <span class="text-slate-700">preserved — orgs keep their own override when this rev promotes.</span></div>
-          <div>Prompt hash:&nbsp; <code class="text-[11px] bg-slate-100 px-1 rounded">sha256:4c7e…</code></div>
-        </div>
-      </details>
     </div>
+  </div>
 
-    <!-- Footer — the subtle-but-important line -->
-    <div class="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
+  <!-- Truncation marker for cards below -->
+  <div class="text-[11.5px] text-slate-400 italic mb-3 px-1">…Skills, Model, Schedule cards below…</div>
+
+  <!-- Footer (existing position, two changes: button label + helper line above) -->
+  <div class="card">
+    <div class="px-5 py-4 flex items-center justify-between">
       <p class="text-[12px] text-slate-500 max-w-[480px]">
-        Saving creates a new revision in <span class="pill-dev">dev</span>. It only runs on your test subaccount. Promote it through the rings from the <a href="03-rollout-pipeline.html" class="text-indigo-600 no-underline">Rollout</a> tab.
+        Saving creates a new revision in <span class="pill-dev">dev</span>. It only runs on your test subaccount. Promote it through the rings from the new <a href="03-rollout-pipeline.html" class="text-indigo-600 no-underline">Rollout</a> action on this agent.
       </p>
       <div class="flex gap-2">
         <button class="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-semibold rounded-lg border border-slate-300">Cancel</button>
-        <button class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save to Dev</button>
+        <button class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg">Save to Dev<span class="new-pill ml-1">new</span></button>
       </div>
     </div>
   </div>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/AdminAgentEditPage.tsx</code> → Prompts tab. Only structural change: the save button is relabelled "Save to Dev" and the helper line under the footer explains what that means. The Advanced section keeps hashes and internal identifiers out of the primary path (per frontend-design-principles §progressive-disclosure).
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SystemAgentEditPage.tsx</code> (single long form, <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">&lt;Card&gt;</code> sections at lines 430+). Three changes (all marked <span class="new-pill">new</span>): badge in the Prompt card header showing the draft revision number; required <em>Change description</em> field; "Save" relabelled to "Save to Dev" with the helper line underneath. The Rollout page (Mock 03) is a new route reachable from a new action on this page, not a tab on it.
   </p>
 </div>
 

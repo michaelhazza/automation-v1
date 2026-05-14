@@ -470,31 +470,79 @@ All anchored to public production incidents in the last 18 months.
 
 ### Closed-loop skill improvement / amendment-primitive feature
 
-A parallel dev session has drafted a closed-loop brief (referenced by the originating session as `tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md`). That document is **not currently present in this branch** — it lives on a separate working branch in the parallel session. The two features are deeply linked:
+The closed-loop brief now lives on main at [`tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md`](research-briefs/closed-loop-skill-improvement-dev-brief.md). The two features are deeply linked but **explicitly decoupled in Phase 1**:
 
-- The closed-loop feature ships an **amendment primitive** that lets subaccount-level corrections accumulate into discoverable improvements at org and system tiers.
-- Without staged rollout, the **upward-promotion path** of those improvements to system tier cannot ship safely. Promoting an amendment that worked for one subaccount to all subaccounts without the four-ring pipeline is "ship and pray."
-- Conversely, the closed-loop feature is the primary **source of changes** the staged rollout pipeline gates. Phase 1 of staged rollout can ship without closed-loop, but its main customer (the amendment-promotion path) is unmet until both features land.
+- **Closed-loop ships first.** Its Phase 1 ships subaccount-tier amendments only — typed overlays that stack on system skills without forking. The morning review queue surfaces failed-scorecard-derived amendments for human accept/edit/reject.
+- **Upward promotion to system tier is the hand-off point.** Closed-loop §4 (out of scope) is explicit: *"Upward promotion to system tier. Deferred until ring rollout exists. The amendment primitive supports this future flow (the `source` enum already includes `promoted_from_subaccount`), but the promotion path itself is not built."*
+- **Closed-loop §9 (what this brief is not) carries an important warning:** *"Phase 1 should be evaluated against the success criteria in §7 before any further investment in Phase 2 (upward promotion, ring rollout) is committed."*
 
-**Recommended order**:
-1. Closed-loop / amendment primitive ships first (independent feature, builds on existing scorecard + skill-versioning).
-2. Staged rollout Phase 1 ships second (gates internal-tier-promotion of amendments).
-3. Staged rollout Phase 2 activates when first customer onboards.
+Practical implication: this staged-rollout brief is **not load-bearing for closed-loop Phase 1**. Closed-loop Phase 1 can ship today against the existing skill-versioning subsystem; subaccount amendments stay at subaccount tier and don't need rings. Staged rollout becomes load-bearing only when closed-loop's success criteria are met and upward promotion is the next step.
 
-When the closed-loop brief lands on main, link it from this brief's §11 and remove the "not currently present in this branch" caveat.
+**Recommended order:**
+1. **Closed-loop Phase 1 ships first** (independent feature, builds on existing scorecard + skill-versioning).
+2. **Closed-loop success-criteria evaluation** (per its §7 — 4 weeks of operation in an internal subaccount, measurable improvement on the frozen regression set).
+3. **Staged rollout Phase 1 ships only if closed-loop earned its case** (internal release flavour for Synthetos staff promoting system-skill changes through Dev → Test rings; Canary / Prod inactive).
+4. **Staged rollout Phase 2 activates** when first live customer onboards and `spec-context.md` flips off `commit_and_revert`.
 
-### Other related work on main
+This ordering is also the answer to "can these ship concurrently?" — see §11.2 below.
+
+### 11.2 Concurrency analysis — should these features ship together?
+
+**Short answer: no, they shouldn't ship concurrently in active build, but the briefs are useful to hold in mind together.**
+
+The two features share a substrate (skill versioning, scorecard verdicts, the typed-amendment / pinned-version primitives both touch `agent_runs`) but address different problems on different timescales:
+
+| | Closed-loop Phase 1 | Staged rollout Phase 1 |
+|---|---|---|
+| **Problem it solves** | Captures failures → human-reviewed amendments at subaccount tier | Gates Synthetos staff changes through Dev → Test before global rollout |
+| **Required for launch?** | No, but high product leverage (closes the operator-learning loop) | No — no live customers means no customer-facing rollout pressure |
+| **Required substrate** | `skill_amendments`, `failure_post_mortem` job, morning review queue, frozen regression set | Per-run version pinning, `rollout_cohorts`, `skill_disable_flags`, reversibility classification, no-op calibration |
+| **Headcount cost** | 6–10 weeks one engineer | 8–12 weeks one engineer |
+| **Risk-of-no-payoff** | Real — see closed-loop §9 (the "coin flip" paper) | Larger — Phase 2 customer rings depend on customers existing first |
+
+**Three reasons not to build concurrently:**
+1. **Dependency direction.** Closed-loop's value is independent. Staged rollout's primary value (gating system-tier changes derived from subaccount amendments) is downstream of closed-loop earning its case.
+2. **Risk concentration.** Building both at once doubles the risk that one of them produces no measurable improvement before either is validated. Closed-loop §9 specifically calls out the "coin flip" risk; the right answer is sequential, not parallel.
+3. **Cognitive bandwidth.** Both touch the same files (`agent_runs`, `skill_versions`, the skill resolver, the scorecard subsystem). Concurrent work creates merge conflicts on the highest-traffic code in the platform.
+
+**One reason the briefs are valuable in parallel today (even if the code isn't):** the schemas have to agree. Per-run pinning (staged-rollout §3.1) must hold the pinned amendment stack alongside pinned base versions. That contract is easy to define in the closed-loop spec session if the staged-rollout brief is on the table — and very expensive to retrofit if the schemas diverge.
+
+### 11.3 Should this be built at all, given we're pre-production?
+
+**Honest answer: probably not yet, and possibly never in its full Phase 2 form.**
+
+The case for building Phase 1 of staged rollout *now*:
+- **Internal-release flavour is a Synthetos-internal process, not a customer rollout** (§2.4). The `commit_and_revert` constraint doesn't apply. So technically it's permitted today.
+- **It's the safety harness for the upward-promotion path** that closed-loop will need eventually. Building the schema and resolver wiring early avoids a painful retrofit later.
+
+The case against:
+- **No customers means no customer-facing rollout pressure.** Phase 2's value (the Canary / Prod customer rings) is dormant until there's a customer base to canary against. Building infrastructure that can't be exercised tends to rot.
+- **Closed-loop hasn't earned its case yet.** Its own brief (§9) flags real risk that the propose-and-review loop produces no measurable improvement. If closed-loop fails, the upward-promotion path that staged-rollout is the safety harness for becomes unnecessary.
+- **8–12 weeks of engineer time** on infrastructure whose primary consumer is a feature that hasn't validated yet, on a codebase that hasn't tested with real users yet, is a significant opportunity cost against the *current* development priority — getting the platform to a real-customer test.
+- **Anthropic's Claude Code reasoning regression** (§9 of the brief) is the closest analogue: a substantial monitoring investment landed but provided no value until it was tuned against real production variance. Pre-production, you can't calibrate against real variance — you can build the pipes but the no-op canary calibration (§3.8) is meaningless without representative traffic.
+
+**Concrete recommendation:**
+
+1. **Keep the brief and mockups as design artefacts.** They lock the contract and the UX direction. Read them again in 6 months.
+2. **Don't open a spec session on this yet.** Closed-loop Phase 1 should ship first and have at least 4 weeks of internal operation before any work on staged rollout begins.
+3. **One pre-emptive schema decision matters now:** per-run version pinning columns (§3.1) on `agent_runs`. If closed-loop adds pinned amendment fields, the staged-rollout columns can be added in the same migration without conflict. Worth a one-paragraph note in the closed-loop spec session so the schemas converge.
+4. **Re-evaluate after closed-loop Phase 1 ships AND we have at least one live agency client.** Both triggers needed before staged-rollout Phase 1 leaves the backlog. Without the first, there's no upward-promotion source. Without the second, there's no rollout target.
+
+The mockups and brief on this branch are the *receipts* of the design thinking. They're cheap to hold; they're expensive to invalidate by building too early.
+
+### 11.4 Other related work on main
 
 - **Cached context infrastructure** (PRs landed via migration 0185+). The prefix-hash column on `llm_requests` is the substrate for the cache-hit-rate diagnostic in §3.4.
 - **LLM observability ledger generalisation.** The `/system/llm-pnl` admin page and `llm_inflight_history` table are the substrate for the per-step cost and model attribution this brief assumes.
 - **Riley Observations — Explore Mode / Execute Mode.** Per-run safety mode for the *end user* (operator choosing "try this safely"). Orthogonal to the per-revision safety this brief provides for the *platform author*. The two compose: Dev ring runs ≈ author running in Execute mode on their own test subaccount.
 
-### Spec-context flag
+### 11.5 Spec-context flag
 
 This brief assumes `docs/spec-context.md` currently states `rollout_model: commit_and_revert` and `staged_rollout: never_for_this_codebase_yet`. Phase 1 ships under those flags (internal-release flavour is not customer-facing). Phase 2 activation requires the flag to flip, which happens when the first live agency client onboards.
 
-### Source artefacts
+### 11.6 Source artefacts
 
-- Three deep-research passes on staged rollout (Claude / Gemini / ChatGPT) — raw outputs archived in the parallel session; key findings synthesised in §2.4 and §3.
-- Original brief location: `tasks/research-briefs/staged-rollout-dev-brief.md` on the parallel session's branch. This document supersedes it for the canonical version on `claude/analyze-agent-orchestration-4Gdlz`.
-- Mockup set on this branch: `prototypes/skill-agent-rings/` (drafted before research; needs §4 revisions).
+- Three deep-research passes on staged rollout (Claude / Gemini / ChatGPT) — synthesised in §2.4 and §3.
+- Original brief at [`tasks/research-briefs/staged-rollout-dev-brief.md`](research-briefs/staged-rollout-dev-brief.md). This document supersedes it for the canonical version on `claude/analyze-agent-orchestration-4Gdlz`.
+- Closed-loop brief at [`tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md`](research-briefs/closed-loop-skill-improvement-dev-brief.md).
+- Mockup set on this branch: `prototypes/skill-agent-rings/`.

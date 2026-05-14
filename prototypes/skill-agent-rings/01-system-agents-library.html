@@ -1,14 +1,14 @@
 <!doctype html>
 <!--
-  Mock 01 / 09 — System agents library (admin landing)
-  ======================================================
-  Entry point. An existing admin page (client/src/pages/SystemAgentsPage.tsx)
-  with ONE addition: a ring-status pill on each row showing what's currently
-  in flight for that agent.
+  Mock 01 / 10 — Agents list with ring status (admin landing)
+  ===============================================================
+  Existing surface: client/src/pages/AgentsPage.tsx (the route /system/agents
+  redirects to /agents). One addition: a ring-status badge on system-managed
+  agent rows showing what's currently in flight for that agent. No new page.
 
   Frontend-principles compliance: admin-only view (relaxed budget). One primary
-  action per row (Open). One extra column beyond the existing table
-  (In flight). No KPI tiles, no charts, no hashes.
+  action per row (Open). One extra signal beyond what AgentsPage shows today
+  (In flight badge). No KPI tiles, no charts, no hashes.
 
   Primary task: "find the agent I want to update, see at a glance if anything
   is mid-rollout for it, open it."
@@ -39,15 +39,15 @@
 
   <!-- Breadcrumb — existing shell -->
   <div class="text-[12px] text-slate-500 mb-3">
-    Synthetos admin <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">System agents</span>
+    Synthetos admin <span class="text-slate-300 mx-1">›</span> <span class="text-slate-900 font-medium">Agents</span>
   </div>
 
   <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
     <!-- Table header -->
     <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
       <div>
-        <h2 class="text-[15px] font-semibold text-slate-900">System agents</h2>
-        <p class="text-[12px] text-slate-500">Agents every organisation inherits. Changes roll out in stages.</p>
+        <h2 class="text-[15px] font-semibold text-slate-900">Agents</h2>
+        <p class="text-[12px] text-slate-500">System agents inherit to every organisation. Changes roll out in stages.</p>
       </div>
       <a href="02-edit-agent-prompt.html" class="text-[12.5px] text-indigo-600 hover:text-indigo-800 font-medium no-underline">+ New agent</a>
     </div>
@@ -131,7 +131,7 @@
   </div>
 
   <p class="text-[12px] text-slate-500 mt-4 leading-relaxed">
-    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/SystemAgentsPage.tsx</code>. One new column (<em>In flight</em>) shows whether the agent has a revision moving through rings right now. Click a row to see the rollout pipeline (Mock 03).
+    Existing surface: <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">client/src/pages/AgentsPage.tsx</code> (route <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">/agents</code>; <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">/system/agents</code> redirects here). Today's page is a single agent list; the only change in this mockup is an <em>In flight</em> column on system-managed agent rows. Click a row to open <code class="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">SystemAgentEditPage.tsx</code>; ring-pipeline view (Mock 03) is reachable from the agent's edit page.
   </p>
 </div>
 
