@@ -9,7 +9,7 @@
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
 | Applies to | This repo (`automation-v1`) — Express + Vite + React + Drizzle + pg-boss stack |
-| Structure | Universal Rules → Protected Files → Layer 1 (9 areas) → Layer 2 (13 modules: 8 generic + 5 AutomationOS-specific) → Pipeline integration → Report template → Tooling |
+| Structure | Universal Rules → Protected Files → Layer 1 (10 areas) → Layer 2 (13 modules: 8 generic + 5 AutomationOS-specific) → Pipeline integration → Report template → Tooling |
 | Pairs with | `CLAUDE.md`, `architecture.md`, `KNOWLEDGE.md`, `docs/spec-context.md`, `docs/frontend-design-principles.md`, `docs/capabilities.md`, `.claude/agents/*` |
 
 ---
