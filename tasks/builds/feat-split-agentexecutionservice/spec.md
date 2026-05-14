@@ -204,7 +204,7 @@ export type { LoopParams } from './agentExecutionLoop.js';
 export type { LoopResult } from './agentExecutionTypes.js';
 ```
 
-The `agentExecutionService` constant's body (the `executeRun` orchestrator that calls phase functions in order) either lives in the barrel itself or in an `agentExecutionService/index.ts`. The architect plan decides — default is "in the barrel" so `executeRun` is grep-discoverable by future readers at the canonical path.
+The `agentExecutionService` constant's body (the object literal containing `executeRun` as the orchestrator that calls phase functions in order, AND `startRunAsync` as a sibling method that calls `this.executeRun(...)`) either lives in the barrel itself or in an `agentExecutionService/index.ts`. The architect plan decides — default is "in the barrel" so both methods are grep-discoverable by future readers at the canonical path. CRITICAL: `executeRun` and `startRunAsync` MUST remain methods on the same object literal regardless of Q1's outcome — `startRunAsync`'s `void this.executeRun(request).catch(...)` line depends on the `this` binding. Splitting them would break the fire-and-forget detachment.
 
 ## 6. Current State (Brief)
 
@@ -334,6 +334,7 @@ Returns the public `AgentRunResult`. Update `executeRun` to call `finalizeRun`. 
 ### Chunk 11 — Barrel thinning + caller sweep + doc sync
 
 - Trim `agentExecutionService.ts` to the §5.6 barrel shape.
+- **`startRunAsync` placement (locked acceptance criterion):** `startRunAsync` ships in the SAME module that holds the `agentExecutionService` constant (per Q1 default: inline in the barrel; or inside `agentExecutionService/index.ts` if Q1 chooses (b)). It MUST remain a method on the same object literal as `executeRun` so that the existing `void this.executeRun(request).catch(...)` call resolves `this` against the live object. If Q1 chooses (b) and the orchestrator moves to `agentExecutionService/index.ts`, both methods move together and the barrel re-exports the resulting constant. Under no Q1 outcome may `startRunAsync` be split from `executeRun` — the `this`-binding is load-bearing for the existing fire-and-forget detachment and the locked public surface in §4.
 - Sweep callers (§10 list). Where a caller imports a type that has moved to `types.ts` or `resume.ts`, optionally update the caller to point at the new canonical path; otherwise leave the caller on the barrel re-export.
 - Update `architecture.md § Agent Execution Middleware Pipeline` to point at the new module tree (one short paragraph + pointer to the directory).
 - Update `docs/doc-sync.md` if needed.
