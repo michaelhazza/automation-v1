@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/audit-prevention-gates-2026-05-14/spec.md
-active_plan: tasks/builds/audit-prevention-gates-2026-05-14/plan.md
-build_slug: audit-prevention-gates-2026-05-14
-branch: audit-prevention-gates-2026-05-14
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-14
+last_merge_ready_pr: #307
+last_merge_ready_slug: audit-prevention-gates-2026-05-14
+last_merge_ready_branch: audit-prevention-gates-2026-05-14
 last_merged_pr: #305
 last_merged_slug: pre-v1-lockdown-2026-05-14
 last_merged_branch: audit/full-pre-v1-lockdown-2026-05-14
@@ -22,15 +25,15 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 
 ---
 
-**Active spec:** `tasks/builds/audit-prevention-gates-2026-05-14/spec.md`
-**Active plan:** `tasks/builds/audit-prevention-gates-2026-05-14/plan.md`
-**Active build slug:** `audit-prevention-gates-2026-05-14`
-**Branch:** `audit-prevention-gates-2026-05-14`
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY**
 
-**Active build:** Audit Prevention Gates — Phase 2 BUILD complete (HEAD `2bcdb52b`). 12 chunks shipped, 14 CI gates wired (P6 dropped per §B1; covered by pre-existing `verify-no-raw-console.sh`), 4 doc rules landed (P17-P20), 3 KNOWLEDGE patterns appended (P21-P23), ADR-0024 authored. Branch-level review pass complete: spec-conformance CONFORMANT, pr-reviewer APPROVED both rounds (0 Blocking, 8 → 5 Should-fix carried for finalisation surface), reality-checker READY (9/9 criteria), dual-reviewer APPROVED with 3 critical functional fixes (`fc2fb394`). G2 + G3 PASS. Doc-sync gate: 9 yes / 7 n/a / 1 no-with-rationale. Handoff written at `tasks/builds/audit-prevention-gates-2026-05-14/handoff.md`. Open issues for finalisation: 8 should-fix items (per Round 2 review), main drift during build (origin/main advanced 6e5d3a77 → 2802ebc0; Phase 3 S2 will merge), `pg`/`with-org-tx-or-scoped-db` baseline follow-ups, PR# placeholder updates. Next: `launch finalisation`.
+**Just labelled ready-to-merge:** PR #307 — `audit-prevention-gates-2026-05-14` (label applied 2026-05-14T12:58:46Z). 14 new CI prevention-gates landed (P1-P24 minus P6, dropped per §B1), 4 doc rules (P17-P20), 3 KNOWLEDGE patterns (P21-P23), ADR-0024. Phase 3 finalisation: S2 merge clean (37-commit drift → operator-override "force"; KNOWLEDGE.md / current-focus.md auto-resolved per known-shape table). G4 regression guard PASS. chatgpt-pr-review 3 rounds → APPROVED: Round 1 implemented 4 high-severity fixes (T1 madge fail-closed, F1 with-org-tx caller-walk constrained to declaring file + regression fixtures, F2 types-used strips barrel re-exports + regression tests, F3 jscpd fail-closed); Round 2 implemented 2 fixes (T5 AST identifier walk replacing substring `.includes`, F4 budget-gate expiry framework doc-soften with `references/test-gate-policy.md` carve-out + baseline-file header NOTE callouts); Round 3 APPROVED with no new findings (1 auto-rejected as triple-occurrence of the same `verify-org-id-source.sh` diff-misread — script was wired into `run-all-gates.sh` 40 days pre-branch in commit `89a818cc`). Deferred: `BUDGET-EXPIRY-ENFORCEMENT-1` (per-file budget gates have no calendar-expiry mechanism — doc now correctly reflects this; future opt-in). Doc-sync sweep: 9 yes / 7 n/a / 1 no-with-grep-rationale (17 rows covered). 1 new KNOWLEDGE pattern appended (manual-mode ChatGPT has no session memory across rounds — auto-reject duplicates without re-engaging). tasks/todo.md: 23 closed-entry placeholder tags updated branch → pr:307. CI will fire on the post-Phase-3 commit; auto-merge follows green.
 
-**Just merged:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
+**Prior merge:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
 
 **Prior merge:** PR #300 — `skill-merge-consolidation-pass` (squash-commit `7fa97612`, 2026-05-14T04:18:03Z). Conditional LLM consolidation pass for the skill analyzer's merge pipeline (migration 0358). Fires only when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL`. New closed enum `consolidationOutcome` (`not_triggered | succeeded | declined | failed`) with `failureReason='not_shortened'` routing non-shortening LLM outputs to `failed` (dual-reviewer ACCEPT). Three informational warning codes (`CONSOLIDATION_APPLIED | DECLINED | FAILED`). chatgpt-pr-review APPROVED after 2 rounds (F4 canonical-JSON deep-equality + regression test applied; 4 findings rejected with code-cited rationale; 1 deferred as `SKILL-MERGE-RATIONALE-1`). CI fix-loop: 1 iteration (migration 0358 down was non-idempotent — `DROP COLUMN` without `IF EXISTS` violated the codebase convention that `*.down.sql` files must survive being applied first by the forward-only migrate runner). KNOWLEDGE.md +3 entries (Stripped-field upstream; Canonicalise JSON before deep-equality; LLM-self-attestation is not the success signal). 9 forward-backlog items routed to tasks/todo.md as `SKILL-MERGE-*`.
 

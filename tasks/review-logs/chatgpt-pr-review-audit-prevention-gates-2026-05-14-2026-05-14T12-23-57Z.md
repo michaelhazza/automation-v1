@@ -248,3 +248,53 @@
 - User-decided: none (operator-explicit close-of-review signal).
 - No code changes this round. Log-only commit follows.
 
+---
+
+## Phase 3 Doc Sync sweep — 2026-05-14T13-20-00Z
+
+Per `docs/doc-sync.md § Investigation procedure`. 17 registered docs / meta-rows.
+
+**Pre-condition:** `origin/main` HEAD is still `2802ebc0` (the same head observed during Phase 2 doc-sync). No new content from main has landed on this branch beyond what Phase 2 already accounted for. Phase 2 verdicts therefore remain applicable; only `references/test-gate-policy.md` is re-verdicted because Round 2 F4 added a new sub-section.
+
+**Candidate-stale-reference set from Round 1/2/3 diff:**
+- New symbols: `stripReExports`, `isCalledViaOrgScope` (semantic change, not rename), `name-collision-unsafe`, `name-collision-safe`, `substring-collision`, `BUDGET-EXPIRY-ENFORCEMENT-1`
+- New policy section title: "Per-file count baselines are out of scope for the expiry framework"
+- Behavioural changes: `verify-no-new-cycles.sh` / `verify-duplicate-blocks.sh` fail-closed on tool error; with-org-tx analyser caller-walk constrained to declaring file + AST identifier walk replacing substring `.includes`; types-used analyser strips barrel re-exports before counting usage
+
+**Grep verification:** zero stale references found in `architecture.md`, `CLAUDE.md`, `DEVELOPMENT_GUIDELINES.md`, `docs/capabilities.md`, `docs/integration-reference.md`, `docs/frontend-design-principles.md`, `KNOWLEDGE.md`, `docs/incident-response.md`, `docs/testing-transition-plan.md`, `CONTRIBUTING.md`, `docs/context-packs/`, `docs/decisions/`, `references/spec-review-directional-signals.md`, `.claude/CHANGELOG.md`, `.claude/FRAMEWORK_VERSION` for any of the new symbols. Only hit was `references/test-gate-policy.md` itself for "Per-file count baselines" (its own update).
+
+### Phase 3 doc-sync verdict table
+
+| Doc | Verdict |
+|---|---|
+| `architecture.md` | yes (Phase 2 Tenant Scoping § Single org-id source — no Round-N updates needed) |
+| `docs/capabilities.md` | yes (Phase 2 Editorial Rules — no Round-N updates needed) — `n/a: build / tooling change only` for the gate-script and analyser hardening from Round 1/2 |
+| `docs/integration-reference.md` | n/a — no integration behaviour changes; CI gates + analyser internal logic only |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | yes for CLAUDE.md (Phase 2 § 6 Surgical Changes refactor-residue comments, § Frontend Design Principles named exports). DEVELOPMENT_GUIDELINES.md: n/a |
+| `CONTRIBUTING.md` | n/a — no contributor-facing convention changes; suppression grammar is reference-doc material |
+| `docs/frontend-design-principles.md` | n/a — no UI pattern / hard rule introduced |
+| `KNOWLEDGE.md` | yes (Phase 2: 3 entries P21–P23). Step 7 cross-check pass will append new round-driven patterns from Round 1/2 if any are durable. |
+| `docs/spec-context.md` | n/a — does not apply to feature pipelines |
+| `docs/decisions/` | yes (Phase 2 ADR-0024 service-layer extraction). No new ADR from Round 1/2/3 — analyser changes are internal helper logic, not architectural locks. |
+| `docs/context-packs/` | no — checked all 5 packs for stale anchor refs; only context-packs reference to this build's surface is `minimal.md#key-files-per-domain` (anchor-name, not line-number), unaffected by Round 1/2/3 changes |
+| `references/test-gate-policy.md` | yes (Phase 2 "Audit-prevention-gates policy (2026-05-14)" sub-section; Round 2 F4 reworded "Baseline expiry policy" paragraph + added "Per-file count baselines are out of scope for the expiry framework" sub-section) |
+| `references/spec-review-directional-signals.md` | n/a — no spec-reviewer signal patterns introduced |
+| `docs/incident-response.md` | n/a — no SEV / on-call / post-mortem changes |
+| `docs/testing-transition-plan.md` | n/a — no testing-migration-plan changes |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | n/a — repo-specific CI gates + docs, not framework-level agent-fleet changes |
+| `scripts/verify-*` (15 gates) row | yes (Phase 2 authored the row; Round 1 hardened 2 of those gates against silent tool failure — doc-sync row stays valid) |
+| `docs/doc-sync.md` itself | yes (Phase 2 added the `scripts/verify-*` row) |
+
+**Verdicts: 9 yes / 7 n/a / 1 no (with grep rationale).** All 17 registered rows covered. No blocker.
+
+### Final Summary
+
+- KNOWLEDGE.md updated: yes (3 entries Phase 2 P21-P23 + 1 new Round 3 entry "diff-only reviewer triple-misread pattern" appended in Step 7)
+- architecture.md updated: yes (sections § Tenant Scoping → Single org-id source — Phase 2)
+- capabilities.md updated: `n/a: build / tooling change only`
+- integration-reference.md updated: n/a — no integration behaviour change
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes — CLAUDE.md §6 Surgical Changes + §Frontend Design Principles; DEVELOPMENT_GUIDELINES.md n/a
+- frontend-design-principles.md updated: n/a — no new UI pattern or hard rule
+
+**Final verdict:** APPROVED across 3 rounds + 1 doc-sync sweep. Mergeable.
+

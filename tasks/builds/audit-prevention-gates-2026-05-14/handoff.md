@@ -88,3 +88,29 @@
 3. **`pg` package undeclared** (chunk 6 P1 finding) — 15+ scripts import it; declare in `package.json` `optionalDependencies` matching `docx`/`mammoth` precedent from PR #305. Routed to `tasks/todo.md`.
 4. **Partial baseline `with-org-tx-or-scoped-db.txt`** — seeded from first ~80 service files; extend before promoting P2-companion to error. Routed to `tasks/todo.md`.
 5. **PR# placeholders in `tasks/todo.md`** — 23 of 24 closed entries use `[status:closed:branch:audit-prevention-gates-2026-05-14]`; update to `PR#NNN` on PR open.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #307
+**PR URL:** https://github.com/michaelhazza/automation-v1/pull/307
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`
+**spec_deviations reviewed:** n/a — no deviations introduced; F4's doc-soften is a clarification of spec §13 Q1 intent.
+
+**S2 merge:** clean. 37-commit drift on entry; operator-override "force" since drift exceeded red threshold (31+). Auto-resolve table handled `KNOWLEDGE.md` (union) and `tasks/current-focus.md` (ours); no code-area conflicts; one merge commit `ed8b56ae`.
+
+**G4 regression guard:** PASS (lint 0 errors / 887 warnings baseline; typecheck clean).
+
+**chatgpt-pr-review rounds:** 3.
+- Round 1 (CHANGES_REQUESTED, 3 Blocking / 3 Should-fix): 4 implemented (T1 madge fail-closed, F1 with-org-tx caller-walk + regression test, F2 types-used barrel re-export filter + regression tests, F3 jscpd fail-closed), 1 deferred to `tasks/todo.md § BUDGET-EXPIRY-ENFORCEMENT-1` (T2), 1 auto-rejected as diff-misread (T3).
+- Round 2 (CHANGES_REQUESTED, 1 Blocking / 2 Should-fix): 2 implemented (T5 AST identifier walk replacing `.includes` substring, F4 doc-soften for budget-gate expiry framework — `references/test-gate-policy.md` carve-out + baseline-file header annotations + `BUDGET-EXPIRY-ENFORCEMENT-1` re-scope), 1 auto-rejected as duplicate of R1/T3 (T4).
+- Round 3 (APPROVED, 0 Blocking, 1 Should-fix): 1 auto-rejected as triple-duplicate of R1/T3 + R2/T4 (T6). Operator closed loop with explicit "close the review after this and progress to finalisation and merge" signal at 2026-05-14T13:15Z.
+
+**Doc-sync sweep:** 9 yes / 7 n/a / 1 no-with-grep-rationale. All 17 registered rows + meta entries covered. Only Round-driven update: `references/test-gate-policy.md` § Per-file count baselines are out of scope (Round 2 F4). `origin/main` HEAD unchanged from Phase 2 doc-sync (`2802ebc0`), so prior verdicts apply.
+
+**KNOWLEDGE.md entries added in Phase 3:** 1 new pattern — "Manual-mode ChatGPT has no session memory across rounds — same diff-misread can recur indefinitely" (drawn from the T3/T4/T6 triple-occurrence, addresses the "stop re-engaging on the third repeat" lesson). Phase 2 already appended P21/P22/P23.
+
+**tasks/todo.md cleanup:** 23 closed-entry tags updated from `[status:closed:branch:audit-prevention-gates-2026-05-14]` to `[status:closed:pr:307]`. `BUDGET-EXPIRY-ENFORCEMENT-1` retained (Round 1 deferred + Round 2 re-scoped). Carried follow-ups (`pg` package undeclared, with-org-tx baseline extension, 7 promotion follow-ups, P15 / P7 / P3 / cygpath / FILES_SCANNED smaller items) remain as-is.
+
+**ready-to-merge label applied at:** 2026-05-14T12:58:46Z (operator-explicit "don't ask me any more questions" override of the standing memory rule that asks before label apply).
