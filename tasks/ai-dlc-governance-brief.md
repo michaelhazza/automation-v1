@@ -56,6 +56,8 @@ Reference: attached "Current Development Lifecycle" diagram. Linear pipeline —
 
 Reference: attached "Proposed Development Lifecycle" diagram. Same backbone, plus: Clarify Intent → Align Product/Engineering/Risk Context → Duplication or Strategic Drift check → Write and Review Spec → Approve Build Plan → Build with AI Agents → Run Quality and Review Gates → Finalise Docs and Knowledge → Merge → Register Capability → Govern Capability Portfolio. Compound Learning Feedback feeds **forward** into future builds (template / agent / hook / test updates), not back into the current spec.
 
+**Diagrams are explanatory artefacts only.** The implementation contract is the written lifecycle, artefact, and gate requirements in this brief. Where the diagram and the prose disagree, the prose wins.
+
 ---
 
 ## 5. Design Principle
@@ -90,6 +92,12 @@ Required `intent.md` sections:
 server/db/schema, server/routes, auth/permission services, middleware, RLS migrations, webhook handlers, billing surfaces, external messaging, agent runtime, approvals. Selecting any of these flags the build for `adversarial-reviewer` auto-invocation during construction — the intent declaration and the construction-time trigger share one vocabulary.
 
 This stays lightweight. It is not a replacement for the spec.
+
+**Migration rule (`brief.md` → `intent.md`):**
+- Existing `tasks/builds/{slug}/brief.md` files remain valid historical artefacts. Do not retro-rewrite.
+- New Standard+ builds use `intent.md` only.
+- For an in-progress Standard+ build that already has `brief.md`, the next coordinator touching it must either (a) promote `brief.md` into `intent.md`, or (b) record in `progress.md` why promotion is not required.
+- Do not maintain both `brief.md` and `intent.md` as active authoritative artefacts for the same Standard+ build unless `intent.md` explicitly supersedes `brief.md`.
 
 ### 6.2 Lightweight Elaboration
 
@@ -156,7 +164,19 @@ There is no checked-in spec template file today — specs are authored freeform 
 
 ### 6.5 Capability Registration Before Merge (via doc-sync)
 
-Before `finalisation-coordinator` transitions to `MERGE_READY`, `docs/capabilities.md` must be updated so every shipped capability is registered as a governed asset.
+Before `finalisation-coordinator` transitions to `MERGE_READY`, `docs/capabilities.md` must be updated so every governed capability change is reflected in the Asset Register.
+
+**When registration is required (trigger rule):**
+Capability registration is required when the PR creates, materially changes, exposes, retires, or changes ownership / risk posture of a product capability, agent capability, skill, integration, execution environment, approval surface, customer-facing workflow, or governed platform primitive. It is **not** required for every non-trivial PR.
+
+**Capability registration outcomes (must be one of):**
+- create new capability record
+- update existing capability record
+- split existing capability record (one capability becomes two or more)
+- merge with existing capability record (absorbed into an existing entry)
+- n/a with reason
+
+Most builds will be `update existing` — this keeps the register from fragmenting into one row per PR.
 
 **Integration point:** add a new row to the trigger table in `docs/doc-sync.md`. Capability registration is verdicted by the existing doc-sync investigation procedure — single enforcement mechanism, not two parallel ones. The verdict supports the same `yes / no / n/a with reason` pattern doc-sync already uses.
 
@@ -173,7 +193,7 @@ Before `finalisation-coordinator` transitions to `MERGE_READY`, `docs/capabiliti
 | Capability ID / slug | yes |
 | Name | yes |
 | Description | yes |
-| Owner | yes (or explicit placeholder) |
+| Owner | yes (or explicit placeholder per the rule below) |
 | Capability cluster | yes |
 | Lifecycle state | yes |
 | Launch source | yes — link to build slug or PR |
@@ -184,6 +204,13 @@ Before `finalisation-coordinator` transitions to `MERGE_READY`, `docs/capabiliti
 | Related docs | yes |
 
 **Lifecycle states:** Inception, Growth, Mature, Declining, Sunset Candidate, Sunset. Most new capabilities launch as Inception or Growth.
+
+**Owner placeholder rule:** placeholders are practical but dangerous if they persist. Any placeholder owner must include:
+1. A **temporary accountable reviewer** (a named human who will field questions until the permanent owner is assigned).
+2. An **owner-resolution follow-up task** in `tasks/todo.md`.
+3. A **resolution due date** captured on the Asset Register row.
+
+Without these three, "TBD" silently becomes the owner of the portfolio.
 
 **Closed starter list of capability clusters (seeded in `docs/capabilities.md` before the gate goes live):**
 Workflow Engine, Approvals, Identity & Auth, Reporting, Integrations, Agent Runtime, Admin & Ops, Billing, Memory & Knowledge, Audit & Governance.
@@ -231,6 +258,8 @@ Do not include in the near-term spec:
 | Quarterly portfolio coherence automation | Begin as manual leadership review later |
 | ML-based lifecycle scoring | Not needed for v1 |
 | Full portfolio dashboard UI | Markdown register is enough for v1 |
+
+**V1 implementation constraint (binding):** v1 must be enforceable through markdown artefacts, coordinator instructions, doc-sync verdicts, and lightweight static checks only. Do **not** introduce database schema, UI, background jobs, dashboards, scoring engines, scheduled monitors, or new coordinators in this build. This is a hard constraint, not a guideline — it prevents the governance wrapper from drifting into a product-feature build.
 
 ---
 
@@ -293,7 +322,7 @@ The spec author should refine these; this is a starting decomposition for the ar
 ### Chunk 7: Process documentation sync
 - Update `CLAUDE.md`, `architecture.md`, and any context-pack references to describe the revised lifecycle:
   Intent → Elaboration → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Finalisation → Merge → Capability Registration → Compound Learning.
-- Update `current-focus.md` schema to optionally reference the capability being touched.
+- `current-focus.md` capability reference is **optional in v1** and should only be added if it does not require broader schema migration. If a schema migration would be needed, defer to a later build.
 
 ---
 
