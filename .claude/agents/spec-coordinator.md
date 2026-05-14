@@ -221,14 +221,14 @@ Produce three outputs. Each has a fixed value set:
 Write all three outputs into `intent.md` under `## Duplication / Strategy Check` using the §7.1.0 mandatory Markdown table shape:
 
 ```markdown
-| Dimension | Assessment | Notes |
-|---|---|---|
-| Duplication | <None / Partial overlap / Likely duplicate> | <free text> |
-| Strategic fit | <Aligned / Neutral / Not aligned> | <free text> |
-| Recommendation | <proceed / revise / merge with existing capability / stop> | <free text> |
+| Output | Value |
+|---|---|
+| Duplication assessment | clear \| partial overlap \| likely duplicate |
+| Strategic fit | clear \| questionable \| not aligned |
+| Recommendation | proceed \| revise \| merge with existing capability \| stop |
 ```
 
-Any supplementary per-cluster rows are appended below this table in the same section.
+Any supplementary per-cluster rows are appended below this table in the same section (one row per cluster, with cluster name in the Output column).
 
 ### Gate behaviour
 
