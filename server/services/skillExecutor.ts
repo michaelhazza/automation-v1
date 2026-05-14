@@ -9,8 +9,6 @@ import * as priorityFeedService from './priorityFeedService.js';
 // ---------------------------------------------------------------------------
 import { createWorkerAdapter } from './adapters/workerAdapter.js';
 import { updateThreadContextHandler } from '../actions/updateThreadContext.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { logger } from '../lib/logger.js';
 import type { SkillExecutionContext, SkillHandler } from './skillExecutor/context.js';
 export type { SkillExecutionContext, SkillHandler };
 import { requireSubaccountContext } from './skillExecutor/context.js';
@@ -152,6 +150,10 @@ import { methodologyStubHandlers } from './skillExecutor/handlers/methodologyStu
 import { autoGatedStubHandlers } from './skillExecutor/handlers/autoGatedStubs.js';
 import { reviewGatedProposerHandlers } from './skillExecutor/handlers/reviewGatedProposers.js';
 import { thinDispatcherHandlers } from './skillExecutor/handlers/thinDispatchers.js';
+import { systemMonitorShellHandlers } from './skillExecutor/handlers/systemMonitorShells.js';
+import { optimiserShellHandlers } from './skillExecutor/handlers/optimiserShells.js';
+import { spendShellHandlers } from './skillExecutor/handlers/spendShells.js';
+import { configShellHandlers } from './skillExecutor/handlers/configShells.js';
 
 /**
  * Registry of skill handlers keyed by skill name. The `skillExecutor.execute`
@@ -242,6 +244,14 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   ...reviewGatedProposerHandlers,
   // ── Thin dispatchers — dynamic-import forwarding (none remain post-split) ─
   ...thinDispatcherHandlers,
+  // ── System Monitor shells ─────────────────────────────────────────────────
+  ...systemMonitorShellHandlers,
+  // ── Optimiser shells ─────────────────────────────────────────────────────
+  ...optimiserShellHandlers,
+  // ── Spend shells ──────────────────────────────────────────────────────────
+  ...spendShellHandlers,
+  // ── Config shells ────────────────────────────────────────────────────────
+  ...configShellHandlers,
   trigger_process: async (input, context) => {
     requireSubaccountContext(context, 'trigger_process');
     return executeTriggerProcess(input, context);
@@ -619,23 +629,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return proposeReviewGatedAction('notify_operator', input, context);
   },
 
-  // ── Phase 4.5 Configuration Agent skill (closes B3 + B5) ──────────────
-  // The skill calls applyOrganisationConfigUpdate directly rather than
-  // routing through proposeReviewGatedAction — the service itself owns the
-  // sensitive-vs-non-sensitive split (B5) and the config_history write (B3).
-  config_update_organisation_config: async (input, context) => {
-    const { applyOrganisationConfigUpdate } = await import('./configUpdateOrganisationService.js');
-    return applyOrganisationConfigUpdate({
-      organisationId: context.organisationId,
-      path: input.path as string,
-      value: input.value,
-      reason: (input.reason as string) ?? 'config_agent write',
-      sourceSession: (input.sourceSession as string | null | undefined) ?? null,
-      changedByUserId: (context.userId as string | undefined) ?? null,
-      agentId: context.agentId,
-    });
-  },
-
   // ── Reporting Agent paywall workflow skills ───────────────────────────
   // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
   transcribe_audio: async (input, context) => {
@@ -725,53 +718,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeWeeklyDigestGather(input);
   },
 
-  // Action-call alias used by the Workflow runner (see weekly-digest.Workflow.ts)
-  config_weekly_digest_gather: async (input) => {
-    const { executeWeeklyDigestGather } = await import('../tools/internal/weeklyDigestGather.js');
-    return executeWeeklyDigestGather(input);
-  },
-
-  // ── Phase 3 S22: Deliver Workflow output via deliveryService ─────
-  config_deliver_workflow_output: async (input, context) => {
-    const { deliveryService } = await import('./deliveryService.js');
-    const {
-      subaccountId,
-      organisationId,
-      artefactTitle,
-      artefactContent,
-      deliveryChannels,
-    } = input as Record<string, unknown>;
-
-    if (!subaccountId || !organisationId || !artefactTitle || !artefactContent) {
-      return { success: false, error: 'subaccountId, organisationId, artefactTitle, artefactContent required' };
-    }
-
-    const config =
-      (deliveryChannels as { email?: boolean; portal?: boolean; slack?: boolean } | undefined) ??
-      { email: true, portal: true, slack: false };
-
-    const result = await deliveryService.deliver(
-      {
-        title: String(artefactTitle),
-        content: String(artefactContent),
-        createdByAgentId: context.agentId,
-      },
-      {
-        email: Boolean(config.email ?? true),
-        portal: Boolean(config.portal ?? true),
-        slack: Boolean(config.slack ?? false),
-      },
-      String(subaccountId),
-      String(organisationId),
-    );
-
-    return {
-      success: true,
-      taskId: result.taskId,
-      channels: result.channels,
-    };
-  },
-
   // ── Sprint 5 P4.2: Memory block write path ─────────────────────
   update_memory_block: async (input, context) => {
     const { updateBlock } = await import('./memoryBlockService.js');
@@ -781,73 +727,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       return { success: false, error: 'block_name and new_content are required' };
     }
     return updateBlock(blockName, newContent, context.agentId, context.organisationId);
-  },
-
-  // ── Configuration Assistant skill handlers ────────────────────
-  // Mutation tools (review-gated via action registry)
-  config_create_agent: async (input, context) => {
-    const { executeConfigCreateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_agent', input, context, () => executeConfigCreateAgent(input, context));
-  },
-  config_update_agent: async (input, context) => {
-    const { executeConfigUpdateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_agent', input, context, () => executeConfigUpdateAgent(input, context));
-  },
-  config_activate_agent: async (input, context) => {
-    const { executeConfigActivateAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_activate_agent', input, context, () => executeConfigActivateAgent(input, context));
-  },
-  config_link_agent: async (input, context) => {
-    const { executeConfigLinkAgent } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_link_agent', input, context, () => executeConfigLinkAgent(input, context));
-  },
-  config_update_link: async (input, context) => {
-    const { executeConfigUpdateLink } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_link', input, context, () => executeConfigUpdateLink(input, context));
-  },
-  config_set_link_skills: async (input, context) => {
-    const { executeConfigSetLinkSkills } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_skills', input, context, () => executeConfigSetLinkSkills(input, context));
-  },
-  config_set_link_instructions: async (input, context) => {
-    const { executeConfigSetLinkInstructions } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_instructions', input, context, () => executeConfigSetLinkInstructions(input, context));
-  },
-  config_set_link_schedule: async (input, context) => {
-    const { executeConfigSetLinkSchedule } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_schedule', input, context, () => executeConfigSetLinkSchedule(input, context));
-  },
-  config_set_link_limits: async (input, context) => {
-    const { executeConfigSetLinkLimits } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_set_link_limits', input, context, () => executeConfigSetLinkLimits(input, context));
-  },
-  config_create_subaccount: async (input, context) => {
-    const { executeConfigCreateSubaccount } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_subaccount', input, context, () => executeConfigCreateSubaccount(input, context));
-  },
-  config_create_scheduled_task: async (input, context) => {
-    const { executeConfigCreateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_create_scheduled_task', input, context, () => executeConfigCreateScheduledTask(input, context));
-  },
-  config_update_scheduled_task: async (input, context) => {
-    const { executeConfigUpdateScheduledTask } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_scheduled_task', input, context, () => executeConfigUpdateScheduledTask(input, context));
-  },
-  config_attach_data_source: async (input, context) => {
-    const { executeConfigAttachDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_attach_data_source', input, context, () => executeConfigAttachDataSource(input, context));
-  },
-  config_update_data_source: async (input, context) => {
-    const { executeConfigUpdateDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_update_data_source', input, context, () => executeConfigUpdateDataSource(input, context));
-  },
-  config_remove_data_source: async (input, context) => {
-    const { executeConfigRemoveDataSource } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_remove_data_source', input, context, () => executeConfigRemoveDataSource(input, context));
-  },
-  config_restore_version: async (input, context) => {
-    const { executeConfigRestoreVersion } = await import('../tools/config/configSkillHandlers.js');
-    return executeWithActionAudit('config_restore_version', input, context, () => executeConfigRestoreVersion(input, context));
   },
 
   // Capability discovery (Orchestrator routing spec §4) — read-only, no action audit needed
@@ -868,68 +747,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeRequestFeature(input, context);
   },
 
-  // Read-only config tools (no action audit needed)
-  config_list_agents: async (input, context) => {
-    const { executeConfigListAgents } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListAgents(input, context);
-  },
-  config_list_subaccounts: async (input, context) => {
-    const { executeConfigListSubaccounts } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListSubaccounts(input, context);
-  },
-  config_list_links: async (input, context) => {
-    const { executeConfigListLinks } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListLinks(input, context);
-  },
-  config_list_scheduled_tasks: async (input, context) => {
-    const { executeConfigListScheduledTasks } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListScheduledTasks(input, context);
-  },
-  config_list_data_sources: async (input, context) => {
-    const { executeConfigListDataSources } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListDataSources(input, context);
-  },
-  config_list_system_skills: async (input, context) => {
-    const { executeConfigListSystemSkills } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListSystemSkills(input, context);
-  },
-  config_list_org_skills: async (input, context) => {
-    const { executeConfigListOrgSkills } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigListOrgSkills(input, context);
-  },
-  config_get_agent_detail: async (input, context) => {
-    const { executeConfigGetAgentDetail } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigGetAgentDetail(input, context);
-  },
-  config_get_link_detail: async (input, context) => {
-    const { executeConfigGetLinkDetail } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigGetLinkDetail(input, context);
-  },
-
-  // Validation and history tools
-  config_run_health_check: async (input, context) => {
-    const { executeConfigRunHealthCheck } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigRunHealthCheck(input, context);
-  },
-  config_preview_plan: async (input, context) => {
-    const { executeConfigPreviewPlan } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigPreviewPlan(input, context);
-  },
-  config_view_history: async (input, context) => {
-    const { executeConfigViewHistory } = await import('../tools/config/configSkillHandlers.js');
-    return executeConfigViewHistory(input, context);
-  },
-
-  // Phase G — portal / email skills (spec §11.6) — action_call only.
-  config_publish_workflow_output_to_portal: async (input, context) => {
-    const { executeConfigPublishWorkflowOutputToPortal } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_publish_workflow_output_to_portal', input, context, () => executeConfigPublishWorkflowOutputToPortal(input, context));
-  },
-  config_send_workflow_email_digest: async (input, context) => {
-    const { executeConfigSendWorkflowEmailDigest } = await import('../tools/config/workflowSkillHandlers.js');
-    return executeWithActionAudit('config_send_workflow_email_digest', input, context, () => executeConfigSendWorkflowEmailDigest(input, context));
-  },
-
   // Onboarding smart-skip — scrapes website to pre-fill brand/audience signals.
   // Implementation pending; returns a not-yet-available error so onboarding
   // falls back to asking the question directly.
@@ -947,52 +764,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       success: true,
       result: renderDictionary(CANONICAL_DICTIONARY_REGISTRY, { tableFilter, includeExamples }),
     };
-  },
-
-  // ── System Monitoring Agent skills ──────────────────────────────────
-  read_agent_run: async (input, context) => {
-    const { executeReadAgentRun } = await import('./systemMonitor/skills/readAgentRun.js');
-    return executeReadAgentRun(input, context);
-  },
-  read_baseline: async (input, context) => {
-    const { executeReadBaseline } = await import('./systemMonitor/skills/readBaseline.js');
-    return executeReadBaseline(input, context);
-  },
-  read_connector_state: async (input, context) => {
-    const { executeReadConnectorState } = await import('./systemMonitor/skills/readConnectorState.js');
-    return executeReadConnectorState(input, context);
-  },
-  read_dlq_recent: async (input, context) => {
-    const { executeReadDlqRecent } = await import('./systemMonitor/skills/readDlqRecent.js');
-    return executeReadDlqRecent(input, context);
-  },
-  read_heuristic_fires: async (input, context) => {
-    const { executeReadHeuristicFires } = await import('./systemMonitor/skills/readHeuristicFires.js');
-    return executeReadHeuristicFires(input, context);
-  },
-  read_incident: async (input, context) => {
-    const { executeReadIncident } = await import('./systemMonitor/skills/readIncident.js');
-    return executeReadIncident(input, context);
-  },
-  read_logs_for_correlation_id: async (input, context) => {
-    const { executeReadLogsForCorrelationId } = await import('./systemMonitor/skills/readLogsForCorrelationId.js');
-    return executeReadLogsForCorrelationId(input, context);
-  },
-  read_recent_runs_for_agent: async (input, context) => {
-    const { executeReadRecentRunsForAgent } = await import('./systemMonitor/skills/readRecentRunsForAgent.js');
-    return executeReadRecentRunsForAgent(input, context);
-  },
-  read_skill_execution: async (input, context) => {
-    const { executeReadSkillExecution } = await import('./systemMonitor/skills/readSkillExecution.js');
-    return executeReadSkillExecution(input, context);
-  },
-  write_diagnosis: async (input, context) => {
-    const { executeWriteDiagnosis } = await import('./systemMonitor/skills/writeDiagnosis.js');
-    return executeWriteDiagnosis(input, context);
-  },
-  write_event: async (input, context) => {
-    const { executeWriteEvent } = await import('./systemMonitor/skills/writeEvent.js');
-    return executeWriteEvent(input, context);
   },
 
   // ── Sub-Account Optimiser: generic agent-output primitive (Chunk 1) ────────
@@ -1108,183 +879,6 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     );
   },
 
-  // ── Sub-Account Optimiser: scan skills (Chunk 5) ─────────────────────────
-  // Each scan skill is a thin wrapper: query module → evaluator → EvaluatorOutput[].
-  // All scan skills are read-only (no action record, no side effects).
-  // Spec: docs/sub-account-optimiser-spec.md §5
-
-  'optimiser.scan_agent_budget': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_agent_budget');
-    try {
-      const { module: agentBudgetModule } = await import('./optimiser/queries/agentBudget.js');
-      const { evaluate } = await import('./optimiser/recommendations/agentBudget.js');
-      const tx = getOrgScopedDb('optimiser.scan_agent_budget');
-      const rows = await agentBudgetModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: agentBudgetModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.over_budget', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_workflow_escalations': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_workflow_escalations');
-    try {
-      const { module: escalationRateModule } = await import('./optimiser/queries/escalationRate.js');
-      const { evaluate } = await import('./optimiser/recommendations/playbookEscalation.js');
-      const tx = getOrgScopedDb('optimiser.scan_workflow_escalations');
-      const rows = await escalationRateModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: escalationRateModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.playbook.escalation_rate', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_skill_latency': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_skill_latency');
-    try {
-      const { skillLatencyModule, peerMediansViewIsPopulated, runSkillLatencyQuery } = await import('./optimiser/queries/skillLatency.js');
-      const { evaluateSkillSlow } = await import('./optimiser/recommendations/skillSlow.js');
-      // peerMediansViewIsPopulated manages its own admin connection internally
-      const populated = await peerMediansViewIsPopulated();
-      if (!populated) {
-        logger.info('optimiser.scan.partial', { scanCategory: skillLatencyModule.category, medianVersion: 0, subaccountId });
-        return { success: true, outputs: [] };
-      }
-      // allowRlsBypass: reading cross-tenant peer medians view (optimiser_skill_peer_medians) — read-only aggregate, no tenant data written
-      const { withAdminConnectionGuarded: adminGuarded } = await import('../lib/rlsBoundaryGuard.js');
-      let outputs: import('./optimiser/recommendations/types.js').EvaluatorOutput[] = [];
-      await adminGuarded(
-        { source: 'optimiser.scan_skill_latency', allowRlsBypass: false },
-        async (adminTx) => {
-          const versionRows = await adminTx.execute<{ max_version: number }>(
-            (await import('drizzle-orm')).sql`SELECT MAX(median_version) AS max_version FROM optimiser_skill_peer_medians`,
-          );
-          const medianVersion = versionRows[0]?.max_version ?? 0;
-          const rows = await runSkillLatencyQuery(adminTx, subaccountId, medianVersion);
-          logger.info('optimiser.scan.completed', { scanCategory: skillLatencyModule.category, resultCount: rows.length, subaccountId });
-          outputs = evaluateSkillSlow(rows, { subaccountId, organisationId: context.organisationId, medianVersion, priorRecsByDedupe: new Map() });
-        },
-      );
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.skill.slow', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_inactive_workflows': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_inactive_workflows');
-    try {
-      const { module: inactiveWorkflowsModule } = await import('./optimiser/queries/inactiveWorkflows.js');
-      const { evaluate } = await import('./optimiser/recommendations/inactiveWorkflow.js');
-      const tx = getOrgScopedDb('optimiser.scan_inactive_workflows');
-      const rows = await inactiveWorkflowsModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: inactiveWorkflowsModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.inactive.workflow', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_escalation_phrases': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_escalation_phrases');
-    try {
-      const { module: escalationPhrasesModule } = await import('./optimiser/queries/escalationPhrases.js');
-      const { evaluate } = await import('./optimiser/recommendations/repeatPhrase.js');
-      const tx = getOrgScopedDb('optimiser.scan_escalation_phrases');
-      const rows = await escalationPhrasesModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: escalationPhrasesModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.escalation.repeat_phrase', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_memory_citation': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_memory_citation');
-    try {
-      const { module: memoryCitationModule } = await import('./optimiser/queries/memoryCitation.js');
-      const { evaluate } = await import('./optimiser/recommendations/memoryCitation.js');
-      const tx = getOrgScopedDb('optimiser.scan_memory_citation');
-      const rows = await memoryCitationModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: memoryCitationModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.memory.low_citation_waste', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_routing_uncertainty': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_routing_uncertainty');
-    try {
-      const { module: routingUncertaintyModule } = await import('./optimiser/queries/routingUncertainty.js');
-      const { evaluate } = await import('./optimiser/recommendations/routingUncertainty.js');
-      const tx = getOrgScopedDb('optimiser.scan_routing_uncertainty');
-      const rows = await routingUncertaintyModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: routingUncertaintyModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.agent.routing_uncertainty', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  'optimiser.scan_cache_efficiency': async (input, context) => {
-    const subaccountId = requireSubaccountContext(context, 'optimiser.scan_cache_efficiency');
-    try {
-      const { module: cacheEfficiencyModule } = await import('./optimiser/queries/cacheEfficiency.js');
-      const { evaluate } = await import('./optimiser/recommendations/cacheEfficiency.js');
-      const tx = getOrgScopedDb('optimiser.scan_cache_efficiency');
-      const rows = await cacheEfficiencyModule.run(tx, subaccountId);
-      logger.info('optimiser.scan.completed', { scanCategory: cacheEfficiencyModule.category, resultCount: rows.length, subaccountId });
-      const outputs = evaluate(rows, { subaccountId, organisationId: context.organisationId, medianVersion: 0, priorRecsByDedupe: new Map() });
-      return { success: true, outputs };
-    } catch (err) {
-      logger.error('optimiser.scan.failed', { scanCategory: 'optimiser.llm.cache_poor_reuse', error: err instanceof Error ? err.message : String(err), subaccountId });
-      throw err;
-    }
-  },
-
-  // ── Agentic Commerce — Spend Skills (Chunk 6) ─────────────────────────────
-  // Thin shells over chargeRouterService.proposeCharge. Each handler validates
-  // input, resolves spending context, normalises merchant (invariant 21), and
-  // delegates to spendSkillHandlers. Dual registration enforced per invariant 14:
-  // every spendsMoney:true ACTION_REGISTRY entry has a matching SKILL_HANDLERS entry.
-  // Spec: tasks/builds/agentic-commerce/spec.md §7.1
-  // Plan: tasks/builds/agentic-commerce/plan.md §Chunk 6
-  pay_invoice: async (input, context) => {
-    const { executePayInvoice } = await import('./spendSkillHandlers.js');
-    return executePayInvoice(input, context);
-  },
-  purchase_resource: async (input, context) => {
-    const { executePurchaseResource } = await import('./spendSkillHandlers.js');
-    return executePurchaseResource(input, context);
-  },
-  subscribe_to_service: async (input, context) => {
-    const { executeSubscribeToService } = await import('./spendSkillHandlers.js');
-    return executeSubscribeToService(input, context);
-  },
-  top_up_balance: async (input, context) => {
-    const { executeTopUpBalance } = await import('./spendSkillHandlers.js');
-    return executeTopUpBalance(input, context);
-  },
-  issue_refund: async (input, context) => {
-    const { executeIssueRefund } = await import('./spendSkillHandlers.js');
-    return executeIssueRefund(input, context);
-  },
 };
 
 // ── Support Desk principal helper ────────────────────────────────────────────
