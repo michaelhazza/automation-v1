@@ -3,7 +3,7 @@
 **Slug:** `development-lifecycle-governance-upgrade`
 **Status:** Locked — handed to specification (2026-05-14)
 **Supersedes:** previous draft of this file (AI-DLC + Skyjed synthesis, 2026-05-14)
-**Extends, does not replace:** `docs/2026-04-30-dev-pipeline-coordinators-spec.md` (canonical pipeline contract)
+**Extends, does not replace:** `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md` (canonical pipeline contract)
 
 **Purpose:** Upgrade the SynthetOS development lifecycle so it remains fully backwards-compatible with the current spec, build, review and finalisation process, while adding lightweight intent governance, capability registration, and compound learning.
 
@@ -88,7 +88,7 @@ Required `intent.md` sections:
 | Open questions | What needs resolution before spec approval? |
 | Duplication / strategy check | Output of §6.3 |
 
-**Risk surface taxonomy (canonical, reused from `docs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2):**
+**Risk surface taxonomy (canonical, reused from `docs/superpowers/specs/2026-04-30-dev-pipeline-coordinators-spec.md` §5.1.2):**
 server/db/schema, server/routes, auth/permission services, middleware, RLS migrations, webhook handlers, billing surfaces, external messaging, agent runtime, approvals. Selecting any of these flags the build for `adversarial-reviewer` auto-invocation during construction — the intent declaration and the construction-time trigger share one vocabulary.
 
 This stays lightweight. It is not a replacement for the spec.
