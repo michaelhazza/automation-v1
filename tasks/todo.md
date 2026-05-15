@@ -1531,6 +1531,24 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 ---
 
+## Deferred from spec-conformance review — feat-split-skillexecutor (2026-05-14)
+
+**Captured:** 2026-05-14T19:26:46Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-skillexecutor-2026-05-14T19-26-46Z.md`
+**Spec:** `tasks/builds/feat-split-skillexecutor/spec.md`
+
+- [ ] SKILLEXEC-SPLIT-DEF-CONF-1 — Spec self-contradiction: §5.2 names both `capabilities.ts` (line 123, "capability discovery skills — re-export thin shells calling existing capability handlers") and `capabilityDiscovery.ts` (line 145, eight specific slugs); §7 Chunk 11 references `handlers/capabilities.ts` while §7 Chunk 10c references `handlers/capabilityDiscovery.ts`. The two descriptions overlap in responsibility.
+  - Spec section: §5.2 lines 123 & 145; §7 Chunk 10c & Chunk 11
+  - Gap: Implementation consolidated to a single `handlers/capabilityDiscovery.ts` covering all 8 named slugs (`list_platform_capabilities`, `list_connections`, `check_capability_gap`, `request_feature`, `ask_clarifying_questions`, `ask_clarifying_question`, `challenge_assumptions`, `request_clarification`). No separate `capabilities.ts` was created. Slug coverage matches the union, but the spec's two-module phrasing is internally inconsistent.
+  - Suggested approach: Amend the spec (post-merge erratum) to delete the `capabilities.ts` row from §5.2 and consolidate into the `capabilityDiscovery.ts` entry. Do NOT split into two modules — the consolidation is the correct outcome; only the spec text needs cleanup.
+
+- [ ] SKILLEXEC-SPLIT-DEF-CONF-2 — Spec §5.5 narrative incorrectly claims `executeSpawnSubAgents` uses `enqueueHandoff`; implementation correctly preserves source behaviour (synchronous spawn via `agentExecutionService.executeRun`).
+  - Spec section: §5.5 line 217 ("Handlers that need to enqueue a handoff (currently `executeReassignTask` and `executeSpawnSubAgents`) import `enqueueHandoff` from `pipeline.ts`"); §5.3 line 197 cross-edge claim "(b) `handlers/tasks.ts` and `handlers/handoff.ts` both import `enqueueHandoff` from `pipeline.ts`".
+  - Gap: `handlers/handoff.ts` does NOT import `enqueueHandoff`. `executeSpawnSubAgents` calls `agentExecutionService.executeRun` directly (synchronous in-process) — the spec's behaviour claim conflicts with the source's actual behaviour. Only `handlers/tasks.ts` (executeReassignTask path) imports `enqueueHandoff`. The implementation respects the spec's binding constraint (§2 "No behaviour change") which dominates the §5.5 narrative.
+  - Suggested approach: Amend the spec (post-merge erratum) — strike `executeSpawnSubAgents` from §5.5 line 217 and revise §5.3 line 197 cross-edge (b) to name only `handlers/tasks.ts` as the consumer of `enqueueHandoff`. No code change required; behaviour is correct as shipped.
+
+---
+
 ## Deferred from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)
 
 **Captured:** 2026-05-14T13-14-38Z
