@@ -86,7 +86,7 @@ const ALLOWED_TEMPLATE_VERSIONS = ['v1.0.0', 'local-dev-v1.0.0'] as const;
  * infra/sandbox-templates/{name}/CURRENT_VERSION.
  * Falls back to SANDBOX_TEMPLATE_VERSION env var (then 'v1.0.0') when the
  * file cannot be read (local dev without template files on disk).
- * Throws FailureError('sandbox_template_invalid') for any version not in
+ * Throws FailureError('sandbox_input_rejected') for any version not in
  * the pinned allowlist.
  *
  * Exported for unit testing.
