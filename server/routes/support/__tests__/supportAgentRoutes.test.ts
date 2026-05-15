@@ -91,10 +91,10 @@ describe('PATCH deep-merge: null value for a NESTED_KEY does NOT deep-merge', ()
 // ─── Section 2: Structural — PATCH handler delegates to service functions ─────
 
 describe('Structural: PATCH handler source delegates to getInbox and updateAgentConfig', () => {
-  it('supportAgentRoutes.ts calls getInbox in the PATCH handler', async () => {
+  it('supportAgentRoutes.ts calls getInboxForOrg in the PATCH handler', async () => {
     const src = await readRouteSource();
 
-    expect(src).toContain('getInbox');
+    expect(src).toContain('getInboxForOrg');
   });
 
   it('supportAgentRoutes.ts calls updateAgentConfig in the PATCH handler', async () => {
@@ -103,10 +103,10 @@ describe('Structural: PATCH handler source delegates to getInbox and updateAgent
     expect(src).toContain('updateAgentConfig');
   });
 
-  it('supportAgentRoutes.ts imports getInbox and updateAgentConfig from supportInboxService', async () => {
+  it('supportAgentRoutes.ts imports getInboxForOrg and updateAgentConfig from supportInboxService', async () => {
     const src = await readRouteSource();
 
-    expect(src).toMatch(/import\s*\{[^}]*getInbox[^}]*\}\s*from\s*['"][^'"]*supportInboxService/);
+    expect(src).toMatch(/import\s*\{[^}]*getInboxForOrg[^}]*\}\s*from\s*['"][^'"]*supportInboxService/);
     expect(src).toMatch(/import\s*\{[^}]*updateAgentConfig[^}]*\}\s*from\s*['"][^'"]*supportInboxService/);
   });
 
@@ -135,5 +135,14 @@ describe('Structural: PATCH handler source delegates to getInbox and updateAgent
     const callIdx = src.indexOf('await updateAgentConfig(inboxId');
     const preceding = src.slice(Math.max(0, callIdx - 200), callIdx);
     expect(preceding).not.toMatch(/try\s*\{\s*$/);
+  });
+
+  it('PATCH handler uses getInboxForOrg (org-only load) so sibling-subaccount returns 403 not 404', async () => {
+    const src = await readRouteSource();
+    // The merge-read must use getInboxForOrg (org-only, no subaccount predicate)
+    // so that the subaccount scope check fires at updateAgentConfig and returns 403
+    // rather than getInbox returning 404 before the write step.
+    expect(src).toContain('getInboxForOrg');
+    expect(src).not.toMatch(/await getInbox\(/);
   });
 });

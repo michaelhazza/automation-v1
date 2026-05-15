@@ -151,6 +151,52 @@ export async function getInbox(
 }
 
 /**
+ * Get a single inbox by org only (no subaccount filter).
+ * Used by the PATCH route to load the existing config for merge, so that the
+ * subaccount scope check fires at the write step (updateAgentConfig) rather than
+ * silently returning 404 here.
+ * Throws 404 if not found within the org.
+ */
+export async function getInboxForOrg(
+  inboxId: string,
+  organisationId: string,
+): Promise<InboxWithSyncHealth> {
+  const db = getOrgScopedDb('supportInboxService.getInboxForOrg');
+  const [row] = await db
+    .select({
+      inbox: canonicalInboxes,
+      connectorStatus: connectorConfigs.status,
+      lastSyncAt: connectorConfigs.lastSyncAt,
+      lastSyncStatus: connectorConfigs.lastSyncStatus,
+      lastSyncError: connectorConfigs.lastSyncError,
+    })
+    .from(canonicalInboxes)
+    .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
+    .where(
+      and(
+        eq(canonicalInboxes.id, inboxId),
+        eq(canonicalInboxes.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw notFoundError('support.inbox.not_found');
+  }
+
+  return {
+    ...row.inbox,
+    syncHealth: classifyHealth({
+      status: row.connectorStatus ?? 'active',
+      lastSyncStatus: row.lastSyncStatus ?? null,
+      lastSyncError: row.lastSyncError ?? null,
+    }),
+    lastSyncAt: row.lastSyncAt ?? null,
+    syncErrorMessage: row.lastSyncError ?? null,
+  };
+}
+
+/**
  * Update the agent_config for an inbox.
  * Runs SupportInboxAgentConfigSchema.parse(config) before the UPDATE — throws
  * { statusCode: 422, message: 'support.inbox.agent_config_invalid' } on parse failure.

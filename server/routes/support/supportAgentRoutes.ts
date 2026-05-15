@@ -6,7 +6,7 @@ import type { SupportInboxAgentConfig } from '../../../shared/types/supportInbox
 import { validatePromptOverride } from '../../services/promptOverridePure.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
 import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
-import { listInboxes, getInbox, updateAgentConfig } from '../../services/supportInboxService.js';
+import { listInboxes, getInboxForOrg, updateAgentConfig } from '../../services/supportInboxService.js';
 import { mergeAgentConfigPatch } from '../../services/supportInboxConfigMergePure.js';
 
 const router = Router({ mergeParams: true });
@@ -54,7 +54,10 @@ router.patch(
     const principal = await makePrincipal(req);
     const { inboxId } = req.params;
 
-    const existing = await getInbox(inboxId, principal);
+    // Load existing by org only (no subaccount filter) so that the subaccount
+    // scope enforcement fires at the write step (updateAgentConfig → 403
+    // support.inbox.scope_mismatch) rather than silently returning 404 here.
+    const existing = await getInboxForOrg(inboxId, principal.organisationId);
 
     const patch = req.body as Record<string, unknown>;
 
