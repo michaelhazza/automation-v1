@@ -77,19 +77,7 @@ import { routeCall } from '../services/llmRouter.js';
 import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { logger } from '../lib/logger.js';
-
-// p-limit is ESM; import dynamically to avoid CommonJS issues
-async function getPLimit(concurrency: number) {
-  const { default: pLimit } = await import('p-limit');
-  return pLimit(concurrency);
-}
-
-function consolidationWordCount(text: string | null): number {
-  if (!text) return 0;
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
-const BATCH_SIZE = 100; // OpenAI embedding batch size
+import { getPLimit, consolidationWordCount, BATCH_SIZE } from './skillAnalyzerJob/helpers.js';
 
 /** Process a skill analyzer job through all pipeline stages. */
 export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
