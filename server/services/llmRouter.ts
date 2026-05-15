@@ -39,6 +39,7 @@ import { isProviderCoolingDown, setProviderCooldown } from './llmRouter/cooldown
 import { FALLBACK_MODEL_MAP, isNonRetryableError } from './llmRouter/fallbackMap.js';
 import type { FallbackAttempt, RouterCallParams } from './llmRouter/types.js';
 import { resolveRunIdFromIee } from './llmRouter/ieeResolver.js';
+import { enqueueAggregateUpdate } from './llmRouter/aggregateEnqueue.js';
 
 // ---------------------------------------------------------------------------
 // LLM Router — the financial chokepoint for every LLM call in the platform.
@@ -1661,29 +1662,6 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           payloadRowId:        null,
         },
       });
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Enqueue aggregate update via pg-boss (or in-memory fallback)
-// ---------------------------------------------------------------------------
-
-async function enqueueAggregateUpdate(idempotencyKey: string): Promise<void> {
-  try {
-    const { routerJobService } = await import('./routerJobService.js');
-    await routerJobService.enqueueAggregateUpdate(idempotencyKey);
-  } catch {
-    // Fallback: run synchronously if queue service unavailable
-    const [request] = await db
-      .select()
-      .from(llmRequests)
-      .where(eq(llmRequests.idempotencyKey, idempotencyKey))
-      .limit(1);
-
-    if (request) {
-      const { costAggregateService } = await import('./costAggregateService.js');
-      await costAggregateService.upsertAggregates(request);
     }
   }
 }
