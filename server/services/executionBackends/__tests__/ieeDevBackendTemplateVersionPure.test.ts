@@ -70,9 +70,10 @@ describe('resolveTemplateVersion', () => {
   });
 
   it('Test 4: rejects unknown versions with FailureError', () => {
-    // File not readable → falls back to env var with an unknown version.
+    // File absent (ENOENT) → falls back to env var with an unknown version.
+    const enoent = Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (readFileSync as any).mockImplementation(() => { throw new Error('ENOENT'); });
+    (readFileSync as any).mockImplementation(() => { throw enoent; });
     process.env['SANDBOX_TEMPLATE_VERSION'] = 'v9.9.9';
 
     expect(() => resolveTemplateVersion(TEMPLATE_NAME)).toThrow(FailureError);
@@ -102,5 +103,34 @@ describe('resolveTemplateVersion', () => {
 
     const result = resolveTemplateVersion(TEMPLATE_NAME);
     expect(result).toBe('v1.0.0');
+  });
+
+  it('Test 6: malformed CURRENT_VERSION (parse error) propagates without fallback', () => {
+    // File reads successfully but parseCurrentVersion throws — the prior
+    // (Round 1) broad-catch silently fell back to env/default, defeating the
+    // template-version integrity guard. The Round 2 fix narrows the catch to
+    // ENOENT only so parse failures propagate.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (readFileSync as any).mockReturnValue('this is not a valid CURRENT_VERSION file');
+    vi.mocked(parseCurrentVersion).mockImplementation(() => {
+      throw new Error('malformed CURRENT_VERSION: missing required field "version"');
+    });
+    // Set env var to a *valid* sentinel — if the implementation silently
+    // fell back, this test would WRONGLY pass with 'v1.0.0'. Asserting the
+    // throw confirms no fallback occurs.
+    process.env['SANDBOX_TEMPLATE_VERSION'] = 'v1.0.0';
+
+    expect(() => resolveTemplateVersion(TEMPLATE_NAME)).toThrow(/malformed CURRENT_VERSION/);
+  });
+
+  it('Test 7: non-ENOENT file-read errors propagate (do not fall back)', () => {
+    // Permission errors, FS corruption etc. should surface — silently
+    // falling back to env on EACCES would mask a real infra problem.
+    const eacces = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (readFileSync as any).mockImplementation(() => { throw eacces; });
+    process.env['SANDBOX_TEMPLATE_VERSION'] = 'v1.0.0';
+
+    expect(() => resolveTemplateVersion(TEMPLATE_NAME)).toThrow(/EACCES/);
   });
 });

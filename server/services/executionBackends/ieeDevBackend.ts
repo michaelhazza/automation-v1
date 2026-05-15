@@ -93,12 +93,32 @@ const ALLOWED_TEMPLATE_VERSIONS = ['v1.0.0', 'local-dev-v1.0.0'] as const;
  */
 export function resolveTemplateVersion(templateName: string): string {
   const filePath = join(process.cwd(), 'infra', 'sandbox-templates', templateName, 'CURRENT_VERSION');
-  let version: string;
+
+  // Narrow the fallback to file-read errors only (ENOENT — file absent, common
+  // in local-dev / CI before sandbox templates land on disk). Parse failures
+  // MUST propagate as `sandbox_input_rejected` rather than silently falling
+  // back to env/default, otherwise a malformed CURRENT_VERSION defeats the
+  // template-version integrity guard.
+  let content: string | null = null;
   try {
-    const content = readFileSync(filePath, 'utf8');
+    content = readFileSync(filePath, 'utf8');
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      // Permission errors, file-system corruption, etc. — surface verbatim.
+      throw err;
+    }
+    // File absent — fall back to env / default.
+  }
+
+  let version: string;
+  if (content !== null) {
+    // Do NOT wrap in try/catch — parse failures must propagate so the
+    // allowlist check below rejects malformed sentinels rather than silently
+    // accepting an env/default value.
     const parsed = parseCurrentVersion(content);
     version = parsed.version;
-  } catch {
+  } else {
     version = process.env['SANDBOX_TEMPLATE_VERSION'] ?? 'v1.0.0';
   }
 
