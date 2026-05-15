@@ -23,6 +23,13 @@ export type BestMatch = {
   band: 'likely_duplicate' | 'ambiguous' | 'distinct';
 };
 
+/** A candidate that survived exact-duplicate filtering in Stage 2. */
+export type RemainingCandidate = {
+  index: number;
+  candidate: ParsedSkill;
+  hash: string;
+};
+
 export type ClassifiedResult = {
   candidateIndex: number;
   candidate: ParsedSkill;
@@ -53,6 +60,12 @@ export interface JobContext {
   /** Library skills keyed by lowercased name for slug/name fallback lookup. */
   libraryByName: Map<string, LibrarySkillSummary>;
 
+  /** All library skills as a flat array (needed by Stage 3 embedding + Stage 5 classification). */
+  librarySkills: LibrarySkillSummary[];
+
+  /** Candidates that survived exact-duplicate filtering in Stage 2 (needed by Stages 3 + 4). */
+  remainingCandidates: RemainingCandidate[];
+
   /** Embedding vectors keyed by content hash (candidate + library). */
   embeddingByContent: Map<string, number[]>;
 
@@ -65,8 +78,24 @@ export interface JobContext {
   /** Classified results that landed on DISTINCT (for agent-propose + Stage 7b). */
   classifiedDistinct: ClassifiedResult[];
 
+  /** Best-match records from Stage 4 (all bands — used by Stage 4b and Stage 5). */
+  bestMatches: BestMatch[];
+
   /** Best-match records that are unambiguously distinct (band === 'distinct'). */
   distinctResults: BestMatch[];
+
+  /** Best-match records that require LLM classification (band !== 'distinct'). */
+  llmQueue: BestMatch[];
+
+  /** Per-candidate non-skill flags set in Stage 4b (used by Stage 5 inserts). */
+  nonSkillFlagsByIndex: Map<number, { isDocumentationFile: boolean; isContextFile: boolean }>;
+
+  /**
+   * Candidate embeddings with their index, produced in Stage 4 for the cosine
+   * comparison. Kept on the context for Stage 7 (agent-propose), which needs
+   * the embedding for each DISTINCT result.
+   */
+  candidateEmbeddingsForCompare: Array<{ index: number; embedding: number[] }>;
 
   /** Exact-duplicate records from Stage 2. */
   exactDuplicates: ExactDuplicateResult[];

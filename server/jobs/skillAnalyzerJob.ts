@@ -18,16 +18,7 @@
  * delay on crash.
  */
 
-import { generateEmbeddings } from '../lib/embeddings.js';
 import { env } from '../lib/env.js';
-import { skillParserService } from '../services/skillParserService.js';
-import { skillEmbeddingService } from '../services/skillEmbeddingService.js';
-import { systemSkillService } from '../services/systemSkillService.js';
-// Phase 1 of skill-analyzer-v2: the analyzer is system-only. The org-skill
-// library read path was removed; all dedup comparisons happen against
-// system_skills via systemSkillService.listSkills() (which returns all rows
-// regardless of isActive / visibility, so retired skills still participate
-// in dedup detection — see spec §10 Phase 0 listSkills() contract).
 import {
   updateJobProgress,
   getJobById,
@@ -69,15 +60,17 @@ import {
 } from '../services/skillAnalyzerServicePure.js';
 import { effectiveTierMap } from '../services/skillAnalyzerConfigService.js';
 import type { SkillAnalyzerConfig } from '../db/schema/skillAnalyzerConfig.js';
-import {
-  skillParserServicePure,
-  ParsedSkill,
-} from '../services/skillParserServicePure.js';
 import { routeCall } from '../services/llmRouter.js';
 import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { logger } from '../lib/logger.js';
-import { getPLimit, consolidationWordCount, BATCH_SIZE } from './skillAnalyzerJob/helpers.js';
+import { getPLimit, consolidationWordCount } from './skillAnalyzerJob/helpers.js';
+import { runStage1 } from './skillAnalyzerJob/stage1Parse.js';
+import { runStage2 } from './skillAnalyzerJob/stage2Hash.js';
+import { runStage3 } from './skillAnalyzerJob/stage3Embed.js';
+import { runStage4 } from './skillAnalyzerJob/stage4Compare.js';
+import { runStage4b } from './skillAnalyzerJob/stage4bNonSkillDetect.js';
+import { JobAlreadyFailedAbort, type ClassifiedResult, type JobContext } from './skillAnalyzerJob/types.js';
 
 /** Process a skill analyzer job through all pipeline stages. */
 export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
@@ -87,8 +80,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     console.error(`[SkillAnalyzerJob] Job ${jobId} not found`);
     return;
   }
-
-  const organisationId = job.organisationId;
 
   // v2 §11.11.4: all pipeline thresholds come from the job's config_snapshot,
   // not the live table. Stale snapshots on pre-0155 jobs fall back to the
@@ -106,382 +97,50 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // re-classified, doubling LLM spend on each restart.
 
   // -------------------------------------------------------------------------
-  // Stage 1: Parse (0% → 10%)
+  // Stages 1-4b — extracted to sibling modules; orchestrated here.
   // -------------------------------------------------------------------------
-  await updateJobProgress(jobId, {
-    status: 'parsing',
-    progressPct: 0,
-    progressMessage: 'Parsing skill definitions...',
-  });
-
-  let candidates: ParsedSkill[];
+  let ctx: JobContext = {
+    candidates: [],
+    libraryById: new Map(),
+    libraryByName: new Map(),
+    librarySkills: [],
+    remainingCandidates: [],
+    embeddingByContent: new Map(),
+    resultRows: [],
+    validationThresholds,
+    classifiedDistinct: [],
+    bestMatches: [],
+    distinctResults: [],
+    llmQueue: [],
+    nonSkillFlagsByIndex: new Map(),
+    exactDuplicates: [],
+    hashFromCandidateContent: () => { throw new Error('hashFromCandidateContent not yet initialized'); },
+    candidateEmbeddingsForCompare: [],
+  };
 
   try {
-    // Two distinct signals that collapse into "use stored / re-parse / fail":
-    //   • Array.isArray(parsedCandidates) === true  → authoritative list from
-    //     a prior run (possibly empty, e.g. valid paste that yielded zero
-    //     skills). Use it as-is; the "no valid skill definitions" check
-    //     below handles the empty case with a user-friendly error.
-    //   • Array.isArray(parsedCandidates) === false → null / undefined / a
-    //     non-array JSONB value. For paste/upload this signals a corrupt
-    //     row (the create path always writes an array before enqueueing);
-    //     for github/download it's the expected first-run state, so we
-    //     re-parse from the remote URL.
-    // Collapsing "empty array" and "not-an-array" into the same check was
-    // a real regression — it misreported a zero-skill paste as DB corruption.
-    if (Array.isArray(job.parsedCandidates)) {
-      candidates = job.parsedCandidates as ParsedSkill[];
-    } else if (job.sourceType === 'paste' || job.sourceType === 'upload') {
-      await updateJobProgress(jobId, {
-        status: 'failed',
-        errorMessage: 'parsedCandidates is missing on this job row — re-submit the analysis.',
-      });
-      return;
-    } else if (job.sourceType === 'github') {
-      const githubMeta = job.sourceMetadata as { url: string };
-      candidates = await skillParserService.parseFromGitHub(githubMeta.url);
-    } else if (job.sourceType === 'download') {
-      const downloadMeta = job.sourceMetadata as { url: string };
-      candidates = await skillParserService.parseFromDownloadUrl(downloadMeta.url);
-    } else {
-      candidates = [];
-    }
+    ctx = await runStage1(ctx, jobId, job);
+    ctx = await runStage2(ctx, jobId);
+    ctx = await runStage3(ctx, jobId);
+    ctx = await runStage4(ctx, jobId);
+    ctx = await runStage4b(ctx, jobId);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await updateJobProgress(jobId, {
-      status: 'failed',
-      errorMessage: `Failed to parse skills: ${msg}`,
-    });
-    return;
+    if (err instanceof JobAlreadyFailedAbort) return;
+    throw err;
   }
 
-  if (candidates.length === 0) {
-    await updateJobProgress(jobId, {
-      status: 'failed',
-      errorMessage: 'No valid skill definitions found in the provided input.',
-    });
-    return;
-  }
-
-  // Enforce 500-candidate limit
-  if (candidates.length > 500) {
-    candidates = candidates.slice(0, 500);
-  }
-
-  await updateJobProgress(jobId, {
-    progressPct: 10,
-    progressMessage: `Found ${candidates.length} skill${candidates.length === 1 ? '' : 's'} - checking for exact duplicates...`,
-    candidateCount: candidates.length,
-    // Store (possibly freshly parsed) candidates for display/replay
-    parsedCandidates: candidates,
-  });
-
-  // -------------------------------------------------------------------------
-  // Stage 2: Hash (10% → 20%)
-  // -------------------------------------------------------------------------
-  await updateJobProgress(jobId, {
-    status: 'hashing',
-    progressPct: 10,
-    progressMessage: 'Computing content hashes...',
-  });
-
-  // Load all library skills from system_skills. listSkills() returns every
-  // row regardless of isActive / visibility so retired skills still
-  // participate in dedup. See spec §10 Phase 0 listSkills() contract.
-  const systemSkillRows = await systemSkillService.listSkills();
-
-  const librarySkills: LibrarySkillSummary[] = systemSkillRows.map((s) => ({
-    id: s.id,
-    slug: s.slug,
-    name: s.name,
-    description: s.description,
-    definition: s.definition as object | null,
-    instructions: s.instructions,
-    // isSystem is now always true (the analyzer is system-only post Phase 1).
-    // Field kept for backwards compatibility with the LibrarySkillSummary
-    // type used by skillAnalyzerServicePure helpers.
-    isSystem: true,
-  }));
-
-  // Compute candidate hashes
-  const candidateHashes = candidates.map((c) =>
-    skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(c))
-  );
-
-  // Compute library hashes
-  const libraryHashMap = new Map<string, LibrarySkillSummary>();
-  for (const lib of librarySkills) {
-    const libAsCandidate: ParsedSkill = {
-      name: lib.name,
-      slug: lib.slug,
-      description: lib.description,
-      definition: lib.definition,
-      instructions: lib.instructions,
-      rawSource: '',
-    };
-    const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
-    libraryHashMap.set(hash, lib);
-  }
-
-  // Find exact duplicates
-  type ExactDuplicateResult = {
-    candidateIndex: number;
-    matchedLib: LibrarySkillSummary;
-  };
-  const exactDuplicates: ExactDuplicateResult[] = [];
-  const remainingCandidates: Array<{ index: number; candidate: ParsedSkill; hash: string }> = [];
-
-  // Also deduplicate candidates within the batch (same hash → only first one proceeds)
-  const seenCandidateHashes = new Map<string, number>();
-
-  for (let i = 0; i < candidates.length; i++) {
-    const hash = candidateHashes[i];
-    const candidate = candidates[i];
-    const libMatch = libraryHashMap.get(hash);
-
-    if (libMatch) {
-      exactDuplicates.push({ candidateIndex: i, matchedLib: libMatch });
-    } else if (seenCandidateHashes.has(hash)) {
-      // Intra-batch duplicate — classify same as first occurrence (resolved later)
-      // For now, mark as exact duplicate pointing to the same candidate
-      exactDuplicates.push({ candidateIndex: i, matchedLib: {
-        id: null,
-        slug: candidate.slug,
-        name: `${candidate.name} (duplicate in import)`,
-        description: candidate.description,
-        definition: candidate.definition,
-        instructions: candidate.instructions,
-          isSystem: false,
-      }});
-    } else {
-      seenCandidateHashes.set(hash, i);
-      remainingCandidates.push({ index: i, candidate, hash });
-    }
-  }
-
-  await updateJobProgress(jobId, {
-    progressPct: 20,
-    progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found - embedding ${remainingCandidates.length} remaining...`,
-    exactDuplicateCount: exactDuplicates.length,
-  });
-
-  // Helper: look up the SHA-256 hash for a given candidate index. Defined
-  // here (after Stage 2) so it is available in Stage 5's incremental inserts
-  // as well as Stage 8's batch writes. The hash is computed in Stage 2 and
-  // persisted on each result row for the Phase 4 manual-add PATCH path.
-  const hashByIndex = new Map<number, string>();
-  for (let i = 0; i < candidates.length; i++) {
-    hashByIndex.set(i, candidateHashes[i]);
-  }
-  const getCandidateHash = (idx: number): string => {
-    const h = hashByIndex.get(idx);
-    if (h === undefined) {
-      // Should be unreachable — every candidate is hashed in Stage 2.
-      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
-    }
-    return h;
-  };
-
-  // -------------------------------------------------------------------------
-  // Stage 3: Embed (20% → 40%)
-  // -------------------------------------------------------------------------
-  await updateJobProgress(jobId, {
-    status: 'embedding',
-    progressPct: 20,
-    progressMessage: 'Generating embeddings...',
-  });
-
-  // Gather all content needing embeddings (candidates + library skills)
-  type EmbedItem = {
-    key: string; // content hash
-    text: string; // normalized content
-    sourceType: 'candidate' | 'system' | 'org';
-    sourceIdentifier: string;
-  };
-
-  const toEmbed: EmbedItem[] = [];
-
-  // Remaining candidates
-  for (const { index, candidate, hash } of remainingCandidates) {
-    toEmbed.push({
-      key: hash,
-      text: skillParserServicePure.normalizeForHash(candidate),
-      sourceType: 'candidate',
-      sourceIdentifier: `job:${jobId}:idx:${index}`,
-    });
-  }
-
-  // Library skills (check cache first)
-  const libEmbedItems: EmbedItem[] = librarySkills.map((lib) => {
-    const libAsCandidate: ParsedSkill = {
-      name: lib.name, slug: lib.slug, description: lib.description,
-      definition: lib.definition, instructions: lib.instructions,
-      rawSource: '',
-    };
-    const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
-    return {
-      key: hash,
-      text: skillParserServicePure.normalizeForHash(libAsCandidate),
-      sourceType: lib.isSystem ? 'system' as const : 'org' as const,
-      sourceIdentifier: lib.isSystem ? lib.slug : (lib.id ?? lib.slug),
-    };
-  });
-
-  // Check cache for all items
-  const allHashes = [...toEmbed, ...libEmbedItems].map((e) => e.key);
-  const cachedEmbeddings = await skillEmbeddingService.getByContentHashes(allHashes);
-
-  // Filter to uncached items only
-  const uncachedItems = [...toEmbed, ...libEmbedItems].filter(
-    (e) => !cachedEmbeddings.has(e.key)
-  );
-
-  // Deduplicate uncached items by key
-  const uniqueUncached = Array.from(new Map(uncachedItems.map((e) => [e.key, e])).values());
-
-  if (uniqueUncached.length > 0) {
-    // Batch embed in groups of BATCH_SIZE
-    const embeddingFallback = !env.OPENAI_API_KEY;
-
-    if (!embeddingFallback) {
-      for (let i = 0; i < uniqueUncached.length; i += BATCH_SIZE) {
-        const batch = uniqueUncached.slice(i, i + BATCH_SIZE);
-        const texts = batch.map((e) => e.text);
-
-        const embeddings = await generateEmbeddings(texts);
-
-        if (embeddings) {
-          const storeBatch = embeddings.map((embedding, idx) => ({
-            contentHash: batch[idx].key,
-            sourceType: batch[idx].sourceType,
-            sourceIdentifier: batch[idx].sourceIdentifier,
-            embedding,
-          }));
-          await skillEmbeddingService.storeBatch(storeBatch);
-
-          // Add to local cache map
-          for (let j = 0; j < storeBatch.length; j++) {
-            cachedEmbeddings.set(storeBatch[j].contentHash, embeddings[j]);
-          }
-        }
-
-        const pct = 20 + Math.round((Math.min(i + BATCH_SIZE, uniqueUncached.length) / uniqueUncached.length) * 20);
-        await updateJobProgress(jobId, {
-          progressPct: pct,
-          progressMessage: `Embedded ${Math.min(i + BATCH_SIZE, uniqueUncached.length)} / ${uniqueUncached.length} skills...`,
-        });
-      }
-    } else {
-      console.warn('[SkillAnalyzerJob] OPENAI_API_KEY not set - skipping embeddings, all pairs treated as ambiguous');
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Stage 4: Compare (40% → 60%)
-  // -------------------------------------------------------------------------
-  await updateJobProgress(jobId, {
-    status: 'comparing',
-    progressPct: 40,
-    progressMessage: 'Computing similarity scores...',
-  });
-
-  // Build embedding arrays for comparison
-  const candidateEmbeddingsForCompare = remainingCandidates
-    .map(({ index, hash }) => {
-      const embedding = cachedEmbeddings.get(hash);
-      return embedding ? { index, embedding } : null;
-    })
-    .filter((e): e is NonNullable<typeof e> => e !== null);
-
-  const libraryEmbeddingsForCompare = librarySkills
-    .map((lib) => {
-      const libAsCandidate: ParsedSkill = {
-        name: lib.name, slug: lib.slug, description: lib.description,
-        definition: lib.definition, instructions: lib.instructions,
-        rawSource: '',
-      };
-      const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
-      const embedding = cachedEmbeddings.get(hash);
-      return embedding ? { id: lib.id, slug: lib.slug, name: lib.name, embedding } : null;
-    })
-    .filter((e): e is NonNullable<typeof e> => e !== null);
-
-  type BestMatch = {
-    candidateIndex: number;
-    libraryId: string | null;
-    librarySlug: string | null;
-    libraryName: string | null;
-    similarity: number;
-    band: 'likely_duplicate' | 'ambiguous' | 'distinct';
-  };
-
-  let bestMatches: BestMatch[];
-  if (candidateEmbeddingsForCompare.length > 0 && libraryEmbeddingsForCompare.length > 0) {
-    bestMatches = skillAnalyzerServicePure.computeBestMatches(
-      candidateEmbeddingsForCompare,
-      libraryEmbeddingsForCompare
-    );
-  } else {
-    // No embeddings available — treat all as ambiguous
-    bestMatches = remainingCandidates.map(({ index }) => ({
-      candidateIndex: index,
-      libraryId: null,
-      librarySlug: null,
-      libraryName: null,
-      similarity: 0.75, // midpoint of ambiguous band
-      band: 'ambiguous' as const,
-    }));
-  }
-
-  // Ensure candidates whose embeddings failed are treated as ambiguous rather than silently dropped.
-  // Try to find a tentative library match by slug so the LLM can properly classify them.
-  const matchedIndices = new Set(bestMatches.map((m) => m.candidateIndex));
-  for (const { index, candidate } of remainingCandidates) {
-    if (!matchedIndices.has(index)) {
-      // Find best slug/name match from library for LLM classification
-      const slugMatch = librarySkills.find((lib) => lib.slug === candidate.slug);
-      const nameMatch = !slugMatch ? librarySkills.find((lib) =>
-        lib.name.toLowerCase() === candidate.name.toLowerCase()
-      ) : null;
-      const tentativeMatch = slugMatch ?? nameMatch ?? null;
-      bestMatches.push({
-        candidateIndex: index,
-        libraryId: tentativeMatch?.id ?? null,
-        librarySlug: tentativeMatch?.slug ?? null,
-        libraryName: tentativeMatch?.name ?? null,
-        similarity: 0.75,
-        band: 'ambiguous' as const,
-      });
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Stage 4b: Non-skill detection — heuristic pre-classification
-  // -------------------------------------------------------------------------
-  // Flag any parsed candidates that appear to be documentation files (e.g.
-  // a repo README) or context/foundation documents (e.g.
-  // product-marketing-context) rather than executable tool skills.
-  // These flags travel through the pipeline and are persisted on the result
-  // row so the Review UI can show appropriate badges / warnings.
-  const nonSkillFlagsByIndex = new Map<number, { isDocumentationFile: boolean; isContextFile: boolean }>();
-  for (const m of bestMatches) {
-    const candidate = candidates[m.candidateIndex];
-    if (candidate) {
-      nonSkillFlagsByIndex.set(
-        m.candidateIndex,
-        skillAnalyzerServicePure.detectNonSkillFile(candidate),
-      );
-    }
-  }
-
-  const distinctResults = bestMatches.filter((m) => m.band === 'distinct');
-  const llmQueue = bestMatches.filter((m) => m.band !== 'distinct');
-
-  await updateJobProgress(jobId, {
-    progressPct: 60,
-    progressMessage: `${distinctResults.length} distinct, ${llmQueue.length} need classification...`,
-    comparisonCount: bestMatches.length,
-  });
+  // Destructure context fields used by the inline stages below so the Stage 5+
+  // code can reference them as local variables without modification.
+  const {
+    candidates,
+    librarySkills,
+    llmQueue,
+    nonSkillFlagsByIndex,
+    distinctResults,
+    exactDuplicates,
+    candidateEmbeddingsForCompare,
+  } = ctx;
+  const getCandidateHash = ctx.hashFromCandidateContent;
 
   // -------------------------------------------------------------------------
   // Stage 5: Classify (60% → 90%)
@@ -530,28 +189,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       inFlight: {},
     },
   });
-
-  type ClassifiedResult = {
-    candidateIndex: number;
-    candidate: ParsedSkill;
-    classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
-    confidence: number;
-    similarityScore: number | null;
-    classificationReasoning: string | null;
-    libraryId: string | null;
-    librarySlug: string | null;
-    libraryName: string | null;
-    diffSummary: object | null;
-    // Phase 3 of skill-analyzer-v2: LLM-generated merged version of the
-    // candidate + library skill, populated only when the classifier
-    // returns a valid proposedMerge for a PARTIAL_OVERLAP / IMPROVEMENT
-    // result. Null on every other path. The Write stage persists this
-    // into both proposed_merged_content (mutable) and
-    // original_proposed_merge (immutable) on the result row.
-    proposedMerge: object | null;
-    classificationFailed: boolean;
-    classificationFailureReason: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
-  };
 
   const classifiedResults: ClassifiedResult[] = [];
 
