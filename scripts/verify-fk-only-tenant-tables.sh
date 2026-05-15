@@ -167,8 +167,11 @@ while IFS=$'\t' read -r table parents; do
   fi
 
   # Grep up migrations only for a CREATE POLICY targeting this table.
+  # Handles plain (ON "table"), unquoted (ON table), and schema-qualified
+  # (ON "public"."table" or ON public.table) forms.
+  policy_table_pattern="(\"?[a-zA-Z_][a-zA-Z0-9_]*\"?\.)?\"?${table}\"?"
   if find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' ! -name '*.down.sql' -print0 | \
-       xargs -0 grep -qE "CREATE POLICY[[:space:]]+[^\;]+[[:space:]]+ON[[:space:]]+\"?${table}\"?" 2>/dev/null; then
+       xargs -0 grep -qE "CREATE POLICY[[:space:]]+[^;]+[[:space:]]+ON[[:space:]]+${policy_table_pattern}" 2>/dev/null; then
     continue
   fi
 
