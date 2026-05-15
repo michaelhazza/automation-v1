@@ -1,6 +1,6 @@
 import type { ClassificationResult } from '../similarity.js';
 import { isValidClassification } from '../similarity.js';
-import type { ProposedMerge } from '../../skillAnalyzerServicePure.js';
+import type { ProposedMerge } from '../mergeWarnings/types.js';
 
 /** Result returned by parseClassificationResponseWithMerge. The classification
  *  + confidence + reasoning fields match the base classifier; proposedMerge
