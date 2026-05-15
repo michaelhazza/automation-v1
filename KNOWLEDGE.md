@@ -1671,6 +1671,19 @@ Tab additions that land on main while the branch is in flight must be **manually
 **Detection:** `grep -rnE "boss\.work\b" server/ --include="*.ts" | grep -v "server/lib/createWorker.ts" | grep -v "server/lib/__tests__/"`. Every hit is a candidate.
 **Why it matters:** queue handlers are the easiest place for tenant-context bugs to sneak in: the payload schema is usually small, no HTTP middleware runs, the handler often spans many service calls. `createWorker` is the single chokepoint that gets this right; bypassing it makes every DB call in the handler an opportunity to leak.
 
+## [2026-05-15] Pattern — `verify-no-db-in-routes.sh` regex does NOT catch schema-table imports; only literal `db` symbol imports
+**Date:** 2026-05-15
+**Source:** fix-route-db-support-agent build (chunk-0 caller sweep), Q2 plan-gate
+**Pattern:** The gate at `scripts/verify-no-db-in-routes.sh` uses the regex `import.*db.*from.*['"].*\/db`. This matches `import { db } from '../../db/db.js'` (the literal `db` object) but NOT `import { canonicalInboxes } from '../../db/schema/index.js'` — because the string between `import` and `from` is `{ canonicalInboxes }`, which does not contain "db". A route that imports only schema table objects (and calls Drizzle query builder methods like `db.select().from(canonicalInboxes)`) bypasses the gate entirely. `supportAgentRoutes.ts` had this breach for its entire existence; the gate showed 0 violations every CI run.
+**Rule.** When reviewing route files for the "no direct DB access" invariant, grep for BOTH the literal `db` symbol AND schema-table imports from `'../../db/schema'`. The gate catches the former; code review and this rule are the only defence against the latter. A future tightening of the gate's regex should cover `from '.*\/db/schema'` as a separate alternation. Deferred to a separate `audit-prevention-gates-v2` ticket per plan Q2.
+**Why it matters:** "the gate passes" is not the same as "the route is clean". A route can bypass the architectural invariant with schema imports alone.
+
+## [2026-05-15] Pattern — Route handlers under a subaccount-scoped mount MUST build their principal via `resolveSubaccount`, even when the handler doesn't explicitly read `:subaccountId` from `req.params`
+**Date:** 2026-05-15
+**Source:** fix-route-db-support-agent build, Decision 4 and Chunk 2
+**Pattern:** `supportAgentRoutes.ts` was mounted at `/api/subaccounts/:subaccountId/support` (server/index.ts:512) but its `makePrincipal` function hardcoded `subaccountId: null`. This had two consequences: (a) `listInboxes` returned ALL org-scoped inboxes instead of only the subaccount's inboxes — a privilege-widening bug; (b) `updateAgentConfig`'s subaccount-ownership guard (which checks `existingRow.subaccountId !== principalCtx.subaccountId`) was always bypassed because `principalCtx.subaccountId` was `null` and the guard is a no-op when the principal is org-scoped.
+**Rule.** When a route is mounted at a path containing `:subaccountId`, its `makePrincipal` function MUST call `resolveSubaccount(req.params.subaccountId, req.orgId!)` and use `subaccount.id` as the principal's `subaccountId`. The mount path's `:subaccountId` is the source of truth — not whether the route's individual handler bodies explicitly read from `req.params`. Check `server/routes/support/supportInboxesRoutes.ts` for the canonical pattern: `Router({ mergeParams: true })` + async `makePrincipal` that calls `resolveSubaccount`.
+**Why it matters:** `subaccountId: null` in a subaccount-scoped mount silently widens the result set to the entire org and defeats all subaccount-ownership guards downstream. The bug is invisible from a test that only checks HTTP response shape; it requires reviewing the principal construction logic specifically.
 ## [2026-05-15] Pattern — URL paths diverge from internal naming over time (UK vs US spelling, etc.)
 **Date:** 2026-05-15
 **Source:** Track A3 audit, R6 — `tasks/review-logs/codebase-audit-log-skill-analyzer-2026-05-14T16-53-39Z.md`
@@ -1713,6 +1726,14 @@ if (match($0, /REFERENCES[[:space:]]+"?[a-zA-Z_][a-zA-Z0-9_]*"?\."?([a-zA-Z_][a-
 ```
 Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-zA-Z0-9_]*\"?\.)?\"?${table}\"?"`.
 **Why it matters:** Drizzle's initial migration file (`0000_wandering_firedrake.sql`) uses the ALTER TABLE form for ALL FK constraints. A scanner that only handles the plain form will miss every FK in the entire initial migration — zero coverage on the most FK-dense file in the repo.
+
+---
+
+## [2026-05-15] Pattern — Use org-only read for PATCH merge-read; let the write layer enforce subaccount scope
+**Date:** 2026-05-15
+**Source:** finalisation-coordinator PR #318 (fix-route-db-support-agent) — chatgpt-pr-review Round 1 F1.
+**Pattern:** When a PATCH route reads an existing record to extract current values before merging a patch, it should load by org only (no subaccount predicate). If the read uses a subaccount-scoped helper (e.g. `getInbox(id, principal)` which filters by `subaccountId`), a sibling-subaccount inbox returns 404 at the read step before `updateAgentConfig` can reach its write-scope check and throw the planned 403 `support.inbox.scope_mismatch`. Fix: add a separate org-only read helper (e.g. `getInboxForOrg(id, orgId)`) for the merge-read step; the write helper enforces subaccount scope internally.
+**Why it matters:** Silent 404-for-sibling-access may be defensible security-wise but breaks the approved error-code contract and is hard to catch with structural tests. The pattern applies to any service that has both a scoped-read and an org-level read use case.
 
 ---
 

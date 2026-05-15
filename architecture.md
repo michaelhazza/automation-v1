@@ -3795,7 +3795,7 @@ Inboxes are created during provider registration (one per connector config) and 
 - `readThreadForAgent(ticketId, orgId)` — raw thread, no draft overlay; used by skill execution context.
 - `readThreadForHumanUi(ticketId, orgId)` — thread + `draftOverlay: CanonicalTicketDraft[]` for the UI; renders pending drafts inline.
 
-`server/services/supportInboxService.ts` provides `listInboxes` / `getInbox` with a left-join to `connector_configs` for sync health; `classifyHealth` is a pure function.
+`server/services/supportInboxService.ts` provides `listInboxes` (supports `{ activeOnly }` flag) / `getInbox` (subaccount-scoped read) / `getInboxForOrg` (org-only read, used for PATCH merge-read before write-layer scope check) with a left-join to `connector_configs` for sync health; `classifyHealth` is a pure function.
 
 ### Lifecycle — write paths (three-phase dispatch invariant)
 
