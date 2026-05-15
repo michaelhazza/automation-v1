@@ -1,15 +1,16 @@
 <!-- mission-control
-active_spec: tasks/builds/split-skill-analyzer/spec.md
-active_plan: tasks/builds/split-skill-analyzer/plan.md
-build_slug: split-skill-analyzer
-branch: claude/split-skill-analyzer
-status: MERGE_READY
+active_spec: tasks/builds/sandbox-safety-batch/spec.md
+active_plan: tasks/builds/sandbox-safety-batch/plan.md
+build_slug: sandbox-safety-batch
+branch: claude/sandbox-safety-batch
+status: REVIEWING
 last_updated: 2026-05-15
 last_merged_pr: #313
 last_merged_slug: page-splits
 last_merged_branch: claude/synthetos-personal-assistant-0kaIM
 last_merged_at: 2026-05-15T00:00:00Z
 last_merged_commit: pending
+prior_pending_merge: split-skill-analyzer (PR #320 MERGE_READY, label applied)
 -->
 
 # Current Focus
@@ -24,11 +25,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/split-skill-analyzer/spec.md`
-**Active plan:** `tasks/builds/split-skill-analyzer/plan.md`
-**Active build slug:** `split-skill-analyzer`
-**Branch:** `claude/split-skill-analyzer`
-**Status:** **MERGE_READY** — Phase 3 finalisation complete for the split-skill-analyzer build. PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) open. Two-part monolith split (`skillAnalyzerService.ts` 2,642 LOC → 78-LOC barrel + sub-modules; `skillAnalyzerServicePure.ts` 3,727 LOC → 64-LOC barrel + 22 sub-modules) + FORCE RLS migration 0359 (parent-EXISTS policy on `skill_analyzer_results`) + `boss.work` → `createWorker` conversion + all route-facing `skill_analyzer_results` accesses migrated to `getOrgScopedDb`. `chatgpt-pr-review` 2 rounds APPROVED — F1 (5-file FORCE RLS fix across `results/`) + F4 (2-file fix across `execute/`) applied; F2 (diff-misread import path) + F3 (intra-tree barrel exports) rejected as false positives. Doc-sync sweep clean (architecture.md `executeApproved` path updated; capabilities.md n/a; KNOWLEDGE.md +3 patterns: FORCE RLS parent-EXISTS policy, inner db.transaction bypass, pre-fix grep discipline). CI: verify-canonical-retry.sh and verify-with-org-tx-or-scoped-db.sh failures are inherited noise from PR #319 + #317 (neither file in our diff); use `--admin` merge to bypass. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-claude-split-skill-analyzer-2026-05-15T06-19-25Z.md`.
+**Active spec:** `tasks/builds/sandbox-safety-batch/spec.md`
+**Active plan:** `tasks/builds/sandbox-safety-batch/plan.md`
+**Active build slug:** `sandbox-safety-batch`
+**Branch:** `claude/sandbox-safety-batch`
+**Status:** **BUILDING** — Wave 2 Session C. Multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 5 medium/observe + 3 additional). Pre-drafted spec at `tasks/builds/sandbox-safety-batch/spec.md` (PR #322, on main). REQ #35 ambiguity resolved 2026-05-15: event-driven listener via service-layer enqueue (see progress.md). Out-of-scope: SANDBOX-DEF-EGRESS-MECH + SANDBOX-F1 stay v2-backlog. e2b SDK not installed; inline-sandbox provider only.
+
+**Prior pending merge:** PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) (`split-skill-analyzer`) — Phase 3 finalisation complete, MERGE_READY label applied, awaiting CI + merge by operator. Two-part monolith split (`skillAnalyzerService.ts` 2,642 LOC → 78-LOC barrel + sub-modules; `skillAnalyzerServicePure.ts` 3,727 LOC → 64-LOC barrel + 22 sub-modules) + FORCE RLS migration 0359 (parent-EXISTS policy on `skill_analyzer_results`) + `boss.work` → `createWorker` conversion + all route-facing `skill_analyzer_results` accesses migrated to `getOrgScopedDb`. `chatgpt-pr-review` 2 rounds APPROVED — F1 (5-file FORCE RLS fix across `results/`) + F4 (2-file fix across `execute/`) applied; F2 (diff-misread import path) + F3 (intra-tree barrel exports) rejected as false positives. Doc-sync sweep clean (architecture.md `executeApproved` path updated; capabilities.md n/a; KNOWLEDGE.md +3 patterns: FORCE RLS parent-EXISTS policy, inner db.transaction bypass, pre-fix grep discipline). CI: verify-canonical-retry.sh and verify-with-org-tx-or-scoped-db.sh failures are inherited noise from PR #319 + #317 (neither file in our diff); use `--admin` merge to bypass. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-claude-split-skill-analyzer-2026-05-15T06-19-25Z.md`.
 
 **Previously MERGE_READY:** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) (`page-splits`) — 16 client-side page-level files split along tab / region / atom seams. See prior entry below.
 
