@@ -53,8 +53,8 @@ describe('activeOnly controls isActive condition', () => {
 
   it('isActive is gated by an activeOnly conditional', async () => {
     const src = await readSource();
-    // The activeOnly check must guard the isActive push
-    expect(src).toMatch(/activeOnly.*true[\s\S]*?isActive|isActive[\s\S]*?activeOnly/);
+    // The actual guard + push must exist in source code (not just in a comment)
+    expect(src).toMatch(/if\s*\(\s*options\?\.activeOnly\s*===\s*true\s*\)[\s\S]{0,200}conditions\.push\(eq\(canonicalInboxes\.isActive/);
   });
 
   it('activeOnly condition uses eq(canonicalInboxes.isActive, true)', async () => {
