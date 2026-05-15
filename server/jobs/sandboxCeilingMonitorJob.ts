@@ -29,6 +29,7 @@ import {
   classifyCeilingTransition,
   type CeilingTransition,
 } from './sandboxCeilingMonitorPure.js';
+import { decideCeilingVsProviderRaceOutcome } from './ceilingMonitorRaceDecisionPure.js';
 import { resolveSandboxProvider } from '../services/sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService } from '../services/sandbox/sandboxProviderResolver.js';
 import { withSandboxProvider } from '../lib/withSandboxProvider.js';
@@ -252,6 +253,44 @@ async function applyCeilingTransition(
           err,
         });
         // proceed with the DB UPDATE — terminate failure is non-fatal
+      }
+    }
+
+    // Re-read the row's status immediately before the UPDATE to detect a
+    // concurrent provider write (spec §8.3 SANDBOX-ADV-3.2).
+    const reReadRows = await db
+      .select({
+        status: sandboxExecutions.status,
+        terminatedAt: sandboxExecutions.terminatedAt,
+        harvestedAt: sandboxExecutions.harvestedAt,
+      })
+      .from(sandboxExecutions)
+      .where(
+        and(
+          eq(sandboxExecutions.id, sandboxExecutionId),
+          eq(sandboxExecutions.organisationId, organisationId),
+        ),
+      )
+      .limit(1);
+
+    const currentRow = reReadRows[0];
+    if (currentRow) {
+      const providerOutputAvailable =
+        currentRow.terminatedAt !== null ||
+        currentRow.harvestedAt !== null;
+
+      const decision = decideCeilingVsProviderRaceOutcome({
+        rowStatusAtMonitorTick: currentRow.status,
+        providerOutputAvailable,
+        monitorClaimedFirst: currentRow.status !== 'harvesting' && !providerOutputAvailable,
+      });
+
+      if (decision.winner === 'provider' || decision.winner === 'tied') {
+        logger.info('sandbox.ceiling_monitor.lost_race_to_provider', {
+          sandboxExecutionId,
+          rationale: decision.rationale,
+        });
+        return;
       }
     }
 
