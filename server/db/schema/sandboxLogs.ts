@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // sandbox_logs — redacted per-line log rows (spec §20.8).
@@ -13,7 +14,7 @@ export const sandboxLogs = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     sandboxExecutionId: uuid('sandbox_execution_id').notNull(),
     organisationId: uuid('organisation_id').notNull(),
-    subaccountId: uuid('subaccount_id').notNull(),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id, { onDelete: 'restrict' }),
     runId: uuid('run_id').notNull(),
 
     // Log stream classification

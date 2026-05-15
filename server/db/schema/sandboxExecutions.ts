@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // sandbox_executions — one row per sandbox task execution (spec §20.3).
@@ -12,7 +13,7 @@ export const sandboxExecutions = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull(),
-    subaccountId: uuid('subaccount_id').notNull(),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id, { onDelete: 'restrict' }),
     runId: uuid('run_id').notNull(),
     agentId: uuid('agent_id').notNull(),
     taskId: text('task_id').notNull(),

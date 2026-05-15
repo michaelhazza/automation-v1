@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // sandbox_artefacts — pointer rows for harvested artefacts (spec §20.4).
@@ -11,7 +12,7 @@ export const sandboxArtefacts = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     sandboxExecutionId: uuid('sandbox_execution_id').notNull(),
     organisationId: uuid('organisation_id').notNull(),
-    subaccountId: uuid('subaccount_id').notNull(),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id, { onDelete: 'restrict' }),
 
     // Artefact metadata
     filename: text('filename').notNull(),
