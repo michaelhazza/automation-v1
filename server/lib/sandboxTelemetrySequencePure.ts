@@ -17,6 +17,7 @@ import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
 import type { NewSandboxTelemetryEvent } from '../db/schema/sandboxTelemetryEvents.js';
 import { FailureError, failure } from '../../shared/iee/failure.js';
 import { logger } from './logger.js';
+import { getOrgScopedOrgId } from './orgScopedDb.js';
 
 export type SandboxTelemetryEventInsert = NewSandboxTelemetryEvent;
 
@@ -40,13 +41,33 @@ const DEFAULT_MAX_RETRIES = 3;
  *   - `error` criticality: throw `FailureError('sandbox_telemetry_drop')`.
  *
  * MUST be called inside an existing transaction (withOrgTx or equivalent) so
- * `pg_advisory_xact_lock` has a transaction to bind to.
+ * `pg_advisory_xact_lock` has a transaction to bind to. The contract is
+ * enforced at three layers:
+ *   1. The `db` parameter is typed `OrgScopedTx` — the type system rejects
+ *      callers that try to pass the raw `db` import.
+ *   2. The only construction path is `getOrgScopedDb(...)`, which throws
+ *      `failure('missing_org_context')` if no `withOrgTx` is active.
+ *   3. The runtime assertion at the top of this helper re-reads the
+ *      AsyncLocalStorage org context and throws if absent, catching the
+ *      pathological case of a stale `OrgScopedTx` parameter held past its
+ *      owning transaction's lifetime (currently impossible by construction
+ *      but defended against here for future-proofing).
+ *
+ * `pg_advisory_xact_lock` is transaction-scoped (released at COMMIT or
+ * ROLLBACK) — it persists across the subsequent SELECT MAX(sequence) and
+ * INSERT statements within the same transaction.
  */
 export async function allocateAndInsertTelemetryEvent(
   db: OrgScopedTx,
   rowToInsert: Omit<SandboxTelemetryEventInsert, 'sequence'>,
   opts?: { maxRetries?: number },
 ): Promise<AllocateAndInsertResult> {
+  // Runtime contract enforcement (defence-in-depth layer 3): re-assert that
+  // an org-scoped transaction is active. Without this, the type system trusts
+  // the caller; with it, a stale `db` handle passed from a closed tx still
+  // fails fast rather than silently running each statement in auto-commit.
+  getOrgScopedOrgId('allocateAndInsertTelemetryEvent');
+
   const maxRetries = opts?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const { sandboxExecutionId, criticality, eventType } = rowToInsert;
 

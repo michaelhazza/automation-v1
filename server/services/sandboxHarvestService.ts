@@ -653,11 +653,16 @@ async function step9LogPersistence(
   const allLines = [...stdout, ...stderr];
   const thisBatchBytes = allLines.reduce((sum, e) => sum + Buffer.byteLength(e.line, 'utf8'), 0);
 
+  // date_trunc('day', NOW() AT TIME ZONE 'UTC') produces a `timestamp without
+  // time zone`. Comparing that to a timestamptz column depends on the session
+  // timezone — wrapping the result in `AT TIME ZONE 'UTC'` rebuilds a
+  // canonical UTC timestamptz so the daily quota boundary is invariant under
+  // session timezone settings.
   const [{ today_bytes }] = await db.execute<{ today_bytes: string }>(sql`
     SELECT COALESCE(SUM(octet_length(line)), 0)::bigint AS today_bytes
     FROM sandbox_logs
     WHERE organisation_id = ${ctx.organisationId}
-      AND persisted_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+      AND persisted_at >= (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
   `);
   const todayBytesAlreadyPersisted = Number(today_bytes);
 

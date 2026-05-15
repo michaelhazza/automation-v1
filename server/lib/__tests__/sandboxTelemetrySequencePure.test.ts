@@ -5,6 +5,15 @@ import {
 } from '../sandboxTelemetrySequencePure.js';
 import { isFailureError } from '../../../shared/iee/failure.js';
 
+// Mock the org-scoped DB module so the runtime tx-context assertion inside
+// the helper does not throw when this unit test runs outside a real
+// `withOrgTx` block. The assertion is verified at integration level — here
+// the mock returns a synthetic org id so the helper's defence-in-depth
+// passes and we can exercise the lock + sequence + insert paths.
+vi.mock('../orgScopedDb.js', () => ({
+  getOrgScopedOrgId: vi.fn(() => 'org-uuid-1'),
+}));
+
 // ---------------------------------------------------------------------------
 // Minimal row fixture — only fields required for the helper
 // ---------------------------------------------------------------------------
