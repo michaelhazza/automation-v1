@@ -40,6 +40,7 @@ import { withSandboxProvider } from '../lib/withSandboxProvider.js';
 import { subaccountIeeBrowserSettingsService } from './subaccountIeeBrowserSettingsService.js';
 import { evaluateTaskCost, IEE_BROWSER_EVENT_TASK_COST_ANOMALY } from './sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
 import { isCredentialLeakFilename } from './sandbox/credentialLeakFilenameGuardPure.js';
+import { sanitiseArtefactFilename } from './sandbox/artefactFilenameSanitiserPure.js';
 import { recordIncident } from './incidentIngestor.js';
 
 // ---------------------------------------------------------------------------
@@ -426,6 +427,16 @@ async function step6ArtefactEnumeration(
       logger.error('sandbox.credential.leak_attempted', {
         sandboxExecutionId: ctx.sandboxExecutionId,
         filename: entry.filename,
+      });
+      return { result: { ok: false, reason: 'artefact_upload_failed' }, artefacts: [] };
+    }
+
+    // S3 path-traversal sanitisation (spec §8.4, SANDBOX-ADV-4.2).
+    const sanitised = sanitiseArtefactFilename(entry.filename);
+    if (!sanitised.ok) {
+      await writeTelemetryEvent(ctx, 'artefact_upload_failed', 'error', {
+        filename: entry.filename,
+        reason: sanitised.reason,
       });
       return { result: { ok: false, reason: 'artefact_upload_failed' }, artefacts: [] };
     }
