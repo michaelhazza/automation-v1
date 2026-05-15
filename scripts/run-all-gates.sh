@@ -165,6 +165,11 @@ run_gate "$SCRIPT_DIR/verify-no-missing-deps.sh"
 run_gate "$SCRIPT_DIR/verify-loc-cap.sh"
 run_gate "$SCRIPT_DIR/verify-frontend-design-budget.sh"
 
+# ── Wave 1 Env D prevention gates (2026-05-15 batch) ──
+run_gate "$SCRIPT_DIR/verify-fk-only-tenant-tables.sh"
+run_gate "$SCRIPT_DIR/verify-agents-view-in-workflow-routes.sh"
+run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

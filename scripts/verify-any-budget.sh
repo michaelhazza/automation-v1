@@ -26,7 +26,7 @@ GUARD_ID="type-strengthening"
 GUARD_NAME="TypeScript any Budget (non-growing)"
 BASELINE_FILE="${ROOT_DIR}/scripts/.gate-baselines/any-budget.txt"
 PER_FILE_HELPER="${ROOT_DIR}/scripts/lib/per-file-counter-pure.mjs"
-DEFAULT_EXIT_CODE=2  # warning-first rollout; promote to 1 via §C1 operator decision
+DEFAULT_EXIT_CODE=2  # promotion attempt 2026-05-15 reverted: current main exceeds baseline (73 files grew since PR #307 seed), baseline needs re-seeding before promotion. Tracked in tasks/todo.md.
 
 source "$SCRIPT_DIR/lib/guard-utils.sh"
 
