@@ -1729,6 +1729,14 @@ Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-z
 
 ---
 
+## [2026-05-15] Pattern — Use org-only read for PATCH merge-read; let the write layer enforce subaccount scope
+**Date:** 2026-05-15
+**Source:** finalisation-coordinator PR #318 (fix-route-db-support-agent) — chatgpt-pr-review Round 1 F1.
+**Pattern:** When a PATCH route reads an existing record to extract current values before merging a patch, it should load by org only (no subaccount predicate). If the read uses a subaccount-scoped helper (e.g. `getInbox(id, principal)` which filters by `subaccountId`), a sibling-subaccount inbox returns 404 at the read step before `updateAgentConfig` can reach its write-scope check and throw the planned 403 `support.inbox.scope_mismatch`. Fix: add a separate org-only read helper (e.g. `getInboxForOrg(id, orgId)`) for the merge-read step; the write helper enforces subaccount scope internally.
+**Why it matters:** Silent 404-for-sibling-access may be defensible security-wise but breaks the approved error-code contract and is hard to catch with structural tests. The pattern applies to any service that has both a scoped-read and an org-level read use case.
+
+---
+
 ## [2026-05-15] Pattern — sub-module import paths must reflect actual directory depth, not original file location
 **Date:** 2026-05-15
 **Source:** build: split-workflow-engine — 70+ TypeScript TS2307 cascade errors after structural split.

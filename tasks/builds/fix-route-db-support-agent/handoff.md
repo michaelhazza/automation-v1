@@ -1,5 +1,27 @@
 # Handoff — fix-route-db-support-agent
 
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #318
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-fix-route-db-support-agent-2026-05-15T03-51-10Z.md
+**spec_deviations reviewed:** yes (Q1/Q2/Q3 all reviewed by ChatGPT — approved)
+**Doc-sync sweep verdicts:**
+- architecture.md: yes (Support Inbox Service exports section — added getInboxForOrg + activeOnly)
+- docs/capabilities.md: n/a: internal refactor with no capability surface change
+- docs/integration-reference.md: no — checked supportAgentRoutes, supportInboxService, getInboxForOrg, mergeAgentConfigPatch; zero hits
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: yes (§8.39 — PR number corrected from #307 → #318)
+- CONTRIBUTING.md: no — no lint-suppression or contributor-convention changes
+- docs/frontend-design-principles.md: no — no UI changes in this build
+- KNOWLEDGE.md: yes (1 new entry — org-only read for PATCH merge-read pattern)
+- docs/spec-context.md: n/a — spec-review sessions only
+**KNOWLEDGE.md entries added:** 1
+**tasks/todo.md items closed:** 2 (pre-v1-lockdown Route→DB breach + F5 AGENTS_VIEW)
+**ready-to-merge label applied at:** 2026-05-15T06:30:40Z
+
+---
+
+
+
 ## Phase 2 (BUILD) — complete
 
 **Completed:** 2026-05-15

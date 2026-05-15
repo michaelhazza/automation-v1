@@ -1,15 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/fix-route-db-support-agent/spec.md
-active_plan: tasks/builds/fix-route-db-support-agent/plan.md
-build_slug: fix-route-db-support-agent
-branch: claude/fix-route-db-support-agent
-status: REVIEWING
-last_updated: 2026-05-15T00:00:00Z
-last_merged_pr: #313
-last_merged_slug: page-splits
-last_merged_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_at: 2026-05-15T00:00:00Z
-last_merged_commit: 0ffbf081
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
+last_updated: 2026-05-15
+last_merge_ready_pr: #318
+last_merge_ready_slug: fix-route-db-support-agent
+last_merge_ready_branch: claude/fix-route-db-support-agent
 -->
 
 # Current Focus
@@ -24,11 +22,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/fix-route-db-support-agent/spec.md`
-**Active plan:** `tasks/builds/fix-route-db-support-agent/plan.md` (architect pending)
-**Active build slug:** `fix-route-db-support-agent`
-**Branch:** `claude/fix-route-db-support-agent` (fresh off origin/main `76377549`)
-**Status:** **REVIEWING** — Phase 2 BUILD complete 2026-05-15. All 5 chunks shipped (6 commits + 3 fix commits). Branch-level review pass: spec-conformance CONFORMANT, adversarial-reviewer C1 closed, pr-reviewer APPROVED (4 should-fix resolved), reality-checker READY, dual-reviewer REVIEW_GAP (Codex unavailable). Phase 3 finalisation in progress.
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR [#318](https://github.com/michaelhazza/automation-v1/pull/318) — `fix-route-db-support-agent`. Route→DB breach in `supportAgentRoutes.ts` closed (all schema imports removed, handlers delegate to `supportInboxService`). F5 `AGENTS_VIEW` gate added to `GET /api/agents` default branch. `getInboxForOrg` added as org-only read for PATCH merge-read. Pipeline complete: spec-conformance CONFORMANT → adversarial HOLES_FOUND closed → pr-reviewer APPROVED → reality-checker READY → chatgpt-pr-review 2 rounds APPROVED. `ready-to-merge` label applied 2026-05-15T06:30:40Z.
 
 **Just merged:** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) — `page-splits` (squash-commit `0ffbf081`, merged 2026-05-15). 16 client-side page-level files split along tab/region/atom seams. `chatgpt-pr-review` 3 rounds APPROVED — 4 should-fix findings implemented; 2 deferred to `tasks/todo.md`. Doc-sync sweep clean. Phase 3 handoff at `tasks/builds/page-splits/handoff.md § Phase 3 (FINALISATION) — complete`.
 

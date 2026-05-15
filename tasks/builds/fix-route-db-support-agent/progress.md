@@ -87,6 +87,15 @@ Chunk 3's test file (`supportAgentRoutes.test.ts`) covers the deep-merge pure lo
 REVIEW_GAP: dual-reviewer | task-class: Standard | reason: Codex CLI not installed in local session | operator-override: no | remediation: chatgpt-pr-review serves as primary second-opinion pass at Phase 3 (enforced by finalisation-coordinator)
 ```
 
+## LEARNING_FEEDBACK_PROPOSAL (Step 7a — Compound Learning Feedback)
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| Use org-only read for PATCH merge-read; let write layer enforce subaccount scope (`getInboxForOrg` pattern) | `agent-instruction` → `pr-reviewer` | chatgpt-pr-review R1 F1 caught this regression. pr-reviewer should look for PATCH handlers that call a subaccount-scoped read before a write, where the write layer has its own scope check — these can silently change 403→404. | pending |
+| Sub-agent fixes may be uncommitted — `git diff origin/main...HEAD` only shows committed state | `agent-instruction` → `finalisation-coordinator` | Round 2 diff was stale because chatgpt-pr-review sub-agent left fixes in working tree without committing. Finalisation-coordinator should verify `git status` clean (or diff includes expected symbols) before generating any review diff. | pending |
+
+---
+
 ## Closure text for finalisation-coordinator
 
 After PR number is known, `finalisation-coordinator` applies these edits to `tasks/todo.md`:
