@@ -35,9 +35,6 @@ server/services/agentExecutionService.ts:0:exceeds hard LoC cap
 server/services/skillAnalyzerService.ts:0:exceeds hard LoC cap
 
 # expires: 2026-11-14
-server/services/skillAnalyzerServicePure.ts:0:exceeds hard LoC cap
-
-# expires: 2026-11-14
 server/services/skillExecutor.ts:0:exceeds hard LoC cap
 
 # expires: 2026-11-14

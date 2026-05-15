@@ -1,27 +1,13 @@
-import { cosineSimilarity, classifyBand, computeBestMatches } from './skillAnalyzerServicePure/similarity.js';
-import { crossReferencesLibrarySkill } from './skillAnalyzerServicePure/crossRef.js';
-import { buildClassificationPrompt, buildClassifyPromptWithMerge } from './skillAnalyzerServicePure/classification/prompts.js';
-import { parseClassificationResponse, parseClassificationResponseWithMerge } from './skillAnalyzerServicePure/classification/parse.js';
-import { deriveClassificationFailureReason } from './skillAnalyzerServicePure/classification/failureReason.js';
-import { classifyDemotedFields, parseDemotedFieldStatuses, adjustClassifierConfidence } from './skillAnalyzerServicePure/mergeWarnings/approval.js';
-import { rationaleArguesAgainstMerge } from './skillAnalyzerServicePure/ruleBasedMerge.js';
-import { generateDiffSummary } from './skillAnalyzerServicePure/diff.js';
-import { rankAgentsForCandidate, deriveDiffRows, detectNonSkillFile, buildAgentSuggestionPrompt, parseAgentSuggestionResponse, buildAgentClusterRecommendationPrompt, parseAgentClusterRecommendationResponse, AGENT_RECOMMENDATION_THRESHOLD, AGENT_RECOMMENDATION_MIN_SKILLS } from './skillAnalyzerServicePure/agentRanking.js';
-import { extractPreservationInventory, buildConsolidationPrompt, parseConsolidationResponse, computeConsolidationViolations } from './skillAnalyzerServicePure/consolidation.js';
+// Pure-service barrel — re-exports the full public surface from sub-modules.
+// All callers continue to import from './skillAnalyzerServicePure.js'.
 
-// ---------------------------------------------------------------------------
-// Skill Analyzer Service — Pure Functions
-// Zero DB/env/service imports. Fully testable in isolation.
-// ---------------------------------------------------------------------------
-
-// --- Transitional re-exports (removed when barrel is rewritten in Chunk 6) ---
-export { SKILL_ANALYZER_MID_FLIGHT_STATUSES, SKILL_ANALYZER_TERMINAL_STATUSES, SKILL_ANALYZER_JOB_STATUSES, type SkillAnalyzerMidFlightStatus, type SkillAnalyzerTerminalStatus, type SkillAnalyzerJobStatus, isSkillAnalyzerTerminalStatus, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure/statuses.js';
-export { type LibrarySkillSummary, type ClassificationResult, type SimilarityBand, cosineSimilarity, classifyBand, computeBestMatches } from './skillAnalyzerServicePure/similarity.js';
-export { canonicalJSON, sortKeys } from './skillAnalyzerServicePure/serialisation.js';
-export { crossReferencesLibrarySkill } from './skillAnalyzerServicePure/crossRef.js';
-export { CLASSIFICATION_SYSTEM_PROMPT, formatSkillForPrompt, buildClassificationPrompt, buildClassifyPromptWithMerge, CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT } from './skillAnalyzerServicePure/classification/prompts.js';
-export { parseClassificationResponse, type ClassificationResultWithMerge, parseClassificationResponseWithMerge } from './skillAnalyzerServicePure/classification/parse.js';
-export { deriveClassificationFailureReason } from './skillAnalyzerServicePure/classification/failureReason.js';
+export * from './skillAnalyzerServicePure/statuses.js';
+export * from './skillAnalyzerServicePure/similarity.js';
+export * from './skillAnalyzerServicePure/serialisation.js';
+export * from './skillAnalyzerServicePure/classification/prompts.js';
+export * from './skillAnalyzerServicePure/classification/parse.js';
+export * from './skillAnalyzerServicePure/classification/failureReason.js';
+export * from './skillAnalyzerServicePure/crossRef.js';
 export * from './skillAnalyzerServicePure/mergeWarnings/types.js';
 export * from './skillAnalyzerServicePure/mergeWarnings/defaults.js';
 export * from './skillAnalyzerServicePure/mergeWarnings/sort.js';
@@ -31,11 +17,21 @@ export * from './skillAnalyzerServicePure/concurrency.js';
 export * from './skillAnalyzerServicePure/validation.js';
 export * from './skillAnalyzerServicePure/ruleBasedMerge.js';
 export * from './skillAnalyzerServicePure/textExtraction.js';
-
 export * from './skillAnalyzerServicePure/collisions.js';
-export * from './skillAnalyzerServicePure/diff.js';
 export * from './skillAnalyzerServicePure/agentRanking.js';
 export * from './skillAnalyzerServicePure/consolidation.js';
+export * from './skillAnalyzerServicePure/diff.js';
+
+import { cosineSimilarity, classifyBand, computeBestMatches } from './skillAnalyzerServicePure/similarity.js';
+import { deriveClassificationFailureReason } from './skillAnalyzerServicePure/classification/failureReason.js';
+import { buildClassificationPrompt, buildClassifyPromptWithMerge } from './skillAnalyzerServicePure/classification/prompts.js';
+import { parseClassificationResponse, parseClassificationResponseWithMerge } from './skillAnalyzerServicePure/classification/parse.js';
+import { generateDiffSummary } from './skillAnalyzerServicePure/diff.js';
+import { rankAgentsForCandidate, deriveDiffRows, detectNonSkillFile, buildAgentSuggestionPrompt, parseAgentSuggestionResponse, buildAgentClusterRecommendationPrompt, parseAgentClusterRecommendationResponse, AGENT_RECOMMENDATION_THRESHOLD, AGENT_RECOMMENDATION_MIN_SKILLS } from './skillAnalyzerServicePure/agentRanking.js';
+import { crossReferencesLibrarySkill } from './skillAnalyzerServicePure/crossRef.js';
+import { rationaleArguesAgainstMerge } from './skillAnalyzerServicePure/ruleBasedMerge.js';
+import { classifyDemotedFields, parseDemotedFieldStatuses, adjustClassifierConfidence } from './skillAnalyzerServicePure/mergeWarnings/approval.js';
+import { extractPreservationInventory, buildConsolidationPrompt, parseConsolidationResponse, computeConsolidationViolations } from './skillAnalyzerServicePure/consolidation.js';
 
 export const skillAnalyzerServicePure = {
   cosineSimilarity,
