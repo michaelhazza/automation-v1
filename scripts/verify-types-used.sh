@@ -21,7 +21,8 @@
 #   1 — new unreferenced exports above baseline OR baseline entry past grace period
 #   2 — baseline-only violations or within-grace expiry warning
 #
-# Warning-first rollout: ships with default exit 2; promote to 1 via §C1.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
+# New violations exit 1 via check_expiring_baseline; baseline-only entries exit 2 (within-grace warning).
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

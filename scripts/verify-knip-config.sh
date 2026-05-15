@@ -12,7 +12,8 @@
 #   scripts/__fixtures__/*        — gate fixture files
 #
 # Usage: bash scripts/verify-knip-config.sh
-# Exit codes: 0 = all surfaces declared, 2 = one or more surfaces missing
+# Exit codes: 0 = all surfaces declared, 1 = one or more surfaces missing.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
 
 set -euo pipefail
 
@@ -30,7 +31,7 @@ emit_header "$GUARD_ID"
 if [ ! -f "$KNIP_CONFIG" ]; then
   echo "❌ knip.json not found at repo root" >&2
   echo "[GATE] ${GUARD_ID}: violations=1"
-  exit 2
+  exit 1
 fi
 
 # Resolve paths for Node on Windows (cygpath if available)
@@ -48,7 +49,7 @@ echo ""
 echo "[GATE] ${GUARD_ID}: violations=${VIOLATIONS}"
 
 if [ "$VIOLATIONS" -gt 0 ]; then
-  exit 2
+  exit 1
 fi
 
 exit 0

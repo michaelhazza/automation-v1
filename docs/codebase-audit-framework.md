@@ -843,6 +843,7 @@ Some duplication is intentional. Duplication beats coupling when:
 | Layer | Soft cap | Hard cap |
 |---|---|---|
 | `server/services/*.ts` | 1,500 LOC | 2,500 LOC |
+| `server/jobs/*.ts` | 1,500 LOC | 2,500 LOC |
 | `server/routes/*.ts` | 800 LOC | 1,500 LOC |
 | `client/src/pages/*.tsx` | 600 LOC | 1,200 LOC |
 | `client/src/components/*.tsx` | 400 LOC | 800 LOC |

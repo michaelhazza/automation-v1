@@ -271,6 +271,14 @@ No silent catch. Every caught promise rejection routes through `logger.warn({sco
 
 Every `useEffect` that awaits a fetch and then calls `setState` carries a `cancelled` boolean or generation-counter ref, checked before the `setState`. Bare `setState` after `await` causes stale-state writes when inputs change mid-flight.
 
+### 8.38 Tick workers MUST resolve a real org context before opening DB transactions
+
+A pg-boss handler registered with `resolveOrgContext: () => null` MUST call `withOrgTx(row.organisationId, ...)` explicitly after loading the run row — `resolveOrgContext: () => null` is an opt-out for the first raw-db lookup only, not for the entire handler body. Handlers that run dozens of DB calls after a null opt-out have no `app.organisation_id` GUC set; every downstream `getOrgScopedDb()` call reads from the unscoped pool and Postgres's RLS returns empty sets silently. Detection gate: `scripts/verify-with-org-tx-or-scoped-db.sh`.
+
+### 8.39 Routes never import from `server/db/schema/**`
+
+Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #307). Detection gate: `scripts/verify-no-db-in-routes.sh`.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

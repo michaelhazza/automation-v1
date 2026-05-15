@@ -31,6 +31,7 @@
 #   Format: # expires: YYYY-MM-DD  then  <relpath>:0:<reason>
 #
 # Exit codes: 0=pass, 1=hard violations above baseline or past-grace expiry, 2=soft/within-baseline/within-grace expiry warning
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307); exit-1 path was already in place for hard-cap regressions.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

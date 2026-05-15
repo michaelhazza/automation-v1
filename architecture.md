@@ -384,6 +384,19 @@ Agent scheduling uses **pg-boss** (PostgreSQL-based job queue), managed by `agen
 - `agentScheduleService` reads heartbeat config and enqueues runs into pg-boss
 - Idempotency keys prevent duplicate runs on retry (see below)
 
+### Canonical worker registration
+
+**`createWorker` in `server/lib/createWorker.ts` is the only approved way to register a pg-boss queue handler.** Bare `boss.work(queue, handler)` is banned in all files except `createWorker.ts` itself.
+
+`createWorker` does three load-bearing things that bare `boss.work` omits:
+1. Reads `organisationId` from the job payload via `defaultResolveOrgContext`.
+2. Opens a Drizzle transaction with the `app.organisation_id` GUC set (`withOrgTx`).
+3. Makes `getOrgScopedDb()` available to the entire handler body.
+
+For cross-org sweep handlers (maintenance jobs, DLQ wiring) that genuinely have no tenant context, pass `resolveOrgContext: () => null` to `createWorker` rather than calling `boss.work` directly — the opt-out is then visible to grep and the gate. When the handler needs to resolve the org from the row, use `resolveOrgContext: () => null` for the initial raw-db lookup, then open a `withOrgTx(row.organisationId, ...)` block for all subsequent DB work.
+
+Enforcement gate: `scripts/verify-no-direct-boss-work.sh`.
+
 ---
 
 <a id="handoff-sub-agent-system"></a>
@@ -1879,6 +1892,40 @@ Valid values (closed enum `agent_charge_transition_caller`): `'charge_router'`, 
 - `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
 - `verify-rls-contract-compliance.sh` — verifies the three-layer contract is wired end-to-end
 - `verify-rls-session-var-canon.sh` — bans the phantom `app.current_organisation_id` variable from migrations and server code
+- `verify-fk-only-tenant-tables.sh` — flags tables FK-scoped to a tenant-protected parent but missing their own `CREATE POLICY`
+
+#### FK-scoped RLS pattern
+
+When a table holds tenant-private data but has **no `organisation_id` column** — it is scoped to a parent table that does — it needs an EXISTS-based RLS policy joining through the FK:
+
+```sql
+ALTER TABLE <child_table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <child_table> FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS <child_table>_tenant_isolation ON <child_table>;
+
+CREATE POLICY <child_table>_tenant_isolation ON <child_table>
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM <parent_table> p
+      WHERE p.id = <child_table>.<parent_fk_column>
+        AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM <parent_table> p
+      WHERE p.id = <child_table>.<parent_fk_column>
+        AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  );
+```
+
+When the child table has its own `organisation_id` column, use the canonical org-isolation template above — it is cheaper (index hit on the child itself). Only use the EXISTS join when the child genuinely has no `organisation_id` column and adding one would require a backfill migration. Detection gate: `scripts/verify-fk-only-tenant-tables.sh`.
 
 ---
 
