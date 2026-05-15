@@ -3,7 +3,7 @@
 **Files reviewed:** branch `claude/sandbox-safety-batch` vs `main` (~55 files, 22 sandbox-isolation backlog items, 4 migrations 0360-0363, 1 new canonical service)
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-15T11:20:23Z
-**Commit at finish:** <recorded after commit>
+**Commit at finish:** b3e65022e2e3819417af32dd1061fda328fce437
 
 ---
 
