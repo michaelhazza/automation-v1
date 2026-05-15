@@ -133,4 +133,4 @@ Surfaced here for visibility; not appended to `tasks/todo.md` because the existi
 
 Then proceed to `reality-checker` (Significant/Major branch) -> `dual-reviewer` -> Phase 3 finalisation (`finalisation-coordinator`).
 
-**Commit at finish:** (recorded post-commit below)
+**Commit at finish:** `dd817ac6`
