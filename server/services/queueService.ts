@@ -1,9 +1,5 @@
-import { db } from '../db/index.js';
-import { executions, executionFiles, computeReservations } from '../db/schema/index.js';
-import { eq, lt, sql } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
-import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 import { setSystemWorkerContext } from './connectionTokenService.js';
@@ -13,149 +9,29 @@ import {
   SANDBOX_LOGS_PRUNE_JOB,
   SANDBOX_EGRESS_AUDIT_PRUNE_JOB,
 } from '../lib/sandboxJobNames.js';
-import {
-  WORKFLOW_RESUME_QUEUE,
-  LOCK_ID_CLEANUP_FILES,
-  LOCK_ID_CLEANUP_RESERVATIONS,
-  serializeError,
-  withAdvisoryLock,
-} from './queueService/types.js';
+import { WORKFLOW_RESUME_QUEUE } from './queueService/types.js';
 import { getQueueBackend } from './queueService/backend.js';
+import {
+  enqueueExecution as enqueueExecutionFn,
+  sendJob as sendJobFn,
+  cleanupExpiredExecutionFiles as cleanupExpiredExecutionFilesFn,
+  cleanupExpiredComputeReservations as cleanupExpiredComputeReservationsFn,
+  enqueueWorkflowResume as enqueueWorkflowResumeFn,
+  enqueueRegressionCapture as enqueueRegressionCaptureFn,
+} from './queueService/enqueueHelpers.js';
+import { resolveMigrationAdapter } from './queueService/migrationAdapter.js';
+import { startIntervalFallback } from './queueService/maintenanceJobs/intervalFallback.js';
 
 // ---------------------------------------------------------------------------
 // Exported queue service
 // ---------------------------------------------------------------------------
 export const queueService = {
-  async enqueueExecution(executionId: string): Promise<void> {
-    // Stamp the queuedAt time when the job enters the queue
-    await db
-      .update(executions)
-      .set({ queuedAt: new Date(), updatedAt: new Date() })
-      .where(eq(executions.id, executionId));
-
-    const backend = await getQueueBackend();
-    await backend.enqueue(executionId);
-  },
-
-  /**
-   * Generic job enqueue — used by event-driven follow-on jobs (e.g. the
-   * ClientPulse intervention proposer that fires after compute_churn_risk).
-   * Thin wrapper over the backend's send method so callers don't need to
-   * reach into getQueueBackend() directly.
-   */
-  async sendJob(queueName: string, data: object): Promise<void> {
-    if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
-      // In-memory backend used in tests / dev has no named-queue routing;
-      // silently no-op so calling code stays the same.
-      return;
-    }
-    const boss = await getPgBoss();
-    await boss.send(queueName, data);
-  },
-
-  /**
-   * M-17: Delete expired execution_files rows.
-   */
-  async cleanupExpiredExecutionFiles(): Promise<number> {
-    const result = await db
-      .delete(executionFiles)
-      .where(lt(executionFiles.expiresAt, new Date()));
-    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:cleanup_execution_files', rows_deleted: count }));
-    return count;
-  },
-
-  /**
-   * M-18: Release stale budget_reservations left in 'active' status.
-   * Reservations expire after 5 minutes if the billing flow crashes.
-   * Mark them as 'released' so they no longer inflate projected spend.
-   */
-  async cleanupExpiredComputeReservations(): Promise<number> {
-    const result = await db
-      .update(computeReservations)
-      .set({ status: 'released' })
-      .where(
-        sql`${computeReservations.status} = 'active' AND ${computeReservations.expiresAt} < NOW()`
-      );
-    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:release_budget_reservations', rows_released: count }));
-    return count;
-  },
-
-  /**
-   * Enqueue a workflow resume job. Called from the approval handler when an
-   * action that was created by a workflow step (identified by workflowRunId
-   * in the action's metadataJson) is approved.
-   *
-   * Falls back to direct synchronous resume if pg-boss is not available.
-   */
-  async enqueueWorkflowResume(params: {
-    workflowRunId: string;
-    approvedActionId?: string;
-    organisationId: string;
-    subaccountId: string;
-    agentId: string;
-    agentRunId?: string;
-  }): Promise<void> {
-    if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
-      const boss = await getPgBoss();
-      await boss.send(WORKFLOW_RESUME_QUEUE, params, getJobConfig('workflow-resume'));
-      return;
-    }
-
-    // Synchronous fallback — resume inline (no restart resilience, but functional)
-    const { resumeFlow } = await import('./flowExecutorService.js');
-    resumeFlow(params.workflowRunId, {
-      organisationId: params.organisationId,
-      subaccountId: params.subaccountId,
-      agentId: params.agentId,
-      agentRunId: params.agentRunId,
-    }, params.approvedActionId).catch((err) => {
-      console.error('[WorkflowResume] Inline resume failed', err);
-    });
-  },
-
-  /**
-   * Sprint 2 P1.2 — enqueue a regression-capture job for a rejected
-   * review item. Best-effort: uses pg-boss when available, falls back
-   * to an in-process call when the backend is in-memory. Failures are
-   * logged, not rethrown — the caller (reviewService.rejectItem) must
-   * not fail the user's rejection on a capture error.
-   */
-  async enqueueRegressionCapture(params: {
-    reviewItemId: string;
-    organisationId: string;
-  }): Promise<void> {
-    try {
-      if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
-        const boss = await getPgBoss();
-        await boss.send('regression-capture', params, getJobConfig('regression-capture'));
-        return;
-      }
-
-      // In-memory fallback — run the capture inline so in-memory
-      // deployments still accumulate cases. Fire-and-forget with a
-      // catch so the rejection flow never sees a capture failure.
-      const { captureRegressionFromRejection } = await import(
-        './regressionCaptureService.js'
-      );
-      captureRegressionFromRejection(params).catch((err) => {
-        console.error(
-          JSON.stringify({
-            event: 'regression_capture_inline_failed',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
-      });
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          event: 'regression_capture_enqueue_failed',
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
-  },
+  enqueueExecution: enqueueExecutionFn,
+  sendJob: sendJobFn,
+  cleanupExpiredExecutionFiles: cleanupExpiredExecutionFilesFn,
+  cleanupExpiredComputeReservations: cleanupExpiredComputeReservationsFn,
+  enqueueWorkflowResume: enqueueWorkflowResumeFn,
+  enqueueRegressionCapture: enqueueRegressionCaptureFn,
 
   /**
    * Start periodic maintenance jobs.
@@ -1220,82 +1096,8 @@ export const queueService = {
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
-      // In-memory queue: setInterval + advisory locks prevent duplicate runs
-      setInterval(async () => {
-        await withAdvisoryLock(LOCK_ID_CLEANUP_FILES, () =>
-          queueService.cleanupExpiredExecutionFiles().then(() => undefined)
-        ).catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:cleanup_execution_files_error', ...serializeError(err) }));
-        });
-      }, 60 * 60 * 1000); // every hour
-
-      setInterval(async () => {
-        await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
-          queueService.cleanupExpiredComputeReservations().then(() => undefined)
-        ).catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
-        });
-      }, 5 * 60 * 1000); // every 5 minutes
-
-      setInterval(async () => {
-        const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
-        runMemoryDecay().catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:memory_decay_error', ...serializeError(err) }));
-        });
-      }, 24 * 60 * 60 * 1000); // daily
-
-      // Sprint 2 P1.1 Layer 3 — security event retention sweep in the
-      // in-memory fallback. Admin-bypass job, no advisory lock needed
-      // because there's only one instance in in-memory mode by definition.
-      setInterval(async () => {
-        const { runSecurityEventsCleanup } = await import('../jobs/securityEventsCleanupJob.js');
-        runSecurityEventsCleanup().catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:security_events_cleanup_error', ...serializeError(err) }));
-        });
-      }, 24 * 60 * 60 * 1000); // daily
-
-      // Sprint 3 P2.1 Sprint 3A — agent_runs retention prune in the
-      // in-memory fallback. Admin-bypass cross-org sweep.
-      setInterval(async () => {
-        const { runAgentRunCleanupTick } = await import('../jobs/agentRunCleanupJob.js');
-        runAgentRunCleanupTick().catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:agent_run_cleanup_error', ...serializeError(err) }));
-        });
-      }, 24 * 60 * 60 * 1000); // daily
-
-      // Agent Intelligence Phase 2B — memory dedup daily sweep (in-memory fallback)
-      setInterval(async () => {
-        const { runMemoryDedup } = await import('../jobs/memoryDedupJob.js');
-        runMemoryDedup().catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:memory_dedup_error', ...serializeError(err) }));
-        });
-      }, 24 * 60 * 60 * 1000); // daily
-
-      // Workspace seat rollup — hourly billing snapshot (in-memory fallback)
-      setInterval(async () => {
-        const { runSeatRollup } = await import('../jobs/seatRollupJob.js');
-        runSeatRollup().catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'seat-rollup:error', ...serializeError(err) }));
-        });
-      }, 60 * 60 * 1000); // hourly
-
-      console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
+      startIntervalFallback();
     }
   },
 };
 
-// ---------------------------------------------------------------------------
-// resolveMigrationAdapter — inline helper for workspace.migrate-identity worker
-// ---------------------------------------------------------------------------
-
-async function resolveMigrationAdapter(backend: string) {
-  if (backend === 'synthetos_native') {
-    const { nativeWorkspaceAdapter } = await import('../adapters/workspace/nativeWorkspaceAdapter.js');
-    return nativeWorkspaceAdapter;
-  }
-  if (backend === 'google_workspace') {
-    const { googleWorkspaceAdapter } = await import('../adapters/workspace/googleWorkspaceAdapter.js');
-    return googleWorkspaceAdapter;
-  }
-  throw new Error(`unknown migration backend: ${backend}`);
-}
