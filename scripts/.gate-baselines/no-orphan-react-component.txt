@@ -204,3 +204,27 @@ client/src/components/TraceChainTimeline.tsx:1:React component file has no ingre
 client/src/components/UnifiedActivityFeed.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
 # expires: 2026-08-14
 client/src/components/workspace/OnboardAgentModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/invocations-card/AccordionRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/invocations-card/HeartbeatTimeline.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/RoleBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/StatusBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/SubaccountTreeRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/BlocksTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/InsightsTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/ReferencesTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/RenameReferenceModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/TabButton.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/format.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/types.ts:1:React component file has no ingress (not routed and not imported by any routed file)
