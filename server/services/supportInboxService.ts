@@ -62,11 +62,23 @@ function agentConfigInvalidError(message: string): Error {
 
 /**
  * List all inboxes for the org, including sync-health derived from connector_configs.
+ *
+ * @param options.activeOnly - when true, restricts results to inboxes where isActive = true
  */
 export async function listInboxes(
   principalCtx: PrincipalContext,
+  options?: { activeOnly?: boolean },
 ): Promise<InboxWithSyncHealth[]> {
   const db = getOrgScopedDb('supportInboxService.listInboxes');
+
+  const conditions = [eq(canonicalInboxes.organisationId, principalCtx.organisationId)];
+  if (principalCtx.subaccountId !== null) {
+    conditions.push(eq(canonicalInboxes.subaccountId, principalCtx.subaccountId));
+  }
+  if (options?.activeOnly === true) {
+    conditions.push(eq(canonicalInboxes.isActive, true));
+  }
+
   const rows = await db
     .select({
       inbox: canonicalInboxes,
@@ -77,14 +89,7 @@ export async function listInboxes(
     })
     .from(canonicalInboxes)
     .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
-    .where(
-      principalCtx.subaccountId !== null
-        ? and(
-            eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-            eq(canonicalInboxes.subaccountId, principalCtx.subaccountId),
-          )
-        : eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-    )
+    .where(and(...conditions))
     .orderBy(canonicalInboxes.createdAt);
 
   return rows.map(r => ({
@@ -122,6 +127,55 @@ export async function getInbox(
       and(
         eq(canonicalInboxes.id, inboxId),
         eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+        ...(principalCtx.subaccountId !== null
+          ? [eq(canonicalInboxes.subaccountId, principalCtx.subaccountId)]
+          : []),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw notFoundError('support.inbox.not_found');
+  }
+
+  return {
+    ...row.inbox,
+    syncHealth: classifyHealth({
+      status: row.connectorStatus ?? 'active',
+      lastSyncStatus: row.lastSyncStatus ?? null,
+      lastSyncError: row.lastSyncError ?? null,
+    }),
+    lastSyncAt: row.lastSyncAt ?? null,
+    syncErrorMessage: row.lastSyncError ?? null,
+  };
+}
+
+/**
+ * Get a single inbox by org only (no subaccount filter).
+ * Used by the PATCH route to load the existing config for merge, so that the
+ * subaccount scope check fires at the write step (updateAgentConfig) rather than
+ * silently returning 404 here.
+ * Throws 404 if not found within the org.
+ */
+export async function getInboxForOrg(
+  inboxId: string,
+  organisationId: string,
+): Promise<InboxWithSyncHealth> {
+  const db = getOrgScopedDb('supportInboxService.getInboxForOrg');
+  const [row] = await db
+    .select({
+      inbox: canonicalInboxes,
+      connectorStatus: connectorConfigs.status,
+      lastSyncAt: connectorConfigs.lastSyncAt,
+      lastSyncStatus: connectorConfigs.lastSyncStatus,
+      lastSyncError: connectorConfigs.lastSyncError,
+    })
+    .from(canonicalInboxes)
+    .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
+    .where(
+      and(
+        eq(canonicalInboxes.id, inboxId),
+        eq(canonicalInboxes.organisationId, organisationId),
       ),
     )
     .limit(1);

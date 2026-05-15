@@ -277,7 +277,7 @@ A pg-boss handler registered with `resolveOrgContext: () => null` MUST call `wit
 
 ### 8.39 Routes never import from `server/db/schema/**`
 
-Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #307). Detection gate: `scripts/verify-no-db-in-routes.sh`.
+Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #318). Detection gate: `scripts/verify-no-db-in-routes.sh`.
 
 ---
 
