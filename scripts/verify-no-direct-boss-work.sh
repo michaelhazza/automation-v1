@@ -88,9 +88,9 @@ while IFS= read -r src_file; do
     line_text=$(echo "$match" | cut -d: -f2-)
 
     # Filter to actual pg-boss worker registrations: the identifier just
-    # before `.work(` is typically `boss`, `pgboss`, `this.boss`, or
-    # `this.pgboss`. Skip lines that match unrelated `.work` symbols
-    # (e.g., `network.work`, comments quoting the pattern).
+    # before `.work(` must be one of the four canonical boss-instance names
+    # used in this codebase: `boss`, `pgboss`, `this.boss`, `this.pgboss`.
+    # Skip lines that match unrelated `.work` symbols (e.g., `network.work`).
     if ! echo "$line_text" | grep -qE "\b(boss|pgboss)\.work\(|this\.(boss|pgboss)\.work\("; then
       continue
     fi
@@ -101,10 +101,8 @@ while IFS= read -r src_file; do
       "//"*|"*"*|"/*"*) continue ;;
     esac
 
-    # Skip per-line suppression.
-    if echo "$line_text" | grep -qE "guard-ignore:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
-      continue
-    fi
+    # Skip if the line (or the previous line) carries a suppression for this gate.
+    is_suppressed "$src_file" "$lineno" "$GUARD_ID" && continue
 
     emit_violation "$GUARD_ID" "error" "$rel_path" "$lineno" \
       "Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context" \

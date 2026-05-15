@@ -1906,14 +1906,18 @@ DROP POLICY IF EXISTS <child_table>_tenant_isolation ON <child_table>;
 
 CREATE POLICY <child_table>_tenant_isolation ON <child_table>
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM <parent_table> p
       WHERE p.id = <child_table>.<parent_fk_column>
         AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
     )
   )
   WITH CHECK (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM <parent_table> p
       WHERE p.id = <child_table>.<parent_fk_column>
         AND p.organisation_id = current_setting('app.organisation_id', true)::uuid

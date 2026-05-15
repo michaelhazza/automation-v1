@@ -75,10 +75,8 @@ while IFS= read -r route_file; do
                || echo "$route_file" | sed "s|$ROOT_DIR/||")
     rel_path=$(echo "$rel_path" | sed 's|\\|/|g')
 
-    # Skip if the line carries a per-line suppression for this gate.
-    if echo "$line_text" | grep -qE "guard-ignore:\s*${GUARD_ID}\s+reason=\"[^\"]+\""; then
-      continue
-    fi
+    # Skip if the line (or the previous line) carries a suppression for this gate.
+    is_suppressed "$route_file" "$lineno" "$GUARD_ID" && continue
 
     emit_violation "$GUARD_ID" "error" "$rel_path" "$lineno" \
       "Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore" \
