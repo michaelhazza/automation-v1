@@ -84,7 +84,7 @@ export const operatorSessionInitialContextBundler = {
           and(
             eq(voiceProfilesTable.ownerUserId, input.ownerUserId),
             eq(voiceProfilesTable.state, 'ready'),
-            isNull(voiceProfilesTable.optedOutAt),
+            isNull(voiceProfilesTable.optOutAt),
           ),
         )
         .limit(1);
