@@ -169,6 +169,12 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
     templateVersion: input.templateVersion,
     status: 'pending',
     policyJson: input.policy,
+    // SANDBOX-ADV-6.1 (spec B §6.3): persist credential aliases on INSERT so the
+    // reconciliation sweep can rebuild redaction patterns when the canonical
+    // harvest path crashes. Without this, reconciliation reads back `[]` from
+    // the column default and any credentialed task's reconciled harvest skips
+    // alias-derived redaction.
+    credentialAliases: input.credentialIssuanceContext.aliases,
     inputSummaryJson: {
       inputBytes: input.inputBytes,
       fileCount: input.inputFiles.length,

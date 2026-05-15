@@ -71,7 +71,15 @@ const V1_DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
 // template. Deferred-decision: this list should be driven from CURRENT_VERSION
 // coherence checks (C14) rather than maintained inline. TODO: consolidate in
 // verify-template-version-coherence CI gate when C14 lands.
-const ALLOWED_TEMPLATE_VERSIONS = ['v1.0.0'] as const;
+//
+// `local-dev-v1.0.0` is the pre-first-publish sentinel per KNOWLEDGE.md
+// [2026-05-11] — the strict CI gate exempts `local-dev-*` versions to keep
+// the pre-first-publish flow green. The operator flips the prefix off at
+// first-publish time (SANDBOX-F1 step 0). Without this entry every
+// `iee_dev` sandbox-class dispatch in local dev throws
+// `sandbox_input_rejected` because the committed CURRENT_VERSION carries
+// `version=local-dev-v1.0.0`.
+const ALLOWED_TEMPLATE_VERSIONS = ['v1.0.0', 'local-dev-v1.0.0'] as const;
 
 /**
  * Resolve the current template version for a given template name from

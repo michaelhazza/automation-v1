@@ -290,28 +290,12 @@ async function applyCeilingTransition(
   }
 
   if (transition.kind === 'harvesting') {
-    // Terminate the provider sandbox before flipping the row status.
-    // providerSandboxId is non-null for harvesting transitions per classifyCeilingTransition.
-    if (providerSandboxId) {
-      try {
-        await withSandboxProvider({
-          phase: 'terminal',
-          sandboxExecutionId,
-          telemetryWriter: makeTelemetryWriter(),
-          call: () => getProvider().terminate(providerSandboxId),
-        });
-      } catch (err) {
-        logger.warn('sandbox.ceiling_monitor.provider_terminate_failed', {
-          sandboxExecutionId,
-          providerSandboxId,
-          err,
-        });
-        // proceed with the DB UPDATE — terminate failure is non-fatal
-      }
-    }
-
-    // Re-read the row's status immediately before the UPDATE to detect a
-    // concurrent provider write (spec §8.3 SANDBOX-ADV-3.2).
+    // Re-read the row's status BEFORE terminating to detect a concurrent
+    // provider write (spec §8.3 SANDBOX-ADV-3.2). If the provider has already
+    // won the race (flipped to harvesting), back out without terminating —
+    // calling terminate() on an actively-harvesting sandbox would kill an
+    // in-progress successful harvest. The whole point of provider-result-wins
+    // semantics is to defer to the provider when it has reached harvest.
     const reReadRows = await db
       .select({
         status: sandboxExecutions.status,
@@ -345,6 +329,26 @@ async function applyCeilingTransition(
           rationale: decision.rationale,
         });
         return;
+      }
+    }
+
+    // Monitor won the race — safe to terminate the provider sandbox.
+    // providerSandboxId is non-null for harvesting transitions per classifyCeilingTransition.
+    if (providerSandboxId) {
+      try {
+        await withSandboxProvider({
+          phase: 'terminal',
+          sandboxExecutionId,
+          telemetryWriter: makeTelemetryWriter(),
+          call: () => getProvider().terminate(providerSandboxId),
+        });
+      } catch (err) {
+        logger.warn('sandbox.ceiling_monitor.provider_terminate_failed', {
+          sandboxExecutionId,
+          providerSandboxId,
+          err,
+        });
+        // proceed with the DB UPDATE — terminate failure is non-fatal
       }
     }
 

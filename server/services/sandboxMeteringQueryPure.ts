@@ -35,7 +35,13 @@ export interface SandboxMinutesQueryResult {
 
 export interface SandboxMeteringRow {
   templateName: string;
-  wallClockMs: number;
+  // The SQL builders cast `SUM(...)::bigint` (rather than `::int`) so the
+  // aggregate cannot overflow int4 (~24.8 days of summed wall-clock ms across
+  // a query window). The pg driver returns bigint values as strings to avoid
+  // JS number-precision loss; rollupSandboxMinutes coerces with Number()
+  // before doing arithmetic. Sums above Number.MAX_SAFE_INTEGER (~285k years
+  // of ms) are not a concern.
+  wallClockMs: number | string;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +73,7 @@ export function buildOrgSandboxMinutesQuery(
   return sql`
     SELECT
       lr.sandbox_template_version AS template_name,
-      SUM(lr.sandbox_wall_clock_ms)::int AS wall_clock_ms
+      SUM(lr.sandbox_wall_clock_ms)::bigint AS wall_clock_ms
     FROM llm_requests lr
     WHERE lr.source_type = 'sandbox_compute'
       AND lr.organisation_id = ${input.organisationId}
@@ -89,7 +95,7 @@ export function buildSubaccountSandboxMinutesQuery(
   return sql`
     SELECT
       lr.sandbox_template_version AS template_name,
-      SUM(lr.sandbox_wall_clock_ms)::int AS wall_clock_ms
+      SUM(lr.sandbox_wall_clock_ms)::bigint AS wall_clock_ms
     FROM llm_requests lr
     WHERE lr.source_type = 'sandbox_compute'
       AND lr.organisation_id = ${input.organisationId}
@@ -122,12 +128,14 @@ export function rollupSandboxMinutes(
   }
 
   // Group wallClockMs by templateName (rows should already be grouped by the
-  // SQL query, but this handles any duplicates defensively).
+  // SQL query, but this handles any duplicates defensively). Coerce bigint-as-
+  // string values from the pg driver before summing.
   const byTemplate = new Map<string, number>();
   for (const row of rows) {
+    const ms = typeof row.wallClockMs === 'string' ? Number(row.wallClockMs) : row.wallClockMs;
     byTemplate.set(
       row.templateName,
-      (byTemplate.get(row.templateName) ?? 0) + row.wallClockMs,
+      (byTemplate.get(row.templateName) ?? 0) + ms,
     );
   }
 

@@ -21,10 +21,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Strip CR per DEVELOPMENT_GUIDELINES.md §5 — Windows-authored files contain
+// CRLF; the static-grep assertions below use bare \n, so normalise on read.
 const src = readFileSync(
   path.join(__dirname, '../sandboxCeilingMonitorJob.ts'),
   'utf8',
-);
+).replace(/\r/g, '');
 
 describe('ceiling tripped → terminate called before DB UPDATE (REQ #36)', () => {
   it('calls getProvider().terminate inside a withSandboxProvider wrapper', () => {

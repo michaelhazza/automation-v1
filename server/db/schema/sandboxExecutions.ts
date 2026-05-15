@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
+import type { CredentialIssuanceAlias, SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
 import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,9 @@ export const sandboxExecutions = pgTable(
 
     // Credential aliases permitted for this execution (spec §6.3 SANDBOX-ADV-6.1).
     // Populated at run creation; empty array means no credentials injected.
-    credentialAliases: jsonb('credential_aliases').notNull().$type<string[]>().default([]),
+    // Stored as the full CredentialIssuanceAlias[] payload so reconciliation can
+    // rebuild redaction patterns identically to the canonical harvest path.
+    credentialAliases: jsonb('credential_aliases').notNull().$type<CredentialIssuanceAlias[]>().default([]),
 
     // Input summary (size + MIME + file count — no content)
     inputSummaryJson: jsonb('input_summary_json'),
