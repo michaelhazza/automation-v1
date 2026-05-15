@@ -97,7 +97,7 @@ router.post(
 router.get(
   '/api/workflow-runs/:runId',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_VIEW),
   asyncHandler(async (req, res) => {
     const result = await WorkflowRunService.getRun(req.orgId!, req.params.runId);
     res.json(result);
@@ -149,7 +149,7 @@ router.patch(
 router.post(
   '/api/workflow-runs/:runId/cancel',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL),
   asyncHandler(async (req, res) => {
     await WorkflowRunService.cancelRun(req.orgId!, req.params.runId, req.user!.id);
     res.json({ ok: true, status: 'cancelling' });
@@ -159,7 +159,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/replay',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
     const { WorkflowEngineService } = await import('../services/workflowEngineService.js');
     const result = await WorkflowEngineService.createReplayRun(
@@ -174,7 +174,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/steps/:stepRunId/input',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT),
   asyncHandler(async (req, res) => {
     const { runId, stepRunId } = req.params;
     const { data, expectedVersion } = req.body as {
@@ -200,7 +200,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/steps/:stepRunId/output',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT),
   asyncHandler(async (req, res) => {
     const { runId, stepRunId } = req.params;
     const {
@@ -244,7 +244,7 @@ router.post(
 router.post(
   '/api/workflow-runs/:runId/steps/:stepRunId/approve',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_APPROVE),
   asyncHandler(async (req, res) => {
     const { runId, stepRunId } = req.params;
     const { decision, editedOutput, expectedVersion, decisionReason } = req.body as {
@@ -288,7 +288,7 @@ router.post(
 router.post(
   '/api/tasks/:taskId/run/pause',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
     const runId = await resolveActiveRunForTask(taskId, req.orgId!);
@@ -308,7 +308,7 @@ router.post(
 router.post(
   '/api/tasks/:taskId/run/resume',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
     const { extendCostCents, extendSeconds } = req.body as { extendCostCents?: number; extendSeconds?: number };
@@ -342,7 +342,7 @@ router.post(
 router.post(
   '/api/tasks/:taskId/run/stop',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireOrgPermission(ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
     const runId = await resolveActiveRunForTask(taskId, req.orgId!);
