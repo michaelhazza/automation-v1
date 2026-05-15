@@ -7,6 +7,7 @@
 **Scope:** All chunks (1–5) shipped; whole-spec coverage per caller confirmation
 **Changed-code set:** 8 files (3 production, 3 new tests, 2 docs)
 **Run at:** 2026-05-15T03:22:00Z
+**Commit at finish:** 655cae40
 
 ---
 
