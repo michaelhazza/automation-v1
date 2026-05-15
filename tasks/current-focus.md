@@ -3,8 +3,8 @@ active_spec: tasks/builds/wave-1-cleanup-prevention/launch-prompt.md
 active_plan: tasks/builds/wave-1-cleanup-prevention/launch-prompt.md
 build_slug: wave-1-cleanup-prevention
 branch: claude/wave-1-cleanup-prevention
-status: REVIEWING
-last_updated: 2026-05-15T13:24:09Z
+status: MERGE_READY
+last_updated: 2026-05-15T14:00:00Z
 last_merged_pr: #316
 last_merged_slug: wave-1-cleanup-prevention-specs
 last_merged_branch: main
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/wave-1-cleanup-prevention/launch-prompt.md`
 **Active build slug:** `wave-1-cleanup-prevention`
 **Branch:** `claude/wave-1-cleanup-prevention`
-**Status:** **REVIEWING** — Phase 3 finalisation in progress. PR [#317](https://github.com/michaelhazza/automation-v1/pull/317) open. Light-pipeline build (~30 mechanical prevention + cleanup items). `pr-reviewer` DONE (findings applied in `d396ba74`). `chatgpt-pr-review` running (user-requested). Phase 3 handoff at `tasks/builds/wave-1-cleanup-prevention/handoff.md`.
+**Status:** **MERGE_READY** — Phase 3 finalisation complete. PR [#317](https://github.com/michaelhazza/automation-v1/pull/317) open. `chatgpt-pr-review` 2 rounds APPROVED (F1 *.down.sql exclusion; F2 schema-qualified REFERENCES + CREATE POLICY grep). `ready-to-merge` label applied. Phase 3 handoff at `tasks/builds/wave-1-cleanup-prevention/handoff.md`.
 
 **Just completed (page-splits):** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) — MERGE_READY. Phase 3 finalisation complete. 16 client-side page-level files split along tab / region / atom seams; no functional change. `chatgpt-pr-review` 3 rounds APPROVED. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-page-splits-2026-05-14T21-53-53Z.md`.
 
@@ -100,7 +100,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-15 (Phase 3 finalisation complete for `page-splits`; PR #313 MERGE_READY; `ready-to-merge` label applied)
+**Last updated:** 2026-05-15 (Phase 3 finalisation complete for `wave-1-cleanup-prevention`; PR #317 MERGE_READY; `ready-to-merge` label applied)
 
 ---
 
