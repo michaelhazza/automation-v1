@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
-import { canonicalInboxes } from '../../db/schema/index.js';
 import { SupportInboxAgentConfigSchema } from '../../../shared/types/supportInboxAgentConfig.js';
 import type { SupportInboxAgentConfig } from '../../../shared/types/supportInboxAgentConfig.js';
 import { validatePromptOverride } from '../../services/promptOverridePure.js';
