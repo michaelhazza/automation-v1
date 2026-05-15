@@ -47,6 +47,8 @@ import {
   type E2bTerminalSignal,
 } from './e2bSandboxPure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
+import { logger } from '../../lib/logger.js';
+import { verifyTeardown } from './teardownVerifierPure.js';
 import type {
   SandboxRunTaskInput,
   SandboxRunTaskOutput,
@@ -134,6 +136,18 @@ export interface E2bSdkClient {
    * Should be called after the sandbox's process has completed.
    */
   getTerminalState(sandboxId: string): Promise<E2bTerminalSignal>;
+
+  /**
+   * Check whether a sandbox is still alive (running).
+   * Returns true if the sandbox is reachable and running; false if terminated.
+   * Used by teardown verification (§7.7 REQ #55) — called after terminateSandbox
+   * to confirm the sandbox is actually gone.
+   *
+   * NOTE: method name must be verified against the real e2b SDK surface at
+   * installation time. If the real SDK uses a different name, update this
+   * interface and the defaultSdkStub accordingly.
+   */
+  isSandboxAlive(sandboxId: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +168,9 @@ function makeNotInstalledStub(): E2bSdkClient {
     writeFile: notInstalled,
     listFiles: notInstalled,
     getTerminalState: notInstalled,
+    // Teardown verification stub: returns false (not alive) when SDK not installed.
+    // The real SDK implementation must be verified at installation time.
+    isSandboxAlive: async (_sandboxId: string) => false,
   };
 }
 
@@ -387,6 +404,22 @@ export class E2bSandbox implements SandboxExecutionService {
       // both terminate independently as belt-and-braces.
     });
 
+    // Post-terminate verification (§7.7 REQ #55). Runs even if terminate above
+    // threw — health-check throw maps to verified:false/health_check_threw.
+    const verification = await verifyTeardown({
+      providerSandboxId,
+      postTerminateHealthCheck: () => this.sdkClient.isSandboxAlive(providerSandboxId),
+    });
+
+    if (verification.verified) {
+      logger.info('sandbox.teardown.verified', { providerSandboxId });
+    } else {
+      logger.error('sandbox.teardown.unverified', {
+        providerSandboxId,
+        reason: verification.reason,
+      });
+    }
+
     // Metrics: populated from provider-reported data where available.
     // In V1 the e2b SDK surface for per-execution vCPU / memory metrics is
     // unknown until the real SDK is installed. Stubs carry wall-clock only.
@@ -422,6 +455,20 @@ export class E2bSandbox implements SandboxExecutionService {
 
   async terminate(providerSandboxId: string): Promise<void> {
     await this.sdkClient.terminateSandbox(providerSandboxId);
+
+    const verification = await verifyTeardown({
+      providerSandboxId,
+      postTerminateHealthCheck: () => this.sdkClient.isSandboxAlive(providerSandboxId),
+    });
+
+    if (verification.verified) {
+      logger.info('sandbox.teardown.verified', { providerSandboxId });
+    } else {
+      logger.error('sandbox.teardown.unverified', {
+        providerSandboxId,
+        reason: verification.reason,
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
