@@ -51,12 +51,7 @@ import {
   completeStepRunInternal,
 } from '../stepLifecycle.js';
 import { loadDefinitionForRun, findStepInDefinition } from '../definitionHelpers.js';
-import {
-  withInvalidationGuard,
-  mergeStepOutputIntoContext,
-  assertContextSize,
-  shouldSuppressWebSocket,
-} from '../contextHelpers.js';
+import { withInvalidationGuard } from '../contextHelpers.js';
 import { emitWorkflowEvent } from '../readySet.js';
 
 export async function dispatchStep(

@@ -5,7 +5,7 @@ import { logger } from '../../../lib/logger.js';
 import { emitOrgUpdate } from '../../../websocket/emitters.js';
 import { upsertSubaccountOnboardingState } from '../../../lib/workflow/onboardingStateHelpers.js';
 import { hashValue } from '../../../lib/workflow/hash.js';
-import { renderString, resolveInputs as resolveTemplateInputs, TemplatingError } from '../../../lib/workflow/templating.js';
+import { renderString, resolveInputs as resolveTemplateInputs } from '../../../lib/workflow/templating.js';
 import { computeSkipSet, parseDecisionOutput } from '../../../lib/workflow/agentDecisionPure.js';
 import { renderAgentDecisionEnvelope } from '../../../lib/workflow/agentDecisionEnvelope.js';
 import {
