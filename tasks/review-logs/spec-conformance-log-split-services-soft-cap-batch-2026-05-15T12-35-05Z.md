@@ -7,6 +7,7 @@
 **Scope:** Phase 2 branch-level — all 5 splits per spec §7 acceptance criteria
 **Changed-code set:** 59 source files across the 5 sibling trees + 5 barrels
 **Run at:** 2026-05-15T12:35:05Z
+**Commit at finish:** `aaf91bb5`
 
 ---
 
