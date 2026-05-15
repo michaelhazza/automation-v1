@@ -44,7 +44,7 @@ server/services/executionBackends/_ieeShared.ts:186:Swallowed promise error: .ca
 # expires: 2026-08-14
 server/services/llmInflightRegistry.ts:665:Swallowed promise error: .catch(() => undefined/null)
 # expires: 2026-08-14
-server/services/queueService.ts:1200:Swallowed promise error: .catch(() => undefined/null)
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:663:Swallowed promise error: .catch(() => undefined/null)
 # expires: 2026-08-14
 server/services/skillParserService.ts:570:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-14
