@@ -513,6 +513,13 @@ export class E2bSandbox implements SandboxExecutionService {
   ): Promise<SandboxLogRefs> {
     const readLog = async (stream: 'stdout' | 'stderr'): Promise<string> => {
       try {
+        // no-tenancy-context: defaults to log-only. This private method takes only
+        // (providerSandboxId, sandboxExecutionId) — the full tenancy fields required
+        // by sandbox_telemetry_events (organisationId, runId, agentId, taskId,
+        // templateName, templateVersion) are not threaded here. Diagnostics surface
+        // via logger.warn in withSandboxProvider only; DB-row persistence at this
+        // site requires a method-signature refactor and is tracked in tasks/todo.md
+        // under REQ #31 follow-up.
         await withSandboxProvider({
           phase: 'harvest',
           sandboxExecutionId,
@@ -542,6 +549,13 @@ export class E2bSandbox implements SandboxExecutionService {
     sandboxExecutionId: string,
   ): Promise<SandboxArtefactRef[]> {
     try {
+      // no-tenancy-context: defaults to log-only. This private method takes only
+      // (providerSandboxId, sandboxExecutionId) — the full tenancy fields required
+      // by sandbox_telemetry_events (organisationId, runId, agentId, taskId,
+      // templateName, templateVersion) are not threaded here. Diagnostics surface
+      // via logger.warn in withSandboxProvider only; DB-row persistence at this
+      // site requires a method-signature refactor and is tracked in tasks/todo.md
+      // under REQ #31 follow-up.
       const entries = await withSandboxProvider({
         phase: 'harvest',
         sandboxExecutionId,
