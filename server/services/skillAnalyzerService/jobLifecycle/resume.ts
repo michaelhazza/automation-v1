@@ -120,7 +120,7 @@ export async function resumeJob(params: {
     .where(eq(skillAnalyzerJobs.id, jobId));
 
   const boss = await getPgBoss();
-  await boss.send('skill-analyzer', { jobId }, {
+  await boss.send('skill-analyzer', { jobId, organisationId }, {
     ...getJobConfig('skill-analyzer'),
     singletonKey: undefined,
   });

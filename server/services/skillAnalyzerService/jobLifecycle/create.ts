@@ -60,7 +60,7 @@ export async function createJob(params: {
   // killed otherwise-healthy long runs mid-Stage-5. singletonKey stays
   // undefined — one-shot enqueue per jobId.
   const boss = await getPgBoss();
-  await boss.send('skill-analyzer', { jobId }, {
+  await boss.send('skill-analyzer', { jobId, organisationId }, {
     ...getJobConfig('skill-analyzer'),
     singletonKey: undefined,
   });
