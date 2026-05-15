@@ -15,7 +15,7 @@
  * Provider file API calls (steps 2, 5, 6) are wrapped via withSandboxProvider.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import { sandboxArtefacts } from '../db/schema/sandboxArtefacts.js';
@@ -42,6 +42,7 @@ import { evaluateTaskCost, IEE_BROWSER_EVENT_TASK_COST_ANOMALY } from './sandbox
 import { isCredentialLeakFilename } from './sandbox/credentialLeakFilenameGuardPure.js';
 import { sanitiseArtefactFilename } from './sandbox/artefactFilenameSanitiserPure.js';
 import { recordIncident } from './incidentIngestor.js';
+import { checkLogStorageQuota } from './sandbox/logStorageQuotaPure.js';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -607,6 +608,37 @@ async function step9LogPersistence(
   stderr: LogEntry[],
 ): Promise<{ result: HarvestStepResult; stdoutRef: string; stderrRef: string }> {
   const db = getOrgScopedDb('sandboxHarvestService.step9');
+
+  // Per-tenant log-storage quota check (spec §8.5, SANDBOX-ADV-5.2).
+  const allLines = [...stdout, ...stderr];
+  const thisBatchBytes = allLines.reduce((sum, e) => sum + Buffer.byteLength(e.line, 'utf8'), 0);
+
+  const [{ today_bytes }] = await db.execute<{ today_bytes: string }>(sql`
+    SELECT COALESCE(SUM(char_length(line)), 0)::bigint AS today_bytes
+    FROM sandbox_logs
+    WHERE organisation_id = ${ctx.organisationId}
+      AND persisted_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+  `);
+  const todayBytesAlreadyPersisted = Number(today_bytes);
+
+  const quotaResult = checkLogStorageQuota({
+    organisationId: ctx.organisationId,
+    todayBytesAlreadyPersisted,
+    thisBatchBytes,
+  });
+
+  if (!quotaResult.allowed) {
+    await writeTelemetryEvent(ctx, 'artefact_upload_failed', 'error', {
+      reason: 'log_quota_exceeded',
+      capBytes: quotaResult.capBytes,
+      exceededBy: quotaResult.exceededBy,
+    });
+    return {
+      result: { ok: false, reason: 'harvest_failed' },
+      stdoutRef: '',
+      stderrRef: '',
+    };
+  }
 
   const persistStream = async (
     stream: 'stdout' | 'stderr',
