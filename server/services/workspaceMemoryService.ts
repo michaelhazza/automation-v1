@@ -15,7 +15,6 @@ import {
   SUMMARY_MAX_TOKENS,
   DEFAULT_ENTRY_LIMIT,
   VALID_ENTRY_TYPES,
-  MIN_MEMORY_CONTENT_LENGTH,
   MAX_PROMPT_ENTITIES,
   MAX_ENTITIES_PER_EXTRACTION,
   MIN_ENTITY_CONFIDENCE,
@@ -48,29 +47,25 @@ import { assertScope, assertScopeSingle } from '../lib/scopeAssertion.js';
 import { createHash } from 'crypto';
 import { sanitizeSearchQuery } from '../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../lib/queryIntentClassifier.js';
-import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../lib/queryIntent.js';
+import { RETRIEVAL_PROFILES } from '../lib/queryIntent.js';
 import {
   applyOutcomeDefaults,
   scoreForOutcome,
   selectPromotedEntryType,
   type RunOutcome,
 } from './workspaceMemoryServicePure.js';
+import {
+  agentRoleToDomain,
+  classifyDomainTopic,
+  type ExtractRunInsightsOptions,
+  type HybridRetrieveParams,
+  type HybridResult,
+} from './workspaceMemoryService/types.js';
+import { hydeCacheGet, hydeCacheSet } from './workspaceMemoryService/hydeCache.js';
+import { scoreMemoryEntry } from './workspaceMemoryService/quality.js';
 
-// Phase B §8.3 — extended options bag for `extractRunInsights`. `taskSlug`
-// moves inside `options` alongside `overrides` so the tail argument has a
-// single consistent shape. Overrides are caller-specific (today only
-// `outcomeLearningService` uses them to preserve "run-sourced, verified"
-// semantics for human-curated lessons — §6.7.1).
-export interface ExtractRunInsightsOptions {
-  taskSlug?: string;
-  overrides?: {
-    isUnverified?: boolean;
-    provenanceConfidence?: number;
-  };
-  // Test injection point — allows unit tests to supply a mock without a real
-  // provider config. Production code always falls back to `routeCall`.
-  _routeCall?: typeof routeCall;
-}
+export type { ExtractRunInsightsOptions };
+export { agentRoleToDomain };
 
 // ---------------------------------------------------------------------------
 // Workspace Memory Service — shared memory across agents in a workspace
@@ -81,126 +76,8 @@ const MEMORY_BOUNDARY_START = '<workspace-memory-data>';
 const MEMORY_BOUNDARY_END = '</workspace-memory-data>';
 
 // ---------------------------------------------------------------------------
-// HyDE cache — per-instance LRU with TTL (Phase B4)
-// ---------------------------------------------------------------------------
-const HYDE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const HYDE_CACHE_MAX_SIZE = 200;
-const hydeCache = new Map<string, { value: string; expiresAt: number }>();
-
-function hydeCacheGet(key: string): string | undefined {
-  const entry = hydeCache.get(key);
-  if (!entry) return undefined;
-  if (Date.now() > entry.expiresAt) { hydeCache.delete(key); return undefined; }
-  // LRU: move to end by re-inserting (Map preserves insertion order)
-  hydeCache.delete(key);
-  hydeCache.set(key, entry);
-  return entry.value;
-}
-
-function hydeCacheSet(key: string, value: string): void {
-  if (hydeCache.size >= HYDE_CACHE_MAX_SIZE) {
-    const firstKey = hydeCache.keys().next().value;
-    if (firstKey) hydeCache.delete(firstKey);
-  }
-  hydeCache.set(key, { value, expiresAt: Date.now() + HYDE_CACHE_TTL_MS });
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2C: Lightweight domain/topic classifier for memory entries
-// ---------------------------------------------------------------------------
-
-const DOMAIN_KEYWORDS: Record<string, readonly string[]> = {
-  crm:       ['lead', 'deal', 'pipeline', 'contact', 'prospect', 'hubspot', 'salesforce', 'crm', 'close rate', 'churn', 'retention'],
-  reporting: ['report', 'dashboard', 'metric', 'kpi', 'analytics', 'chart', 'trend', 'benchmark', 'performance', 'roi'],
-  marketing: ['campaign', 'ad ', 'ads ', 'seo', 'content', 'social media', 'email marketing', 'audience', 'brand', 'conversion', 'ctr', 'impressions'],
-  dev:       ['deploy', 'api', 'bug', 'code', 'migration', 'server', 'database', 'endpoint', 'integration', 'webhook'],
-  finance:   ['budget', 'invoice', 'revenue', 'cost', 'margin', 'billing', 'payment', 'expense', 'subscription', 'pricing'],
-  ops:       ['workflow', 'automation', 'process', 'sop', 'onboarding', 'scheduling', 'handoff', 'escalation'],
-};
-
-const TOPIC_KEYWORDS: Record<string, readonly string[]> = {
-  budget:    ['budget', 'spend', 'cost', 'expense', 'allocation'],
-  campaign:  ['campaign', 'ad campaign', 'launch', 'promo'],
-  pipeline:  ['pipeline', 'deal', 'stage', 'funnel', 'opportunity'],
-  metrics:   ['metric', 'kpi', 'benchmark', 'performance', 'score'],
-  content:   ['content', 'copy', 'post', 'article', 'blog'],
-  client:    ['client', 'customer', 'account', 'stakeholder'],
-  product:   ['product', 'feature', 'release', 'roadmap'],
-};
-
-/**
- * Map an agent's role (from agents.agentRole) to a memory domain.
- * Returns null when the role doesn't map to a known domain — callers
- * should treat null as "no domain scoping" (search everything).
- */
-export function agentRoleToDomain(role: string | null | undefined): string | null {
-  if (!role) return null;
-  const lower = role.toLowerCase();
-  // Direct matches first
-  for (const domain of Object.keys(DOMAIN_KEYWORDS)) {
-    if (lower.includes(domain)) return domain;
-  }
-  // Common role names that map to domains
-  if (/sales|account.exec|bdr|sdr|business.dev/.test(lower)) return 'crm';
-  if (/analyst|intelligence|data/.test(lower)) return 'reporting';
-  if (/seo|content|social|brand|geo/.test(lower)) return 'marketing';
-  if (/engineer|developer|devops/.test(lower)) return 'dev';
-  if (/accounting|bookkeep|cfo/.test(lower)) return 'finance';
-  if (/coordinator|operations|admin|onboard/.test(lower)) return 'ops';
-  return null;
-}
-
-function classifyDomainTopic(content: string): { domain: string | null; topic: string | null } {
-  const lower = content.toLowerCase();
-  let bestDomain: string | null = null;
-  let bestDomainHits = 0;
-  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
-    const hits = keywords.filter(kw => lower.includes(kw)).length;
-    if (hits > bestDomainHits) { bestDomainHits = hits; bestDomain = domain; }
-  }
-  let bestTopic: string | null = null;
-  let bestTopicHits = 0;
-  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
-    const hits = keywords.filter(kw => lower.includes(kw)).length;
-    if (hits > bestTopicHits) { bestTopicHits = hits; bestTopic = topic; }
-  }
-  return { domain: bestDomainHits >= 1 ? bestDomain : null, topic: bestTopicHits >= 1 ? bestTopic : null };
-}
-
-// ---------------------------------------------------------------------------
 // Unified hybrid retrieval pipeline (Phase 0A)
 // ---------------------------------------------------------------------------
-
-interface HybridRetrieveParams {
-  subaccountId: string;
-  orgId?: string;
-  queryText: string;
-  queryEmbedding?: number[];
-  qualityThreshold: number;
-  taskSlug?: string;
-  /** Phase 2C: Optional domain filter for scoped retrieval. */
-  domain?: string;
-  topK?: number;
-  includeOtherSubaccounts?: boolean;
-  profile?: RetrievalProfile;
-}
-
-interface HybridResult {
-  id: string;
-  content: string;
-  rrf_score: number;
-  combined_score: number;
-  source_count: number;
-  agent_id: string | null;
-  agent_name: string;
-  subaccount_id: string;
-  created_at: string;
-  // Memory & Briefings §4.2 (S2): included so the recency-boost post-processing
-  // step can check if this entry was accessed within RECENCY_BOOST_WINDOW.
-  // IMPORTANT: this field is read-only for ranking purposes — it is NEVER written
-  // back as qualityScore (§4.4 invariant: recency boost is ranking-time only).
-  last_accessed_at: string | null;
-}
 
 async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResult[]> {
   const {
@@ -561,38 +438,6 @@ let pgBossSendCallback: ((queue: string, data: unknown, options?: Record<string,
 
 export function setContextEnrichmentJobSender(fn: typeof pgBossSendCallback) {
   pgBossSendCallback = fn;
-}
-
-// ---------------------------------------------------------------------------
-// Quality scoring
-// ---------------------------------------------------------------------------
-
-function scoreMemoryEntry(entry: { content: string; entryType: string }): number {
-  const { content } = entry;
-
-  // Hard floor: trivially short content is always zero
-  if (content.length < MIN_MEMORY_CONTENT_LENGTH) return 0;
-
-  const completeness = Math.min(content.length / 200, 1.0);
-
-  const specificitySignals = [
-    /\d+/.test(content),
-    /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/.test(content),
-    /"[^"]+"/.test(content),
-    /\b\d{4}-\d{2}-\d{2}\b/.test(content),
-    /\$[\d,]+/.test(content),
-  ];
-  const specificity = specificitySignals.filter(Boolean).length / specificitySignals.length;
-
-  const typeBoosts: Record<string, number> = {
-    preference: 1.0, pattern: 0.9, decision: 0.85, issue: 0.8, observation: 0.6,
-  };
-  const relevance = typeBoosts[entry.entryType] ?? 0.5;
-
-  const actionability = /should|must|always|never|prefers?|requires?|wants?|needs?|avoid/i
-    .test(content) ? 0.9 : 0.4;
-
-  return 0.25 * completeness + 0.25 * relevance + 0.25 * specificity + 0.25 * actionability;
 }
 
 export const workspaceMemoryService = {
