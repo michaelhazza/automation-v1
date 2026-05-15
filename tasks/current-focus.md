@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-16
-last_merge_ready_pr: #327
-last_merge_ready_slug: split-services-soft-cap-batch
-last_merge_ready_branch: claude/split-services-soft-cap-batch
-last_merged_pr: #313
-last_merged_slug: page-splits
-last_merged_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_at: 2026-05-15T00:00:00Z
-last_merged_commit: pending
+last_merged_pr: #327
+last_merged_slug: split-services-soft-cap-batch
+last_merged_branch: claude/split-services-soft-cap-batch
+last_merged_at: 2026-05-15T22:15:25Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — PR [#327](https://github.com/michaelhazza/automation-v1/pull/327) — `split-services-soft-cap-batch` (`claude/split-services-soft-cap-batch`). Wave 2 Session B: 5 god-files split into thin barrels (total 160 LOC across 5 barrels — agentService 39, queueService 29, workspaceMemoryService 45, llmRouter 46, skillAnalyzerJob 1) + 54 sibling sub-modules. 23 commits across 27 planned chunks. Phase 2 pipeline: spec-conformance CONFORMANT after rebase `fe6357ca` (REQ #7 positional gate-baseline drift, counts preserved 4→4, 1→1) → pr-reviewer R1 CHANGES_REQUESTED (BLOCKING: `callerAssert.ts:22` regex broke after split — every prod LLM call would have thrown `ADAPTER_DIRECT_CALL` — fixed in `8209bc2c`) → pr-reviewer R2 APPROVED → reality-checker READY → dual-reviewer APPROVED (Codex 0 findings). Phase 3 pipeline: S2 branch-sync clean (0 commits behind main at entry; earlier merge `fc6a93a7`) → G4 regression guard PASS (lint 0 errors / 882 warnings, typecheck clean) → chatgpt-pr-review 2 rounds (R1 3 findings deferred as pre-existing on main — F1 `stage5cSourceFork` name-collision filter, T1 `budget_block_upsert_ghost` observability gap, T2 `WORKSPACE_MIGRATION_CONCURRENCY` unbounded env-var, all routed to `tasks/todo.md`; R2 1 finding rejected as misread — ChatGPT missed `llmRouter.ts:38-39` re-exports below a comment-block boundary, `typecheck` confirmed imports are used) → doc-sync sweep 16 verdicts recorded (1 yes architecture.md + 2 yes KNOWLEDGE.md entries; 1 no CLAUDE.md/DEVELOPMENT_GUIDELINES.md with substantive rationale; 12 n/a with trigger-not-applicable rationales; 1 n/a capabilities.md `internal refactor with no capability surface change`) → 4 KNOWLEDGE.md patterns appended (2 Phase 2 + 2 Phase 3: third-opinion `verify-introduced-vs-pre-existing` + barrel comment-block re-export misread) → 3 `tasks/todo.md` items closed (Area 10 soft-cap 5-of-10 partial, SA3, REQ #7) → 4 Compound Learning Feedback proposals emitted (3 `agent-instruction` + 1 `hook-or-grep-gate`; auto-apply prohibited per v1 binding). REVIEW_GAP: `chatgpt-plan-review` skipped (operator override `yes-2026-05-15T-autonomous-mode-directive`); `chatgpt-pr-review` covered second-opinion pass at Phase 3.
+**Status:** **NONE**
+
+**Just merged:** PR [#327](https://github.com/michaelhazza/automation-v1/pull/327) — `split-services-soft-cap-batch` (squash-commit `pending-squash`, 2026-05-15T22:15:25Z). Wave 2 Session B: 5 god-files split into thin barrels (total 160 LOC across 5 barrels — agentService 39, queueService 29, workspaceMemoryService 45, llmRouter 46, skillAnalyzerJob 1) + 54 sibling sub-modules. 23 commits across 27 planned chunks. Phase 2 pipeline: spec-conformance CONFORMANT after rebase `fe6357ca` → pr-reviewer R1 CHANGES_REQUESTED (BLOCKING `callerAssert.ts:22` regex fixed in `8209bc2c`) → pr-reviewer R2 APPROVED → reality-checker READY → dual-reviewer APPROVED (Codex 0 findings). Phase 3 pipeline: S2 clean → G4 PASS → chatgpt-pr-review 2 rounds (R1 3 deferred as pre-existing on main, R2 1 rejected as misread) → doc-sync sweep 16 verdicts recorded → 4 KNOWLEDGE.md patterns appended (2 Phase 2 + 2 Phase 3: third-opinion verify-introduced-vs-pre-existing + barrel comment-block re-export misread) → 3 tasks/todo.md items closed (Area 10 soft-cap 5-of-10 partial, SA3, REQ #7) → 4 Compound Learning Feedback proposals emitted. Auto-fix loop: 1 iteration (`82a19f5d` — extended `scripts/verify-no-raw-console.sh` LEGACY_ALLOWLIST with 15 sub-module paths to close the B.2 raw-console-calls gate; exact pattern KNOWLEDGE.md Phase 2 entry predicted). CI ALL GREEN at merge time. REVIEW_GAP: `chatgpt-plan-review` skipped (operator override `yes-2026-05-15T-autonomous-mode-directive`); `chatgpt-pr-review` covered second-opinion pass at Phase 3.
 
 **Previously MERGE_READY:** PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) — `split-skill-analyzer`. Two-part monolith split + FORCE RLS migration 0359 + `createWorker` migration. chatgpt-pr-review 2 rounds APPROVED. Doc-sync clean. PR still open at time of new build kick-off; managed in parallel.
 
@@ -103,7 +102,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-16 (`split-services-soft-cap-batch` Phase 3 complete; PR #327 MERGE_READY pending operator label approval. `split-skill-analyzer` PR #320 still MERGE_READY in parallel.)
+**Last updated:** 2026-05-16 (PR #327 `split-services-soft-cap-batch` MERGED; status → NONE. `split-skill-analyzer` PR #320 still MERGE_READY in parallel.)
 
 ---
 
