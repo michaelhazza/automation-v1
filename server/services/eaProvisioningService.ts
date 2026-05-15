@@ -22,6 +22,20 @@ export interface EAProvisionResult {
   agentId: string;
 }
 
+export function buildVoiceProfileInsertValues(ctx: EAProvisionContext) {
+  return {
+    organisationId: ctx.organisationId,
+    ownerUserId: ctx.userId,
+    sources: ['gmail_sent_sampler'] as string[],
+    sourceConfig: { gmail_sent_sampler: { lastN: 50, sinceDays: 90 } },
+    state: 'pending' as const,
+    refreshPolicy: 'periodic' as const,
+    refreshConfig: { days: 30 },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
 export async function provisionEA(
   input: EAProvisionInput,
   ctx: EAProvisionContext,
@@ -128,15 +142,7 @@ export async function provisionEA(
     if (input.voiceProfileOptIn) {
       const [profile] = await tx
         .insert(voiceProfiles)
-        .values({
-          organisationId: ctx.organisationId,
-          ownerUserId: ctx.userId,
-          sources: ['gmail_sent_sampler'],
-          state: 'pending',
-          refreshPolicy: 'manual',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
+        .values(buildVoiceProfileInsertValues(ctx))
         .returning({ id: voiceProfiles.id });
 
       // Enqueue derivation asynchronously — do not await

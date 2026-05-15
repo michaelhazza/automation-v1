@@ -6,16 +6,19 @@
 # follow via Track A2/A3 worker-registration migrations; job files follow their
 # owning tracks.
 #
+# 2026-05-15 realignment: index.ts entries shifted +5 lines after the
+# split-skill-analyzer / split-workflow-engine merges; line :691 entry
+# removed (boss.work call no longer present at that location). Same pattern
+# as PR #321 (canonical-retry baseline drift fix).
+#
 # expires: 2026-08-13
 server/index.ts:652:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:691:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:933:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:928:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:946:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:941:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
-# expires: 2026-08-13
-server/index.ts:954:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:959:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
 server/jobs/ieeBrowserDailyRollupJob.ts:151:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13

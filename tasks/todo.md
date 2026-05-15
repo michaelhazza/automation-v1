@@ -1398,12 +1398,14 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.
 Confirmed holes fixed inline before pr-reviewer. Deferred items below.
 
-### createDraftWithProposal non-atomic (likely-hole)
+### createDraftWithProposal non-atomic (likely-hole) [status:closed:pr:324]
 `server/services/eaDrafts/eaDraftService.ts:58-88` — `actionService.proposeAction` and the
 subsequent `db.insert(eaDrafts)` are not wrapped in a single transaction. `proposeAction` does
 not accept a caller transaction handle. Fix requires refactoring `actionService.proposeAction`
 to accept an optional `tx` parameter, or extracting its insert logic into a shared helper.
 Phase 1.5 work item. Risk: orphaned `actions` row on `ea_drafts` insert failure.
+
+**Closed 2026-05-15 (pa-v1-cleanup-batch):** Verified atomic at `server/services/eaDrafts/eaDraftService.ts:98-133` — already wrapped in `db.transaction(async (tx) => { ... })`; `actionService.proposeAction` accepts `tx` param. Migration `0344_ea_drafts_proposal_action_unique.sql` adds defence-in-depth UNIQUE on `ea_drafts.proposal_action_id`. Spec §7.5 amended 2026-05-13 to ratify the 1:1 invariant.
 
 ### dispatch() missing organisationId filter on integrationConnections lookup (worth-confirming)
 `server/services/triggers/externalSourceTriggers.ts:38-52` — add
@@ -1424,65 +1426,118 @@ before being passed to the LLM.
 **Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v1-2026-05-12T13-15-07Z.md`
 **Spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md`
 
-- [ ] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract
+- [x] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract [status:closed:pr:324]
   - Spec section: §7.4 + §21.1
   - Gap: Missing `name` column (display); single `source` column (string) replaced by `sources text[]` array; missing `source_config jsonb` (per-sampler config); missing `refresh_config jsonb` (per-policy config). Renames: `sample_size`→`sample_count`, `last_derived_at`→`last_refreshed_at`, `opt_out_at`→`opted_out_at`.
   - Suggested approach: Decide whether to bring schema into spec alignment (migration adds 4 cols, drops 1, renames 3) OR amend the spec to match the simpler implementation. The simpler schema is functional but breaks the spec's per-sampler config envelope.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0360_voice_profiles_schema_align.sql` renames 3 cols + adds 2 jsonb cols per spec §21.1. Drizzle + Zod + service aligned. Spec §7.4 was also amended 2026-05-13 to ratify simplified shape (no separate `name` column; `sources text[]` array; `source_config` jsonb).
 
-- [ ] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch
+- [x] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch [status:closed:pr:324]
   - Spec section: §8.2 table + §6.3 rationale
   - Gap: Code uses Tier 6 (max); spec specifies Tier 4 with action-level `defaultGate: review`. The spec rationale (third-party visibility is consent-based) supports Tier 4. Either change works at runtime since both are review-gated, but tier classification drives downstream policy decisions (budget caps, audit categorisation).
   - Suggested approach: Confirm with the risk-tier rubric authors whether `create_event` is Tier 4 (record-write, consent-based visibility) or Tier 6 (broadcast). Update either the spec or the action registry.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Code already at Tier 4 with `defaultGate: 'review'` (`server/config/actionRegistry/calendar.ts:58-79` + `:81-102`). Conformance log captured an outdated view.
 
-- [ ] REQ-T8 — Dedup key formats diverge from spec §7.1
+- [x] REQ-T8 — Dedup key formats diverge from spec §7.1 [status:closed:pr:324]
   - Spec section: §7.1 + §24.1
   - Gap: Slack dedup key uses `channelId@messageTs` not `slack_event_id`. Calendar dedup key uses `eventId@startAt@minutesUntilStart` not `{calendarId}@{eventId}@{startAtISO8601}@{lookaheadMinutes}`. Both work as unique keys but diverge from spec's explicit shapes (which were chosen for multi-calendar support + recurring occurrence handling).
   - Suggested approach: Update `deriveDedupKey` in `externalSourceTriggersPure.ts` to match spec format, or amend spec §7.1 to match the simpler keys.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §7.1 amended 2026-05-13 (REQ-T8 amendment line 429) to ratify the simpler key shapes. Code at `externalSourceTriggersPure.ts:13-22` already matches.
 
-- [ ] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1
+- [x] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1 [status:closed:pr:324]
   - Spec section: §7.1
   - Gap: Spec specifies envelope with `provider`, `externalEventId`, `subaccountId`, `organisationId`, `integrationConnectionId`, and per-type `messageMetadata`/`eventMetadata`/`mentionMetadata` objects. Code's union has flat field shape (no envelope, owner-only). Loses some downstream consumer affordances (e.g. integration_connection_id passing through).
   - Suggested approach: Confirm with downstream consumers whether the simplified shape suffices. If not, expand schema to match spec.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §7.1 amended 2026-05-13 (REQ-C1 amendment line 406) to ratify the flat discriminated union — no envelope. Code at `shared/types/externalSourceTrigger.ts` already matches.
 
-- [ ] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2
+- [x] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2 [status:closed:pr:324]
   - Spec section: §13.2
   - Gap: `0332_executive_assistant_seed.sql` `default_org_skill_slugs` lists 16 entries. Spec §13.2 names additionally: `read_inbox`, `send_email`, `read_data_source`, `web_search`, `fetch_url`, `scrape_structured`, `ask_clarifying_question`, `request_clarification`, `read_workspace`, `update_memory_block`, `notify_operator`, `read_priority_feed`, `search_agent_history`.
   - Suggested approach: Verify whether the missing skills are auto-enabled via universal-skills (per §13.2: "Universal skills per `server/config/universalSkills.ts` are always available regardless of allowlist"). If yes, allowlist is correct. If no, add the missing slugs to the seed.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql` (lines 26-50) writes the spec-conforming allowlist. Universal skills covered by `server/config/universalSkills.ts`.
 
-- [ ] REQ-EA3 — Partial unique index axis differs from spec §13.4
+- [x] REQ-EA3 — Partial unique index axis differs from spec §13.4 [status:closed:pr:324]
   - Spec section: §13.4 concurrency guard
   - Gap: Code uses `agents(organisation_id, owner_user_id) WHERE slug='executive-assistant'`. Spec specifies `agents(subaccount_id, owner_user_id) WHERE slug='executive-assistant'`. Difference matters when a user has access to multiple subaccounts in the same org: spec's axis allows one EA per subaccount per user; code allows only one EA per user per org.
   - Suggested approach: Align with the multi-subaccount product intent; if users routinely access multiple subaccounts, change the index. If V1 dogfood is single-subaccount only, leave as-is and amend spec.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §13.4 amended 2026-05-13 (REQ-EA3 amendment line 1187) to ratify per-org uniqueness because a single user has one EA across their entire org regardless of subaccount. Code at `migrations/0332_executive_assistant_seed.sql:64-66` already matches.
 
-- [ ] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1
+- [x] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1 [status:closed:pr:324]
   - Spec section: §13.1
   - Gap: Seed uses `every_5m`; spec says `on_login`. The `every_5m` policy creates more API load per user; `on_login` lazily refreshes on route entry (and is what `useHomeWidgets` invalidates on).
   - Suggested approach: Change seed to `on_login` unless there's a UX reason for periodic refresh.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql:19-25` writes `refreshPolicy: 'on_login'`.
 
-- [ ] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded
+- [x] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded [status:closed:pr:324]
   - Spec section: §13.1 + §13.6 (display name renaming)
   - Gap: Seed hardcodes `"Personal Assistant"`; spec specifies `'${agent.displayName}'`. Once users rename their EA via Settings (§13.6), the home widget should reflect the new name.
   - Suggested approach: Update seed to use template string; ensure homeWidgetService substitutes `${agent.displayName}` when rendering.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql:22` writes `titleTemplate: '${agent.displayName}'`.
 
-- [ ] REQ-M15 — Personal nav group placement
+- [x] REQ-M15 — Personal nav group placement [status:closed:pr:324]
   - Spec section: §14.1
   - Gap: Spec says Personal group renders at the TOP of the sidebar, above Operate/Build/Govern. Code places it mid-list per `client/src/config/sidebar.ts` ordering comment ("top → work → projects → agents → personal → company → ...").
   - Suggested approach: Move Personal group higher in `buildNavItems` if matching the spec is important for the "first thing the user sees" framing.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Moved `personal` group from position 5 to position 2 in `client/src/config/sidebar.ts`. New order: `top → personal → work → projects → agents → company → ...`. Requires operator visual confirmation in the PR.
 
-- [ ] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter
+- [x] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter [status:closed:pr:324]
   - Spec section: §7.3
   - Gap: Spec input shape includes `types?: Array<'public_channel' | 'private_channel' | 'mpim' | 'im'>`. Code's Zod schema has no `types` field — callers cannot filter channel types.
   - Suggested approach: Add `types` to the action Zod schema and pass through to the Slack handler.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Code at `shared/types/slackAction.ts:3-9` already includes `types` field with the spec-named enum and `default(['public_channel'])`. Conformance log captured an outdated view.
 
-- [ ] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4
+- [x] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4 [status:closed:pr:324]
   - Spec section: §8.4 step 2
   - Gap: Spec says `code: 'missing_draft_context'` (422) for missing/invalid `eaDraftId` or owner mismatch. Code uses `DRAFT_NOT_APPROVED`, `DRAFT_NOT_FOUND`, `DRAFT_SEND_IN_FLIGHT` (no `missing_draft_context`). Also: no owner-mismatch check (`ea_drafts.ownerUserId !== agent.ownerUserId`).
   - Suggested approach: Either add the `missing_draft_context` mapping when `eaDraftId` is absent, OR amend spec to use the more granular code set the code emits. Add the owner-mismatch assertion either way (defence-in-depth).
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §8.4 + §24.2 + §24.9 amended 2026-05-13 (sixth-pass cleanup, REQ-CAL3-naming amendment) to ratify the `DRAFT_NOT_*` family used by shipped code. Owner-userId mismatch check is present at `server/services/calendar/calendarActionService.ts:178-183`.
 
-- [ ] REQ-M9 — Stall job 7-day proposal expiry path
+- [x] REQ-M9 — Stall job 7-day proposal expiry path [status:closed:pr:324]
   - Spec section: §5.2 (`workflowGateStallNotifyJob` modification clause) + §20.4 + §22.2
   - Gap: Spec prose says stall job should "transition expired proposal rows (`createdAt + 7d`) to approval state `expired`" for EA-linked drafts. Code's `eaDraftStallResetHandler` only resets `sending → idle`. Existing `actions` primitive expiry may already cover this, but the spec's explicit clause says it should be added to the stall job for EA-linked rows.
   - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
+  - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Pre-existing primitive at `server/jobs/workflowGateStallNotifyJob.ts:124-135` already sweeps proposal rows at 7d with `metadata.systemExpired = true` + `expired_after_7d`. Spec §5.1 + §20.4 + §22.2 amended 2026-05-13 (seventh-pass cleanup, REVIEW-F1) to honestly describe the terminal state as `rejected` with metadata flags (the `actions` primitive has no `expired` status).
+
+## Deferred from pa-v1-cleanup-batch review pass (2026-05-15)
+
+**Captured:** 2026-05-15T19:00:00Z
+**Source logs:**
+- `tasks/review-logs/adversarial-review-log-pa-v1-cleanup-batch-2026-05-15T19-00-00Z.md`
+- pr-reviewer R1 (CHANGES_REQUESTED → APPROVED after fix-loop)
+
+- [ ] **PA-CLEANUP-DEF-1 — Missing `organisationId` predicate on three state-flip UPDATEs in `voiceProfileService.deriveProfile`** (adversarial LIKELY)
+  - File: `server/services/voiceProfile/voiceProfileService.ts:88-91`, `:99-102`, `:112-121`
+  - Gap: The initial claim UPDATE at lines 29-39 correctly includes `eq(voiceProfiles.organisationId, ctx.organisationId)`, but the three follow-on state-flip UPDATEs (error path, empty-samples path, success path) filter only on `voiceProfiles.id`. UUIDs are unguessable and the initial claim is org-scoped, so practical exploitability is low — but the defense-in-depth gap is real and inconsistent with `optOut`/`reactivate` (which DO include the org predicate). Pre-existing baselined pattern (bare-`db` posture across 10 callsites in this file).
+  - Suggested approach: Add `eq(voiceProfiles.organisationId, ctx.organisationId)` to all three follow-on `.where()` clauses. Mechanical change.
+
+- [ ] **PA-CLEANUP-DEF-2 — `operatorSessionInitialContextBundler.ts:83-88` voice profile SELECT missing application-layer `organisationId` predicate** (adversarial WORTH_CONFIRMING)
+  - File: `server/services/operatorSessionInitialContextBundler.ts:80-90`
+  - Gap: Query runs via `getOrgScopedDb()` so the Postgres session variable IS set and RLS enforces — but no application-layer `eq(voiceProfilesTable.organisationId, input.organisationId)` predicate. DEVELOPMENT_GUIDELINES.md §1 mandates application-layer filtering even with RLS. If the RLS session variable is ever absent in a background context, no backstop.
+  - Suggested approach: Add the explicit application-layer predicate.
+
+- [ ] **PA-CLEANUP-DEF-3 — Nightly voice profile refresh job emits no durable audit row per profile** (adversarial WORTH_CONFIRMING)
+  - File: `server/jobs/voiceProfileRefreshJob.ts:46,48`
+  - Gap: Log lines via `logger.info/error` are observability, not durable audit (no row in `audit_events` or `agent_execution_events`). Acceptable for V1 (system-initiated background action). Future compliance requirements may demand a per-refresh audit trail.
+  - Suggested approach: If/when needed, emit a `voice.profile.refreshed` event row.
+
+- [ ] **PA-CLEANUP-DEF-4 — `voiceProfileService.deriveProfile` writes `sampleSize: 0` (hardcoded) instead of actual sample count** (pr-reviewer STRONG_RECOMMENDATION)
+  - File: `server/services/voiceProfile/voiceProfileService.ts:118`
+  - Gap: The column rename `sample_count → sample_size` was driven by REQ-C4 to align with spec semantics. Persisting `0` defeats the rename's purpose. Existing comment "sample count intentionally zeroed — samples not retained" conflates two concerns: "we don't keep the sample text" vs "we don't record how many we processed". Spec §1092 trace event `voice.profile.refreshed { profileId, sampleSize, durationMs }` expects the actual count.
+  - Suggested approach: Decide whether `sampleSize` should reflect the actual N. If yes, change `sampleSize: 0` to use `samples.length`. If no (privacy concern), update the spec §1009 + §1092 + §12 column semantics to document that `sample_size` is intentionally zero post-derivation.
+
+- [ ] **PA-CLEANUP-DEF-5 — Stale doc comments referencing old voice_profiles column names** (pr-reviewer CONSIDER)
+  - Files: `server/services/voiceProfile/voiceProfileServicePure.ts:128` (JSDoc references `last_refreshed_at` and `refresh_config.days`); `server/jobs/voiceProfileRefreshJob.ts:15` (JSDoc could mention `refresh_config.days` is read via `shouldRefresh` post-query); `server/services/operatorSessionService.ts:90-91` (comment "V1: lastRefreshedAt column not yet added (Chunk 6)" — references AiSubscriptionConnection, not voice_profiles, but phrasing is confusing post-rename)
+  - Suggested approach: One-line doc updates. Cosmetic only.
+
+- [ ] **PA-CLEANUP-DEF-6 — KNOWLEDGE.md rule: column-rename grep discipline** (pr-reviewer STRONG_RECOMMENDATION, process improvement)
+  - Gap: Architect's chunk-0 file-set enumeration missed `agentExecutionServicePure.ts` and `operatorSessionInitialContextBundler.ts` (and would have missed `eaProvisioningService.ts` too) because the chunk-0 sweep grepped for Drizzle field names without also greping for snake_case column names in select projections / SQL templates / spec-referenced provisioning code.
+  - Suggested approach: Append a Pattern entry to KNOWLEDGE.md: "When planning a column rename, grep BOTH camelCase Drizzle field names AND any snake_case literals in select projections AND any spec-referenced provisioning code paths that write the column." Captured by finalisation-coordinator Step 7.
+
+- [ ] **PA-CLEANUP-DEF-7 — Failed voice profiles get retried nightly under `refreshPolicy='periodic'`** (dual-reviewer Codex iter 2, P2)
+  - Files: `server/jobs/voiceProfileRefreshJob.ts:35-45`, `server/services/voiceProfile/voiceProfileServicePure.ts:131-146` (`shouldRefresh`), `server/services/voiceProfile/voiceProfileService.ts:36` (`deriveProfile` claim predicate).
+  - Gap (pre-existing, surfaced by REQ-C4 provisioning change): When a newly-provisioned `periodic` profile's first derivation fails (sampler error / no samples), the row ends in `state='failed'` with `lastDerivedAt = null`. The nightly job filters by `refreshPolicy='periodic' AND opt_out_at IS NULL`, `shouldRefresh` returns `true` for null `lastDerivedAt`, and `deriveProfile` allows `failed` rows to be claimed (`inArray(state, ['pending', 'ready', 'failed'])`). Result: every failed opt-in profile is re-derived every night until manually opted out or fixed. The state machine in `canTransitionState` says `failed → pending` is the "manual retry path" only — so the nightly job is bypassing the intended state semantics.
+  - Why deferred from this PR: REQ-C4 scope is column-rename + provisioning-shape alignment per spec §13.4 step 6. The spec mandates `refreshPolicy='periodic'` at provisioning (pr-reviewer R1 BLOCKING), and the behavioral interaction with `failed` rows is pre-existing — it predates this PR and would surface for ANY periodic profile, not just wizard-provisioned ones. Fix requires a spec decision (should the refresh job skip `state='failed'`? Should `shouldRefresh` require non-null `lastDerivedAt`? Should `deriveProfile` exclude `failed` from the claim predicate?).
+  - Suggested approach: Pick one: (a) add `ne(voiceProfiles.state, 'failed')` to the nightly job's candidate query, (b) make `shouldRefresh` return `false` when `lastDerivedAt` is null AND `state='failed'`, or (c) tighten `deriveProfile`'s claim predicate to exclude `failed` so only the explicit `optOut` / `reactivate` flow can transition out of `failed`. Option (a) is the smallest change and respects the state-machine intent.
 
 ## Deferred spec decisions — feat-split-usagepage (2026-05-14)
 
@@ -1652,3 +1707,65 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
     - `scripts/.gate-baselines/canonical-retry.txt` — 4 entries at `queueService.ts:105, :263, :1095, :1130` need to repoint at `queueService/backend.ts:24`, `queueService/executionProcessor.ts:131`, `queueService/maintenanceJobs/pgBossRegistrations.ts:558`, `queueService/maintenanceJobs/pgBossRegistrations.ts:593`.
     - `scripts/.gate-baselines/no-silent-failures.txt` — 1 entry at `queueService.ts:1200` needs to repoint at `queueService/maintenanceJobs/pgBossRegistrations.ts:663`.
   - Suggested approach: rebaseline (path 1 in log Next-step) — preserve existing `expires:` dates, repoint paths/lines. Per DEVELOPMENT_GUIDELINES.md §5 ("PRs that move, rename, split, or shift lines in files referenced by a gate baseline update those references in the same commit"). Remediation (path 2 — adopt `withBackoff`, replace `.catch(() => undefined)` with `logger.warn`) would violate spec §3 "No drive-by lint cleanup" and belongs in a separate PR.
+
+## Wave 2 audit sweep — 2026-05-15
+
+**Captured:** 2026-05-15T07-19-34Z
+**Branch:** `claude/wave-2-audit-sweep`
+**Source logs:**
+- `tasks/audit-logs/codebase-audit-log-wave-2-frontend-2026-05-15T07-19-34Z.md` (7 findings, 1 medium, 6 low) — Operator HomePage hits 4-KPI cap; suspect dashboard pages need Wave 3 deep-read.
+- `tasks/audit-logs/codebase-audit-log-wave-2-skills-2026-05-15T07-19-34Z.md` (5 findings, 3 medium, 2 low) — preliminary grep found ~95 candidate unmatched skill `.md` files; comparator is unstable pending runtime `Object.keys(ACTION_REGISTRY)` enumeration; no enforced bidirectional check.
+- `tasks/audit-logs/codebase-audit-log-wave-2-circular-deps-2026-05-15T07-19-34Z.md` (10 findings, 1 high, 5 medium, 4 low) — 73 server cycles + 4 client cycles; skillExecutor ↔ workflowEngine super-cycle dominates.
+- `tasks/audit-logs/codebase-audit-log-wave-2-duplication-2026-05-15T07-19-34Z.md` (10 findings, 1 high, 8 medium, 1 low) — Top server clone 87L within `workflowEngine/queueLifecycle/agentStep.ts`; top client clone 213L between Skills pages and ClientPulse `HistoryTab.tsx`.
+- `tasks/audit-logs/codebase-audit-log-wave-2-agent-execution-2026-05-15T07-19-34Z.md` (5 findings, 2 high, 2 medium, 1 low) — Handoff event writes are fire-and-forget; spawn-sub-agents is not queue-backed (durability gap).
+- `tasks/audit-logs/critical-path-coverage-matrix-2026-05-15T07-19-34Z.md` (12 paths, 6 gates-only) — 6 critical paths have no named test (pg-boss handler idempotency, handoff durability, service-principal leak, cost-ledger retry, payload retention tier, workflow-engine tick worker).
+
+### Wave 2 — Symptom-fix items
+
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains.
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction.
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing.
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK1 — Preliminary grep found ~95 skill `.md` candidates with no direct snake_case slug match in `actionRegistry`.** medium/medium. **Count is not grounded to a canonical comparator** — three grep methods give different baselines (raw object-literal keys = 103 incl. nested non-actions like `annotations`/`mcp`; explicit `slug:` field captures = 62). True unmatched count is somewhere between ~50 and ~95. **Recommended first step: a runtime enumeration of `Object.keys(ACTION_REGISTRY)` (single 5-line script) to produce the authoritative comparator before further work.** Examples of likely-orphaned slugs (still valid as examples): `analyse_42macro_transcript`, `audit_geo`, `book_meeting`, `classify_email`, `derive_test_cases`, `discover_prospects`, `draft_*`, `generate_competitor_brief`. Possible legitimate methodology-only skills; possible drift. Needs operator architectural call: where are methodology-only skills declared if not in `ACTION_REGISTRY`?
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK2 — Naming convention drift between `.md` slug and registry slug.** medium/medium. `calendar-create-event.md` (kebab) vs `create_task` (snake) — no canonical alias map source file located (only a `__tests__/actionSlugAliasesPure.test.ts` references the concept).
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK3 — `UNIVERSAL_SKILL_NAMES` is hand-maintained.** low/medium. Header says "must stay in sync" with `ACTION_REGISTRY.isUniversal` — no enforced bidirectional check.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD1 — skillExecutor ↔ workflowEngine super-cycle (cycles 19–61, ≈43 of 73 server cycles, ≈59% on its own; CD1+CD2+CD3 combined ≈85%).** high/high. Long chains routing through `workflowEngine/queueLifecycle/dispatch.ts > workflowActionCallExecutor.ts > skillExecutor.ts > skillExecutor/registry.ts > skillExecutor/handlers/*.ts > tools/*.ts > services/*.ts > workflowEngineService.ts > ...`. Architectural — invert handler imports via a `HandlerContext` injection pattern.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD2 — `agentExecutionService` <-> `agentExecutionLoop` <-> `executionBackends` triangle (cycles 64–71).** medium/high. `executionBackends/options.ts` types pull back into orchestration layer; move offending types to pure-types-only module.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD3 — `workflowEngineService` post-split residual cycles.** medium/high. Despite PR #319 dropping main file 4,073 → 64 LOC, queueLifecycle dispatch chain still routes through.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD4 — `notifyOperatorFanoutService` <-> channels.** low/medium. Three-line fix.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD5–CD10 — Misc small cycles** (`agentExecutionServicePure` inverted import; `MacroReport.tsx` server template cycle; `mcpServer.ts` self-cycle; `sandboxProviderResolver` provider-imports-impl; `govern/components/*Tab.tsx <-> Modal.tsx` x 4). low/high. Each is a 5-minute fix once a baseline gate exists.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP1 — 213L + 209L Skills pages <-> pulse/HistoryTab.tsx.** high/high. Extract shared rendering logic.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP2 — `AdminPermissionSetsPage` <-> `org-settings/PermissionsTab` triple-clone (176L total).** medium/high. Lift `<PermissionsEditor>` component.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP3 — `OrgApprovalChannelsPage` <-> `SubaccountApprovalChannelsPage` triple-clone (178L total).** medium/high. Lift `<ApprovalChannelsEditor>` component.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP4 — `AgentChatPage` <-> `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated extraction).** medium/high. Combine the two extracted `messageRender.tsx` copies into `components/chat/messageRender.tsx`.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP5 — 143L `SubaccountBlueprintsPage` <-> `SystemOrganisationTemplatesPage`.** medium/high. Template-rendering UI cloned.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP6 — 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:397-483` <-> `:225-307`.** medium/high. Extract helper.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE4 — Worker-restart recovery for in-flight handoffs not documented.** medium/medium. Wave 3 deeper read of `agentExecutionLoop.ts` (1,415 LOC) needed.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE5 — Critical-severity error-path emissions also use `void insertExecutionEventSafe`.** low/high. Hierarchy errors, cross-subtree spawn, delegation-out-of-scope — at minimum `await` these before returning.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC2 — Idempotency-key dedup logic has no named canonical test.** medium/high. Add `server/lib/__tests__/idempotencyKey.dedup.test.ts` exercising concurrent insert against the unique constraint.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC3 — `agentRunVisibility.ts` impure read path has no integration test.** medium/high. Add `agentRunVisibility.integration.test.ts`.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC4 — No gate proves every LLM call site goes through `llmRouter`.** medium/medium. Add gate `verify-llm-call-site-routes-through-router.sh`.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC7 — No meta-test that every pg-boss handler is idempotent under retry.** medium/high.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC8 — No test for handoff durability under simulated worker restart.** medium/high. Pairs with AE1, AE2.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC10 — No test for three-tier service-principal trace boundary.** medium/high.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC11 — No test for cost-ledger increments-once under retry.** medium/medium. v2 backlog.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC12 — No test for LLM payload retention tier boundary transition.** low/medium. v2 backlog.
+
+### Wave 2 — Prevention proposals
+
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-CD1 — `npm run check:circular` as warn-gate.** Baseline 73 server + 4 client cycles. Any net-new cycle fails the PR. Closes CD1–CD10. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:architecture.md] **PP-CD2 — Document the "handler-imports-via-interface, never via service" rule.** Closes CD1, CD2. Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-DUP1 — `npm run check:duplication` (jscpd) baseline gate.** Baseline 4,298 server + 3,495 client duplicated lines. Closes DUP1–DUP10. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK1 — `verify-skill-registry-alignment.sh`.** Closes SK1, SK2, SK5. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES` <-> `ACTION_REGISTRY.isUniversal` lint.** Closes SK3. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-AE2 — `verify-critical-event-emission-awaited.sh`.** Closes AE1, AE5. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:architecture.md] **PP-AE1 — Document audit-trail durability invariants.** Closes AE1, AE5. Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:DEVELOPMENT_GUIDELINES.md] **PP-AE3 — "Handoff dispatch paths must agree on durability posture."** Closes AE2. Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-FE2 — `verify-page-complexity-budget.sh`.** Closes FE1, FE2. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:docs/codebase-audit-framework.md] **PP-MC1 — Module C must require each critical path name a test, gate, or documented `wont-test`.** Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-MC2 — `verify-critical-path-coverage.sh` consuming `tasks/critical-paths-manifest.yml`.** Pairs with PP-MC1. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:KNOWLEDGE.md] **PP-CD3 — Pattern entry: post-split file size can drop without resolving the underlying cycle / durability semantics.** Closes CD3, AE1. Leverage tier 3.

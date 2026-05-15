@@ -114,8 +114,8 @@ export async function deriveProfile(
     .set({
       state: 'ready',
       profileJson: features,
-      lastRefreshedAt: new Date(),
-      sampleCount: 0, // sample count intentionally zeroed — samples not retained
+      lastDerivedAt: new Date(),
+      sampleSize: 0, // sample count intentionally zeroed — samples not retained
       updatedAt: new Date(),
     })
     .where(eq(voiceProfiles.id, input.profileId));
@@ -150,8 +150,8 @@ export async function refreshProfile(
 
   const needsRefresh = input.force || shouldRefresh({
     refreshPolicy: profile.refreshPolicy as 'manual' | 'periodic' | 'on_send_count',
-    refreshConfig: null,
-    lastDerivedAt: profile.lastRefreshedAt ?? null,
+    refreshConfig: profile.refreshConfig as { days?: number } | null,
+    lastDerivedAt: profile.lastDerivedAt ?? null,
     now: new Date(),
   });
 
@@ -198,14 +198,14 @@ export async function listProfiles(
     );
 }
 
-/** Opt-out: sets opted_out_at = now() (do NOT delete). */
+/** Opt-out: sets opt_out_at = now() (do NOT delete). */
 export async function optOut(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
   await db
     .update(voiceProfiles)
-    .set({ optedOutAt: new Date(), updatedAt: new Date() })
+    .set({ optOutAt: new Date(), updatedAt: new Date() })
     .where(
       and(
         eq(voiceProfiles.id, input.profileId),
@@ -214,14 +214,14 @@ export async function optOut(
     );
 }
 
-/** Re-activate: clears opted_out_at. */
+/** Re-activate: clears opt_out_at. */
 export async function reactivate(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
   await db
     .update(voiceProfiles)
-    .set({ optedOutAt: null, updatedAt: new Date() })
+    .set({ optOutAt: null, updatedAt: new Date() })
     .where(
       and(
         eq(voiceProfiles.id, input.profileId),

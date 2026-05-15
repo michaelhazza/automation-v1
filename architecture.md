@@ -4051,7 +4051,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | EA draft CRUD routes | `server/routes/eaDrafts.ts` — `GET/POST /api/ea-drafts`, `POST /api/ea-drafts/:id/approve` |
 | EA draft service | `server/services/eaDrafts/eaDraftService.ts` |
 | EA provisioning (personal setup) | `server/services/eaDrafts/eaProvisioningService.ts` + `POST /api/personal/setup` route |
-| Voice profile service | `server/services/calendar/voiceProfileService.ts` + `GET/POST /api/voice-profiles` route |
+| Voice profile service | `server/services/voiceProfile/voiceProfileService.ts` + `server/services/voiceProfile/voiceProfileServicePure.ts` (pure helpers) + `server/routes/voiceProfiles.ts` (GET/POST `/api/voice-profiles`). Row shape per spec §21.1 post-2026-05-15 alignment (migration 0360): `sources text[]`, `source_config jsonb`, `sample_size int`, `last_derived_at timestamptz`, `refresh_policy text`, `refresh_config jsonb`, `opt_out_at timestamptz`. |
 | Calendar action service | `server/services/calendar/calendarActionService.ts` — executes `calendar.*` skill handlers |
 | Slack action service | `server/services/slack/slackActionService.ts` — executes `slack.*` skill handlers |
 | Home widget service | `server/services/homeWidgetService.ts` + `GET /api/agent-home-widgets` route |

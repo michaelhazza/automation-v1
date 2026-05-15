@@ -13,14 +13,12 @@ export type VoiceProfileRefreshJobData = Record<string, never>;
 
 /**
  * Nightly job: finds voice_profiles where refresh_policy='periodic' AND
- * opted_out_at IS NULL, then filters in JS via shouldRefresh for the
+ * opt_out_at IS NULL, then filters in JS via shouldRefresh for the
  * time-threshold check. Per-row try/catch so one failure does not block others.
  */
 export async function voiceProfileRefreshHandler(_job: Job<VoiceProfileRefreshJobData>): Promise<void> {
   const now = new Date();
 
-  // Query all candidate rows. Filter in JS via shouldRefresh since
-  // refresh_config is not a column — threshold defaults to 30 days.
   const candidates = await withAdminConnection(
     { source: 'voiceProfileRefreshJob', reason: 'cross-org periodic refresh scan' },
     async (tx) => {
@@ -28,7 +26,7 @@ export async function voiceProfileRefreshHandler(_job: Job<VoiceProfileRefreshJo
       return tx.select().from(voiceProfiles).where(
         and(
           eq(voiceProfiles.refreshPolicy, 'periodic'),
-          isNull(voiceProfiles.optedOutAt),
+          isNull(voiceProfiles.optOutAt),
         ),
       );
     },
@@ -38,8 +36,8 @@ export async function voiceProfileRefreshHandler(_job: Job<VoiceProfileRefreshJo
     try {
       const eligible = shouldRefresh({
         refreshPolicy: row.refreshPolicy as 'manual' | 'periodic' | 'on_send_count',
-        refreshConfig: null,
-        lastDerivedAt: row.lastRefreshedAt ?? null,
+        refreshConfig: row.refreshConfig as { days?: number } | null,
+        lastDerivedAt: row.lastDerivedAt ?? null,
         now,
       });
       if (!eligible) continue;

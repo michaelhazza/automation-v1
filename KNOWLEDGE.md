@@ -1820,3 +1820,32 @@ Any remaining `await db.` calls against the RLS-protected table name in the outp
 - `scripts/.gate-baselines/*.txt` (positional entries reference old paths)
 - `architecture.md` references with line markers
 **Why it matters:** the regex bug shipped clean static-gate output AND clean type-checks AND clean lint. It would only have shown up at runtime, on the first LLM call in any non-test environment, throwing `ADAPTER_DIRECT_CALL` and breaking every agent in production.
+### [2026-05-15] Pattern — Conformance log can outlive the spec it audits
+
+**Date:** 2026-05-15
+**Source:** pa-v1-cleanup-batch chunk-0 architecture sweep (PR #324, slug `pa-v1-cleanup-batch`).
+
+A spec-conformance log is a code-vs-spec snapshot at a specific timestamp. If the spec is amended AFTER the log is written (the conformance reviewer surfaces a divergence, the team chooses to ratify the as-built shape into the spec rather than change the code), the log goes stale before the code does. Future remediation work that reads the log will spin up "fix" chunks for items that are no longer gaps. The PA-V1 deferred batch had 12 directional + 1 bookkeeping items dated 2026-05-12; on 2026-05-13 the spec was amended (8 amendment passes documented in the spec header) ratifying the as-built shape for 8 of the 12. Of the remaining items, 3 were closed by prior PRs (migrations 0343/0344). Only 2 needed real code work (REQ-C4 voice_profiles schema + REQ-M15 sidebar reorder). The architect's chunk-0 mandatory re-read of the PA-V1 spec (not just the log) caught the divergence and prevented 11 wasteful "fix" chunks. **Rule:** when a remediation batch references a conformance log, the architect MUST re-read the underlying spec section for each REQ before drafting fixes — the log is secondary to the spec.
+
+### [2026-05-15] Pattern — Column-rename grep discipline: both casings plus provisioning paths
+
+**Date:** 2026-05-15
+**Source:** pa-v1-cleanup-batch chunk-1 builder report (PR #324) + pr-reviewer Round 1 BLOCKING finding.
+
+When planning a column rename, grep BOTH the camelCase Drizzle field name AND any snake_case literals in SELECT projections / SQL templates / spec-referenced provisioning code paths. Architect's chunk-0 file-set enumeration for REQ-C4 (`voice_profiles` 3 column renames + 2 new jsonb columns) missed:
+- `server/services/agentExecutionServicePure.ts` — referenced `optedOutAt` in a function parameter type. Caught by typecheck on attempt 2.
+- `server/services/operatorSessionInitialContextBundler.ts` — direct Drizzle column reference `voiceProfilesTable.optedOutAt`. Caught by typecheck on attempt 2.
+- `server/services/eaProvisioningService.ts:128-140` — wizard-provisioning code that writes new voice_profile rows with the legacy `refreshPolicy: 'manual'` shape, NOT covered by typecheck because the schema's `refreshPolicy text` accepts any string. Caught by pr-reviewer R1 as a BLOCKING semantic divergence from spec §13.4 step 6. Required a fix-loop iteration.
+
+The provisioning-code blind spot is the most dangerous: typecheck doesn't catch it because the column type is loose (`text`). **Rule:** grep both casings + scan spec-referenced provisioning code paths (anything that writes the table in the wizard / setup / seed flow) BEFORE declaring the chunk file-set. Cheaper than a fix-loop round.
+
+### [2026-05-15] Pattern — `.down.sql` idempotent guards convention is brittle but established
+
+**Date:** 2026-05-15
+**Source:** pa-v1-cleanup-batch dual-reviewer Codex P1 finding + chatgpt-pr-review F1 rejection (PR #324).
+
+`scripts/migrate.ts` matches both `*.sql` and `*.down.sql` (regex `/^\d{4}_.*\.sql$/`), tracks applied filenames in `schema_migrations`, and applies any pending files in lex order. On a fresh DB, `0NNN_*.down.sql` (which sorts BEFORE `0NNN_*.sql` because `.` < terminating `.sql`) runs FIRST as a forward migration — so the down file MUST be idempotent enough to be a complete no-op against the pre-up state. Convention across 92 existing `.down.sql` files: wrap renames in `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = '...' AND column_name = '...') THEN ALTER TABLE ... END IF; END $$;` plus `DROP COLUMN IF EXISTS` / `DROP INDEX IF EXISTS` / `CREATE INDEX IF NOT EXISTS`.
+
+**False-alarm trap:** the convention LOOKS unsafe ("won't the down destructively roll back an upgraded DB on a later migrate pass?"). It doesn't, because `schema_migrations` tracks applied filenames and only applies *pending* files. Once a `.down.sql` is recorded as applied, it never runs again. The only real risk is the contrived case where `.sql` was deployed before `.down.sql` existed in the repo — both `0360_*.sql` AND `0360_*.down.sql` shipped together in chunk 1 (`44e79c4f`), so this branch's deployments cannot hit it.
+
+The reviewer's "best fix" (exclude `*.down.sql` from forward discovery in the runner, remove the workaround comments) is a ~92-file convention change deserving its own ADR + dedicated build. Out of scope for any single feature PR. Reference: `migrations/0358_skill_merge_consolidation.down.sql` header documents the same convention.
