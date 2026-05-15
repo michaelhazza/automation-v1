@@ -32,9 +32,13 @@ const DEFAULT_MAX_RETRIES = 3;
  * Allocate the next sequence number for a sandbox execution's telemetry stream
  * and INSERT the event row, serialised via a Postgres transactional advisory lock.
  *
- * The lock key is derived from `hashtext(sandboxExecutionId)::bigint` so all
- * writers for the same execution serialise against each other within any given
- * transaction. The lock is released automatically at transaction end.
+ * The lock key is derived from the first 64 bits of `sandboxExecutionId`
+ * (split into two int4 values for the two-argument
+ * `pg_advisory_xact_lock(int4, int4)` form) so all writers for the same
+ * execution serialise against each other within any given transaction.
+ * The lock is released automatically at transaction end. (Prior versions
+ * used `hashtext(sandboxExecutionId)::bigint` which only gave 32-bit
+ * effective entropy via sign-extension — see KNOWLEDGE.md 2026-05-15.)
  *
  * On 23505 unique-violation (defensive; should not occur under the advisory lock):
  *   - `info`/`warn` criticality: log warn, return `{ inserted: false }`.

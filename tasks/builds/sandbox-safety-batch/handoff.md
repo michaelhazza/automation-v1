@@ -80,3 +80,32 @@
 8. Apply `ready-to-merge` label.
 
 The session STOPS at step 4 with the chatgpt-pr-review paste prompt ready for the operator.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #326
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T*.md` (4 rounds; R4 APPROVED)
+**spec_deviations reviewed:** n/a (no spec_deviations recorded in Phase 2 handoff)
+
+**Doc-sync sweep verdicts:**
+- architecture.md updated: no — grepped sandbox helpers + sandbox_harvest_runs; zero stale references. New helpers are implementation details under existing § Sandbox Isolation primitive section.
+- capabilities.md updated: n/a: internal refactor with no capability surface change
+- integration-reference.md updated: n/a — sandbox is internal subsystem, not external integration
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — no changes to build discipline, conventions, agent fleet, or §8 rules
+- frontend-design-principles.md updated: n/a — no UI changes
+- KNOWLEDGE.md updated: yes (6 entries appended at Phase 2; cross-checked at Phase 3)
+- spec-context.md updated: n/a — feature pipeline, not spec-review
+
+**KNOWLEDGE.md entries added:** 6 (bare-db on FORCE RLS; hashtext 32-bit collision; char_length vs Buffer.byteLength; Drizzle $type is documentation; migration CHECK without backfill; optional-callback wiring at every caller)
+
+**tasks/todo.md items removed/closed by this build:** 22 (3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional from the sandbox-isolation backlog sections)
+
+**chatgpt-pr-review summary (4 rounds):**
+- R1: F1 (3-layer tx-contract enforcement) + F2 (UTC quota boundary) — both applied.
+- R2: F2 (ENOENT-only catch in resolveTemplateVersion + 2 new tests) applied; F1 duplicate auto-rejected per operator memory rule.
+- R3: F1 duplicate (3rd raise) auto-rejected; minor advisory (docstring alignment) applied.
+- R4: APPROVED. Operator-override on F1 implemented in R3→R4 transition — added named `assertOrgScopedTransactionActive()` helper to make the transaction-liveness contract visible at the assertion call site (mechanically equivalent to the prior runtime check but explicit by name). Hashtext docstring drift cleaned up as minor advisory.
+
+**ready-to-merge label applied at:** 2026-05-15T22:00:11Z
