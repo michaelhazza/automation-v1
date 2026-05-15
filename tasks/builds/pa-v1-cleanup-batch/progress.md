@@ -96,4 +96,9 @@ Feature-coordinator running inline. Phase-1 handoff restore skipped per operator
 - **PR creation:** PR #324 with operator visual-confirmation request in body
 - **PR-number substitution:** 13 todo.md flips + 1 conformance-log row updated from `<pending>` → `pr:324`
 
-**STOPPING POINT.** Operator instruction "all the way to chatgpt final review manual" — chatgpt-pr-review is the operator's manual loop. Remaining Phase 3 steps (KNOWLEDGE.md, todo.md cleanup, MERGE_READY label) happen AFTER chatgpt-pr-review per playbook.
+**Phase 3 COMPLETE** — operator closed chatgpt-pr-review Round 1, ready-to-merge label applied:
+- chatgpt-pr-review: F1 REJECTED (technical correction — runner tracks applied files in schema_migrations); T1/T2/T3 DEFERRED (already PA-CLEANUP-DEF-1/2/4). Log: `tasks/review-logs/chatgpt-pr-review-pa-v1-cleanup-batch-2026-05-15T21-30-00Z.md`.
+- KNOWLEDGE.md: 3 patterns appended (conformance log staleness, column-rename grep discipline, .down.sql idempotent guards convention).
+- ready-to-merge label applied to PR #324.
+- current-focus.md NOT transitioned (operator's earlier revert preserved).
+- Operator still owes: visual confirmation of Personal nav placement on PR.

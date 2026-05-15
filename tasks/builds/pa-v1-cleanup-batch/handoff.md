@@ -83,13 +83,29 @@ Completed inline by main session per autonomous-mode operator instruction:
 3. **PR creation** — PR #324 opened with explicit operator visual-confirmation request in the body (spec §9 criterion #7).
 4. **PR-number placeholder substitution** — 13 `tasks/todo.md` items + 1 conformance-log row updated from `<pending>` to `pr:324` / `PR #324`.
 
-**STOPPING POINT — manual chatgpt-pr-review.** Operator instruction: "all the way to chatgpt final review manual." chatgpt-pr-review is a manual ChatGPT-web loop that requires the operator to paste responses round-by-round; it cannot run autonomously. Operator picks up here.
+## Phase 3 (FINALISATION) — complete
 
-Remaining Phase 3 steps (after manual chatgpt-pr-review completes):
-- Step 6: full doc-sync sweep (Phase 2 already did the relevant updates; sweep verifies no follow-up edits introduced new gaps)
-- Step 7: KNOWLEDGE.md pattern extraction (3 candidates: column-rename grep discipline, spec-amendment-vs-pre-PR resolution path, fresh-DB .down.sql idempotent-guards convention)
-- Step 7a: Compound Learning Feedback
-- Step 8: tasks/todo.md final cleanup
-- Step 9: current-focus.md → MERGE_READY — **operator intentionally reverted current-focus to split-skill-analyzer earlier**; Phase 3 should NOT pivot it unless operator wants
-- Step 10: apply `ready-to-merge` label
-- Step 11: end-of-phase prompt
+**PR:** [#324](https://github.com/michaelhazza/automation-v1/pull/324) — `ready-to-merge` label applied.
+
+**Step 5 — chatgpt-pr-review (manual):** Round 1 closed without further rounds per operator decision. ChatGPT verdict was NEEDS_WORK with 1 Blocking (F1 — migration `.down.sql` destructive replay risk) + 3 Consider (T1/T2/T3). Triage:
+- **F1 REJECTED** (technical correction) — reviewer misread `scripts/migrate.ts`; the `schema_migrations` tracking table prevents re-application of recorded files. The dual-reviewer's idempotent-guards fix remains the correct in-convention answer. Full correction recorded in chatgpt-pr-review log.
+- **T1/T2/T3 DEFERRED** — already tracked in `tasks/todo.md` as PA-CLEANUP-DEF-4 / DEF-1 / DEF-2 respectively. Baseline-architecture rationale for partial-fix avoidance recorded in log.
+- Log: `tasks/review-logs/chatgpt-pr-review-pa-v1-cleanup-batch-2026-05-15T21-30-00Z.md`.
+
+**Step 6 — full doc-sync sweep:** complete. Phase 2 sweep already updated `architecture.md` (Voice profile service row). No additional doc edits required post-review (chatgpt-pr-review introduced zero code changes).
+
+**Step 7 — KNOWLEDGE.md pattern extraction:** 3 entries appended:
+- `[2026-05-15] Pattern — Conformance log can outlive the spec it audits` — architect's mandatory re-read of underlying spec section per REQ.
+- `[2026-05-15] Pattern — Column-rename grep discipline: both casings plus provisioning paths` — type-loose column writes evade typecheck and require explicit greps.
+- `[2026-05-15] Pattern — \`.down.sql\` idempotent guards convention is brittle but established` — runner behavior, the false-alarm trap, and reference to the 92-file existing convention.
+
+**Step 7a — Compound Learning Feedback:** no new compound-learning proposals this build; the three KNOWLEDGE.md entries above are direct pattern captures.
+
+**Step 8 — tasks/todo.md cleanup:** complete. 13 deferred items already flipped to `[status:closed:pr:324]` during Phase 3 placeholder substitution. 7 new deferred items added (PA-CLEANUP-DEF-1 through PA-CLEANUP-DEF-7) with rationale.
+
+**Step 9 — current-focus.md transition:** SKIPPED per operator's earlier intentional revert. `current-focus.md` remains pointed at `split-skill-analyzer` MERGE_READY for PR #320.
+
+**Step 10 — ready-to-merge label:** applied to PR #324 via `gh pr edit 324 --add-label ready-to-merge`. CI will run on the labelled state.
+
+**Operator action still required before merge:**
+- Visual confirmation of Personal nav group placement in the running client (spec §9 criterion #7). PR body has the checklist. Reply on the PR with `nav placement confirmed` (or a screenshot of what's wrong).
