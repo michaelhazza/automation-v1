@@ -1676,3 +1676,32 @@ Tab additions that land on main while the branch is in flight must be **manually
 **Pattern:** Audit logs capture findings as `<file>:<line>:<description>`. When a subsequent PR splits the referenced file, the line numbers shift — sometimes drastically. A finding at `skillAnalyzerService.ts:1420` may become `skillAnalyzerServicePure.ts:380` after extraction, making the audit log entry look like a regression ("the file doesn't even exist") when the code was actually moved and the real concern is whether it was addressed. Post-split audit reviews that compare new line numbers against old audit log entries will misclassify moved-but-unaddressed code as "fixed" (no longer at the referenced location) or classify moved code as a new finding.
 **Rule.** When resuming an audit after a split PR: (1) re-run the detection pass for all findings in the affected area before triaging — never triage from stale line-number references; (2) for NEEDS-DISCUSSION items, note explicitly in the triage whether the cited line is still at the same location or has moved; (3) audit log entries should reference git commit SHAs alongside file paths when the audit spans multiple PRs to pin the file state.
 **Why it matters:** the purpose of an audit log is to track whether findings are addressed, not just that they were found. Stale line numbers cause addressed findings to appear unresolved and vice versa — the log loses its value as a tracking artifact.
+
+---
+
+## [2026-05-15] Pattern — Gate scripts that glob `*.sql` must exclude `*.down.sql`
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F1 on PR #317 (wave-1-cleanup-prevention) — `verify-fk-only-tenant-tables.sh`.
+**Pattern:** Migration gate scripts that enumerate SQL files via `find ... -name '*.sql'` or `glob migrations/*.sql` inadvertently include `*.down.sql` rollback files. Down migrations can contain `CREATE POLICY` statements (restoring a dropped policy) or `CREATE TABLE` statements (restoring a dropped table), which will give a false-positive signal to both the coverage check ("policy exists") and the discovery scan ("table exists"). The gate `verify-fk-only-tenant-tables.sh` shipped this bug on first merge — the CREATE TABLE walk and the CREATE POLICY grep both used `*.sql` globs, so a policy in a down migration would count as coverage.
+**Rule.** Every gate that scans migrations for schema-presence signals (CREATE TABLE, CREATE POLICY, ALTER TABLE, CREATE INDEX, ENABLE ROW LEVEL SECURITY) MUST exclude down migrations. Canonical fix: `find "$MIGRATIONS_DIR" -name '*.sql' ! -name '*.down.sql'`. For glob-based greps: `grep ... migrations/*.sql` → `find ... ! -name '*.down.sql' -print0 | xargs -0 grep ...`. The summary file-count passed to `emit_summary` should also exclude down migrations for an accurate "N files scanned" metric.
+**Why it matters:** a policy found in a down migration gives false confidence that a table is protected — the down migration exists to REMOVE the policy on rollback, not assert it. A scan that counts this as coverage would silently miss a table with no active up-migration policy.
+
+---
+
+## [2026-05-15] Pattern — Drizzle ORM uses two distinct REFERENCES forms; gate regexes must handle both
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F2 + R2 follow-up on PR #317 (wave-1-cleanup-prevention) — `verify-fk-only-tenant-tables.sh`.
+**Pattern:** Drizzle ORM generates FK references in two distinct forms depending on migration statement type:
+- **ALTER TABLE FK constraints** (e.g. `0000_wandering_firedrake.sql:139`): `REFERENCES "public"."executions"("id")` — schema-qualified, double-quoted.
+- **Inline column definitions** (e.g. `0013_phase_two_scheduled_workforce.sql:49`): `REFERENCES "scheduled_tasks"("id")` — no schema prefix, single-quoted.
+A regex `/REFERENCES[[:space:]]+"?([a-zA-Z_][a-zA-Z0-9_]*)"?/` captures `public` (not `executions`) for the ALTER TABLE form, silently missing every FK expressed via schema-qualified form. The fix is a two-stage match: try the schema-qualified form `"schema"."table"` first (capturing the part after the dot), then fall back to the plain `"table"` form. Similarly, `CREATE POLICY ... ON "public"."table"` requires the policy grep to handle an optional schema prefix before the table name.
+**Rule.** Any gate regex that matches table names in SQL must test against both forms. Canonical two-stage awk match:
+```awk
+if (match($0, /REFERENCES[[:space:]]+"?[a-zA-Z_][a-zA-Z0-9_]*"?\."?([a-zA-Z_][a-zA-Z0-9_]*)/, fkm)) {
+  parent = fkm[1]  # schema-qualified: capture after the dot
+} else if (match($0, /REFERENCES[[:space:]]+"?([a-zA-Z_][a-zA-Z0-9_]*)/, fkm)) {
+  parent = fkm[1]  # plain form
+}
+```
+Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-zA-Z0-9_]*\"?\.)?\"?${table}\"?"`.
+**Why it matters:** Drizzle's initial migration file (`0000_wandering_firedrake.sql`) uses the ALTER TABLE form for ALL FK constraints. A scanner that only handles the plain form will miss every FK in the entire initial migration — zero coverage on the most FK-dense file in the repo.
