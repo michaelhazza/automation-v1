@@ -223,7 +223,7 @@ test('system admin in workspace mode sees platform group alongside workspace gro
 });
 
 // ── Test 7: group emission order matches canonical sequence ──
-test('group emission order: top → work → projects → agents → company → clientpulse → organisation → support → footer (no platform for non-sysadmin)', () => {
+test('group emission order: top → personal → work → projects → agents → company → clientpulse → organisation → support → footer (no platform for non-sysadmin)', () => {
   const ctx = baseCtx({
     hasOrgContext: true,
     hasAnyOrgPerm: true,
@@ -234,6 +234,7 @@ test('group emission order: top → work → projects → agents → company →
     hasSidebarItem: () => true,
     navProjects: [{ id: 'p1', name: 'P1', color: '#f00', status: 'active' }],
     navAgents: [{ id: 'a1', agentId: 'ag1', name: 'A1', icon: null }],
+    userOwnedAgents: [{ agentId: 'ea-1', name: 'My Assistant' }],
     liveAgentCount: 1,
   });
   const items = buildNavItems(ctx);
@@ -245,7 +246,7 @@ test('group emission order: top → work → projects → agents → company →
     }
   }
 
-  const expectedOrder = ['top', 'work', 'projects', 'agents', 'company', 'clientpulse', 'organisation', 'support', 'footer'];
+  const expectedOrder = ['top', 'personal', 'work', 'projects', 'agents', 'company', 'clientpulse', 'organisation', 'support', 'footer'];
   let lastIdx = -1;
   for (const group of seen) {
     const idx = expectedOrder.indexOf(group);
@@ -254,4 +255,47 @@ test('group emission order: top → work → projects → agents → company →
     lastIdx = idx;
   }
   expect(seen.includes('platform')).toBe(false);
+});
+
+// ── Test 11: personal group appears before work group when userOwnedAgents non-empty ──
+test('personal group items appear before work group items when userOwnedAgents.length > 0', () => {
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-personal-order',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    userOwnedAgents: [{ agentId: 'ea-1', name: 'My Assistant' }],
+    navProjects: [],
+    navAgents: [],
+  });
+  const items = buildNavItems(ctx);
+
+  const firstPersonalIdx = items.findIndex((i) => i.group === 'personal');
+  const firstWorkIdx = items.findIndex((i) => i.group === 'work');
+
+  expect(firstPersonalIdx).not.toBe(-1);
+  expect(firstWorkIdx).not.toBe(-1);
+  expect(firstPersonalIdx).toBeLessThan(firstWorkIdx);
+});
+
+// ── Test 12: no personal group items emitted when userOwnedAgents is empty ──
+test('no personal group items are emitted when userOwnedAgents.length === 0', () => {
+  const ctx = baseCtx({
+    hasOrgContext: true,
+    hasAnyOrgPerm: true,
+    activeClientId: 'client-no-personal',
+    viewMode: 'workspace',
+    hasOrgPerm: () => true,
+    hasClientPerm: () => true,
+    hasSidebarItem: () => true,
+    userOwnedAgents: [],
+    navProjects: [],
+    navAgents: [],
+  });
+  const items = buildNavItems(ctx);
+
+  expect(items.some((i) => i.group === 'personal')).toBe(false);
 });
