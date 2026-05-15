@@ -50,11 +50,19 @@ export async function allocateAndInsertTelemetryEvent(
   const maxRetries = opts?.maxRetries ?? DEFAULT_MAX_RETRIES;
   const { sandboxExecutionId, criticality, eventType } = rowToInsert;
 
-  // Acquire a per-execution advisory lock keyed by hashtext(sandboxExecutionId).
-  // pg_advisory_xact_lock is session-level serialised; held until tx end.
-  await db.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${sandboxExecutionId})::bigint)`,
-  );
+  // Acquire a per-execution advisory lock using the first 64 bits of the UUID.
+  // The two-argument form of pg_advisory_xact_lock takes two int4 values — this
+  // uses the first 32 bits as lockid_hi and the next 32 bits as lockid_lo,
+  // giving full 64-bit entropy from the UUID. The single-argument form with
+  // hashtext()::bigint only provides 32 bits of effective entropy (sign-extended
+  // int4), making collisions likely at ~65K concurrent executions.
+  // pg_advisory_xact_lock is held until tx end.
+  await db.execute(sql`
+    SELECT pg_advisory_xact_lock(
+      ('x' || substr(replace(${sandboxExecutionId}, '-', ''), 1, 8))::bit(32)::int,
+      ('x' || substr(replace(${sandboxExecutionId}, '-', ''), 9, 8))::bit(32)::int
+    )
+  `);
 
   let lastAttemptedSequence = 0;
 

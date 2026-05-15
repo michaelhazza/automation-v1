@@ -37,6 +37,7 @@ import {
   assertNotLatestLocalTemplateVersion,
 } from './localDockerSandboxPure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
+import { logger } from '../../lib/logger.js';
 import type {
   SandboxRunTaskInput,
   SandboxRunTaskOutput,
@@ -172,9 +173,13 @@ export class LocalDockerSandbox implements SandboxExecutionService {
         const outputPath = join(hostWorkspaceDir, 'output.json');
         const content = readFileSync(outputPath, 'utf-8');
         rawOutput = JSON.parse(content) as unknown;
-      } catch {
+      } catch (err) {
         // Missing or unreadable output.json — harvest pipeline classifies as
         // output_validation_failed. rawOutput stays null.
+        logger.warn('sandbox.local_docker.output_read_failed', {
+          sandboxExecutionId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

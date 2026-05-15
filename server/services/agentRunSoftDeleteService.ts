@@ -1,7 +1,7 @@
 import { and, eq, isNull, isNotNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { logger } from '../lib/logger.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { SANDBOX_ARTEFACT_PURGE_JOB } from '../lib/sandboxJobNames.js';
@@ -22,6 +22,10 @@ export interface SoftDeleteResult {
  * §8.35: the UPDATE is gated on org scope + deleted_at IS NULL so rowCount 1
  * is the only success; rowCount 0 disambiguates not_found vs already_deleted
  * via a secondary SELECT.
+ *
+ * Caller must be inside `withOrgTx({organisationId})` or an org-scoped
+ * middleware. Bypass: route handlers wrapped by `withOrgPermission`
+ * automatically provide context.
  */
 export async function softDeleteAgentRun(input: {
   runId: string;
@@ -30,7 +34,9 @@ export async function softDeleteAgentRun(input: {
 }): Promise<SoftDeleteResult> {
   const { runId, organisationId, subaccountId } = input;
 
-  const updated = await db
+  const scopedDb = getOrgScopedDb('agentRunSoftDeleteService.softDeleteAgentRun');
+
+  const updated = await scopedDb
     .update(agentRuns)
     .set({ deletedAt: new Date() })
     .where(
@@ -52,7 +58,7 @@ export async function softDeleteAgentRun(input: {
 
   if (rowCount === 0) {
     // Disambiguate: was the row missing, or already soft-deleted?
-    const [existing] = await db
+    const [existing] = await scopedDb
       .select({ id: agentRuns.id, deletedAt: agentRuns.deletedAt })
       .from(agentRuns)
       .where(

@@ -79,7 +79,8 @@ interface LogEntry {
 }
 
 // Maximum log line length (spec §20.8 — over-cap lines are truncated).
-const MAX_LOG_LINE_BYTES = 65536; // 64 KB
+// Must match DB CHECK constraint char_length(line) <= 10000 in migration 0362.
+const MAX_LOG_LINE_CHARS = 10000;
 
 // ---------------------------------------------------------------------------
 // Telemetry write helper — delegates to the advisory-lock-serialised allocator.
@@ -371,13 +372,18 @@ async function step5LogRead(ctx: HarvestContext): Promise<LogReadResult> {
         .map((l) => ({
           stream,
           // Truncate over-cap lines (spec §20.8 — truncate, never drop).
-          line: Buffer.byteLength(l, 'utf8') > MAX_LOG_LINE_BYTES
-            ? l.slice(0, MAX_LOG_LINE_BYTES)
+          line: l.length > MAX_LOG_LINE_CHARS
+            ? l.slice(0, MAX_LOG_LINE_CHARS)
             : l,
           emittedAt: new Date(),
         }));
       return { lines, bytes };
-    } catch {
+    } catch (err) {
+      logger.warn('sandbox.harvest.output_read_failed', {
+        sandboxExecutionId: ctx.sandboxExecutionId,
+        stream,
+        err: err instanceof Error ? err.message : String(err),
+      });
       return { lines: [], bytes: 0 };
     }
   };
@@ -440,7 +446,11 @@ async function step6ArtefactEnumeration(
         return [] as Array<{ filename: string; bytes: number; mime: string }>;
       },
     });
-  } catch {
+  } catch (err) {
+    logger.warn('sandbox.harvest.artefact_enum_failed', {
+      sandboxExecutionId: ctx.sandboxExecutionId,
+      err: err instanceof Error ? err.message : String(err),
+    });
     return {
       result: { ok: false, reason: 'artefact_upload_failed' },
       artefacts: [],
@@ -644,7 +654,7 @@ async function step9LogPersistence(
   const thisBatchBytes = allLines.reduce((sum, e) => sum + Buffer.byteLength(e.line, 'utf8'), 0);
 
   const [{ today_bytes }] = await db.execute<{ today_bytes: string }>(sql`
-    SELECT COALESCE(SUM(char_length(line)), 0)::bigint AS today_bytes
+    SELECT COALESCE(SUM(octet_length(line)), 0)::bigint AS today_bytes
     FROM sandbox_logs
     WHERE organisation_id = ${ctx.organisationId}
       AND persisted_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')

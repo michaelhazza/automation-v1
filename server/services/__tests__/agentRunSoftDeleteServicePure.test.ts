@@ -12,11 +12,13 @@ export {};
 // Module-level mocks — hoisted before dynamic imports of the tested module.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../db/index.js', () => ({
-  db: {
-    update: vi.fn(),
-    select: vi.fn(),
-  },
+const mockScopedDb = {
+  update: vi.fn(),
+  select: vi.fn(),
+};
+
+vi.mock('../../lib/orgScopedDb.js', () => ({
+  getOrgScopedDb: vi.fn(() => mockScopedDb),
 }));
 
 vi.mock('../../db/schema/agentRuns.js', () => ({
@@ -63,7 +65,6 @@ vi.mock('../../lib/sandboxJobNames.js', () => ({
 // Dynamic imports (after mocks are hoisted)
 // ---------------------------------------------------------------------------
 
-const { db } = await import('../../db/index.js');
 const { getPgBoss } = await import('../../lib/pgBossInstance.js');
 const { logger } = await import('../../lib/logger.js');
 const { softDeleteAgentRun } = await import('../agentRunSoftDeleteService.js');
@@ -114,7 +115,7 @@ describe('softDeleteAgentRun', () => {
   it('Test 1: happy path — UPDATE rowCount=1; sendJob called; returns { deleted: true }', async () => {
     const mockSend = vi.fn().mockResolvedValue(null);
     vi.mocked(getPgBoss).mockResolvedValue({ send: mockSend } as unknown as Awaited<ReturnType<typeof getPgBoss>>);
-    vi.mocked(db.update).mockReturnValue(makeUpdateChain([{ id: RUN_ID }]) as unknown as ReturnType<typeof db.update>);
+    mockScopedDb.update.mockReturnValue(makeUpdateChain([{ id: RUN_ID }]) as unknown as ReturnType<typeof mockScopedDb.update>);
 
     const result = await softDeleteAgentRun(INPUT);
 
@@ -130,9 +131,9 @@ describe('softDeleteAgentRun', () => {
   it('Test 2: already-deleted — UPDATE rowCount=0; SELECT returns row with deletedAt set; returns { deleted: false, reason: already_deleted }; sendJob NOT called', async () => {
     const mockSend = vi.fn();
     vi.mocked(getPgBoss).mockResolvedValue({ send: mockSend } as unknown as Awaited<ReturnType<typeof getPgBoss>>);
-    vi.mocked(db.update).mockReturnValue(makeUpdateChain([]) as unknown as ReturnType<typeof db.update>);
-    vi.mocked(db.select).mockReturnValue(
-      makeSelectChain([{ id: RUN_ID, deletedAt: new Date('2026-01-01T00:00:00.000Z') }]) as unknown as ReturnType<typeof db.select>,
+    mockScopedDb.update.mockReturnValue(makeUpdateChain([]) as unknown as ReturnType<typeof mockScopedDb.update>);
+    mockScopedDb.select.mockReturnValue(
+      makeSelectChain([{ id: RUN_ID, deletedAt: new Date('2026-01-01T00:00:00.000Z') }]) as unknown as ReturnType<typeof mockScopedDb.select>,
     );
 
     const result = await softDeleteAgentRun(INPUT);
@@ -144,8 +145,8 @@ describe('softDeleteAgentRun', () => {
   it('Test 3: not-found — UPDATE rowCount=0; SELECT returns empty; returns { deleted: false, reason: not_found }', async () => {
     const mockSend = vi.fn();
     vi.mocked(getPgBoss).mockResolvedValue({ send: mockSend } as unknown as Awaited<ReturnType<typeof getPgBoss>>);
-    vi.mocked(db.update).mockReturnValue(makeUpdateChain([]) as unknown as ReturnType<typeof db.update>);
-    vi.mocked(db.select).mockReturnValue(makeSelectChain([]) as unknown as ReturnType<typeof db.select>);
+    mockScopedDb.update.mockReturnValue(makeUpdateChain([]) as unknown as ReturnType<typeof mockScopedDb.update>);
+    mockScopedDb.select.mockReturnValue(makeSelectChain([]) as unknown as ReturnType<typeof mockScopedDb.select>);
 
     const result = await softDeleteAgentRun(INPUT);
 
@@ -156,7 +157,7 @@ describe('softDeleteAgentRun', () => {
   it('Test 4: enqueue failure — UPDATE rowCount=1; sendJob throws; returns { deleted: true }; logger.error called', async () => {
     const mockSend = vi.fn().mockRejectedValue(new Error('pg-boss unavailable'));
     vi.mocked(getPgBoss).mockResolvedValue({ send: mockSend } as unknown as Awaited<ReturnType<typeof getPgBoss>>);
-    vi.mocked(db.update).mockReturnValue(makeUpdateChain([{ id: RUN_ID }]) as unknown as ReturnType<typeof db.update>);
+    mockScopedDb.update.mockReturnValue(makeUpdateChain([{ id: RUN_ID }]) as unknown as ReturnType<typeof mockScopedDb.update>);
 
     const result = await softDeleteAgentRun(INPUT);
 

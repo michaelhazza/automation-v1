@@ -411,9 +411,13 @@ export class E2bSandbox implements SandboxExecutionService {
           call: () => this.sdkClient.readFile(providerSandboxId, '/workspace/output.json'),
         });
         rawOutput = JSON.parse(outputBuf.toString('utf-8')) as unknown;
-      } catch {
+      } catch (err) {
         // Missing or unreadable output.json — harvest pipeline classifies this
         // as output_validation_failed. rawOutput stays null.
+        logger.warn('sandbox.e2b.output_read_failed', {
+          sandboxExecutionId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -429,11 +433,15 @@ export class E2bSandbox implements SandboxExecutionService {
       sandboxExecutionId,
       telemetryWriter: makeTelemetryWriter(),
       call: () => this.sdkClient.terminateSandbox(providerSandboxId),
-    }).catch(() => {
+    }).catch((err: unknown) => {
       // Terminate failure is non-fatal: the sandbox may already be closed
       // (timeout, cost-ceiling), or the provider API is temporarily down.
       // The ceiling-monitor job (C11a) and the wall-clock-kill job (C11a)
       // both terminate independently as belt-and-braces.
+      logger.warn('sandbox.e2b.terminate_failed', {
+        sandboxExecutionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     });
 
     // Post-terminate verification (§7.7 REQ #55). Runs even if terminate above
@@ -528,8 +536,13 @@ export class E2bSandbox implements SandboxExecutionService {
         });
         // C7 (harvest pipeline) processes the raw buffer through redaction and
         // persists to sandbox_logs. This stub returns an opaque log-ref string.
-      } catch {
-        // Log file absent — treated as empty stream.
+      } catch (err) {
+        logger.warn('sandbox.e2b.log_harvest_read_failed', {
+          sandboxExecutionId,
+          providerSandboxId,
+          stream,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
       return `e2b:${sandboxExecutionId}:${stream}`;
     };
@@ -566,8 +579,12 @@ export class E2bSandbox implements SandboxExecutionService {
       // redaction (§8.4 step 7), and S3 upload (§8.4 step 8). This stub
       // returns an empty list — artefact wiring lands in C7.
       void entries;
-    } catch {
-      // Directory absent — no artefacts.
+    } catch (err) {
+      logger.warn('sandbox.e2b.artefact_harvest_list_failed', {
+        sandboxExecutionId,
+        providerSandboxId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
     return [];
   }
