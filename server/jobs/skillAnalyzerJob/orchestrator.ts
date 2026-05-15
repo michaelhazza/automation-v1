@@ -74,23 +74,16 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     ctx = await runStage3(ctx, jobId);
     ctx = await runStage4(ctx, jobId);
     ctx = await runStage4b(ctx, jobId);
-  } catch (err) {
-    if (err instanceof JobAlreadyFailedAbort) return;
-    throw err;
-  }
-
-  try {
     ctx = await runStage5(ctx, jobId);
     ctx = await runStage5b(ctx, jobId);
     ctx = await runStage5c(ctx, jobId);
+    ctx = await runStage6(ctx, jobId);
+    ctx = await runStage7(ctx, jobId);
+    ctx = await runStage8(ctx, jobId);
+    ctx = await runStage7b(ctx, jobId);
+    await runStage8b(ctx, jobId);
   } catch (err) {
     if (err instanceof JobAlreadyFailedAbort) return;
     throw err;
   }
-
-  ctx = await runStage6(ctx, jobId);
-  ctx = await runStage7(ctx, jobId);
-  ctx = await runStage8(ctx, jobId);
-  ctx = await runStage7b(ctx, jobId);
-  await runStage8b(ctx, jobId);
 }

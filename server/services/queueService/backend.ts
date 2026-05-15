@@ -7,7 +7,7 @@ import { SimpleQueue, EXECUTION_QUEUE_NAME } from './types.js';
 import { processExecution } from './executionProcessor.js';
 
 const simpleQueue = new SimpleQueue(processExecution);
-export let queueWorkerReady = false;
+let queueWorkerReady = false;
 
 export async function getQueueBackend() {
   if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
