@@ -1,24 +1,7 @@
-import { createJob } from './skillAnalyzerService/jobLifecycle/create.js';
-import { resumeJob, RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS } from './skillAnalyzerService/jobLifecycle/resume.js';
-import { getJob, getJobById, listJobs } from './skillAnalyzerService/jobLifecycle/get.js';
-import { setResultAction, bulkSetResultAction } from './skillAnalyzerService/results/setAction.js';
-import { updateProposedAgent, updateAgentProposal, updateResultAgentProposals } from './skillAnalyzerService/results/updateProposal.js';
-import { resolveWarning, appendBatchCollisionWarnings, applyBatchDeductionAndWarningAtomic } from './skillAnalyzerService/results/warnings.js';
-import { patchMergeFields, resetMergeToOriginal } from './skillAnalyzerService/results/merge.js';
-import { executeApproved } from './skillAnalyzerService/execute/approved.js';
-import { retryClassification, bulkRetryFailedClassifications } from './skillAnalyzerService/execute/retry.js';
-import { unlockStaleExecution } from './skillAnalyzerService/execute/unlock.js';
-import { insertResults, insertSingleResult, listResultIndicesForJob } from './skillAnalyzerService/persistence/results.js';
-import { markSkillInFlight, unmarkSkillInFlight } from './skillAnalyzerService/persistence/inFlight.js';
-import { updateJobProgress, updateJobAgentRecommendation } from './skillAnalyzerService/persistence/progress.js';
+// Impure-shell barrel — re-exports the full public surface from sub-modules.
+// All callers import from './skillAnalyzerService.js'.
 
-// ---------------------------------------------------------------------------
-// Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
-// ---------------------------------------------------------------------------
-
-// Status union is defined once in skillAnalyzerServicePure.ts alongside the
-// mid-flight and terminal subsets. Re-export here so existing callers keep
-// their import path.
+// Status enums re-exported from Pure tree (existing callers expect these here)
 export {
   SKILL_ANALYZER_JOB_STATUSES,
   SKILL_ANALYZER_MID_FLIGHT_STATUSES,
@@ -30,51 +13,66 @@ export {
   type SkillAnalyzerTerminalStatus,
 } from './skillAnalyzerServicePure.js';
 
-export { createJob };
-export { resumeJob, RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS };
-export { getJob, getJobById, listJobs };
+// Public types
+export type {
+  MatchedSkillContent,
+  AvailableSystemAgent,
+  EnrichedResult,
+  GetJobResponse,
+  ResolveWarningParams,
+  UpdateAgentProposalParams,
+  PatchMergeFieldsParams,
+} from './skillAnalyzerService/types.js';
 
-export type { MatchedSkillContent, AvailableSystemAgent, EnrichedResult, GetJobResponse, ResolveWarningParams, UpdateAgentProposalParams, PatchMergeFieldsParams } from './skillAnalyzerService/types.js';
+// Job lifecycle
+import { createJob } from './skillAnalyzerService/jobLifecycle/create.js';
+import { resumeJob } from './skillAnalyzerService/jobLifecycle/resume.js';
+import { getJob, getJobById, listJobs } from './skillAnalyzerService/jobLifecycle/get.js';
 
-export { setResultAction, bulkSetResultAction };
-export { updateProposedAgent, updateAgentProposal, updateResultAgentProposals };
-export { resolveWarning, appendBatchCollisionWarnings, applyBatchDeductionAndWarningAtomic };
-export { patchMergeFields, resetMergeToOriginal };
+// Per-result operations
+import { setResultAction, bulkSetResultAction } from './skillAnalyzerService/results/setAction.js';
+import { updateProposedAgent, updateAgentProposal, updateResultAgentProposals } from './skillAnalyzerService/results/updateProposal.js';
+import { resolveWarning, appendBatchCollisionWarnings, applyBatchDeductionAndWarningAtomic } from './skillAnalyzerService/results/warnings.js';
+import { patchMergeFields, resetMergeToOriginal } from './skillAnalyzerService/results/merge.js';
 
-export { executeApproved } from './skillAnalyzerService/execute/approved.js';
-export { retryClassification, bulkRetryFailedClassifications } from './skillAnalyzerService/execute/retry.js';
-export { unlockStaleExecution } from './skillAnalyzerService/execute/unlock.js';
+// Execute
+import { executeApproved } from './skillAnalyzerService/execute/approved.js';
+import { retryClassification, bulkRetryFailedClassifications } from './skillAnalyzerService/execute/retry.js';
+import { unlockStaleExecution } from './skillAnalyzerService/execute/unlock.js';
 
-export { insertResults, insertSingleResult, listResultIndicesForJob } from './skillAnalyzerService/persistence/results.js';
-export { markSkillInFlight, unmarkSkillInFlight } from './skillAnalyzerService/persistence/inFlight.js';
-export { updateJobProgress, updateJobAgentRecommendation } from './skillAnalyzerService/persistence/progress.js';
+// Persistence + progress
+import { insertResults, insertSingleResult, listResultIndicesForJob } from './skillAnalyzerService/persistence/results.js';
+import { markSkillInFlight, unmarkSkillInFlight } from './skillAnalyzerService/persistence/inFlight.js';
+import { updateJobProgress, updateJobAgentRecommendation } from './skillAnalyzerService/persistence/progress.js';
 
-export const skillAnalyzerService = {
-  createJob,
-  resumeJob,
-  getJob,
-  listJobs,
-  setResultAction,
-  bulkSetResultAction,
-  updateAgentProposal,
-  updateProposedAgent,
-  patchMergeFields,
-  resetMergeToOriginal,
+// Named re-exports (for callers that import named functions directly)
+export {
+  createJob, resumeJob, getJob, listJobs,
+  setResultAction, bulkSetResultAction,
+  updateProposedAgent, updateAgentProposal,
+  patchMergeFields, resetMergeToOriginal,
   resolveWarning,
-  executeApproved,
-  unlockStaleExecution,
+  executeApproved, unlockStaleExecution,
   updateJobProgress,
-  retryClassification,
-  bulkRetryFailedClassifications,
-  // Internal — used by job handler only
-  getJobById,
-  insertResults,
-  insertSingleResult,
-  listResultIndicesForJob,
-  markSkillInFlight,
-  unmarkSkillInFlight,
-  updateResultAgentProposals,
-  updateJobAgentRecommendation,
-  appendBatchCollisionWarnings,
-  applyBatchDeductionAndWarningAtomic,
+  retryClassification, bulkRetryFailedClassifications,
+  getJobById, insertResults, insertSingleResult, listResultIndicesForJob,
+  markSkillInFlight, unmarkSkillInFlight,
+  updateResultAgentProposals, updateJobAgentRecommendation,
+  appendBatchCollisionWarnings, applyBatchDeductionAndWarningAtomic,
+};
+
+// Aggregate object — locked at 26 keys per spec §4.2
+export const skillAnalyzerService = {
+  createJob, resumeJob, getJob, listJobs,
+  setResultAction, bulkSetResultAction,
+  updateAgentProposal, updateProposedAgent,
+  patchMergeFields, resetMergeToOriginal,
+  resolveWarning,
+  executeApproved, unlockStaleExecution,
+  updateJobProgress,
+  retryClassification, bulkRetryFailedClassifications,
+  getJobById, insertResults, insertSingleResult, listResultIndicesForJob,
+  markSkillInFlight, unmarkSkillInFlight,
+  updateResultAgentProposals, updateJobAgentRecommendation,
+  appendBatchCollisionWarnings, applyBatchDeductionAndWarningAtomic,
 };
