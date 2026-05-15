@@ -18,6 +18,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   ieeRunCompletedPayloadSchema,
@@ -30,6 +32,7 @@ import {
   ieeCancel,
 } from './_ieeShared.js';
 import { classifyExecutionClass } from './ieeDevBackendPure.js';
+import { parseCurrentVersion } from '../sandbox/templateVersionParserPure.js';
 import { FailureError } from '../../../shared/iee/failure.js';
 import { failure } from '../../../shared/iee/failure.js';
 
@@ -63,6 +66,46 @@ const V1_DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
     startTimeoutMs: 30_000,         // 30 s provider-start soft timeout
   },
 };
+
+// Pinned allowlist of known-valid template versions for the synthetos-sandbox
+// template. Deferred-decision: this list should be driven from CURRENT_VERSION
+// coherence checks (C14) rather than maintained inline. TODO: consolidate in
+// verify-template-version-coherence CI gate when C14 lands.
+const ALLOWED_TEMPLATE_VERSIONS = ['v1.0.0'] as const;
+
+/**
+ * Resolve the current template version for a given template name from
+ * infra/sandbox-templates/{name}/CURRENT_VERSION.
+ * Falls back to SANDBOX_TEMPLATE_VERSION env var (then 'v1.0.0') when the
+ * file cannot be read (local dev without template files on disk).
+ * Throws FailureError('sandbox_template_invalid') for any version not in
+ * the pinned allowlist.
+ *
+ * Exported for unit testing.
+ */
+export function resolveTemplateVersion(templateName: string): string {
+  const filePath = join(process.cwd(), 'infra', 'sandbox-templates', templateName, 'CURRENT_VERSION');
+  let version: string;
+  try {
+    const content = readFileSync(filePath, 'utf8');
+    const parsed = parseCurrentVersion(content);
+    version = parsed.version;
+  } catch {
+    version = process.env['SANDBOX_TEMPLATE_VERSION'] ?? 'v1.0.0';
+  }
+
+  if (!(ALLOWED_TEMPLATE_VERSIONS as readonly string[]).includes(version)) {
+    throw new FailureError(
+      failure('sandbox_input_rejected', `template version not in allowlist: ${version}`, {
+        templateName,
+        received: version,
+        allowed: ALLOWED_TEMPLATE_VERSIONS,
+      }),
+    );
+  }
+
+  return version;
+}
 
 export const ieeDevBackend: ExecutionBackend = {
   // Identity
@@ -128,7 +171,7 @@ export const ieeDevBackend: ExecutionBackend = {
         // proxy task identifier until payload variants carry explicit taskIds.
         taskId: input.runId,
         templateName: 'synthetos-sandbox',
-        templateVersion: process.env['SANDBOX_TEMPLATE_VERSION'] ?? 'v1.0.0',
+        templateVersion: resolveTemplateVersion('synthetos-sandbox'),
         policy: V1_DEFAULT_SANDBOX_POLICY,
         inputBytes: 0,
         inputFiles: [],

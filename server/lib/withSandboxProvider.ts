@@ -32,10 +32,19 @@ import {
 
 export type SandboxProviderPhase = 'start' | 'mid_execution' | 'terminal' | 'harvest';
 
+export interface ProviderDiagnosticEvent {
+  subKind: 'slow_start' | 'rate_limit' | 'retry' | 'ambiguous_terminal';
+  attempt?: number;
+  elapsedMs?: number;
+  status?: number;
+  code?: string;
+}
+
 export interface WithSandboxProviderOpts<T> {
   phase: SandboxProviderPhase;
   sandboxExecutionId: string;
   call: () => Promise<T>;
+  telemetryWriter?: (event: ProviderDiagnosticEvent) => Promise<void>;
 }
 
 // Slow-start threshold per spec §16.4 (default 30 s).
@@ -90,7 +99,7 @@ export async function withSandboxProvider<T>(
       );
     },
 
-    onRetry: (attempt: number, err: unknown): void => {
+    onRetry: async (attempt: number, err: unknown): Promise<void> => {
       const signal = extractSignal(err);
       const isRateLimit = signal.status === 429 || signal.code === 'rate_limited';
       const subKind = isRateLimit ? 'rate_limit' : 'retry';
@@ -102,12 +111,20 @@ export async function withSandboxProvider<T>(
         Date.now() - callStart > SLOW_START_THRESHOLD_MS
       ) {
         slowStartEmitted = true;
+        const slowStartElapsedMs = Date.now() - callStart;
         logger.warn('sandbox.provider_diagnostic', {
           sandboxExecutionId,
           phase,
           subKind: 'slow_start',
-          elapsedMs: Date.now() - callStart,
+          elapsedMs: slowStartElapsedMs,
         });
+        if (opts.telemetryWriter) {
+          try {
+            await opts.telemetryWriter({ subKind: 'slow_start', elapsedMs: slowStartElapsedMs });
+          } catch (telErr) {
+            logger.error('sandbox.provider_diagnostic.telemetry_write_failed', { err: telErr });
+          }
+        }
       }
 
       logger.warn('sandbox.provider_diagnostic', {
@@ -118,6 +135,18 @@ export async function withSandboxProvider<T>(
         status: signal.status,
         code: signal.code,
       });
+      if (opts.telemetryWriter) {
+        try {
+          await opts.telemetryWriter({
+            subKind: subKind as 'rate_limit' | 'retry',
+            attempt,
+            status: signal.status,
+            code: signal.code,
+          });
+        } catch (telErr) {
+          logger.error('sandbox.provider_diagnostic.telemetry_write_failed', { err: telErr });
+        }
+      }
     },
   }).catch(async (err: unknown) => {
     // withBackoff threw after exhausting transient retries, or threw
@@ -133,6 +162,17 @@ export async function withSandboxProvider<T>(
         code: signal.code,
         status: signal.status,
       });
+      if (opts.telemetryWriter) {
+        try {
+          await opts.telemetryWriter({
+            subKind: 'ambiguous_terminal',
+            status: signal.status,
+            code: signal.code,
+          });
+        } catch (telErr) {
+          logger.error('sandbox.provider_diagnostic.telemetry_write_failed', { err: telErr });
+        }
+      }
 
       // Enqueue reconciliation job via the string-constant seam only.
       // C11a wires boss.work(SANDBOX_HARVEST_RECONCILIATION_JOB, handler).
@@ -166,13 +206,21 @@ export async function withSandboxProvider<T>(
 
   // Post-success slow-start check: provider was slow but eventually succeeded.
   if (phase === 'start' && !slowStartEmitted && Date.now() - callStart > SLOW_START_THRESHOLD_MS) {
+    const postSuccessElapsedMs = Date.now() - callStart;
     logger.warn('sandbox.provider_diagnostic', {
       sandboxExecutionId,
       phase,
       subKind: 'slow_start',
-      elapsedMs: Date.now() - callStart,
+      elapsedMs: postSuccessElapsedMs,
       outcome: 'success',
     });
+    if (opts.telemetryWriter) {
+      try {
+        await opts.telemetryWriter({ subKind: 'slow_start', elapsedMs: postSuccessElapsedMs });
+      } catch (err) {
+        logger.error('sandbox.provider_diagnostic.telemetry_write_failed', { err });
+      }
+    }
   }
 
   return result;

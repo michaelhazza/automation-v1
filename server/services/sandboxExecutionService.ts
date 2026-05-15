@@ -18,6 +18,8 @@ import type { SandboxExecution, NewSandboxExecution } from '../db/schema/sandbox
 import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../db/schema/sandboxTelemetryEvents.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { SANDBOX_CEILING_MONITOR_JOB, SANDBOX_WALL_CLOCK_KILL_JOB } from '../lib/sandboxJobNames.js';
 import { resolveSandboxProvider } from './sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService as ISandboxExecutionService } from './sandbox/sandboxProviderResolver.js';
 // Side-effect imports — trigger `registerSandboxProvider('e2b' | 'local_docker', ...)`
@@ -442,8 +444,43 @@ async function _attemptProviderStart(
   // ── Case 6 setup: invoke the provider ─────────────────────────────────────
   const provider = getProvider();
 
-  // TODO(C11a): enqueue sandboxCeilingMonitorJob via sandboxJobNames before
-  // invoking the provider so the monitor starts ticking from sandbox-start time.
+  // Enqueue post-start lifecycle monitors before the synchronous provider.runTask().
+  // State-claim-first (§8.10): lease is held from Case 1 INSERT; enqueuing now means
+  // the monitors are armed by the time the synchronous call returns.
+  // SANDBOX-B4 known limitation: provider.runTask blocks until terminal, so the
+  // monitor's first tick fires after the call resolves; the monitor's self-re-enqueue
+  // loop covers the in-flight window.
+  const boss = await getPgBoss();
+  const resolvedCeilings = resolveSandboxCeilings(input.policy);
+  await boss.send(
+    SANDBOX_CEILING_MONITOR_JOB,
+    {
+      sandboxExecutionId: row.id,
+      organisationId: row.organisationId,
+      subaccountId: row.subaccountId,
+      startedAt: row.startedAt?.toISOString() ?? new Date().toISOString(),
+      wallClockMs: resolvedCeilings.wallClockMs,
+      costCents: resolvedCeilings.costCents,
+      monitorIntervalMs: resolvedCeilings.monitorIntervalMs,
+      templateName: row.templateName,
+    },
+    { singletonKey: row.id },
+  );
+  // SANDBOX-B4: WALL_CLOCK_KILL_BUFFER_MS not yet in a shared constants file —
+  // using 30 s default. TODO: consolidate in server/lib/sandboxRetentionConstants.ts.
+  const WALL_CLOCK_KILL_BUFFER_MS = 30_000;
+  await boss.send(
+    SANDBOX_WALL_CLOCK_KILL_JOB,
+    {
+      sandboxExecutionId: row.id,
+      organisationId: row.organisationId,
+      subaccountId: row.subaccountId,
+      wallClockMs: resolvedCeilings.wallClockMs,
+    },
+    {
+      startAfter: Math.ceil((resolvedCeilings.wallClockMs + WALL_CLOCK_KILL_BUFFER_MS) / 1000),
+    },
+  );
 
   let providerOutput: SandboxRunTaskOutput;
   try {
