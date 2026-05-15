@@ -7,15 +7,18 @@ import { canonicalInboxes } from '../../db/schema/index.js';
 import { SupportInboxAgentConfigSchema } from '../../../shared/types/supportInboxAgentConfig.js';
 import { validatePromptOverride } from '../../services/promptOverridePure.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
+import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
+import { listInboxes } from '../../services/supportInboxService.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
-function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string }): PrincipalContext {
+async function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string; params: Record<string, string> }): Promise<PrincipalContext> {
+  const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
   return {
     type: 'user',
     id: req.user!.id,
     organisationId: req.orgId!,
-    subaccountId: null,
+    subaccountId: subaccount.id,
     teamIds: [],
   };
 }
@@ -27,24 +30,8 @@ router.get(
   authenticate,
   requireOrgPermission('support.inbox.view'),
   asyncHandler(async (req, res) => {
-    const principal = makePrincipal(req);
-    const db = getOrgScopedDb('supportAgentRoutes.dashboard');
-
-    const rows = await db
-      .select({
-        id: canonicalInboxes.id,
-        name: canonicalInboxes.name,
-        agentConfig: canonicalInboxes.agentConfig,
-      })
-      .from(canonicalInboxes)
-      .where(
-        and(
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-          eq(canonicalInboxes.isActive, true),
-        ),
-      )
-      .orderBy(canonicalInboxes.createdAt);
-
+    const principal = await makePrincipal(req);
+    const rows = await listInboxes(principal, { activeOnly: true });
     const inboxes = rows.map((r) => ({
       inboxId: r.id,
       inboxName: r.name,
@@ -54,7 +41,6 @@ router.get(
       escalations: 0,
       evalDriftStatus: 'green' as const,
     }));
-
     res.json({ inboxes });
   }),
 );
@@ -66,7 +52,7 @@ router.patch(
   authenticate,
   requireOrgPermission('support.inbox.configure'),
   asyncHandler(async (req, res) => {
-    const principal = makePrincipal(req);
+    const principal = await makePrincipal(req);
     const { inboxId } = req.params;
     const db = getOrgScopedDb('supportAgentRoutes.patchAgentConfig');
 
