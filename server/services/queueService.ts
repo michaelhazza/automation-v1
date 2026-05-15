@@ -18,77 +18,18 @@ import {
   SANDBOX_LOGS_PRUNE_JOB,
   SANDBOX_EGRESS_AUDIT_PRUNE_JOB,
 } from '../lib/sandboxJobNames.js';
+import {
+  SimpleQueue,
+  EXECUTION_QUEUE_NAME,
+  WORKFLOW_RESUME_QUEUE,
+  LOCK_ID_CLEANUP_FILES,
+  LOCK_ID_CLEANUP_RESERVATIONS,
+  serializeError,
+  withAdvisoryLock,
+} from './queueService/types.js';
 
-// ---------------------------------------------------------------------------
-// Simple in-memory queue
-// In production this is replaced by pg-boss or bullmq, but the processing
-// logic (processExecution) is shared in both cases.
-// ---------------------------------------------------------------------------
-class SimpleQueue {
-  private processing = false;
-  private queue: string[] = [];
-
-  async add(executionId: string): Promise<void> {
-    this.queue.push(executionId);
-    if (!this.processing) {
-      this.processNext();
-    }
-  }
-
-  private async processNext(): Promise<void> {
-    if (this.queue.length === 0) {
-      this.processing = false;
-      return;
-    }
-
-    this.processing = true;
-    const executionId = this.queue.shift()!;
-
-    try {
-      await processExecution(executionId);
-    } catch {
-      // Execution processing errors are handled inside processExecution
-    }
-
-    setImmediate(() => this.processNext());
-  }
-}
-
-const simpleQueue = new SimpleQueue();
+const simpleQueue = new SimpleQueue(processExecution);
 let queueWorkerReady = false;
-const EXECUTION_QUEUE_NAME = 'execution-run';
-const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
-
-// ---------------------------------------------------------------------------
-// Advisory lock helpers — prevent duplicate maintenance runs across
-// horizontally-scaled instances when using the in-memory queue backend.
-// pg-boss handles deduplication natively, so locks are only needed for
-// the setInterval fallback path.
-// ---------------------------------------------------------------------------
-const LOCK_ID_CLEANUP_FILES        = 7001;
-const LOCK_ID_CLEANUP_RESERVATIONS = 7002;
-
-function serializeError(err: unknown): { message: string; name: string; stack?: string } {
-  if (err instanceof Error) {
-    return {
-      message: err.message,
-      name: err.name,
-      ...(env.NODE_ENV !== 'production' && { stack: err.stack }),
-    };
-  }
-  return { message: String(err), name: 'UnknownError' };
-}
-
-async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
-  const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) AS acquired`);
-  const acquired = (Array.from(result)[0] as { acquired?: boolean } | undefined)?.acquired;
-  if (!acquired) return; // another instance is running this job
-  try {
-    await fn();
-  } finally {
-    await db.execute(sql`SELECT pg_advisory_unlock(${lockId})`);
-  }
-}
 
 async function getQueueBackend() {
   if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
