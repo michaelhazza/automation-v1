@@ -4,7 +4,8 @@
 **Authoritative sub-spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md` (treated as authoritative at HEAD; 2026-05-13 amendment block is part of the contract)
 **Spec commit at check:** HEAD of branch `claude/pa-v1-cleanup-batch`
 **Branch:** `claude/pa-v1-cleanup-batch`
-**Branch HEAD:** `ed822574`
+**Branch HEAD (pre-log commit):** `ed822574`
+**Commit at finish:** `2e70c02f`
 **Base (merge-base with `origin/main`):** `c92d2a81`
 **Scope:** full batch — 12 spec-conformance REQ items + 1 adversarial item enumerated in spec §1 / §5 / §6 / §7
 **Changed-code set:** 13 files
@@ -92,4 +93,4 @@ Spec §9 acceptance criteria:
 
 CONFORMANT — no gaps, mechanical or directional. Proceed to `pr-reviewer`. No re-run against an expanded changed-code set is required (no fixes applied this run).
 
-**Commit at finish:** (recorded after auto-commit step)
+**Commit at finish:** `2e70c02f` (pushed to `origin/claude/pa-v1-cleanup-batch`).
