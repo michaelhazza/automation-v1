@@ -1,4 +1,4 @@
-import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
+import { eq, inArray, and, sql, isNull } from 'drizzle-orm';
 import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
@@ -10,7 +10,7 @@ import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
 import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, ProposedMerge, SkillAnalyzerJobStatus } from './skillAnalyzerServicePure.js';
-import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure.js';
+import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
 import { randomUUID, createHash } from 'crypto';
@@ -18,9 +18,9 @@ import { stableStringify, hashSkillContent, toErrorMessage } from './skillAnalyz
 import { slugifyName } from './skillAnalyzerService/helpers/slugify.js';
 import type { MatchedSkillContent, AvailableSystemAgent, EnrichedResult, GetJobResponse, ResolveWarningParams, UpdateAgentProposalParams, PatchMergeFieldsParams } from './skillAnalyzerService/types.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
-import { getPgBoss } from '../lib/pgBossInstance.js';
-import { getJobConfig } from '../config/jobConfig.js';
-import { skillParserService } from './skillParserService.js';
+import { createJob } from './skillAnalyzerService/jobLifecycle/create.js';
+import { resumeJob, RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS } from './skillAnalyzerService/jobLifecycle/resume.js';
+import { getJob, getJobById, listJobs } from './skillAnalyzerService/jobLifecycle/get.js';
 // Phase 1 of skill-analyzer-v2: the analyzer is system-only. The
 // org-skill skillService import was removed; executeApproved now writes
 // to system_skills via systemSkillService. DISTINCT results use the
@@ -49,298 +49,11 @@ export {
   type SkillAnalyzerTerminalStatus,
 } from './skillAnalyzerServicePure.js';
 
-/** Create a new analysis job and enqueue it for background processing.
- *  For paste/github, rawInput is the text/url string.
- *  For upload, rawInput is the array of Multer files. */
-export async function createJob(params: {
-  organisationId: string;
-  userId: string;
-  sourceType: 'paste' | 'upload' | 'github' | 'download';
-  sourceMetadata: Record<string, unknown>;
-  rawInput: string | Express.Multer.File[];
-}): Promise<{ jobId: string }> {
-  const { organisationId, userId, sourceType, sourceMetadata, rawInput } = params;
-
-  // For paste source, parse immediately and store candidates on the job row.
-  // For upload/github, the job handler will fetch/parse during processing.
-  let parsedCandidates: unknown = null;
-
-  if (sourceType === 'paste' && typeof rawInput === 'string') {
-    const candidates = skillParserService.parseFromPaste(rawInput);
-    parsedCandidates = candidates;
-  } else if (sourceType === 'upload' && Array.isArray(rawInput)) {
-    // Parse synchronously at job creation — files are already in temp dir
-    const candidates = await skillParserService.parseUploadedFiles(rawInput);
-    parsedCandidates = candidates;
-  }
-  // For github and download, candidates are fetched during job processing
-
-  // v2 §11.11.4: capture the full config row at job start so mid-job config
-  // edits never apply to an in-flight run. Downstream stages (merge validation,
-  // approval gate, Execute) read from `jobs.config_snapshot`, not the live
-  // table.
-  const configSnapshot = await skillAnalyzerConfigService.snapshotForJob();
-
-  const rows = await db
-    .insert(skillAnalyzerJobs)
-    .values({
-      organisationId,
-      createdBy: userId,
-      sourceType,
-      sourceMetadata,
-      parsedCandidates,
-      status: 'pending',
-      progressPct: 0,
-      configSnapshot,
-      configVersionUsed: configSnapshot.configVersion,
-    })
-    .returning({ id: skillAnalyzerJobs.id });
-
-  const jobId = rows[0].id;
-
-  // Enqueue pg-boss job. Passing getJobConfig so the queue actually
-  // respects the retry/expire settings declared in jobConfig.ts; without
-  // this, pg-boss defaults applied (notably a 15-min expireIn) which
-  // killed otherwise-healthy long runs mid-Stage-5. singletonKey stays
-  // undefined — one-shot enqueue per jobId.
-  const boss = await getPgBoss();
-  await boss.send('skill-analyzer', { jobId }, {
-    ...getJobConfig('skill-analyzer'),
-    singletonKey: undefined,
-  });
-
-  return { jobId };
-}
-
-/** Re-enqueue a previously-started analysis job that failed or stalled.
- *  The handler is crash-resumable: Stage 1 reuses stored parsedCandidates,
- *  Stage 5 skips already-classified candidateIndices, and Stage 6 hits
- *  the agent-embedding cache when content hashes match. So resuming is
- *  effectively free on LLM spend.
- *
- *  Safety guards:
- *    - Refuses if job.status === 'completed' (work already done)
- *    - Refuses if an alive pg-boss queue entry for this jobId still
- *      exists (would cause double-processing and Stage 8 race conditions)
- *
- *  Intermediate status (e.g. 'classifying') is accepted and reset — this
- *  is the common case where a worker was SIGKILL'd mid-pipeline and left
- *  the row in an in-flight state. */
-
-/** How long a mid-flight row must be silent before resume will force-expire
- *  a lingering pg-boss `active` entry. 2× the stale-sweep threshold so
- *  this path only trips on jobs that are clearly dead but haven't yet been
- *  reaped by the periodic sweep. See Round 1 Finding 7. */
-const RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS = 30 * 60_000;
-
-export async function resumeJob(params: {
-  jobId: string;
-  organisationId: string;
-  userId: string;
-}): Promise<{ ok: true }> {
-  const { jobId, organisationId } = params;
-
-  const [job] = await db
-    .select()
-    .from(skillAnalyzerJobs)
-    .where(and(
-      eq(skillAnalyzerJobs.id, jobId),
-      eq(skillAnalyzerJobs.organisationId, organisationId),
-    ));
-
-  if (!job) throw { statusCode: 404, message: 'Analysis job not found.' };
-  if (job.status === 'completed') {
-    throw { statusCode: 409, message: 'Analysis already completed — nothing to resume.' };
-  }
-
-  // Guard against double-enqueue: if pg-boss already has a live row for
-  // this jobId, resuming would run the handler twice in parallel and both
-  // copies would fight over the Stage-8 insert set.
-  //
-  // Exception: a lingering 'active' pg-boss entry combined with EITHER
-  //   (a) our DB row is 'failed', or
-  //   (b) our DB row is mid-flight but has been silent past the stale
-  //       resume threshold (2× the sweep threshold = 30 min by default),
-  // means the worker process died without pg-boss detecting it (pg-boss's
-  // own lock only expires after expireInSeconds, which is 4 hours). Force-
-  // expire the ghost so resume can proceed rather than blocking the user
-  // for hours on a dead worker.
-  //
-  // Case (b) matters because the sweep runs periodically; between worker
-  // death and the next sweep tick a user clicking Resume would otherwise
-  // get "already queued or running" for up to 15 min despite nothing
-  // actually running. See ChatGPT PR review Round 1 Finding 7.
-  //
-  // drizzle-orm/postgres-js returns db.execute() as the row array directly
-  // (NOT { rows }) — see server/services/jobQueueHealthService.ts for the
-  // established cast pattern.
-  const aliveRows = await db.execute(sql`
-    SELECT COUNT(*)::int AS n
-    FROM pgboss.job
-    WHERE name = 'skill-analyzer'
-      AND data->>'jobId' = ${jobId}
-      AND state IN ('created', 'retry', 'active')
-  `);
-  const aliveCount = (aliveRows as unknown as Array<{ n: number }>)[0]?.n ?? 0;
-  if (aliveCount > 0) {
-    const jobUpdatedMs = job.updatedAt instanceof Date
-      ? job.updatedAt.getTime()
-      : new Date(job.updatedAt as unknown as string).getTime();
-    const silenceMs = Date.now() - jobUpdatedMs;
-    const midFlightStale = isSkillAnalyzerMidFlightStatus(job.status)
-      && silenceMs > RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS;
-    if (job.status === 'failed' || midFlightStale) {
-      // Dead worker left a ghost active entry — expire it so we can re-enqueue.
-      await db.execute(sql`
-        UPDATE pgboss.job
-        SET state = 'failed',
-            completedon = NOW(),
-            output = '{"error":"Expired by resume — worker process died"}'::jsonb
-        WHERE name = 'skill-analyzer'
-          AND data->>'jobId' = ${jobId}
-          AND state = 'active'
-      `);
-      logger.info('skill_analyzer.resume_force_expired_ghost', {
-        jobId,
-        dbStatus: job.status,
-        silenceMs,
-        reason: job.status === 'failed' ? 'db_failed' : 'mid_flight_stale',
-      });
-    } else {
-      throw { statusCode: 409, message: 'Analysis is already queued or running.' };
-    }
-  }
-
-  // Reset the intermediate row state so the progress UI reflects the
-  // resume and the handler's stage-entry updates don't look like regressions.
-  // Everything the handler needs to resume (parsedCandidates, configSnapshot,
-  // classifyState, existing skill_analyzer_results rows) is preserved —
-  // those are the inputs to Stage 5's skip-already-classified logic.
-  await db
-    .update(skillAnalyzerJobs)
-    .set({
-      status: 'pending',
-      errorMessage: null,
-      progressMessage: 'Resuming analysis...',
-      updatedAt: new Date(),
-    })
-    .where(eq(skillAnalyzerJobs.id, jobId));
-
-  const boss = await getPgBoss();
-  await boss.send('skill-analyzer', { jobId }, {
-    ...getJobConfig('skill-analyzer'),
-    singletonKey: undefined,
-  });
-
-  logger.info('skill_analyzer.resume_enqueued', { jobId, organisationId });
-  return { ok: true };
-}
+export { createJob };
+export { resumeJob, RESUME_MID_FLIGHT_GHOST_THRESHOLD_MS };
+export { getJob, getJobById, listJobs };
 
 export type { MatchedSkillContent, AvailableSystemAgent, EnrichedResult, GetJobResponse, ResolveWarningParams, UpdateAgentProposalParams, PatchMergeFieldsParams } from './skillAnalyzerService/types.js';
-
-/** Get job status and results. Validates that job belongs to the org.
- *  Phase 1 of skill-analyzer-v2 extends the response with two new fields:
- *  - matchedSkillContent on each result with a non-null matchedSkillId
- *  - availableSystemAgents on the job (combobox source for Phase 4) */
-export async function getJob(
-  jobId: string,
-  organisationId: string
-): Promise<GetJobResponse> {
-  const jobRows = await db
-    .select()
-    .from(skillAnalyzerJobs)
-    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
-    .limit(1);
-
-  const job = jobRows[0];
-  if (!job) {
-    throw { statusCode: 404, message: 'Job not found' };
-  }
-
-  const rawResults = await db
-    .select()
-    .from(skillAnalyzerResults)
-    .where(eq(skillAnalyzerResults.jobId, jobId))
-    .orderBy(skillAnalyzerResults.candidateIndex);
-
-  // Live lookup: for every result with matchedSkillId set, fetch the current
-  // system_skills row and attach as matchedSkillContent. If the skill was
-  // deleted between analysis and now, omit the field for that result (the
-  // Review UI handles the missing field with a fallback notice — spec §7.4).
-  // Single batched query — avoid N+1 over getSkill().
-  const matchedSkillIds = Array.from(
-    new Set(
-      rawResults
-        .map((r) => r.matchedSkillId)
-        .filter((id): id is string => id !== null && id !== undefined),
-    ),
-  );
-  const matchedSkillsById = new Map<string, SystemSkill>();
-  if (matchedSkillIds.length > 0) {
-    const rows = await db
-      .select()
-      .from(systemSkills)
-      .where(inArray(systemSkills.id, matchedSkillIds));
-    for (const row of rows) {
-      const visibility =
-        row.visibility === 'none' || row.visibility === 'basic' || row.visibility === 'full'
-          ? row.visibility
-          : 'none';
-      matchedSkillsById.set(row.id, {
-        id: row.id,
-        slug: row.slug,
-        name: row.name,
-        description: row.description ?? '',
-        isActive: row.isActive,
-        visibility,
-        definition: row.definition as SystemSkill['definition'],
-        instructions: row.instructions ?? null,
-        sideEffects: row.sideEffects,
-      });
-    }
-  }
-
-  const results: EnrichedResult[] = rawResults.map((r) => {
-    if (!r.matchedSkillId) return r;
-    const matched = matchedSkillsById.get(r.matchedSkillId);
-    if (!matched) return r;
-    const matchedSkillContent: MatchedSkillContent = {
-      id: matched.id,
-      slug: matched.slug,
-      name: matched.name,
-      description: matched.description,
-      definition: matched.definition as object,
-      instructions: matched.instructions,
-    };
-    return { ...r, matchedSkillContent };
-  });
-
-  // Live read of system_agents for the "Add another system agent" combobox.
-  // Full inventory at request time — not cached.
-  const allAgents = await systemAgentService.listAgents();
-  const availableSystemAgents: AvailableSystemAgent[] = allAgents.map((a) => ({
-    systemAgentId: a.id,
-    slug: a.slug,
-    name: a.name,
-  }));
-
-  return { job, results, availableSystemAgents };
-}
-
-/** List jobs for an org (most recent first). */
-export async function listJobs(
-  organisationId: string,
-  limit = 20,
-  offset = 0
-): Promise<(typeof skillAnalyzerJobs.$inferSelect)[]> {
-  return db
-    .select()
-    .from(skillAnalyzerJobs)
-    .where(eq(skillAnalyzerJobs.organisationId, organisationId))
-    .orderBy(desc(skillAnalyzerJobs.createdAt))
-    .limit(limit)
-    .offset(offset);
-}
 
 /** Set action on a single result. Validates job + org ownership. */
 export async function setResultAction(params: {
@@ -1854,18 +1567,6 @@ export async function updateJobProgress(
 // ---------------------------------------------------------------------------
 // Internal functions for job handler use (no org-scoping — admin bypass path)
 // ---------------------------------------------------------------------------
-
-/** Load a job by ID without org validation (for internal job processing only). */
-export async function getJobById(
-  jobId: string
-): Promise<typeof skillAnalyzerJobs.$inferSelect | null> {
-  const rows = await db
-    .select()
-    .from(skillAnalyzerJobs)
-    .where(eq(skillAnalyzerJobs.id, jobId))
-    .limit(1);
-  return rows[0] ?? null;
-}
 
 /** Batch insert results for a job. Splits into 100-row batches. */
 export async function insertResults(
