@@ -1713,3 +1713,12 @@ if (match($0, /REFERENCES[[:space:]]+"?[a-zA-Z_][a-zA-Z0-9_]*"?\."?([a-zA-Z_][a-
 ```
 Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-zA-Z0-9_]*\"?\.)?\"?${table}\"?"`.
 **Why it matters:** Drizzle's initial migration file (`0000_wandering_firedrake.sql`) uses the ALTER TABLE form for ALL FK constraints. A scanner that only handles the plain form will miss every FK in the entire initial migration — zero coverage on the most FK-dense file in the repo.
+
+---
+
+## [2026-05-15] Pattern — sub-module import paths must reflect actual directory depth, not original file location
+**Date:** 2026-05-15
+**Source:** build: split-workflow-engine — 70+ TypeScript TS2307 cascade errors after structural split.
+**Pattern:** When a builder agent extracts a module from `server/services/bigService.ts` into `server/services/newTree/subModule.ts`, it may copy relative imports verbatim from the source file. Those imports were correct for `server/services/` depth but are wrong at `server/services/newTree/` depth — every path needs one extra `../` level. For modules extracted two levels deep (`server/services/newTree/subDir/leaf.ts`), paths need two extra levels. The TypeScript error (TS2307 "Cannot find module") cascades: all symbols from the broken import become `any`, which then triggers TS7006 ("implicitly has 'any' type") and TS18046 ("is of type 'unknown'") on every downstream usage — 70+ errors tracing to ~15 wrong import paths.
+**Rule.** After any structural split that moves files to a deeper directory, audit every external import in every extracted file and verify the `../` depth matches the file's new location (not its origin). Canonical test: for a file at `server/services/A/B/leaf.ts` wanting `server/db/index.ts`, count: `server/services/A/B/leaf.ts` → up 3 → `server/` → down to `db/index.ts` = `../../../db/index.js`.
+**Why it matters:** TS2307 errors from wrong paths cause cascading `any`-type pollution that inflates error count by 5-10× and obscures the true root cause. The fix is always the same (add `../` levels) but the inflated error list wastes diagnostic time if the root cause isn't identified first.

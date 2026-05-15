@@ -3,8 +3,8 @@ active_spec: tasks/builds/split-workflow-engine/spec.md
 active_plan: tasks/builds/split-workflow-engine/plan.md
 build_slug: split-workflow-engine
 branch: claude/split-workflow-engine
-status: REVIEWING
-last_updated: 2026-05-15T04:03:50Z
+status: MERGE_READY
+last_updated: 2026-05-15T05:30:00Z
 last_merged_pr: #291
 last_merged_slug: personal-assistant-v1
 last_merged_branch: claude/synthetos-personal-assistant-0kaIM
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/split-workflow-engine/plan.md` (to be authored by architect)
 **Active build slug:** `split-workflow-engine`
 **Branch:** `claude/split-workflow-engine` (off `origin/main` @ `76377549`)
-**Status:** **REVIEWING** — Phase 2 build complete. Handoff written at `tasks/builds/split-workflow-engine/handoff.md`. Structural split of `workflowEngineService.ts` (4,074 LOC → 11 sub-modules + barrel), permissions migration (4 new `WORKFLOW_RUNS_*` keys, 9 route gates updated), doc-sync sweep complete. Chunks 7 (db scoping) and 8 (RLS) deferred as follow-up PR — see handoff REVIEW_GAP entries. Phase 3 finalisation pending. All reviewers (spec-conformance, pr-reviewer, reality-checker, adversarial-reviewer, dual-reviewer, chatgpt-pr-review) run in Phase 3.
+**Status:** **MERGE_READY** — Phase 3 finalisation complete. PR #319 ready to merge. Structural split of `workflowEngineService.ts` (4,074 LOC → 11 sub-modules + barrel), permissions migration (4 new `WORKFLOW_RUNS_*` keys, 9 route gates updated). Chunks 7 (db scoping) and 8 (RLS) deferred — follow-up PR after WF3/WF4 remediation. Review pipeline: spec-conformance CONFORMANT, pr-reviewer APPROVED (2 should-fix items applied), reality-checker READY, chatgpt-pr-review APPROVED (4 findings F1/F2/F3/T1 all fixed). Doc-sync sweep complete (architecture.md: AGENTS_EDIT→WORKFLOW_RUNS_START + barrel LOC; DEVELOPMENT_GUIDELINES.md: resolveOrgContext exception note; KNOWLEDGE.md: RLS fix pattern wording + new import-depth pattern). `ready-to-merge` label pending application.
 
 **Pending merge:** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) — `page-splits` reached MERGE_READY 2026-05-14; `ready-to-merge` label applied; CI monitoring continues independently. 16 client-side page-level file splits, no functional change. `chatgpt-pr-review` 3 rounds APPROVED. Phase 3 handoff at `tasks/builds/page-splits/handoff.md § Phase 3 (FINALISATION) — complete`.
 
