@@ -18,120 +18,13 @@ import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import { v4 as uuidv4 } from 'uuid';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 
-// ---------------------------------------------------------------------------
-// Consolidation Build C1 — local type declarations
-// (Will be replaced by shared/types/build.ts exports in chunk C5)
-// ---------------------------------------------------------------------------
+import type { AgentPersonality, AgentRunPreview, AgentFull, GoogleDocsContent, DataSourceScope, LoadedDataSource } from './agentService/types.js';
+export type { AgentPersonality, AgentRunPreview, AgentFull, DataSourceScope, LoadedDataSource } from './agentService/types.js';
 
-export interface AgentPersonality {
-  traits: string[];
-  tone: string;
-  description: string;
-  enabled: boolean;
-}
+import { dataSourceCache, lastGoodContentCache, getCachedContent, setCachedContent } from './agentService/caches.js';
 
-export interface AgentRunPreview {
-  id: string;
-  status: string;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  costUsd: number;
-}
-
-export interface AgentFull {
-  id: string;
-  etag: string;
-  /** Runtime guard used by service; not exposed in API response */
-  isSystemManaged: boolean;
-  configure: {
-    name: string;
-    description: string;
-    roleTitle: string;
-    parentAgentId: string | null;
-    model: string;
-    outputSize: 'compact' | 'standard' | 'extended';
-    allowSubaccountModelOverride: boolean;
-    responseMode: 'balanced' | 'expressive' | 'precise' | 'highly_creative';
-  };
-  behaviour: {
-    briefingTemplate: string;
-    constraints: string[];
-  };
-  personality: AgentPersonality;
-  skills: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }>;
-  dataSources: Array<{ id: string; kind: string; ref: string; status: 'connected' | 'disconnected' | 'error' }>;
-  triggers: Array<{ id: string; kind: 'schedule' | 'event' | 'manual'; spec: unknown; status: 'active' | 'paused' }>;
-  budget: { dailyCapUsd: number | null; monthlyCapUsd: number | null; warnThresholdPct: number };
-  runs: { last5: AgentRunPreview[]; total30d: number; cost30d: number };
-  /** Minimum 1. Agents with no revision history return 1 (not 0). */
-  agentRevisionCount: number;
-  lastRevisionEditedAt: string | null;
-  lastRevisionAuthor: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// In-memory caches
-// ---------------------------------------------------------------------------
-
-interface CacheEntry {
-  content: string;
-  fetchedAt: number;
-  expiresAt: number;
-}
-
-// Expiring hot cache — populated on fetch, expired per cacheMinutes
-const dataSourceCache = new Map<string, CacheEntry>();
-
-// Last-good-content fallback — never expires, overwritten only on successful fetch
-// Served silently when a live fetch fails so end users are unaffected
-const lastGoodContentCache = new Map<string, string>();
-
-function getCachedContent(sourceId: string): string | null {
-  const entry = dataSourceCache.get(sourceId);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    dataSourceCache.delete(sourceId);
-    return null;
-  }
-  return entry.content;
-}
-
-function setCachedContent(sourceId: string, content: string, cacheMinutes: number): void {
-  dataSourceCache.set(sourceId, {
-    content,
-    fetchedAt: Date.now(),
-    expiresAt: Date.now() + cacheMinutes * 60 * 1000,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Proactive sync scheduler
-// ---------------------------------------------------------------------------
-
-class DataSyncScheduler {
-  private timers = new Map<string, ReturnType<typeof setInterval>>();
-
-  schedule(sourceId: string, intervalMs: number): void {
-    this.cancel(sourceId);
-    const timer = setInterval(() => void runProactiveSync(sourceId), intervalMs);
-    this.timers.set(sourceId, timer);
-  }
-
-  cancel(sourceId: string): void {
-    const timer = this.timers.get(sourceId);
-    if (timer) {
-      clearInterval(timer);
-      this.timers.delete(sourceId);
-    }
-  }
-
-  activeCount(): number {
-    return this.timers.size;
-  }
-}
-
-export const dataSyncScheduler = new DataSyncScheduler();
+import { dataSyncScheduler } from './agentService/scheduler.js';
+export { dataSyncScheduler };
 
 // ---------------------------------------------------------------------------
 // Google Docs helpers
@@ -140,16 +33,6 @@ export const dataSyncScheduler = new DataSyncScheduler();
 function extractGoogleDocId(urlOrId: string): string {
   const match = urlOrId.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
   return match ? match[1] : urlOrId;
-}
-
-interface GoogleDocsContent {
-  body?: {
-    content?: Array<{
-      paragraph?: {
-        elements?: Array<{ textRun?: { content?: string } }>;
-      };
-    }>;
-  };
 }
 
 function extractGoogleDocText(doc: GoogleDocsContent): string {
@@ -390,6 +273,8 @@ async function runProactiveSync(sourceId: string): Promise<void> {
   }
 }
 
+dataSyncScheduler.setSyncFn(runProactiveSync);
+
 // ---------------------------------------------------------------------------
 // Fetch all data sources for an agent (used by LLM context builder)
 // ---------------------------------------------------------------------------
@@ -458,51 +343,6 @@ export async function loadSourceContent(
 
   const tokenCount = approxTokens(content);
   return { content, fetchOk, tokenCount };
-}
-
-/**
- * Scope descriptor for loading data sources. See spec §6.1.
- *
- * At least `agentId` must be set. Optionally narrows by subaccountAgentId
- * (for subaccount-specific sources) or scheduledTaskId (for scheduled-task-
- * specific sources). These two are orthogonal — a run either came from a
- * subaccount-agent link, or from a scheduled task, but not both sources of
- * scoping at the same row level.
- */
-export interface DataSourceScope {
-  agentId: string;
-  subaccountAgentId?: string | null;
-  scheduledTaskId?: string | null;
-}
-
-/**
- * LoadedDataSource — the raw shape returned by fetchDataSourcesByScope and
- * loadTaskAttachmentsAsContext. The "decision" fields (orderIndex,
- * includedInPrompt, etc.) are populated later by loadRunContextData — see
- * spec §6.1 for the full pre/post-loader invariant.
- */
-export interface LoadedDataSource {
-  id: string;
-  scope: 'agent' | 'subaccount' | 'scheduled_task' | 'task_instance';
-  name: string;
-  description: string | null;
-  content: string;
-  contentType: string;
-  tokenCount: number;
-  sizeBytes: number;
-  priority: number;
-  fetchOk: boolean;
-  maxTokenBudget: number;
-
-  // Decision fields — populated by loadRunContextData after sorting,
-  // override suppression, and the budget walk. Optional at the type level
-  // because fetchDataSourcesByScope and loadTaskAttachmentsAsContext return
-  // values with none of them set. See spec §6.1.
-  orderIndex?: number;
-  includedInPrompt?: boolean;
-  truncated?: boolean;
-  suppressedByOverride?: boolean;
-  suppressedBy?: string;
 }
 
 /**
