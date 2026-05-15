@@ -1,5 +1,6 @@
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import { systemSkills } from '../../../db/schema/systemSkills.js';
 import { systemAgentService } from '../../systemAgentService.js';
@@ -99,7 +100,7 @@ export async function getJob(
 export async function getJobById(
   jobId: string
 ): Promise<typeof skillAnalyzerJobs.$inferSelect | null> {
-  const rows = await db
+  const rows = await getOrgScopedDb('skillAnalyzerService.getJobById')
     .select()
     .from(skillAnalyzerJobs)
     .where(eq(skillAnalyzerJobs.id, jobId))

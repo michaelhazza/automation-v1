@@ -1,6 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { logger } from '../../../lib/logger.js';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs } from '../../../db/schema/index.js';
 import { getPgBoss } from '../../../lib/pgBossInstance.js';
 import { getJobConfig } from '../../../config/jobConfig.js';
@@ -109,7 +110,7 @@ export async function resumeJob(params: {
   // Everything the handler needs to resume (parsedCandidates, configSnapshot,
   // classifyState, existing skill_analyzer_results rows) is preserved —
   // those are the inputs to Stage 5's skip-already-classified logic.
-  await db
+  await getOrgScopedDb('skillAnalyzerService.resumeJob')
     .update(skillAnalyzerJobs)
     .set({
       status: 'pending',

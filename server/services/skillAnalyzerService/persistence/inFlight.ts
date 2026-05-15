@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs } from '../../../db/schema/index.js';
 
 /** Record that a slug's LLM classification is in-flight.
@@ -10,7 +10,7 @@ export async function markSkillInFlight(
   slug: string,
   startedAtMs: number,
 ): Promise<void> {
-  await db
+  await getOrgScopedDb('skillAnalyzerService.markSkillInFlight')
     .update(skillAnalyzerJobs)
     .set({
       classifyState: sql`jsonb_set(
@@ -28,7 +28,7 @@ export async function unmarkSkillInFlight(
   jobId: string,
   slug: string,
 ): Promise<void> {
-  await db
+  await getOrgScopedDb('skillAnalyzerService.unmarkSkillInFlight')
     .update(skillAnalyzerJobs)
     .set({
       classifyState: sql`coalesce(classify_state, '{}') #- ARRAY['inFlight', ${slug}]::text[]`,

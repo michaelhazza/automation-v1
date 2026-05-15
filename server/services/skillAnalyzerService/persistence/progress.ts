@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { logger } from '../../../lib/logger.js';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import type { AgentRecommendation } from '../../skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../../../db/schema/skillAnalyzerJobs.js';
 import { slugifyName } from '../helpers/slugify.js';
@@ -36,7 +36,7 @@ export async function updateJobProgress(
   if (update.completedAt !== undefined) values.completedAt = update.completedAt;
   if (update.classifyState !== undefined) values.classifyState = update.classifyState;
 
-  await db
+  await getOrgScopedDb('skillAnalyzerService.updateJobProgress')
     .update(skillAnalyzerJobs)
     .set(values)
     .where(eq(skillAnalyzerJobs.id, jobId));
@@ -77,7 +77,7 @@ export async function updateJobAgentRecommendation(
     : [];
 
   // Idempotency: only write if the column is still null (first run wins on retry).
-  const updated = await db
+  const updated = await getOrgScopedDb('skillAnalyzerService.updateJobAgentRecommendation')
     .update(skillAnalyzerJobs)
     .set({
       agentRecommendation: recommendation,
@@ -102,7 +102,7 @@ export async function updateJobAgentRecommendation(
   // show the proposed agent. Only runs when a new agent was suggested.
   if (recommendation.shouldCreateAgent && Array.isArray(recommendation.skillSlugs) && recommendation.skillSlugs.length > 0) {
     const slugSet = recommendation.skillSlugs.map(s => s.toLowerCase());
-    const affectedRows = await db
+    const affectedRows = await getOrgScopedDb('skillAnalyzerService.updateJobAgentRecommendation.selectResults')
       .select({ id: skillAnalyzerResults.id, candidateSlug: skillAnalyzerResults.candidateSlug, agentProposals: skillAnalyzerResults.agentProposals })
       .from(skillAnalyzerResults)
       .where(and(
@@ -128,7 +128,7 @@ export async function updateJobAgentRecommendation(
       };
       // Place the proposed agent at the top so the UI ranks it first.
       const nextProposals = [synthetic, ...existing];
-      await db
+      await getOrgScopedDb('skillAnalyzerService.updateJobAgentRecommendation.updateResult')
         .update(skillAnalyzerResults)
         .set({ agentProposals: nextProposals })
         .where(eq(skillAnalyzerResults.id, row.id));
