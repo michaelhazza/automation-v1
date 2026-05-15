@@ -1,9 +1,12 @@
 import { sql } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerResults } from '../../../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
-// Internal functions for job handler use (no org-scoping — admin bypass path)
+// Internal functions for job handler use. The job handler now opens an
+// org-scoped transaction via createWorker (Chunk 13), so these writes
+// flow through getOrgScopedDb to satisfy the RLS policy on
+// skill_analyzer_results (migration 0359).
 // ---------------------------------------------------------------------------
 
 /** Batch insert results for a job. Splits into 100-row batches. */
@@ -12,7 +15,7 @@ export async function insertResults(
 ): Promise<void> {
   if (rows.length === 0) return;
   for (let i = 0; i < rows.length; i += 100) {
-    await db.insert(skillAnalyzerResults).values(rows.slice(i, i + 100));
+    await getOrgScopedDb('skillAnalyzerService.insertResults').insert(skillAnalyzerResults).values(rows.slice(i, i + 100));
   }
 }
 
@@ -20,7 +23,7 @@ export async function insertResults(
 export async function insertSingleResult(
   row: typeof skillAnalyzerResults.$inferInsert,
 ): Promise<void> {
-  await db.insert(skillAnalyzerResults).values(row);
+  await getOrgScopedDb('skillAnalyzerService.insertSingleResult').insert(skillAnalyzerResults).values(row);
 }
 
 /** List already-written result rows for a job as a minimal projection.
@@ -54,7 +57,7 @@ export async function listResultIndicesForJob(
   proposedMergedInstructions: string | null;
 }>> {
   // Raw SQL used to extract JSONB sub-fields without pulling the full JSONB blob.
-  const rawRows = await db.execute(sql`
+  const rawRows = await getOrgScopedDb('skillAnalyzerService.listResultIndicesForJob').execute(sql`
     SELECT
       candidate_index        AS "candidateIndex",
       classification,
