@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-16
-last_merge_ready_pr: #326
-last_merge_ready_slug: sandbox-safety-batch
-last_merge_ready_branch: claude/sandbox-safety-batch
-last_merged_pr: #324
-last_merged_slug: pa-v1-cleanup-batch
-last_merged_branch: claude/pa-v1-cleanup-batch
-last_merged_at: 2026-05-15T09:46:17Z
-last_merged_commit: 9ce10f97
+last_merged_pr: #326
+last_merged_slug: sandbox-safety-batch
+last_merged_branch: claude/sandbox-safety-batch
+last_merged_at: 2026-05-15T22:27:12Z
+last_merged_commit: 3620442d
 -->
 
 # Current Focus
@@ -31,9 +28,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) (`sandbox-safety-batch`) Phase 3 finalisation complete. Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new assertOrgScopedTransactionActive() helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI: awaiting label apply.
+**Status:** **NONE**
 
-**Previously MERGE_READY:** PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) (`split-skill-analyzer`) — Phase 3 finalisation complete, MERGE_READY label applied, awaiting CI + merge. Two-part monolith split (`skillAnalyzerService.ts` 2,642 LOC → 78-LOC barrel + sub-modules; `skillAnalyzerServicePure.ts` 3,727 LOC → 64-LOC barrel + 22 sub-modules) + FORCE RLS migration 0359 (parent-EXISTS policy on `skill_analyzer_results`) + `boss.work` → `createWorker` conversion + all route-facing `skill_analyzer_results` accesses migrated to `getOrgScopedDb`. `chatgpt-pr-review` 2 rounds APPROVED — F1 (5-file FORCE RLS fix across `results/`) + F4 (2-file fix across `execute/`) applied; F2 (diff-misread import path) + F3 (intra-tree barrel exports) rejected as false positives. Doc-sync sweep clean (architecture.md `executeApproved` path updated; capabilities.md n/a; KNOWLEDGE.md +3 patterns: FORCE RLS parent-EXISTS policy, inner db.transaction bypass, pre-fix grep discipline). CI: verify-canonical-retry.sh and verify-with-org-tx-or-scoped-db.sh failures are inherited noise from PR #319 + #317 (neither file in our diff); use `--admin` merge to bypass. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-claude-split-skill-analyzer-2026-05-15T06-19-25Z.md`.
+**Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
+
+**Just merged:** PR [#327](https://github.com/michaelhazza/automation-v1/pull/327) — `split-services-soft-cap-batch` (squash-commit `9f342b74`, 2026-05-15T22:16:32Z). Wave 2 Session B: 5 god-files split into thin barrels (total 160 LOC across 5 barrels) + 54 sibling sub-modules. 23 commits across 27 planned chunks. Phase 2 pipeline: spec-conformance CONFORMANT after rebase → pr-reviewer R2 APPROVED → reality-checker READY → dual-reviewer APPROVED. Phase 3: S2 clean → G4 PASS → chatgpt-pr-review 2 rounds → doc-sync sweep 16 verdicts → 4 KNOWLEDGE.md patterns appended → 3 todo items closed → 4 Compound Learning proposals emitted. Auto-fix loop: 1 iteration (verify-no-raw-console LEGACY_ALLOWLIST extension). CI ALL GREEN. REVIEW_GAP: `chatgpt-plan-review` skipped (operator override autonomous-mode).
+
+**Just merged:** PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) — `split-skill-analyzer` (merged 2026-05-15T06:51:58Z). Two-part monolith split + FORCE RLS migration 0359 + `boss.work` → `createWorker` conversion. chatgpt-pr-review 2 rounds APPROVED.
 
 **Previously MERGE_READY:** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) (`page-splits`) — 16 client-side page-level files split along tab / region / atom seams. See prior entry below.
 
