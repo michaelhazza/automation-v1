@@ -89,3 +89,20 @@ describe('and() wraps all where conditions', () => {
     expect(src).toMatch(/subaccountId.*null[\s\S]*?push|push[\s\S]*?subaccountId/);
   });
 });
+
+// ─── Section 4: getInbox also enforces subaccount scoping ─────────────────────
+
+describe('getInbox enforces subaccount scoping', () => {
+  it('getInbox where clause includes subaccountId when principal is subaccount-scoped', async () => {
+    const src = await readSource();
+    // getInbox must include the subaccountId predicate — mirrors the listInboxes guard
+    expect(src).toMatch(/getInbox[\s\S]{0,800}subaccountId[\s\S]{0,200}null[\s\S]{0,200}eq\(canonicalInboxes\.subaccountId/);
+  });
+
+  it('getInbox uses and(...) with multiple conditions', async () => {
+    const src = await readSource();
+    // getInbox uses and() in its where clause
+    const getInboxSection = src.slice(src.indexOf('export async function getInbox'));
+    expect(getInboxSection).toMatch(/\.where\(\s*and\(/);
+  });
+});

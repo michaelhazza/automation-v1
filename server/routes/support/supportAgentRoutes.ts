@@ -7,6 +7,7 @@ import { validatePromptOverride } from '../../services/promptOverridePure.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
 import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
 import { listInboxes, getInbox, updateAgentConfig } from '../../services/supportInboxService.js';
+import { mergeAgentConfigPatch } from '../../services/supportInboxConfigMergePure.js';
 
 const router = Router({ mergeParams: true });
 
@@ -69,13 +70,7 @@ router.patch(
     // Deep-merge nested objects so a partial PATCH (e.g. only collisionWindow.respectHumanAssignee)
     // does not discard sibling fields that the client did not send.
     const existingConfig = existing.agentConfig as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...existingConfig, ...patch };
-    const NESTED_KEYS = ['collisionWindow', 'draftExpiry', 'optIns'] as const;
-    for (const key of NESTED_KEYS) {
-      if (patch[key] != null && typeof patch[key] === 'object' && !Array.isArray(patch[key])) {
-        merged[key] = { ...(existingConfig[key] as object), ...(patch[key] as object) };
-      }
-    }
+    const merged = mergeAgentConfigPatch(existingConfig, patch);
 
     let parsedConfig: SupportInboxAgentConfig;
     try {
