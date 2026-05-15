@@ -37,6 +37,10 @@ export const sandboxExecutions = pgTable(
     // Policy snapshot (spec §20.1) — sandbox-specific projection of the calling run's Policy Envelope
     policyJson: jsonb('policy_json').notNull().$type<SandboxPolicy>(),
 
+    // Credential aliases permitted for this execution (spec §6.3 SANDBOX-ADV-6.1).
+    // Populated at run creation; empty array means no credentials injected.
+    credentialAliases: jsonb('credential_aliases').notNull().$type<string[]>().default([]),
+
     // Input summary (size + MIME + file count — no content)
     inputSummaryJson: jsonb('input_summary_json'),
 
