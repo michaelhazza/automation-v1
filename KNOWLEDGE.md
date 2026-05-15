@@ -1743,3 +1743,54 @@ Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-z
 **Pattern:** When a builder agent extracts a module from `server/services/bigService.ts` into `server/services/newTree/subModule.ts`, it may copy relative imports verbatim from the source file. Those imports were correct for `server/services/` depth but are wrong at `server/services/newTree/` depth — every path needs one extra `../` level. For modules extracted two levels deep (`server/services/newTree/subDir/leaf.ts`), paths need two extra levels. The TypeScript error (TS2307 "Cannot find module") cascades: all symbols from the broken import become `any`, which then triggers TS7006 ("implicitly has 'any' type") and TS18046 ("is of type 'unknown'") on every downstream usage — 70+ errors tracing to ~15 wrong import paths.
 **Rule.** After any structural split that moves files to a deeper directory, audit every external import in every extracted file and verify the `../` depth matches the file's new location (not its origin). Canonical test: for a file at `server/services/A/B/leaf.ts` wanting `server/db/index.ts`, count: `server/services/A/B/leaf.ts` → up 3 → `server/` → down to `db/index.ts` = `../../../db/index.js`.
 **Why it matters:** TS2307 errors from wrong paths cause cascading `any`-type pollution that inflates error count by 5-10× and obscures the true root cause. The fix is always the same (add `../` levels) but the inflated error list wastes diagnostic time if the root cause isn't identified first.
+
+---
+
+## [2026-05-15] Pattern — FORCE RLS on FK-only tenant tables uses a parent-EXISTS policy (no direct organisation_id column)
+**Date:** 2026-05-15
+**Source:** build: split-skill-analyzer (PR #320) — migration 0359 (`0359_skill_analyzer_results_rls.sql`).
+**Pattern:** Some tables (e.g. `skill_analyzer_results`) hold their org FK indirectly — via a parent `job_id` that points to `skill_analyzer_jobs.organisation_id`, with no direct `organisation_id` column of their own. The canonical FORCE RLS policy for such tables uses a correlated EXISTS subquery:
+```sql
+CREATE POLICY "org_isolation" ON skill_analyzer_results
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM skill_analyzer_jobs
+      WHERE skill_analyzer_jobs.id = skill_analyzer_results.job_id
+        AND skill_analyzer_jobs.organisation_id = current_setting('app.organisation_id', true)
+    )
+  );
+ALTER TABLE skill_analyzer_results FORCE ROW LEVEL SECURITY;
+```
+This is the first parent-EXISTS policy in the codebase. Direct-`organisation_id` tables (e.g. `agent_runs`) use the simpler `USING (organisation_id = current_setting(...))` form; the EXISTS form is needed only when the row has no direct org column.
+**Rule.** Any table without a direct `organisation_id` column that holds tenant-sensitive data MUST use the parent-EXISTS form. Use the EXISTS subquery on the immediate parent table (the one that does carry `organisation_id`), not a deeper ancestor. The `FORCE ROW LEVEL SECURITY` directive (not just `ROW LEVEL SECURITY`) is mandatory — it overrides `BYPASSRLS` for application-role connections, ensuring no code path can accidentally bypass the policy.
+**Why it matters:** omitting FORCE RLS on such tables means that admin-role connections or connections with `BYPASSRLS` would silently see all rows across all orgs. The parent-EXISTS form ensures tenant isolation even for tables that, for schema-evolution reasons, inherited their org FK indirectly.
+
+---
+
+## [2026-05-15] Pattern — Inner `db.transaction()` inside a route-called service method silently bypasses FORCE RLS
+**Date:** 2026-05-15
+**Source:** build: split-skill-analyzer (PR #320) — `resolveWarning()` in `server/services/skillAnalyzerService/results/warnings.ts`.
+**Pattern:** `resolveWarning()` originally wrapped its read + update in `await db.transaction(async (tx) => { ... })`. In postgres.js, `db.transaction(callback)` checks out a BRAND-NEW pool connection for `tx`. That new connection has NO `app.organisation_id` GUC — the GUC is LOCAL to the auth middleware's outer transaction. With FORCE RLS enabled on `skill_analyzer_results`, any SELECT or UPDATE through `tx` silently returns 0 rows. The outer `db.transaction()` wrapper was also redundant: the auth middleware already runs the entire HTTP handler inside a long-lived transaction, so a second inner transaction just added a savepoint and a new (unconfigured) connection.
+**Fix.** Remove the `db.transaction()` wrapper entirely. Replace all `tx.select()` / `tx.update()` calls with `const orgTx = getOrgScopedDb('caller-tag')` calls. `getOrgScopedDb()` reads the Drizzle tx from AsyncLocalStorage — this is the auth middleware's outer transaction, which already has `app.organisation_id` set. The `FOR UPDATE` row lock is still honoured on the outer tx.
+**Rule.** A service method called from a route handler MUST NOT open its own `db.transaction()` for the purpose of accessing FORCE RLS tables. Use `getOrgScopedDb()` instead. Reserve inner `db.transaction()` calls for operations that genuinely need a savepoint (e.g. creating skills inside a job execute, where partial failure must roll back only that skill). Before adding an inner `db.transaction()` to any service method, ask: does this method touch a FORCE RLS table? If yes, use `getOrgScopedDb()`.
+**Detection heuristic.** Grep service files for `db.transaction(` — every hit in a file that also touches `skillAnalyzerResults` (or any other FORCE RLS table) is a candidate. Check whether the callback uses the `tx` parameter to query RLS-protected tables; if so, it's the bug.
+**Why it matters:** the bug is entirely silent — no error is thrown, queries simply return 0 rows or affect 0 rows. Under FORCE RLS the application appears to work (no 500s) but reads return empty and writes are no-ops, so reviewer state never persists and the feature is effectively broken for the affected operations.
+
+---
+
+## [2026-05-15] Pattern — When adding FORCE RLS to a table, grep ALL service sub-module files for raw `db.*` access
+**Date:** 2026-05-15
+**Source:** build: split-skill-analyzer (PR #320) — F1+F4 fix sequence across two ChatGPT review rounds.
+**Pattern:** The initial FORCE RLS fix (Round 1, F1) migrated 5 files in `results/` and `jobLifecycle/get.ts` to `getOrgScopedDb`. Round 2 (F4) caught 2 more files in `execute/` (`approved.ts`, `retry.ts`) that were also using raw `db` against `skillAnalyzerResults`. The split happened because the fix was applied file-by-file as found rather than starting from a comprehensive grep.
+**Rule.** When adding FORCE RLS to any table, the FIRST step before writing any fix is:
+```bash
+grep -rn "skillAnalyzerResults\|skill_analyzer_results" server/services/ --include="*.ts" | grep -v "\.test\." | grep -v "schema/"
+```
+This produces the complete list of service files that access the table. Review every hit for raw `db.` usage. Fix ALL of them in one commit — do not fix them iteratively across multiple rounds. The same procedure applies for any FORCE RLS table: substitute the table name and run the grep first.
+**Detection.** After fixing, verify with:
+```bash
+grep -rn "await db\." server/services/<serviceTree>/ --include="*.ts" | grep -v "\.test\." | grep -v "schema/"
+```
+Any remaining `await db.` calls against the RLS-protected table name in the output = missed sites.
+**Why it matters:** each missed site silently drops writes and returns empty reads. With a large service tree split across many sub-modules, an exhaustive pre-fix grep is cheaper than multiple chatgpt-pr-review rounds catching the same missed pattern.

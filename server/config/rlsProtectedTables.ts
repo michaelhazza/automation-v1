@@ -1334,6 +1334,17 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0353_operator_run_files.sql',
     rationale: 'Per-run operator file artefact pointers with R2 storage keys — content-sha256, MIME type, and emitted_by metadata are scoped per org. Cross-tenant leak exposes another org\'s operator run file paths and storage keys.',
   },
+  // 0359 — skill analyzer (Track A3 SA1)
+  {
+    tableName: 'skill_analyzer_results',
+    schemaFile: 'skillAnalyzerResults.ts',
+    policyMigration: '0359_skill_analyzer_results_rls.sql',
+    rationale:
+      'Per-candidate classification results from the skill analyzer — proposed merges and LLM reasoning ' +
+      'tied to a specific job and tenant via skill_analyzer_jobs.organisation_id. Cross-tenant exposure ' +
+      'would leak proposed-merge content and merge-warning details. Tenant isolation uses the parent-EXISTS ' +
+      'pattern against skill_analyzer_jobs (no direct organisation_id column on this table).',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
