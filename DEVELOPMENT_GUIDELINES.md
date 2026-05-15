@@ -43,6 +43,7 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 - **A new service file requires multiple DB interactions or multiple callers.** Otherwise the call goes inline in the route wrapped in `withOrgTx`. Max one service per domain.
 - **Use the right access pattern**: `withOrgTx` (org-scoped), `withAdminConnection` (system/admin), pure helper (no DB), admin+per-tenant `withOrgTx` (jobs writing tenant data — mirror `memoryDedupJob.ts`), log-and-swallow with `getOrgScopedDb()` inside the `try` block (never above it).
 - **Maintenance jobs that advertise per-org partial-success use one admin transaction per organisation, or SAVEPOINT subtransactions inside an outer admin tx that holds the advisory lock — never a single shared admin tx across all orgs.**
+- **A pg-boss worker that sets `resolveOrgContext: () => null` MUST re-open `withOrgTx` after loading the run's organisation.** The null opt-out is for the initial cross-tenant row lookup only — every subsequent DB call in the handler must run inside `withOrgTx({tx, organisationId: run.organisationId, ...}, async () => { ... })` and use `getOrgScopedDb()`. See `KNOWLEDGE.md` [2026-05-14] for the WF4 incident rationale. (Q4 — build: split-workflow-engine) **Exception:** `workflowEngine/queueLifecycle/tick.ts` and `watchdog.ts` currently violate this convention — remediation is explicitly deferred to the WF3/WF4 follow-up PR. Until that PR lands, these two files are tracked exceptions, not compliance examples.
 
 ---
 
@@ -269,6 +270,14 @@ No silent catch. Every caught promise rejection routes through `logger.warn({sco
 ### 8.37 React `useEffect` async loads carry a cancellation guard
 
 Every `useEffect` that awaits a fetch and then calls `setState` carries a `cancelled` boolean or generation-counter ref, checked before the `setState`. Bare `setState` after `await` causes stale-state writes when inputs change mid-flight.
+
+### 8.38 Tick workers MUST resolve a real org context before opening DB transactions
+
+A pg-boss handler registered with `resolveOrgContext: () => null` MUST call `withOrgTx(row.organisationId, ...)` explicitly after loading the run row — `resolveOrgContext: () => null` is an opt-out for the first raw-db lookup only, not for the entire handler body. Handlers that run dozens of DB calls after a null opt-out have no `app.organisation_id` GUC set; every downstream `getOrgScopedDb()` call reads from the unscoped pool and Postgres's RLS returns empty sets silently. Detection gate: `scripts/verify-with-org-tx-or-scoped-db.sh`.
+
+### 8.39 Routes never import from `server/db/schema/**`
+
+Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #307). Detection gate: `scripts/verify-no-db-in-routes.sh`.
 
 ---
 

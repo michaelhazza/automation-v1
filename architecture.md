@@ -384,6 +384,19 @@ Agent scheduling uses **pg-boss** (PostgreSQL-based job queue), managed by `agen
 - `agentScheduleService` reads heartbeat config and enqueues runs into pg-boss
 - Idempotency keys prevent duplicate runs on retry (see below)
 
+### Canonical worker registration
+
+**`createWorker` in `server/lib/createWorker.ts` is the only approved way to register a pg-boss queue handler.** Bare `boss.work(queue, handler)` is banned in all files except `createWorker.ts` itself.
+
+`createWorker` does three load-bearing things that bare `boss.work` omits:
+1. Reads `organisationId` from the job payload via `defaultResolveOrgContext`.
+2. Opens a Drizzle transaction with the `app.organisation_id` GUC set (`withOrgTx`).
+3. Makes `getOrgScopedDb()` available to the entire handler body.
+
+For cross-org sweep handlers (maintenance jobs, DLQ wiring) that genuinely have no tenant context, pass `resolveOrgContext: () => null` to `createWorker` rather than calling `boss.work` directly — the opt-out is then visible to grep and the gate. When the handler needs to resolve the org from the row, use `resolveOrgContext: () => null` for the initial raw-db lookup, then open a `withOrgTx(row.organisationId, ...)` block for all subsequent DB work.
+
+Enforcement gate: `scripts/verify-no-direct-boss-work.sh`.
+
 ---
 
 <a id="handoff-sub-agent-system"></a>
@@ -1879,6 +1892,40 @@ Valid values (closed enum `agent_charge_transition_caller`): `'charge_router'`, 
 - `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
 - `verify-rls-contract-compliance.sh` — verifies the three-layer contract is wired end-to-end
 - `verify-rls-session-var-canon.sh` — bans the phantom `app.current_organisation_id` variable from migrations and server code
+- `verify-fk-only-tenant-tables.sh` — flags tables FK-scoped to a tenant-protected parent but missing their own `CREATE POLICY`
+
+#### FK-scoped RLS pattern
+
+When a table holds tenant-private data but has **no `organisation_id` column** — it is scoped to a parent table that does — it needs an EXISTS-based RLS policy joining through the FK:
+
+```sql
+ALTER TABLE <child_table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <child_table> FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS <child_table>_tenant_isolation ON <child_table>;
+
+CREATE POLICY <child_table>_tenant_isolation ON <child_table>
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM <parent_table> p
+      WHERE p.id = <child_table>.<parent_fk_column>
+        AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM <parent_table> p
+      WHERE p.id = <child_table>.<parent_fk_column>
+        AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  );
+```
+
+When the child table has its own `organisation_id` column, use the canonical org-isolation template above — it is cheaper (index hit on the child itself). Only use the EXISTS join when the child genuinely has no `organisation_id` column and adding one would require a backfill migration. Detection gate: `scripts/verify-fk-only-tenant-tables.sh`.
 
 ---
 
@@ -3944,8 +3991,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify Workflows V1 — Workflow Studio | `client/src/pages/StudioPage.tsx` + `client/src/components/studio/` (canvas, inspectors, chat panel). Draft hydration via `GET /api/workflow-drafts/:draftId` (route verifies `userCanAccessSubaccount(userId, dbRole, draft.subaccountId)` via `server/lib/userSubaccountAccess.ts` and returns 404 on access denied — does NOT 403, to avoid disclosure). Publish via `PATCH /api/workflow-templates/:id`. |
 | Modify Workflows V1 — gate primitive (approval / ask) | `server/services/workflowStepGateService.ts` (write path + state machine) + `server/db/schema/workflowStepGates.ts`. Gate kinds: `approval` / `ask`. Snapshot writes always go through `normaliseApproverPoolSnapshot` (lowercase + dedup + UUID validate). Decision API: `POST /api/tasks/:taskId/gates/:gateId/decide`. Detail GET: `GET /api/tasks/:taskId/gates/:gateId` (org-scoped, also verifies the gate belongs to the path task's active run). Pool fingerprint algo: SHA-256 first 16 hex chars (per spec) — see `shared/types/approverPoolSnapshot.ts`. |
 | Modify Workflows V1 — task event service | `server/services/taskEventService.ts` (`appendAndEmitTaskEvent({ taskId, organisationId, subaccountId }, eventOrigin, event)`). Allocates `tasks.next_event_seq` atomically inside the call — callers no longer pre-allocate. **Durable persistence** (pre-launch D-P0-5): every accepted event inserts a row into `task_events` (migration 0279, FORCE RLS) inside the same transaction as the seq allocation; the WebSocket emit fires only after commit (DB row is the source of truth). Because the service opens its own `db.transaction()` from the module-level pool (callers fire-and-forget), the transaction issues `SELECT set_config('app.organisation_id', $orgId, true)` as the first statement — without that GUC the FORCE-RLS policy fail-closes silently and every insert affects 0 rows. **Payload guard:** events serialising to >64KB are rejected (warn-logged + thrown) before the seq is allocated. Validator: `shared/types/taskEventValidator.ts`. Event taxonomy emit sites: `approval.queued` / `ask.queued` (gate open), `approval.pool_refreshed` (gate refresh), `step.approval_resolved` (decideApproval at all 3 paths), `task.degraded` (replay-endpoint gap detection), plus the existing pause / resume / stop / ask.submitted / ask.skipped / file.edited. |
-| Modify Workflows V1 — workflow run service | `server/services/workflowRunService.ts` (startRun / pause / resume / stop / decideApproval). Schema: `workflow_runs` with `task_id uuid NOT NULL` (one-active-per-task partial unique index `workflow_runs_one_active_per_task_idx`). All `INSERT INTO workflow_runs` paths MUST go through `insertRunRowWithUniqueGuard` (`server/services/workflowRunInsertHelper.ts`) which translates SQLSTATE 23505 → `TaskAlreadyHasActiveRunError → 409`. Runaway protection: cost ceiling + wall-clock ceiling + manual stop + **run-depth fail-fast** via `assertRunDepth(currentDepth, ctx)` from `server/lib/runDepthGuard.ts` (`MAX_WORKFLOW_RUN_DEPTH = 10`; throws `RunDepthExceededError` with `statusCode: 422`, `errorCode: 'run_depth_exceeded'`). Replay endpoint requires `AGENTS_EDIT` (write op — creates a new run + dispatches steps). |
-| Modify Workflows V1 — workflow template service | `server/services/workflowTemplateService.ts` (create / publish / version-pin). Schema: `workflow_templates` + `workflow_template_versions`. Engine validator: `server/services/workflowEngineService.ts`. |
+| Modify Workflows V1 — workflow run service | `server/services/workflowRunService.ts` (startRun / pause / resume / stop / decideApproval). Schema: `workflow_runs` with `task_id uuid NOT NULL` (one-active-per-task partial unique index `workflow_runs_one_active_per_task_idx`). All `INSERT INTO workflow_runs` paths MUST go through `insertRunRowWithUniqueGuard` (`server/services/workflowRunInsertHelper.ts`) which translates SQLSTATE 23505 → `TaskAlreadyHasActiveRunError → 409`. Runaway protection: cost ceiling + wall-clock ceiling + manual stop + **run-depth fail-fast** via `assertRunDepth(currentDepth, ctx)` from `server/lib/runDepthGuard.ts` (`MAX_WORKFLOW_RUN_DEPTH = 10`; throws `RunDepthExceededError` with `statusCode: 422`, `errorCode: 'run_depth_exceeded'`). Replay endpoint requires `WORKFLOW_RUNS_START` (write op — creates a new run + dispatches steps). |
+| Modify Workflows V1 — workflow template service | `server/services/workflowTemplateService.ts` (create / publish / version-pin). Schema: `workflow_templates` + `workflow_template_versions`. Engine validator: `server/services/workflowEngineService.ts` (re-export facade, ~65 LOC; implementation lives in `server/services/workflowEngine/`). |
+| Modify Workflows V1 — workflow engine internals | `server/services/workflowEngine/` — split from the 4,074-LOC monolith (build: split-workflow-engine). Sub-modules: `constants.ts` (queue names, timeouts), `types.ts` (re-exports + `requireSubaccountId`), `definitionHelpers.ts` (template loading/hydration), `contextHelpers.ts` (invalidation guard, context merge), `readySet.ts` (ready-set computation, step materialisation, knowledge bindings), `stepLifecycle.ts` (completion / cancellation / replay / bulk fan-out). Queue lifecycle handlers under `queueLifecycle/`: `tick.ts` (tick handler), `dispatch.ts` (step dispatch + agent resolution), `watchdog.ts` (stuck-step timeout sweep), `agentStep.ts` (agent-run completion + decision retry logic), `registerWorkers.ts` (pg-boss worker registration for TICK / WATCHDOG / AGENT_STEP queues). Dependency direction: `queueLifecycle/*` → `stepLifecycle` → `definitionHelpers / contextHelpers / readySet` → `constants / types`. No module may import the barrel (`workflowEngineService.ts`) — only the barrel imports from the tree. |
 | Modify Workflows V1 — draft service | `server/services/workflowDraftService.ts` (create / findById / markConsumed). Schema: `workflow_drafts` (FORCE RLS). Cleanup: `server/jobs/workflowDraftsCleanupJob.ts` (daily 03:00 UTC, reaps unconsumed rows older than 7 days). Cleanup MUST use `withAdminConnection` + `SET LOCAL ROLE admin_role` — bare `db` from a pg-boss handler runs without `app.organisation_id` and the FORCE RLS policy fail-closes (every DELETE affects 0 rows silently). |
 | Modify Workflows V1 — orchestrator job | `server/jobs/orchestratorFromTaskJob.ts` (cadence detection, recommendation card emission, draft creation). Cadence detection pure helper: `server/services/orchestratorCadenceDetectionPure.ts`. |
 | Modify sub-account baseline artefacts (F1) | `server/services/memoryBlockService.ts` (tier loaders: `getTier1Blocks`, `getBlocksForInjection`, `getBaselineVoiceTone`) + `server/workflows/baseline-artefacts-capture.workflow.ts` (capture workflow) + `shared/constants/baselineArtefacts.ts` (reserved-slug registry). Status JSONB shape: `shared/schemas/subaccount.ts::baselineArtefactsStatusSchema`. Status service: `server/services/subaccountOnboardingService.ts` (`markArtefactCaptured` / `markArtefactSkipped` / `markArtefactEdited` / `recordArtefactStarted`). Routes: `server/routes/subaccounts.ts` (`GET/POST .../baseline-artefacts-status`, `POST .../baseline-artefacts/started`, `POST .../baseline-artefacts/:slug/skip`, `PATCH .../baseline-artefacts/:slug`). UI: `OnboardingWizardPage.tsx` (step 4), `EditArtefactDrawer`, `BaselineArtefactsStatusBadge`, `SubaccountKnowledgePage`. |
@@ -4309,7 +4357,7 @@ Coverage gap is surfaced via tagged log: `recordIncident` emits `incident_missin
 - **Log buffer (G2):** `logger.emit` calls `appendLogLineSafe` (lazy-loaded from `server/services/systemMonitor/logBuffer.ts`), wiring every structured log line into the in-process ring buffer. The adapter is in `server/lib/logger.ts`; pure conversion logic in `server/lib/loggerBufferAdapterPure.ts`.
 - **DLQ subscriptions (G1, G5):** `dlqMonitorService.ts` derives 40 queue names dynamically via `deriveDlqQueueNames(JOB_CONFIG)` (up from 8 hard-coded). Any new queue in `JOB_CONFIG` with a `deadLetter` field is covered automatically. The DLQ handler calls `recordIncident(..., { forceSync: true })` so DLQ signals bypass the throttle (G5) — pg-boss already gates delivery and the throttle would otherwise drop bursty same-fingerprint DLQ deliveries instead of incrementing `occurrenceCount`.
 - **Async-ingest worker (G3):** When `SYSTEM_INCIDENT_INGEST_MODE=async`, the ingest queue worker is registered in `server/index.ts` (`system-monitor-ingest`, retryLimit=3, expireInSeconds=60, deadLetter=`system-monitor-ingest__dlq`). On every boot the resolved mode is logged unconditionally as `incident_ingest_mode` (mode + asyncWorkerRegistered fields) so operators see the active path without grepping env config.
-- **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `workflowEngineService.ts`; `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry).
+- **Workflow + IEE workers (G4):** `workflow-run-tick`, `workflow-watchdog`, `workflow-agent-step` are registered via `createWorker` in `server/services/workflowEngine/queueLifecycle/registerWorkers.ts` (surfaced via `WorkflowEngineService.registerWorkers()`); `iee-run-completed` via `createWorker` in `ieeRunCompletedHandler.ts`. Both inherit `createWorker`'s error-path instrumentation (timeout, retry classification, org-scoped tx, `withOrgTx` telemetry).
 - **Agentic-commerce spend queues:** Three queues handle the worker round-trip for `spend_request` tool calls. `agent-spend-request` (worker→main, handled by `agentSpendRequestHandler.ts`) carries the charge proposal; `agent-spend-response` (main→worker, keyed by `correlationId`) delivers the immediate decision (`approved | blocked | pending_approval`) plus optional SPT metadata; `agent-spend-completion` (worker→main, handled by `agentSpendCompletionHandler.ts`) reports merchant outcome. The response queue is consumed directly by the worker via polling in `awaitSpendResponse()`; the other two are registered in `queueService.ts`.
 - **Webhook 5xx emission (G7):** GHL webhook DB-lookup failure (`server/routes/webhooks/ghlWebhook.ts`) and GitHub webhook handler error (`server/routes/githubWebhook.ts`) both call `recordIncident` directly.
 - **Skill-analyzer terminal failure (G11):** A wrapper helper (`runSkillAnalyzerJobWithIncidentEmission` in `server/jobs/skillAnalyzerJobWithIncidentEmission.ts`) gates emission on `retryCount >= retryLimit` so only the FINAL retry attempt records an incident — earlier-attempt throws rethrow without emitting. The wrapper is invoked from the `skill-analyzer` pg-boss handler in `server/index.ts:499`. pg-boss retry exhaustion also lands in `skill-analyzer__dlq` (covered by G1's DLQ derivation); the wrapper gives faster visibility ahead of the DLQ landing.
