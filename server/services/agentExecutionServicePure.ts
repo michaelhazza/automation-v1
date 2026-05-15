@@ -568,9 +568,9 @@ export function isComplexRun(params: {
 // ---------------------------------------------------------------------------
 
 export function assembleVoiceBlock(
-  profile: { state: string; optedOutAt: Date | null; profileJson: unknown } | null,
+  profile: { state: string; optOutAt: Date | null; profileJson: unknown } | null,
 ): string | null {
-  if (!profile || profile.state !== 'ready' || profile.optedOutAt !== null) return null;
+  if (!profile || profile.state !== 'ready' || profile.optOutAt !== null) return null;
   return `<voice>\n${JSON.stringify(profile.profileJson, null, 2)}\n</voice>`;
 }
 

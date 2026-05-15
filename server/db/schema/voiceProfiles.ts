@@ -13,12 +13,14 @@ export const voiceProfiles = pgTable(
     subaccountId: uuid('subaccount_id').references(() => subaccounts.id, { onDelete: 'cascade' }),
     orgScope: boolean('org_scope').notNull().default(false),
     sources: text('sources').array().notNull().default(sql`'{}'`),
-    sampleCount: integer('sample_count').notNull().default(0),
+    sourceConfig: jsonb('source_config').notNull().default({}),
+    sampleSize: integer('sample_size').notNull().default(0),
     profileJson: jsonb('profile_json'),
     state: text('state').notNull().default('pending').$type<'pending' | 'deriving' | 'ready' | 'failed'>(),
     refreshPolicy: text('refresh_policy').notNull().default('manual').$type<'manual' | 'periodic' | 'on_send_count'>(),
-    lastRefreshedAt: timestamp('last_refreshed_at', { withTimezone: true }),
-    optedOutAt: timestamp('opted_out_at', { withTimezone: true }),
+    refreshConfig: jsonb('refresh_config').notNull().default({}),
+    lastDerivedAt: timestamp('last_derived_at', { withTimezone: true }),
+    optOutAt: timestamp('opt_out_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -30,8 +32,8 @@ export const voiceProfiles = pgTable(
       .on(table.organisationId, table.subaccountId)
       .where(sql`${table.subaccountId} IS NOT NULL`),
     stateRefreshIdx: index('voice_profiles_state_refresh_idx')
-      .on(table.state, table.lastRefreshedAt)
-      .where(sql`${table.state} IN ('ready', 'pending') AND ${table.optedOutAt} IS NULL`),
+      .on(table.state, table.lastDerivedAt)
+      .where(sql`${table.state} IN ('ready', 'pending') AND ${table.optOutAt} IS NULL`),
   })
 );
 
