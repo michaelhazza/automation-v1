@@ -1795,6 +1795,60 @@ grep -rn "await db\." server/services/<serviceTree>/ --include="*.ts" | grep -v 
 Any remaining `await db.` calls against the RLS-protected table name in the output = missed sites.
 **Why it matters:** each missed site silently drops writes and returns empty reads. With a large service tree split across many sub-modules, an exhaustive pre-fix grep is cheaper than multiple chatgpt-pr-review rounds catching the same missed pattern.
 
+---
+
+## [2026-05-15] Pattern — Bare `db` import on a FORCE RLS table silently fails every write
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (adversarial-reviewer F1 confirmed-hole on `agentRunSoftDeleteService.ts`).
+**Pattern:** A new service `agentRunSoftDeleteService.softDeleteAgentRun()` imported `{ db }` directly from `server/db/index.js` and called `db.update(agentRuns).set({ deletedAt }).where(...)`. The `agent_runs` table has `FORCE ROW LEVEL SECURITY` (migration 0079). Under FORCE RLS the policy fires against the table owner, and the bare-`db` connection has no `app.organisation_id` GUC set, so the policy evaluates to `false`. Result: every UPDATE silently returned `rowCount=0`; every SELECT returned empty. The function's suppression-is-success path treated this as `{ deleted: false, reason: 'not_found' }`, hiding the bug behind a perfectly normal-looking return value.
+**Rule.** Any service that writes to a FORCE-RLS table MUST use `getOrgScopedDb('serviceName.methodName')` rather than the bare `db` handle. `getOrgScopedDb()` reads the active org-scoped transaction from AsyncLocalStorage (set by `withOrgTx` or the auth middleware). Bare `db` is acceptable only for tables that do NOT have FORCE RLS, where the explicit `eq(organisationId, ...)` predicate is defence-in-depth.
+**Detection.** When adding a new service that writes to a `force_rls = true` table: (1) confirm `getOrgScopedDb` import is present; (2) grep the service for `from '.*?/db/index'` — any hit on the bare db is a bug; (3) the unit test must mock `getOrgScopedDb`, not `db` directly, so the call shape mirrors production.
+**Why pr-reviewer missed it.** PR-reviewer pattern-matched "228 other services do this" and rated the bare-`db` import as a consider-only item. Adversarial-reviewer correctly classified it as confirmed-hole because the threat-model lens specifically checks `FORCE_RLS_TABLES ∩ writers_using_bare_db`. **Lesson:** when pr-reviewer and adversarial-reviewer disagree on tenant isolation, adversarial wins.
+
+---
+
+## [2026-05-15] Pattern — `hashtext(uuid)::bigint` for `pg_advisory_xact_lock` gives 32-bit, not 64-bit, entropy
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (adversarial-reviewer F2 likely-hole on `sandboxTelemetrySequencePure.ts`).
+**Pattern:** The initial Chunk 3 implementation acquired the per-execution advisory lock via `pg_advisory_xact_lock(hashtext(${sandboxExecutionId})::bigint)`. PostgreSQL `hashtext()` returns `int4` (32-bit). The `::bigint` cast is sign-extension only — it does NOT add entropy. Effective lock-key space is 2^32. Birthday-paradox collision probability for two distinct executions sharing a lock key reaches 50% at ~77,000 concurrent executions. Two collided executions serialise their telemetry writes against each other across separate transactions — DoS class.
+**Fix.** Use the two-argument form `pg_advisory_xact_lock(lockid_hi, lockid_lo)` and split the UUID into two int4 halves derived directly from the hex string: `('x' || substr(replace(${id}::text, '-', ''), 1, 8))::bit(32)::int` for hi, `('x' || substr(replace(${id}::text, '-', ''), 9, 8))::bit(32)::int` for lo. The 8 hex chars at positions 1 and 9 give full 64 bits of UUID entropy.
+**Rule.** Single-arg `pg_advisory_xact_lock(::bigint)` is acceptable when the lock key is a sequential integer (table primary key, sequence value). When the lock key is derived from a UUID via `hashtext`, always use the two-arg form with explicit int4 halves of the UUID.
+
+---
+
+## [2026-05-15] Pattern — `char_length(line)` vs `Buffer.byteLength(line, 'utf8')` are different units
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (pr-reviewer S5 + adversarial-reviewer F3 on `sandboxHarvestService.step9LogPersistence`).
+**Pattern:** Step 9 of the log-persistence path computed `thisBatchBytes = sum(Buffer.byteLength(line, 'utf8'))` for the incoming batch and queried the day's accumulated bytes via `SELECT SUM(char_length(line))` from the DB. The two functions count DIFFERENT things — `char_length` counts Unicode code points; `octet_length` counts UTF-8 bytes. For ASCII text they coincide. For 4-byte emoji or 3-byte CJK characters, `Buffer.byteLength` returns up to 4x the `char_length` value. Net effect on a 100MB quota: emoji-heavy logs appear to exhaust the quota at ~25MB of actual storage, erroneously rejecting legitimate harvests.
+**Rule.** When comparing or summing byte counts across SQL and JS sides: SQL byte count → `SUM(octet_length(text_column))`; JS byte count → `Buffer.byteLength(s, 'utf8')`. Never mix `char_length` (SQL code points) with `Buffer.byteLength` (JS bytes) in the same arithmetic.
+**Related rule** (from the same build): when a DB CHECK constraint says `char_length(line) <= 10000`, the application must truncate at `s.length` characters (code-point-equivalent for the BMP) — NOT at `Buffer.byteLength(s, 'utf8')` bytes. Match the units on both sides.
+
+---
+
+## [2026-05-15] Pattern — Drizzle `$type<...>()` is documentation, not enforcement
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (dual-reviewer accept: corrected `sandboxExecutions.credentialAliases.$type` + INSERT wire-up).
+**Pattern:** Chunk 1b declared `credentialAliases: jsonb('credential_aliases').notNull().$type<string[]>().default([])`. Chunk 5 used a boundary cast (`as unknown as StuckRow[]`) to coerce the reconciliation row into `Array<{alias, connectionId}>`. The `runTask` INSERT path never set the column. Net effect: production rows stored `[]`, reconciliation read `[]`, the spec acceptance was "met" (read path returns column value), but the actual data path was empty. Dual-reviewer caught it because the test only asserted the READ side, not the WRITE side.
+**Rule.** When `$type<X>()` is declared on a JSONB column: (1) the writer must actually populate the column with X-shaped data — confirm via grep of `.set({ <columnName>: ... })` and `.values({ <columnName>: ... })` sites; (2) read paths that consume the column must NOT use `as unknown as X[]` casts — that pattern signals the `$type` and the read-shape disagree; (3) author a Vitest that asserts read/write shape parity: a row INSERTed with a structured object should be SELECTable with the same structure (not a cast-through-unknown).
+**Why pr-reviewer missed it.** PR-reviewer flagged the type drift as `should-fix` but treated the write-path gap as v2-deferred (since REQ #57 was already deferred). Dual-reviewer treated it as a current-build bug because the column was added in chunk 1b for THIS build's chunk 5 to use — the gap wasn't pre-existing.
+
+---
+
+## [2026-05-15] Pattern — Migration `ADD CONSTRAINT CHECK` without a backfill UPDATE fails on existing data
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (dual-reviewer accept: added `UPDATE sandbox_logs SET line = left(line, 10000)` before `ADD CONSTRAINT` in migration 0362).
+**Pattern:** Migration 0362 originally added `CHECK (char_length(line) <= 10000)` directly. If any existing `sandbox_logs.line` row had `char_length(line) > 10000` (possible if a prior harvest landed a long line before the cap was enforced), the migration would fail with a 23514 constraint violation, blocking the entire transaction.
+**Rule.** Any migration that adds a non-trivial CHECK constraint to an existing table MUST either (a) backfill-truncate or normalise existing rows in the same transaction, or (b) use `ADD CONSTRAINT ... NOT VALID` followed by a separate `VALIDATE CONSTRAINT` step that runs after the backfill. Both approaches are acceptable; the trade-off is lock-window length vs deferred validation. For pre-production builds, in-transaction backfill is simpler and matches the test posture.
+**Template:** `BEGIN; UPDATE <table> SET <col> = <truncate-expr> WHERE <violates-constraint>; ALTER TABLE <table> ADD CONSTRAINT <name> CHECK (<expr>); COMMIT;`
+
+---
+
+## [2026-05-15] Pattern — `withSandboxProvider` diagnostics must be wired at the CALLER, not the wrapper
+**Date:** 2026-05-15
+**Source:** build: sandbox-safety-batch (spec-conformance Round 1 directional gap on REQ #31, fix-loop commit `79310bbf`).
+**Pattern:** Chunk 6 added an optional `telemetryWriter` callback to `WithSandboxProviderOpts<T>` so the wrapper can persist provider diagnostics (`slow_start`, `rate_limit`, `retry`, `ambiguous_terminal`) to `sandbox_telemetry_events` as DB rows in addition to log emissions. The wrapper change alone is insufficient — diagnostics still only land in logs unless EVERY production caller passes a writer with the right tenancy context. The fix-loop wired 12 of 14 call sites; 2 private methods (`_harvestLogs`, `_harvestArtefacts`) lacked tenancy context and stayed log-only with marker comments.
+**Rule.** Optional-callback contracts only fulfill the spec when every in-scope caller wires the callback. Pattern matches the `telemetryWriter` shape: lib provides the seam; the harvest service / execution service supplies the closure that builds the row payload from its own context.
+**Detection.** When a spec mandates "diagnostics persist to DB rows", search for the wrapper's call sites via `git grep -n 'withSandboxProvider(' server/`. Every hit must either pass `telemetryWriter` or be explicitly marked `// no-tenancy-context: defaults to log-only` with a routing comment to the follow-up todo. A silent omission is a CONFORMANT-vs-NON_CONFORMANT difference.
 
 ---
 

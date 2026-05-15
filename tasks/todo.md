@@ -40,12 +40,10 @@ Branch `claude/hermes-audit-tier-1-qzqlD` merged 2026-04-21.
 
 ### Sandbox isolation (PR #287)
 
-- [ ] **SANDBOX-F1** — Real e2b publish/inspect wiring. Currently `templateDigest` falls back to placeholder `local-dev-*` value; publish workflow hard-fails until real e2b integration lands. Tracked by gate `verify-sandbox-template-version`.
-- [ ] **SANDBOX-ADV-2.1** (likely-hole) — `templateVersion` from env var unvalidated at `server/services/executionBackends/ieeDevBackend.ts:131`. Audit rows can carry forged version strings. Fix: read pinned digest from `E2bSandbox.templateDigest`.
-- [ ] **SANDBOX-ADV-3.1** (likely-hole) — Telemetry sequence allocator race silently drops events at `sandboxExecutionService.ts:63-73` + `sandboxHarvestService.ts:81-91`. `criticality='error'` events may be lost. Fix: `INSERT ... ON CONFLICT DO UPDATE SET sequence = ... RETURNING sequence` with retry, or advisory lock.
-- [ ] **SANDBOX-ADV-6.1** (likely-hole) — Reconciliation hardcodes `credentialAliases: []` at `sandboxHarvestReconciliationJob.ts:183-187`. Latent until C13. Fix: add `credential_aliases` JSONB column to `sandbox_executions`.
-- [ ] **SANDBOX-ADV-1.2 / 2.2 / 3.2 / 4.2 / 5.2** — Worth-confirming items: missing subaccount FKs on 5 new sandbox tables; inline-sandbox env-injection bypass via forged env object; race between provider success and ceiling-monitor `markForHarvest`; S3 path-traversal via filename; no per-tenant log-storage quota. Low priority; see archive for full context.
-- [ ] **SANDBOX-R3-T1** (advisory) — Reconciliation eligibility uses Node `new Date()`; migrate to DB `SELECT NOW()` for consistency with ceiling monitor. `server/jobs/sandboxHarvestReconciliationJob.ts:72`. Single-file ~10-line change.
+All actionable items from this section closed by sandbox-safety-batch (PR #326, 2026-05-16). Closed: SANDBOX-ADV-1.1, SANDBOX-ADV-1.2, SANDBOX-ADV-2.1, SANDBOX-ADV-2.2, SANDBOX-ADV-3.1, SANDBOX-ADV-3.2, SANDBOX-ADV-4.1, SANDBOX-ADV-4.2, SANDBOX-ADV-5.1, SANDBOX-ADV-5.2, SANDBOX-ADV-6.1, SANDBOX-R3-T1, plus REQ #6, #11, #20, #28, #29, #31, #35, #36, #55. See `tasks/builds/sandbox-safety-batch/handoff.md`.
+
+- [ ] **SANDBOX-F1** — Real e2b publish/inspect wiring. Currently `templateDigest` falls back to placeholder `local-dev-*` value; publish workflow hard-fails until real e2b integration lands. Tracked by gate `verify-sandbox-template-version`. Cross-references SANDBOX-R3-T2 (placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`).
+- [ ] **REQ #57** — Credential value-threading into `/workspace/secrets/` (medium, v2-deferred). Reason: e2b SDK not installed in V1 per SANDBOX-DEF-EGRESS-MECH. Stub at e2bSandbox.ts declares intent; lands with the SDK in the follow-up build. See `tasks/builds/sandbox-safety-batch/req-57-decision.md`.
 
 ### Personal Assistant V1 (PR #291, merged 2026-05-12)
 
@@ -1282,116 +1280,21 @@ These items were classified ambiguous/directional during spec review. Spec mecha
 
 ---
 
-## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)
+## Closed by sandbox-safety-batch (PR #326, 2026-05-16)
 
-**Captured:** 2026-05-11T08:06:30Z
-**Source log:** `tasks/review-logs/spec-conformance-log-sandbox-isolation-2026-05-11T08-06-30Z.md`
-**Spec:** `tasks/builds/sandbox-isolation/spec.md`
-**Verdict:** NON_CONFORMANT — 14 directional / ambiguous gaps. The 3 critical items (REQ #11, #28, #29) together prevent the feature from working end-to-end on the happy path; address them as a single focused builder pass before invoking `pr-reviewer`.
+All items previously listed under `## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)`, `## Deferred from adversarial-reviewer review — sandbox-isolation (2026-05-11)`, and `## Deferred from chatgpt-pr-review — sandbox-isolation (2026-05-11)` closed by the sandbox-safety-batch build.
 
-- [ ] **REQ #11 (Critical) — `runTask` does not call `runHarvest` on the happy path**
-  - Spec section: §8.4, §22 (harvest happens inline within `runTask` for the happy path).
-  - Gap: `server/services/sandboxExecutionService.ts:367-376` throws `sandbox_harvest_failed` with comment `TODO(C7): wire to runHarvest()`. The harvest pipeline IS implemented in `sandboxHarvestService.ts` but `runTask` never invokes it after the provider returns terminal. Result: every successful sandbox call fails with a synthetic harvest error.
-  - Suggested approach: in `_attemptProviderStart` after the provider returns `providerOutput`, replace the throw with a call to `runHarvest(input.sandboxExecutionId, { ...tenancy from input, outputSchemaRef: input.outputSchemaRef, credentialAliases: input.credentialIssuanceContext.aliases.map(a => ({ alias: a.alias, connectionId: a.connectionId })), policyArtefactLimits: input.policy.artefactLimits })` and return its result. Before the call, transition the row from `running` (or current pre-terminal state) to `harvesting` via an atomic UPDATE WHERE status predicate so the harvest pipeline's own §24.3 race semantics engage. The harvest pipeline will own the terminal write in step 12.
+**Closed REQs (spec-conformance):** #6 (logs line CHECK), #11 (runTask → runHarvest), #20 (sandboxMeteringQueryPure), #28 (sandbox_start_failed event), #29 (sandbox_start event), #31 (withSandboxProvider DB diagnostics), #35 (soft-delete artefact-purge trigger via canonical agentRunSoftDeleteService), #36 (provider terminate from monitor + kill), #55 (teardown verification).
 
-- [ ] **REQ #28 (Critical) — `sandbox_start_failed` telemetry event never emitted**
-  - Spec section: §14.5 (pre-start failure path MUST emit `sandbox_start_failed`).
-  - Gap: grep finds the string only in the schema enum and in `verify-sandbox-minimum-events.sh`. No production code writes this event row. CI gate already FAILS for this reason.
-  - Suggested approach: add a telemetry event writer in C5's `_handleExistingRow` (Case 7 — MAX_START_ATTEMPTS reached) and in `_attemptProviderStart` (catch branch, before the `provider_unavailable` UPDATE). Use `sandboxHarvestService`'s `writeTelemetryEvent` shape extracted into a smaller helper, or call into it directly. Payload per spec §14.2 row `sandbox_start_failed`: `{ reason, providerErrorCode? }`.
+**Closed adversarial findings:** SANDBOX-ADV-1.1 (reconciliation withOrgTx — verified), SANDBOX-ADV-1.2 (5-table subaccount FK migration 0360), SANDBOX-ADV-2.1 (templateVersion validated via resolveTemplateVersion + allowlist), SANDBOX-ADV-2.2 (inline-sandbox env-injection guard), SANDBOX-ADV-3.1 (telemetry sequence allocator race fixed via pg_advisory_xact_lock helper), SANDBOX-ADV-3.2 (ceiling-vs-provider race resolved via decideCeilingVsProviderRaceOutcome), SANDBOX-ADV-4.1 (credential-leak case-insensitive — extracted to pure helper + test), SANDBOX-ADV-4.2 (S3 path-traversal sanitised via sanitiseArtefactFilename), SANDBOX-ADV-5.1 (ceiling-monitor + wall-clock-kill enqueued in sandboxExecutionService start path), SANDBOX-ADV-5.2 (per-tenant log-storage quota), SANDBOX-ADV-6.1 (credential_aliases JSONB column + write + read path).
 
-- [ ] **REQ #29 (Critical) — `sandbox_start` telemetry event never emitted**
-  - Spec section: §14.5 (post-start path MUST emit `sandbox_start`).
-  - Gap: same shape as #28 — only present in schema enum + gate script. No production writer.
-  - Suggested approach: emit `sandbox_start` from `_attemptProviderStart` immediately after `provider.runTask(input)` returns successfully and BEFORE the harvest invocation (added in REQ #11). Payload per spec §14.2 row `sandbox_start`: `{ ceilings, network_policy, alias_count }` — derive from the resolved ceilings, `input.policy.network`, and `input.credentialIssuanceContext.aliases.length`.
+**Closed advisory:** SANDBOX-R3-T1 (reconciliation eligibility uses DB SELECT NOW() — Chunk 5).
 
-- [ ] **REQ #6 (High) — `sandbox_logs.line` length CHECK constraint**
-  - Spec section: §20.8 (`CHECK (length(line) <= MAX_LOG_LINE_BYTES)` — V1 default 64 KB per line).
-  - Gap: schema and migration `0322` carry no length CHECK. Service-layer truncation at `sandboxHarvestService.ts:333-337` partially substitutes but spec pins this as a DB constraint (defence-in-depth against bypass).
-  - Suggested approach: write a corrective migration `0325_add_sandbox_logs_line_length_check.sql` with `ALTER TABLE sandbox_logs ADD CONSTRAINT sandbox_logs_line_length_check CHECK (length(line) <= 65536)`. Paired down. Update the Drizzle schema to declare the constraint so generated migrations align. Verify the service-layer truncation at line 333 already keeps lines under the limit (it does — `MAX_LOG_LINE_BYTES = 65536`).
+Per-item verdicts: `tasks/review-logs/spec-conformance-log-sandbox-safety-batch-2026-05-15T10-01-59Z.md`. Build summary: `tasks/builds/sandbox-safety-batch/handoff.md`.
 
-- [ ] **REQ #20 (High) — `sandboxMeteringQueryPure.ts` missing**
-  - Spec section: §12.6, §19.1, §25.1.
-  - Gap: spec names the file path, the function names (`getOrgSandboxMinutes(orgId, monthRange)`, `getSubaccountSandboxMinutes(orgId, subaccountId, monthRange)`), and the test file. None exist.
-  - Suggested approach: create `server/services/sandboxMeteringQueryPure.ts` exposing the two functions as pure SQL composers (return `SQL` fragments, callers wrap with `withOrgTx`). The rollup is over `llm_requests` filtered by `source_type = 'sandbox_compute'`, summing `sandbox_wall_clock_ms / 60_000` for "minutes". Decide month-range semantics (closed-open interval on `billing_month`) and pure-test the SQL string output against fixtures. Add `server/services/__tests__/sandboxMeteringQueryPure.test.ts`.
-
-- [ ] **REQ #31 (Medium) — `withSandboxProvider` emits diagnostics only as logs, not DB rows**
-  - Spec section: §14.2 (DB telemetry events) + §14.3 (structured log events) — both required.
-  - Gap: `server/lib/withSandboxProvider.ts` emits `provider_diagnostic` and `provider_unavailable` to the logger only. Progress.md acknowledges the lib wrapper doesn't carry the HarvestContext required for DB rows.
-  - Suggested approach: extend the `withSandboxProvider` options type with optional tenancy fields (`organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `provider`); when present, write a `sandbox_telemetry_events` row alongside the log line. Audit every call site and pass the context. For call sites without context (rare — mostly the harvest-step provider reads), keep the log-only path as a documented fallback with a `// no-tenancy-context: defaults to log-only` comment.
-
-- [ ] **REQ #35 (Medium, AMBIGUOUS) — `sandboxArtefactPurgeJob` trigger from run-soft-delete**
-  - Spec section: §17.4 (artefacts physically deleted from object storage by `sandbox-artefact-purge` job triggered by the soft-delete event).
-  - Gap: job exists and is registered, but the trigger from the run-soft-delete cascade was not surveyed end-to-end during this conformance run.
-  - Suggested approach: confirm whether the existing run-deletion path (the soft-delete handler used elsewhere in the codebase) calls `boss.send(SANDBOX_ARTEFACT_PURGE_JOB, { agentRunId })` for the affected runs. If yes, mark this PASS; if no, wire the call from the soft-delete service.
-
-- [ ] **REQ #36 (Medium) — Ceiling-monitor + wall-clock-kill jobs do not call provider terminate**
-  - Spec section: §10.2 ("calls the provider terminate API and writes `timed_out`" / "calls the provider terminate API directly").
-  - Gap: both jobs in `server/jobs/sandboxCeilingMonitorJob.ts` and `server/jobs/sandboxWallClockKillJob.ts` only update the DB row to `harvesting` with an `errorReason`. Neither calls `provider.terminate(provider_sandbox_id)` via `withSandboxProvider`. The conservative choice (let harvest pipeline handle teardown via its own close path) is defensible but diverges from the spec's named mechanism.
-  - Suggested approach (operator-decision): either (a) wire `withSandboxProvider({ phase: 'terminal', sandboxExecutionId, call: () => provider.terminate(providerSandboxId) })` into both jobs before the DB UPDATE, importing the provider via the resolver registry; or (b) write a one-paragraph spec amendment clarifying that "calls the provider terminate API" is satisfied by transitioning to `harvesting` + harvest pipeline's existing teardown call (which IS via withSandboxProvider). Option (b) is lower-risk but rewrites spec wording.
-
-- [ ] **REQ #55 (Medium) — Sandbox teardown verification missing entirely**
-  - Spec section: §17.5 (`sandbox.teardown.verified` / `sandbox.teardown.unverified` log events; operator-paging on unverified after 60s + backoff).
-  - Gap: zero matches for either event name in `server/`. e2bSandbox calls `terminateSandbox` but does not verify-then-emit. localDockerSandbox similar.
-  - Suggested approach: add a `verifyTeardown(providerSandboxId, sandboxExecutionId)` method on each provider that polls (with `withBackoff`) until the sandbox is no longer enumerable in the provider's sandbox list, with a 60s grace + retry. On success, emit `sandbox.teardown.verified` log. On failure, emit `sandbox.teardown.unverified` log + write a structured op-paging event (path TBD per existing operator-paging convention in the codebase). Call from the harvest pipeline's terminal step (after `assertValidTransition`).
-
-- [ ] **REQ #57 (High, AMBIGUOUS) — Credential value-threading into `/workspace/secrets/` is acknowledged-incomplete**
-  - Spec section: §11.1 (sandbox receives task-scoped, sub-account-scoped credentials mounted as files).
-  - Gap: `server/services/sandbox/e2bSandbox.ts:258-265` declares the file-mount intent but the loop body is a no-op with `void alias.alias + targetPath` and a comment "credential value is not available in the input descriptor in V1. C13 (adapter rewiring) threads the issued credential value through". The C13 adapter passes `credentialIssuanceContext: { aliases: [] }` — no value-threading happens. Sandbox cannot receive credentials in V1.
-  - Suggested approach: extend `SandboxRunTaskInput.credentialIssuanceContext` to carry pre-issued credential values (or a callable to issue at sandbox start). Plumb the calling adapter (`ieeDevBackend.dispatch`) to call `credentialBrokerService.issueCredential` for each requested alias before invoking `runTask`, attach the materialised credential value, and let `e2bSandbox` write each via `sdkClient.writeFile(sandboxId, '/workspace/secrets/{alias}.token', Buffer.from(value), { mode: 0o400 })`. Verify the `redactionPattern: RegExp` returned by the broker (REQ #13 PASS) is registered in the harvest pipeline's per-execution pattern set so the value is redacted from harvested outputs.
-
----
-
-## Deferred from adversarial-reviewer review — sandbox-isolation (2026-05-11)
-
-Source: `tasks/review-logs/adversarial-review-log-sandbox-isolation-2026-05-11T08-47-38Z.md` — verdict HOLES_FOUND (2 confirmed + 4 likely + 5 worth-confirming). Per `feature-coordinator §8.2`, advisory non-blocking. Operator may prioritise selected items pre-merge during Phase 3 chatgpt-pr-review.
-
-### High-priority pre-merge candidates
-
-- [ ] **SANDBOX-ADV-1.1 (confirmed-hole) — Reconciliation job missing `withOrgTx` wrap**
-  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:120-195`
-  - Issue: `runHarvestReconciliation` calls `getOrgScopedDb()` but the reconciliation job never wraps in `withOrgTx({ tx, organisationId })`. Every reconciliation will throw `missing_org_context` (silently caught by per-row try/catch). Stuck executions cannot recover. Separately, the `UPDATE sandbox_executions WHERE id = ANY(...)` runs on admin connection without `organisation_id` predicate.
-  - Fix: Wrap reconcile call in `db.transaction(async (orgTx) => { withOrgTx({ tx: orgTx, organisationId: row.organisation_id }, async () => { await reconcileExecution(orgTx, row); }); })`. Add `AND organisation_id = ${row.organisation_id}::uuid` to UPDATE WHERE. Pattern: `sandboxTelemetryPruneJob.ts:91-105`.
-
-- [ ] **SANDBOX-ADV-5.1 (likely-hole) — Ceiling-monitor + wall-clock-kill jobs never enqueued**
-  - File: `server/services/sandboxExecutionService.ts:380-383` (TODO unimplemented)
-  - Issue: Both jobs registered as workers but never enqueued. Wall-clock enforcement is provider-side only (best-effort). Tenant code can run beyond spec §10.1 30-min hard cap with cost charged but unenforced.
-  - Fix: After `pending → running` UPDATE in `_attemptProviderStart`, enqueue both via `boss.send` with `singletonKey: sandboxExecutionId` and appropriate `startAfter`.
-
-- [ ] **SANDBOX-ADV-4.1 (confirmed-hole) — Credential-leak defense is case-sensitive**
-  - File: `server/services/sandboxHarvestService.ts:411-421`
-  - Issue: Step 6 of harvest blocks `/workspace/secrets/` (case-sensitive). Bypass: `/workspace/Secrets/foo.token`, `../secrets/foo`. e2b `listFiles` response not normalised.
-  - Fix: Normalise: `const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');` then check on `norm`. Reject `..` paths.
-  - Severity: Latent until C13 wires credentials. Fix BEFORE C13 lands.
-
-### Medium-priority post-merge backlog
-
-- [ ] **SANDBOX-ADV-2.1 (likely-hole) — `templateVersion` from env var unvalidated** (`server/services/executionBackends/ieeDevBackend.ts:131`). env-var value flows verbatim to audit rows. e2b sandbox image is safe (uses pinned digest) but audit rows can carry forged version strings, breaking spec G12 audit guarantee. Fix: read pinned digest from `E2bSandbox.templateDigest`.
-- [ ] **SANDBOX-ADV-3.1 (likely-hole) — Telemetry sequence allocator race silently drops events** (`sandboxExecutionService.ts:63-73` + `sandboxHarvestService.ts:81-91`). `criticality='error'` events may be lost. Fix: `INSERT ... ON CONFLICT DO UPDATE SET sequence = ... RETURNING sequence` with retry, OR Postgres advisory lock. At minimum: log dropped events at warn/error level.
-- [ ] **SANDBOX-ADV-6.1 (likely-hole) — Reconciliation hardcodes `credentialAliases: []`** (`sandboxHarvestReconciliationJob.ts:183-187`). Latent until C13. Fix: add `credential_aliases` JSONB column to `sandbox_executions`.
-
-### Low-priority / observations (worth-confirming)
-
-- [ ] **SANDBOX-ADV-1.2 — Subaccount FK missing on all 5 new sandbox tables.** No DB-level cross-org subaccount validation; relies on service layer.
-- [ ] **SANDBOX-ADV-2.2 — Inline-sandbox env-injection bypass possible** if non-test caller passes forged `env` object to `resolveSandboxProvider`. CI gate catches static imports only.
-- [ ] **SANDBOX-ADV-3.2 — Race between provider success and ceiling-monitor `markForHarvest`** can cause completed execution to be billed as timed-out with no cost row.
-- [ ] **SANDBOX-ADV-4.2 — S3 path-traversal via filename.** `${ctx.subaccountId}/${ctx.sandboxExecutionId}/${artefact.filename}` — `..` could overwrite another execution's artefact. Sanitise filename.
-- [ ] **SANDBOX-ADV-5.2 — No per-tenant log-storage quota.** Per-execution caps (10MB stdout + 10MB stderr) but tenant could fill DB before 90d prune.
-
----
-
-## Deferred from chatgpt-pr-review — sandbox-isolation (2026-05-11)
-
-Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`. 3 rounds; Round 3 verdict APPROVED. 2 advisory non-blockers carried forward (recorded for future work; ChatGPT explicitly flagged both as not-blocking).
-
-- [ ] **SANDBOX-R3-T1 (advisory, low priority) — Reconciliation eligibility still uses Node wall-clock `now = new Date()`**
-  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:72` (`const now = new Date();`)
-  - ChatGPT call (Round 3): *"less critical than the ceiling monitor because it is recovery timing, not billing enforcement, but for consistency I'd eventually move that to DB time too. Not a blocker."*
-  - Why deferred: recovery timing has no billing or correctness invariant; clock skew of seconds-to-minutes shifts when stuck-row sweep fires but does not change which rows are eligible (the per-row `isExecutionEligibleForReconciliation` check still validates the deadline). Round 2 R2-T1 fix migrated the ceiling monitor (correctness-sensitive) to DB-anchored time; this completes the migration to consistency.
-  - Suggested approach: replace `const now = new Date();` with a `SELECT NOW()` in the same admin transaction; thread the DB time through to `isExecutionEligibleForReconciliation`. Pure helper signature unchanged. Single-file change, ~10 lines.
-
-- [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
-  - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
-  - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
+Remaining v2-backlog cross-references (still open elsewhere in this file):
+- **SANDBOX-F1** (real e2b publish/inspect wiring; gates SANDBOX-R3-T2)
+- **REQ #57** (credential value-threading; waits on e2b SDK install)
 
 ## Deferred adversarial findings — personal-assistant-v1 (2026-05-12)
 

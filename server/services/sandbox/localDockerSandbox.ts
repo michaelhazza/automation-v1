@@ -28,13 +28,16 @@ import {
   registerSandboxProvider,
   type SandboxExecutionService,
 } from './sandboxProviderResolver.js';
-import { withSandboxProvider } from '../../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../../lib/withSandboxProvider.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../../lib/sandboxTelemetrySequencePure.js';
 import { parseCurrentVersion } from './templateVersionParserPure.js';
 import {
   dockerExitCodeToTerminal,
   assertNotLatestLocalTemplateVersion,
 } from './localDockerSandboxPure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
+import { logger } from '../../lib/logger.js';
 import type {
   SandboxRunTaskInput,
   SandboxRunTaskOutput,
@@ -87,13 +90,28 @@ export class LocalDockerSandbox implements SandboxExecutionService {
   }
 
   // ---------------------------------------------------------------------------
+  // terminate — no-op for local_docker; docker run --rm exits on its own
+  // when the container finishes or the ceiling monitor sends SIGTERM.
+  // ---------------------------------------------------------------------------
+
+  async terminate(_providerSandboxId: string): Promise<void> {
+    // no-op — local_docker containers are managed via SIGTERM forwarding in _runContainer
+  }
+
+  // ---------------------------------------------------------------------------
   // runTask — one container per task, no reuse (spec §8.2.2)
   // ---------------------------------------------------------------------------
 
   async runTask(input: SandboxRunTaskInput): Promise<SandboxRunTaskOutput> {
     const {
       sandboxExecutionId,
+      organisationId,
+      subaccountId,
+      runId,
+      agentId,
+      taskId,
       templateName,
+      templateVersion,
       policy,
     } = input;
 
@@ -106,10 +124,36 @@ export class LocalDockerSandbox implements SandboxExecutionService {
 
     const startMs = Date.now();
 
+    const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+      async (event) => {
+        const db = getOrgScopedDb('localDockerSandbox.telemetryWriter');
+        await allocateAndInsertTelemetryEvent(db, {
+          sandboxExecutionId,
+          organisationId,
+          subaccountId,
+          runId,
+          agentId,
+          taskId,
+          provider: 'local_docker',
+          templateName,
+          templateVersion,
+          eventType: 'provider_diagnostic',
+          criticality: 'info',
+          payloadJson: {
+            subKind: event.subKind,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            status: event.status,
+            code: event.code,
+          },
+        });
+      };
+
     // --- Phase: start (spawn docker run) ---
     const exitCode = await withSandboxProvider({
       phase: 'start',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () =>
         this._runContainer({
           sandboxExecutionId,
@@ -129,9 +173,13 @@ export class LocalDockerSandbox implements SandboxExecutionService {
         const outputPath = join(hostWorkspaceDir, 'output.json');
         const content = readFileSync(outputPath, 'utf-8');
         rawOutput = JSON.parse(content) as unknown;
-      } catch {
+      } catch (err) {
         // Missing or unreadable output.json — harvest pipeline classifies as
         // output_validation_failed. rawOutput stays null.
+        logger.warn('sandbox.local_docker.output_read_failed', {
+          sandboxExecutionId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

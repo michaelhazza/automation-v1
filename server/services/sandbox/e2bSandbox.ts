@@ -36,7 +36,9 @@ import {
   registerSandboxProvider,
   type SandboxExecutionService,
 } from './sandboxProviderResolver.js';
-import { withSandboxProvider } from '../../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../../lib/withSandboxProvider.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../../lib/sandboxTelemetrySequencePure.js';
 import { parsePublishedVersion } from './templateVersionParserPure.js';
 import {
   e2bTerminalSignalToInternal,
@@ -47,6 +49,8 @@ import {
   type E2bTerminalSignal,
 } from './e2bSandboxPure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
+import { logger } from '../../lib/logger.js';
+import { verifyTeardown } from './teardownVerifierPure.js';
 import type {
   SandboxRunTaskInput,
   SandboxRunTaskOutput,
@@ -134,6 +138,18 @@ export interface E2bSdkClient {
    * Should be called after the sandbox's process has completed.
    */
   getTerminalState(sandboxId: string): Promise<E2bTerminalSignal>;
+
+  /**
+   * Check whether a sandbox is still alive (running).
+   * Returns true if the sandbox is reachable and running; false if terminated.
+   * Used by teardown verification (§7.7 REQ #55) — called after terminateSandbox
+   * to confirm the sandbox is actually gone.
+   *
+   * NOTE: method name must be verified against the real e2b SDK surface at
+   * installation time. If the real SDK uses a different name, update this
+   * interface and the defaultSdkStub accordingly.
+   */
+  isSandboxAlive(sandboxId: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +170,9 @@ function makeNotInstalledStub(): E2bSdkClient {
     writeFile: notInstalled,
     listFiles: notInstalled,
     getTerminalState: notInstalled,
+    // Teardown verification stub: returns false (not alive) when SDK not installed.
+    // The real SDK implementation must be verified at installation time.
+    isSandboxAlive: async (_sandboxId: string) => false,
   };
 }
 
@@ -241,6 +260,31 @@ export class E2bSandbox implements SandboxExecutionService {
     // Wall-clock ceiling → SDK timeout parameter (ms → seconds, rounded up).
     const timeoutSeconds = Math.ceil(policy.ceilings.wallClockMs / 1000);
 
+    const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+      async (event) => {
+        const db = getOrgScopedDb('e2bSandbox.telemetryWriter');
+        await allocateAndInsertTelemetryEvent(db, {
+          sandboxExecutionId,
+          organisationId,
+          subaccountId,
+          runId,
+          agentId,
+          taskId,
+          provider: 'e2b',
+          templateName,
+          templateVersion,
+          eventType: 'provider_diagnostic',
+          criticality: 'info',
+          payloadJson: {
+            subKind: event.subKind,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            status: event.status,
+            code: event.code,
+          },
+        });
+      };
+
     const metadataTags = buildE2bMetadataTags({
       organisationId,
       subaccountId,
@@ -264,6 +308,7 @@ export class E2bSandbox implements SandboxExecutionService {
       const handle = await withSandboxProvider({
         phase: 'start',
         sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(),
         call: () =>
           this.sdkClient.createSandbox({
             templateAlias: resolveTemplateAlias(templateName, {
@@ -319,6 +364,7 @@ export class E2bSandbox implements SandboxExecutionService {
       await withSandboxProvider({
         phase: 'start',
         sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(),
         call: () =>
           this.sdkClient.writeFile(
             providerSandboxId,
@@ -346,6 +392,7 @@ export class E2bSandbox implements SandboxExecutionService {
     const terminalSignal = await withSandboxProvider({
       phase: 'terminal',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () => this.sdkClient.getTerminalState(providerSandboxId),
     });
 
@@ -360,12 +407,17 @@ export class E2bSandbox implements SandboxExecutionService {
         const outputBuf = await withSandboxProvider({
           phase: 'harvest',
           sandboxExecutionId,
+          telemetryWriter: makeTelemetryWriter(),
           call: () => this.sdkClient.readFile(providerSandboxId, '/workspace/output.json'),
         });
         rawOutput = JSON.parse(outputBuf.toString('utf-8')) as unknown;
-      } catch {
+      } catch (err) {
         // Missing or unreadable output.json — harvest pipeline classifies this
         // as output_validation_failed. rawOutput stays null.
+        logger.warn('sandbox.e2b.output_read_failed', {
+          sandboxExecutionId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -379,13 +431,34 @@ export class E2bSandbox implements SandboxExecutionService {
     await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () => this.sdkClient.terminateSandbox(providerSandboxId),
-    }).catch(() => {
+    }).catch((err: unknown) => {
       // Terminate failure is non-fatal: the sandbox may already be closed
       // (timeout, cost-ceiling), or the provider API is temporarily down.
       // The ceiling-monitor job (C11a) and the wall-clock-kill job (C11a)
       // both terminate independently as belt-and-braces.
+      logger.warn('sandbox.e2b.terminate_failed', {
+        sandboxExecutionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     });
+
+    // Post-terminate verification (§7.7 REQ #55). Runs even if terminate above
+    // threw — health-check throw maps to verified:false/health_check_threw.
+    const verification = await verifyTeardown({
+      providerSandboxId,
+      postTerminateHealthCheck: () => this.sdkClient.isSandboxAlive(providerSandboxId),
+    });
+
+    if (verification.verified) {
+      logger.info('sandbox.teardown.verified', { providerSandboxId });
+    } else {
+      logger.error('sandbox.teardown.unverified', {
+        providerSandboxId,
+        reason: verification.reason,
+      });
+    }
 
     // Metrics: populated from provider-reported data where available.
     // In V1 the e2b SDK surface for per-execution vCPU / memory metrics is
@@ -416,6 +489,29 @@ export class E2bSandbox implements SandboxExecutionService {
   }
 
   // ---------------------------------------------------------------------------
+  // terminate — kill a running sandbox by its provider-assigned id.
+  // Idempotent: no-op if the sandbox is already closed.
+  // ---------------------------------------------------------------------------
+
+  async terminate(providerSandboxId: string): Promise<void> {
+    await this.sdkClient.terminateSandbox(providerSandboxId);
+
+    const verification = await verifyTeardown({
+      providerSandboxId,
+      postTerminateHealthCheck: () => this.sdkClient.isSandboxAlive(providerSandboxId),
+    });
+
+    if (verification.verified) {
+      logger.info('sandbox.teardown.verified', { providerSandboxId });
+    } else {
+      logger.error('sandbox.teardown.unverified', {
+        providerSandboxId,
+        reason: verification.reason,
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Log harvest (stub — full wiring in C7 harvest pipeline)
   // ---------------------------------------------------------------------------
 
@@ -425,6 +521,13 @@ export class E2bSandbox implements SandboxExecutionService {
   ): Promise<SandboxLogRefs> {
     const readLog = async (stream: 'stdout' | 'stderr'): Promise<string> => {
       try {
+        // no-tenancy-context: defaults to log-only. This private method takes only
+        // (providerSandboxId, sandboxExecutionId) — the full tenancy fields required
+        // by sandbox_telemetry_events (organisationId, runId, agentId, taskId,
+        // templateName, templateVersion) are not threaded here. Diagnostics surface
+        // via logger.warn in withSandboxProvider only; DB-row persistence at this
+        // site requires a method-signature refactor and is tracked in tasks/todo.md
+        // under REQ #31 follow-up.
         await withSandboxProvider({
           phase: 'harvest',
           sandboxExecutionId,
@@ -433,8 +536,13 @@ export class E2bSandbox implements SandboxExecutionService {
         });
         // C7 (harvest pipeline) processes the raw buffer through redaction and
         // persists to sandbox_logs. This stub returns an opaque log-ref string.
-      } catch {
-        // Log file absent — treated as empty stream.
+      } catch (err) {
+        logger.warn('sandbox.e2b.log_harvest_read_failed', {
+          sandboxExecutionId,
+          providerSandboxId,
+          stream,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
       return `e2b:${sandboxExecutionId}:${stream}`;
     };
@@ -454,6 +562,13 @@ export class E2bSandbox implements SandboxExecutionService {
     sandboxExecutionId: string,
   ): Promise<SandboxArtefactRef[]> {
     try {
+      // no-tenancy-context: defaults to log-only. This private method takes only
+      // (providerSandboxId, sandboxExecutionId) — the full tenancy fields required
+      // by sandbox_telemetry_events (organisationId, runId, agentId, taskId,
+      // templateName, templateVersion) are not threaded here. Diagnostics surface
+      // via logger.warn in withSandboxProvider only; DB-row persistence at this
+      // site requires a method-signature refactor and is tracked in tasks/todo.md
+      // under REQ #31 follow-up.
       const entries = await withSandboxProvider({
         phase: 'harvest',
         sandboxExecutionId,
@@ -464,8 +579,12 @@ export class E2bSandbox implements SandboxExecutionService {
       // redaction (§8.4 step 7), and S3 upload (§8.4 step 8). This stub
       // returns an empty list — artefact wiring lands in C7.
       void entries;
-    } catch {
-      // Directory absent — no artefacts.
+    } catch (err) {
+      logger.warn('sandbox.e2b.artefact_harvest_list_failed', {
+        sandboxExecutionId,
+        providerSandboxId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
     return [];
   }

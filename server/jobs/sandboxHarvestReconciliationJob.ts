@@ -58,6 +58,7 @@ interface StuckRow {
   policy_json: { ceilings?: { wallClockMs?: number } } | null;
   attempt_number: number;
   output_schema_ref?: string | null;
+  credential_aliases: Array<{ alias: string; connectionId: string }>;
 }
 
 export async function sandboxHarvestReconciliationHandler(): Promise<void> {
@@ -70,7 +71,8 @@ export async function sandboxHarvestReconciliationHandler(): Promise<void> {
     async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      const now = new Date();
+      const [{ now: dbNow }] = await tx.execute<{ now: string }>(sql`SELECT NOW() AS now`);
+      const now = new Date(dbNow);
       // Deadline: wallClockMs + RECONCILIATION_BUFFER_MS since startedAt.
       // We use a conservative floor for the query: anything started > 1 minute ago
       // AND wall clock + buffer has elapsed is eligible. The per-row check below
@@ -92,7 +94,8 @@ export async function sandboxHarvestReconciliationHandler(): Promise<void> {
           template_version,
           started_at,
           policy_json,
-          attempt_number
+          attempt_number,
+          credential_aliases
         FROM sandbox_executions
         WHERE
           status = ANY(ARRAY['pending','running','harvesting','harvest_failed','artefact_upload_failed'])
@@ -271,7 +274,7 @@ async function reconcileExecution(
     // outputSchemaRef: not stored on the row in V1; default to empty string
     // so the harvest pipeline uses a passthrough schema.
     outputSchemaRef: '',
-    credentialAliases: [],
+    credentialAliases: row.credential_aliases,
   });
 
   logger.info('sandbox.harvest_reconciliation.execution_reconciled', {

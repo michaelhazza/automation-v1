@@ -22,6 +22,7 @@ import type { SandboxProviderName, SandboxRunTaskInput, SandboxRunTaskOutput } f
 
 export interface SandboxExecutionService {
   runTask(input: SandboxRunTaskInput): Promise<SandboxRunTaskOutput>;
+  terminate(providerSandboxId: string): Promise<void>;
 }
 
 type ProviderConstructor = () => SandboxExecutionService;
@@ -43,15 +44,12 @@ export function registerSandboxProvider(
 /**
  * Resolve and instantiate the configured sandbox provider.
  *
- * Reads SANDBOX_PROVIDER and NODE_ENV from the supplied env object (defaults to
- * process.env). Throws FailureError at construction time for any mis-configuration
- * so a mis-deployed service never starts.
+ * Reads SANDBOX_PROVIDER and NODE_ENV from process.env. Throws FailureError at
+ * construction time for any mis-configuration so a mis-deployed service never starts.
  */
-export function resolveSandboxProvider(
-  env: Record<string, string | undefined> = process.env,
-): SandboxExecutionService {
-  const rawProvider = env['SANDBOX_PROVIDER'];
-  const nodeEnv = env['NODE_ENV'] ?? 'development';
+export function resolveSandboxProvider(): SandboxExecutionService {
+  const rawProvider = process.env['SANDBOX_PROVIDER'];
+  const nodeEnv = process.env['NODE_ENV'] ?? 'development';
 
   if (!rawProvider) {
     throw new FailureError({
@@ -81,7 +79,7 @@ export function resolveSandboxProvider(
 
   // Hard guard: inline is only permitted in test with SANDBOX_ALLOW_INLINE=1
   if (providerName === 'inline') {
-    const allowInline = env['SANDBOX_ALLOW_INLINE'];
+    const allowInline = process.env['SANDBOX_ALLOW_INLINE'];
     if (nodeEnv !== 'test' || allowInline !== '1') {
       throw new FailureError({
         failureReason: 'sandbox_provider_unavailable',
@@ -89,7 +87,7 @@ export function resolveSandboxProvider(
           'inlineSandbox is test-only — set NODE_ENV=test and SANDBOX_ALLOW_INLINE=1 to use',
       });
     }
-    return new InlineSandbox(env);
+    return new InlineSandbox();
   }
 
   const constructor = registry.get(providerName);

@@ -291,6 +291,10 @@ export const agentRuns = pgTable(
     // intact when a user is removed. Spec §6.5b.
     assignedUserId: uuid('assigned_user_id').references(() => users.id, { onDelete: 'set null' }),
 
+    // Soft-delete timestamp (migration 0363, spec §7.6 REQ #35).
+    // NULL = active run. Set by agentRunSoftDeleteService; never cleared.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -347,6 +351,11 @@ export const agentRuns = pgTable(
     userOwnedIdx: index('agent_runs_user_owned_idx')
       .on(table.organisationId, table.ownerUserId, table.startedAt)
       .where(sql`${table.ownerUserId} IS NOT NULL`),
+    // Soft-delete lookup (migration 0363, spec §7.6 REQ #35). Partial so
+    // the index covers only deleted rows — keeps it small.
+    deletedAtIdx: index('agent_runs_deleted_at_idx')
+      .on(table.deletedAt)
+      .where(sql`${table.deletedAt} IS NOT NULL`),
   })
 );
 

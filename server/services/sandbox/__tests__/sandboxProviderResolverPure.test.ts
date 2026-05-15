@@ -9,7 +9,7 @@
  *   npx vitest run server/services/sandbox/__tests__/sandboxProviderResolverPure.test.ts
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   resolveSandboxProvider,
   registerSandboxProvider,
@@ -23,6 +23,9 @@ function makeMockProvider(): SandboxExecutionService {
     runTask: async () => {
       throw new Error('not called in unit tests');
     },
+    terminate: async () => {
+      throw new Error('not called in unit tests');
+    },
   };
 }
 
@@ -31,6 +34,10 @@ function makeMockProvider(): SandboxExecutionService {
 beforeEach(() => {
   registerSandboxProvider('e2b', makeMockProvider);
   registerSandboxProvider('local_docker', makeMockProvider);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 // ─── helper ───────────────────────────────────────────────────────────────────
@@ -52,15 +59,19 @@ function expectSandboxFailure(fn: () => unknown, expectedDetailFragment: string)
 
 describe('missing SANDBOX_PROVIDER', () => {
   test('case 1 — throws when SANDBOX_PROVIDER is absent', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', '');
     expectSandboxFailure(
-      () => resolveSandboxProvider({ NODE_ENV: 'production' }),
+      () => resolveSandboxProvider(),
       'SANDBOX_PROVIDER env var is not set',
     );
   });
 
   test('case 2 — throws when SANDBOX_PROVIDER is empty string', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', '');
     expectSandboxFailure(
-      () => resolveSandboxProvider({ NODE_ENV: 'production', SANDBOX_PROVIDER: '' }),
+      () => resolveSandboxProvider(),
       'SANDBOX_PROVIDER env var is not set',
     );
   });
@@ -70,9 +81,10 @@ describe('missing SANDBOX_PROVIDER', () => {
 
 describe('invalid SANDBOX_PROVIDER value', () => {
   test('case 3 — throws for unrecognised provider name', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', 'fake_provider');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({ NODE_ENV: 'production', SANDBOX_PROVIDER: 'fake_provider' }),
+      () => resolveSandboxProvider(),
       'not a valid provider',
     );
   });
@@ -82,21 +94,24 @@ describe('invalid SANDBOX_PROVIDER value', () => {
 
 describe('e2b provider', () => {
   test('case 4 — resolves in production', () => {
-    const svc = resolveSandboxProvider({ NODE_ENV: 'production', SANDBOX_PROVIDER: 'e2b' });
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', 'e2b');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
     expect(typeof svc.runTask).toBe('function');
   });
 
   test('case 5 — resolves in development', () => {
-    const svc = resolveSandboxProvider({ NODE_ENV: 'development', SANDBOX_PROVIDER: 'e2b' });
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SANDBOX_PROVIDER', 'e2b');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
   });
 
   test('case 6 — resolves in test', () => {
-    const svc = resolveSandboxProvider({
-      NODE_ENV: 'test',
-      SANDBOX_PROVIDER: 'e2b',
-    });
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'e2b');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
   });
 });
@@ -105,26 +120,25 @@ describe('e2b provider', () => {
 
 describe('local_docker provider', () => {
   test('case 7 — throws in production (hard guard)', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', 'local_docker');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({ NODE_ENV: 'production', SANDBOX_PROVIDER: 'local_docker' }),
+      () => resolveSandboxProvider(),
       'not permitted when NODE_ENV=production',
     );
   });
 
   test('case 8 — resolves in development', () => {
-    const svc = resolveSandboxProvider({
-      NODE_ENV: 'development',
-      SANDBOX_PROVIDER: 'local_docker',
-    });
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SANDBOX_PROVIDER', 'local_docker');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
   });
 
   test('case 9 — resolves in test', () => {
-    const svc = resolveSandboxProvider({
-      NODE_ENV: 'test',
-      SANDBOX_PROVIDER: 'local_docker',
-    });
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'local_docker');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
   });
 });
@@ -133,70 +147,67 @@ describe('local_docker provider', () => {
 
 describe('inline provider', () => {
   test('case 10 — resolves when NODE_ENV=test AND SANDBOX_ALLOW_INLINE=1', () => {
-    const svc = resolveSandboxProvider({
-      NODE_ENV: 'test',
-      SANDBOX_PROVIDER: 'inline',
-      SANDBOX_ALLOW_INLINE: '1',
-    });
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
+    const svc = resolveSandboxProvider();
     expect(svc).toBeDefined();
     expect(typeof svc.runTask).toBe('function');
   });
 
   test('case 11 — throws in test when SANDBOX_ALLOW_INLINE is absent', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
     expectSandboxFailure(
-      () => resolveSandboxProvider({ NODE_ENV: 'test', SANDBOX_PROVIDER: 'inline' }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
 
   test('case 12 — throws in test when SANDBOX_ALLOW_INLINE=0', () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '0');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({
-          NODE_ENV: 'test',
-          SANDBOX_PROVIDER: 'inline',
-          SANDBOX_ALLOW_INLINE: '0',
-        }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
 
   test('case 13 — throws in development even with SANDBOX_ALLOW_INLINE=1', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({
-          NODE_ENV: 'development',
-          SANDBOX_PROVIDER: 'inline',
-          SANDBOX_ALLOW_INLINE: '1',
-        }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
 
   test('case 14 — throws in development without SANDBOX_ALLOW_INLINE', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({ NODE_ENV: 'development', SANDBOX_PROVIDER: 'inline' }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
 
   test('case 15 — throws in production even with SANDBOX_ALLOW_INLINE=1', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({
-          NODE_ENV: 'production',
-          SANDBOX_PROVIDER: 'inline',
-          SANDBOX_ALLOW_INLINE: '1',
-        }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
 
   test('case 16 — throws in production without SANDBOX_ALLOW_INLINE', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
     expectSandboxFailure(
-      () =>
-        resolveSandboxProvider({ NODE_ENV: 'production', SANDBOX_PROVIDER: 'inline' }),
+      () => resolveSandboxProvider(),
       'inlineSandbox is test-only',
     );
   });
@@ -221,11 +232,10 @@ describe('unregistered provider', () => {
     // testing that resolveSandboxProvider with the inline path (which skips the registry)
     // does NOT trigger the "not registered" error, confirming both code branches are
     // independent.
-    const inlineSvc = resolveSandboxProvider({
-      NODE_ENV: 'test',
-      SANDBOX_PROVIDER: 'inline',
-      SANDBOX_ALLOW_INLINE: '1',
-    });
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_PROVIDER', 'inline');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
+    const inlineSvc = resolveSandboxProvider();
     // Inline path succeeded — confirms it bypasses registry.
     expect(inlineSvc).toBeDefined();
   });
@@ -249,20 +259,25 @@ describe('unregistered provider', () => {
 
 describe('InlineSandbox construction guard', () => {
   test('case 19 — InlineSandbox throws when NODE_ENV is not test', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
     const { InlineSandbox } = await import('../inlineSandbox.js');
     expect(
-      () => new InlineSandbox({ NODE_ENV: 'development', SANDBOX_ALLOW_INLINE: '1' }),
+      () => new InlineSandbox(),
     ).toThrow(FailureError);
   });
 
   test('case 20 — InlineSandbox throws when SANDBOX_ALLOW_INLINE is absent', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
     const { InlineSandbox } = await import('../inlineSandbox.js');
-    expect(() => new InlineSandbox({ NODE_ENV: 'test' })).toThrow(FailureError);
+    expect(() => new InlineSandbox()).toThrow(FailureError);
   });
 
   test('case 21 — InlineSandbox construction succeeds with both guards satisfied', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
     const { InlineSandbox } = await import('../inlineSandbox.js');
-    const svc = new InlineSandbox({ NODE_ENV: 'test', SANDBOX_ALLOW_INLINE: '1' });
+    const svc = new InlineSandbox();
     expect(svc).toBeDefined();
   });
 });
@@ -271,8 +286,10 @@ describe('InlineSandbox construction guard', () => {
 
 describe('InlineSandbox runTask', () => {
   test('returns completed terminal state with echoed sandboxExecutionId', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SANDBOX_ALLOW_INLINE', '1');
     const { InlineSandbox } = await import('../inlineSandbox.js');
-    const svc = new InlineSandbox({ NODE_ENV: 'test', SANDBOX_ALLOW_INLINE: '1' });
+    const svc = new InlineSandbox();
 
     const result = await svc.runTask({
       sandboxExecutionId: 'test-exec-abc-123',
