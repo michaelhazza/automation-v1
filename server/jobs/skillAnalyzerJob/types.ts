@@ -4,6 +4,7 @@ import type {
   LibrarySkillSummary,
   ValidationThresholds,
 } from '../../services/skillAnalyzerServicePure.js';
+import type { AgentProposal } from '../../services/skillAnalyzerServicePure/agentRanking.js';
 import type { SkillAnalyzerConfig } from '../../db/schema/skillAnalyzerConfig.js';
 
 // ---------------------------------------------------------------------------
@@ -125,6 +126,23 @@ export interface JobContext {
    * duplicate inserts.
    */
   completedCandidateIndices: Set<number>;
+
+  /**
+   * Active system agents with their cached embeddings — populated by Stage 6,
+   * consumed by Stage 7, Stage 7b, and Stage 8b.
+   */
+  rankableAgents: Array<{
+    systemAgentId: string;
+    slug: string;
+    name: string;
+    embedding: number[];
+  }>;
+
+  /**
+   * Agent proposals keyed by candidateIndex — populated by Stage 7, mutated
+   * by Stage 7b, read by Stage 8 and Stage 8b.
+   */
+  agentProposalsByCandidateIndex: Map<number, AgentProposal[]>;
 }
 
 // ---------------------------------------------------------------------------
