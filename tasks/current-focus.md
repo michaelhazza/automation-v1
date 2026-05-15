@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/split-skill-analyzer/spec.md
-active_plan: tasks/builds/split-skill-analyzer/plan.md
-build_slug: split-skill-analyzer
-branch: claude/split-skill-analyzer
-status: MERGE_READY
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: NONE
 last_updated: 2026-05-15
-last_merged_pr: #313
-last_merged_slug: page-splits
-last_merged_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_at: 2026-05-15T00:00:00Z
-last_merged_commit: pending
+last_merged_pr: #324
+last_merged_slug: pa-v1-cleanup-batch
+last_merged_branch: claude/pa-v1-cleanup-batch
+last_merged_at: 2026-05-15T09:46:17Z
+last_merged_commit: 9ce10f97
 -->
 
 # Current Focus
