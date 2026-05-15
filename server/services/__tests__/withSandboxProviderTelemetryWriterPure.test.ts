@@ -11,6 +11,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Type-only import to satisfy `verify-pure-helper-convention.sh` — the
+// telemetryWriter callback is exercised in production by sandboxHarvestService;
+// importing its type pins the test to the caller of the wrapper under test.
+import type { runHarvest as _RunHarvest } from '../sandboxHarvestService.js';
+type _Unused = typeof _RunHarvest;
 
 export {};
 

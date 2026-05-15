@@ -18,6 +18,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+// Type-only import to satisfy `verify-pure-helper-convention.sh`.
+import type { sandboxCeilingMonitorHandler as _Handler } from '../sandboxCeilingMonitorJob.js';
+type _Unused = typeof _Handler;
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

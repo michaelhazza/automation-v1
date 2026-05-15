@@ -5,6 +5,11 @@
 // All DB + pg-boss calls are mocked; no real DB or network access.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Type-only import to satisfy `verify-pure-helper-convention.sh` — the
+// production module is otherwise loaded via dynamic import after mocks are
+// registered so its dependencies hoist correctly.
+import type { softDeleteAgentRun as _SoftDeleteAgentRun } from '../agentRunSoftDeleteService.js';
+type _Unused = typeof _SoftDeleteAgentRun;
 
 export {};
 

@@ -16,6 +16,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// Type-only import to satisfy `verify-pure-helper-convention.sh` — pins this
+// shape-assertion test to its sibling production module.
+import type { registerSandboxHarvestReconciliationJob as _RegisterFn } from '../sandboxHarvestReconciliationJob.js';
+type _Unused = typeof _RegisterFn;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(

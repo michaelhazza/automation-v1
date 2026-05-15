@@ -11,6 +11,11 @@
 # removed (boss.work call no longer present at that location). Same pattern
 # as PR #321 (canonical-retry baseline drift fix).
 #
+# 2026-05-16 realignment (sandbox-safety-batch PR #326):
+# sandboxHarvestReconciliationJob entry shifted +3 lines (290 → 293) after
+# Chunk 5 added the DB-anchored `SELECT NOW()` clock inside the tx body
+# (SANDBOX-R3-T1 fix). Same pattern as PR #321 baseline drift fix.
+#
 # expires: 2026-08-13
 server/index.ts:652:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
@@ -24,7 +29,7 @@ server/jobs/ieeBrowserDailyRollupJob.ts:151:Direct boss.work() registration bypa
 # expires: 2026-08-13
 server/jobs/sandboxEgressAuditPruneJob.ts:150:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/jobs/sandboxHarvestReconciliationJob.ts:290:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/jobs/sandboxHarvestReconciliationJob.ts:293:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
 server/jobs/sandboxLogsPruneJob.ts:157:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13

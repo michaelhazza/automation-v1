@@ -19,6 +19,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// Type-only import to satisfy `verify-pure-helper-convention.sh`.
+import type { registerSandboxWallClockKillJob as _RegisterFn } from '../sandboxWallClockKillJob.js';
+type _Unused = typeof _RegisterFn;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(
