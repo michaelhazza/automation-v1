@@ -3,6 +3,7 @@
 # Detects duplicate code block regressions using jscpd.
 # Compares current clone count against scripts/.gate-baselines/duplicate-blocks.txt.
 # New clones → exit 2 (warning-first rollout). Reductions are silent.
+# Promotion attempt 2026-05-15 reverted: current main exceeds baseline (9118 clones vs 8769 seed), baseline needs re-seeding before promotion. Tracked in tasks/todo.md.
 #
 # Usage: bash scripts/verify-duplicate-blocks.sh
 # Exit codes: 0 = at or below baseline, 2 = regression (new clones)
