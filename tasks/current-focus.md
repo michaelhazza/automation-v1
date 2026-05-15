@@ -3,7 +3,7 @@ active_spec: tasks/builds/split-services-soft-cap-batch/spec.md
 active_plan: tasks/builds/split-services-soft-cap-batch/plan.md
 build_slug: split-services-soft-cap-batch
 branch: claude/split-services-soft-cap-batch
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-15
 last_merged_pr: #313
 last_merged_slug: page-splits
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/split-services-soft-cap-batch/plan.md` (pending architect)
 **Active build slug:** `split-services-soft-cap-batch`
 **Branch:** `claude/split-services-soft-cap-batch`
-**Status:** **BUILDING** — Wave 2 Session B kicked off. Pre-drafted spec on main (PR #322). 5 god-files / 1 job over the 1,500 LOC soft cap: `agentService.ts` (2,335), `skillAnalyzerJob.ts` (2,254), `workspaceMemoryService.ts` (1,949), `llmRouter.ts` (1,918), `queueService.ts` (1,683). Each → thin barrel + sibling directory. Architect's chunk-0 caller sweep across all 5 targets decides one-master-PR vs five-sequential. Public surfaces locked at chunk 0. No Wave 1 splits, no `*Pure.ts` companions in this build.
+**Status:** **REVIEWING** — Wave 2 Session B Phase 2 complete. 5 god-files split into thin barrels (total 160 LOC across all 5 barrels — agentService 39, queueService 29, workspaceMemoryService 45, llmRouter 46, skillAnalyzerJob 1) + sibling directory trees (54 sub-modules total). 23 commits across 27 planned chunks (4 chunks folded into predecessor). spec-conformance NON_CONFORMANT (positional gate-baseline drift rebased) → pr-reviewer R1 CHANGES_REQUESTED (BLOCKING: callerAssert regex broke after split — every prod LLM call would have thrown ADAPTER_DIRECT_CALL — fixed in 8209bc2c) → pr-reviewer R2 APPROVED → reality-checker READY → dual-reviewer APPROVED (Codex 0 findings). 2 KNOWLEDGE.md patterns appended (builder "move" semantics + path-pattern regex updates at split time). Ready for Phase 3 finalisation.
 
 **Previously MERGE_READY:** PR [#320](https://github.com/michaelhazza/automation-v1/pull/320) — `split-skill-analyzer`. Two-part monolith split + FORCE RLS migration 0359 + `createWorker` migration. chatgpt-pr-review 2 rounds APPROVED. Doc-sync clean. PR still open at time of new build kick-off; managed in parallel.
 

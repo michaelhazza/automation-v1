@@ -1794,3 +1794,29 @@ grep -rn "await db\." server/services/<serviceTree>/ --include="*.ts" | grep -v 
 ```
 Any remaining `await db.` calls against the RLS-protected table name in the output = missed sites.
 **Why it matters:** each missed site silently drops writes and returns empty reads. With a large service tree split across many sub-modules, an exhaustive pre-fix grep is cheaper than multiple chatgpt-pr-review rounds catching the same missed pattern.
+
+
+---
+
+## [2026-05-15] Pattern — When telling builder to "move X to file Y", spell out BOTH halves explicitly
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch (Wave 2 Session B) — Chunk W2 required a second builder round because the first builder created the new files but left the original code in place, producing 567 lines of duplicated code.
+**Pattern:** When the plan says symbols "move to" a new file, builders sometimes interpret "move" as "create the destination" without removing from the source. The result is silently passing G1 (no errors, types align) while the barrel is bloated and the new files unused.
+**Rule.** Every builder invocation that moves code MUST state both halves explicitly:
+1. "Create the new file X with these symbols"
+2. "Remove the SAME symbols from file Y AND wire Y to import them from X"
+3. "Verify with `wc -l Y` — barrel should drop substantially"
+**Why it matters:** silent duplication compounds across chunks. G1 (lint + typecheck) doesn't fail on duplicated logic. By the time spec-conformance catches it via LOC budget, N misplaced commits have already landed.
+
+---
+
+## [2026-05-15] Pattern — Static gate path-pattern regexes need updating when files move to subdirectories
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch — pr-reviewer R1 found a BLOCKING bug: `server/services/providers/callerAssert.ts:22` regex `/server[/\]services[/\]llmRouter\./` no longer matched after `routeCall` moved from `llmRouter.ts` to `llmRouter/routeCall.ts` (`llmRouter` followed by `/`, not `.`).
+**Pattern:** Runtime guards that walk V8 stack frames to enforce caller-source invariants use regex patterns over file paths. When a god-file is split into a barrel + sub-directory, the literal path in stack frames changes from `<service>.ts:LINE` to `<service>/<submodule>.ts:LINE`. Single-character matchers (`\.`) that anchored on the old shape silently fail to match the new shape.
+**Rule.** Before splitting any service that has a runtime caller-assertion guard, grep for the guard's regex and update it to match BOTH the barrel and the sub-tree: `/server[/\]services[/\]<name>([/\]|\.)/` — either slash or dot after the service name.
+**Other locations to audit at split time:**
+- `scripts/gates/verify-no-direct-adapter-calls.sh` (and similar static gate scripts that grep file paths)
+- `scripts/.gate-baselines/*.txt` (positional entries reference old paths)
+- `architecture.md` references with line markers
+**Why it matters:** the regex bug shipped clean static-gate output AND clean type-checks AND clean lint. It would only have shown up at runtime, on the first LLM call in any non-test environment, throwing `ADAPTER_DIRECT_CALL` and breaking every agent in production.
