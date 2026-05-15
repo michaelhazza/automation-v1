@@ -101,7 +101,7 @@ CHECK2_EXEMPT=$(awk '
 FK_ONLY_TABLES_FILE=$(mktemp)
 trap 'rm -f "$FK_ONLY_TABLES_FILE"' EXIT
 
-find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
+find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' ! -name '*.down.sql' -print0 |
   while IFS= read -r -d '' migration_file; do
     awk -v registry="$REGISTRY_TABLES" '
       BEGIN {
@@ -125,13 +125,18 @@ find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
         if ($0 ~ /^[[:space:]]*"?organisation_id"?[[:space:]]+/) {
           has_org = 1
         }
-        # Match REFERENCES "<parent>" — Drizzle quotes parent tables.
-        if (match($0, /REFERENCES[[:space:]]+"?([a-zA-Z_][a-zA-Z0-9_]*)"?/, fkm)) {
+        # Match REFERENCES — schema-qualified form "public"."table" first, then plain "table".
+        # Drizzle ALTER TABLE uses "public"."table"; inline column REFERENCES use plain "table".
+        if (match($0, /REFERENCES[[:space:]]+"?[a-zA-Z_][a-zA-Z0-9_]*"?\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/, fkm)) {
           parent = fkm[1]
-          if (parent in reg) {
-            if (parents == "") parents = parent
-            else parents = parents "," parent
-          }
+        } else if (match($0, /REFERENCES[[:space:]]+"?([a-zA-Z_][a-zA-Z0-9_]*)"?/, fkm)) {
+          parent = fkm[1]
+        } else {
+          parent = ""
+        }
+        if (parent != "" && parent in reg) {
+          if (parents == "") parents = parent
+          else parents = parents "," parent
         }
         if ($0 ~ /^[[:space:]]*\);/) {
           # Emit the table when it has no organisation_id but does FK-reference
@@ -161,10 +166,9 @@ while IFS=$'\t' read -r table parents; do
     continue
   fi
 
-  # Grep all migrations for a CREATE POLICY targeting this table. Match both
-  # quoted and unquoted forms: ON "table" and ON table.
-  if grep -qE "CREATE POLICY[[:space:]]+[^\;]+[[:space:]]+ON[[:space:]]+\"?${table}\"?" \
-       "$MIGRATIONS_DIR"/*.sql 2>/dev/null; then
+  # Grep up migrations only for a CREATE POLICY targeting this table.
+  if find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' ! -name '*.down.sql' -print0 | \
+       xargs -0 grep -qE "CREATE POLICY[[:space:]]+[^\;]+[[:space:]]+ON[[:space:]]+\"?${table}\"?" 2>/dev/null; then
     continue
   fi
 
@@ -179,7 +183,7 @@ done <<< "$FK_ONLY_TABLES"
 
 VIOLATION_KEYS="${VIOLATION_KEYS%$'\n'}"
 
-emit_summary "$(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' | wc -l)" "$VIOLATIONS"
+emit_summary "$(find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' ! -name '*.down.sql' | wc -l)" "$VIOLATIONS"
 
 exit_code=$(check_expiring_baseline "$GUARD_ID" "$VIOLATION_KEYS")
 exit "$exit_code"
