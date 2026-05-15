@@ -62,11 +62,23 @@ function agentConfigInvalidError(message: string): Error {
 
 /**
  * List all inboxes for the org, including sync-health derived from connector_configs.
+ *
+ * @param options.activeOnly - when true, restricts results to inboxes where isActive = true
  */
 export async function listInboxes(
   principalCtx: PrincipalContext,
+  options?: { activeOnly?: boolean },
 ): Promise<InboxWithSyncHealth[]> {
   const db = getOrgScopedDb('supportInboxService.listInboxes');
+
+  const conditions = [eq(canonicalInboxes.organisationId, principalCtx.organisationId)];
+  if (principalCtx.subaccountId !== null) {
+    conditions.push(eq(canonicalInboxes.subaccountId, principalCtx.subaccountId));
+  }
+  if (options?.activeOnly === true) {
+    conditions.push(eq(canonicalInboxes.isActive, true));
+  }
+
   const rows = await db
     .select({
       inbox: canonicalInboxes,
@@ -77,14 +89,7 @@ export async function listInboxes(
     })
     .from(canonicalInboxes)
     .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
-    .where(
-      principalCtx.subaccountId !== null
-        ? and(
-            eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-            eq(canonicalInboxes.subaccountId, principalCtx.subaccountId),
-          )
-        : eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-    )
+    .where(and(...conditions))
     .orderBy(canonicalInboxes.createdAt);
 
   return rows.map(r => ({
