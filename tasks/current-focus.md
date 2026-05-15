@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/page-splits/spec.md
-active_plan: tasks/builds/page-splits/plan.md
-build_slug: page-splits
-branch: claude/synthetos-personal-assistant-0kaIM
-status: MERGE_READY
+active_spec: tasks/builds/fix-route-db-support-agent/spec.md
+active_plan: tasks/builds/fix-route-db-support-agent/plan.md
+build_slug: fix-route-db-support-agent
+branch: claude/fix-route-db-support-agent
+status: REVIEWING
 last_updated: 2026-05-15T00:00:00Z
-last_merged_pr: #291
-last_merged_slug: personal-assistant-v1
+last_merged_pr: #313
+last_merged_slug: page-splits
 last_merged_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_at: 2026-05-12T23:33:50Z
-last_merged_commit: 9002174e
+last_merged_at: 2026-05-15T00:00:00Z
+last_merged_commit: 0ffbf081
 -->
 
 # Current Focus
@@ -24,11 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/page-splits/spec.md`
-**Active plan:** `tasks/builds/page-splits/plan.md`
-**Active build slug:** `page-splits`
-**Branch:** `claude/synthetos-personal-assistant-0kaIM` (branch name stale; carries over from EA V1 #291)
-**Status:** **MERGE_READY** — Phase 3 finalisation complete for the page-splits aggregate build. PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) open. `ready-to-merge` label applied; CI monitoring in progress. 16 client-side page-level files split along tab / region / atom seams; no functional change. `chatgpt-pr-review` 3 rounds APPROVED — 4 should-fix findings (F1 CreateClientModal reset, F2 refreshSubaccounts wired, F3 NewBriefModal full-deps + wasOpenRef, F4 prevSeededRef identity-change-while-open) all implemented; 2 consider findings deferred to `tasks/todo.md` (PAGE-SPLITS-T1, PAGE-SPLITS-T2). Doc-sync sweep clean (architecture.md no stale refs; capabilities.md n/a; KNOWLEDGE.md +3 patterns). Phase 3 handoff at `tasks/builds/page-splits/handoff.md § Phase 3 (FINALISATION) — complete`. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-page-splits-2026-05-14T21-53-53Z.md`.
+**Active spec:** `tasks/builds/fix-route-db-support-agent/spec.md`
+**Active plan:** `tasks/builds/fix-route-db-support-agent/plan.md` (architect pending)
+**Active build slug:** `fix-route-db-support-agent`
+**Branch:** `claude/fix-route-db-support-agent` (fresh off origin/main `76377549`)
+**Status:** **REVIEWING** — Phase 2 BUILD complete 2026-05-15. All 5 chunks shipped (6 commits + 3 fix commits). Branch-level review pass: spec-conformance CONFORMANT, adversarial-reviewer C1 closed, pr-reviewer APPROVED (4 should-fix resolved), reality-checker READY, dual-reviewer REVIEW_GAP (Codex unavailable). Phase 3 finalisation in progress.
+
+**Just merged:** PR [#313](https://github.com/michaelhazza/automation-v1/pull/313) — `page-splits` (squash-commit `0ffbf081`, merged 2026-05-15). 16 client-side page-level files split along tab/region/atom seams. `chatgpt-pr-review` 3 rounds APPROVED — 4 should-fix findings implemented; 2 deferred to `tasks/todo.md`. Doc-sync sweep clean. Phase 3 handoff at `tasks/builds/page-splits/handoff.md § Phase 3 (FINALISATION) — complete`.
 
 **Just merged:** PR #291 — `personal-assistant-v1` (squash-commit `9002174e`, merged 2026-05-12T23:33:50Z). Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
 
