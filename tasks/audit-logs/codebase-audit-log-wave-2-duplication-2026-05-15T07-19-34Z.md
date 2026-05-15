@@ -16,7 +16,7 @@
 |---|---|---|---|
 | 1 | 87 | `server/services/workflowEngine/queueLifecycle/agentStep.ts:397-483` | same file `:225-307` |
 | 2 | 44 | `server/services/hierarchyTemplateService.ts:455-498` | `server/services/systemTemplateService.ts:413-456` |
-| 3 | 34 | `server/services/skillAnalyzerService/results/merge.ts:242-275` | `server/services/skillAnalyzerService/results/updateProposal.ts:191-162` |
+| 3 | 34 | `server/services/skillAnalyzerService/results/merge.ts:242-275` | `server/services/skillAnalyzerService/results/updateProposal.ts:191-224` [^jscpd-typo] |
 | 4 | 34 | `server/services/workspace/workspaceOnboardingService.ts:111-144` | same file `:73-105` |
 | 5 | 33 | `server/services/supportDraftDispatchService.ts:812-844` | same file `:752-784` |
 | 6 | 33 | `server/services/hierarchyTemplateService.ts:521-553` | `server/services/systemTemplateService.ts:475-507` |
@@ -34,6 +34,8 @@
 | 18 | 28 | `server/jobs/fastPathDecisionsPruneJob.ts:93-120` | `server/jobs/sandboxTelemetryPruneJob.ts:100-135` |
 | 19 | 27 | `server/services/supportInboxService.ts:178-204` | same file `:132-159` |
 | 20 | 27 | `server/services/agentRecommendationsService.ts:386-412` | same file `:263-289` |
+
+[^jscpd-typo]: The raw `jscpd-report.json` reports the second range as `191-162` (start > end) for this clone. The 34-line clone size on the first file implies the correct second range is `191-224`. The reversed range is an artefact of jscpd 4.2.0's reporter; the raw tool output is preserved in `tasks/audit-logs/jscpd-server/jscpd-report.json` unmodified.
 
 ## Pass 1 Findings — Client top 20
 

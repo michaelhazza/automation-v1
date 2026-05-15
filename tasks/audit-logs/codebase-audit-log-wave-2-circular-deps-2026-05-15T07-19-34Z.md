@@ -15,7 +15,7 @@
 
 ### Server (73 cycles)
 
-Three dominant cycle clusters account for ~85% of the 73:
+**Three dominant cycle clusters (CD1 + CD2 + CD3 combined) account for ~85% of the 73 cycles.** CD1 alone covers cycles 19–61 (~43 cycles, ~59%); CD2 covers cycles 64–71 (~8 cycles); CD3 covers the residual `workflowEngineService`-routed paths. The remaining ~15% are the smaller named cycles CD4–CD10.
 
 | ID | Severity | Confidence | Finding |
 |---|---|---|---|
