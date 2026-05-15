@@ -9,57 +9,14 @@ import { ParseFailureError } from '../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../lib/utf8Truncate.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, MergeWarningCode, WarningResolutionKind, ProposedMerge, SkillAnalyzerJobStatus } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning, WarningResolution, WarningTier, ProposedMerge, SkillAnalyzerJobStatus } from './skillAnalyzerServicePure.js';
 import { evaluateApprovalState, checkConcurrencyStamp, buildClassifierFailureOutcome, CLASSIFIER_FALLBACK_WARNING, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 import * as skillAnalyzerConfigService from './skillAnalyzerConfigService.js';
-import { createHash, randomUUID } from 'crypto';
-
-/** Deterministic JSON stringify (sorted keys) for hashing. */
-function stableStringify(value: unknown): string {
-  const seen = new WeakSet();
-  const stringify = (v: unknown): string => {
-    if (v === null || typeof v !== 'object') return JSON.stringify(v);
-    if (seen.has(v as object)) return '"[circular]"';
-    seen.add(v as object);
-    if (Array.isArray(v)) return '[' + v.map(stringify).join(',') + ']';
-    const keys = Object.keys(v as object).sort();
-    return '{' + keys.map(k => JSON.stringify(k) + ':' + stringify((v as Record<string, unknown>)[k])).join(',') + '}';
-  };
-  return stringify(value);
-}
-
-/** v2 §11.11.7 helper: deterministic hash of a skill's content fields so
- *  Execute can idempotent-skip a slug collision when the existing row was
- *  created by a prior (crashed) run. */
-function hashSkillContent(s: {
-  name: string;
-  description: string | null;
-  definition: object | null;
-  instructions: string | null;
-}): string {
-  const payload = stableStringify({
-    name: s.name,
-    description: s.description ?? '',
-    definition: s.definition ?? null,
-    instructions: s.instructions ?? null,
-  });
-  return createHash('sha256').update(payload).digest('hex');
-}
-
-/** Best-effort string extraction for thrown values. Services in this codebase
- *  throw plain objects of shape `{ statusCode, message }` (not Error
- *  instances), so the standard `err instanceof Error ? err.message : String(err)`
- *  pattern produces "[object Object]" for service errors. Try the message
- *  field first, fall back to Error.message, then String coercion. */
-function toErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err !== null) {
-    const m = (err as { message?: unknown }).message;
-    if (typeof m === 'string' && m.length > 0) return m;
-  }
-  return String(err);
-}
+import { randomUUID, createHash } from 'crypto';
+import { stableStringify, hashSkillContent, toErrorMessage } from './skillAnalyzerService/hashing.js';
+import { slugifyName } from './skillAnalyzerService/helpers/slugify.js';
+import type { MatchedSkillContent, AvailableSystemAgent, EnrichedResult, GetJobResponse, ResolveWarningParams, UpdateAgentProposalParams, PatchMergeFieldsParams } from './skillAnalyzerService/types.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
@@ -279,41 +236,7 @@ export async function resumeJob(params: {
   return { ok: true };
 }
 
-/** Shape of `matchedSkillContent` attached to result rows in the GET response.
- *  Computed live from systemSkillService.getSkill at request time. See spec §7.4. */
-export interface MatchedSkillContent {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  definition: object;
-  instructions: string | null;
-}
-
-/** Shape of `availableSystemAgents` attached to the job in the GET response.
- *  Used by the Phase 4 "Add another system agent..." combobox. */
-export interface AvailableSystemAgent {
-  systemAgentId: string;
-  slug: string;
-  name: string;
-}
-
-/** Result row enriched with the live `matchedSkillContent` lookup. */
-export type EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {
-  matchedSkillContent?: MatchedSkillContent;
-  /** v2 §11.12.5: true when the mutation cleared existing warning_resolutions
-   *  so the UI can surface a "Review decisions reset" toast. */
-  resolutionsCleared?: boolean;
-};
-
-/** Job + enriched results + Phase 1 GET response extensions. */
-export interface GetJobResponse {
-  job: typeof skillAnalyzerJobs.$inferSelect;
-  results: EnrichedResult[];
-  /** Per spec §7.4: live snapshot of all system agents for the
-   *  "Add another system agent..." combobox in Phase 4. */
-  availableSystemAgents: AvailableSystemAgent[];
-}
+export type { MatchedSkillContent, AvailableSystemAgent, EnrichedResult, GetJobResponse, ResolveWarningParams, UpdateAgentProposalParams, PatchMergeFieldsParams } from './skillAnalyzerService/types.js';
 
 /** Get job status and results. Validates that job belongs to the org.
  *  Phase 1 of skill-analyzer-v2 extends the response with two new fields:
@@ -610,18 +533,6 @@ export async function updateProposedAgent(params: {
 // Warning resolution — v2 §11.2
 // ---------------------------------------------------------------------------
 
-export interface ResolveWarningParams {
-  resultId: string;
-  jobId: string;
-  organisationId: string;
-  userId: string;
-  /** Required header; missing → 400, mismatch → 409. See §11.11.5. */
-  ifUnmodifiedSince: string;
-  warningCode: MergeWarningCode;
-  resolution: WarningResolutionKind;
-  details?: { field?: string; disambiguationNote?: string; collidingSkillId?: string };
-}
-
 /** Append (or upsert-by-composite-key) a reviewer decision on a warning.
  *  Dedup key: (warningCode, details.field ?? null). Newer entry replaces
  *  the prior one for the same key.
@@ -747,24 +658,6 @@ export async function resolveWarning(params: ResolveWarningParams): Promise<void
       .set(updates)
       .where(eq(skillAnalyzerResults.id, resultId));
   });
-}
-
-/** Body for the PATCH /jobs/:jobId/results/:resultId/agents endpoint.
- *  Exactly one of `selected`, `remove`, or `addIfMissing` must be present.
- *  See spec §7.3 for the full contract. */
-export interface UpdateAgentProposalParams {
-  resultId: string;
-  jobId: string;
-  organisationId: string;
-  systemAgentId: string;
-  /** Toggle the selected flag on an existing proposal. */
-  selected?: boolean;
-  /** Drop the proposal from agentProposals entirely. */
-  remove?: boolean;
-  /** Manual-add: when the proposal is not in agentProposals, refresh the
-   *  agent's embedding and append a fully-scored proposal with selected=true.
-   *  When the proposal is already present, this is a no-op. */
-  addIfMissing?: boolean;
 }
 
 /** Update one entry in a result row's agentProposals jsonb. Used by the
@@ -940,24 +833,6 @@ export async function updateAgentProposal(
     }
   }
   return enriched;
-}
-
-/** Body for the PATCH /merge endpoint. Per spec §7.3 the four merge fields
- *  are individually patchable; any omitted field is left untouched.
- *  `instructions` may be explicitly null to clear the field.
- *  `ifUnmodifiedSince` is an optional ISO timestamp for optimistic concurrency:
- *  if the stored mergeUpdatedAt is newer than this value the endpoint returns 409. */
-export interface PatchMergeFieldsParams {
-  resultId: string;
-  jobId: string;
-  organisationId: string;
-  ifUnmodifiedSince?: string;
-  patch: {
-    name?: string;
-    description?: string;
-    definition?: object;
-    instructions?: string | null;
-  };
 }
 
 /** Patch one or more fields of a result row's proposedMergedContent jsonb.
@@ -2217,10 +2092,6 @@ export async function updateJobAgentRecommendation(
         .where(eq(skillAnalyzerResults.id, row.id));
     }
   }
-}
-
-function slugifyName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
 // ---------------------------------------------------------------------------
