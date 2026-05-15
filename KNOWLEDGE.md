@@ -1183,6 +1183,39 @@ Detection: any new write path to a FORCE RLS table — if the path is webhook in
 Source: PR #291 chatgpt-pr-review Round 1 F2. Spec §18 line 1573 locks V1 EA approval to the draft owner only: `if (draft.ownerUserId !== req.user.id) → 403`. The original route allowed `org_admin | system_admin` to approve another user's draft — this is rejected for V1 because it conflates "admin can see metadata" with "admin can act on content". Admin break-glass for EA drafts (read body, approve on behalf, reject on behalf) requires an explicit V2 spec with an audit gate: every break-glass action writes an audit row with reason, the admin's identity, and the affected draft owner. Until that spec exists, admin paths return 403 on approve/reject/retry.
 
 Generalises beyond EA: any "AI-drafted content awaiting user decision" surface (EA drafts, agent recommendations awaiting user approval, generated reports pending publish) defaults to owner-only action. Admin metadata visibility is fine (list endpoints can show "Bob has 3 pending drafts"). Admin content visibility and admin content action are separate, gated capabilities that require their own audit story. Detection: any new route that gates by `isAdmin || isOwner` for an action on user-generated content — challenge it. The default is `isOwner` only; the `isAdmin` branch requires a documented audit-and-rationale layer.
+
+### [2026-05-15] Pattern — Page split for mega-pages: host + `components/<feature>/` + scoped hook
+
+Source: simultaneous refactor of `client/src/pages/AdminSubaccountDetailPage.tsx` (1,415 LOC), `client/src/components/Layout.tsx` (1,325 LOC), and `client/src/pages/UsagePage.tsx` (1,280 LOC). Hosts shrunk to 92 / 192 / 127 LOC respectively. Specs at `tasks/builds/feat-split-{adminsubaccountdetailpage,layout,usagepage}/spec.md`.
+
+Reusable shape when a page or shared component crosses ~800 LOC:
+1. **Folder convention.** Extracted subcomponents go in `client/src/components/<kebab-feature>/`, matching the established `pulse/`, `clientpulse/`, `skill-analyzer/`, `baseline/` precedent. NEVER under `client/src/pages/<page>/components/` for top-level pages — that creates a third placement convention nobody else follows.
+2. **Three placement buckets.** Atoms (`Badge`, `FilterSelect`) under `<feature>/atoms/`; orchestrating tabs / regions directly under `<feature>/`; modals under `<feature>/modals/`. Pure helpers in `<feature>/format.ts` + `constants.ts`; shared types in `<feature>/types.ts`.
+3. **Hooks separate from components.** Side-effect-heavy state extracts into focused hooks under `client/src/hooks/use<Feature><Slice>.ts`. One hook per coherent slice (identity, permissions, badges, sidebar config, etc.). Each hook's return contract is pinned in the spec's §7. Hooks own their own `useEffect` blocks including the eslint-disable rationale comments — those carry over verbatim.
+4. **Three ownership models for cross-tab data.** (a) host-owned + passed down + `onChange={load}` callback for mutations (e.g. `categories`, `linkedProcesses`); (b) tab-owned self-fetch when no cross-tab consumer exists (e.g. `BoardConfigTab` after refactor); (c) hook-owned single source of truth when multiple chrome regions consume it (e.g. `useLayoutIdentity` for `subaccounts`). Pin the model per data item in spec §7.
+5. **Per-tab error banners not a shared host banner.** When tabs extract, their local error state moves with them. The host's previously-shared `error` field becomes dead — remove it as part of the refactor. Spec must explicitly call this out: §8 "error-banner contract" naming exactly which tabs render their own banner.
+6. **Optimistic state mutations need an action on the owning hook.** If pre-refactor behaviour did `setSubaccounts(prev => [...prev, newEntry])` inline, the equivalent post-refactor is `useLayoutIdentity.addSubaccount(sa)` — an explicit action exposed by the hook. Forgetting this is a behavioural regression flagged immediately by spec-conformance review.
+7. **Imports inside `client/src/components/<feature>/` files use NO `.js` suffix** — matches the `pulse/`, `clientpulse/`, etc. precedent. Hooks under `client/src/hooks/` are mixed; new ones can go either way under `moduleResolution: bundler`. Be consistent within a folder.
+8. **Page-file path stays put.** Top-level pages keep their flat `client/src/pages/PageName.tsx` location — moving to `client/src/pages/<feature>/index.tsx` would touch `App.tsx` routing and is a separate refactor (deferred unless explicitly in scope).
+9. **Spec-conformance pickier than pr-reviewer.** Spec-conformance flags spec/implementation divergence as `NON_CONFORMANT` even for cleaner alternatives (e.g. dropping redundant props that `identity` already supplies). pr-reviewer treats the same divergence as a "strong rec" not blocking. Both reviewers correctly catch behavioural regressions (dropped optimistic adds, dead state retention) — fix those before merge.
+
+Detection: any `client/src/pages/*.tsx` or top-level `client/src/components/*.tsx` exceeding ~800 LOC is a candidate. Start with the spec-authoring step (see `docs/spec-authoring-checklist.md` §1 "existing primitives search") and reuse this pattern rather than inventing a new one.
+
+### [2026-05-15] Pattern — Batch 2 follow-on for the page-split refactor
+
+Source: simultaneous refactor of `client/src/pages/SubaccountKnowledgePage.tsx` (1,160 → 256 LOC), `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` (1,102 → 230 LOC), and `client/src/pages/subaccount/WorkflowRunPage.tsx` (952 → 200 LOC). Specs at `tasks/builds/feat-split-{subaccountknowledgepage,skillanalyzerresultsstep,workflowrunpage}/spec.md`.
+
+Three additional patterns surfaced beyond the batch-1 list:
+
+10. **Cross-tab side-effect ordering: mutate-while-mounted, then unmount via tab-switch.** When a tab's action (e.g. Promote in References) triggers a tab switch + parent refetch, the spec-correct ordering is: `api.post(...)` → `toast.success(...)` → close any open modal → `await onMutated()` (the parent's load) → `onTabSwitchTo(other)`. Doing the tab-switch first causes the React 18 setState-on-unmounted-component warning because the originating tab is still in the middle of post-success state cleanup. Spec must pin this ordering verbatim.
+
+11. **Header-button-to-tab handshake via `openCreateOnMount` / `onCreateConsumed`.** When the host renders a "+ New X" button that should open the active tab's create modal, the active-tab component receives `openCreateOnMount: boolean` + `onCreateConsumed: () => void` props. On mount with `openCreateOnMount=true`, the tab opens its create modal and calls `onCreateConsumed()` to clear the host's `pendingCreate` flag (so a subsequent tab switch + return doesn't re-trigger). The `onCreateConsumed` callback must be `useCallback`-stabilised on the host or the `useEffect` re-fires every render.
+
+12. **Sub-folder convention for orchestrator-internal pieces.** When a single orchestrator (e.g. `SkillAnalyzerResultsStep`) decomposes into 5+ sub-files that are not reused elsewhere, group them in a sub-folder named after the orchestrator (`skill-analyzer/resultsStep/` ⊂ `skill-analyzer/`) rather than flat-listing them alongside truly shared siblings. The sub-folder signals "internal pieces of X" vs `skill-analyzer/` which signals "the skill-analyzer feature surface as a whole". Same principle would apply to `<feature>/<orchestrator>/` for future page-or-component splits where the orchestrator has its own dedicated sub-pieces.
+
+13. **Defer optional internal splits unless the LOC threshold is breached AND the split simplifies something concrete.** Specs commonly include conditional "If X.tsx exceeds ~300 LOC after this move, also split Y" lines. At 350-407 LOC such splits are sometimes still worth doing (RenameReferenceModal extraction at 407 LOC made the parent shorter and clearer); at 320 LOC they may not be (AgentsTab at 377 LOC was deliberately not split because the 3 modals form a coherent unit). Spec-conformance reviewer will flag the spec-vs-code drift either way; the call is whose-judgement and whether the split improves readability or just moves lines.
+
+14. **Verbatim-source preservation can preserve latent bugs.** PR-reviewer surfaced a long-standing `WorkflowSlug` (Pascal-case) typo in `WorkflowRunPage` that mismatches the server's `workflowSlug` field — the buggy fallback branch has been unreachable for as long as the field has been on the wire. The refactor's "preserve verbatim" rule means the bug carried over. Decision: keep latent bugs intact during a refactor unless the spec explicitly opts in to fixing them. The natural fix is a follow-on commit, not a refactor amendment.
 ### 2026-05-13 Pattern — "Suppression is success" for single-writer event emitters _(promoted from tasks/todo.md)_
 
 When a single-writer event emitter loses a coordination race (another writer already produced the canonical event), the emitter MUST return `{ success: true, suppressed: true, reason }` rather than `{ success: false, ... }`. Returning failure triggers retries, false incident signals, and broken metrics — the metaphor is "we agreed not to write, that IS success." ADR-0013 formalises the rule; `architecture.md § Home dashboard live reactivity` documents the canonical implementation; `system-monitoring writeDiagnosis` enforces it; this KNOWLEDGE entry captures the pattern in retrievable form. When introducing a new single-writer emitter, name a helper (e.g. `suppressedSuccess(reason)`) that returns the shape above rather than hand-rolling it at the call site.
@@ -1522,6 +1555,62 @@ Refresh this matrix every quarterly review. If a new critical path emerges and l
 **Rule.** When a finding is rejected as a diff-misread once, add a `## Pre-triage verification` block to the session log with the exact verification command (`git blame -L X,Y file` / `grep -n term file` / etc.) and its output. On Round N+1+ recurrences, auto-reject as duplicate per playbook step 1a — do NOT re-engage the substance, do NOT re-verify, do NOT escalate to operator. The operator made the call once; ChatGPT will keep raising it; the coordinator's job is to absorb the noise. A third occurrence of the same misread is the moment to commit to "ignore class of finding for remainder of this review" rather than triple-handling it.
 **Why it matters:** at one repeat the cost is small (a re-verification + log entry). At three repeats (PR #307 actually got there) the cost is two extra rounds the operator paid for, plus context burn on a defect that doesn't exist. Calibrate engagement to information yield: same finding + same rationale = zero new information regardless of round number.
 
+---
+
+## [2026-05-15] Pattern — Modal stays mounted on `return null` — local state leaks between opens
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F1 on PR #313 (page-splits build) — `CreateClientModal.tsx` post-split.
+**Pattern:** A component that renders `if (!open) return null` stays **mounted** in the React tree — only its DOM output is removed. State variables (`useState`) persist across close/reopen cycles. Pre-split, Layout.tsx unmounted modals by conditional JSX; post-split the extracted components remain in the JSX tree unconditionally and gate on `return null` internally. Without an explicit reset, stale values (error messages, half-filled fields, loading flags) reappear on the next open. Fix: add a `useEffect` on the `open` prop that resets all owned state when `open` becomes `true`:
+```ts
+useEffect(() => {
+  if (open) { setState1(''); setState2(''); setErrorState(''); }
+}, [open]);
+```
+**Why it matters:** the bug is invisible in initial testing (happy path always opens fresh) and only surfaces after a failed create or a close-without-submit. Extraction is the trigger — if the original host unmounted the component, the bug was invisible; once extracted and kept mounted, it's guaranteed.
+**Detection:** grep for extracted modal components that use `if (!open) return null` AND hold `useState` — every one is a candidate unless it has an `open`-effect reset.
+
+---
+
+## [2026-05-15] Pattern — prevSeededRef pattern: distinguish untouched seed from user override in a modal
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F3 / R2 F4 on PR #313 (page-splits build) — `NewBriefModal.tsx`.
+**Pattern:** When a modal seeds dropdown state from external identity (e.g. `activeOrgId`) on open, and must sync when identity changes while the modal is open, but must NOT clobber a value the user manually changed — track the last-seeded IDs in a `useRef`. On each effect run, compare the current override to the ref before updating:
+```ts
+const prevSeededRef = useRef<{ orgId: string | null } | null>(null);
+useEffect(() => {
+  // ...
+  const prev = prevSeededRef.current;
+  prevSeededRef.current = { orgId: identity.activeOrgId };
+  setOverride(current => {
+    if (opening) return nextValue;          // initial seed — always take
+    if (current === null) return nextValue; // null = data-race seed (wasn't loaded yet)
+    if (current.id === prev?.orgId) return nextValue; // untouched seed — re-sync
+    return current;                         // user changed it — leave alone
+  });
+}, [open, identity.activeOrgId, ...]);
+```
+The functional `setState` form is required — it receives the actual current state at dispatch time, avoiding stale-closure bugs when the effect fires with multiple dep changes at once.
+**Why it matters:** without `prevSeededRef`, any identity-change-while-open overwrites the user's manual selection. Without functional setState, the comparison uses the captured closure value which may be one render stale.
+
+---
+
+## [2026-05-15] Pattern — Page-split slim shell: original file becomes ~150-line orchestrator; sub-files live in a named sub-directory
+
+**Date:** 2026-05-15
+**Source:** PR #313 page-splits build — 16 client-side page-level files split along tab / region / atom seams.
+**Pattern:** When splitting a monolithic page component, the original file (e.g. `AdminSubaccountDetailPage.tsx`) becomes a **slim shell** (~150-200 lines) that imports and dispatches to sub-components. Sub-files live in a co-located directory named after the page domain (e.g. `client/src/pages/admin-subaccount-detail/`). The split seam hierarchy:
+- **Tab**: full-width content area that maps 1:1 to a tab in the page's tab bar (`OnboardingTab.tsx`, `EnginesTab.tsx`, etc.)
+- **Region**: logical sub-section within a tab (not a tab itself — e.g. `HeaderRegion.tsx`, `StatsRegion.tsx`)
+- **Atom**: the smallest extractable display unit within a region (e.g. `StatusBadge.tsx`, `CostPill.tsx`)
+
+Types shared between the shell and sub-components live in `types.ts` at the sub-directory level. The shell's ActiveTab union and TAB_LABELS record live in that `types.ts`, not in the shell itself.
+
+Tab additions that land on main while the branch is in flight must be **manually grafted** after the S2 merge: take `--ours` for the slim shell (preserving the split structure), then add the new tab's import + permission guard + conditional push + render block.
+**Why it matters:** without this pattern documented, a future reader of a slim shell will not know where the tab implementation lives (no inline code), and may try to add a tab to the shell directly rather than extracting to the sub-directory.
+
+---
 
 ## [2026-05-14] Pattern — `verify-rls-contract-compliance.sh` allowlists `server/services/` and lets raw-`db` queries on tenant tables slip through
 **Date:** 2026-05-14
