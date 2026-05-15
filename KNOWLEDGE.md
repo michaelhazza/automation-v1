@@ -1655,6 +1655,14 @@ Tab additions that land on main while the branch is in flight must be **manually
 **Detection:** `wc -l server/services/<name>.ts server/services/<name>Pure.ts` after every split PR. If either file exceeds 2,500 LOC (services hard cap), the split is incomplete.
 **Why it matters:** the productivity tax of a god-file applies to the Pure module just as much as the impure shell — a 3,727-LOC Pure module is just as hard to navigate as a 3,727-LOC service. Worse: the "split" framing suggests the problem is solved, so future contributors don't push for further decomposition.
 
+## [2026-05-15] Pattern — FK-scoped tenant data is NOT automatically RLS-protected
+**Date:** 2026-05-15
+**Source:** Track A2 audit, WF1 — `tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md` (build: split-workflow-engine)
+**Pattern:** Five workflow tables (`workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs`) held agent outputs, HITL decisions, workflow studio chat sessions, and event-sequence counters — all tenant-private — with zero Postgres-level isolation. Each table references a tenant-scoped parent (e.g. `workflow_runs.id`) via FK, but FK constraints are not RLS policies. Postgres does NOT propagate a parent table's RLS policy to child tables that reference it; each table needs its own `CREATE POLICY`. The gate `verify-rls-protected-tables.sh` missed this because it inspects only tables with an `organisation_id` column — FK-only tables are invisible to it.
+**Rule.** Any table holding tenant-private data and referencing a tenant-scoped parent via FK MUST carry its own `CREATE POLICY` using an EXISTS-based predicate that joins through the parent FK chain to `organisations.id`. FK + parent RLS alone is not Postgres-level isolation. Detection: `grep -rn "pgTable\b" server/db/schema/ | xargs grep -L "organisation_id" | xargs ... ` cross-referenced against `migrations/*.sql | grep "CREATE POLICY"` — tables absent from policy set and absent from the explicit allowlist are gaps.
+**Planned fix pattern (targeted for the WF1 follow-up PR; RLS migration not landed in this build):** `CREATE POLICY <table>_rls_policy ON <table> USING (current_setting('app.organisation_id', true) IS NOT NULL AND current_setting('app.organisation_id', true) <> '' AND EXISTS (SELECT 1 FROM <parent> p WHERE p.id = <table>.<fk_col> AND p.organisation_id = NULLIF(current_setting('app.organisation_id', true), '')::uuid))`. Every `::uuid` cast wraps the GUC in `NULLIF(...)` to prevent the cast from throwing on empty string (Postgres CAN re-order AND clauses despite short-circuit expectations).
+**Why it matters:** without their own policies, these FK-only tables are accessible to any role with BYPASSRLS or to any handler running without a GUC — including the workflow tick worker (which uses `resolveOrgContext: () => null` and thus runs without `app.organisation_id` set).
+
 ## [2026-05-14] Pattern — `boss.work(queue, ...)` outside `createWorker` bypasses canonical org-context plumbing
 **Date:** 2026-05-14
 **Source:** Track A3 audit, SA4 — `server/index.ts:691`
@@ -1705,3 +1713,12 @@ if (match($0, /REFERENCES[[:space:]]+"?[a-zA-Z_][a-zA-Z0-9_]*"?\."?([a-zA-Z_][a-
 ```
 Canonical policy grep pattern variable: `policy_table_pattern="(\"?[a-zA-Z_][a-zA-Z0-9_]*\"?\.)?\"?${table}\"?"`.
 **Why it matters:** Drizzle's initial migration file (`0000_wandering_firedrake.sql`) uses the ALTER TABLE form for ALL FK constraints. A scanner that only handles the plain form will miss every FK in the entire initial migration — zero coverage on the most FK-dense file in the repo.
+
+---
+
+## [2026-05-15] Pattern — sub-module import paths must reflect actual directory depth, not original file location
+**Date:** 2026-05-15
+**Source:** build: split-workflow-engine — 70+ TypeScript TS2307 cascade errors after structural split.
+**Pattern:** When a builder agent extracts a module from `server/services/bigService.ts` into `server/services/newTree/subModule.ts`, it may copy relative imports verbatim from the source file. Those imports were correct for `server/services/` depth but are wrong at `server/services/newTree/` depth — every path needs one extra `../` level. For modules extracted two levels deep (`server/services/newTree/subDir/leaf.ts`), paths need two extra levels. The TypeScript error (TS2307 "Cannot find module") cascades: all symbols from the broken import become `any`, which then triggers TS7006 ("implicitly has 'any' type") and TS18046 ("is of type 'unknown'") on every downstream usage — 70+ errors tracing to ~15 wrong import paths.
+**Rule.** After any structural split that moves files to a deeper directory, audit every external import in every extracted file and verify the `../` depth matches the file's new location (not its origin). Canonical test: for a file at `server/services/A/B/leaf.ts` wanting `server/db/index.ts`, count: `server/services/A/B/leaf.ts` → up 3 → `server/` → down to `db/index.ts` = `../../../db/index.js`.
+**Why it matters:** TS2307 errors from wrong paths cause cascading `any`-type pollution that inflates error count by 5-10× and obscures the true root cause. The fix is always the same (add `../` levels) but the inflated error list wastes diagnostic time if the root cause isn't identified first.
