@@ -1,0 +1,103 @@
+/**
+ * sandboxTelemetrySequencePure.ts — Advisory-lock-serialised sequence allocator
+ * for sandbox_telemetry_events.
+ *
+ * Spec B §6.2 (SANDBOX-ADV-3.1). Eliminates the SELECT-then-INSERT race that
+ * existed in sandboxExecutionService and sandboxHarvestService by taking a
+ * per-execution advisory lock before computing the next sequence number.
+ *
+ * The "Pure" suffix indicates this file has zero direct DB imports — callers
+ * pass in the in-transaction db handle, keeping this module testable without
+ * a real Postgres connection.
+ */
+
+import { sql } from 'drizzle-orm';
+import type { OrgScopedTx } from '../db/index.js';
+import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
+import type { NewSandboxTelemetryEvent } from '../db/schema/sandboxTelemetryEvents.js';
+import { FailureError, failure } from '../../shared/iee/failure.js';
+import { logger } from './logger.js';
+
+export type SandboxTelemetryEventInsert = NewSandboxTelemetryEvent;
+
+export interface AllocateAndInsertResult {
+  sequence: number;
+  inserted: boolean;
+}
+
+const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Allocate the next sequence number for a sandbox execution's telemetry stream
+ * and INSERT the event row, serialised via a Postgres transactional advisory lock.
+ *
+ * The lock key is derived from `hashtext(sandboxExecutionId)::bigint` so all
+ * writers for the same execution serialise against each other within any given
+ * transaction. The lock is released automatically at transaction end.
+ *
+ * On 23505 unique-violation (defensive; should not occur under the advisory lock):
+ *   - `info`/`warn` criticality: log warn, return `{ inserted: false }`.
+ *   - `error` criticality: throw `FailureError('sandbox_telemetry_drop')`.
+ *
+ * MUST be called inside an existing transaction (withOrgTx or equivalent) so
+ * `pg_advisory_xact_lock` has a transaction to bind to.
+ */
+export async function allocateAndInsertTelemetryEvent(
+  db: OrgScopedTx,
+  rowToInsert: Omit<SandboxTelemetryEventInsert, 'sequence'>,
+  opts?: { maxRetries?: number },
+): Promise<AllocateAndInsertResult> {
+  const maxRetries = opts?.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const { sandboxExecutionId, criticality, eventType } = rowToInsert;
+
+  // Acquire a per-execution advisory lock keyed by hashtext(sandboxExecutionId).
+  // pg_advisory_xact_lock is session-level serialised; held until tx end.
+  await db.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${sandboxExecutionId})::bigint)`,
+  );
+
+  let lastAttemptedSequence = 0;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Compute next sequence inside the lock — no concurrent writer can race here.
+    type SeqRow = { next_seq: number };
+    const seqRows = (await db.execute(sql`
+      SELECT COALESCE(MAX(sequence), 0) + 1 AS next_seq
+      FROM sandbox_telemetry_events
+      WHERE sandbox_execution_id = ${sandboxExecutionId}
+    `)) as unknown as SeqRow[];
+    const sequence = (seqRows[0]?.next_seq as number) ?? 1;
+
+    try {
+      const inserted = await db
+        .insert(sandboxTelemetryEvents)
+        .values({ ...rowToInsert, sequence })
+        .returning({ sequence: sandboxTelemetryEvents.sequence });
+      return { sequence: inserted[0]?.sequence ?? sequence, inserted: true };
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code !== '23505') {
+        throw err;
+      }
+      // 23505 — unique violation (defensive path; should not happen under advisory lock).
+      lastAttemptedSequence = sequence;
+    }
+  }
+
+  // All retries exhausted.
+  if (criticality === 'error') {
+    throw new FailureError(
+      failure('sandbox_telemetry_drop', `sequence retries exhausted`, {
+        sandboxExecutionId,
+        eventType,
+        criticality,
+      }),
+    );
+  }
+
+  logger.warn('sandbox.telemetry.dropped_after_retries', {
+    sandboxExecutionId,
+    eventType,
+    criticality,
+  });
+  return { sequence: lastAttemptedSequence, inserted: false };
+}

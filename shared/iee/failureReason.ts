@@ -81,6 +81,8 @@ export const FailureReason = z.enum([
   // IEE Browser on e2b additions (spec §8.4, §13.5).
   'iee_browser_launch_disabled',   // dispatch-layer check: settings.status !== 'on' or rolloutApproved === false
   'profile_harvest_failed',        // browser profile volume could not be snapshotted post-task
+  // Sandbox telemetry additions (sandbox-safety-batch §6.2 SANDBOX-ADV-3.1).
+  'sandbox_telemetry_drop',        // error-criticality telemetry event dropped after sequence retry exhaustion
   'unknown',
 ]);
 

@@ -15,14 +15,15 @@
  * Provider file API calls (steps 2, 5, 6) are wrapped via withSandboxProvider.
  */
 
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import { sandboxArtefacts } from '../db/schema/sandboxArtefacts.js';
-import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
 import { sandboxLogs } from '../db/schema/sandboxLogs.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
+import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../db/schema/sandboxTelemetryEvents.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { redactValue } from '../lib/redaction.js';
 import { logger } from '../lib/logger.js';
@@ -78,60 +79,30 @@ interface LogEntry {
 const MAX_LOG_LINE_BYTES = 65536; // 64 KB
 
 // ---------------------------------------------------------------------------
-// Telemetry sequence allocator — mirrors agentExecutionEventService pattern.
+// Telemetry write helper — delegates to the advisory-lock-serialised allocator.
 // ---------------------------------------------------------------------------
-
-async function allocateTelemetrySequence(
-  db: ReturnType<typeof getOrgScopedDb>,
-  sandboxExecutionId: string,
-): Promise<number> {
-  type SeqRow = { next_seq: number };
-  const rows = (await db.execute(sql`
-    SELECT COALESCE(MAX(sequence) + 1, 1) AS next_seq
-    FROM sandbox_telemetry_events
-    WHERE sandbox_execution_id = ${sandboxExecutionId}
-  `)) as unknown as SeqRow[];
-  return (rows[0]?.next_seq as number) ?? 1;
-}
 
 async function writeTelemetryEvent(
   ctx: HarvestContext,
-  eventType: typeof sandboxTelemetryEvents.$inferInsert['eventType'],
-  criticality: typeof sandboxTelemetryEvents.$inferInsert['criticality'],
+  eventType: SandboxTelemetryEventType,
+  criticality: SandboxTelemetryCriticality,
   payloadJson: Record<string, unknown>,
 ): Promise<void> {
   const db = getOrgScopedDb('sandboxHarvestService.writeTelemetryEvent');
-  const sequence = await allocateTelemetrySequence(db, ctx.sandboxExecutionId);
-
-  try {
-    await db.insert(sandboxTelemetryEvents).values({
-      sandboxExecutionId: ctx.sandboxExecutionId,
-      organisationId: ctx.organisationId,
-      subaccountId: ctx.subaccountId,
-      runId: ctx.runId,
-      agentId: ctx.agentId,
-      taskId: ctx.taskId,
-      provider: ctx.provider,
-      templateName: ctx.templateName,
-      templateVersion: ctx.templateVersion,
-      eventType,
-      criticality,
-      sequence,
-      payloadJson,
-    });
-  } catch (err: unknown) {
-    // 23505 = unique_violation on (sandbox_execution_id, sequence) — sequence allocator
-    // out of sync on concurrent writes. Log and continue (spec §24.3).
-    if ((err as { code?: string }).code === '23505') {
-      logger.warn('sandbox.harvest.telemetry_sequence_collision', {
-        sandboxExecutionId: ctx.sandboxExecutionId,
-        eventType,
-        sequence,
-      });
-      return;
-    }
-    throw err;
-  }
+  await allocateAndInsertTelemetryEvent(db, {
+    sandboxExecutionId: ctx.sandboxExecutionId,
+    organisationId: ctx.organisationId,
+    subaccountId: ctx.subaccountId,
+    runId: ctx.runId,
+    agentId: ctx.agentId,
+    taskId: ctx.taskId,
+    provider: ctx.provider,
+    templateName: ctx.templateName,
+    templateVersion: ctx.templateVersion,
+    eventType,
+    criticality,
+    payloadJson,
+  });
 }
 
 // ---------------------------------------------------------------------------
