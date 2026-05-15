@@ -1498,6 +1498,41 @@ before being passed to the LLM.
   - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Pre-existing primitive at `server/jobs/workflowGateStallNotifyJob.ts:124-135` already sweeps proposal rows at 7d with `metadata.systemExpired = true` + `expired_after_7d`. Spec §5.1 + §20.4 + §22.2 amended 2026-05-13 (seventh-pass cleanup, REVIEW-F1) to honestly describe the terminal state as `rejected` with metadata flags (the `actions` primitive has no `expired` status).
 
+## Deferred from pa-v1-cleanup-batch review pass (2026-05-15)
+
+**Captured:** 2026-05-15T19:00:00Z
+**Source logs:**
+- `tasks/review-logs/adversarial-review-log-pa-v1-cleanup-batch-2026-05-15T19-00-00Z.md`
+- pr-reviewer R1 (CHANGES_REQUESTED → APPROVED after fix-loop)
+
+- [ ] **PA-CLEANUP-DEF-1 — Missing `organisationId` predicate on three state-flip UPDATEs in `voiceProfileService.deriveProfile`** (adversarial LIKELY)
+  - File: `server/services/voiceProfile/voiceProfileService.ts:88-91`, `:99-102`, `:112-121`
+  - Gap: The initial claim UPDATE at lines 29-39 correctly includes `eq(voiceProfiles.organisationId, ctx.organisationId)`, but the three follow-on state-flip UPDATEs (error path, empty-samples path, success path) filter only on `voiceProfiles.id`. UUIDs are unguessable and the initial claim is org-scoped, so practical exploitability is low — but the defense-in-depth gap is real and inconsistent with `optOut`/`reactivate` (which DO include the org predicate). Pre-existing baselined pattern (bare-`db` posture across 10 callsites in this file).
+  - Suggested approach: Add `eq(voiceProfiles.organisationId, ctx.organisationId)` to all three follow-on `.where()` clauses. Mechanical change.
+
+- [ ] **PA-CLEANUP-DEF-2 — `operatorSessionInitialContextBundler.ts:83-88` voice profile SELECT missing application-layer `organisationId` predicate** (adversarial WORTH_CONFIRMING)
+  - File: `server/services/operatorSessionInitialContextBundler.ts:80-90`
+  - Gap: Query runs via `getOrgScopedDb()` so the Postgres session variable IS set and RLS enforces — but no application-layer `eq(voiceProfilesTable.organisationId, input.organisationId)` predicate. DEVELOPMENT_GUIDELINES.md §1 mandates application-layer filtering even with RLS. If the RLS session variable is ever absent in a background context, no backstop.
+  - Suggested approach: Add the explicit application-layer predicate.
+
+- [ ] **PA-CLEANUP-DEF-3 — Nightly voice profile refresh job emits no durable audit row per profile** (adversarial WORTH_CONFIRMING)
+  - File: `server/jobs/voiceProfileRefreshJob.ts:46,48`
+  - Gap: Log lines via `logger.info/error` are observability, not durable audit (no row in `audit_events` or `agent_execution_events`). Acceptable for V1 (system-initiated background action). Future compliance requirements may demand a per-refresh audit trail.
+  - Suggested approach: If/when needed, emit a `voice.profile.refreshed` event row.
+
+- [ ] **PA-CLEANUP-DEF-4 — `voiceProfileService.deriveProfile` writes `sampleSize: 0` (hardcoded) instead of actual sample count** (pr-reviewer STRONG_RECOMMENDATION)
+  - File: `server/services/voiceProfile/voiceProfileService.ts:118`
+  - Gap: The column rename `sample_count → sample_size` was driven by REQ-C4 to align with spec semantics. Persisting `0` defeats the rename's purpose. Existing comment "sample count intentionally zeroed — samples not retained" conflates two concerns: "we don't keep the sample text" vs "we don't record how many we processed". Spec §1092 trace event `voice.profile.refreshed { profileId, sampleSize, durationMs }` expects the actual count.
+  - Suggested approach: Decide whether `sampleSize` should reflect the actual N. If yes, change `sampleSize: 0` to use `samples.length`. If no (privacy concern), update the spec §1009 + §1092 + §12 column semantics to document that `sample_size` is intentionally zero post-derivation.
+
+- [ ] **PA-CLEANUP-DEF-5 — Stale doc comments referencing old voice_profiles column names** (pr-reviewer CONSIDER)
+  - Files: `server/services/voiceProfile/voiceProfileServicePure.ts:128` (JSDoc references `last_refreshed_at` and `refresh_config.days`); `server/jobs/voiceProfileRefreshJob.ts:15` (JSDoc could mention `refresh_config.days` is read via `shouldRefresh` post-query); `server/services/operatorSessionService.ts:90-91` (comment "V1: lastRefreshedAt column not yet added (Chunk 6)" — references AiSubscriptionConnection, not voice_profiles, but phrasing is confusing post-rename)
+  - Suggested approach: One-line doc updates. Cosmetic only.
+
+- [ ] **PA-CLEANUP-DEF-6 — KNOWLEDGE.md rule: column-rename grep discipline** (pr-reviewer STRONG_RECOMMENDATION, process improvement)
+  - Gap: Architect's chunk-0 file-set enumeration missed `agentExecutionServicePure.ts` and `operatorSessionInitialContextBundler.ts` (and would have missed `eaProvisioningService.ts` too) because the chunk-0 sweep grepped for Drizzle field names without also greping for snake_case column names in select projections / SQL templates / spec-referenced provisioning code.
+  - Suggested approach: Append a Pattern entry to KNOWLEDGE.md: "When planning a column rename, grep BOTH camelCase Drizzle field names AND any snake_case literals in select projections AND any spec-referenced provisioning code paths that write the column." Captured by finalisation-coordinator Step 7.
+
 ## Deferred spec decisions — feat-split-usagepage (2026-05-14)
 
 Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/builds/feat-split-usagepage/spec.md`. These are informational — the spec is mechanically tight and READY_FOR_BUILD; review only if you want to revisit a directional call.
