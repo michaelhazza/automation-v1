@@ -4,7 +4,7 @@
 # Each entry carries # expires: 2026-08-14 (90-day grace period).
 #
 # expires: 2026-08-14
-server/index.ts:693:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/index.ts:697:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
 server/lib/createWorker.ts:102:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
@@ -26,4 +26,4 @@ server/services/routerJobService.ts:255:Raw retry counter declaration — use se
 # expires: 2026-08-14
 server/services/stripeAgentWebhookService.ts:338:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/workflowEngineService.ts:3414:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/workflowEngine/queueLifecycle/agentStep.ts:108:Raw retry counter declaration — use server/lib/withBackoff.ts instead

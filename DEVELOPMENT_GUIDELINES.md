@@ -82,6 +82,16 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 - **`actionType` regex must include dots.** The pattern `actionType: '[a-z_]+'` does not match dot-namespaced types (`crm.fire_automation`, `crm.query`, etc.). Use `[a-z_.]+` or document the exclusion explicitly.
 - **Strip CRLF when parsing files on Windows.** Windows-authored files contain `\r\n`. Bash scripts that join or split lines must pipe through `tr -d '\r'`; JS parsers must `.replace(/\r/g, '')` before splitting on `\n`. The `guard-utils.sh` jq wrapper already does this — new scripts must replicate it.
 
+### Gate baseline and test robustness
+
+Baselines under `scripts/.gate-baselines/*.txt` are keyed by `<path>:<line>:<message>`. Many test fixtures, snapshots, and assertion strings are likewise positional. A refactor that moves, renames, splits, or shifts lines in any referenced file breaks the reference for every downstream PR — those PRs then fail gates they did not cause, and the failure appears in code unrelated to the actual diff.
+
+- **PRs that move, rename, split, or shift lines in files referenced by a gate baseline, fixture, or positional test assertion update those references in the same commit.** Treat the baseline file or fixture as part of the unit of change. Source-file rename without baseline update is the same defect class as schema rename without migration update.
+- **Authoring rule: prefer behaviour-anchored assertions over coordinate-anchored ones.** Assert that a specific function was called with specific args; assert on parsed structure rather than formatted output; sort lists before comparing; pin against stable IDs, not array index or render order. Coordinate-anchored tests (line numbers, full file paths in messages, snapshotted log strings, ordered-by-default lists) generate false negatives on unrelated refactors and erode trust in the suite.
+- **Evolving rule: when a refactor exposes a brittle test or baseline entry, fix the brittleness, not just the coordinates.** Updating `line:693` to `line:697` is fine for documented-debt baselines. But if the same entry has drifted twice in a quarter, the underlying check is the wrong shape — replace the file:line key with a content-hash key, or replace the regex with an AST-aware analyser. Whichever change reduces future drift is the cheaper long-run fix.
+
+Detection: if a CI run on a fresh branch off `main` fails a gate that the branch's diff does not touch, the cause is almost always baseline drift from a previous merge that did not follow this rule.
+
 ## 6. Migration discipline
 
 1. **Migrations are append-only.** Never edit a historical migration file after it has run.
