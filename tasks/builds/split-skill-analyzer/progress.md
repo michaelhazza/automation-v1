@@ -40,7 +40,33 @@
 
 ## Doc Sync gate
 
-(pending — populated at Step 9)
+### Verdicts (Step 6 — 2026-05-15)
+
+| Doc | Verdict |
+|-----|---------|
+| `architecture.md` | yes (§ v2 bug-fix cycle: updated `executeApproved` path from monolith to sub-module at line 2751) |
+| `docs/capabilities.md` | n/a: internal refactor with no capability surface change |
+| `docs/integration-reference.md` | no — checked `skillAnalyzerService`, `skill_analyzer`, `getOrgScopedDb`; zero matches |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | n/a — no convention change; RLS patterns recorded in KNOWLEDGE.md |
+| `CONTRIBUTING.md` | n/a — no suppression-policy change |
+| `docs/frontend-design-principles.md` | n/a — no UI changes |
+| `KNOWLEDGE.md` | yes (3 entries: FORCE RLS parent-EXISTS policy, inner db.transaction bypass, pre-fix grep discipline) |
+| `docs/decisions/` | n/a — extending an established RLS pattern, not locking a new architectural choice |
+| `docs/context-packs/` | n/a — no architecture.md anchor ID changes |
+| `references/test-gate-policy.md` | n/a — no gate posture change |
+| `references/spec-review-directional-signals.md` | n/a — not triggered |
+| `docs/incident-response.md` | n/a — not triggered |
+| `docs/testing-transition-plan.md` | n/a — not triggered |
+| `.claude/FRAMEWORK_VERSION` / `.claude/CHANGELOG.md` | n/a — no framework-level change |
+| `scripts/verify-*` | n/a — no gate added/removed/renamed |
+
+## Compound Learning Feedback (Step 7a — 2026-05-15)
+
+| # | Pattern | Source | Target enum | Proposal |
+|---|---------|--------|-------------|---------|
+| CL1 | FK-only tenant tables need parent-EXISTS RLS policy, not direct-column form | migration 0359 (PR #320) | pre-migration-review checklist | Add: "If the table has no direct `organisation_id` column but reaches org via an FK chain, write a parent-EXISTS policy on the immediate parent table (see `0359_skill_analyzer_results_rls.sql`)." |
+| CL2 | Inner `db.transaction()` in route-called service methods bypasses FORCE RLS (new pool connection, no GUC) | `resolveWarning()` fix (PR #320 F1) | multi-tenant safety checklist | Add: "Grep service files for `db.transaction(` — every inner wrapper that touches a FORCE RLS table is a candidate bypass; replace with `getOrgScopedDb()`." |
+| CL3 | Before writing any FORCE RLS fix, enumerate ALL raw `db.*` access sites to the table across the entire service tree | PR #320 F1+F4 two-round pattern | pre-fix-grep discipline | Add: "When adding FORCE RLS to table X: first run `grep -rn 'X' server/services/` to enumerate all service touch-points; fix ALL in one pass, not iteratively." |
 
 ## Closure proposals for tasks/todo.md (apply at finalisation once PR# known)
 
