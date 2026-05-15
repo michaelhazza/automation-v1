@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { workspaceMemories, workspaceMemoryEntries } from '../../db/schema/index.js';
 import { routeCall } from '../llmRouter.js';
@@ -20,137 +20,10 @@ import {
 } from './types.js';
 import { scoreMemoryEntry } from './quality.js';
 import * as readMethods from './read.js';
-
-// ---------------------------------------------------------------------------
-// pgBoss callback — module-level state; moves to enrichmentJob.ts in W4.
-// setContextEnrichmentJobSender in the barrel delegates to this setter.
-// ---------------------------------------------------------------------------
-
-let pgBossSendCallback: ((queue: string, data: unknown, options?: Record<string, unknown>) => Promise<void>) | null = null;
-
-export function setExtractPgBossCallback(fn: typeof pgBossSendCallback): void {
-  pgBossSendCallback = fn;
-}
-
-// ---------------------------------------------------------------------------
-// Wrappers that resolve barrel exports via dynamic import to avoid the
-// circular dependency that would arise from a static import of the barrel
-// (which spreads this module). Both reembedEntry and regenerateSummary remain
-// in the barrel until W4 when they move to their own sub-modules.
-// ---------------------------------------------------------------------------
-
-async function callReembedEntry(params: { id: string; content: string; resetContext: boolean }): Promise<boolean> {
-  const { reembedEntry } = await import('../workspaceMemoryService.js');
-  return reembedEntry(params);
-}
-
-async function callRegenerateSummary(organisationId: string, subaccountId: string): Promise<void> {
-  const { workspaceMemoryService } = await import('../workspaceMemoryService.js');
-  await workspaceMemoryService.regenerateSummary(organisationId, subaccountId);
-}
-
-// ---------------------------------------------------------------------------
-// Mem0 dedup loop — private to this module; moves to dedup.ts in W4
-// ---------------------------------------------------------------------------
-
-interface DedupeEntry {
-  content: string;
-  entryType: string;
-  op: 'ADD' | 'UPDATE' | 'DELETE';
-  existingId?: string;
-  updatedContent?: string;
-}
-
-const DEDUP_SYSTEM = `You are a memory deduplication assistant.
-Given new facts and existing facts, classify each new fact as ADD, UPDATE, or DELETE.
-- ADD: new information not in existing facts
-- UPDATE: amends an existing fact (provide existing_id and updated_fact)
-- DELETE: makes an existing fact wrong or obsolete (provide existing_id)
-
-Output ONLY valid JSON: { "ops": [{ "type": "ADD"|"UPDATE"|"DELETE", "fact": "...", "existing_id"?: "uuid", "updated_fact"?: "..." }] }
-If all are new: { "ops": [{ "type": "ADD", "fact": "..." }, ...] }`;
-
-async function deduplicateEntries(
-  newEntries: Array<{ content: string; entryType: string }>,
-  subaccountId: string,
-  taskSlug: string | null,
-  organisationId: string,
-  runId: string,
-): Promise<DedupeEntry[]> {
-  if (newEntries.length === 0) return [];
-
-  // Load recent candidate entries for comparison (top 20 by recency).
-  // §7 G6.2 — skip archived Reference notes so dedup does not re-surface
-  // content that the user intentionally removed from the workspace.
-  const taskFilter = taskSlug
-    ? and(
-        eq(workspaceMemoryEntries.subaccountId, subaccountId),
-        isNull(workspaceMemoryEntries.deletedAt),
-        sql`(task_slug = ${taskSlug} OR task_slug IS NULL)`,
-      )
-    : and(
-        eq(workspaceMemoryEntries.subaccountId, subaccountId),
-        isNull(workspaceMemoryEntries.deletedAt),
-      );
-
-  const candidates = await db
-    .select({ id: workspaceMemoryEntries.id, content: workspaceMemoryEntries.content })
-    .from(workspaceMemoryEntries)
-    .where(taskFilter)
-    .orderBy(desc(workspaceMemoryEntries.createdAt))
-    .limit(20);
-
-  // If no existing entries, all are ADD — skip LLM call
-  if (candidates.length === 0) {
-    return newEntries.map(e => ({ ...e, op: 'ADD' as const }));
-  }
-
-  try {
-    const response = await routeCall({
-      system: DEDUP_SYSTEM,
-      messages: [{
-        role: 'user',
-        content: JSON.stringify({
-          new_facts: newEntries.map(e => ({ content: e.content, type: e.entryType })),
-          existing_facts: candidates.map(c => ({ id: c.id, fact: c.content })),
-        }),
-      }],
-      maxTokens: 1024,
-      temperature: 0.1,
-      context: {
-        organisationId,
-        subaccountId,
-        runId,
-        sourceType: 'agent_run',
-        taskType: 'memory_compile',
-        executionPhase: 'execution',
-        routingMode: 'ceiling',
-      },
-    });
-
-    const parsed = JSON.parse(response.content) as {
-      ops: Array<{ type: 'ADD' | 'UPDATE' | 'DELETE'; fact?: string; existing_id?: string; updated_fact?: string }>;
-    };
-
-    const result: DedupeEntry[] = [];
-    const opsLimit = Math.min(parsed.ops.length, newEntries.length);
-    for (let i = 0; i < opsLimit; i++) {
-      const op = parsed.ops[i];
-      const source = newEntries[i];
-      result.push({
-        content: op.fact ?? source.content,
-        entryType: source.entryType,
-        op: op.type,
-        existingId: op.existing_id,
-        updatedContent: op.updated_fact,
-      });
-    }
-    return result;
-  } catch {
-    // Dedup failed — fall through to ADD all (safe degradation)
-    return newEntries.map(e => ({ ...e, op: 'ADD' as const }));
-  }
-}
+import { deduplicateEntries } from './dedup.js';
+import { reembedEntry } from './decayAndEmbedding.js';
+import { regenerateSummary } from './regenerateSummary.js';
+import { getPgBossSendCallback } from './enrichmentJob.js';
 
 // ---------------------------------------------------------------------------
 // Post-Run Extraction
@@ -309,7 +182,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
     if (reembedTargets.length > 0) {
       Promise.all(
         reembedTargets.map((target) =>
-          callReembedEntry({ id: target.id, content: target.content, resetContext: true })
+          reembedEntry({ id: target.id, content: target.content, resetContext: true })
         )
       ).catch((err) => console.error('[WorkspaceMemory] Failed to re-embed updated entries:', err));
     }
@@ -323,12 +196,13 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       // right away). reembedEntry handles hash stamping + in-flight dedup.
       Promise.all(
         inserted.map((entry) =>
-          callReembedEntry({ id: entry.id, content: entry.content, resetContext: false })
+          reembedEntry({ id: entry.id, content: entry.content, resetContext: false })
         )
       ).catch((err) => console.error('[WorkspaceMemory] Failed to generate embeddings:', err));
 
       // Phase 2: Enqueue async context enrichment job (B1)
       // This generates contextual prefixes and re-embeds with richer context
+      const pgBossSendCallback = getPgBossSendCallback();
       if (pgBossSendCallback) {
         const entryIds = inserted.map(e => e.id);
         const jobKey = `ctx-enrich:${entryIds.sort().join(',')}`;
@@ -364,7 +238,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
     const newCount = memory.runsSinceSummary + 1;
 
     if (newCount >= memory.summaryThreshold) {
-      await callRegenerateSummary(organisationId, subaccountId);
+      await regenerateSummary(organisationId, subaccountId);
     } else {
       await db
         .update(workspaceMemories)
