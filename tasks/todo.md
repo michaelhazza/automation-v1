@@ -1638,3 +1638,7 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Tag:** fix-route-db-support-agent, advisory
 
 - [ ] [origin:chatgpt-pr-review:fix-route-db-support-agent:2026-05-15] [status:open] [tag:hardening] **SUPPORT-PATCH-SCOPE-ORDER** — For sibling-subaccount PATCH requests with an invalid payload, the route currently validates the payload after the org-only read but before `updateAgentConfig`'s scope check. This means a sibling-subaccount caller with an invalid payload may receive a validation error rather than a 403. This is pre-existing behaviour and not introduced by this build. The approved contract is valid-payload 403 only. If the invariant "any sibling-subaccount PATCH always returns 403 regardless of payload validity" is ever required, add a pre-validation scope check/helper before the `req.body` parse. Non-blocking; no spec change required for current build. Files: `server/routes/support/supportAgentRoutes.ts`.
+
+## Deferred from sandbox-safety-batch — v2-backlog (2026-05-15)
+
+- [ ] REQ #57 — Credential value-threading into `/workspace/secrets/` (medium, v2-deferred). Reason: e2b SDK not installed in V1 per SANDBOX-DEF-EGRESS-MECH. Stub at e2bSandbox.ts:~297 declares intent. Lands with the SDK in the follow-up build. See `tasks/builds/sandbox-safety-batch/req-57-decision.md`.
