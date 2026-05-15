@@ -7,6 +7,7 @@
 **Scope:** all-of-spec (operator-confirmed full-branch verify per Setup Step C path 3)
 **Changed-code set:** 54 files (50 code/migration + 4 docs)
 **Run at:** 2026-05-15T09:27:43Z
+**Commit at finish:** `79124cf1`
 
 ---
 
