@@ -1638,3 +1638,17 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Tag:** fix-route-db-support-agent, advisory
 
 - [ ] [origin:chatgpt-pr-review:fix-route-db-support-agent:2026-05-15] [status:open] [tag:hardening] **SUPPORT-PATCH-SCOPE-ORDER** — For sibling-subaccount PATCH requests with an invalid payload, the route currently validates the payload after the org-only read but before `updateAgentConfig`'s scope check. This means a sibling-subaccount caller with an invalid payload may receive a validation error rather than a 403. This is pre-existing behaviour and not introduced by this build. The approved contract is valid-payload 403 only. If the invariant "any sibling-subaccount PATCH always returns 403 regardless of payload validity" is ever required, add a pre-validation scope check/helper before the `req.body` parse. Non-blocking; no spec change required for current build. Files: `server/routes/support/supportAgentRoutes.ts`.
+
+## Deferred from spec-conformance review — split-services-soft-cap-batch (2026-05-15)
+
+**Captured:** 2026-05-15T12:35:05Z
+**Source log:** `tasks/review-logs/spec-conformance-log-split-services-soft-cap-batch-2026-05-15T12-35-05Z.md`
+**Spec:** `tasks/builds/split-services-soft-cap-batch/spec.md`
+
+- [ ] REQ #7 — Positional gate-baseline drift after `queueService.ts` split (5 entries across 2 baseline files reference paths that no longer exist).
+  - Spec section: §7 criterion 7 (`verify-canonical-retry.sh baseline is honoured`).
+  - Gap: split moved 4 retry-counter declarations and 1 swallowed-promise from `server/services/queueService.ts:<line>` to sub-modules under `server/services/queueService/...`. The number of violations is unchanged (4→4, 1→1), but the gate uses `check_expiring_baseline` with positional keys, so CI will trip on both stale baseline entries AND new-path violations.
+  - Affected files:
+    - `scripts/.gate-baselines/canonical-retry.txt` — 4 entries at `queueService.ts:105, :263, :1095, :1130` need to repoint at `queueService/backend.ts:24`, `queueService/executionProcessor.ts:131`, `queueService/maintenanceJobs/pgBossRegistrations.ts:558`, `queueService/maintenanceJobs/pgBossRegistrations.ts:593`.
+    - `scripts/.gate-baselines/no-silent-failures.txt` — 1 entry at `queueService.ts:1200` needs to repoint at `queueService/maintenanceJobs/pgBossRegistrations.ts:663`.
+  - Suggested approach: rebaseline (path 1 in log Next-step) — preserve existing `expires:` dates, repoint paths/lines. Per DEVELOPMENT_GUIDELINES.md §5 ("PRs that move, rename, split, or shift lines in files referenced by a gate baseline update those references in the same commit"). Remediation (path 2 — adopt `withBackoff`, replace `.catch(() => undefined)` with `logger.warn`) would violate spec §3 "No drive-by lint cleanup" and belongs in a separate PR.
