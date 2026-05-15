@@ -1,14 +1,13 @@
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
-import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { canonicalInboxes } from '../../db/schema/index.js';
 import { SupportInboxAgentConfigSchema } from '../../../shared/types/supportInboxAgentConfig.js';
+import type { SupportInboxAgentConfig } from '../../../shared/types/supportInboxAgentConfig.js';
 import { validatePromptOverride } from '../../services/promptOverridePure.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
 import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
-import { listInboxes } from '../../services/supportInboxService.js';
+import { listInboxes, getInbox, updateAgentConfig } from '../../services/supportInboxService.js';
 
 const router = Router({ mergeParams: true });
 
@@ -54,23 +53,8 @@ router.patch(
   asyncHandler(async (req, res) => {
     const principal = await makePrincipal(req);
     const { inboxId } = req.params;
-    const db = getOrgScopedDb('supportAgentRoutes.patchAgentConfig');
 
-    const [existing] = await db
-      .select({ id: canonicalInboxes.id, agentConfig: canonicalInboxes.agentConfig })
-      .from(canonicalInboxes)
-      .where(
-        and(
-          eq(canonicalInboxes.id, inboxId),
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-        ),
-      )
-      .limit(1);
-
-    if (!existing) {
-      res.status(404).json({ error: 'support.inbox.not_found' });
-      return;
-    }
+    const existing = await getInbox(inboxId, principal);
 
     const patch = req.body as Record<string, unknown>;
 
@@ -94,7 +78,7 @@ router.patch(
       }
     }
 
-    let parsedConfig;
+    let parsedConfig: SupportInboxAgentConfig;
     try {
       parsedConfig = SupportInboxAgentConfigSchema.parse(merged);
     } catch {
@@ -102,16 +86,7 @@ router.patch(
       return;
     }
 
-    const [updated] = await db
-      .update(canonicalInboxes)
-      .set({ agentConfig: parsedConfig, updatedAt: new Date() })
-      .where(
-        and(
-          eq(canonicalInboxes.id, inboxId),
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-        ),
-      )
-      .returning();
+    const updated = await updateAgentConfig(inboxId, parsedConfig, principal);
 
     res.json({ inbox: { id: updated.id, agentConfig: updated.agentConfig } });
   }),
