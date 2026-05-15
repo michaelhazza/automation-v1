@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import type { MergeWarning, WarningResolution } from '../../skillAnalyzerServicePure.js';
 import { checkConcurrencyStamp } from '../../skillAnalyzerServicePure.js';
@@ -23,113 +23,113 @@ export async function resolveWarning(params: ResolveWarningParams): Promise<void
     throw { statusCode: 400, message: 'If-Unmodified-Since must be a valid ISO timestamp.' };
   }
 
-  await db.transaction(async (tx) => {
-    // Row-lock read to avoid concurrent resolve-warning overwrites.
-    const rows = await tx
-      .select()
-      .from(skillAnalyzerResults)
-      .where(and(
-        eq(skillAnalyzerResults.id, resultId),
-        eq(skillAnalyzerResults.jobId, jobId),
-      ))
-      .for('update')
-      .limit(1);
+  const orgTx = getOrgScopedDb('skillAnalyzerService.resolveWarning');
 
-    const row = rows[0];
-    if (!row) throw { statusCode: 404, message: 'Result not found' };
+  // Row-lock read to avoid concurrent resolve-warning overwrites.
+  const rows = await orgTx
+    .select()
+    .from(skillAnalyzerResults)
+    .where(and(
+      eq(skillAnalyzerResults.id, resultId),
+      eq(skillAnalyzerResults.jobId, jobId),
+    ))
+    .for('update')
+    .limit(1);
 
-    // Org ownership check via job.
-    const jobRows = await tx
-      .select({ id: skillAnalyzerJobs.id })
-      .from(skillAnalyzerJobs)
-      .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
-      .limit(1);
-    if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+  const row = rows[0];
+  if (!row) throw { statusCode: 404, message: 'Result not found' };
 
-    if (row.approvedAt) {
-      throw {
-        statusCode: 409,
-        message: 'Result is locked — unapprove before resolving warnings.',
-        errorCode: 'RESULT_LOCKED',
-      };
-    }
+  // Org ownership check via job.
+  const jobRows = await orgTx
+    .select({ id: skillAnalyzerJobs.id })
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
 
-    const concurrencyResult = checkConcurrencyStamp(
-      row.mergeUpdatedAt,
-      row.createdAt,
-      clientStamp,
-    );
-    if (concurrencyResult === 'missing') {
-      throw {
-        statusCode: 500,
-        message: 'Result has no createdAt timestamp — cannot verify concurrency.',
-      };
-    }
-    if (concurrencyResult === 'stale') {
-      throw {
-        statusCode: 409,
-        message: 'Result was modified since you opened it, or the If-Unmodified-Since token does not match. Reload and retry.',
-        errorCode: 'STALE_RESOLVE',
-      };
-    }
-
-    const existing = Array.isArray(row.warningResolutions)
-      ? (row.warningResolutions as WarningResolution[])
-      : [];
-
-    // Dedup by composite (warningCode, details.field ?? null). Newer wins.
-    const fieldKey = details?.field ?? null;
-    const filtered = existing.filter(r => {
-      const rField = r.details?.field ?? null;
-      return !(r.warningCode === warningCode && rField === fieldKey);
-    });
-
-    const entry: WarningResolution = {
-      warningCode,
-      resolution,
-      resolvedAt: new Date().toISOString(),
-      resolvedBy: userId,
+  if (row.approvedAt) {
+    throw {
+      statusCode: 409,
+      message: 'Result is locked — unapprove before resolving warnings.',
+      errorCode: 'RESULT_LOCKED',
     };
-    if (details && (details.field || details.disambiguationNote || details.collidingSkillId)) {
-      entry.details = details;
-    }
-    filtered.push(entry);
+  }
 
-    // Fix 7 cascade: NAME_MISMATCH resolutions cascade the chosen name into
-    // proposedMergedContent and set execution_resolved_name atomically so
-    // the merge preview matches what Execute will write.
-    const updates: Record<string, unknown> = {
-      warningResolutions: filtered,
-      mergeUpdatedAt: new Date(),
+  const concurrencyResult = checkConcurrencyStamp(
+    row.mergeUpdatedAt,
+    row.createdAt,
+    clientStamp,
+  );
+  if (concurrencyResult === 'missing') {
+    throw {
+      statusCode: 500,
+      message: 'Result has no createdAt timestamp — cannot verify concurrency.',
     };
-    if (warningCode === 'NAME_MISMATCH' && row.proposedMergedContent) {
-      const merged = row.proposedMergedContent as { name: string; definition: object | null; description: string; instructions: string | null };
-      const defName = (merged.definition as Record<string, unknown> | null | undefined)?.name;
-      let chosen: string | null = null;
-      if (resolution === 'use_library_name') {
-        // Dominant source is the library by construction; use schema name if
-        // present, else top-level name.
-        chosen = typeof defName === 'string' && defName.trim().length > 0
-          ? defName
-          : (merged.name ?? '').trim() || null;
-      } else if (resolution === 'use_incoming_name') {
-        chosen = (merged.name ?? '').trim() || (typeof defName === 'string' ? defName : null);
-      }
-      if (chosen) {
-        const newDefinition = {
-          ...(merged.definition as Record<string, unknown> | null ?? {}),
-          name: chosen,
-        };
-        updates.proposedMergedContent = { ...merged, name: chosen, definition: newDefinition };
-        updates.executionResolvedName = chosen;
-      }
-    }
+  }
+  if (concurrencyResult === 'stale') {
+    throw {
+      statusCode: 409,
+      message: 'Result was modified since you opened it, or the If-Unmodified-Since token does not match. Reload and retry.',
+      errorCode: 'STALE_RESOLVE',
+    };
+  }
 
-    await tx
-      .update(skillAnalyzerResults)
-      .set(updates)
-      .where(eq(skillAnalyzerResults.id, resultId));
+  const existing = Array.isArray(row.warningResolutions)
+    ? (row.warningResolutions as WarningResolution[])
+    : [];
+
+  // Dedup by composite (warningCode, details.field ?? null). Newer wins.
+  const fieldKey = details?.field ?? null;
+  const filtered = existing.filter(r => {
+    const rField = r.details?.field ?? null;
+    return !(r.warningCode === warningCode && rField === fieldKey);
   });
+
+  const entry: WarningResolution = {
+    warningCode,
+    resolution,
+    resolvedAt: new Date().toISOString(),
+    resolvedBy: userId,
+  };
+  if (details && (details.field || details.disambiguationNote || details.collidingSkillId)) {
+    entry.details = details;
+  }
+  filtered.push(entry);
+
+  // Fix 7 cascade: NAME_MISMATCH resolutions cascade the chosen name into
+  // proposedMergedContent and set execution_resolved_name atomically so
+  // the merge preview matches what Execute will write.
+  const updates: Record<string, unknown> = {
+    warningResolutions: filtered,
+    mergeUpdatedAt: new Date(),
+  };
+  if (warningCode === 'NAME_MISMATCH' && row.proposedMergedContent) {
+    const merged = row.proposedMergedContent as { name: string; definition: object | null; description: string; instructions: string | null };
+    const defName = (merged.definition as Record<string, unknown> | null | undefined)?.name;
+    let chosen: string | null = null;
+    if (resolution === 'use_library_name') {
+      // Dominant source is the library by construction; use schema name if
+      // present, else top-level name.
+      chosen = typeof defName === 'string' && defName.trim().length > 0
+        ? defName
+        : (merged.name ?? '').trim() || null;
+    } else if (resolution === 'use_incoming_name') {
+      chosen = (merged.name ?? '').trim() || (typeof defName === 'string' ? defName : null);
+    }
+    if (chosen) {
+      const newDefinition = {
+        ...(merged.definition as Record<string, unknown> | null ?? {}),
+        name: chosen,
+      };
+      updates.proposedMergedContent = { ...merged, name: chosen, definition: newDefinition };
+      updates.executionResolvedName = chosen;
+    }
+  }
+
+  await orgTx
+    .update(skillAnalyzerResults)
+    .set(updates)
+    .where(eq(skillAnalyzerResults.id, resultId));
 }
 
 /** Append SKILL_GRAPH_COLLISION warnings produced by the cross-batch collision
@@ -144,7 +144,7 @@ export async function appendBatchCollisionWarnings(
   for (const [candidateSlug, newWarnings] of warningsBySlug.entries()) {
     if (newWarnings.length === 0) continue;
     const newWarningsJson = JSON.stringify(newWarnings);
-    await db
+    await getOrgScopedDb('skillAnalyzerService.appendBatchCollisionWarnings')
       .update(skillAnalyzerResults)
       .set({
         mergeWarnings: sql`
@@ -188,7 +188,7 @@ export async function applyBatchDeductionAndWarningAtomic(
   for (const { slug, deduction, warning } of slugEntries) {
     if (deduction <= 0) continue;
     const warningJson = JSON.stringify([warning]);
-    await db
+    await getOrgScopedDb('skillAnalyzerService.applyBatchDeductionAndWarningAtomic')
       .update(skillAnalyzerResults)
       .set({
         confidence: sql`GREATEST(0.20, COALESCE(${skillAnalyzerResults.confidence}, 0.5) - ${deduction})`,

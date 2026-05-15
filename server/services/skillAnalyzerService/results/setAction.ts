@@ -1,6 +1,7 @@
 import { eq, inArray, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import * as skillAnalyzerConfigService from '../../skillAnalyzerConfigService.js';
 import type { MergeWarning, WarningResolution, WarningTier } from '../../skillAnalyzerServicePure.js';
@@ -33,7 +34,7 @@ export async function setResultAction(params: {
   // PARTIAL_OVERLAP / IMPROVEMENT results with unresolved decision_required
   // or critical warnings cannot transition to approved.
   if (action === 'approved') {
-    const resultRows = await db
+    const resultRows = await getOrgScopedDb('skillAnalyzerService.setResultAction.read')
       .select()
       .from(skillAnalyzerResults)
       .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
@@ -76,7 +77,7 @@ export async function setResultAction(params: {
         .update(stableStringify(approvalSnapshot))
         .digest('hex');
 
-      await db
+      await getOrgScopedDb('skillAnalyzerService.setResultAction.approve')
         .update(skillAnalyzerResults)
         .set({
           actionTaken: 'approved',
@@ -95,7 +96,7 @@ export async function setResultAction(params: {
   // reject / skip / unapprove (null) path. For 'approved' on non-PARTIAL_OVERLAP
   // classifications (DISTINCT, DUPLICATE) we simply update actionTaken without
   // the approval gate — those don't have merge warnings to resolve.
-  await db
+  await getOrgScopedDb('skillAnalyzerService.setResultAction.update')
     .update(skillAnalyzerResults)
     .set({
       actionTaken: action,
@@ -140,7 +141,7 @@ export async function bulkSetResultAction(params: {
   }
 
   // reject / skip: bulk update without approval snapshot logic.
-  await db
+  await getOrgScopedDb('skillAnalyzerService.bulkSetResultAction')
     .update(skillAnalyzerResults)
     .set({
       actionTaken: action,

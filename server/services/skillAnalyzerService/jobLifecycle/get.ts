@@ -26,7 +26,7 @@ export async function getJob(
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  const rawResults = await db
+  const rawResults = await getOrgScopedDb('skillAnalyzerService.getJob.results')
     .select()
     .from(skillAnalyzerResults)
     .where(eq(skillAnalyzerResults.jobId, jobId))

@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../../../lib/logger.js';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import { systemSkillService } from '../../systemSkillService.js';
 import type { EnrichedResult } from '../types.js';
@@ -39,7 +40,7 @@ export async function patchMergeFields(
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  const resultRows = await db
+  const resultRows = await getOrgScopedDb('skillAnalyzerService.patchMergeFields.read')
     .select()
     .from(skillAnalyzerResults)
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
@@ -101,7 +102,7 @@ export async function patchMergeFields(
   // v2 §11.11.1: any merge edit wipes warning_resolutions + approval state so
   // stale decisions can't satisfy a new merge's warnings.
   const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
-  await db
+  await getOrgScopedDb('skillAnalyzerService.patchMergeFields.update')
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: next,
@@ -118,7 +119,7 @@ export async function patchMergeFields(
     .where(eq(skillAnalyzerResults.id, resultId));
 
   // Return the freshly enriched row.
-  const updatedRows = await db
+  const updatedRows = await getOrgScopedDb('skillAnalyzerService.patchMergeFields.refetch')
     .select()
     .from(skillAnalyzerResults)
     .where(eq(skillAnalyzerResults.id, resultId))
@@ -180,7 +181,7 @@ export async function resetMergeToOriginal(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  const resultRows = await db
+  const resultRows = await getOrgScopedDb('skillAnalyzerService.resetMergeToOriginal.read')
     .select()
     .from(skillAnalyzerResults)
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
@@ -212,7 +213,7 @@ export async function resetMergeToOriginal(params: {
 
   // v2 §11.11.1: reset wipes resolutions + approval state identically to
   // PATCH /merge to keep invariants consistent.
-  await db
+  await getOrgScopedDb('skillAnalyzerService.resetMergeToOriginal.update')
     .update(skillAnalyzerResults)
     .set({
       proposedMergedContent: row.originalProposedMerge,
@@ -231,7 +232,7 @@ export async function resetMergeToOriginal(params: {
   const hadResolutions = Array.isArray(row.warningResolutions) && (row.warningResolutions as unknown[]).length > 0;
 
   // Return enriched row (matchedSkillContent included)
-  const updatedRows = await db
+  const updatedRows = await getOrgScopedDb('skillAnalyzerService.resetMergeToOriginal.refetch')
     .select()
     .from(skillAnalyzerResults)
     .where(eq(skillAnalyzerResults.id, resultId))

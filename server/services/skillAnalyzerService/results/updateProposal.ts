@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../../../lib/logger.js';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import { skillAnalyzerServicePure } from '../../skillAnalyzerServicePure.js';
 import { systemSkillService } from '../../systemSkillService.js';
@@ -78,7 +79,7 @@ export async function updateAgentProposal(
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  const resultRows = await db
+  const resultRows = await getOrgScopedDb('skillAnalyzerService.updateAgentProposal.read')
     .select()
     .from(skillAnalyzerResults)
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
@@ -171,7 +172,7 @@ export async function updateAgentProposal(
     }
   }
 
-  await db
+  await getOrgScopedDb('skillAnalyzerService.updateAgentProposal.update')
     .update(skillAnalyzerResults)
     .set({ agentProposals: nextProposals })
     .where(eq(skillAnalyzerResults.id, resultId));
@@ -179,7 +180,7 @@ export async function updateAgentProposal(
   // Return the freshly enriched result via getJob (so the response shape
   // matches the GET endpoint). For efficiency we re-fetch only this row's
   // join data rather than re-running the full job lookup.
-  const updatedRows = await db
+  const updatedRows = await getOrgScopedDb('skillAnalyzerService.updateAgentProposal.refetch')
     .select()
     .from(skillAnalyzerResults)
     .where(eq(skillAnalyzerResults.id, resultId))
@@ -230,7 +231,7 @@ export async function updateResultAgentProposals(
   agentProposals: unknown[],
 ): Promise<void> {
   if (agentProposals.length === 0) return;
-  await db
+  await getOrgScopedDb('skillAnalyzerService.updateResultAgentProposals')
     .update(skillAnalyzerResults)
     .set({ agentProposals })
     .where(
