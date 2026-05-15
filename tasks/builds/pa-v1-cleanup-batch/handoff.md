@@ -72,11 +72,24 @@ REVIEW_GAP: chatgpt-plan-review | task-class: Significant | reason: autonomous m
 
 ---
 
-## Phase 3 (FINALISATION) — pending
+## Phase 3 (FINALISATION) — partial, paused at manual chatgpt-pr-review
 
-Operator instructed autonomous run through to manual chatgpt-pr-review handoff. Phase 3 plan:
+**PR:** [#324](https://github.com/michaelhazza/automation-v1/pull/324)
 
-1. **S2 branch sync** — branch was created directly from `origin/main`; no rebase needed. Verify no main changes since branch creation.
-2. **G4 regression guard** — run `npm run lint && npm run typecheck` against post-S2 state.
-3. **PR creation** — `gh pr create` with body that explicitly requests operator visual confirmation of Personal nav group placement (spec §9 criterion #7).
-4. **chatgpt-pr-review (MANUAL)** — STOPPING POINT per operator instruction.
+Completed inline by main session per autonomous-mode operator instruction:
+
+1. **S2 branch sync** — clean (0 behind / 11 ahead `origin/main`; no rebase needed; branch was created directly from `origin/main`).
+2. **G4 regression guard** — PASS (`npm run lint` 0 errors, `npm run typecheck` clean).
+3. **PR creation** — PR #324 opened with explicit operator visual-confirmation request in the body (spec §9 criterion #7).
+4. **PR-number placeholder substitution** — 13 `tasks/todo.md` items + 1 conformance-log row updated from `<pending>` to `pr:324` / `PR #324`.
+
+**STOPPING POINT — manual chatgpt-pr-review.** Operator instruction: "all the way to chatgpt final review manual." chatgpt-pr-review is a manual ChatGPT-web loop that requires the operator to paste responses round-by-round; it cannot run autonomously. Operator picks up here.
+
+Remaining Phase 3 steps (after manual chatgpt-pr-review completes):
+- Step 6: full doc-sync sweep (Phase 2 already did the relevant updates; sweep verifies no follow-up edits introduced new gaps)
+- Step 7: KNOWLEDGE.md pattern extraction (3 candidates: column-rename grep discipline, spec-amendment-vs-pre-PR resolution path, fresh-DB .down.sql idempotent-guards convention)
+- Step 7a: Compound Learning Feedback
+- Step 8: tasks/todo.md final cleanup
+- Step 9: current-focus.md → MERGE_READY — **operator intentionally reverted current-focus to split-skill-analyzer earlier**; Phase 3 should NOT pivot it unless operator wants
+- Step 10: apply `ready-to-merge` label
+- Step 11: end-of-phase prompt

@@ -109,7 +109,7 @@ PASS items (selected):
 
 ## Close-out notes (2026-05-15, pa-v1-cleanup-batch)
 
-The 12 directional gaps + 1 bookkeeping item (REQ-M9) + 1 adversarial finding deferred from this 2026-05-12 review are now resolved. Resolution path per item below. Verified by `pa-v1-cleanup-batch` build (branch `claude/pa-v1-cleanup-batch`, PR `<pending>`).
+The 12 directional gaps + 1 bookkeeping item (REQ-M9) + 1 adversarial finding deferred from this 2026-05-12 review are now resolved. Resolution path per item below. Verified by `pa-v1-cleanup-batch` build (branch `claude/pa-v1-cleanup-batch`, PR `#324`).
 
 | REQ | Resolution path | Proof location |
 |---|---|---|

@@ -82,3 +82,18 @@ Feature-coordinator running inline. Phase-1 handoff restore skipped per operator
 - frontend-design-principles.md updated: no — no new UI pattern or hard rule (sidebar reorder is a placement change within existing pattern)
 - KNOWLEDGE.md updated: no — patterns identified (column-rename grep discipline, spec-amendment-vs-pre-PR resolution path, fresh-DB down-migration guard convention) deferred to finalisation Step 7
 - spec-context.md updated: n/a (feature pipeline)
+
+### Step 10 — Phase 2 handoff written + auto-commit + push — COMPLETE (commit `24eadd9d`)
+
+---
+
+## Phase 3 — partial, paused at manual chatgpt-pr-review
+
+**PR:** [#324](https://github.com/michaelhazza/automation-v1/pull/324) opened 2026-05-15.
+
+- **S2 sync:** clean (0 behind / 11 ahead origin/main; branched directly from main)
+- **G4 regression guard:** PASS (lint 0 errors, typecheck clean)
+- **PR creation:** PR #324 with operator visual-confirmation request in body
+- **PR-number substitution:** 13 todo.md flips + 1 conformance-log row updated from `<pending>` → `pr:324`
+
+**STOPPING POINT.** Operator instruction "all the way to chatgpt final review manual" — chatgpt-pr-review is the operator's manual loop. Remaining Phase 3 steps (KNOWLEDGE.md, todo.md cleanup, MERGE_READY label) happen AFTER chatgpt-pr-review per playbook.
