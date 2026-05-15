@@ -1398,7 +1398,7 @@ Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-
 Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.
 Confirmed holes fixed inline before pr-reviewer. Deferred items below.
 
-### createDraftWithProposal non-atomic (likely-hole) [status:closed:pr:<pending>]
+### createDraftWithProposal non-atomic (likely-hole) [status:closed:pr:324]
 `server/services/eaDrafts/eaDraftService.ts:58-88` — `actionService.proposeAction` and the
 subsequent `db.insert(eaDrafts)` are not wrapped in a single transaction. `proposeAction` does
 not accept a caller transaction handle. Fix requires refactoring `actionService.proposeAction`
@@ -1426,73 +1426,73 @@ before being passed to the LLM.
 **Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v1-2026-05-12T13-15-07Z.md`
 **Spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md`
 
-- [x] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract [status:closed:pr:<pending>]
+- [x] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract [status:closed:pr:324]
   - Spec section: §7.4 + §21.1
   - Gap: Missing `name` column (display); single `source` column (string) replaced by `sources text[]` array; missing `source_config jsonb` (per-sampler config); missing `refresh_config jsonb` (per-policy config). Renames: `sample_size`→`sample_count`, `last_derived_at`→`last_refreshed_at`, `opt_out_at`→`opted_out_at`.
   - Suggested approach: Decide whether to bring schema into spec alignment (migration adds 4 cols, drops 1, renames 3) OR amend the spec to match the simpler implementation. The simpler schema is functional but breaks the spec's per-sampler config envelope.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0360_voice_profiles_schema_align.sql` renames 3 cols + adds 2 jsonb cols per spec §21.1. Drizzle + Zod + service aligned. Spec §7.4 was also amended 2026-05-13 to ratify simplified shape (no separate `name` column; `sources text[]` array; `source_config` jsonb).
 
-- [x] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch [status:closed:pr:<pending>]
+- [x] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch [status:closed:pr:324]
   - Spec section: §8.2 table + §6.3 rationale
   - Gap: Code uses Tier 6 (max); spec specifies Tier 4 with action-level `defaultGate: review`. The spec rationale (third-party visibility is consent-based) supports Tier 4. Either change works at runtime since both are review-gated, but tier classification drives downstream policy decisions (budget caps, audit categorisation).
   - Suggested approach: Confirm with the risk-tier rubric authors whether `create_event` is Tier 4 (record-write, consent-based visibility) or Tier 6 (broadcast). Update either the spec or the action registry.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Code already at Tier 4 with `defaultGate: 'review'` (`server/config/actionRegistry/calendar.ts:58-79` + `:81-102`). Conformance log captured an outdated view.
 
-- [x] REQ-T8 — Dedup key formats diverge from spec §7.1 [status:closed:pr:<pending>]
+- [x] REQ-T8 — Dedup key formats diverge from spec §7.1 [status:closed:pr:324]
   - Spec section: §7.1 + §24.1
   - Gap: Slack dedup key uses `channelId@messageTs` not `slack_event_id`. Calendar dedup key uses `eventId@startAt@minutesUntilStart` not `{calendarId}@{eventId}@{startAtISO8601}@{lookaheadMinutes}`. Both work as unique keys but diverge from spec's explicit shapes (which were chosen for multi-calendar support + recurring occurrence handling).
   - Suggested approach: Update `deriveDedupKey` in `externalSourceTriggersPure.ts` to match spec format, or amend spec §7.1 to match the simpler keys.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §7.1 amended 2026-05-13 (REQ-T8 amendment line 429) to ratify the simpler key shapes. Code at `externalSourceTriggersPure.ts:13-22` already matches.
 
-- [x] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1 [status:closed:pr:<pending>]
+- [x] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1 [status:closed:pr:324]
   - Spec section: §7.1
   - Gap: Spec specifies envelope with `provider`, `externalEventId`, `subaccountId`, `organisationId`, `integrationConnectionId`, and per-type `messageMetadata`/`eventMetadata`/`mentionMetadata` objects. Code's union has flat field shape (no envelope, owner-only). Loses some downstream consumer affordances (e.g. integration_connection_id passing through).
   - Suggested approach: Confirm with downstream consumers whether the simplified shape suffices. If not, expand schema to match spec.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §7.1 amended 2026-05-13 (REQ-C1 amendment line 406) to ratify the flat discriminated union — no envelope. Code at `shared/types/externalSourceTrigger.ts` already matches.
 
-- [x] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2 [status:closed:pr:<pending>]
+- [x] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2 [status:closed:pr:324]
   - Spec section: §13.2
   - Gap: `0332_executive_assistant_seed.sql` `default_org_skill_slugs` lists 16 entries. Spec §13.2 names additionally: `read_inbox`, `send_email`, `read_data_source`, `web_search`, `fetch_url`, `scrape_structured`, `ask_clarifying_question`, `request_clarification`, `read_workspace`, `update_memory_block`, `notify_operator`, `read_priority_feed`, `search_agent_history`.
   - Suggested approach: Verify whether the missing skills are auto-enabled via universal-skills (per §13.2: "Universal skills per `server/config/universalSkills.ts` are always available regardless of allowlist"). If yes, allowlist is correct. If no, add the missing slugs to the seed.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql` (lines 26-50) writes the spec-conforming allowlist. Universal skills covered by `server/config/universalSkills.ts`.
 
-- [x] REQ-EA3 — Partial unique index axis differs from spec §13.4 [status:closed:pr:<pending>]
+- [x] REQ-EA3 — Partial unique index axis differs from spec §13.4 [status:closed:pr:324]
   - Spec section: §13.4 concurrency guard
   - Gap: Code uses `agents(organisation_id, owner_user_id) WHERE slug='executive-assistant'`. Spec specifies `agents(subaccount_id, owner_user_id) WHERE slug='executive-assistant'`. Difference matters when a user has access to multiple subaccounts in the same org: spec's axis allows one EA per subaccount per user; code allows only one EA per user per org.
   - Suggested approach: Align with the multi-subaccount product intent; if users routinely access multiple subaccounts, change the index. If V1 dogfood is single-subaccount only, leave as-is and amend spec.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §13.4 amended 2026-05-13 (REQ-EA3 amendment line 1187) to ratify per-org uniqueness because a single user has one EA across their entire org regardless of subaccount. Code at `migrations/0332_executive_assistant_seed.sql:64-66` already matches.
 
-- [x] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1 [status:closed:pr:<pending>]
+- [x] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1 [status:closed:pr:324]
   - Spec section: §13.1
   - Gap: Seed uses `every_5m`; spec says `on_login`. The `every_5m` policy creates more API load per user; `on_login` lazily refreshes on route entry (and is what `useHomeWidgets` invalidates on).
   - Suggested approach: Change seed to `on_login` unless there's a UX reason for periodic refresh.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql:19-25` writes `refreshPolicy: 'on_login'`.
 
-- [x] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded [status:closed:pr:<pending>]
+- [x] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded [status:closed:pr:324]
   - Spec section: §13.1 + §13.6 (display name renaming)
   - Gap: Seed hardcodes `"Personal Assistant"`; spec specifies `'${agent.displayName}'`. Once users rename their EA via Settings (§13.6), the home widget should reflect the new name.
   - Suggested approach: Update seed to use template string; ensure homeWidgetService substitutes `${agent.displayName}` when rendering.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Migration `0343_ea_home_widget_spec_align.sql:22` writes `titleTemplate: '${agent.displayName}'`.
 
-- [x] REQ-M15 — Personal nav group placement [status:closed:pr:<pending>]
+- [x] REQ-M15 — Personal nav group placement [status:closed:pr:324]
   - Spec section: §14.1
   - Gap: Spec says Personal group renders at the TOP of the sidebar, above Operate/Build/Govern. Code places it mid-list per `client/src/config/sidebar.ts` ordering comment ("top → work → projects → agents → personal → company → ...").
   - Suggested approach: Move Personal group higher in `buildNavItems` if matching the spec is important for the "first thing the user sees" framing.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Moved `personal` group from position 5 to position 2 in `client/src/config/sidebar.ts`. New order: `top → personal → work → projects → agents → company → ...`. Requires operator visual confirmation in the PR.
 
-- [x] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter [status:closed:pr:<pending>]
+- [x] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter [status:closed:pr:324]
   - Spec section: §7.3
   - Gap: Spec input shape includes `types?: Array<'public_channel' | 'private_channel' | 'mpim' | 'im'>`. Code's Zod schema has no `types` field — callers cannot filter channel types.
   - Suggested approach: Add `types` to the action Zod schema and pass through to the Slack handler.
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Code at `shared/types/slackAction.ts:3-9` already includes `types` field with the spec-named enum and `default(['public_channel'])`. Conformance log captured an outdated view.
 
-- [x] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4 [status:closed:pr:<pending>]
+- [x] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4 [status:closed:pr:324]
   - Spec section: §8.4 step 2
   - Gap: Spec says `code: 'missing_draft_context'` (422) for missing/invalid `eaDraftId` or owner mismatch. Code uses `DRAFT_NOT_APPROVED`, `DRAFT_NOT_FOUND`, `DRAFT_SEND_IN_FLIGHT` (no `missing_draft_context`). Also: no owner-mismatch check (`ea_drafts.ownerUserId !== agent.ownerUserId`).
   - Suggested approach: Either add the `missing_draft_context` mapping when `eaDraftId` is absent, OR amend spec to use the more granular code set the code emits. Add the owner-mismatch assertion either way (defence-in-depth).
   - **Closed 2026-05-15 (pa-v1-cleanup-batch):** Spec §8.4 + §24.2 + §24.9 amended 2026-05-13 (sixth-pass cleanup, REQ-CAL3-naming amendment) to ratify the `DRAFT_NOT_*` family used by shipped code. Owner-userId mismatch check is present at `server/services/calendar/calendarActionService.ts:178-183`.
 
-- [x] REQ-M9 — Stall job 7-day proposal expiry path [status:closed:pr:<pending>]
+- [x] REQ-M9 — Stall job 7-day proposal expiry path [status:closed:pr:324]
   - Spec section: §5.2 (`workflowGateStallNotifyJob` modification clause) + §20.4 + §22.2
   - Gap: Spec prose says stall job should "transition expired proposal rows (`createdAt + 7d`) to approval state `expired`" for EA-linked drafts. Code's `eaDraftStallResetHandler` only resets `sending → idle`. Existing `actions` primitive expiry may already cover this, but the spec's explicit clause says it should be added to the stall job for EA-linked rows.
   - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
