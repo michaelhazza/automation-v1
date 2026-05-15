@@ -88,3 +88,39 @@ Approve after F4, or merge with F4 deferred if this edge case is acceptable. No 
 - F4 auto-implemented per operator preference (technical, edge-case state correctness). The fix tracks the last-seeded `{orgId, clientId}` in a ref so we can distinguish "untouched seed" from "user-chosen override" and re-sync only the former when identity moves.
 - No user-facing product-surface decisions surfaced.
 
+### Round 3 — 2026-05-15
+
+**Verdict:** `APPROVED` — "No further findings. The F4 prevSeededRef approach is correct. APPROVED."
+
+**Findings:**
+
+| ID | Title | Severity | Category | Triage | Recommendation | Action |
+|---|---|---|---|---|---|---|
+| — | No new findings | — | — | — | — | — |
+
+**ChatGPT Feedback (raw):**
+
+```
+Round 3 verdict: No further findings. The F4 prevSeededRef approach is correct — tracking last-seeded IDs and only re-syncing when the current override still matches the previous seed cleanly handles the identity-change-while-open case without clobbering manual user picks. APPROVED. Resume finalisation.
+```
+
+**Decisions log:**
+- No further findings. All prior should-fix items confirmed closed.
+- Session complete: APPROVED.
+
+## Final Summary
+
+- **Verdict:** APPROVED
+- **Rounds:** 3
+- **Findings:** 4 should-fix (F1–F4) + 2 consider (T1–T2)
+- **Fixes applied:** F1 (CreateClientModal reset), F2 (refreshSubaccounts wired), F3 (NewBriefModal full-deps + wasOpenRef), F4 (prevSeededRef identity-change-while-open)
+- **Deferred:** T1 (PAGE-SPLITS-T1 in todo.md), T2 (PAGE-SPLITS-T2 in todo.md)
+- **User-facing decisions:** None — all findings were technical/internal state hygiene
+- **Completed:** 2026-05-15
+- **KNOWLEDGE.md updated:** yes (3 entries — modal-mounted-state-leak, prevSeededRef-pattern, page-split-slim-shell)
+- **architecture.md updated:** no — checked refreshSubaccounts (useLayoutIdentity internal detail, not in architecture.md), Layout.tsx (still accurate at §Permissions-driven nav), skill-analyzer (already marked retired), OperatorSettingsTab/MemoryUtilityTab (already in Key files per domain from S2); zero stale references
+- **capabilities.md updated:** n/a: internal refactor with no capability surface change
+- **integration-reference.md updated:** n/a
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** n/a
+- **frontend-design-principles.md updated:** no — no new UI hard rules or design patterns introduced; page-split construction is structural refactoring not a design decision
+

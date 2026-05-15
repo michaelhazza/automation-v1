@@ -104,3 +104,39 @@ Per `finalisation-coordinator` playbook from step 4 onward:
 - Confirm with operator (or surface via chatgpt-pr-review) whether the 1 directional gap in `feat-split-adminsubaccountdetailpage` should block or defer.
 - Verify the operator-tab and memory-utility-tab grafts work correctly in manual smoke (operator-driven; CI cannot test interactive UI).
 - Branch name is stale (`claude/synthetos-personal-assistant-0kaIM` — carried over from EA V1). This is harmless; PR title will identify the work correctly.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**Completed:** 2026-05-15
+**PR:** [#313](https://github.com/michaelhazza/automation-v1/pull/313)
+
+### chatgpt-pr-review outcome
+
+3 rounds. 4 should-fix findings (F1–F4) all implemented. 2 consider findings (T1–T2) deferred to `tasks/todo.md` as PAGE-SPLITS-T1 and PAGE-SPLITS-T2. Final verdict: APPROVED.
+
+Fixes applied:
+- **F1** — `CreateClientModal.tsx`: added open-effect reset to clear stale state on reopen
+- **F2** — `useLayoutIdentity.ts` + `Layout.tsx`: added `refreshSubaccounts()` method; wired into `onCreated` callback
+- **F3** — `NewBriefModal.tsx`: replaced `[open]`-only dep suppression with full-deps effect + `wasOpenRef` for transition tracking
+- **F4** — `NewBriefModal.tsx`: added `prevSeededRef` to track last-seeded org/client IDs; functional setState distinguishes untouched seed from user override
+
+Log: `tasks/review-logs/chatgpt-pr-review-page-splits-2026-05-14T21-53-53Z.md`
+
+### Doc-sync sweep
+
+- **architecture.md:** no — no stale references (skill-analyzer already marked retired from S2; OperatorSettingsTab/MemoryUtilityTab already in key-files-per-domain)
+- **capabilities.md:** n/a: internal refactor with no capability surface change
+- **integration-reference.md:** n/a
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md:** n/a
+- **frontend-design-principles.md:** no — no new design rules
+- **KNOWLEDGE.md:** yes (3 entries — modal-mounted-state-leak, prevSeededRef-pattern, page-split-slim-shell)
+
+### todo.md
+
+PAGE-SPLITS-T1 and PAGE-SPLITS-T2 remain open as deferred backlog items. No pre-existing items were closed by this build.
+
+### Status
+
+MERGE_READY — ready-to-merge label applied, CI monitoring in progress.

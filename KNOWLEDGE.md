@@ -1554,3 +1554,58 @@ Refresh this matrix every quarterly review. If a new critical path emerges and l
 **Pattern:** ChatGPT in manual-mode chatgpt-pr-review uses no shared session state between rounds — each upload is processed against a fresh chat. If a finding was rejected as a diff-only-reviewer false positive in Round N (e.g. "this PR claims `verify-org-id-source.sh` is wired but the diff doesn't show the wiring" — but the wiring lives in `main` at line 65 of `run-all-gates.sh` from a 2026-04-04 commit), the same finding will recur verbatim in Round N+1, N+2, etc. until something in the diff itself disproves it. Round-N+1's prompt cannot teach ChatGPT what Round-N learned because it doesn't carry the Round-N transcript. PR #307 saw T3/T4/T6 — three rounds, three identical misreads, rejection rationale ("verified via `git blame`, wired 2026-04-04 in commit 89a818cc") had to be re-emitted each time.
 **Rule.** When a finding is rejected as a diff-misread once, add a `## Pre-triage verification` block to the session log with the exact verification command (`git blame -L X,Y file` / `grep -n term file` / etc.) and its output. On Round N+1+ recurrences, auto-reject as duplicate per playbook step 1a — do NOT re-engage the substance, do NOT re-verify, do NOT escalate to operator. The operator made the call once; ChatGPT will keep raising it; the coordinator's job is to absorb the noise. A third occurrence of the same misread is the moment to commit to "ignore class of finding for remainder of this review" rather than triple-handling it.
 **Why it matters:** at one repeat the cost is small (a re-verification + log entry). At three repeats (PR #307 actually got there) the cost is two extra rounds the operator paid for, plus context burn on a defect that doesn't exist. Calibrate engagement to information yield: same finding + same rationale = zero new information regardless of round number.
+
+---
+
+## [2026-05-15] Pattern — Modal stays mounted on `return null` — local state leaks between opens
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F1 on PR #313 (page-splits build) — `CreateClientModal.tsx` post-split.
+**Pattern:** A component that renders `if (!open) return null` stays **mounted** in the React tree — only its DOM output is removed. State variables (`useState`) persist across close/reopen cycles. Pre-split, Layout.tsx unmounted modals by conditional JSX; post-split the extracted components remain in the JSX tree unconditionally and gate on `return null` internally. Without an explicit reset, stale values (error messages, half-filled fields, loading flags) reappear on the next open. Fix: add a `useEffect` on the `open` prop that resets all owned state when `open` becomes `true`:
+```ts
+useEffect(() => {
+  if (open) { setState1(''); setState2(''); setErrorState(''); }
+}, [open]);
+```
+**Why it matters:** the bug is invisible in initial testing (happy path always opens fresh) and only surfaces after a failed create or a close-without-submit. Extraction is the trigger — if the original host unmounted the component, the bug was invisible; once extracted and kept mounted, it's guaranteed.
+**Detection:** grep for extracted modal components that use `if (!open) return null` AND hold `useState` — every one is a candidate unless it has an `open`-effect reset.
+
+---
+
+## [2026-05-15] Pattern — prevSeededRef pattern: distinguish untouched seed from user override in a modal
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F3 / R2 F4 on PR #313 (page-splits build) — `NewBriefModal.tsx`.
+**Pattern:** When a modal seeds dropdown state from external identity (e.g. `activeOrgId`) on open, and must sync when identity changes while the modal is open, but must NOT clobber a value the user manually changed — track the last-seeded IDs in a `useRef`. On each effect run, compare the current override to the ref before updating:
+```ts
+const prevSeededRef = useRef<{ orgId: string | null } | null>(null);
+useEffect(() => {
+  // ...
+  const prev = prevSeededRef.current;
+  prevSeededRef.current = { orgId: identity.activeOrgId };
+  setOverride(current => {
+    if (opening) return nextValue;          // initial seed — always take
+    if (current === null) return nextValue; // null = data-race seed (wasn't loaded yet)
+    if (current.id === prev?.orgId) return nextValue; // untouched seed — re-sync
+    return current;                         // user changed it — leave alone
+  });
+}, [open, identity.activeOrgId, ...]);
+```
+The functional `setState` form is required — it receives the actual current state at dispatch time, avoiding stale-closure bugs when the effect fires with multiple dep changes at once.
+**Why it matters:** without `prevSeededRef`, any identity-change-while-open overwrites the user's manual selection. Without functional setState, the comparison uses the captured closure value which may be one render stale.
+
+---
+
+## [2026-05-15] Pattern — Page-split slim shell: original file becomes ~150-line orchestrator; sub-files live in a named sub-directory
+
+**Date:** 2026-05-15
+**Source:** PR #313 page-splits build — 16 client-side page-level files split along tab / region / atom seams.
+**Pattern:** When splitting a monolithic page component, the original file (e.g. `AdminSubaccountDetailPage.tsx`) becomes a **slim shell** (~150-200 lines) that imports and dispatches to sub-components. Sub-files live in a co-located directory named after the page domain (e.g. `client/src/pages/admin-subaccount-detail/`). The split seam hierarchy:
+- **Tab**: full-width content area that maps 1:1 to a tab in the page's tab bar (`OnboardingTab.tsx`, `EnginesTab.tsx`, etc.)
+- **Region**: logical sub-section within a tab (not a tab itself — e.g. `HeaderRegion.tsx`, `StatsRegion.tsx`)
+- **Atom**: the smallest extractable display unit within a region (e.g. `StatusBadge.tsx`, `CostPill.tsx`)
+
+Types shared between the shell and sub-components live in `types.ts` at the sub-directory level. The shell's ActiveTab union and TAB_LABELS record live in that `types.ts`, not in the shell itself.
+
+Tab additions that land on main while the branch is in flight must be **manually grafted** after the S2 merge: take `--ours` for the slim shell (preserving the split structure), then add the new tab's import + permission guard + conditional push + render block.
+**Why it matters:** without this pattern documented, a future reader of a slim shell will not know where the tab implementation lives (no inline code), and may try to add a tab to the shell directly rather than extracting to the sub-directory.
