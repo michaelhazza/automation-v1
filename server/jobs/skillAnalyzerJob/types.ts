@@ -1,9 +1,10 @@
-import type { skillAnalyzerResults } from '../../db/schema/index.js';
+import type { skillAnalyzerResults, skillAnalyzerJobs } from '../../db/schema/index.js';
 import type { ParsedSkill } from '../../services/skillParserServicePure.js';
 import type {
   LibrarySkillSummary,
   ValidationThresholds,
 } from '../../services/skillAnalyzerServicePure.js';
+import type { SkillAnalyzerConfig } from '../../db/schema/skillAnalyzerConfig.js';
 
 // ---------------------------------------------------------------------------
 // Local types — shared across all stage modules
@@ -51,6 +52,12 @@ export type ClassifiedResult = {
 // ---------------------------------------------------------------------------
 
 export interface JobContext {
+  /** The loaded job row — set in the orchestrator before Stage 1. */
+  job: typeof skillAnalyzerJobs.$inferSelect;
+
+  /** The config snapshot from the job row — set in the orchestrator before Stage 1. */
+  configSnapshot: SkillAnalyzerConfig | null;
+
   /** Parsed candidate skills for this run (capped at 500). */
   candidates: ParsedSkill[];
 
@@ -105,6 +112,19 @@ export interface JobContext {
    * Throws if the index was not hashed in Stage 2 (should be unreachable).
    */
   hashFromCandidateContent: (idx: number) => string;
+
+  /**
+   * Classified results from Stage 5 — populated by runStage5, consumed by
+   * Stages 5b, 5c, 7, 7b, and 8.
+   */
+  classifiedResults: ClassifiedResult[];
+
+  /**
+   * Set of candidate indices that already had rows written by a prior worker
+   * run (crash-resume). Populated by Stage 5, used by Stage 8 to avoid
+   * duplicate inserts.
+   */
+  completedCandidateIndices: Set<number>;
 }
 
 // ---------------------------------------------------------------------------
