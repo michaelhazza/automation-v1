@@ -33,6 +33,9 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 
+// ownerScope=user always returns the caller's own agents without an AGENTS_VIEW gate —
+// this is intentional: users should always be able to see their own PA/agent regardless of org
+// permissions (ADR decision, F5 plan §2 Decision 5).
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
   if (req.query.ownerScope === 'user') {
     const rows = await agentService.listOwnedByUser(req.orgId!, req.user!.id);

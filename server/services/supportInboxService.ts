@@ -127,6 +127,9 @@ export async function getInbox(
       and(
         eq(canonicalInboxes.id, inboxId),
         eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+        ...(principalCtx.subaccountId !== null
+          ? [eq(canonicalInboxes.subaccountId, principalCtx.subaccountId)]
+          : []),
       ),
     )
     .limit(1);
