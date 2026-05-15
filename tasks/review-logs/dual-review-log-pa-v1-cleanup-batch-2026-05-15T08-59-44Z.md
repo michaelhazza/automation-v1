@@ -3,6 +3,7 @@
 **Files reviewed:** branch `claude/pa-v1-cleanup-batch` against `origin/main` — 13 code files + 8 review/doc artifacts (full diff list per branch brief).
 **Iterations run:** 2/3
 **Timestamp:** 2026-05-15T08:59:44Z
+**Commit at finish:** d60e94b9
 
 ---
 
