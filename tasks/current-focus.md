@@ -3,16 +3,16 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
-last_updated: 2026-05-14
+status: NONE
+last_updated: 2026-05-15
 last_merge_ready_pr: #307
 last_merge_ready_slug: audit-prevention-gates-2026-05-14
 last_merge_ready_branch: audit-prevention-gates-2026-05-14
-last_merged_pr: #305
-last_merged_slug: pre-v1-lockdown-2026-05-14
-last_merged_branch: audit/full-pre-v1-lockdown-2026-05-14
-last_merged_at: 2026-05-14T07:36:27Z
-last_merged_commit: b48b49b9
+last_merged_pr: #307
+last_merged_slug: audit-prevention-gates-2026-05-14
+last_merged_branch: audit-prevention-gates-2026-05-14
+last_merged_at: 2026-05-14T15:35:00Z
+last_merged_commit: 4b3c4f2f
 -->
 
 # Current Focus
@@ -29,9 +29,11 @@ Per-session progress goes in `tasks/builds/<slug>/progress.md`, not here. Histor
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY**
+**Status:** **NONE**
 
-**Just labelled ready-to-merge:** PR #307 — `audit-prevention-gates-2026-05-14` (label applied 2026-05-14T12:58:46Z). 14 new CI prevention-gates landed (P1-P24 minus P6, dropped per §B1), 4 doc rules (P17-P20), 3 KNOWLEDGE patterns (P21-P23), ADR-0024. Phase 3 finalisation: S2 merge clean (37-commit drift → operator-override "force"; KNOWLEDGE.md / current-focus.md auto-resolved per known-shape table). G4 regression guard PASS. chatgpt-pr-review 3 rounds → APPROVED: Round 1 implemented 4 high-severity fixes (T1 madge fail-closed, F1 with-org-tx caller-walk constrained to declaring file + regression fixtures, F2 types-used strips barrel re-exports + regression tests, F3 jscpd fail-closed); Round 2 implemented 2 fixes (T5 AST identifier walk replacing substring `.includes`, F4 budget-gate expiry framework doc-soften with `references/test-gate-policy.md` carve-out + baseline-file header NOTE callouts); Round 3 APPROVED with no new findings (1 auto-rejected as triple-occurrence of the same `verify-org-id-source.sh` diff-misread — script was wired into `run-all-gates.sh` 40 days pre-branch in commit `89a818cc`). Deferred: `BUDGET-EXPIRY-ENFORCEMENT-1` (per-file budget gates have no calendar-expiry mechanism — doc now correctly reflects this; future opt-in). Doc-sync sweep: 9 yes / 7 n/a / 1 no-with-grep-rationale (17 rows covered). 1 new KNOWLEDGE pattern appended (manual-mode ChatGPT has no session memory across rounds — auto-reject duplicates without re-engaging). tasks/todo.md: 23 closed-entry placeholder tags updated branch → pr:307. CI will fire on the post-Phase-3 commit; auto-merge follows green.
+**Open follow-up:** PR #315 — `fix/audit-gate-baselines-2026-05-15`. Data-only baseline extension (3 files, +3736 lines) that missed the PR #307 merge cut-off. Extends `no-silent-failures.txt` (+18 entries) and `with-org-tx-or-scoped-db.txt` (+1838 entries) to the current pre-existing violation state; all entries carry `# expires: 2026-08-14`. No source changes. CI must turn green on `unit tests` (gate-script runner) before merging.
+
+**Prior merge:** PR #307 — `audit-prevention-gates-2026-05-14` (true-merge commit `4b3c4f2f`, 2026-05-14, operator-merged via GitHub UI). 14 new CI prevention-gates (P1-P24 minus P6), 4 doc rules (P17-P20), 3 KNOWLEDGE patterns (P21-P23), ADR-0024. chatgpt-pr-review 3 rounds → APPROVED: Round 1 (T1 madge fail-closed, F1 with-org-tx same-file caller-walk, F2 types-used strips barrel re-exports, F3 jscpd fail-closed); Round 2 (T5 AST identifier walk, F4 budget-gate doc-soften + `references/test-gate-policy.md` carve-out); Round 3 APPROVED with no new findings. CI fix-loop: 2 iterations (export fixture function for eslint; baseline extensions with operator pre-approval).
 
 **Prior merge:** PR #305 — `pre-v1-lockdown-2026-05-14` (squash-commit `b48b49b9`, 2026-05-14T07:36:27Z). Pre-v1 lockdown audit branch under the Light finalisation path (audit-runner pipeline; bypassed Phase 1/2/3 entry guard with operator approval). Pass 2 deliverables: deleted dead `client/src/components/skill-analyzer/` subtree (4,114 LOC, 11 files; superseded by PR #300 consolidation), declared 4 previously-undeclared deps (`express-rate-limit` + `zod-to-json-schema` as static `dependencies`; `docx` + `mammoth` as `optionalDependencies` with dynamic-import fallback), removed two stale `@ts-expect-error` annotations, bumped `docs/codebase-audit-framework.md` v1.3 → v1.4 (§2 Vitest + lint refresh). Pass 3 deferred: 24 symptom items + 24 prevention proposals routed to `tasks/todo.md`; prevention-gates spec at `tasks/builds/audit-prevention-gates-2026-05-14/spec.md` + 820-line plan.md (future Major build). pr-reviewer APPROVED (0 blocking / 1 should-fix on `pg` dep ownership / 3 nit). chatgpt-pr-review 2 rounds, 6 findings all REJECT with code-cited rationale (diff-only reviewer blind spots on deletion-heavy + manifest-only PRs). Doc-sync sweep: `architecture.md` Skill Analyzer section updated (UI-retired callout, 3 deleted-file rows removed from Files table, prose mirror-clause dropped); `docs/codebase-audit-framework.md` footer fixed v1.3 → v1.4. KNOWLEDGE.md +3 patterns from the chatgpt-pr-review loop (manual-mode context-loss between rounds; diff-only reviewer false-positive shapes; audit-branch Light finalisation recovery path). CI: green on first push (no fix-loop iterations).
 
