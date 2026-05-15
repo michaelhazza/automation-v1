@@ -68,6 +68,7 @@ LEGACY_ALLOWLIST=(
   "server/routes/webhooks/teamworkWebhook.ts"
   "server/services/adapters/apiAdapter.ts"
   "server/services/agentExecutionService.ts"
+  "server/services/agentExecutionService/runLifecycle/complete.ts"
   "server/services/agentExecutionServicePure.ts"
   "server/services/agentRunHandoffService.ts"
   "server/services/agentService.ts"
