@@ -1,133 +1,17 @@
 import { diffWordsWithSpace } from 'diff';
 import { ParsedSkill, contentHash } from './skillParserServicePure.js';
+import { type LibrarySkillSummary, type ClassificationResult, type SimilarityBand, cosineSimilarity, classifyBand, computeBestMatches, isValidClassification } from './skillAnalyzerServicePure/similarity.js';
+import { canonicalJSON } from './skillAnalyzerServicePure/serialisation.js';
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Service — Pure Functions
 // Zero DB/env/service imports. Fully testable in isolation.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Job status — single source of truth
-// ---------------------------------------------------------------------------
-// Canonical definition of skill_analyzer_jobs.status values. MUST stay in
-// sync with the `$type<>` union in server/db/schema/skillAnalyzerJobs.ts.
-// Prior to centralisation this list was redeclared in three places
-// (service type alias, schema `$type<>`, sweep module) which let the sweep
-// silently diverge — the original `matching` typo missed an entire stage.
-// See tasks/review-logs/chatgpt-pr-review-bugfixes-april26-*.md Round 1
-// Finding 2.
-
-/** Statuses the pipeline writes while actively working a job. A worker
- *  crash in any of these states leaves a row that the stale-job sweep
- *  must reap. Excludes `pending` (queued, no worker to die) and the
- *  terminals (`completed`, `failed`). */
-export const SKILL_ANALYZER_MID_FLIGHT_STATUSES = [
-  'parsing',
-  'hashing',
-  'embedding',
-  'comparing',
-  'classifying',
-] as const;
-
-/** Terminal statuses — no further work will occur. */
-export const SKILL_ANALYZER_TERMINAL_STATUSES = ['completed', 'failed'] as const;
-
-/** All valid values of `skill_analyzer_jobs.status`. */
-export const SKILL_ANALYZER_JOB_STATUSES = [
-  'pending',
-  ...SKILL_ANALYZER_MID_FLIGHT_STATUSES,
-  ...SKILL_ANALYZER_TERMINAL_STATUSES,
-] as const;
-
-export type SkillAnalyzerMidFlightStatus =
-  typeof SKILL_ANALYZER_MID_FLIGHT_STATUSES[number];
-export type SkillAnalyzerTerminalStatus =
-  typeof SKILL_ANALYZER_TERMINAL_STATUSES[number];
-export type SkillAnalyzerJobStatus = typeof SKILL_ANALYZER_JOB_STATUSES[number];
-
-export function isSkillAnalyzerTerminalStatus(
-  status: string,
-): status is SkillAnalyzerTerminalStatus {
-  return (SKILL_ANALYZER_TERMINAL_STATUSES as readonly string[]).includes(status);
-}
-
-export function isSkillAnalyzerMidFlightStatus(
-  status: string,
-): status is SkillAnalyzerMidFlightStatus {
-  return (SKILL_ANALYZER_MID_FLIGHT_STATUSES as readonly string[]).includes(status);
-}
-
-/** Summary of a library skill (system or org) for comparison. */
-export interface LibrarySkillSummary {
-  id: string | null;           // null for system skills
-  slug: string;
-  name: string;
-  description: string;
-  definition: object | null;
-  instructions: string | null;
-  isSystem: boolean;
-}
-
-/** Result of LLM classification. */
-export interface ClassificationResult {
-  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
-  confidence: number;
-  reasoning: string;
-}
-
-const VALID_CLASSIFICATIONS = ['DUPLICATE', 'IMPROVEMENT', 'PARTIAL_OVERLAP', 'DISTINCT'] as const;
-
-function isValidClassification(v: unknown): v is ClassificationResult['classification'] {
-  return typeof v === 'string' && (VALID_CLASSIFICATIONS as readonly string[]).includes(v);
-}
-
-/** Deterministic JSON stringification with sorted object keys. Used for
- *  semantic deep-equality of plain JSON objects where key order is not
- *  meaningful (e.g. tool-definition shapes echoed back by an LLM). */
-function canonicalJSON(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      out[key] = sortKeys((value as Record<string, unknown>)[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-/** Three similarity bands for controlling LLM call volume. */
-export type SimilarityBand = 'likely_duplicate' | 'ambiguous' | 'distinct';
-
-// ---------------------------------------------------------------------------
-// Similarity
-// ---------------------------------------------------------------------------
-
-/** Cosine similarity using dot product (valid for OpenAI embeddings which are
- *  pre-normalized to unit length). Returns 0.0–1.0. */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length || a.length === 0) return 0;
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-  }
-  // Clamp to [0, 1] to handle floating point drift
-  return Math.max(0, Math.min(1, dot));
-}
-
-/** Classify similarity score into a band.
- *  >0.92 → likely_duplicate (confirm via LLM, but probably skip import)
- *  0.60–0.92 → ambiguous (full LLM analysis needed)
- *  <0.60 → distinct (skip LLM, classify as DISTINCT directly) */
-export function classifyBand(similarity: number): SimilarityBand {
-  if (similarity > 0.92) return 'likely_duplicate';
-  if (similarity >= 0.60) return 'ambiguous';
-  return 'distinct';
-}
+// --- Transitional re-exports (removed when barrel is rewritten in Chunk 6) ---
+export { SKILL_ANALYZER_MID_FLIGHT_STATUSES, SKILL_ANALYZER_TERMINAL_STATUSES, SKILL_ANALYZER_JOB_STATUSES, type SkillAnalyzerMidFlightStatus, type SkillAnalyzerTerminalStatus, type SkillAnalyzerJobStatus, isSkillAnalyzerTerminalStatus, isSkillAnalyzerMidFlightStatus } from './skillAnalyzerServicePure/statuses.js';
+export { type LibrarySkillSummary, type ClassificationResult, type SimilarityBand, cosineSimilarity, classifyBand, computeBestMatches } from './skillAnalyzerServicePure/similarity.js';
+export { canonicalJSON, sortKeys } from './skillAnalyzerServicePure/serialisation.js';
 
 /** Derive a human-readable reason for a classification API failure.
  *  Pass the caught error, or null if the parse step returned null
@@ -140,43 +24,6 @@ export function deriveClassificationFailureReason(
   if (e.code === 'CLASSIFY_TIMEOUT') return 'timed_out';
   if (e?.statusCode === 429) return 'rate_limit';
   return 'unknown';
-}
-
-/** Compute all pairwise similarities between candidates and library.
- *  For each candidate, returns only the single best-matching library skill.
- *  Results are sorted by candidate index. */
-export function computeBestMatches(
-  candidateEmbeddings: Array<{ index: number; embedding: number[] }>,
-  libraryEmbeddings: Array<{ id: string | null; slug: string; name: string; embedding: number[] }>
-): Array<{
-  candidateIndex: number;
-  libraryId: string | null;
-  librarySlug: string | null;
-  libraryName: string | null;
-  similarity: number;
-  band: SimilarityBand;
-}> {
-  return candidateEmbeddings.map((candidate) => {
-    let bestSimilarity = 0;
-    let bestLibrary: (typeof libraryEmbeddings)[0] | null = null;
-
-    for (const lib of libraryEmbeddings) {
-      const sim = cosineSimilarity(candidate.embedding, lib.embedding);
-      if (sim > bestSimilarity) {
-        bestSimilarity = sim;
-        bestLibrary = lib;
-      }
-    }
-
-    return {
-      candidateIndex: candidate.index,
-      libraryId: bestLibrary?.id ?? null,
-      librarySlug: bestLibrary?.slug ?? null,
-      libraryName: bestLibrary?.name ?? null,
-      similarity: bestSimilarity,
-      band: classifyBand(bestSimilarity),
-    };
-  });
 }
 
 // ---------------------------------------------------------------------------
