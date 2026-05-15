@@ -1,6 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { logger } from '../../../lib/logger.js';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillVersioningHelper } from '../../skillVersioningHelper.js';
 import { systemSkills } from '../../../db/schema/systemSkills.js';
 import { systemAgents } from '../../../db/schema/systemAgents.js';
@@ -174,7 +175,7 @@ async function runExecute(params: {
   const failResult = async (resultId: string, errMsg: string): Promise<void> => {
     errors.push({ resultId, error: errMsg });
     failed++;
-    await db
+    await getOrgScopedDb('skillAnalyzerService.executeApprovedResults.failResult')
       .update(skillAnalyzerResults)
       .set({ executionResult: 'failed', executionError: errMsg })
       .where(eq(skillAnalyzerResults.id, resultId));
@@ -261,7 +262,7 @@ async function runExecute(params: {
     // DUPLICATE: skip
     // -----------------------------------------------------------------------
     if (result.classification === 'DUPLICATE') {
-      await db
+      await getOrgScopedDb('skillAnalyzerService.executeApprovedResults.skipDuplicate')
         .update(skillAnalyzerResults)
         .set({ executionResult: 'skipped' })
         .where(eq(skillAnalyzerResults.id, result.id));
@@ -347,7 +348,7 @@ async function runExecute(params: {
             tx,
           });
         });
-        await db
+        await getOrgScopedDb('skillAnalyzerService.executeApprovedResults.markUpdated')
           .update(skillAnalyzerResults)
           .set({ executionResult: 'updated', resultingSkillId: result.matchedSkillId })
           .where(eq(skillAnalyzerResults.id, result.id));
@@ -586,7 +587,7 @@ async function runExecute(params: {
 
           return created;
         });
-        await db
+        await getOrgScopedDb('skillAnalyzerService.executeApprovedResults.markCreated')
           .update(skillAnalyzerResults)
           .set({ executionResult: 'created', resultingSkillId: newSkill.id })
           .where(eq(skillAnalyzerResults.id, result.id));

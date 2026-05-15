@@ -1,5 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../../../db/schema/index.js';
 import { systemSkills } from '../../../db/schema/systemSkills.js';
 import { skillAnalyzerServicePure } from '../../skillAnalyzerServicePure.js';
@@ -154,7 +155,7 @@ export async function retryClassification(
   if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
   const job = jobRows[0];
 
-  const resultRows = await db
+  const resultRows = await getOrgScopedDb('skillAnalyzerService.retryClassification.read')
     .select()
     .from(skillAnalyzerResults)
     .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
@@ -238,7 +239,7 @@ export async function retryClassification(
     ? [CLASSIFIER_FALLBACK_WARNING]
     : null;
 
-  await db
+  await getOrgScopedDb('skillAnalyzerService.retryClassification.update')
     .update(skillAnalyzerResults)
     .set({
       classification: classification.classification,
@@ -279,7 +280,7 @@ export async function bulkRetryFailedClassifications(
     .limit(1);
   if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
 
-  const failedResults = await db
+  const failedResults = await getOrgScopedDb('skillAnalyzerService.bulkRetryFailedClassifications.readFailed')
     .select({ id: skillAnalyzerResults.id })
     .from(skillAnalyzerResults)
     .where(
@@ -303,7 +304,7 @@ export async function bulkRetryFailedClassifications(
     }
   }
 
-  const remaining = await db
+  const remaining = await getOrgScopedDb('skillAnalyzerService.bulkRetryFailedClassifications.readRemaining')
     .select({ id: skillAnalyzerResults.id })
     .from(skillAnalyzerResults)
     .where(
