@@ -2818,7 +2818,8 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 | `server/services/skillAnalyzerService/` | Sub-modules: `types`, `hashing`, `helpers/slugify`, `execute/{approved,retry,unlock}`, `jobLifecycle/{create,resume,get}`, `persistence/{progress,results,inFlight}`, `results/{warnings,updateProposal,setAction,merge}` |
 | `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
 | `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
-| `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
+| `server/jobs/skillAnalyzerJob.ts` | Barrel re-export (1 LOC); pipeline split into stage modules under `skillAnalyzerJob/`. Exports: `processSkillAnalyzerJob` |
+| `server/jobs/skillAnalyzerJob/` | Stage modules: `orchestrator`, `types`, `helpers`, `stage1Parse`, `stage2Hash`, `stage3Embed`, `stage4Compare`, `stage4bNonSkillDetect`, `stage5Classify`, `stage5bCrossBatchCollision`, `stage5cSourceFork`, `stage6AgentEmbed`, `stage7AgentPropose`, `stage7bAgentSuggest`, `stage8WriteResults`, `stage8bClusterRecommend` |
 
 ### Tests
 

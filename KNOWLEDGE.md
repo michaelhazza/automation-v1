@@ -1795,6 +1795,31 @@ grep -rn "await db\." server/services/<serviceTree>/ --include="*.ts" | grep -v 
 Any remaining `await db.` calls against the RLS-protected table name in the output = missed sites.
 **Why it matters:** each missed site silently drops writes and returns empty reads. With a large service tree split across many sub-modules, an exhaustive pre-fix grep is cheaper than multiple chatgpt-pr-review rounds catching the same missed pattern.
 
+
+---
+
+## [2026-05-15] Pattern — When telling builder to "move X to file Y", spell out BOTH halves explicitly
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch (Wave 2 Session B) — Chunk W2 required a second builder round because the first builder created the new files but left the original code in place, producing 567 lines of duplicated code.
+**Pattern:** When the plan says symbols "move to" a new file, builders sometimes interpret "move" as "create the destination" without removing from the source. The result is silently passing G1 (no errors, types align) while the barrel is bloated and the new files unused.
+**Rule.** Every builder invocation that moves code MUST state both halves explicitly:
+1. "Create the new file X with these symbols"
+2. "Remove the SAME symbols from file Y AND wire Y to import them from X"
+3. "Verify with `wc -l Y` — barrel should drop substantially"
+**Why it matters:** silent duplication compounds across chunks. G1 (lint + typecheck) doesn't fail on duplicated logic. By the time spec-conformance catches it via LOC budget, N misplaced commits have already landed.
+
+---
+
+## [2026-05-15] Pattern — Static gate path-pattern regexes need updating when files move to subdirectories
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch — pr-reviewer R1 found a BLOCKING bug: `server/services/providers/callerAssert.ts:22` regex `/server[/\]services[/\]llmRouter\./` no longer matched after `routeCall` moved from `llmRouter.ts` to `llmRouter/routeCall.ts` (`llmRouter` followed by `/`, not `.`).
+**Pattern:** Runtime guards that walk V8 stack frames to enforce caller-source invariants use regex patterns over file paths. When a god-file is split into a barrel + sub-directory, the literal path in stack frames changes from `<service>.ts:LINE` to `<service>/<submodule>.ts:LINE`. Single-character matchers (`\.`) that anchored on the old shape silently fail to match the new shape.
+**Rule.** Before splitting any service that has a runtime caller-assertion guard, grep for the guard's regex and update it to match BOTH the barrel and the sub-tree: `/server[/\]services[/\]<name>([/\]|\.)/` — either slash or dot after the service name.
+**Other locations to audit at split time:**
+- `scripts/gates/verify-no-direct-adapter-calls.sh` (and similar static gate scripts that grep file paths)
+- `scripts/.gate-baselines/*.txt` (positional entries reference old paths)
+- `architecture.md` references with line markers
+**Why it matters:** the regex bug shipped clean static-gate output AND clean type-checks AND clean lint. It would only have shown up at runtime, on the first LLM call in any non-test environment, throwing `ADAPTER_DIRECT_CALL` and breaking every agent in production.
 ### [2026-05-15] Pattern — Conformance log can outlive the spec it audits
 
 **Date:** 2026-05-15
@@ -1824,3 +1849,62 @@ The provisioning-code blind spot is the most dangerous: typecheck doesn't catch 
 **False-alarm trap:** the convention LOOKS unsafe ("won't the down destructively roll back an upgraded DB on a later migrate pass?"). It doesn't, because `schema_migrations` tracks applied filenames and only applies *pending* files. Once a `.down.sql` is recorded as applied, it never runs again. The only real risk is the contrived case where `.sql` was deployed before `.down.sql` existed in the repo — both `0360_*.sql` AND `0360_*.down.sql` shipped together in chunk 1 (`44e79c4f`), so this branch's deployments cannot hit it.
 
 The reviewer's "best fix" (exclude `*.down.sql` from forward discovery in the runner, remove the workaround comments) is a ~92-file convention change deserving its own ADR + dedicated build. Out of scope for any single feature PR. Reference: `migrations/0358_skill_merge_consolidation.down.sql` header documents the same convention.
+
+
+---
+
+## [2026-05-15] Pattern — When telling builder to move X to file Y, spell out BOTH halves explicitly
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch (Wave 2 Session B) — Chunk W2 required a second builder round because the first builder created the new files but left the original code in place, producing 567 lines of duplicated code.
+**Pattern:** When the plan says symbols move to a new file, builders sometimes interpret move as create the destination without removing from the source. The result is silently passing G1 (no errors, types align) while the barrel is bloated and the new files unused.
+**Rule.** Every builder invocation that moves code MUST state both halves explicitly:
+1. Create the new file X with these symbols
+2. Remove the SAME symbols from file Y AND wire Y to import them from X
+3. Verify with — barrel should drop substantially
+**Detection.** After a move-chunk, run:
+
+**Why it matters:** silent duplication compounds across chunks — by the time the final-chunk verification runs, the barrel is bloated and the sub-modules are dead code that imports cleanly but never executes. The builder won't catch it because G1 (lint + typecheck) doesn't fail on duplicated logic. Spec-conformance might catch it via LOC budget, but only after the cost of N misplaced commits.
+
+---
+
+## [2026-05-15] Pattern — Static gate path-pattern regexes need updating when files move to subdirectories
+**Date:** 2026-05-15
+**Source:** build: split-services-soft-cap-batch (Wave 2 Session B) — pr-reviewer R1 found a BLOCKING bug: `server/services/providers/callerAssert.ts:22` regex `/server[/\]services[/\]llmRouter\./` no longer matched after `routeCall` moved from `server/services/llmRouter.ts` to `server/services/llmRouter/routeCall.ts` (`llmRouter` followed by `/`, not `.`).
+**Pattern:** Runtime guards that walk V8 stack frames to enforce caller-source invariants use regex patterns over file paths. When a god-file is split into a barrel + sub-directory, the literal path in stack frames changes from `<service>.ts:LINE` to `<service>/<submodule>.ts:LINE`. Single-character matchers (`\.`) that anchored on the old shape silently fail to match the new shape.
+**Rule.** Before splitting any service that has a runtime caller-assertion guard, grep for the guard's regex and update it to match BOTH the barrel and the sub-tree:
+```bash
+grep -rnE 'service-name-pattern' server/services/providers/ server/lib/ server/middleware/
+```
+Widen the regex to allow both forms: `/server[/\]services[/\]<name>([/\]|\.)/` — either slash or dot after the service name.
+**Other locations to audit at split time:**
+- `scripts/gates/verify-no-direct-adapter-calls.sh` (and similar static gate scripts that grep file paths)
+- `scripts/.gate-baselines/*.txt` (positional entries reference old paths)
+- `architecture.md` references with line markers
+**Why it matters:** the regex bug shipped clean static-gate output AND clean type-checks AND clean lint. It would only have shown up at runtime, on the first LLM call in any non-test environment, throwing `ADAPTER_DIRECT_CALL` and breaking every agent in production.
+
+---
+
+## [2026-05-16] Pattern — Third-opinion review on a structural refactor: verify "introduced vs pre-existing" before accepting any finding
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #327 (slug: split-services-soft-cap-batch) — chatgpt-pr-review Round 1 flagged 3 findings as if they were new (F1 stage5cSourceFork name-collision filter; T1 budget_block_upsert_ghost observability gap; T2 WORKSPACE_MIGRATION_CONCURRENCY unbounded env var). Verification against `origin/main` confirmed all three were byte-identical on main — the structural split moved the buggy lines verbatim into the new sibling files.
+**Pattern:** Third-opinion external reviewers (ChatGPT-web, Codex, any model with no git-history access) see the diff but not the blame. For a pure-barrel split, the diff *looks* like new code to them, but `git blame` reveals the lines existed pre-split. Accepting a third-opinion finding without verification can balloon a structural-refactor PR's scope and violate CLAUDE.md §6 (surgical changes).
+**Rule.** For every third-opinion finding on a refactor / split / move PR, run before accepting:
+```bash
+git diff main -- <flagged-file> | grep -A2 -B2 '<flagged-line-fragment>'
+```
+- **Introduced by this PR** → implement in this PR.
+- **Pre-existing, merely moved** → defer to `tasks/todo.md` as a follow-up. Refactor PRs MUST NOT grow scope to fix bugs that lived on main.
+**Why it matters:** chatgpt-pr-review on PR #327 produced 3 findings, all pre-existing on main. Accepting them would have expanded the PR from "5 god-files split" to "5 god-files split + 3 unrelated bug fixes," muddying the "no behavioural change" claim AND coupling the structural refactor's review to three unrelated correctness investigations. The follow-ups now sit in `tasks/todo.md` with full context and can be batched into a focused "diagnostics hardening" PR.
+
+---
+
+## [2026-05-16] Pattern — Comment-block boundaries between import + re-export can fool external reviewers into "unused imports" false positives
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #327 — chatgpt-pr-review Round 2 F1 claimed `server/services/llmRouter.ts` had unused imports of `TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES`. False positive: the barrel imports them on lines 1-2 then re-exports them on lines 38-39 (the canonical "thin barrel + sibling tree" pattern surfaces schema constants through the service boundary). ChatGPT stopped scanning at the comment-block boundary near line 33-37 and missed the bottom-of-file re-exports.
+**Pattern:** Barrel files often have a structure of `import → sub-module re-exports → header comment block → schema/type re-exports`. External reviewers reading raw diffs without an AST can mistake a comment block for the file's effective end, returning a confident-but-wrong "unused import" claim. Applying the suggested fix would break the build (`Cannot find name 'TASK_TYPES'`).
+**Rule.** Before accepting any "unused import" finding from an external reviewer on a barrel file:
+1. Read the file end-to-end. Look for `export { X }` lines BELOW comment blocks.
+2. Run `npm run typecheck` — TypeScript treats import + re-export as a use; a passing typecheck disproves the claim.
+3. Reject with evidence quoting both the import line and the re-export line.
+**Why it matters:** the barrel pattern is the project's canonical service-API surface. A "fix" that removes the schema re-exports would silently break every downstream caller that uses the barrel as the single import source per CLAUDE.md § Architecture Rules. The verification step (read the WHOLE file, not just where the reviewer pointed) catches this before damage.
+

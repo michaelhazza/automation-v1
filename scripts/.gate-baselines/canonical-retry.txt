@@ -12,13 +12,13 @@ server/services/agentBeliefService.ts:124:Raw retry counter declaration — use 
 # expires: 2026-08-14
 server/services/agentScheduleService.ts:236:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService.ts:105:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/backend.ts:24:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService.ts:263:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/executionProcessor.ts:131:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService.ts:1095:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:558:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService.ts:1130:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:593:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
 server/services/routerJobService.ts:213:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
