@@ -101,3 +101,19 @@ Ready for finalisation-coordinator.
 **Required reviewers in Phase 3:** chatgpt-pr-review (manual ChatGPT-web rounds — operator-driven)
 
 The branch is in a known-good state: G2 clean, all reviewers green, doc-sync recorded, 2 KNOWLEDGE.md patterns appended. Ready to merge after chatgpt-pr-review and `tasks/todo.md` closures land.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #327
+**chatgpt-pr-review log:** tasks/builds/split-services-soft-cap-batch/chatgpt-pr-review-log.md (also mirrored at tasks/review-logs/chatgpt-pr-review-claude-split-services-soft-cap-batch-2026-05-15T21-22-27Z.md)
+**spec_deviations reviewed:** n/a — none recorded in Phase 2
+**Doc-sync sweep verdicts:** 16 rows recorded (1 yes architecture.md, 1 yes KNOWLEDGE.md (2 entries), 1 n/a capabilities.md (internal refactor with no capability surface change), 1 no CLAUDE.md/DEVELOPMENT_GUIDELINES.md with substantive rationale, 12 n/a with trigger-not-applicable rationales). Full list in chatgpt-pr-review log Final Summary.
+**KNOWLEDGE.md entries added:** 2 in Phase 2 (builder move-semantics + path-pattern regex split-time fix), 2 in Phase 3 (third-opinion verify-introduced-vs-pre-existing + barrel comment-block re-export misread)
+**tasks/todo.md items removed/closed:** 3 — Area 10 soft-cap 5-of-10 partial closure, SA3 (skillAnalyzerJob.ts split), REQ #7 (positional gate-baseline drift rebased in `fe6357ca`)
+**Compound Learning Feedback proposals:** 4 rows in progress.md (3 `agent-instruction` + 1 `hook-or-grep-gate`; 0 auto-applied per v1 binding)
+**chatgpt-pr-review rounds:** 2 — R1 deferred 3 findings as pre-existing on main (F1/T1/T2 routed to tasks/todo.md), R2 rejected 1 finding as misread (lines 38-39 of llmRouter.ts re-export the imports ChatGPT claimed unused; `npm run typecheck` passes cleanly)
+**S2 branch-sync:** clean — branch was 0 commits behind main at Phase 3 entry (commit `fc6a93a7` from earlier S2 sync already merged main cleanly)
+**G4 regression guard:** PASS — `npm run lint` 0 errors / 882 warnings; `npm run typecheck` clean
+**ready-to-merge label applied at:** 2026-05-15T21:50:30Z (PENDING operator approval — per operator standing instruction `feedback_ready_to_merge_label.md`, label is operator-controlled; coordinator paused at Step 10.3 to ask)

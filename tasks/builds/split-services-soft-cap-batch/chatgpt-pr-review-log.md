@@ -176,3 +176,48 @@ No code changes this round — scope guard does not fire.
 
 ---
 
+## Final Summary
+
+**Verdict:** APPROVED — operator finalised after Round 2.
+
+**Rounds:** 2.
+**Auto-accepted (technical):** 0 implemented, 1 rejected, 3 deferred (R1 F1/T1/T2 all pre-existing on main, routed to tasks/todo.md).
+**User-decided:** 0 / 0 / 0.
+**Commits:** `85c4130e` (R1 log + tasks/todo.md deferrals), `5e3a0002` (R2 log).
+
+### Doc-sync sweep verdicts (canonical 16-row table per docs/doc-sync.md)
+
+- KNOWLEDGE.md updated: yes (2 entries — "When telling builder to move X to Y, spell out BOTH halves" + "Static gate path-pattern regexes need updating when files move to subdirectories")
+- architecture.md updated: yes (Key files per domain — skillAnalyzerJob.ts row replaced with barrel + sibling-tree pair, mirroring skillAnalyzerService precedent at lines 2817-2818)
+- capabilities.md updated: n/a: internal refactor with no capability surface change
+- integration-reference.md updated: n/a — no integration behaviour change; no scope / skill / status / write-capability / OAuth provider / MCP preset / capability slug / alias added or modified
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked terms `split-service`, `barrel`, `sibling-tree`, `lifecycle-declaration`, `soft-cap` against both docs; zero stale references and no convention / build-discipline / agent-fleet / locked-rule change introduced by this structural refactor
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy / `// reason:` comment-format / disable-pattern change
+- frontend-design-principles.md updated: n/a — server-only refactor; no UI pattern / hard rule / worked example introduced
+- KNOWLEDGE.md updated (duplicate of first row by §85 contract — kept for grep compliance): yes (2 entries, see above)
+- spec-context.md updated: n/a — not a spec-review session
+- docs/decisions/ updated: n/a — no durable architectural choice locked; the soft-cap split policy itself was locked in a prior ADR
+- docs/context-packs/ updated: n/a — no anchor changes in architecture.md (Key-files row replaced in place; section headings and IDs unchanged)
+- references/test-gate-policy.md updated: n/a — no test-gate posture change; forbidden / allowed lists unchanged
+- references/spec-review-directional-signals.md updated: n/a — no spec-reviewer cycle in this build (Phase 1 ran in autonomous mode per operator override `yes-2026-05-15T-autonomous-mode-directive`; chatgpt-spec-review handled the spec-side second-opinion pass)
+- docs/incident-response.md updated: n/a — no SEV matrix / on-call rotation / timeline-log format / post-mortem template / escalation path change
+- docs/testing-transition-plan.md updated: n/a — no migration trigger / test-inventory sequencing / per-area effort estimate / phasing decision change
+- .claude/FRAMEWORK_VERSION + CHANGELOG.md updated: n/a — no framework-level change (repo-specific structural split does not bump framework version per CLAUDE.md § Framework version)
+- scripts/verify-* (15 gates) updated: n/a — only positional gate-baseline rebases on `scripts/.gate-baselines/canonical-retry.txt` (4→4 entries) and `scripts/.gate-baselines/no-silent-failures.txt` (1→1 entry); no gate added / removed / renamed and no suppression-grammar / baseline-expiry-policy change
+
+**Doc-sync gate:** PASS — all 16 canonical rows have valid verdicts (`yes` or `n/a` with substantive rationale); zero missing.
+
+### KNOWLEDGE.md patterns added this build: 2
+
+- `[2026-05-15] Pattern — when telling builder to MOVE X to Y, spell out BOTH halves` (builder semantics)
+- `[2026-05-15] Pattern — static gate path-pattern regexes must be updated when files move to subdirectories` (callerAssert.ts split-time fix)
+
+### tasks/todo.md items added this build: 3 (deferred from R1)
+
+- SOFTCAP-CHATGPT-R1-F1 — stage5cSourceFork name-collision filter bug (pre-existing)
+- SOFTCAP-CHATGPT-R1-T1 — budget_block_upsert_ghost observability (pre-existing)
+- SOFTCAP-CHATGPT-R1-T2 — WORKSPACE_MIGRATION_CONCURRENCY env-var clamp (pre-existing)
+
+### tasks/todo.md items removed this build: TBD (Step 8 cleanup pending)
+
+---
