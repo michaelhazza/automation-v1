@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/knip/schema.json",
+  "entry": [
+    "server/index.ts",
+    "client/src/main.tsx",
+    "worker/src/index.ts",
+    ".claude/hooks/*.js",
+    "server/config/*.ts",
+    "scripts/__fixtures__/*"
+  ],
+  "project": [
+    "server/**/*.ts",
+    "client/src/**/*.ts",
+    "client/src/**/*.tsx",
+    "shared/**/*.ts",
+    "worker/src/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mjs",
+    ".claude/hooks/**/*.js"
+  ],
+  "ignore": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**",
+    "**/node_modules/**",
+    "dist/**",
+    "migrations/**"
+  ]
+}

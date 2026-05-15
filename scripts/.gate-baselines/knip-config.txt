@@ -1,0 +1,5 @@
+# Baseline for P16 verify-knip-config.sh
+# Seeded 2026-05-14 — gate asserts knip.json exists and declares required entry surfaces.
+# This gate has no suppression mechanism; baseline is informational only.
+# knip.json introduced at initial seeding with all required surfaces declared.
+# No pre-existing violations to baseline.

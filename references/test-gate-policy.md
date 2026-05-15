@@ -56,3 +56,22 @@ Agent files and specs that need to enforce the rule should link here rather than
 ```
 
 Agents may add a one-line clarification specific to their step (e.g. "step 5 re-verification is limited to reading the affected file back; never runs gates"), but should not duplicate the forbidden / allowed lists.
+
+## Audit-prevention-gates policy (2026-05-14)
+
+Introduced by the `audit-prevention-gates-2026-05-14` build. The three contracts below extend (do not replace) the canonical "Test gates are CI-only" rule.
+
+**Baseline expiry policy.** The expiry framework applies to **violation-list baselines** — baselines under `scripts/.gate-baselines/<guard-id>.txt` whose entries match the canonical violation-key format `<relative-path>:<line>:<message>`. Each such entry MUST be preceded by an `# expires: YYYY-MM-DD` directive on the line above. Entries become warning (exit 2 contribution) at expiry; entries become error (exit 1 contribution) after `GATE_GRACE_DAYS` (default 30) past expiry. Implementation: `scripts/lib/guard-utils.sh::check_expiring_baseline` (introduced by chunk 1).
+
+**Per-file count baselines are out of scope for the expiry framework.** Baselines under `scripts/.gate-baselines/` that use the `<relative-path>:<count>` format — currently `any-budget.txt` and `marker-budget.txt`, consumed by `scripts/verify-any-budget.sh` (P9) and `scripts/verify-marker-budget.sh` (P10) via `scripts/lib/per-file-counter-pure.mjs::parsePerFileBudgetBaseline` — promote on **count growth**, not on calendar expiry. Any `# expires: YYYY-MM-DD` lines in those two files are informational soft-deadlines for human review only; `parsePerFileBudgetBaseline` strips them and `diffAgainstBaseline` compares counts only. Adding expiry enforcement to these gates is tracked as a follow-up — see `tasks/todo.md § BUDGET-EXPIRY-ENFORCEMENT-1`. New per-file count gates SHOULD NOT add `# expires:` directives until that follow-up lands.
+
+**Suppression annotation grammar.** Five forms supported in declining preference order:
+- T1 preferred: `// guard-ignore: <guard-id> reason="<rationale>"`
+- ADR shape: `// guard-ignore: <guard-id> ADR-<id> <rationale>` (used by gates that require ADR sign-off for new baselines)
+- Legacy with `reason="..."`: same shape, accepted for transition
+- T0 deprecated: `// guard-ignore: <guard-id>` (no reason) — gates emit `error` severity on T0-only suppressions
+- Next-line and file-scoped: documented in the `guard-utils.sh` header
+
+Cross-reference the suppression-grammar header block at the top of `scripts/lib/guard-utils.sh`.
+
+**Warning-first promotion policy.** New gates ship with `default_exit_code=2` (warning). Promotion to `exit 1` (error) is per-gate, operator-initiated, after a minimum one-week soak post-merge. Each promotion is a single-gate PR that flips the gate's `DEFAULT_EXIT_CODE` and surfaces any baseline expirations the soak window revealed. Cross-reference Operator decision §C1 of the prevention-gates plan at `tasks/builds/audit-prevention-gates-2026-05-14/plan.md`.

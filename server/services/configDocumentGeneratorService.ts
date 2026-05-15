@@ -70,10 +70,9 @@ export async function generateConfigurationDocument(input: GenerateInput): Promi
     };
   }
 
-  // DOCX path — uses the `docx` npm package. Imported dynamically so test
-  // runs don't need the package installed.
-   
-  // @ts-expect-error — optional peer dep, not declared in this project's deps
+  // DOCX path — uses the `docx` npm package (declared as optionalDependencies
+  // in package.json). Imported dynamically so test runs and DOCX-disabled
+  // deploys (installed with `--omit=optional`) can skip the dep.
   const docx = await (import('docx') as Promise<any>).catch(() => null) as Record<string, any> | null;
   if (!docx) {
     throw {

@@ -255,6 +255,146 @@ These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-chec
 
 ---
 
+## skill-merge-consolidation-pass — deferred (Phase 2 close 2026-05-14)
+
+From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None are blocking for the build; all are advisory/non-blocking items routed for follow-up.
+
+**From adversarial-reviewer (Phase 1 advisory):**
+
+- [ ] **SKILL-MERGE-RLS-1** — Add `skill_analyzer_results` to `server/config/rlsProtectedTables.ts` with a join-based policy via `skill_analyzer_jobs.organisation_id`. The new `pre_consolidation_merge` JSONB column adds more sensitive content to a pre-existing RLS gap. Also add `-- system-scoped: singleton row, no per-org data` to `migrations/0358_skill_merge_consolidation.sql` for the `skill_analyzer_config` ALTER block. Reference: `tasks/review-logs/adversarial-review-log-skill-merge-consolidation-pass-2026-05-14T02-39-41Z.md` finding 1.
+- [ ] **SKILL-MERGE-INJECTION-1** — Decide whether to guard the `instructions` field in `parseConsolidationResponse` against mutation (the existing `name/description/definition/mergeRationale` mutation guards leave `instructions` open to second-order prompt injection from a jailbroken upstream LLM). Accept the residual risk on system-admin-only surface, or add an `instructions`-length / heuristic guard.
+- [ ] **SKILL-MERGE-BUDGET-1** — Verify whether `systemCallerPolicy: 'bypass_routing'` exempts consolidation calls from per-org LLM budget guards. If yes, add a per-job consolidation-call cap or budget-aware skip. File: `server/jobs/skillAnalyzerJob.ts` ~lines 1289-1306.
+- [ ] **SKILL-MERGE-AUDIT-1** — Decide whether to add a durable `agent_execution_events`-style audit row for consolidation transformations (today the trail is logger-only).
+- [ ] **SKILL-MERGE-AUTHGATE-1** — Verify the config-update route serving `consolidationEnabled` / `consolidationTriggerSeverity` is gated by `requireSystemAdmin`, not a tenant-scoped admin middleware.
+- [ ] **SKILL-MERGE-RESET-UX-1** — Confirm Reset-button semantics change (Reset now rolls back to the consolidated draft on success; the first-pass LLM merge is only accessible via the read-only disclosure panel). Discoverability check with operator before merge.
+
+**From pr-reviewer (round 3, non-blocking):**
+
+- [ ] **SKILL-MERGE-TEST-1** — Add direct test coverage for the `postWords >= preWords` outcome-classification decision (the new `not_shortened` branch from dual-reviewer's fix). Easiest path: extract a small pure helper `classifyConsolidationOutcome({ preWords, postWords })` from `server/jobs/skillAnalyzerJob.ts` ~line 1407 and Vitest it. Reference: `tasks/review-logs/pr-review-log-skill-merge-consolidation-pass-2026-05-14T03-15-00Z.md` Should-fix #2.
+- [ ] **SKILL-MERGE-COPY-1** (Consider/Nit) — Map `failureReason` enum values to plain-English copy in `MergeReviewBlock.tsx` failed banner (today the value renders verbatim, e.g. `Reason: not_shortened` — opaque to non-technical reviewers). Reference: round-3 pr-review-log Consider section.
+
+**From chatgpt-pr-review (Phase 3, Round 1):**
+
+- [ ] **SKILL-MERGE-RATIONALE-1** (Consider/Nit) — Short-circuit the consolidation gate when `mergeRationale` is null upstream, instead of routing to `parseConsolidationResponse` and letting it reject with `rationale_missing_or_invalid`. Today the LLM is prompted to always echo a rationale and fallback paths backfill it, so the null-path is theoretical — but a 2-line guard at the consolidation gate (`server/jobs/skillAnalyzerJob.ts` ~line 1267) would avoid one wasted LLM call per occurrence. Reference: chatgpt-pr-review Round 1 finding F5 (defer).
+
+---
+
+## Deferred from codebase audit — 2026-05-14
+
+**Captured:** 2026-05-14T04-49-08Z
+**Source log:** `tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`
+**Branch:** `audit/full-pre-v1-lockdown-2026-05-14`
+**Pass 2 already shipped on the audit branch:** Area 1 dead skill-analyzer subtree (~4,114 LOC); two static-import deps + two optional DOCX deps; framework §2 v1.3 → v1.4 refresh.
+
+### Critical
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Route → DB layer breach in `server/routes/support/supportAgentRoutes.ts`**. Lines 6, 35-46, 74+ import the `canonicalInboxes` schema table object and build Drizzle `.select().from(canonicalInboxes).where(...).orderBy(...)` queries inside the route handler. Bypasses route → service → db cascade. Gate `scripts/verify-no-db-in-routes.sh` has it in baseline. critical/high. Extract `supportAgentInboxService`; tighten gate baseline.
+
+### High
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Area 10 god-file register — hard-cap breaches** — `server/services/skillExecutor.ts` (6,133 LOC), `workflowEngineService.ts` (4,073), `skillAnalyzerServicePure.ts` (3,729), `agentExecutionService.ts` (2,807), `skillAnalyzerService.ts` (2,642), `client/src/pages/AdminSubaccountDetailPage.tsx` (1,430), `Layout.tsx` (1,325), `UsagePage.tsx` (1,284). Each split is its own ADR + plan + chunks (Rule 7 blast radius). high/informational. Recommended sequence: `skillExecutor` first because of execution-path centrality.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Area 10 soft-cap breaches** — 10 files over the services 1,500 LOC soft cap (`agentService.ts` 2,335, `skillAnalyzerJob.ts` 2,254, `workspaceMemoryService.ts` 1,949, `llmRouter.ts` 1,918, `queueService.ts` 1,683, etc.). high/informational. Address opportunistically.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Missing dep `pg`** (used in 5 tooling scripts; tier choice deferred). Static + optional pairs already shipped. high/medium. Likely `devDependencies`.
+
+### Medium
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Custom retry loop in `server/services/agentBeliefService.ts:124-403`** outside canonical `withBackoff`. medium/medium. Extend `withBackoff` with storm cap OR document divergence + add a test.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`enqueueHandoff` silent depth-cap rejection at `skillExecutor.ts:3988-3994`** — no structured event. medium/medium. Replace `console.warn` with structured `logger.warn` + Langfuse span tag.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Three silent `.catch(() => {})` in `agentExecutionService.ts` lines 1157, 1240, 1368** without `guard-ignore` annotation. medium/medium. Annotate or escalate per site.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **188 `: any` / `as any` occurrences** in non-test server + shared. medium/low. Ratchet via `verify-any-budget.sh`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **133 marker comments** (73 TEMP, 50 TODO, 23 LEGACY, 10 DEPRECATED, 1 XXX). medium/low. Batch triage.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Knip 306 unused-file flags + no `knip.json`** — false-positive risk high. medium/high (on noisiness). Author `knip.json` first.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **~80 unused exports in `shared/types/*`** (knip). medium/low. Per-export manual cross-check.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **101 client pages not yet audited against Frontend Design Principles**. medium/low. Schedule `audit-runner: hotspot frontend`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`SystemPnlPage.tsx` KPI cards admin-only status unverified**. medium/low. Confirm gate; document or trim.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **186 skill ↔ actionRegistry alignment not cross-referenced**. medium/low. `audit-runner: hotspot skills`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Per-critical-path coverage matrix not produced** (Module C). medium/medium.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`madge --circular` not run** (Area 8). medium/low. `audit-runner: hotspot circular-deps`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`jscpd` not run** (Area 2). medium/low. `audit-runner: hotspot duplication`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Handoff audit-trail durability not fully traced** (Module K). medium/low. `audit-runner: hotspot agent-execution`.
+
+### Low
+
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`pagePreview.ts:12-13` and `pageServing.ts:13-14` type-only imports from `db/schema/*`** trip gate regex. low/high. Move row types to `shared/types/page.ts`; gate fix in Prevention Proposals.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`req.user.organisationId` dual-source in `server/middleware/auth.ts` lines 262, 288, 318, 384**. low/medium. Extract `resolveOrganisationId(req)` helper.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Comment cluster `agentExecutionService.ts:72-116`** WHAT-prose residue. low/medium. Delete.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Borderline editorial mention of Google Docs / Dropbox at `docs/capabilities.md:210`**. low/medium. Human editorial review.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **19 duplicate exports (default + named)** in client React components. low/medium. Drop aliases on 7 components; keep `auth.ts` shims.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`UNIVERSAL_SKILL_NAMES` dual-source maintained by hand**. low/medium. Refactor to generate from `ACTION_REGISTRY`.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`@playwright/test` listed as production dep**; used only in tests/scripts. low/medium. Reclassify to `devDependencies` (touches `package.json`).
+
+---
+
+## Prevention proposals from codebase audit — 2026-05-14
+
+**Captured:** 2026-05-14T04-49-08Z
+**Source log:** `tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`
+**Spec for batched implementation:** `tasks/builds/audit-prevention-gates-2026-05-14/spec.md`
+**Rule 16 invariant:** always pass 3; never auto-applied. Operator reviews and applies as a batch.
+
+### Tier 1 — block at write time (16; gates / hooks)
+
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P1** — `scripts/verify-no-missing-deps.sh`: `depcheck --skip-missing=false`; fail on any import absent from `package.json`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P2** — tighten `scripts/verify-no-db-in-routes.sh`: (a) skip `import type`; (b) refuse new baseline entries; (c) companion `verify-with-org-tx-or-scoped-db.sh`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P3** — `scripts/verify-loc-cap.sh`: enforce Area 10 thresholds.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P4** — `scripts/verify-no-silent-catch.sh`: silent catches require `guard-ignore: no-silent-failures`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P5** — `scripts/verify-canonical-retry.sh`: `retryCount` loops outside `withBackoff` require `guard-ignore: canonical-retry`.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:covered-by-verify-no-raw-console] **P6** — `scripts/verify-canonical-logger.sh`: `console.(log\|warn\|error)` in `server/services`/`server/routes` requires `guard-ignore: canonical-logger`. Covered by pre-existing scripts/verify-no-raw-console.sh; see Chunk 3 implementation log for the scope-overlap evidence.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P7** — `scripts/verify-universal-skill-sync.sh`: `UNIVERSAL_SKILL_NAMES` ↔ `ACTION_REGISTRY` bidirectional.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P8** — `scripts/verify-frontend-design-budget.sh`: KPI/Sparkline/chart imports require admin-only allowlist.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P9** — `scripts/verify-any-budget.sh`: non-growing `: any` count per file.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P10** — `scripts/verify-marker-budget.sh`: non-growing marker count per file.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P11** — `scripts/verify-no-new-cycles.sh`: `madge --circular --json` baseline.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P12** — `scripts/verify-duplicate-blocks.sh`: `jscpd --min-tokens 15` baseline.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P13** — `scripts/verify-framework-context-block.sh`: §2 against `package.json` drift.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P14** — `scripts/verify-types-used.sh`: every exported event type in a discriminated union or used in code.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P15** — `scripts/verify-no-orphan-react-component.sh`: walk React Router from `App.tsx`; flag zero-ingress pages.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:closed:pr:307] **P16** — `scripts/verify-knip-config.sh`: `knip.json` registers every dynamic entry surface.
+
+### Tier 2 — convention at design time (4; docs)
+
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:architecture.md] [status:closed:pr:307] **P17** — "Single org-id source" sub-section.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:closed:pr:307] **P18** — extend § Comments: "comments describing a completed refactor are residue".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:CLAUDE.md] [status:closed:pr:307] **P19** — § Frontend: "prefer named exports for React components".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:docs/capabilities.md] [status:closed:pr:307] **P20** — § Editorial Rules: explicit always-OK industry-terms list.
+
+### Tier 3 — lesson via context (4; KNOWLEDGE.md / ADR)
+
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P21** — pattern: per-critical-path coverage tier matrix; refresh quarterly.
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P22** — pattern: "Custom retry loops are pass-3 even when they look right".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:KNOWLEDGE.md] [status:closed:pr:307] **P23** — pattern: "Handoff depth-cap rejections need structured events".
+- [x] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:ADR] [status:closed:pr:307] **P24** — ADR: "Service-layer extraction policy for routes touching `db/schema/`".
+
+### Warning→error promotion follow-ups (chunk 11 wired 14 gates as warning-first per Operator decision §C1)
+
+Each gate ships with `default_exit_code=2` (warning). Operator reviews CI signal during the one-week soak window post-merge; if no unexpected false positives, promote `DEFAULT_EXIT_CODE` from 2 to 1 in the gate script. P6 has no row here because it was dropped per §B1 (covered by pre-existing `verify-no-raw-console.sh`).
+
+Earliest promotion date: merge date + 7 days.
+
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-universal-skill-sync.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-framework-context-block.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-types-used.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-canonical-retry.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-any-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-marker-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-new-cycles.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-duplicate-blocks.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-knip-config.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-with-org-tx-or-scoped-db.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-orphan-react-component.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-no-missing-deps.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-loc-cap.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate] [status:open] **Warning→error promotion: verify-frontend-design-budget.sh** — earliest promotion date: merge + 7 days.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:gate-baseline] [status:open] **Extend baseline: scripts/.gate-baselines/with-org-tx-or-scoped-db.txt** — initial seed covered first ~80 service files (alphabetical A-B). Extend to cover all server/services/*, server/jobs/*, server/lib/*, server/adapters/* before promoting the gate to error per §C1.
+- [ ] [origin:audit:prevention:pre-v1-lockdown:2026-05-14T04-49-08Z] [target:package.json] [status:open] **Declare pg in package.json** — chunk 6 P1 baseline caught `pg` package imported by 15+ scripts but not declared. Add `"pg": "^8.18.0"` to `optionalDependencies` (matches `docx`/`mammoth` precedent from PR #305 for dynamic-import patterns).
+
+### Not feasible — rationale
+
+- N1 — `depcheck` false positives on PostCSS / Vitest coverage are noise-shaped; no enforceable preventive control.
+- N2 — Handoff audit-trail durability requires deep agent-execution tracing; covered by `audit-runner: hotspot agent-execution`.
+
+---
+
 ## Pointers
 
 - **Archive of historical deferred items:** `tasks/todo-archive-2026-Q2.md`
@@ -262,3 +402,1224 @@ These are dead-code TODOs accepted as non-blocking by pr-reviewer + reality-chec
 - **Source-of-truth review logs:** `tasks/review-logs/`
 - **Lessons + corrections:** `KNOWLEDGE.md` + `tasks/lessons.md`
 - **Ideas captured mid-session:** `tasks/ideas.md`
+
+---
+
+## Capabilities Asset Register backfill — development-lifecycle-governance-upgrade (2026-05-14)
+
+One-time append per spec §4.2 row 8 + §7.4.3 + §10 Chunk 4.
+Owner-resolution entries (spec §7.4.3 — one per placeholder Owner).
+Capabilities-backfill entries (spec §10 Chunk 4 — one per TBD Carry notes field).
+
+### owner-resolution: multi-tenant-platform
+
+Capability ID: multi-tenant-platform
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: authentication-access-control
+
+Capability ID: authentication-access-control
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: ai-agent-system
+
+Capability ID: ai-agent-system
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: agent-workplace-identity
+
+Capability ID: agent-workplace-identity
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: capability-aware-orchestrator
+
+Capability ID: capability-aware-orchestrator
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: platform-feature-request-pipeline
+
+Capability ID: platform-feature-request-pipeline
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: universal-brief
+
+Capability ID: universal-brief
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: configuration-assistant
+
+Capability ID: configuration-assistant
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: skill-system
+
+Capability ID: skill-system
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: crm-query-planner
+
+Capability ID: crm-query-planner
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: workflow-engine
+
+Capability ID: workflow-engine
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: human-in-the-loop
+
+Capability ID: human-in-the-loop
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: task-board-workspace
+
+Capability ID: task-board-workspace
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: pulse-supervision-home
+
+Capability ID: pulse-supervision-home
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: agent-spending
+
+Capability ID: agent-spending
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: live-execution-log
+
+Capability ID: live-execution-log
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: memory-knowledge-system
+
+Capability ID: memory-knowledge-system
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: trust-verification-layer
+
+Capability ID: trust-verification-layer
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: workspace-health-diagnostics
+
+Capability ID: workspace-health-diagnostics
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: sub-account-optimiser
+
+Capability ID: sub-account-optimiser
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: sub-account-baseline
+
+Capability ID: sub-account-baseline
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: activity-analytics
+
+Capability ID: activity-analytics
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: client-portal
+
+Capability ID: client-portal
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: pages-content-builder
+
+Capability ID: pages-content-builder
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: integration-framework
+
+Capability ID: integration-framework
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: document-bundles-cached-context
+
+Capability ID: document-bundles-cached-context
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: execution-infrastructure
+
+Capability ID: execution-infrastructure
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: personal-assistant
+
+Capability ID: personal-assistant
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: sandboxed-runtime-iee
+
+Capability ID: sandboxed-runtime-iee
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: persistent-agent-workspace
+
+Capability ID: persistent-agent-workspace
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: subscription-driven-long-task-execution
+
+Capability ID: subscription-driven-long-task-execution
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: performance-reporting-analytics
+
+Capability ID: performance-reporting-analytics
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: seo-management
+
+Capability ID: seo-management
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: geo-ai-search-visibility
+
+Capability ID: geo-ai-search-visibility
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: content-creation-publishing
+
+Capability ID: content-creation-publishing
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: crm-contact-management
+
+Capability ID: crm-contact-management
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: email-marketing-outreach
+
+Capability ID: email-marketing-outreach
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: campaign-management-optimization
+
+Capability ID: campaign-management-optimization
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: financial-analysis-reporting
+
+Capability ID: financial-analysis-reporting
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: churn-detection-account-health
+
+Capability ID: churn-detection-account-health
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: customer-support-automation
+
+Capability ID: customer-support-automation
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: landing-page-management
+
+Capability ID: landing-page-management
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: competitor-intelligence
+
+Capability ID: competitor-intelligence
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: portfolio-intelligence
+
+Capability ID: portfolio-intelligence
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: llm-spend-observability
+
+Capability ID: llm-spend-observability
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: memory-injection-utility
+
+Capability ID: memory-injection-utility
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: tier-4-isolated-code-execution
+
+Capability ID: tier-4-isolated-code-execution
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row.
+
+### owner-resolution: dev-lifecycle-governance
+
+Capability ID: dev-lifecycle-governance
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
+Due date: 2026-08-14
+Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #304 (development-lifecycle-governance-upgrade) — new capability surface, not a backfill.
+
+### capabilities-backfill: multi-tenant-platform
+
+Capability ID: multi-tenant-platform
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-multi-tenant-platform
+Due date: 2026-08-14
+Notes: Research and fill in carry notes (ongoing maintenance, review cadence, operational cost) for this capability.
+
+### capabilities-backfill: authentication-access-control
+
+Capability ID: authentication-access-control
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-authentication-access-control
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: ai-agent-system
+
+Capability ID: ai-agent-system
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-ai-agent-system
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: agent-workplace-identity
+
+Capability ID: agent-workplace-identity
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-workplace-identity
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: capability-aware-orchestrator
+
+Capability ID: capability-aware-orchestrator
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-capability-aware-orchestrator
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: platform-feature-request-pipeline
+
+Capability ID: platform-feature-request-pipeline
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-platform-feature-request-pipeline
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: universal-brief
+
+Capability ID: universal-brief
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-universal-brief
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: configuration-assistant
+
+Capability ID: configuration-assistant
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-configuration-assistant
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: skill-system
+
+Capability ID: skill-system
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-skill-system
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: crm-query-planner
+
+Capability ID: crm-query-planner
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-query-planner
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: workflow-engine
+
+Capability ID: workflow-engine
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-workflow-engine
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: human-in-the-loop
+
+Capability ID: human-in-the-loop
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-human-in-the-loop
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: task-board-workspace
+
+Capability ID: task-board-workspace
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-task-board-workspace
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: pulse-supervision-home
+
+Capability ID: pulse-supervision-home
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-pulse-supervision-home
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: agent-spending
+
+Capability ID: agent-spending
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-spending
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: live-execution-log
+
+Capability ID: live-execution-log
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-live-execution-log
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: memory-knowledge-system
+
+Capability ID: memory-knowledge-system
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-knowledge-system
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: trust-verification-layer
+
+Capability ID: trust-verification-layer
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-trust-verification-layer
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: workspace-health-diagnostics
+
+Capability ID: workspace-health-diagnostics
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-workspace-health-diagnostics
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: sub-account-optimiser
+
+Capability ID: sub-account-optimiser
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-optimiser
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: sub-account-baseline
+
+Capability ID: sub-account-baseline
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-baseline
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: activity-analytics
+
+Capability ID: activity-analytics
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-activity-analytics
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: client-portal
+
+Capability ID: client-portal
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-client-portal
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: pages-content-builder
+
+Capability ID: pages-content-builder
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-pages-content-builder
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: integration-framework
+
+Capability ID: integration-framework
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-integration-framework
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: document-bundles-cached-context
+
+Capability ID: document-bundles-cached-context
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-document-bundles-cached-context
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: execution-infrastructure
+
+Capability ID: execution-infrastructure
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-execution-infrastructure
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: personal-assistant
+
+Capability ID: personal-assistant
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-personal-assistant
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: sandboxed-runtime-iee
+
+Capability ID: sandboxed-runtime-iee
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-sandboxed-runtime-iee
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: persistent-agent-workspace
+
+Capability ID: persistent-agent-workspace
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-persistent-agent-workspace
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: subscription-driven-long-task-execution
+
+Capability ID: subscription-driven-long-task-execution
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-subscription-driven-long-task-execution
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: performance-reporting-analytics
+
+Capability ID: performance-reporting-analytics
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-performance-reporting-analytics
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: seo-management
+
+Capability ID: seo-management
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-seo-management
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: geo-ai-search-visibility
+
+Capability ID: geo-ai-search-visibility
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-geo-ai-search-visibility
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: content-creation-publishing
+
+Capability ID: content-creation-publishing
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-content-creation-publishing
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: crm-contact-management
+
+Capability ID: crm-contact-management
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-contact-management
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: email-marketing-outreach
+
+Capability ID: email-marketing-outreach
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-email-marketing-outreach
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: campaign-management-optimization
+
+Capability ID: campaign-management-optimization
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-campaign-management-optimization
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: financial-analysis-reporting
+
+Capability ID: financial-analysis-reporting
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-financial-analysis-reporting
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: churn-detection-account-health
+
+Capability ID: churn-detection-account-health
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-churn-detection-account-health
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: customer-support-automation
+
+Capability ID: customer-support-automation
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-customer-support-automation
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: landing-page-management
+
+Capability ID: landing-page-management
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-landing-page-management
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: competitor-intelligence
+
+Capability ID: competitor-intelligence
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-competitor-intelligence
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: portfolio-intelligence
+
+Capability ID: portfolio-intelligence
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-portfolio-intelligence
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: llm-spend-observability
+
+Capability ID: llm-spend-observability
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-llm-spend-observability
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: memory-injection-utility
+
+Capability ID: memory-injection-utility
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-injection-utility
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+### capabilities-backfill: tier-4-isolated-code-execution
+
+Capability ID: tier-4-isolated-code-execution
+Unknown field: Carry notes
+Current value: TBD — see tasks/todo.md#capabilities-backfill-tier-4-isolated-code-execution
+Due date: 2026-08-14
+Notes: Research and fill in carry notes for this capability.
+
+
+---
+
+## audit-prevention-gates-2026-05-14 / PR #307 — deferred from chatgpt-pr-review
+
+### BUDGET-EXPIRY-ENFORCEMENT-1 — Per-file budget gates do not enforce `# expires:` directives
+
+**Source:** chatgpt-pr-review Round 1 / T2 (escalated as Round 2 / F4 with operator-approved doc-softening remediation; full log: `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`)
+**Status:** doc/code mismatch CLOSED in Round 2 — `references/test-gate-policy.md § Per-file count baselines are out of scope` explicitly carves these gates out of the expiry framework; both baseline file headers now carry the NOTE callout. This follow-up is now about the **feature gap** (if we ever want calendar-expiry-driven promotion for per-file budgets), not about a doc/code mismatch.
+**Severity:** low (no doc/code mismatch any more; feature gap only fires if we decide we want calendar-expiry-driven promotion for per-file budgets in future)
+**Files:**
+- `scripts/lib/per-file-counter-pure.mjs` — `parsePerFileBudgetBaseline` strips `#`-comment lines including any `# expires:` directives (by design — see doc carve-out)
+- `scripts/verify-any-budget.sh` (P9) and `scripts/verify-marker-budget.sh` (P10) — promote on count growth, not calendar
+
+**Fix outline (if we ever do want expiry-driven promotion for these gates):** thread per-entry expiry through `parsePerFileBudgetBaseline` → `diffAgainstBaseline`, then have the calling shell scripts emit `[GUARD] WARNING / ERROR` per expired/past-grace entry. Apply same exit-code policy as `check_expiring_baseline` (current ∩ baseline > 0 → exit 2; new violation or past-grace → exit 1). Update `references/test-gate-policy.md § Per-file count baselines are out of scope` and the two baseline file headers when this lands.
+
+**Estimated effort if pursued:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
+
+- **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
+  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
+  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
+  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+
+- **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
+  - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
+  - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
+  - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
+
+- **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
+  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
+  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
+  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+
+- **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
+  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
+  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
+  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+
+- **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
+  - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
+  - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
+  - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
+
+- **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
+  - File: `server/routes/operatorSessionConnections.ts` line 442
+  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
+  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+
+- **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
+  - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
+  - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
+  - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
+
+- **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
+  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
+  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
+  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
+
+- **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
+  - File: `server/services/operatorSessionConsentService.ts` lines 197-209
+  - Reason for deferral: Spec §16 names the method but defers the implementation to the user-deletion privacy sweep (out of scope for Spec C).
+  - When to revisit: When the user-deletion flow is implemented. Confirm any caller handles the 501 gracefully rather than failing the deletion.
+
+- **OSI-DEF-11 — `OPERATOR_SESSION_DISCLOSURE_VERSION` is deploy-coupled** (adversarial-reviewer additional observation)
+  - File: `server/config/operatorSessionProviders.ts` (`OPERATOR_SESSION_DISCLOSURE_VERSION = 1`)
+  - Reason for deferral: Hard-coded constant. Bumping the version (e.g. for a legal update) requires a code deploy. No DB-config or feature-flag path.
+  - When to revisit: If the disclosure text needs an urgent update without a deploy window, or if legal asks for a feature-flag-style toggle on disclosure version.
+
+- **OSI-DEF-12 — Legacy `/admin/subaccounts/:id/connections` bookmark lands on empty state when org admin has no active client** (dual-reviewer P2)
+  - File: `client/src/pages/govern/ConnectionsPage.tsx` lines 38-45 + `client/src/App.tsx` line 248 (`SubaccountIntegrationsRoute`)
+  - Reason for deferral: The redirect adds `?workspace=X` but `ConnectionsPage` derives `isWorkspace` from `viewMode`. An org admin with no `activeClientId` lands in `'org'` mode and sees "Select a workspace" instead of subaccount X's connections. Honouring the query param across view modes was attempted in this dual-reviewer pass and reverted — it creates a worse UX problem: the page body shows workspace data while the switcher shows "Org" (mode/data mismatch with no clean way to clear the override without editing the URL). Correct fix is non-trivial (set `activeSubaccountId` + name in localStorage from the redirect, which requires fetching the subaccount name; or replace the redirect target with a workspace-picker prompt) and outside the scope of an in-loop edit.
+  - When to revisit: Bundle with the next pass that touches `SubaccountIntegrationsRoute` or the workspace picker. The clean approach is: in `SubaccountIntegrationsRoute`, fetch the subaccount name via `GET /api/subaccounts/:id`, call `setActiveSubaccount(id, name)`, then `Navigate` to `/connections` without the `workspace` query param. The page then enters workspace mode naturally and the switcher stays consistent.
+  - Current behaviour: legacy bookmark from org mode → "Select a workspace" empty state. Bookmark from workspace mode → works because `viewMode === 'workspace'` and the redirect's `workspace=` param is honoured by the existing line-43 ternary.
+
+- **OSI-DEF-13 — `EditAvailabilityModal` exposes raw agent-ID entry instead of a selectable agent picker** (chatgpt-pr-review PR #286 round 1 T1)
+  - File: `client/src/pages/govern/components/EditAvailabilityModal.tsx`
+  - Reason for deferral: V1 ships with this limitation noted. The backend schema validates UUIDs and non-empty arrays, but the UX is not viable for non-technical operators — they cannot realistically type or paste agent IDs from memory, and there is no in-product way to look an ID up. ChatGPT also flags the membership-validation gap (a user could type an ID belonging to a different subaccount and have the persistence layer accept it).
+  - When to revisit: Either when the agent-list endpoint is being built for an adjacent feature (bundle the picker on the back of it), or earlier if a beta customer hits the "Specific agents only" path and the manual-ID flow blocks them.
+  - Two viable end-states (decision deferred):
+    - (a) Hide the "Specific agents only" option from the modal until the picker exists — narrows V1 surface area to "Any agent in this workspace", which is the default and what most callers will pick anyway.
+    - (b) Add a minimal `GET /api/subaccounts/:id/agents` endpoint that returns `[{id, name}]` for the workspace, render a multi-select, and server-side enforce `allowedAgentIds ⊆ workspace.agents` on persistence.
+  - Recommended end-state at revisit time: (b) — the multi-select is the long-term shape and (a) just kicks the can. Picking (a) at revisit is only justified if the agent-list endpoint is far off and a workspace user is actively asking for the restriction-by-agent path.
+## Deferred spec decisions — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11
+**Source log:** `tasks/review-logs/spec-review-log-sandbox-isolation-2-20260511T000426Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Iteration:** 2
+
+These items were classified ambiguous/directional during spec review. Spec mechanics tightened to acknowledge the build-time choice; the choice itself is deferred to Phase 2.
+
+- [ ] **SANDBOX-DEF-EGRESS-MECH — Choose egress interception mechanism**
+  - Spec section: §9.1 (egress audit logging is mandatory when `network` is non-`none`).
+  - Schema is locked in §20.6 — the choice is which component actually intercepts allow/deny decisions and writes the audit rows.
+  - Candidates: (a) e2b SDK network-policy hooks if they expose per-decision callbacks, (b) application-layer egress proxy outside the sandbox with mandatory routing from the template entrypoint, (c) CNI / eBPF-side hooks if e2b exposes them.
+  - **STATUS (C9 chunk, 2026-05-11): DEFERRED to actual SDK installation.** The e2b SDK (@e2b/sdk or 'e2b') is not yet installed in node_modules. The e2bSandbox provider is implemented with a thin E2bSdkClient interface stub that throws on first call; real SDK wiring lands when the e2b account is provisioned and the SDK's exposed surface (especially network-policy hooks) is verified. The audit-row schema (C1b §20.6) is unaffected by the mechanism choice. Decision options remain (a), (b), (c) above — pick based on the actual SDK API surface at installation time.
+
+- [x] **SANDBOX-DEF-LOG-SCHEMA — CLOSED 2026-05-11 at chatgpt-spec-review Round 1 F1.** Locked to **option (a) — new `sandbox_logs` table**.
+  - Spec section: §8.4 step 9 (log persistence), §17.1 + §17.3 (retention), §20.8 (contract), §21.1 (RLS), §19.1 (schema file + prune job), §19.4 (migration).
+  - Rationale: cleaner RLS surface (symmetric with the other four sandbox tables); line-level idempotency via `UNIQUE (sandbox_execution_id, log_stream, sequence)` enforceable at the DB layer (a JSONB column couldn't); 90d retention lifecycle decoupled from the general application log layer.
+  - Build impact: schema + migration + RLS manifest entry + `sandboxLogsPruneJob` land in C1 (types + schema). No longer a chunk-zero gating decision.
+
+- [ ] **SANDBOX-F1 — Compute real digests + hashes for synthetos-sandbox template (deferred Phase 3 chatgpt-pr-review R1)**
+  - Captured 2026-05-11 via Phase 3 `chatgpt-pr-review` Round 1 finding F1 (recommended `defer`).
+  - Spec section: §15.2 (CURRENT_VERSION is human-committed pre-build), §15.3 (PUBLISHED_VERSION is CI-attested post-publish).
+  - Current state per `infra/sandbox-templates/synthetos-sandbox/CURRENT_VERSION`: `deps_lockfile_hash = sha256:000...` placeholder; Dockerfile base image digest also placeholder; pip package hashes in requirements.txt similarly placeholder.
+  - **Why deferred for V1 ship:** all of these are intentionally placeholder until the e2b account is provisioned (see SANDBOX-DEF-EGRESS-MECH above). The CURRENT_VERSION / PUBLISHED_VERSION contract is structurally complete; values are operator-computed pre-first-publish per spec §15.2.
+  - **Operator action when e2b account is provisioned:** (0) flip `CURRENT_VERSION.version` AND `PUBLISHED_VERSION.version` from `local-dev-v1.0.0` to `v1.0.0` — the `local-dev-` prefix is intentional pre-first-publish to keep the `verify-template-version-coherence.sh` strict gate (Phase 3 T1 fix) green on `ready-to-merge` while no tag exists; (1) `docker pull` the real base image and capture the digest; (2) update `infra/sandbox-templates/synthetos-sandbox/Dockerfile` `FROM` line + CURRENT_VERSION `base_image_digest`; (3) regenerate `requirements.txt` with `pip-compile --generate-hashes` and capture real package hashes; (4) recompute `deps_lockfile_hash = sha256(requirements.txt || package-lock.json)`; (5) update CURRENT_VERSION; (6) flip repo variable `E2B_PUBLISH_ENABLED=true` AFTER wiring the real `e2b template publish` + `e2b template inspect` commands in `.github/workflows/publish-sandbox-templates.yml` (per Phase 3 F2 fix — the workflow now hard-fails until both wiring + variable flip are done); (7) push the `sandbox-template/synthetos-sandbox/v1.0.0` tag to trigger the publish workflow; (8) merge the auto-generated attestation PR within the 24h grace window so PUBLISHED_VERSION lands with real digests.
+
+---
+
+## Deferred from spec-conformance review — sandbox-isolation (2026-05-11)
+
+**Captured:** 2026-05-11T08:06:30Z
+**Source log:** `tasks/review-logs/spec-conformance-log-sandbox-isolation-2026-05-11T08-06-30Z.md`
+**Spec:** `tasks/builds/sandbox-isolation/spec.md`
+**Verdict:** NON_CONFORMANT — 14 directional / ambiguous gaps. The 3 critical items (REQ #11, #28, #29) together prevent the feature from working end-to-end on the happy path; address them as a single focused builder pass before invoking `pr-reviewer`.
+
+- [ ] **REQ #11 (Critical) — `runTask` does not call `runHarvest` on the happy path**
+  - Spec section: §8.4, §22 (harvest happens inline within `runTask` for the happy path).
+  - Gap: `server/services/sandboxExecutionService.ts:367-376` throws `sandbox_harvest_failed` with comment `TODO(C7): wire to runHarvest()`. The harvest pipeline IS implemented in `sandboxHarvestService.ts` but `runTask` never invokes it after the provider returns terminal. Result: every successful sandbox call fails with a synthetic harvest error.
+  - Suggested approach: in `_attemptProviderStart` after the provider returns `providerOutput`, replace the throw with a call to `runHarvest(input.sandboxExecutionId, { ...tenancy from input, outputSchemaRef: input.outputSchemaRef, credentialAliases: input.credentialIssuanceContext.aliases.map(a => ({ alias: a.alias, connectionId: a.connectionId })), policyArtefactLimits: input.policy.artefactLimits })` and return its result. Before the call, transition the row from `running` (or current pre-terminal state) to `harvesting` via an atomic UPDATE WHERE status predicate so the harvest pipeline's own §24.3 race semantics engage. The harvest pipeline will own the terminal write in step 12.
+
+- [ ] **REQ #28 (Critical) — `sandbox_start_failed` telemetry event never emitted**
+  - Spec section: §14.5 (pre-start failure path MUST emit `sandbox_start_failed`).
+  - Gap: grep finds the string only in the schema enum and in `verify-sandbox-minimum-events.sh`. No production code writes this event row. CI gate already FAILS for this reason.
+  - Suggested approach: add a telemetry event writer in C5's `_handleExistingRow` (Case 7 — MAX_START_ATTEMPTS reached) and in `_attemptProviderStart` (catch branch, before the `provider_unavailable` UPDATE). Use `sandboxHarvestService`'s `writeTelemetryEvent` shape extracted into a smaller helper, or call into it directly. Payload per spec §14.2 row `sandbox_start_failed`: `{ reason, providerErrorCode? }`.
+
+- [ ] **REQ #29 (Critical) — `sandbox_start` telemetry event never emitted**
+  - Spec section: §14.5 (post-start path MUST emit `sandbox_start`).
+  - Gap: same shape as #28 — only present in schema enum + gate script. No production writer.
+  - Suggested approach: emit `sandbox_start` from `_attemptProviderStart` immediately after `provider.runTask(input)` returns successfully and BEFORE the harvest invocation (added in REQ #11). Payload per spec §14.2 row `sandbox_start`: `{ ceilings, network_policy, alias_count }` — derive from the resolved ceilings, `input.policy.network`, and `input.credentialIssuanceContext.aliases.length`.
+
+- [ ] **REQ #6 (High) — `sandbox_logs.line` length CHECK constraint**
+  - Spec section: §20.8 (`CHECK (length(line) <= MAX_LOG_LINE_BYTES)` — V1 default 64 KB per line).
+  - Gap: schema and migration `0322` carry no length CHECK. Service-layer truncation at `sandboxHarvestService.ts:333-337` partially substitutes but spec pins this as a DB constraint (defence-in-depth against bypass).
+  - Suggested approach: write a corrective migration `0325_add_sandbox_logs_line_length_check.sql` with `ALTER TABLE sandbox_logs ADD CONSTRAINT sandbox_logs_line_length_check CHECK (length(line) <= 65536)`. Paired down. Update the Drizzle schema to declare the constraint so generated migrations align. Verify the service-layer truncation at line 333 already keeps lines under the limit (it does — `MAX_LOG_LINE_BYTES = 65536`).
+
+- [ ] **REQ #20 (High) — `sandboxMeteringQueryPure.ts` missing**
+  - Spec section: §12.6, §19.1, §25.1.
+  - Gap: spec names the file path, the function names (`getOrgSandboxMinutes(orgId, monthRange)`, `getSubaccountSandboxMinutes(orgId, subaccountId, monthRange)`), and the test file. None exist.
+  - Suggested approach: create `server/services/sandboxMeteringQueryPure.ts` exposing the two functions as pure SQL composers (return `SQL` fragments, callers wrap with `withOrgTx`). The rollup is over `llm_requests` filtered by `source_type = 'sandbox_compute'`, summing `sandbox_wall_clock_ms / 60_000` for "minutes". Decide month-range semantics (closed-open interval on `billing_month`) and pure-test the SQL string output against fixtures. Add `server/services/__tests__/sandboxMeteringQueryPure.test.ts`.
+
+- [ ] **REQ #31 (Medium) — `withSandboxProvider` emits diagnostics only as logs, not DB rows**
+  - Spec section: §14.2 (DB telemetry events) + §14.3 (structured log events) — both required.
+  - Gap: `server/lib/withSandboxProvider.ts` emits `provider_diagnostic` and `provider_unavailable` to the logger only. Progress.md acknowledges the lib wrapper doesn't carry the HarvestContext required for DB rows.
+  - Suggested approach: extend the `withSandboxProvider` options type with optional tenancy fields (`organisationId`, `subaccountId`, `runId`, `agentId`, `taskId`, `templateName`, `templateVersion`, `provider`); when present, write a `sandbox_telemetry_events` row alongside the log line. Audit every call site and pass the context. For call sites without context (rare — mostly the harvest-step provider reads), keep the log-only path as a documented fallback with a `// no-tenancy-context: defaults to log-only` comment.
+
+- [ ] **REQ #35 (Medium, AMBIGUOUS) — `sandboxArtefactPurgeJob` trigger from run-soft-delete**
+  - Spec section: §17.4 (artefacts physically deleted from object storage by `sandbox-artefact-purge` job triggered by the soft-delete event).
+  - Gap: job exists and is registered, but the trigger from the run-soft-delete cascade was not surveyed end-to-end during this conformance run.
+  - Suggested approach: confirm whether the existing run-deletion path (the soft-delete handler used elsewhere in the codebase) calls `boss.send(SANDBOX_ARTEFACT_PURGE_JOB, { agentRunId })` for the affected runs. If yes, mark this PASS; if no, wire the call from the soft-delete service.
+
+- [ ] **REQ #36 (Medium) — Ceiling-monitor + wall-clock-kill jobs do not call provider terminate**
+  - Spec section: §10.2 ("calls the provider terminate API and writes `timed_out`" / "calls the provider terminate API directly").
+  - Gap: both jobs in `server/jobs/sandboxCeilingMonitorJob.ts` and `server/jobs/sandboxWallClockKillJob.ts` only update the DB row to `harvesting` with an `errorReason`. Neither calls `provider.terminate(provider_sandbox_id)` via `withSandboxProvider`. The conservative choice (let harvest pipeline handle teardown via its own close path) is defensible but diverges from the spec's named mechanism.
+  - Suggested approach (operator-decision): either (a) wire `withSandboxProvider({ phase: 'terminal', sandboxExecutionId, call: () => provider.terminate(providerSandboxId) })` into both jobs before the DB UPDATE, importing the provider via the resolver registry; or (b) write a one-paragraph spec amendment clarifying that "calls the provider terminate API" is satisfied by transitioning to `harvesting` + harvest pipeline's existing teardown call (which IS via withSandboxProvider). Option (b) is lower-risk but rewrites spec wording.
+
+- [ ] **REQ #55 (Medium) — Sandbox teardown verification missing entirely**
+  - Spec section: §17.5 (`sandbox.teardown.verified` / `sandbox.teardown.unverified` log events; operator-paging on unverified after 60s + backoff).
+  - Gap: zero matches for either event name in `server/`. e2bSandbox calls `terminateSandbox` but does not verify-then-emit. localDockerSandbox similar.
+  - Suggested approach: add a `verifyTeardown(providerSandboxId, sandboxExecutionId)` method on each provider that polls (with `withBackoff`) until the sandbox is no longer enumerable in the provider's sandbox list, with a 60s grace + retry. On success, emit `sandbox.teardown.verified` log. On failure, emit `sandbox.teardown.unverified` log + write a structured op-paging event (path TBD per existing operator-paging convention in the codebase). Call from the harvest pipeline's terminal step (after `assertValidTransition`).
+
+- [ ] **REQ #57 (High, AMBIGUOUS) — Credential value-threading into `/workspace/secrets/` is acknowledged-incomplete**
+  - Spec section: §11.1 (sandbox receives task-scoped, sub-account-scoped credentials mounted as files).
+  - Gap: `server/services/sandbox/e2bSandbox.ts:258-265` declares the file-mount intent but the loop body is a no-op with `void alias.alias + targetPath` and a comment "credential value is not available in the input descriptor in V1. C13 (adapter rewiring) threads the issued credential value through". The C13 adapter passes `credentialIssuanceContext: { aliases: [] }` — no value-threading happens. Sandbox cannot receive credentials in V1.
+  - Suggested approach: extend `SandboxRunTaskInput.credentialIssuanceContext` to carry pre-issued credential values (or a callable to issue at sandbox start). Plumb the calling adapter (`ieeDevBackend.dispatch`) to call `credentialBrokerService.issueCredential` for each requested alias before invoking `runTask`, attach the materialised credential value, and let `e2bSandbox` write each via `sdkClient.writeFile(sandboxId, '/workspace/secrets/{alias}.token', Buffer.from(value), { mode: 0o400 })`. Verify the `redactionPattern: RegExp` returned by the broker (REQ #13 PASS) is registered in the harvest pipeline's per-execution pattern set so the value is redacted from harvested outputs.
+
+---
+
+## Deferred from adversarial-reviewer review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/adversarial-review-log-sandbox-isolation-2026-05-11T08-47-38Z.md` — verdict HOLES_FOUND (2 confirmed + 4 likely + 5 worth-confirming). Per `feature-coordinator §8.2`, advisory non-blocking. Operator may prioritise selected items pre-merge during Phase 3 chatgpt-pr-review.
+
+### High-priority pre-merge candidates
+
+- [ ] **SANDBOX-ADV-1.1 (confirmed-hole) — Reconciliation job missing `withOrgTx` wrap**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:120-195`
+  - Issue: `runHarvestReconciliation` calls `getOrgScopedDb()` but the reconciliation job never wraps in `withOrgTx({ tx, organisationId })`. Every reconciliation will throw `missing_org_context` (silently caught by per-row try/catch). Stuck executions cannot recover. Separately, the `UPDATE sandbox_executions WHERE id = ANY(...)` runs on admin connection without `organisation_id` predicate.
+  - Fix: Wrap reconcile call in `db.transaction(async (orgTx) => { withOrgTx({ tx: orgTx, organisationId: row.organisation_id }, async () => { await reconcileExecution(orgTx, row); }); })`. Add `AND organisation_id = ${row.organisation_id}::uuid` to UPDATE WHERE. Pattern: `sandboxTelemetryPruneJob.ts:91-105`.
+
+- [ ] **SANDBOX-ADV-5.1 (likely-hole) — Ceiling-monitor + wall-clock-kill jobs never enqueued**
+  - File: `server/services/sandboxExecutionService.ts:380-383` (TODO unimplemented)
+  - Issue: Both jobs registered as workers but never enqueued. Wall-clock enforcement is provider-side only (best-effort). Tenant code can run beyond spec §10.1 30-min hard cap with cost charged but unenforced.
+  - Fix: After `pending → running` UPDATE in `_attemptProviderStart`, enqueue both via `boss.send` with `singletonKey: sandboxExecutionId` and appropriate `startAfter`.
+
+- [ ] **SANDBOX-ADV-4.1 (confirmed-hole) — Credential-leak defense is case-sensitive**
+  - File: `server/services/sandboxHarvestService.ts:411-421`
+  - Issue: Step 6 of harvest blocks `/workspace/secrets/` (case-sensitive). Bypass: `/workspace/Secrets/foo.token`, `../secrets/foo`. e2b `listFiles` response not normalised.
+  - Fix: Normalise: `const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');` then check on `norm`. Reject `..` paths.
+  - Severity: Latent until C13 wires credentials. Fix BEFORE C13 lands.
+
+### Medium-priority post-merge backlog
+
+- [ ] **SANDBOX-ADV-2.1 (likely-hole) — `templateVersion` from env var unvalidated** (`server/services/executionBackends/ieeDevBackend.ts:131`). env-var value flows verbatim to audit rows. e2b sandbox image is safe (uses pinned digest) but audit rows can carry forged version strings, breaking spec G12 audit guarantee. Fix: read pinned digest from `E2bSandbox.templateDigest`.
+- [ ] **SANDBOX-ADV-3.1 (likely-hole) — Telemetry sequence allocator race silently drops events** (`sandboxExecutionService.ts:63-73` + `sandboxHarvestService.ts:81-91`). `criticality='error'` events may be lost. Fix: `INSERT ... ON CONFLICT DO UPDATE SET sequence = ... RETURNING sequence` with retry, OR Postgres advisory lock. At minimum: log dropped events at warn/error level.
+- [ ] **SANDBOX-ADV-6.1 (likely-hole) — Reconciliation hardcodes `credentialAliases: []`** (`sandboxHarvestReconciliationJob.ts:183-187`). Latent until C13. Fix: add `credential_aliases` JSONB column to `sandbox_executions`.
+
+### Low-priority / observations (worth-confirming)
+
+- [ ] **SANDBOX-ADV-1.2 — Subaccount FK missing on all 5 new sandbox tables.** No DB-level cross-org subaccount validation; relies on service layer.
+- [ ] **SANDBOX-ADV-2.2 — Inline-sandbox env-injection bypass possible** if non-test caller passes forged `env` object to `resolveSandboxProvider`. CI gate catches static imports only.
+- [ ] **SANDBOX-ADV-3.2 — Race between provider success and ceiling-monitor `markForHarvest`** can cause completed execution to be billed as timed-out with no cost row.
+- [ ] **SANDBOX-ADV-4.2 — S3 path-traversal via filename.** `${ctx.subaccountId}/${ctx.sandboxExecutionId}/${artefact.filename}` — `..` could overwrite another execution's artefact. Sanitise filename.
+- [ ] **SANDBOX-ADV-5.2 — No per-tenant log-storage quota.** Per-execution caps (10MB stdout + 10MB stderr) but tenant could fill DB before 90d prune.
+
+---
+
+## Deferred from chatgpt-pr-review — sandbox-isolation (2026-05-11)
+
+Source: `tasks/review-logs/chatgpt-pr-review-sandbox-isolation-2026-05-11T10-03-27Z.md`. 3 rounds; Round 3 verdict APPROVED. 2 advisory non-blockers carried forward (recorded for future work; ChatGPT explicitly flagged both as not-blocking).
+
+- [ ] **SANDBOX-R3-T1 (advisory, low priority) — Reconciliation eligibility still uses Node wall-clock `now = new Date()`**
+  - File: `server/jobs/sandboxHarvestReconciliationJob.ts:72` (`const now = new Date();`)
+  - ChatGPT call (Round 3): *"less critical than the ceiling monitor because it is recovery timing, not billing enforcement, but for consistency I'd eventually move that to DB time too. Not a blocker."*
+  - Why deferred: recovery timing has no billing or correctness invariant; clock skew of seconds-to-minutes shifts when stuck-row sweep fires but does not change which rows are eligible (the per-row `isExecutionEligibleForReconciliation` check still validates the deadline). Round 2 R2-T1 fix migrated the ceiling monitor (correctness-sensitive) to DB-anchored time; this completes the migration to consistency.
+  - Suggested approach: replace `const now = new Date();` with a `SELECT NOW()` in the same admin transaction; thread the DB time through to `isExecutionEligibleForReconciliation`. Pure helper signature unchanged. Single-file change, ~10 lines.
+
+- [ ] **SANDBOX-R3-T2 (advisory, covered by SANDBOX-F1) — Placeholder PUBLISHED_VERSION acceptable only because version is `local-dev-*`**
+  - ChatGPT call (Round 3): *"The publish workflow still hard-fails until real e2b publish/inspect is wired, which is the right posture. Not a blocker, but keep the deferred item explicit."*
+  - Status: **already explicit** in SANDBOX-F1 (step 0 + step 6). No new work item — this entry exists as a cross-reference so future audits find the connection.
+
+## Deferred adversarial findings — personal-assistant-v1 (2026-05-12)
+
+Source: adversarial-reviewer Phase 1 pass on branch `claude/synthetos-personal-assistant-0kaIM`.
+Confirmed holes fixed inline before pr-reviewer. Deferred items below.
+
+### createDraftWithProposal non-atomic (likely-hole)
+`server/services/eaDrafts/eaDraftService.ts:58-88` — `actionService.proposeAction` and the
+subsequent `db.insert(eaDrafts)` are not wrapped in a single transaction. `proposeAction` does
+not accept a caller transaction handle. Fix requires refactoring `actionService.proposeAction`
+to accept an optional `tx` parameter, or extracting its insert logic into a shared helper.
+Phase 1.5 work item. Risk: orphaned `actions` row on `ea_drafts` insert failure.
+
+### dispatch() missing organisationId filter on integrationConnections lookup (worth-confirming)
+`server/services/triggers/externalSourceTriggers.ts:38-52` — add
+`eq(integrationConnections.organisationId, ctx.organisationId)` for defence-in-depth.
+
+### dispatch() rate-cap count not scoped by organisationId (worth-confirming)
+`server/services/triggers/externalSourceTriggers.ts:87-97` — add organisationId filter to
+rate-cap count query.
+
+### assembleThreadSummaryPrompt future prompt-injection surface (worth-confirming)
+`server/services/slack/slackActionService.ts:267` — when Slack thread summarisation ships,
+the raw Slack message content must be XML-escaped or sandboxed in a structured prompt turn
+before being passed to the LLM.
+
+## Deferred from spec-conformance review — personal-assistant-v1 (2026-05-12)
+
+**Captured:** 2026-05-12T13:15:07Z
+**Source log:** `tasks/review-logs/spec-conformance-log-personal-assistant-v1-2026-05-12T13-15-07Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-12-personal-assistant-v1-spec.md`
+
+- [ ] REQ-C4 — `voice_profiles` schema diverges from spec §7.4 contract
+  - Spec section: §7.4 + §21.1
+  - Gap: Missing `name` column (display); single `source` column (string) replaced by `sources text[]` array; missing `source_config jsonb` (per-sampler config); missing `refresh_config jsonb` (per-policy config). Renames: `sample_size`→`sample_count`, `last_derived_at`→`last_refreshed_at`, `opt_out_at`→`opted_out_at`.
+  - Suggested approach: Decide whether to bring schema into spec alignment (migration adds 4 cols, drops 1, renames 3) OR amend the spec to match the simpler implementation. The simpler schema is functional but breaks the spec's per-sampler config envelope.
+
+- [ ] REQ-CAL2 — Calendar `create_event` / `update_event` risk tier mismatch
+  - Spec section: §8.2 table + §6.3 rationale
+  - Gap: Code uses Tier 6 (max); spec specifies Tier 4 with action-level `defaultGate: review`. The spec rationale (third-party visibility is consent-based) supports Tier 4. Either change works at runtime since both are review-gated, but tier classification drives downstream policy decisions (budget caps, audit categorisation).
+  - Suggested approach: Confirm with the risk-tier rubric authors whether `create_event` is Tier 4 (record-write, consent-based visibility) or Tier 6 (broadcast). Update either the spec or the action registry.
+
+- [ ] REQ-T8 — Dedup key formats diverge from spec §7.1
+  - Spec section: §7.1 + §24.1
+  - Gap: Slack dedup key uses `channelId@messageTs` not `slack_event_id`. Calendar dedup key uses `eventId@startAt@minutesUntilStart` not `{calendarId}@{eventId}@{startAtISO8601}@{lookaheadMinutes}`. Both work as unique keys but diverge from spec's explicit shapes (which were chosen for multi-calendar support + recurring occurrence handling).
+  - Suggested approach: Update `deriveDedupKey` in `externalSourceTriggersPure.ts` to match spec format, or amend spec §7.1 to match the simpler keys.
+
+- [ ] REQ-C1 — `ExternalSourceTriggerEvent` schema simplified from spec §7.1
+  - Spec section: §7.1
+  - Gap: Spec specifies envelope with `provider`, `externalEventId`, `subaccountId`, `organisationId`, `integrationConnectionId`, and per-type `messageMetadata`/`eventMetadata`/`mentionMetadata` objects. Code's union has flat field shape (no envelope, owner-only). Loses some downstream consumer affordances (e.g. integration_connection_id passing through).
+  - Suggested approach: Confirm with downstream consumers whether the simplified shape suffices. If not, expand schema to match spec.
+
+- [ ] REQ-EA1 — EA default skill allowlist incomplete vs spec §13.2
+  - Spec section: §13.2
+  - Gap: `0332_executive_assistant_seed.sql` `default_org_skill_slugs` lists 16 entries. Spec §13.2 names additionally: `read_inbox`, `send_email`, `read_data_source`, `web_search`, `fetch_url`, `scrape_structured`, `ask_clarifying_question`, `request_clarification`, `read_workspace`, `update_memory_block`, `notify_operator`, `read_priority_feed`, `search_agent_history`.
+  - Suggested approach: Verify whether the missing skills are auto-enabled via universal-skills (per §13.2: "Universal skills per `server/config/universalSkills.ts` are always available regardless of allowlist"). If yes, allowlist is correct. If no, add the missing slugs to the seed.
+
+- [ ] REQ-EA3 — Partial unique index axis differs from spec §13.4
+  - Spec section: §13.4 concurrency guard
+  - Gap: Code uses `agents(organisation_id, owner_user_id) WHERE slug='executive-assistant'`. Spec specifies `agents(subaccount_id, owner_user_id) WHERE slug='executive-assistant'`. Difference matters when a user has access to multiple subaccounts in the same org: spec's axis allows one EA per subaccount per user; code allows only one EA per user per org.
+  - Suggested approach: Align with the multi-subaccount product intent; if users routinely access multiple subaccounts, change the index. If V1 dogfood is single-subaccount only, leave as-is and amend spec.
+
+- [ ] REQ-EA4 — EA `home_widget` refreshPolicy differs from spec §13.1
+  - Spec section: §13.1
+  - Gap: Seed uses `every_5m`; spec says `on_login`. The `every_5m` policy creates more API load per user; `on_login` lazily refreshes on route entry (and is what `useHomeWidgets` invalidates on).
+  - Suggested approach: Change seed to `on_login` unless there's a UX reason for periodic refresh.
+
+- [ ] REQ-EA5 — EA `home_widget.titleTemplate` hardcoded
+  - Spec section: §13.1 + §13.6 (display name renaming)
+  - Gap: Seed hardcodes `"Personal Assistant"`; spec specifies `'${agent.displayName}'`. Once users rename their EA via Settings (§13.6), the home widget should reflect the new name.
+  - Suggested approach: Update seed to use template string; ensure homeWidgetService substitutes `${agent.displayName}` when rendering.
+
+- [ ] REQ-M15 — Personal nav group placement
+  - Spec section: §14.1
+  - Gap: Spec says Personal group renders at the TOP of the sidebar, above Operate/Build/Govern. Code places it mid-list per `client/src/config/sidebar.ts` ordering comment ("top → work → projects → agents → personal → company → ...").
+  - Suggested approach: Move Personal group higher in `buildNavItems` if matching the spec is important for the "first thing the user sees" framing.
+
+- [ ] REQ-C3 — `slack.list_channels` Zod schema missing `types` filter
+  - Spec section: §7.3
+  - Gap: Spec input shape includes `types?: Array<'public_channel' | 'private_channel' | 'mpim' | 'im'>`. Code's Zod schema has no `types` field — callers cannot filter channel types.
+  - Suggested approach: Add `types` to the action Zod schema and pass through to the Slack handler.
+
+- [ ] REQ-CAL3-naming — Calendar write-action error codes differ from spec §8.4
+  - Spec section: §8.4 step 2
+  - Gap: Spec says `code: 'missing_draft_context'` (422) for missing/invalid `eaDraftId` or owner mismatch. Code uses `DRAFT_NOT_APPROVED`, `DRAFT_NOT_FOUND`, `DRAFT_SEND_IN_FLIGHT` (no `missing_draft_context`). Also: no owner-mismatch check (`ea_drafts.ownerUserId !== agent.ownerUserId`).
+  - Suggested approach: Either add the `missing_draft_context` mapping when `eaDraftId` is absent, OR amend spec to use the more granular code set the code emits. Add the owner-mismatch assertion either way (defence-in-depth).
+
+- [ ] REQ-M9 — Stall job 7-day proposal expiry path
+  - Spec section: §5.2 (`workflowGateStallNotifyJob` modification clause) + §20.4 + §22.2
+  - Gap: Spec prose says stall job should "transition expired proposal rows (`createdAt + 7d`) to approval state `expired`" for EA-linked drafts. Code's `eaDraftStallResetHandler` only resets `sending → idle`. Existing `actions` primitive expiry may already cover this, but the spec's explicit clause says it should be added to the stall job for EA-linked rows.
+  - Suggested approach: Verify whether existing `actions` expiry handles this; if not, extend the stall job to query `actions WHERE metadata_json->>'kind' = 'ea_draft' AND status='pending_approval' AND suspend_until < now()` and transition to `expired`/`rejected`.
+
+## Deferred spec decisions — feat-split-usagepage (2026-05-14)
+
+Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/builds/feat-split-usagepage/spec.md`. These are informational — the spec is mechanically tight and READY_FOR_BUILD; review only if you want to revisit a directional call.
+
+- [ ] **Codex #9 — `setRoutingFilters` / `setIeeFilters` update-pattern contract.** AUTO-REJECT (framing). Codex suggested specifying how filter setters avoid reload loops. Rejected because this is a pure refactor preserving today's plain `setState` behaviour, and adding a defensive contract over a simple setter is over-specification for pre-production / rapid-evolution scope.
+
+
+
+## Deferred from spec-conformance review — feat-split-adminsubaccountdetailpage (2026-05-15)
+
+**Captured:** 2026-05-15T14:26:25Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-adminsubaccountdetailpage-2026-05-15T14-26-25Z.md`
+**Spec:** `tasks/builds/feat-split-adminsubaccountdetailpage/spec.md`
+
+- [x] **E4 — Host retains shared `error` state + banner that spec §8 and plan §Chunk 4 said to remove.** RESOLVED 2026-05-15: option (b) applied — host `error` state renamed to `loadError`, the tab-switch `setError('')` clear and the line-115 banner removed, the early-return at the loading guard now uses `{loadError || 'Subaccount not found'}`. Subsequent-refresh failures inside `load()` still set `loadError` but the banner above tab dispatch is gone (cannot fire on a hydrated `sa`, matches spec §8). Typecheck + build clean.
+
+
+
+## Deferred from spec-conformance review — feat-split-layout (2026-05-15)
+
+**Captured:** 2026-05-15T01:10:00Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-layout-2026-05-15T01-10-00Z.md`
+**Spec:** `tasks/builds/feat-split-layout/spec.md`
+
+- [x] **REQ #14 — Optimistic subaccount addition on new-client create dropped.** RESOLVED 2026-05-15: option (b) applied — `addSubaccount(sa: ClientOption)` added to `useLayoutIdentity.ts` (dedupes by id), wired into `Layout.tsx`'s `CreateClientModal.onCreated` as `identity.addSubaccount(client); identity.selectClient(client);`. CreateClientModal's wasteful background `api.get('/api/subaccounts')` discard was also removed. Icon now appears in the rail immediately on create, matching pre-refactor behaviour.
+- [x] **REQ #15 — `SidebarShell` prop contract divergence.** RESOLVED 2026-05-15: option (a) applied — the two redundant `isSystemAdmin` / `activeOrgName` props removed from both the `SidebarShellProps` interface and the host invocation. Component now consumes `identity.isSystemAdmin` and `identity.activeOrgName` directly. The spec §8.2 prop list is the contract drift; mentioned here so a future spec-touch can clean it up.
+
+## Deferred from spec-conformance review — feat-split-subaccountknowledgepage (2026-05-15)
+
+**Captured:** 2026-05-15T17:21:49Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-subaccountknowledgepage-2026-05-14T17-21-49Z.md`
+**Spec:** `tasks/builds/feat-split-subaccountknowledgepage/spec.md`
+
+- [x] **REQ #1 — `ReferencesTab.tsx` exceeds the §10 Chunk 4 conditional extraction threshold.** RESOLVED 2026-05-15: extracted `RenameReferenceModal.tsx` per spec §10 Chunk 4 with the named prop shape (`subaccountId`, `reference`, `initialTitle`, `onClose`, `onRenamed`). The modal owns its `title` state seeded from `initialTitle`, calls `api.patch` + `toast.success('Reference renamed')` + `await onRenamed()` directly. `ReferencesTab.tsx` now shrunk and the rename modal is fully self-contained. Typecheck + build clean.
+
+---
+
+## 2026-05-15 — page-splits chatgpt-pr-review Round 1 deferrals
+
+**Captured:** 2026-05-15 (PR #313 chatgpt-pr-review Round 1)
+**Source log:** `tasks/review-logs/chatgpt-pr-review-page-splits-2026-05-14T21-53-53Z.md`
+
+- [ ] **PAGE-SPLITS-T1 — Consolidate duplicate `formatTime` / `formatConvDate` helpers across agent-chat and config-assistant.** ChatGPT-suggested follow-up. The page-split refactor authored these helpers separately under `client/src/components/agent-chat/format.ts` and `client/src/components/config-assistant/format.ts` to keep each split atomic. Move to a shared `client/src/components/chat/format.ts` (or `lib/dateFormat.ts`) in a follow-up. Acceptable for this PR.
+- [ ] **PAGE-SPLITS-T2 — Tighten weak error handling in extracted components.** Pre-existing weak error handling (swallowed `create-project` errors, `category`/`workflow` delete calls without catch) was carried through unchanged by the splits. Not introduced by PR #313 but worth a cleanup pass.
+
+---
+
+## Deferred from spec-conformance review — feat-split-skillexecutor (2026-05-14)
+
+**Captured:** 2026-05-14T19:26:46Z
+**Source log:** `tasks/review-logs/spec-conformance-log-feat-split-skillexecutor-2026-05-14T19-26-46Z.md`
+**Spec:** `tasks/builds/feat-split-skillexecutor/spec.md`
+
+- [ ] SKILLEXEC-SPLIT-DEF-CONF-1 — Spec self-contradiction: §5.2 names both `capabilities.ts` (line 123, "capability discovery skills — re-export thin shells calling existing capability handlers") and `capabilityDiscovery.ts` (line 145, eight specific slugs); §7 Chunk 11 references `handlers/capabilities.ts` while §7 Chunk 10c references `handlers/capabilityDiscovery.ts`. The two descriptions overlap in responsibility.
+  - Spec section: §5.2 lines 123 & 145; §7 Chunk 10c & Chunk 11
+  - Gap: Implementation consolidated to a single `handlers/capabilityDiscovery.ts` covering all 8 named slugs (`list_platform_capabilities`, `list_connections`, `check_capability_gap`, `request_feature`, `ask_clarifying_questions`, `ask_clarifying_question`, `challenge_assumptions`, `request_clarification`). No separate `capabilities.ts` was created. Slug coverage matches the union, but the spec's two-module phrasing is internally inconsistent.
+  - Suggested approach: Amend the spec (post-merge erratum) to delete the `capabilities.ts` row from §5.2 and consolidate into the `capabilityDiscovery.ts` entry. Do NOT split into two modules — the consolidation is the correct outcome; only the spec text needs cleanup.
+
+- [ ] SKILLEXEC-SPLIT-DEF-CONF-2 — Spec §5.5 narrative incorrectly claims `executeSpawnSubAgents` uses `enqueueHandoff`; implementation correctly preserves source behaviour (synchronous spawn via `agentExecutionService.executeRun`).
+  - Spec section: §5.5 line 217 ("Handlers that need to enqueue a handoff (currently `executeReassignTask` and `executeSpawnSubAgents`) import `enqueueHandoff` from `pipeline.ts`"); §5.3 line 197 cross-edge claim "(b) `handlers/tasks.ts` and `handlers/handoff.ts` both import `enqueueHandoff` from `pipeline.ts`".
+  - Gap: `handlers/handoff.ts` does NOT import `enqueueHandoff`. `executeSpawnSubAgents` calls `agentExecutionService.executeRun` directly (synchronous in-process) — the spec's behaviour claim conflicts with the source's actual behaviour. Only `handlers/tasks.ts` (executeReassignTask path) imports `enqueueHandoff`. The implementation respects the spec's binding constraint (§2 "No behaviour change") which dominates the §5.5 narrative.
+  - Suggested approach: Amend the spec (post-merge erratum) — strike `executeSpawnSubAgents` from §5.5 line 217 and revise §5.3 line 197 cross-edge (b) to name only `handlers/tasks.ts` as the consumer of `enqueueHandoff`. No code change required; behaviour is correct as shipped.
+
+---
+
+## Deferred from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)
+
+**Captured:** 2026-05-14T13-14-38Z
+**Source log:** tasks/review-logs/codebase-audit-log-rls-agent-exec-2026-05-14T13-14-38Z.md
+
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F2 — `verify-rls-protected-tables.sh` silent exit 123 on Windows Git Bash.** low/medium. Root cause: `set -euo pipefail` + an `xargs grep` with no matches under Git Bash. CI on Linux unaffected; local-dev gate run is opaque. Recommended action: wrap `xargs grep -hoE …` invocations with `|| true` or refactor the rename-map detection into a helper with explicit zero-match handling. Regression-test on Linux before merging.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F3 — `verify-rls-contract-compliance.sh` allowlist on `server/services/` masks raw-db usage at the service tier.** medium/medium. 231 of 526 service files import `db`; many call `db.select(...)` on tenant-scoped tables outside the ALS `withOrgTx` block. App-layer `where(eq(table.organisationId, orgId))` is the only defence — RLS-as-defence-in-depth depends on whether the prod DB role enforces RLS (TI-008 tracks the dev gap). Recommended action: architectural migration to `getOrgScopedDb()` for tenant-scoped service-tier queries; widen `verify-with-org-tx-or-scoped-db.sh` to flag the pattern. Per-service work — no bulk auto-fix.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F4 — `agentExecutionService.executeRun` (2,807 LOC) uses raw `db` extensively while `resumeAgentRun` in the same file uses `getOrgScopedDb`.** medium/high. Lines 477, 496, 513, 540 (and elsewhere) hit organisations, subaccounts, agent_runs, subaccountAgents on the unscoped pool. The mixed posture suggests an incomplete migration. Recommended action: migrate `executeRun` to `getOrgScopedDb('agentExecutionService.executeRun')` and verify every call site (HTTP routes, pg-boss jobs, scheduled tasks, recovery paths) opens `withOrgTx` first. Defer to F3 / F4 combined remediation.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F5 — `GET /api/agents` lacks `requireOrgPermission`.** low/medium. `server/routes/agents.ts:36`: any authenticated user (including users with zero agent permissions) can list org-scoped agents. Other agent routes gate via `requireOrgPermission(AGENTS_VIEW)`. May be intentional ("everyone sees owned agents") but undocumented. Recommended action: either add `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)` for consistency, OR add a one-line comment documenting the intent. Product call.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F6 — God-files persist after the operator-stated splits.** medium/high. `server/services/skillExecutor.ts` = 6,133 LOC (4× soft cap, 2.4× hard cap). `agentExecutionService.ts` = 2,807 LOC (over hard cap). `agentExecutionLoop.ts` = 1,415 LOC (over soft cap). The `*Pure.ts` companions landed but the main files remain large. Per framework Area 10, splits are always pass-3. Recommended next: per-phase decomposition of `executeRun`; isolate handoff logic from `skillExecutor.ts`.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F7 — `server/services/skillExecutor.ts:4302` raw `db.update(tasks)` write.** medium/medium. Carries a `guard-ignore-next-line` annotation citing prior `taskService.updateTask` org verification, but the trust chain is fragile — the earlier call closes its own tx and this write opens a fresh unscoped one. Same root cause as F3 / F4. Recommended action: use `getOrgScopedDb()` and pass the active tx through.
+- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F8 — Manual-run idempotency key time-buckets to 10 seconds.** low/medium. `server/routes/agentRuns.ts:54-55` — `manual:${agentId}:${subaccountId}:${userId}:${taskId??'heartbeat'}:${Math.floor(Date.now()/10000)}`. Two intentional triggers within the same 10s window with the same defaults (e.g. user clicks "Run" twice fast on heartbeat with no taskId) collide. Mitigation exists (caller may supply explicit `idempotencyKey`). Recommended action: document the trade-off in code; consider request-scoped UUID for default key.
+
+## Prevention proposals from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)
+
+**Captured:** 2026-05-14T13-14-38Z
+**Source log:** tasks/review-logs/codebase-audit-log-rls-agent-exec-2026-05-14T13-14-38Z.md
+
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:gate] **P1 — Tighten `verify-org-id-source.sh` default exit code from 2 (warning) to 1 (blocking) on post-baseline regressions.** Currently new code can warn-and-merge — the F1 portal.ts regression (9 violations introduced 2026-05-05) sat in main for over a week. Pairs with a baseline-freeze rule: any future increase requires an explicit baseline bump in the same commit. Closes findings: F1. Leverage tier 1 (block at write time).
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:gate] **P2 — Widen `verify-with-org-tx-or-scoped-db.sh` to flag service-tier raw-db query patterns on tenant-scoped tables.** Specifically, flag `db.(select|insert|update|delete)(<RLS_PROTECTED_TABLE>)` inside `server/services/` that does not have a sibling `getOrgScopedDb()` call in the same function scope. Allowlist via `guard-ignore`. Closes the false-negative from `verify-rls-contract-compliance.sh`'s `server/services/` directory allowlist. Closes findings: F3, F4, F7. Leverage tier 1.
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:gate] **P3 — Windows-portable harness test for `scripts/verify-*.sh`.** For each gate, run on a freshly-cloned repo (Linux CI is sufficient — goal is OS-parity behaviour) and assert exit ∈ {0, 1, 2} AND non-empty stdout. Catches scripts that silently die under `set -euo pipefail` + Git Bash quirks. Closes findings: F2. Leverage tier 1.
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:DEVELOPMENT_GUIDELINES.md] **P4 — Add convention rule: services that read or write tenant-scoped tables MUST use `getOrgScopedDb()`.** Raw `db.X()` calls are allowed only inside `withAdminConnection(...)` blocks or for tables in `rls-not-applicable-allowlist.txt`. Pairs with P2 (gate enforces; doc explains). Closes findings: F3, F4, F7. Leverage tier 2 (convention at design time).
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:architecture.md] **P5 — Document the mixed posture in `agentExecutionService.ts`.** `executeRun` runs on raw `db` (pre-migration); `resumeAgentRun` runs on `getOrgScopedDb`. State the target and link to F4. Prevents future maintainers from assuming the file is fully migrated. Closes findings: F4. Leverage tier 2.
+- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:KNOWLEDGE.md] **P6 — Pattern entry: god-files persisting after a 'split' commit.** `skillExecutor.ts` was claimed split but is still 6,133 LOC. Splits should produce a single PR that drops the original file under its hard cap, not just adds a `*Pure.ts` companion. Closes findings: F6. Leverage tier 3 (lesson via context).
+
+## Deferred from codebase audit — 2026-05-14 (Track A2: workflowEngine split)
+
+**Captured:** 2026-05-14T16-30-31Z
+**Source log:** tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md
+
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF1 — Five FK-scoped tenant tables have NO RLS policies.** **high/high.** `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs` hold tenant-private data (LLM payloads, agent outputs, HITL decisions, workflow studio chat sessions) but have zero Postgres-level isolation. They are FK-scoped to RLS-protected parents but lack their own `CREATE POLICY` statements. Concrete evidence: `server/services/workflowEngineService.ts:151-152` queries `workflow_step_runs` by id alone with no org filter. The gate `verify-rls-protected-tables.sh` misses this because it only inspects `organisation_id`-column-bearing tables. Recommended action: add a migration with EXISTS-based RLS policies joining through each parent (same shape as `document_bundle_members`/`subaccount_baseline_metrics` policies). Also add the five tables to the check2-exempt section of `scripts/rls-not-applicable-allowlist.txt` with rationale.
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF2 — `workflowEngineService.ts` god-file persists post-split.** medium/high. 4,073 LOC, 1.6× hard cap (2,500), 2.7× soft cap. The `workflowEngineServicePure.ts` companion landed (95 LOC) but the main file's 20-method surface (enqueueTick, tick, dispatchStep, resolveAgentForStep, findReusableOutputForStep, resumeInvokeAutomationStep, failStepRunInternal, editStepOutput, handleBulkFanOut, checkBulkParentCompletion, replayDispatch, createReplayRun, completeStepRunInternal, completeStepRunFromReview, completeStepRun, failStepRun, onAgentRunCompleted, handleDecisionStepCompletion, watchdogSweep, registerWorkers) was not reduced. Per Area 10, splits are always Pass 3. Recommended next: per-phase decomposition (workflowEngineDispatch, workflowEngineCompletion, workflowEngineBulkFanOut, workflowEngineReplay).
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF3 — `workflowEngineService.ts` uses raw `db` 18 times, `getOrgScopedDb` 0 times.** medium/medium. Same root cause as Track A F3/F4 (PR #308). Service does not import `getOrgScopedDb`. All tenant-touching queries on the unscoped pool. Recommended action: thread `getOrgScopedDb()` through the service; pair with the WF4 tick refactor.
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF4 — Workflow tick worker opts out of org context (`resolveOrgContext: () => null`) without re-opening `withOrgTx` after loading the run row.** medium/high. `server/services/workflowEngineService.ts:3897`. After looking up the org from the run, the rest of `tick()` (30+ DB calls) runs unscoped. `watchdogSweep` at line 3908 has the same issue at a per-iteration level. Recommended action: refactor `tick()` to wrap the run-loaded section in `withOrgTx({tx, organisationId: run.organisationId, ...}, ...)` and use `getOrgScopedDb()` thereafter; `watchdogSweep` should scope per iteration.
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF5 — Workflow run permission inconsistency: subaccount routes use `WORKFLOW_RUNS_*`, org routes reuse `AGENTS_VIEW`/`AGENTS_EDIT`.** medium/medium. `server/routes/workflowRuns.ts` lines 100, 152, 162, 177, 203, 247, 291, 311. The codebase has proper org-tier workflow perms (`WORKFLOW_TEMPLATES_READ`, `WORKFLOW_STUDIO_ACCESS`, `WORKFLOW_RUNS_START` org-scope variant) but no `WORKFLOW_RUNS_VIEW_ALL` / `WORKFLOW_RUNS_ADMIN`. Recommended action: either add the missing org-tier workflow perms and switch the routes, OR document the workflows-as-agents intent inline. Product call.
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF6 — `workflowAgentRunHook.ts:36-39` raw `db.select` on `agent_runs` by id with no org filter.** low/medium. Hook is invoked at agent-run completion. The chain breaks because the caller (`agentExecutionService`) itself uses raw db (Track A F4). Recommended action: use `getOrgScopedDb('workflowAgentRunHook.notifyOnComplete')`; defer to wider WF3 / Track A F3+F4 migration.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed-during-audit] **WF7 — `workflowEngineService.tick()` advisory-lock comment stale.** RESOLVED 2026-05-14 in Pass 2: verified AR-3.1 was closed 2026-05-06 (PR #267, see `tasks/todo-archive-2026-Q2.md:3075`) — singletonKey-is-load-bearing rationale, full-tx wrap deferred to Phase 4 if profiling needs it. Updated the inline comment at `server/services/workflowEngineService.ts:837-847` to drop the stale "deferred to AR-3.1 / tracked in tasks/todo.md" pointer and replace with the closure rationale + Phase 4 profiling trigger.
+- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF8 — `GET /api/workflow-runs/:runId` gates via `AGENTS_VIEW`.** low/medium. `server/routes/workflowRuns.ts:100`. User-facing form of WF5. Subsumed by WF5 fix.
+
+## Prevention proposals from codebase audit — 2026-05-14 (Track A2: workflowEngine split)
+
+**Captured:** 2026-05-14T16-30-31Z
+**Source log:** tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md
+
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:gate] **Q1 — Extend `verify-rls-protected-tables.sh` Check 1 to flag FK-scoped tables without `CREATE POLICY` and without a `# check2-exempt:` allowlist entry.** Currently the gate only inspects literal `organisation_id` columns in CREATE TABLE; tenant-scoped data living in FK-only tables (WF1) slips through. Closes findings: WF1. Leverage tier 1 (block at write time).
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:gate] **Q2 — Add a gate `verify-fk-only-tenant-tables.sh` walking schema files for pgTable definitions that reference a tenant-scoped parent but have no `organisation_id` column AND no migration-level `CREATE POLICY` AND no allowlist entry.** Lower-cost alternative to Q1 — works at the schema-file level. Closes findings: WF1. Leverage tier 1.
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:architecture.md] **Q3 — Document the FK-scoped RLS pattern explicitly: "A table holding tenant-private data and referencing a tenant-scoped parent via FK MUST either (a) carry its own `organisation_id` column + RLS policy, OR (b) carry an EXISTS-based policy joining through the parent FK. FK-alone is not protection."** Cite existing examples (`connector_location_tokens`, `document_bundle_members`, `subaccount_baseline_metrics`). Closes findings: WF1. Leverage tier 2.
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:DEVELOPMENT_GUIDELINES.md] **Q4 — Add convention: "A pg-boss worker that sets `resolveOrgContext: () => null` MUST re-open `withOrgTx` after loading the run/job's organisation. The opt-out is for the initial cross-tenant lookup only."** Closes findings: WF4. Leverage tier 2.
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:KNOWLEDGE.md] **Q5 — Pattern entry: "FK-scoped tenant data ≠ RLS-protected." Five workflow tables held tenant-private payloads with no Postgres-level isolation; the audit found this via grepping `migrations/*.sql` for policy statements against the table names.** Closes findings: WF1. Leverage tier 3.
+- [ ] [origin:audit:prevention:workflow-engine:2026-05-14T16-30-31Z] [status:open] [target:gate] **Q6 — New lint gate flags any `requireOrgPermission(AGENTS_*)` call inside a file matching `server/routes/workflow*.ts`.** Forces deliberate choice: rename to `WORKFLOW_*` perms or add `guard-ignore` comment. Closes findings: WF5, WF8. Leverage tier 1.
+
+## Deferred from codebase audit — 2026-05-14 (Track A3: skillAnalyzerServicePure split)
+
+**Captured:** 2026-05-14T16-53-39Z
+**Source log:** tasks/review-logs/codebase-audit-log-skill-analyzer-2026-05-14T16-53-39Z.md
+
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA1 — `skill_analyzer_results` lacks RLS policy.** medium/high. FK-scoped to `skill_analyzer_jobs` (RLS-protected) but no `CREATE POLICY` of its own. Holds per-tenant classification data (candidateSlug, classification, diff_summary). Mitigation: routes are system-admin-only (`skillAnalyzer.ts:28-29`); narrower blast radius than Track A2 WF1. Recommended action: migration with parent-EXISTS policy + allowlist entry.
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA2 — Inverted god-file split.** medium/high. `skillAnalyzerService.ts` 2,642 LOC + `skillAnalyzerServicePure.ts` 3,727 LOC. The Pure module is larger than its impure shell — total 6,369 LOC across the "split". Recommended action: decompose `skillAnalyzerServicePure.ts` by pipeline stage (parsePure, hashPure, embedPure, comparePure, classifyPure, writePure).
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA3 — `skillAnalyzerJob.ts` 2,254 LOC.** medium/high. Over soft cap (1,500); Area 10 doesn't cap jobs explicitly, but spirit applies. Recommended action: split by pipeline stage; consider extending Area 10 caps to jobs.
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA4 — `server/index.ts:691` uses `boss.work` directly, bypassing `createWorker`.** medium/high. The skill-analyzer worker never enters the canonical `withOrgTx` prelude. Same family as Track A2 WF4 (workflow tick worker, different bypass mechanism). Recommended action: convert to `createWorker({queue: 'skill-analyzer', boss, ..., resolveOrgContext: (job) => /* look up org */, handler: ...})`.
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA5 — Route URL UK spelling vs file/service US spelling.** low/high. `/api/system/skill-analyser/jobs` vs `skillAnalyzer*` everywhere else. Recommended action: document the intentional URL OR plan a deprecation cycle.
+- [ ] [origin:audit:skill-analyzer:2026-05-14T16-53-39Z] [status:open] **SA6 — `skillAnalyzerService.ts:2001,2009` raw `db.insert` on `skill_analyzer_results` outside `getOrgScopedDb`.** medium/high. Same family as Track A F3/F4, Track A2 WF3. Worsened because SA4 (no upstream withOrgTx). Recommended action: migrate once SA4 lands.
+
+## Prevention proposals from codebase audit — 2026-05-14 (Track A3: skillAnalyzerServicePure split)
+
+**Captured:** 2026-05-14T16-53-39Z
+**Source log:** tasks/review-logs/codebase-audit-log-skill-analyzer-2026-05-14T16-53-39Z.md
+
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:gate] **R1 — Gate flags any `boss.work(...)` call outside `server/lib/createWorker.ts` and `server/lib/__tests__/`.** Forces canonical worker registration or explicit annotation. Closes findings: SA4. Tier 1.
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:architecture.md] **R2 — Document the canonical worker registration pattern.** "Every pg-boss queue handler MUST be registered via `createWorker(...)`. Bare `boss.work(...)` is reserved for the wrapper itself and boot-time DLQ wiring." Closes findings: SA4. Tier 2.
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:gate] **R3 — Extend Track A2 Q1/Q2 gates to also cover `skill_analyzer_results`.** FK-scoped tenant tables without explicit RLS. Closes findings: SA1. Tier 1.
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:KNOWLEDGE.md] **R4 — Pattern entry: a 'split' commit can land two god-files instead of one.** `skillAnalyzerServicePure.ts` (3,727 LOC) larger than its impure shell (2,642 LOC). Check `wc -l` on both sides of every split-PR. Closes findings: SA2. Tier 3.
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:docs/codebase-audit-framework.md] **R5 — Extend Area 10 caps table to cover `server/jobs/*.ts` at the same soft/hard thresholds as services.** Closes findings: SA3. Tier 2.
+- [ ] [origin:audit:prevention:skill-analyzer:2026-05-14T16-53-39Z] [status:open] [target:KNOWLEDGE.md] **R6 — Pattern entry: URL paths can diverge from file/service spelling.** Audit spot-check: grep route file for `router.*` and compare URL to identifiers. Closes findings: SA5. Tier 3.

@@ -109,7 +109,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 
 - Services contain all business logic. Routes are thin wrappers.
 - Services throw errors as `{ statusCode: number, message: string, errorCode?: string }` — `asyncHandler` catches these.
-- One service per domain. Target max ~500 lines; `skillExecutor.ts` (65KB) is the exception.
+- One service per domain. Target max ~500 lines; `skillExecutor.ts` was the historical exception and has since been split into `server/services/skillExecutor/` (see § Skill executor & processor hooks).
 - Never access `db` directly in a route — call a service. `server/lib/**` files are pure helpers and must not import `db` either.
 
 ### When to create a new service file
@@ -148,6 +148,14 @@ requireSystemAdmin                    // system_admin only
 req.user: { id, organisationId, role, email }  // from JWT
 req.orgId: string                              // resolved org (may differ from user.organisationId for system_admin)
 ```
+
+### Single org-id source
+
+**`req.user.organisationId` is read in exactly one place: `server/middleware/auth.ts`.**
+
+All other code — routes, services, jobs, helpers — reads `req.orgId`. The two values differ only when a system admin is acting on a non-owned org (`req.user.organisationId` = the admin's home org, `req.orgId` = the impersonated org from the URL). Reading the wrong one in tenant-scoped code is a silent cross-tenant leak.
+
+Enforced by `scripts/verify-org-id-source.sh`. Suppression for legitimate exceptions (the auth middleware itself, audit logs that record the acting user's home org) uses `guard-ignore: org-id-source reason="..."`.
 
 ### Two-tier permission model
 
@@ -802,7 +810,9 @@ Owner-tier viewers always see `full` regardless of the visibility value. Visibil
 
 ### Skill executor & processor hooks
 
-`skillExecutor.ts` implements a three-phase pipeline for every skill execution:
+The skill executor has been split into a directory at `server/services/skillExecutor/`. The public API is re-exported from the thin barrel `server/services/skillExecutor.ts` (exports: `skillExecutor`, `SKILL_HANDLERS`, `SkillExecutionContext`, `SkillHandler`, `registerProcessor`, `setHandoffJobSender`). Internal dependency order: `context` → `pipeline` → `gating` → `handlers/*` → `registry` → barrel (with `adapter-registration.ts` side-effect imported first). All callers import from the barrel; see `tasks/builds/feat-split-skillexecutor/spec.md` for the full module conventions.
+
+The executor implements a three-phase pipeline for every skill execution:
 
 1. **`processInput`** — before permission gate: validate and transform input
 2. **`processInputStep`** — after gate, before execute: prepare execution context
@@ -818,7 +828,7 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 | Org | `skills` | Org admin can create/manage |
 | Subaccount | inherited from org assignment | Subaccount-specific overrides |
 
-System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in `skillExecutor.ts`'s `SKILL_HANDLERS` map, enforced at server boot by `validateSystemSkillHandlers()`.
+System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in the `SKILL_HANDLERS` map (assembled in `server/services/skillExecutor/registry.ts`, re-exported from the barrel), enforced at server boot by `validateSystemSkillHandlers()`.
 
 **Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
 
@@ -1606,6 +1616,8 @@ Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple age
 <a id="agent-execution-middleware-pipeline"></a>
 ## Agent Execution Middleware Pipeline
 
+`agentExecutionService.executeRun()` is the main entry point for autonomous agent execution. The implementation is decomposed across `server/services/agentExecutionService/` with the barrel at `server/services/agentExecutionService.ts` (thin re-export shell, < 250 LOC). Phase modules in `runLifecycle/` run in order: validate → persistRun → configure → loadContext → prepare → dispatch → complete. Supporting modules: `types.ts` (shared interfaces), `backendDispatch.ts` (backend adapter wiring), `promptBuilders.ts` (prompt-assembly helpers), `resume.ts` (`resumeAgentRun` entry point).
+
 The agent execution loop runs every tool call through a three-phase middleware chain defined in `server/services/middleware/index.ts`. The pipeline is the central quality/safety filter for all agent behaviour.
 
 ### Phase 1 — preCall (before the LLM call)
@@ -2153,6 +2165,7 @@ When introducing a new feature whose behaviour the agents will need to query, as
 109+ migrations (0001–0109 plus 0170–0177 for ClientPulse Phases 0–3 + Phase 1 follow-ups, and 0176 for IEE Phase 0 delegation lifecycle, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0358` — Skill Analyzer conditional consolidation pass: adds `skill_analyzer_results.pre_consolidation_merge` (jsonb), `consolidation_outcome` (text, closed enum), `consolidation_note` (text); adds `skill_analyzer_config.consolidation_enabled` (bool) + `consolidation_trigger_severity` (text); extends `warning_tier_map` defaults with `CONSOLIDATION_APPLIED|DECLINED|FAILED` at informational tier.
 - `0275` — Agentic Commerce hardening: partial UNIQUE index on `org_subaccount_channel_grants(org_channel_id, subaccount_id) WHERE active = true` — DB-level idempotency guard for the grant-active uniqueness invariant. Pairs with SELECT-then-INSERT race-handling in `approvalChannelService.addGrant`.
 - `0274` — Agentic Commerce Chunk 8: `actions.agent_id` made nullable to support agent-less spend reservations (system / cron / webhook-driven charges that do not originate from an agent run).
 - `0273` — Agentic Commerce Chunk 3: adds `'stripe_agent'` to `integration_connections.providerType`; documents SPT vault extension (TypeScript-layer only — providerType is TEXT, no DB ENUM)
@@ -2664,6 +2677,8 @@ All routes use `resolveSubaccount(subaccountId, orgId)` + `authenticate` + (conf
 <a id="skill-analyzer"></a>
 ## Skill Analyzer
 
+> **UI retired 2026-05-14 (PR #305):** the client wizard subtree (`client/src/components/skill-analyzer/*`) was deleted as dead code after PR #300 (`skill-merge-consolidation-pass`) superseded its workflow. The server pipeline below remains operational; UI-affordance prose in this section describes the underlying REST contract, not a live UI surface.
+
 System-admin tool for ingesting external skill libraries (upload / paste / GitHub) and merging them into the platform skill catalogue with human review. Produces a per-candidate merge proposal + structured warnings; reviewer approves / rejects / edits; Execute applies approved rows atomically with a pre-mutation backup.
 
 Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
@@ -2674,6 +2689,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 4. **Compare** — cosine similarity produces a single best-match per candidate; banded into `likely_duplicate` (>0.92) / `ambiguous` (0.60–0.92) / `distinct` (<0.60).
 5. **Classify + merge** — Claude Sonnet 4.6 produces classification (DUPLICATE / IMPROVEMENT / PARTIAL_OVERLAP / DISTINCT) and, for overlap classifications, a `proposedMerge` object. See §Rule-based fallback below when the classifier is unavailable.
 6. **Validate** — pure post-processing in `skillAnalyzerServicePure.validateMergeOutput` emits structured warnings (scope expansion, invocation-block loss, HITL-gate loss, table-row drops, required-field demotion, capability overlap, name mismatch, output-format loss).
+6a. **Consolidation gate** (conditional, migration 0358) — when `validateMergeOutput` emits `SCOPE_EXPANSION` / `SCOPE_EXPANSION_CRITICAL` and `consolidation_enabled = true`, a second Sonnet pass tightens the merge before reviewer review. Single attempt, no retry. Outcomes captured in `skill_analyzer_results.consolidation_outcome` (closed enum: `not_triggered | succeeded | declined | failed`); pre-consolidation draft snapshot kept in `pre_consolidation_merge` (jsonb) for audit. Outcome-classification rule: `succeeded` requires `postWords < preWords`; non-shortening outputs route to `failed` with `failureReason='not_shortened'`. Mutation guards (`parseConsolidationResponse`) reject any LLM response that mutated `name`, `description`, `definition` (canonical-JSON deep-equal — key-order tolerant), or `mergeRationale`. Three informational warnings ride on `mergeWarnings`: `CONSOLIDATION_APPLIED | CONSOLIDATION_DECLINED | CONSOLIDATION_FAILED`.
 7. **Agent propose** (DISTINCT only) — cosine rank of the candidate against existing system agents; top-K persisted to `agentProposals` with optional Haiku enrichment.
 8. **Cluster recommend** — if ≥3 DISTINCT candidates lack a good agent home, Sonnet proposes a new agent and retro-injects a synthetic proposal into each affected result's `agentProposals`.
 
@@ -2681,7 +2697,7 @@ Pipeline stages (`server/jobs/skillAnalyzerJob.ts`):
 
 The v2 cycle closed seven correctness holes in the Review + Execute flow. Key additions:
 
-- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; `client/src/components/skill-analyzer/mergeTypes.ts` mirrors it for optimistic UI preview. The server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
+- **Canonical approval evaluator.** `skillAnalyzerServicePure.evaluateApprovalState(warnings, resolutions, tierMap)` is the single source of truth for whether a result can be approved. Server is authoritative; the server re-runs the evaluator on both `PATCH /results/:id` (approve) and `POST /execute`.
 - **Warning tier system** (config-driven). Tiers are `informational` | `standard` | `decision_required` | `critical`, mapped per warning code via `skill_analyzer_config.warning_tier_map`. Tier dictates the Approve-button gate: structured resolution (per-field accept/restore for demoted required fields; use-library / use-incoming for name mismatch; scope-down / flag-other / accept-overlap for graph collisions); single-click acknowledgment; or critical-phrase typed confirmation.
 - **Rule-based fallback merger.** When the LLM classifier is unavailable or returns an invalid proposal, `buildRuleBasedMerge` produces a deterministic merge (library-dominant name for DB slug stability; definition-bearing skill wins schema; H2-section union for instructions). Always emits `CLASSIFIER_FALLBACK` warning + low-confidence banner requiring reviewer acknowledgment. No more `proposedMerge=null` dead rows.
 - **Name consistency cascade.** `detectNameMismatch` compares top-level `name`, `definition.name`, and bare-identifier references in description/instructions. When a reviewer resolves via `use_library_name` / `use_incoming_name`, the chosen name cascades atomically into `proposedMergedContent.name`, `definition.name`, and `execution_resolved_name`; Execute reads `execution_resolved_name` as the canonical source to survive drift.
@@ -2719,7 +2735,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 
 | Table / column | Purpose |
 |----------------|---------|
-| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`. Bumps `config_version` on every update. |
+| `skill_analyzer_config` (new singleton, key='default') | Admin-tunable thresholds: `classifier_fallback_confidence_score`, `scope_expansion_standard_threshold`, `scope_expansion_critical_threshold`, `collision_detection_threshold`, `collision_max_candidates`, `max_table_growth_ratio`, `execution_lock_stale_seconds`, `execution_auto_unlock_enabled`, `critical_warning_confirmation_phrase`, `warning_tier_map`, `consolidation_enabled` (bool, default true), `consolidation_trigger_severity` (enum `'warning' \| 'critical'`, default `'warning'`). Bumps `config_version` on every update. |
 | `skill_analyzer_results.warning_resolutions` | JSONB array of reviewer decisions, deduped by `(warningCode, details.field)`. Wiped on merge edit. |
 | `skill_analyzer_results.classifier_fallback_applied` | True when rule-based merger produced the proposal. |
 | `skill_analyzer_results.execution_resolved_name` | Canonical name chosen via NAME_MISMATCH resolution; authoritative at Execute. |
@@ -2738,6 +2754,7 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 - `collision_max_candidates` ∈ positive integer; `execution_lock_stale_seconds` same.
 - `critical_warning_confirmation_phrase` ≥ 3 characters.
 - Cross-field invariant: `scope_expansion_standard_threshold < scope_expansion_critical_threshold` with `MIN_THRESHOLD_DELTA = 0.05` gap to prevent degenerate collapses.
+- `consolidation_trigger_severity` must be `'warning'` or `'critical'` (closed enum).
 - Every successful update emits `skill_analyzer_config_updated` structured log with `{ changedFields, before, after, configVersion }`.
 
 ### Files
@@ -2748,14 +2765,11 @@ Backup entity shapes emitted by `configBackupService.captureSkillAnalyzerEntitie
 | `server/db/schema/skillAnalyzerConfig.ts` | Drizzle schema for the config singleton |
 | `server/db/schema/skillAnalyzerJobs.ts` | Jobs table (+ v2 columns) |
 | `server/db/schema/skillAnalyzerResults.ts` | Results table (+ v2 columns) |
-| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, warning codes, tier map, validator |
+| `server/services/skillAnalyzerServicePure.ts` | Pure logic — `evaluateApprovalState`, `buildRuleBasedMerge`, `detectNameMismatch`, `remediateTables`, `detectSkillGraphCollision`, `sortWarningsBySeverity`, `checkConcurrencyStamp`, `buildConsolidationPrompt`, `parseConsolidationResponse`, `extractPreservationInventory`, `consolidationWordCount`, warning codes, tier map, validator. Internal helpers `canonicalJSON` + `sortKeys` give key-order-tolerant deep-equality for LLM-echoed objects. |
 | `server/services/skillAnalyzerService.ts` | Stateful — `createJob`, `getJob`, `setResultAction`, `patchMergeFields`, `resetMergeToOriginal`, `resolveWarning`, `updateProposedAgent`, `executeApproved` (3-phase staged pipeline) |
 | `server/services/skillAnalyzerConfigService.ts` | Singleton config reader/updater with 30s in-memory cache + diff logging |
 | `server/routes/skillAnalyzer.ts` | REST surface: jobs / results / merge / resolve-warning / proposed-agents / config |
 | `server/jobs/skillAnalyzerJob.ts` | 8-stage pipeline handler |
-| `client/src/components/skill-analyzer/MergeReviewBlock.tsx` | Three-column merge view + `WarningResolutionBlock` with per-warning resolution controls |
-| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Review screen, `AgentChipBlock`, `ProposedAgentBanner` with Confirm/Reject |
-| `client/src/components/skill-analyzer/mergeTypes.ts` | Browser-safe mirror of the approval evaluator + warning types |
 
 ### Tests
 
@@ -3697,6 +3711,14 @@ Set `OAUTH_CALLBACK_BASE_URL` in `.env` to the ngrok HTTPS URL. `APP_BASE_URL` s
 - `DATABASE_URL` — if Postgres is not on localhost on the other machine
 
 Everything else in `.env` is portable.
+
+### Dev build lifecycle
+
+Every Standard+ feature follows this nine-step sequence (full detail in `CLAUDE.md` § *Build lifecycle*):
+
+> Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge
+
+Orchestrators: `spec-coordinator` (Phase 1 — Intent intake, Duplication / Strategy Check, mockup loop, spec authoring, reviews, handoff), `feature-coordinator` (Phase 2 — planning + construction + review), `finalisation-coordinator` (Phase 3 — Capability Registration + Compound Learning + merge). Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
 
 ---
 

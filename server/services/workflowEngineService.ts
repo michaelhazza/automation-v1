@@ -835,16 +835,17 @@ export const WorkflowEngineService = {
    * return — another handler is already working on this run.
    */
   async tick(runId: string): Promise<void> {
-    // Layer 2 — non-blocking advisory lock.
-    // AR-3.1 NOTE: pg_try_advisory_xact_lock runs in auto-commit mode here (db.execute
-    // without a wrapping db.transaction). The xact-level lock releases at statement end,
-    // NOT at function end. pgboss.send() below (and all other DB ops in this handler)
-    // run on separate auto-commit connections — the advisory lock does NOT span them.
-    // The practical effect is contention detection only (if another handler holds a lock
-    // on the same runId it returns got=false), not a true serialisation gate.
-    // A full fix (wrapping all of tick() in a single db.transaction) is deferred to AR-3.1
-    // resolution and tracked in tasks/todo.md under ## Deferred. The current implementation
-    // is safe under pg-boss's own singletonKey deduplication (§5.6 layer 1).
+    // Layer 2 — non-blocking advisory lock (contention detection only).
+    // pg_try_advisory_xact_lock here runs in auto-commit mode (db.execute without a
+    // wrapping db.transaction), so the xact-level lock releases at statement end, NOT
+    // at function end. pgboss.send() below and all other DB ops run on separate
+    // auto-commit connections — the lock does NOT span them. Practical effect: if
+    // another handler holds a lock on the same runId we observe got=false and bail.
+    // pg-boss singletonKey deduplication (§5.6 layer 1) is the load-bearing
+    // serialisation defence; the advisory lock is just an early-exit. Originally
+    // tracked as AR-3.1 deferred work; AR-3.1 was closed 2026-05-06 (PR #267) with
+    // the singletonKey-is-load-bearing rationale. Re-open as a Phase 4 item only if
+    // profiling shows singletonKey alone is insufficient.
     const lockResult = await db.execute(
       sql`SELECT pg_try_advisory_xact_lock(hashtext(${'workflow-run:' + runId})::bigint) AS got`
     );

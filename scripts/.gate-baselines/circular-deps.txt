@@ -1,0 +1,7 @@
+# Baseline for P11 verify-no-new-cycles.sh
+# Seeded 2026-05-14 — madge --circular --json server/ client/ shared/ worker/
+# reported 0 cycles. Baseline count: 0
+# Gate fails only if cycle count EXCEEDS this baseline.
+# Format: cycle-count:<n>  (single numeric entry)
+# expires: 2026-11-14
+cycle-count:0

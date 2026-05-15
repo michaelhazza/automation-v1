@@ -1183,6 +1183,39 @@ Detection: any new write path to a FORCE RLS table — if the path is webhook in
 Source: PR #291 chatgpt-pr-review Round 1 F2. Spec §18 line 1573 locks V1 EA approval to the draft owner only: `if (draft.ownerUserId !== req.user.id) → 403`. The original route allowed `org_admin | system_admin` to approve another user's draft — this is rejected for V1 because it conflates "admin can see metadata" with "admin can act on content". Admin break-glass for EA drafts (read body, approve on behalf, reject on behalf) requires an explicit V2 spec with an audit gate: every break-glass action writes an audit row with reason, the admin's identity, and the affected draft owner. Until that spec exists, admin paths return 403 on approve/reject/retry.
 
 Generalises beyond EA: any "AI-drafted content awaiting user decision" surface (EA drafts, agent recommendations awaiting user approval, generated reports pending publish) defaults to owner-only action. Admin metadata visibility is fine (list endpoints can show "Bob has 3 pending drafts"). Admin content visibility and admin content action are separate, gated capabilities that require their own audit story. Detection: any new route that gates by `isAdmin || isOwner` for an action on user-generated content — challenge it. The default is `isOwner` only; the `isAdmin` branch requires a documented audit-and-rationale layer.
+
+### [2026-05-15] Pattern — Page split for mega-pages: host + `components/<feature>/` + scoped hook
+
+Source: simultaneous refactor of `client/src/pages/AdminSubaccountDetailPage.tsx` (1,415 LOC), `client/src/components/Layout.tsx` (1,325 LOC), and `client/src/pages/UsagePage.tsx` (1,280 LOC). Hosts shrunk to 92 / 192 / 127 LOC respectively. Specs at `tasks/builds/feat-split-{adminsubaccountdetailpage,layout,usagepage}/spec.md`.
+
+Reusable shape when a page or shared component crosses ~800 LOC:
+1. **Folder convention.** Extracted subcomponents go in `client/src/components/<kebab-feature>/`, matching the established `pulse/`, `clientpulse/`, `skill-analyzer/`, `baseline/` precedent. NEVER under `client/src/pages/<page>/components/` for top-level pages — that creates a third placement convention nobody else follows.
+2. **Three placement buckets.** Atoms (`Badge`, `FilterSelect`) under `<feature>/atoms/`; orchestrating tabs / regions directly under `<feature>/`; modals under `<feature>/modals/`. Pure helpers in `<feature>/format.ts` + `constants.ts`; shared types in `<feature>/types.ts`.
+3. **Hooks separate from components.** Side-effect-heavy state extracts into focused hooks under `client/src/hooks/use<Feature><Slice>.ts`. One hook per coherent slice (identity, permissions, badges, sidebar config, etc.). Each hook's return contract is pinned in the spec's §7. Hooks own their own `useEffect` blocks including the eslint-disable rationale comments — those carry over verbatim.
+4. **Three ownership models for cross-tab data.** (a) host-owned + passed down + `onChange={load}` callback for mutations (e.g. `categories`, `linkedProcesses`); (b) tab-owned self-fetch when no cross-tab consumer exists (e.g. `BoardConfigTab` after refactor); (c) hook-owned single source of truth when multiple chrome regions consume it (e.g. `useLayoutIdentity` for `subaccounts`). Pin the model per data item in spec §7.
+5. **Per-tab error banners not a shared host banner.** When tabs extract, their local error state moves with them. The host's previously-shared `error` field becomes dead — remove it as part of the refactor. Spec must explicitly call this out: §8 "error-banner contract" naming exactly which tabs render their own banner.
+6. **Optimistic state mutations need an action on the owning hook.** If pre-refactor behaviour did `setSubaccounts(prev => [...prev, newEntry])` inline, the equivalent post-refactor is `useLayoutIdentity.addSubaccount(sa)` — an explicit action exposed by the hook. Forgetting this is a behavioural regression flagged immediately by spec-conformance review.
+7. **Imports inside `client/src/components/<feature>/` files use NO `.js` suffix** — matches the `pulse/`, `clientpulse/`, etc. precedent. Hooks under `client/src/hooks/` are mixed; new ones can go either way under `moduleResolution: bundler`. Be consistent within a folder.
+8. **Page-file path stays put.** Top-level pages keep their flat `client/src/pages/PageName.tsx` location — moving to `client/src/pages/<feature>/index.tsx` would touch `App.tsx` routing and is a separate refactor (deferred unless explicitly in scope).
+9. **Spec-conformance pickier than pr-reviewer.** Spec-conformance flags spec/implementation divergence as `NON_CONFORMANT` even for cleaner alternatives (e.g. dropping redundant props that `identity` already supplies). pr-reviewer treats the same divergence as a "strong rec" not blocking. Both reviewers correctly catch behavioural regressions (dropped optimistic adds, dead state retention) — fix those before merge.
+
+Detection: any `client/src/pages/*.tsx` or top-level `client/src/components/*.tsx` exceeding ~800 LOC is a candidate. Start with the spec-authoring step (see `docs/spec-authoring-checklist.md` §1 "existing primitives search") and reuse this pattern rather than inventing a new one.
+
+### [2026-05-15] Pattern — Batch 2 follow-on for the page-split refactor
+
+Source: simultaneous refactor of `client/src/pages/SubaccountKnowledgePage.tsx` (1,160 → 256 LOC), `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` (1,102 → 230 LOC), and `client/src/pages/subaccount/WorkflowRunPage.tsx` (952 → 200 LOC). Specs at `tasks/builds/feat-split-{subaccountknowledgepage,skillanalyzerresultsstep,workflowrunpage}/spec.md`.
+
+Three additional patterns surfaced beyond the batch-1 list:
+
+10. **Cross-tab side-effect ordering: mutate-while-mounted, then unmount via tab-switch.** When a tab's action (e.g. Promote in References) triggers a tab switch + parent refetch, the spec-correct ordering is: `api.post(...)` → `toast.success(...)` → close any open modal → `await onMutated()` (the parent's load) → `onTabSwitchTo(other)`. Doing the tab-switch first causes the React 18 setState-on-unmounted-component warning because the originating tab is still in the middle of post-success state cleanup. Spec must pin this ordering verbatim.
+
+11. **Header-button-to-tab handshake via `openCreateOnMount` / `onCreateConsumed`.** When the host renders a "+ New X" button that should open the active tab's create modal, the active-tab component receives `openCreateOnMount: boolean` + `onCreateConsumed: () => void` props. On mount with `openCreateOnMount=true`, the tab opens its create modal and calls `onCreateConsumed()` to clear the host's `pendingCreate` flag (so a subsequent tab switch + return doesn't re-trigger). The `onCreateConsumed` callback must be `useCallback`-stabilised on the host or the `useEffect` re-fires every render.
+
+12. **Sub-folder convention for orchestrator-internal pieces.** When a single orchestrator (e.g. `SkillAnalyzerResultsStep`) decomposes into 5+ sub-files that are not reused elsewhere, group them in a sub-folder named after the orchestrator (`skill-analyzer/resultsStep/` ⊂ `skill-analyzer/`) rather than flat-listing them alongside truly shared siblings. The sub-folder signals "internal pieces of X" vs `skill-analyzer/` which signals "the skill-analyzer feature surface as a whole". Same principle would apply to `<feature>/<orchestrator>/` for future page-or-component splits where the orchestrator has its own dedicated sub-pieces.
+
+13. **Defer optional internal splits unless the LOC threshold is breached AND the split simplifies something concrete.** Specs commonly include conditional "If X.tsx exceeds ~300 LOC after this move, also split Y" lines. At 350-407 LOC such splits are sometimes still worth doing (RenameReferenceModal extraction at 407 LOC made the parent shorter and clearer); at 320 LOC they may not be (AgentsTab at 377 LOC was deliberately not split because the 3 modals form a coherent unit). Spec-conformance reviewer will flag the spec-vs-code drift either way; the call is whose-judgement and whether the split improves readability or just moves lines.
+
+14. **Verbatim-source preservation can preserve latent bugs.** PR-reviewer surfaced a long-standing `WorkflowSlug` (Pascal-case) typo in `WorkflowRunPage` that mismatches the server's `workflowSlug` field — the buggy fallback branch has been unreachable for as long as the field has been on the wire. The refactor's "preserve verbatim" rule means the bug carried over. Decision: keep latent bugs intact during a refactor unless the spec explicitly opts in to fixing them. The natural fix is a follow-on commit, not a refactor amendment.
 ### 2026-05-13 Pattern — "Suppression is success" for single-writer event emitters _(promoted from tasks/todo.md)_
 
 When a single-writer event emitter loses a coordination race (another writer already produced the canonical event), the emitter MUST return `{ success: true, suppressed: true, reason }` rather than `{ success: false, ... }`. Returning failure triggers retries, false incident signals, and broken metrics — the metaphor is "we agreed not to write, that IS success." ADR-0013 formalises the rule; `architecture.md § Home dashboard live reactivity` documents the canonical implementation; `system-monitoring writeDiagnosis` enforces it; this KNOWLEDGE entry captures the pattern in retrievable form. When introducing a new single-writer emitter, name a helper (e.g. `suppressedSuccess(reason)`) that returns the shape above rather than hand-rolling it at the call site.
@@ -1372,3 +1405,260 @@ Cross-link: `server/services/subaccountIeeBrowserSettingsServicePure.ts::patchBo
 **Source:** finalisation-coordinator finalisation pass on PR #299 (slug: personal-assistant-v2-operator) — chatgpt-pr-review Round 6 T7
 **Pattern:** `jsonb_typeof(col->'key')` returns SQL `NULL` for absent keys, and `NULL != 'array'` evaluates to `NULL` (not `TRUE`) — so a WHERE clause like `WHERE jsonb_typeof(col->'key') != 'array'` silently accepts rows where the key is missing entirely. Always combine key-existence (`NOT (col ? 'key')`) with the type assertion: `WHERE NOT (col ? 'key') OR jsonb_typeof(col->'key') != 'array'`. Three-valued logic in CI gates is a common silent-failure source.
 **Why it matters:** prevents JSONB-shape gates from silently passing rows that are missing the required key. Pair with explicit FAIL messages that say "absent or non-array" so the cause is unambiguous when the gate finally triggers on a real violation.
+
+## Pattern: Spec-edit grep sweep — load-bearing values (counts, canonical sources, escalation enums) leave stale references unless explicitly grepped
+**Date:** 2026-05-14
+**Source:** chatgpt-spec-review session on `tasks/builds/development-lifecycle-governance-upgrade/spec.md` — Round 2 surfaced 3 high/medium findings (F2-1, F2-2, F2-3) and Round 3 surfaced 2 low findings (F3-1, F3-2) that were ALL continuations of Round 1 decisions (F1 count cleanup; F4 cluster source-of-truth; F8 revise soft gate). Each was a section I missed during the original local-Edit sweep — the integrity-check pass at end-of-Round-1 caught 5 issues but missed these 5 because they appeared in sections I hadn't explicitly opened during the round.
+**Pattern:** When a spec edit changes a load-bearing value — a count (e.g. "8 modified files"), a canonical source-of-truth pointer (e.g. "§7.4.2 → docs/capabilities.md"), or an escalation enum (e.g. "stop / merge / revise") — the same value almost certainly appears in multiple sections (Goals, Acceptance Criteria, Backwards-Compatibility Invariants, Deferred Items, Open Questions). Edit one location and ChatGPT/spec-reviewer Round 2+ will find every other instance. The local Edit is necessary but not sufficient — a complete `grep` of the spec for the old value is the only way to close the class in one round.
+**Detection heuristic.** After any Edit that changes a count, a section reference, an enum value, or a canonical-source reference, immediately `grep` the spec for the OLD value (not the new one — old) and update every hit in the same round. Apply to all of: numeric file counts, §-number cross-references, enum-value lists, "[X | Y | Z]" recommendation/verdict triples, "must update both [A] and [B]" coupling phrases. The grep takes 5 seconds; finding it via a Round 2 ChatGPT pass costs a full round.
+**Why it matters:** Round 2 of the dev-lifecycle-governance-upgrade session was 5 cleanup findings + 0 architectural findings. Round 3 was 2 cleanup findings + 0 architectural findings. Both rounds were paid in full (a paste-back, an integrity check, a commit, a push) for issues that should have been caught in Round 1's integrity check. A grep-the-old-value step folded into the Round 1 integrity check would have collapsed those rounds.
+**Generalises** the existing line 919 entry (`Pattern: Close open questions explicitly in §18 when the answer lands in §18b`) — that pattern is a special case of this broader rule (§18 / §18b is one specific load-bearing-coupling instance).
+
+---
+
+## [Pattern title] Stripped-field upstream means downstream cannot reconstruct it
+**Date:** 2026-05-14
+**Source:** feature-coordinator branch review on skill-merge-consolidation-pass — pr-reviewer Round 1 Blocking 1 (rationale not threaded into consolidation prompt/parser)
+**Pattern:** when a shared object has a field stripped to `undefined` for storage-shape conformance (e.g. `mergeRationale` stripped from `storedMerge` before persistence to a four-field jsonb column), DO NOT pass the stripped object into a downstream consumer that expects the full shape. The consumer cannot tell "never had it" from "stripped before passing." `JSON.stringify` will silently drop the field from prompts; equality-check parsers will reject any non-undefined response as "mutated." Always reconstruct the full-shape object from local state at the point of consumption: `const forConsumer = { ...stripped, neededField: localValue }`. Mirror it on both the prompt-build and the parser-input sides; passing different shapes to each is a separate latent bug.
+**Why it matters:** the round-trip invariant for LLM prompts that ask the model to echo a field is silently broken when the field is `undefined` in the input — `JSON.stringify` drops it, the LLM sees nothing to echo, and the parser rejects every response. The bug is invisible at the call site and only surfaces in end-to-end testing. Pin with a unit test that exercises the full round-trip: build prompt -> synthetic LLM response echoing the field -> parser -> assert non-rejection.
+
+---
+
+## [Pattern title] Canonicalise JSON before deep-equality on LLM-echoed objects
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #300 (slug: skill-merge-consolidation-pass) — chatgpt-pr-review Round 1 F4 (independently flagged by pr-reviewer Round 3 as a consider-only nit)
+**Pattern:** when a parser validates that an LLM "echoed an object unchanged" via `JSON.stringify(a) !== JSON.stringify(b)`, the check is silently order-sensitive — LLMs commonly reorder JSON keys without changing semantics, and the naive stringify-compare rejects every reordering as `mutated_*`. Always canonicalise both sides before comparison: `canonicalJSON(value) = JSON.stringify(sortKeys(value))` where `sortKeys` recursively sorts object keys (arrays preserve order; primitives pass through). The fix is 10 lines of pure helper + 1 changed line. The codebase has a precedent at `server/services/skillParserServicePure.ts:240` (skill normalisation hashing) which is why we kept the helper local rather than exporting it (per CLAUDE.md §6 three-similar-lines rule, 2nd occurrence stays inlined; export at 4th).
+**Why it matters:** without canonicalisation, the parser would emit a spurious `CONSOLIDATION_FAILED` with reason `mutated_definition` for any LLM response that reorders keys — a silent reliability tax with no observable bug surface (the failure looks like "LLM hallucinated"). Lock with a regression test that uses non-canonical key order and asserts acceptance. Applies to any parser that round-trips a structured payload through an LLM.
+
+---
+
+## [Pattern title] LLM-self-attestation is not the success signal — measure the artefact
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator finalisation pass on PR #300 (slug: skill-merge-consolidation-pass) — dual-reviewer ACCEPT iter-1 (non-shortening outputs routed to `failed` with `failureReason='not_shortened'`)
+**Pattern:** when an LLM is prompted to perform a measurable transformation (shorten, simplify, translate, normalise, deduplicate), and the model returns BOTH the transformed artefact AND a self-report of success (`declinedToConsolidate: false`, `summary: "I made it shorter"`, etc.), do NOT trust the self-report as the success classification. Compute the objective post-measure on the artefact itself (here: `postWords < preWords` against the pre-consolidation draft) and use that as the `succeeded` gate. The LLM's self-report becomes ONE input to triage, not the verdict. A non-shortening "success" is a protocol violation — the model ignored its own self-check — and routes to `failed` with a typed `failureReason` so telemetry isn't polluted by "0% shorter" or negative-reduction noise.
+**Why it matters:** generalises beyond skill-merge: any pipeline where the LLM both transforms and self-rates is exposed to this. The fix is small (post-measure + reroute) but invisible without it — the failure looks like "the operator's downstream metric is wrong" rather than "the gate accepted a non-result." Locks the post-measure into the closed enum of outcomes so it's enforced by type, not by a comment.
+
+---
+
+## [2026-05-14] Pattern — §2 context-block staleness silently mis-classifies audit decisions
+**Date:** 2026-05-14
+**Source:** audit-runner pre-v1 lockdown — Module C finding 2 (audit log: `tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`)
+**Pattern:** the `docs/codebase-audit-framework.md` §2 AutomationOS context block is the first reference the audit-runner reads to classify "safe vs protected files" and to populate the validation table. When stack facts drift (e.g. Vitest replacing bare `tsx` runners; ESLint flat config landing as `npm run lint`), §2 silently lies to future audits — agents continue to enforce removed rules ("don't invent `npm run lint`"; "tests are bare tsx runners") and skip newly-applicable ones (Vitest test files become validation targets). The drift surfaced in the 2026-05-14 audit weeks after the Vitest migration shipped. Fix: framework v1.4 refresh + the P13 prevention proposal (`scripts/verify-framework-context-block.sh`) that parses §2 against `package.json` scripts and fails CI on drift. Anchor file: `docs/codebase-audit-framework.md:117-120`.
+**Why it matters:** the framework was authored as the single source of truth for "how this codebase is built" — once it goes stale, every downstream agent decision is mis-anchored. Auto-detect via gate, do not rely on humans remembering to bump §2.
+
+---
+
+## [2026-05-14] Pattern — Gate baselines must expire, not just exist
+**Date:** 2026-05-14
+**Source:** audit-runner pre-v1 lockdown — Area 9 finding 1 / Module I critical finding (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`)
+**Pattern:** `scripts/verify-no-db-in-routes.sh` line 43 uses `check_baseline "$GUARD_ID" "$VIOLATIONS" 2` — a baseline mechanism that allows pre-existing violations to persist silently while blocking new ones. The 2026-05-14 audit found `server/routes/support/supportAgentRoutes.ts` building Drizzle queries from the `canonicalInboxes` schema table object directly in the route handler. The gate flags the import but the baseline absorbs it. Baselines are debt instruments — without an expiry mechanism, they become permanent exemptions. Fix: either set an expiry date per baseline entry OR require an ADR to add to a baseline (proposal P2). General rule: any CI gate that "passes despite X violations because they're baselined" must declare WHEN each baseline entry is expected to be cleared.
+**Why it matters:** baselining is a useful debt-management tool but it disguises critical findings. A pre-v1 audit found a tenant-data-shaped layer breach that the gate had absorbed for weeks. The gate did its job (flagging the import) but the *reporting* swallowed the signal.
+
+---
+
+## [2026-05-14] Pattern — Custom retry loops are pass-3 even when they look right
+**Date:** 2026-05-14
+**Source:** audit-runner pre-v1 lockdown — Module J finding 1 (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`)
+**Pattern:** `server/services/agentBeliefService.ts:124-403` implements its own retry counter with `BELIEFS_MAX_RETRIES_PER_RUN` storm detection — bypassing `server/lib/withBackoff.ts`. The custom code reads "correct" — it's a counter, a storm cap, and a structured error log. The smell: when a canonical retry primitive exists, *every* retry pattern that doesn't use it forks the invariant set. The right move is to extend `withBackoff` to support storm caps (the genuine novel feature here) and migrate the call site — not to copy the primitive into a service module. Even when the custom path is genuinely better in isolation, parallel primitives compound until "retry behaviour" depends on which file you're in.
+**Why it matters:** retry / idempotency invariants are state-shaped and untestable in isolation. A divergent retry primitive that someone tweaked once and forgot becomes a latent reliability bug that takes a production incident to surface. The audit's job is to flag the smell even when the local read looks fine.
+
+---
+
+## [2026-05-14] Pattern — Build-stream consolidations need a "delete the replaced" task, not just a comment
+**Date:** 2026-05-14
+**Source:** audit-runner pre-v1 lockdown — Area 1 finding 1 (`tasks/review-logs/codebase-audit-log-pre-v1-lockdown-2026-05-14T04-49-08Z.md`)
+**Pattern:** `client/src/App.tsx:39` has a comment listing 9 superseded pages that the build-stream consolidation replaced. Only the entry point (`SkillAnalyzerPage.tsx`) was actually deleted; the rest of the subtree (Wizard, ImportStep, ProcessingStep, ResultsStep, ExecuteStep, MergeReviewBlock, RestoreBackupControl, RestoreOutcomeBanner, analyzerStatus, mergeTypes, types) survived as dead replicas — ~4,114 LOC, including 2 god files. The consolidation comment described intent but didn't carry a paired deletion task. Pattern: when a refactor replaces a page or feature, the same PR must delete the replaced subtree OR file an explicit follow-up task (`tasks/todo.md` entry, not a code comment). Prevention proposal P15 (`verify-no-orphan-react-component.sh`) would have caught this at write time.
+**Why it matters:** dead replicas cost in three ways — they slow `grep`/IDE search ("which one is real?"), they confuse future authors who copy from them, and they age into hard-to-delete tangles as transitive imports drift. The consolidation comment created the illusion of cleanup. The audit caught it; the gate proposed will catch the next one.
+
+---
+
+## [2026-05-14] Pattern — Manual-mode chatgpt-pr-review loses prior-round context between rounds
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** Between rounds of a `chatgpt-pr-review` MANUAL session, ChatGPT's web UI expires prior file uploads (and may not retain prior-turn rationale unless re-pasted explicitly). On PR #305, Round 2 came back with byte-identical findings to Round 1 even though Round 1's REJECT rationale had been pasted into the chat — ChatGPT explicitly stated *"some prior uploaded files have expired on the platform side, so I reviewed the current pasted diff only, plus the prior round summary from this chat."* If you want continuity-aware rounds, paste the prior round's rationale ALONGSIDE the diff every round; otherwise expect each round to be a cold review.
+**Why it matters:** the operator drives cadence on the loop, but without prior-round context ChatGPT will re-surface the same false positives every round. Two rounds with the same findings is the canonical signal that the loop has reached diminishing returns under the cold-paste workflow. Don't keep iterating expecting a different answer — either inject context, change the framing question, or close the loop.
+
+---
+
+## [2026-05-14] Pattern — Diff-only second-opinion reviewers produce predictable false positives on deletion-heavy + manifest-only PRs
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** ChatGPT (and any diff-only reviewer) only sees the diff under review, not the surrounding repo. On PR #305 it flagged the 4,114 LOC skill-analyzer deletion as a "regression" (evidence of importers lives outside the diff — gone post-deletion, by definition) and the four `package.json` dep declarations as "unrelated to visible source changes" (the static-import sites at `server/routes/users.ts:2`, `server/routes/systemUsers.ts:2`, `server/mcp/mcpServer.ts:14` are pre-existing in `main`, hence not in the diff). Both classes of finding are structural to the reviewer's input shape, not real issues. `pr-reviewer` (with full-tree grep access) is the right verification for deletion-safety and manifest-correctness questions. Reserve diff-only second-opinion reviewers for prose/semantic/UX issues where the diff is self-contained evidence.
+**Why it matters:** failing to classify these as expected false positives consumes review cycles and (worse) can pressure the implementer to "fix" already-correct code. Calibrate reviewer expectations to reviewer inputs.
+
+---
+
+## [2026-05-14] Pattern — Audit branches bypass the formal Phase 1/2/3 entry guard via Light finalisation
+**Date:** 2026-05-14
+**Source:** finalisation pass on PR #305 (pre-v1-lockdown audit branch) — `tasks/review-logs/chatgpt-pr-review-pre-v1-lockdown-2026-05-14T07-02-09Z.md`
+**Pattern:** `audit-runner` produces a different pipeline shape from `feature-coordinator` — it auto-commits/pushes its three-pass output but does NOT write a `tasks/builds/{slug}/handoff.md` and does NOT set `tasks/current-focus.md` to `REVIEWING`. The `finalisation-coordinator` entry guard refuses to proceed without `status: REVIEWING`, which means audit branches need a recovery path. Canonical recovery: **Light finalisation** — operator-confirmed entry-guard bypass; open PR manually, run pr-reviewer + optionally chatgpt-pr-review, run the doc-sync sweep, then apply `ready-to-merge`. Audit branches do NOT execute `finalisation-coordinator` Step 9 (MERGE_READY transition) because they were never in REVIEWING — they go straight from `NONE` to `MERGED` on squash.
+**Why it matters:** without this recovery path the operator either has to manually fake a handoff (high-friction + state-confusing) or skip the formal finalisation entirely (skipping doc-sync and KNOWLEDGE extraction). Naming the recovery as "Light finalisation" makes it explicit and reusable for future audit branches.
+
+---
+
+### [2026-05-14] Pattern — Per-critical-path coverage tier matrix
+
+Not every critical path needs the same coverage shape. Static gates are cheap, unit tests are mid, trajectory tests are expensive. Match the tier to the failure-mode being defended against.
+
+**Initial matrix (refresh quarterly):**
+
+| Critical path | Coverage tier | Rationale |
+|---|---|---|
+| RLS context propagation (`withOrgTx`, `getOrgScopedDb`, session var canonicalisation) | gates + unit | Failure mode is silent cross-tenant; gates catch shape, unit tests catch propagation through transformations |
+| `agentRunVisibility` resolution | gates + unit | Failure mode is permission bypass; both invariant types tested |
+| Idempotency-key dedup | gates + sparse unit | Failure mode is double-execution; gates assert declaration, sparse unit covers the dedup logic at one canonical site |
+| Cost-breaker invocation | gates only | Failure mode is over-spend; the invariant ("breaker wraps every LLM call") is structural and gate-detectable |
+
+Refresh this matrix every quarterly review. If a new critical path emerges and lacks a tier, the first PR that touches it picks one.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Layer 1 Area 5 coverage assessment.
+
+---
+
+### [2026-05-14] Pattern — Custom retry loops are pass-3 even when they look right
+
+`agentBeliefService.ts:124-403` rolls its own `retryCount` storm-detection loop with manual jitter and exponential backoff. The implementation is sound on first read. On second read it's a partial reimplementation of `server/lib/withBackoff.ts`. Audit caught it because the gate `verify-canonical-retry.sh` (P5) flagged the `retryCount` declaration outside the canonical helper.
+
+**Rule.** A retry-shaped construct outside `server/lib/withBackoff.ts` is pass-3 by default, never auto-merge a custom retry loop on Rule 8 ("trust this is intentional"). Either extend `withBackoff` to cover the new case, OR document why the canonical helper genuinely cannot, AND add a `guard-ignore: canonical-retry ADR-<id> <rationale>` suppression that future audits can grep.
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module J finding 1.
+
+---
+
+### [2026-05-14] Pattern — Handoff depth-cap rejections need structured events, not `console.warn`
+
+`server/services/skillExecutor.ts:3992` (the `enqueueHandoff` depth-cap path) rejected handoffs deeper than 5 with a `console.warn` and a silent drop. The three-tier agent invariant is "handoffs up to 5 deep", a rejection at that boundary is a meaningful event, not a debug log. The 2026-05-14 audit found this only because the audit explicitly walked all three-tier invariants; routine log review never flags `console.warn` strings.
+
+**Rule.** Any invariant rejection (depth cap, rate limit, idempotency conflict, RLS gate) emits a structured event via the canonical logger AND a Langfuse tag, not a `console.*` call. Gate-enforced via `verify-no-raw-console.sh` (pre-existing; P6's intended scope is a strict subset of this gate).
+
+**Anchor:** 2026-05-14 pre-v1-lockdown audit, Module K finding 3.
+## [2026-05-14] Pattern — Code-only diff exclusions in manual chatgpt-pr-review produce false-positive "missing file" findings
+**Date:** 2026-05-14
+**Source:** chatgpt-pr-review session on PR #304 — `tasks/review-logs/chatgpt-pr-review-claude-ai-driven-dev-lifecycle-FRqBd-2026-05-14T09-47-42Z.md`, Round 1 findings T1 + T2.
+**Pattern:** Manual-mode `chatgpt-pr-review` uploads the **code-only** diff to ChatGPT (excludes `tasks/review-logs/`, `tasks/todo.md`, `docs/*spec*.md`, `docs/specs/`, `KNOWLEDGE.md` etc — these are spec-reviewer / spec-conformance scope already). ChatGPT cannot see those files but does not know they exist outside the diff, so it routinely flags them as **changelog entries with no backing file** ("the changelog claims X was updated, but X is not in this diff") or **dangling references** ("this links to anchors in `tasks/todo.md` that don't exist"). On PR #304, T1 alleged the changelog falsely claimed `docs/spec-authoring-checklist.md` and `tasks/review-logs/README.md` were updated; T2 alleged the Asset Register linked to non-existent `tasks/todo.md` anchors. Both were false positives — `git diff origin/main...HEAD --stat -- <path>` confirmed all the named files had +N lines on the branch; they were just excluded from ChatGPT's view by the manual-mode exclusion globs. Coordinator MUST verify any "missing file" / "dangling link" / "changelog claims X" finding against `git diff origin/main...HEAD -- <path>` before treating it as a real defect; if the file is in the branch diff but not the ChatGPT-visible diff, it's a scope artefact and the finding is `reject — false positive due to diff scope`.
+**Why it matters:** without this check, the coordinator either auto-applies a "fix" that strips correct content or sends the operator back into the loop chasing a phantom regression. Both waste cycles; the strip-correct-content variant is actively destructive.
+
+---
+
+## [2026-05-14] Pattern — Round-N duplicate findings can be narrowed-case subfindings of decided general-case findings
+**Date:** 2026-05-14
+**Source:** chatgpt-pr-review session on PR #304 — `tasks/review-logs/chatgpt-pr-review-claude-ai-driven-dev-lifecycle-FRqBd-2026-05-14T09-47-42Z.md`, Round 2 F4 vs Round 1 F1.
+**Pattern:** Coordinator's duplicate-detection step (per-round step 1a) auto-applies the prior round's decision when a later-round finding is a "substantive duplicate" — same `finding_type` + same file/area, no new evidence. The trap: a later-round finding can share the *finding type* and *file* with a previously-rejected general-case finding, but be a **localised sub-case the original rejection rationale does not cover**. On PR #304: Round 1 F1 claimed "Step 3/3a writes to `tasks/builds/<slug>/...` before Step 4 ratifies the slug" (general case, rejected because line 127 of `spec-coordinator.md` already reconciles this via a provisional-slug rule). Round 2 F4 claimed "the *ambiguous-classification* paragraph writes to `<slug>/progress.md` and the provisional-slug rule is textually *below* it" — same finding_type (`architecture`/sequencing), same file (`spec-coordinator.md`), but a narrower scope: the ambiguous branch's write happens at line 125, the provisional-slug rule lives at line 127, so the local order *is* wrong even though the general case is reconciled. The narrow case is a real defect that the broad rejection does not cover. **Rule:** before auto-rejecting a Round-N finding as a duplicate, compare the textual *scope* (not just type+file) — if the new finding names a specific paragraph/line/branch the prior rationale did NOT address, treat it as a new finding and triage it on its own merits.
+**Why it matters:** silent auto-reject of narrowed-case subfindings ships real sequencing/scope defects under the guise of "we already decided this." The duplicate-detection heuristic exists to save the operator from repeated rephrased findings, not to filter out legitimately new evidence with overlapping classification.
+
+---
+
+## [2026-05-14] Pattern — Manual-mode ChatGPT has no session memory across rounds — same diff-misread can recur indefinitely
+**Date:** 2026-05-14
+**Source:** finalisation-coordinator chatgpt-pr-review on PR #307 (audit-prevention-gates-2026-05-14) — `tasks/review-logs/chatgpt-pr-review-audit-prevention-gates-2026-05-14-2026-05-14T12-23-57Z.md`, Round 1 T3 → Round 2 T4 → Round 3 T6, all the SAME finding.
+**Pattern:** ChatGPT in manual-mode chatgpt-pr-review uses no shared session state between rounds — each upload is processed against a fresh chat. If a finding was rejected as a diff-only-reviewer false positive in Round N (e.g. "this PR claims `verify-org-id-source.sh` is wired but the diff doesn't show the wiring" — but the wiring lives in `main` at line 65 of `run-all-gates.sh` from a 2026-04-04 commit), the same finding will recur verbatim in Round N+1, N+2, etc. until something in the diff itself disproves it. Round-N+1's prompt cannot teach ChatGPT what Round-N learned because it doesn't carry the Round-N transcript. PR #307 saw T3/T4/T6 — three rounds, three identical misreads, rejection rationale ("verified via `git blame`, wired 2026-04-04 in commit 89a818cc") had to be re-emitted each time.
+**Rule.** When a finding is rejected as a diff-misread once, add a `## Pre-triage verification` block to the session log with the exact verification command (`git blame -L X,Y file` / `grep -n term file` / etc.) and its output. On Round N+1+ recurrences, auto-reject as duplicate per playbook step 1a — do NOT re-engage the substance, do NOT re-verify, do NOT escalate to operator. The operator made the call once; ChatGPT will keep raising it; the coordinator's job is to absorb the noise. A third occurrence of the same misread is the moment to commit to "ignore class of finding for remainder of this review" rather than triple-handling it.
+**Why it matters:** at one repeat the cost is small (a re-verification + log entry). At three repeats (PR #307 actually got there) the cost is two extra rounds the operator paid for, plus context burn on a defect that doesn't exist. Calibrate engagement to information yield: same finding + same rationale = zero new information regardless of round number.
+
+---
+
+## [2026-05-15] Pattern — Modal stays mounted on `return null` — local state leaks between opens
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F1 on PR #313 (page-splits build) — `CreateClientModal.tsx` post-split.
+**Pattern:** A component that renders `if (!open) return null` stays **mounted** in the React tree — only its DOM output is removed. State variables (`useState`) persist across close/reopen cycles. Pre-split, Layout.tsx unmounted modals by conditional JSX; post-split the extracted components remain in the JSX tree unconditionally and gate on `return null` internally. Without an explicit reset, stale values (error messages, half-filled fields, loading flags) reappear on the next open. Fix: add a `useEffect` on the `open` prop that resets all owned state when `open` becomes `true`:
+```ts
+useEffect(() => {
+  if (open) { setState1(''); setState2(''); setErrorState(''); }
+}, [open]);
+```
+**Why it matters:** the bug is invisible in initial testing (happy path always opens fresh) and only surfaces after a failed create or a close-without-submit. Extraction is the trigger — if the original host unmounted the component, the bug was invisible; once extracted and kept mounted, it's guaranteed.
+**Detection:** grep for extracted modal components that use `if (!open) return null` AND hold `useState` — every one is a candidate unless it has an `open`-effect reset.
+
+---
+
+## [2026-05-15] Pattern — prevSeededRef pattern: distinguish untouched seed from user override in a modal
+
+**Date:** 2026-05-15
+**Source:** chatgpt-pr-review R1 F3 / R2 F4 on PR #313 (page-splits build) — `NewBriefModal.tsx`.
+**Pattern:** When a modal seeds dropdown state from external identity (e.g. `activeOrgId`) on open, and must sync when identity changes while the modal is open, but must NOT clobber a value the user manually changed — track the last-seeded IDs in a `useRef`. On each effect run, compare the current override to the ref before updating:
+```ts
+const prevSeededRef = useRef<{ orgId: string | null } | null>(null);
+useEffect(() => {
+  // ...
+  const prev = prevSeededRef.current;
+  prevSeededRef.current = { orgId: identity.activeOrgId };
+  setOverride(current => {
+    if (opening) return nextValue;          // initial seed — always take
+    if (current === null) return nextValue; // null = data-race seed (wasn't loaded yet)
+    if (current.id === prev?.orgId) return nextValue; // untouched seed — re-sync
+    return current;                         // user changed it — leave alone
+  });
+}, [open, identity.activeOrgId, ...]);
+```
+The functional `setState` form is required — it receives the actual current state at dispatch time, avoiding stale-closure bugs when the effect fires with multiple dep changes at once.
+**Why it matters:** without `prevSeededRef`, any identity-change-while-open overwrites the user's manual selection. Without functional setState, the comparison uses the captured closure value which may be one render stale.
+
+---
+
+## [2026-05-15] Pattern — Page-split slim shell: original file becomes ~150-line orchestrator; sub-files live in a named sub-directory
+
+**Date:** 2026-05-15
+**Source:** PR #313 page-splits build — 16 client-side page-level files split along tab / region / atom seams.
+**Pattern:** When splitting a monolithic page component, the original file (e.g. `AdminSubaccountDetailPage.tsx`) becomes a **slim shell** (~150-200 lines) that imports and dispatches to sub-components. Sub-files live in a co-located directory named after the page domain (e.g. `client/src/pages/admin-subaccount-detail/`). The split seam hierarchy:
+- **Tab**: full-width content area that maps 1:1 to a tab in the page's tab bar (`OnboardingTab.tsx`, `EnginesTab.tsx`, etc.)
+- **Region**: logical sub-section within a tab (not a tab itself — e.g. `HeaderRegion.tsx`, `StatsRegion.tsx`)
+- **Atom**: the smallest extractable display unit within a region (e.g. `StatusBadge.tsx`, `CostPill.tsx`)
+
+Types shared between the shell and sub-components live in `types.ts` at the sub-directory level. The shell's ActiveTab union and TAB_LABELS record live in that `types.ts`, not in the shell itself.
+
+Tab additions that land on main while the branch is in flight must be **manually grafted** after the S2 merge: take `--ours` for the slim shell (preserving the split structure), then add the new tab's import + permission guard + conditional push + render block.
+**Why it matters:** without this pattern documented, a future reader of a slim shell will not know where the tab implementation lives (no inline code), and may try to add a tab to the shell directly rather than extracting to the sub-directory.
+
+---
+
+## [2026-05-14] Pattern — `verify-rls-contract-compliance.sh` allowlists `server/services/` and lets raw-`db` queries on tenant tables slip through
+**Date:** 2026-05-14
+**Source:** Track A audit (RLS + agent-execution), F3 / F4 / F7 — `tasks/review-logs/codebase-audit-log-rls-agent-exec-2026-05-14T13-14-38Z.md`
+**Pattern:** The "no raw db outside services" gate (`scripts/verify-rls-contract-compliance.sh`) treats `server/services/` as the trusted layer that may import `db` from `../db/index.js`. But the rule that makes RLS effective is finer-grained than that: services must obtain their tx handle via `getOrgScopedDb()` so the query runs inside the ALS `withOrgTx` block with `app.organisation_id` set. 231 of 526 service files import `db`; only 85 import `getOrgScopedDb`. Many of the 231 do `db.select(...)` directly on RLS-protected tables (e.g. `permissionSetService.listForOrg`, `agentExecutionService.executeRun`) — those queries run on the unscoped pool, missing the GUC. App-layer `where(eq(table.organisationId, orgId))` is the only defence; RLS-as-defence-in-depth depends on whether the prod DB role enforces RLS (TI-008 tracks the dev gap). The gate as written gives a false sense of coverage.
+**Rule:** Treat the directory-level allowlist as a tier-1 trust shortcut, not a correctness guarantee. When auditing a service that touches a tenant-scoped table, grep for `getOrgScopedDb` inside the function — if absent and the table is in `RLS_PROTECTED_TABLES`, treat it as a Module I finding regardless of what `verify-rls-contract-compliance.sh` reports. The complementary gate `verify-with-org-tx-or-scoped-db.sh` exists but does not yet flag this pattern at the service tier; widening it is logged as P2.
+**Why it matters:** the three-layer fail-closed posture is the highest-blast-radius defence in this codebase. A gate that quietly accepts 231 service files importing raw `db` undermines the posture's "Layer 1" claim. Catching it requires looking past gate output, not at gate output.
+
+## [2026-05-14] Pattern — Mixed scoped-vs-raw DB posture inside a single service file is the signal of an incomplete migration, not a stable design
+**Date:** 2026-05-14
+**Source:** Track A audit, F4 — `server/services/agentExecutionService.ts`
+**Pattern:** In a 2,807-LOC service file, the entrypoint `executeRun` (line 457) hits `organisations`, `subaccounts`, `agent_runs`, `subaccountAgents` on raw `db`. The peer entrypoint `resumeAgentRun` (line 2442) opens with `const tx = getOrgScopedDb('agentExecutionService.resumeAgentRun')` and uses `tx.*` throughout. Both functions are tenant-scoped; the scoping discipline differs. The likely explanation is that `resumeAgentRun` is newer code written after the org-scoped-db convention was introduced, while `executeRun` predates it and the migration was never finished. Mixed posture within a single file is rarely intentional — it almost always means the migration is incomplete.
+**Rule:** When a service file shows mixed `db` / `getOrgScopedDb` usage, treat the unscoped half as in-flight technical debt, not as a design choice. File an audit finding to migrate the unscoped paths to match the scoped paths. Pair with an architecture.md note (P5) so the next maintainer doesn't replicate the pre-convention pattern by example.
+**Why it matters:** mixed posture is a teaching surface for future contributors — a new function in `agentExecutionService.ts` is as likely to use raw `db` as `getOrgScopedDb` depending on which existing function the author copies from. Convention compounds when consistently applied; mixed posture self-perpetuates.
+
+## [2026-05-14] Pattern — God-files persist after a "split" commit — the *Pure.ts companion landed; the main file did not shrink
+**Date:** 2026-05-14
+**Source:** Track A audit, F6 — `server/services/skillExecutor.ts` 6,133 LOC, `agentExecutionService.ts` 2,807 LOC, `agentExecutionLoop.ts` 1,415 LOC
+**Pattern:** The operator brief said "four god-file splits (skillExecutor, workflowEngine, skillAnalyzerServicePure, agentExecutionService) have since landed on main". Verified: the `*Pure.ts` companions exist (`skillExecutorPure.ts` 99 LOC, `skillExecutorDelegationPure.ts` 171 LOC, `agentExecutionServicePure.ts` 608 LOC). Verified: the original files are still huge (`skillExecutor.ts` 4× soft cap and 2.4× hard cap). A "split" that extracts pure helpers but leaves the main file at 6k LOC has not reduced the maintenance burden of the file — it has only created a parallel surface for unit tests. The framework Area 10 caps were violated before the split and remain violated after.
+**Rule:** Treat "split" as a misleading term. The audit-relevant question is "is the original file at or below its hard cap?" — not "was a `*Pure.ts` companion added?". Each split commit should land alongside a `wc -l` assertion in the commit body, e.g. "skillExecutor.ts: 6,133 → 1,400 LOC". Add a paired gate (`verify-loc-cap.sh` already exists; confirm it fires on this codebase). Frame splits as a deletion-from-original operation, not as an addition-of-companion operation.
+**Why it matters:** god-files are a productivity tax — every contributor has to load the full file's context to safely edit any part of it. A claimed split that doesn't shrink the original is the worst case: it suggests a fix has happened (so reviewers don't push for further work) without actually delivering the benefit.
+
+## [2026-05-14] Pattern — FK-scoped tenant data tables can ship with zero Postgres-level isolation if no one writes a CREATE POLICY
+**Date:** 2026-05-14
+**Source:** Track A2 audit (workflowEngine split, post-refactor), WF1 — `tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md`
+**Pattern:** Five workflow tables — `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs` — hold tenant-private payloads (LLM input/output JSON, HITL decision reasons, workflow-studio chat sessions, per-step agent outputs) but have NO `CREATE POLICY` statement in any migration. They reference RLS-protected parents (`workflow_runs`, `flow_runs`) via FK, but no Postgres-level isolation propagates through that FK without an explicit EXISTS-based policy. The gate `verify-rls-protected-tables.sh` did not flag the gap because it only inspects tables with a literal `organisation_id` column in their `CREATE TABLE` — these are FK-only. Concrete evidence of the bypass: `server/services/workflowEngineService.ts:151-152` queries `workflow_step_runs` by id alone with no org filter: `db.select({status}).from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId))`. Currently safe because the surrounding flow has already validated org, but the DB layer offers zero defence-in-depth.
+**Rule.** When a new table holds tenant-private data and is FK-scoped (no `organisation_id` column of its own), the check is NOT "does the parent have RLS" but "does THIS table have its own CREATE POLICY". Two valid patterns: (a) its own `organisation_id` column + standard RLS policy, OR (b) an EXISTS-based policy joining through the FK to the parent's `organisation_id`. See `connector_location_tokens`, `document_bundle_members`, `subaccount_baseline_metrics` in `scripts/rls-not-applicable-allowlist.txt` for examples of (b). Audit-time check: `grep -E "<table_name>" migrations/*.sql | grep -iE "POLICY|ENABLE ROW|FORCE ROW"` — if the grep is empty, the table has no RLS.
+**Why it matters:** "the parent has RLS so the child is fine" is one of the most common reasoning errors in multi-tenant DB design. Postgres RLS does not transit through FK references unless you write a policy that does the JOIN explicitly. Five real production tables shipping with this gap proves the assumption is easy to make.
+
+## [2026-05-14] Pattern — pg-boss worker `resolveOrgContext: () => null` is a footgun if the handler then does scoped work without re-opening withOrgTx
+**Date:** 2026-05-14
+**Source:** Track A2 audit, WF4 — `server/services/workflowEngineService.ts:3897`
+**Pattern:** `createWorker` lets a handler opt out of the default org-context resolver by returning null. This is the right escape hatch when the job payload genuinely has no tenant context (cross-org sweeps, admin maintenance jobs). But it's a footgun when used for "the org lives in the row, not the payload" — because the handler then does dozens of DB operations without ever re-opening a tenant-scoped tx. The workflow tick worker pays this cost: after `db.select().from(workflowRuns).where(eq(workflowRuns.id, runId))` finds the run + its org, the rest of `tick()` (30+ DB calls across dispatchStep, completeStepRun, failStepRunInternal, etc.) runs on the unscoped pool. The `app.organisation_id` GUC is never set.
+**Rule.** A pg-boss worker that calls `resolveOrgContext: () => null` because it needs to look up the org from the row MUST re-open a `withOrgTx` block after that lookup. Pattern: `(1) raw-db lookup to find the run; (2) call withOrgTx({tx, organisationId: run.organisationId, ...}, async () => { /* rest of handler uses getOrgScopedDb */ })`. The opt-out is for the FIRST query only, not for the entire handler body.
+**Why it matters:** `resolveOrgContext: () => null` looks like a small escape-hatch but its implications cascade through the entire handler. The longer the handler, the more cross-tenant work runs in a context Postgres can't validate. workflow tick is 30+ DB calls — a code path with this much surface area should never run un-scoped after the first lookup.
+
+## [2026-05-14] Pattern — A 'split' commit can land two god-files instead of one — the Pure module can end up bigger than its impure shell
+**Date:** 2026-05-14
+**Source:** Track A3 audit (skillAnalyzerServicePure split), SA2 — `tasks/review-logs/codebase-audit-log-skill-analyzer-2026-05-14T16-53-39Z.md`
+**Pattern:** The skillAnalyzerServicePure "split" produced `skillAnalyzerService.ts` at 2,642 LOC and `skillAnalyzerServicePure.ts` at **3,727 LOC** — the Pure module is 1.4× the impure shell. Total 6,369 LOC across the split, larger than skillExecutor's pre-split state (6,133 LOC). The Pure module being bigger than its shell is the inverse of the usual split shape (Pure = small focused helpers); here the Pure module is itself a parallel god-file.
+**Rule.** Treat "split" as a misleading term whenever BOTH halves of a split are over the framework Area 10 hard cap. The audit-relevant check is "is each file at or below its hard cap after the split?" — not "did a `*Pure.ts` companion get created?". Each split commit should land with a `wc -l` assertion in the commit body showing both files' sizes; if the Pure module is over the cap, plan its decomposition before claiming the work done.
+**Detection:** `wc -l server/services/<name>.ts server/services/<name>Pure.ts` after every split PR. If either file exceeds 2,500 LOC (services hard cap), the split is incomplete.
+**Why it matters:** the productivity tax of a god-file applies to the Pure module just as much as the impure shell — a 3,727-LOC Pure module is just as hard to navigate as a 3,727-LOC service. Worse: the "split" framing suggests the problem is solved, so future contributors don't push for further decomposition.
+
+## [2026-05-14] Pattern — `boss.work(queue, ...)` outside `createWorker` bypasses canonical org-context plumbing
+**Date:** 2026-05-14
+**Source:** Track A3 audit, SA4 — `server/index.ts:691`
+**Pattern:** `createWorker` is the project's canonical pg-boss handler wrapper. It does three load-bearing things: (1) reads `organisationId` from the job payload via `defaultResolveOrgContext`, (2) opens a Drizzle transaction with `app.organisation_id` GUC set, (3) calls `withOrgTx` so downstream services can `getOrgScopedDb()` and get the scoped tx. Bare `boss.work(queue, handler)` does NONE of this. The skill-analyzer worker at `server/index.ts:691` uses bare `boss.work`, so `runSkillAnalyzerJobWithIncidentEmission(jobId)` and downstream `processSkillAnalyzerJob(jobId)` run entirely on the unscoped pool. No GUC. No org-scoped tx. Defence is the app-layer `where(eq(skillAnalyzerJobs.id, jobId))` filter only. Cross-reference: Track A2 WF4 found the workflow tick worker has the same anti-pattern via `resolveOrgContext: () => null` (different bypass mechanism — opting out within `createWorker` rather than skipping `createWorker` entirely).
+**Rule.** Every pg-boss queue handler MUST be registered via `createWorker(...)`. Bare `boss.work(...)` is reserved for: (a) the wrapper itself (server/lib/createWorker.ts), (b) boot-time DLQ wiring (where the handler does no DB work), (c) intentionally cross-org sweep handlers — and even those should use `createWorker({ resolveOrgContext: () => null })` so the opt-out is visible to grep, then re-open `withOrgTx` once the row's org is loaded (Track A2 WF4 lesson).
+**Detection:** `grep -rnE "boss\.work\b" server/ --include="*.ts" | grep -v "server/lib/createWorker.ts" | grep -v "server/lib/__tests__/"`. Every hit is a candidate.
+**Why it matters:** queue handlers are the easiest place for tenant-context bugs to sneak in: the payload schema is usually small, no HTTP middleware runs, the handler often spans many service calls. `createWorker` is the single chokepoint that gets this right; bypassing it makes every DB call in the handler an opportunity to leak.

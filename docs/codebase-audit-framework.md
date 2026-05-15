@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.3 — path corrections (`withOrgTx` is in `server/instrumentation.ts`, `getOrgScopedDb` is in `server/lib/orgScopedDb.ts`, client entry is `client/src/main.tsx`, `scheduleCalendarServicePure` and `agentBriefingService` are under `server/services/`, `agentBeliefs` is a schema at `server/db/schema/`) + completion-criteria tightening to require final audit branch state (1.2: Audit Completion Criteria; 1.1: Scope Guard, Audit Modes, validation no-silent-skip, idempotency storage-boundary, invariant-in-code; 1.0: 2026-04-25 initial calibration from generic v5.0) |
+| Version | 1.4 — §2 context-block refresh: Vitest is the canonical test runner (`vitest run`, `@vitest/coverage-v8` for coverage); `npm run lint` exists (eslint flat config). Drift surfaced by the 2026-05-14 pre-v1 lockdown audit (Module C finding 2). Prior: 1.3 path corrections + completion-criteria tightening for final audit branch state. 1.2 Audit Completion Criteria. 1.1 Scope Guard + Audit Modes + validation no-silent-skip + idempotency storage-boundary + invariant-in-code. 1.0 2026-04-25 initial calibration from generic v5.0 |
 | Status | Active. Reusable across audits. |
 | Purpose | Post-build and periodic code quality audit for AutomationOS |
 | Audience | Main session (Claude Code) running the audit, plus subagents (`pr-reviewer`, `spec-conformance`, `dual-reviewer`, `chatgpt-pr-review`) it delegates to |
@@ -114,10 +114,10 @@ This block is pre-filled from the calibration recon. **Re-verify it at the start
 | Browser automation | Playwright `^1.59.1` (IEE runtime + tests) |
 | Agent SDK | `@modelcontextprotocol/sdk ^1.29.0` (MCP servers) |
 | Observability | Langfuse `^3.38.6` (LLM tracing) |
-| Test framework | None canonical — bare `tsx` runners under `server/**/__tests__/` (NO Vitest, NO Jest) |
-| Lint command | **None defined** (`npm run lint` does not exist — do not invent it) |
-| Typecheck command | `npm run build:server` (= `tsc -p server/tsconfig.json`); also `vite build` for client |
-| Test commands | `npm run test:gates` (~20 bash gates), `npm run test:qa`, `npm run test:unit`, `npm test` (gates → qa → unit), `npm run test:trajectories` |
+| Test framework | **Vitest** (`vitest run` via `npm run test:unit`); coverage via `@vitest/coverage-v8`. Legacy bare-`tsx` runners under `server/**/__tests__/` are being converted (see `scripts/convert-handwritten-harness.mjs` and `docs/testing-conventions.md`). NO Jest. New tests MUST be Vitest |
+| Lint command | `npm run lint` (eslint flat config); `npm run lint:fix` for auto-fix. ESLint flat config at `eslint.config.js` |
+| Typecheck command | `npm run build:server` (= `tsc -p server/tsconfig.json`); also `vite build` for client. Separate non-emit variants: `npm run typecheck`, `npm run typecheck:client`, `npm run typecheck:server` |
+| Test commands | `npm run test:gates` (~20 bash gates), `npm run test:qa`, `npm run test:unit` (= `vitest run`), `npm test` (gates → qa → unit), `npm run test:trajectories` |
 | Build commands | `npm run build` (= server tsc + vite build), `npm run build:server`, `npm run build:client` |
 | DB commands | `npm run db:generate` (Drizzle codegen), `npm run migrate` (custom: `tsx scripts/migrate.ts`), `npm run db:studio`, `npm run seed` |
 | Skill commands | `npm run skills:apply-visibility`, `npm run skills:verify-visibility`, `npm run skills:backfill` |
@@ -1493,9 +1493,8 @@ This is the canonical tool list for audit work in this repo. Tools that are not 
 
 ### Tools NOT to use
 
-- **`npm run lint`** — does not exist. Do not invent it.
-- **`tsc --noEmit`** as a standalone — use `npm run build:server`.
-- **Vitest / Jest commands** — neither is installed canonically. Tests are bare `tsx` runners.
+- **`tsc --noEmit`** as a standalone in pass-2 validation — use `npm run build:server`. `npm run typecheck` and its variants exist but are not the canonical pass-2 check.
+- **Jest** — not installed. Vitest is canonical (see §2). Do not introduce Jest tests.
 - **`npm audit fix`** — never as a pass-2 action. All dependency changes are `manual review required`.
 
 ---
@@ -1564,7 +1563,7 @@ The user signing off after reviewing the report is not part of completion criter
 - **"Cleaning up" `req.user.organisationId` to `req.orgId`** in a service — it's the right direction, but it touches RLS plumbing → pass 3 (Rule 8 downgrade trigger).
 - **Modifying a `scripts/gates/*.sh` to make a failing gate pass** — gate failures are findings, not noise (§4 Protected Files).
 - **Removing a Langfuse trace emission because "we have logs anyway"** — Rule 12 forbids.
-- **Adding `npm run lint`** when scripts don't have it — there is no lint script (§2). Don't invent one.
+- **Introducing Jest tests** when Vitest is the canonical runner — Vitest only; convert legacy bare-`tsx` tests rather than adding more.
 - **Running multiple review agents in parallel against the same branch** — Rule 15.
 - **Editing `KNOWLEDGE.md` entries** — append-only, never edit (`CLAUDE.md` §3).
 - **Auto-rewriting `docs/capabilities.md`** — editorial rules require human review (Module M).
@@ -1585,5 +1584,5 @@ The audit is a tool for protecting the codebase. Better to escalate than to ship
 
 ---
 
-*AutomationOS Codebase Audit Framework v1.3 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code), v1.2 Audit Completion Criteria, v1.3 path corrections + completion-criteria tightening, all 2026-04-25. Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
+*AutomationOS Codebase Audit Framework v1.4 — calibrated 2026-04-25 from generic v5.0; v1.1 tightenings (Scope Guard, Audit Modes, no-silent-skip, idempotency storage-boundary, invariant-in-code), v1.2 Audit Completion Criteria, v1.3 path corrections + completion-criteria tightening (all 2026-04-25); v1.4 §2 context-block Vitest + lint refresh (2026-05-14). Update §2 and bump version on stack changes; append KNOWLEDGE.md for every pattern caught.*
 

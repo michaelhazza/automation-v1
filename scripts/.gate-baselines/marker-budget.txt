@@ -1,0 +1,77 @@
+# Baseline for P10 verify-marker-budget.sh
+# Pre-existing TODO/FIXME/HACK/TEMP/LEGACY/DEPRECATED counts per file at gate-landing (2026-05-14).
+# Gate fails only when a file's count GROWS above its baselined value.
+# 33 files with non-zero counts at baseline.
+#
+# NOTE: the `# expires: 2026-08-14` directives below are INFORMATIONAL soft-deadlines
+# for human review only. The per-file count parser strips comment lines and the
+# gate does NOT enforce calendar expiry — only count growth. See
+# `references/test-gate-policy.md § Per-file count baselines are out of scope for
+# the expiry framework` and `tasks/todo.md § BUDGET-EXPIRY-ENFORCEMENT-1`.
+#
+# expires: 2026-08-14
+client/src/components/EmailConfigEditor.tsx:1
+# expires: 2026-08-14
+client/src/components/InlineIntegrationCard.tsx:1
+# expires: 2026-08-14
+client/src/pages/AgentChatPage.tsx:2
+# expires: 2026-08-14
+client/src/pages/govern/components/AiSubscriptionsTab.tsx:1
+# expires: 2026-08-14
+client/src/pages/govern/components/KnowledgeDocumentsTab.tsx:1
+# expires: 2026-08-14
+server/adapters/teamworkAdapter.ts:1
+# expires: 2026-08-14
+server/config/modelRegistry.ts:1
+# expires: 2026-08-14
+server/config/oauthProviders.ts:1
+# expires: 2026-08-14
+server/db/schema/agentRunSnapshots.ts:1
+# expires: 2026-08-14
+server/db/schema/webhookAdapterConfigs.ts:2
+# expires: 2026-08-14
+server/jobs/ghlAutoStartOnboardingJob.ts:1
+# expires: 2026-08-14
+server/jobs/slackInboundJob.ts:1
+# expires: 2026-08-14
+server/routes/onboarding.ts:2
+# expires: 2026-08-14
+server/routes/webLoginConnections.ts:3
+# expires: 2026-08-14
+server/services/agentResumeService.ts:1
+# expires: 2026-08-14
+server/services/briefArtefactBackstop.ts:1
+# expires: 2026-08-14
+server/services/canonicalDataService.ts:1
+# expires: 2026-08-14
+server/services/crmQueryPlanner/normaliseIntentPure.ts:1
+# expires: 2026-08-14
+server/services/draftCandidatesService.ts:1
+# expires: 2026-08-14
+server/services/executionBackends/_ieeShared.ts:1
+# expires: 2026-08-14
+server/services/n8nImportServicePure.ts:4
+# expires: 2026-08-14
+server/services/onboardingService.ts:1
+# expires: 2026-08-14
+server/services/routerJobService.ts:1
+# expires: 2026-08-14
+server/services/sandbox/browserWarmPool.ts:1
+# expires: 2026-08-14
+server/services/sandboxExecutionService.ts:1
+# expires: 2026-08-14
+server/services/sandboxHarvestService.ts:1
+# expires: 2026-08-14
+server/services/scanIntegrationFingerprintsPure.ts:1
+# expires: 2026-08-14
+server/services/scrapingEngine/browserFetcher.ts:1
+# expires: 2026-08-14
+server/services/scrapingEngine/index.ts:1
+# expires: 2026-08-14
+server/services/stripeAgentWebhookService.ts:1
+# expires: 2026-08-14
+server/services/voiceProfile/samplers/driveDocSampler.ts:1
+# expires: 2026-08-14
+server/services/voiceProfile/samplers/gmailSentSampler.ts:1
+# expires: 2026-08-14
+shared/types/integrationCardContent.ts:1

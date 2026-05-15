@@ -85,6 +85,7 @@ Run only relevant checks unless the change spans client + server. Never skip a f
 - Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
 - Match existing style, even if you'd do it differently. No drive-by reformatting.
 - Never duplicate logic — if the same behaviour is needed in two or more places, extract it into a shared function, helper, or service before writing it twice.
+- **Comments describing a *completed* refactor are residue, the commit message is the right home.** If a comment block exists only to explain why some code USED to be different, delete it. Anchor case: the 2026-05-14 pre-v1-lockdown audit found a 44-line cluster in `server/services/agentExecutionService.ts:72-116` describing an import-removal refactor that shipped in migration 0106. The git history carries that. The code does not need to.
 
 ## 7. Autonomous Bug Fixing
 
@@ -202,7 +203,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `reality-checker` | Post-pr-reviewer evidence-demanding verifier; read-only; demands proof before approving a build; Significant/Major only |
 | `spec-reviewer` | Codex review loop for spec documents; max 5 iterations lifetime; non-blocking |
 | `feature-coordinator` | Phase 2 orchestrator — plan, build chunks, branch review, doc-sync, Phase 3 handoff |
-| `spec-coordinator` | Phase 1 orchestrator — brief intake, mockup loop, spec authoring, reviews, handoff |
+| `spec-coordinator` | Phase 1 orchestrator — intent intake, duplication/strategy check, mockup loop, spec authoring, reviews, handoff |
 | `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, ChatGPT PR review, MERGE_READY |
 | `builder` | Sonnet sub-agent; implements one plan chunk and runs G1 gate; auto-invoked by feature-coordinator |
 | `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by spec-coordinator |
@@ -231,6 +232,24 @@ Use the most capable model where reasoning matters; switch to Sonnet once decisi
 | Mid-build decision | Opus | If a hard architectural choice surfaces during implementation, switch back to Opus for that question only, then return to Sonnet |
 
 The plan gate is a deliberate checkpoint. Do not proceed to execution on Opus — the execution phase is token-intensive and Sonnet handles a clear plan equally well at lower cost.
+
+### Build lifecycle
+
+Every Standard+ build follows this nine-step sequence:
+
+> Intent → Duplication / Strategy Check → Specification → Build Planning → Construction → Review → Capability Registration → Compound Learning → Merge
+
+- **Intent** — structured `intent.md` authored by `spec-coordinator` Step 3 (Standard+ only; Trivial builds retain `brief.md`).
+- **Duplication / Strategy Check** — `spec-coordinator` Step 3a hard gate; stops or redirects builds that duplicate existing capabilities or target declining clusters.
+- **Specification** — `spec-coordinator` Steps 4–6; produces `spec.md` with Lifecycle Declaration and ABCd Estimate.
+- **Build Planning** — `architect` decomposes the spec into chunks; `feature-coordinator` presents the finalised plan at the plan gate.
+- **Construction** — `feature-coordinator` drives per-chunk `builder` runs against the plan; G1 gate per chunk.
+- **Review** — branch-level review pass: `spec-conformance` → `adversarial-reviewer` (conditional) → `pr-reviewer` → `reality-checker` → `dual-reviewer`.
+- **Capability Registration** — `finalisation-coordinator` Step 6; emits a Capability Registration verdict for `docs/capabilities.md` (one of the eight §6.2.1 valid strings); blocks `MERGE_READY` until recorded.
+- **Compound Learning** — `finalisation-coordinator` Step 7a; emits proposal rows that route patterns from Step 7 to a target enum for future-build learning; operator may approve later; no auto-apply and no merge block.
+- **Merge** — `finalisation-coordinator` Step 9 sets `MERGE_READY`; Step 10 applies the label.
+
+Capability Registration and Compound Learning run **during finalisation, before merge** — they precede `MERGE_READY`.
 
 ### Task Classification
 
@@ -395,6 +414,8 @@ See [`docs/capabilities.md` § Non-goals](./docs/capabilities.md). These are dur
 Consumer-simple product on enterprise-grade backend. Rich backend does NOT justify rich UI. Five hard rules per UI artifact: (1) start from the user's primary task, not the data model; (2) default to hidden — dashboards, KPIs, IDs, cost views deferred unless a workflow requires them; (3) one primary action per screen; (4) inline state beats dashboards (status dot > utilization chart); (5) re-check — would a non-technical operator complete the task without feeling overwhelmed? If not, cut information.
 
 **Full rationale, pre-design checklist, worked examples:** [`docs/frontend-design-principles.md`](./docs/frontend-design-principles.md). Read before drafting a mockup or new page.
+
+- **Prefer named exports for React components.** Default-and-named dual exports create ambiguity that `knip` cannot reliably trace, leaving orphan components hidden until a manual audit catches them. Rename-shim cases (e.g. the subaccount-vs-client transition in `client/src/lib/auth.ts`) are time-limited exceptions: every such shim documents a sunset date in its header comment.
 
 ---
 

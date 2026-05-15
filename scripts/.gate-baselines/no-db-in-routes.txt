@@ -1,0 +1,31 @@
+# Gate baseline file — no-db-in-routes
+#
+# PURPOSE
+# -------
+# Pre-existing direct db imports in server/routes/ that cannot be fixed
+# immediately. Migrated from guard-baselines.json (count-based) to this
+# path-keyed format as part of audit-prevention-gates-2026-05-14 Chunk 5.
+#
+# All 19 prior violations from guard-baselines.json are now suppressed via
+# inline guard-ignore comments, so this baseline starts empty. The baseline
+# file exists to enforce the ADR-required baseline-growth rule: any new
+# unsuppressed db import added to routes/ must be documented with an ADR.
+#
+# HOW TO ADD A NEW ENTRY
+# ----------------------
+# 1. Add an inline suppression on the violating line:
+#      // guard-ignore: no-db-in-routes reason="<rationale>"
+#    Prefer suppression over baseline entries for new violations.
+# 2. If suppression is not feasible, set a realistic expiry (30-90 days),
+#    copy the violation string exactly as the gate emits it, and include
+#    "ADR-<id>" in the commit body.
+# 3. Track the fix in tasks/todo.md with the expiry date.
+#
+# FORMAT: one entry per violation, preceded by # expires: YYYY-MM-DD
+#   # expires: YYYY-MM-DD
+#   <relative-path>:<line-number>:<one-line-message>
+#
+# EXIT CODES
+#   0 — pass (no violations; or all violations within current baseline)
+#   1 — error: new violations above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only or within-grace expiry (pre-existing, not yet over grace)
