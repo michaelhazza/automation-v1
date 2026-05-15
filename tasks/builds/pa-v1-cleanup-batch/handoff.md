@@ -1,0 +1,82 @@
+# Handoff — pa-v1-cleanup-batch
+
+**Build slug:** `pa-v1-cleanup-batch`
+**Branch:** `claude/pa-v1-cleanup-batch`
+**Spec:** `tasks/builds/pa-v1-cleanup-batch/spec.md` (landed on main via PR #322, commit `c92d2a81`)
+**Plan:** `tasks/builds/pa-v1-cleanup-batch/plan.md`
+**Scope class:** Significant
+**Started:** 2026-05-15
+**Phase 1 handoff restore:** SKIPPED per operator (spec authored separately and merged to main before this Phase 2 launch)
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Plan path:** `tasks/builds/pa-v1-cleanup-batch/plan.md`
+**Chunks built:** 3 (Chunk 0 architecture-notes doc + Chunk 1 voice_profiles schema + Chunk 2 sidebar nav + Chunk 3 conformance-log close-out)
+**Branch HEAD at handoff:** pending (set after Phase 2 close commit)
+**G1 attempts (per chunk):**
+- Chunk 0: 0 (pure doc)
+- Chunk 1: lint 1, typecheck 2 (out-of-plan-scope fan-out resolved on attempt 2), build:server 1, targeted tests 1
+- Chunk 2: lint 1, typecheck 1, build:client 1, targeted tests 1
+- Chunk 3: 0 (pure doc)
+
+**G2 attempts:** 1 (ALL PASS — lint 0 errors, typecheck clean, build:server clean, build:client clean in 5.55s)
+
+**G3 attempts (post-fix-loop + post-dual-reviewer):** 2 (both clean)
+
+**spec-conformance verdict:** CONFORMANT (`tasks/review-logs/spec-conformance-log-pa-v1-cleanup-batch-2026-05-15T08-06-59Z.md`). 14 of 14 in-scope items (12 spec-conformance REQs + 1 adversarial + 1 bookkeeping M9) PASS; zero fixes applied.
+
+**adversarial-reviewer verdict:** HOLES_FOUND advisory — 0 confirmed-holes, 1 likely-hole (PA-CLEANUP-DEF-1 missing org predicate on three state-flip UPDATEs in `voiceProfileService.deriveProfile`), 2 worth-confirming (PA-CLEANUP-DEF-2 bundler missing app-layer org predicate; PA-CLEANUP-DEF-3 nightly refresh job no durable audit row). All routed to `tasks/todo.md`. Non-blocking per Phase 1 policy. (`tasks/review-logs/adversarial-review-log-pa-v1-cleanup-batch-2026-05-15T19-00-00Z.md`)
+
+**pr-reviewer verdict:** APPROVED after 3 rounds:
+- R1: CHANGES_REQUESTED (1 BLOCKING — REQ-C4 provisioning shape diverged from spec §13.4 step 6; `eaProvisioningService.ts` wrote `refreshPolicy: 'manual'` and omitted `sourceConfig`/`refreshConfig`). 3 STRONG_RECOMMENDATIONS + 4 CONSIDER items routed to `tasks/todo.md` as PA-CLEANUP-DEF-4..6.
+- R2 (post-fix-loop): APPROVED. Builder commit `44776dc6` fixed the BLOCKING + extracted pure helper `buildVoiceProfileInsertValues` + added shape-pinning Vitest (`server/services/__tests__/eaProvisioningService.test.ts`).
+- R3 (post-dual-reviewer per §8.6): APPROVED. Dual-reviewer commit `d60e94b9` added idempotent `IF EXISTS` guards to the `.down.sql` migration; pr-reviewer R3 verified the fix lands clean and matches the `0358` convention.
+
+(Logs: `tasks/review-logs/pr-review-log-pa-v1-cleanup-batch-round1-*.md`, `round2-*.md`, `round3-*.md`)
+
+**reality-checker verdict:** READY after 3 rounds:
+- R1: NEEDS_WORK — build:server claim had no log path, pr-reviewer + adversarial logs not persisted.
+- R2: NEEDS_WORK — build:client claim was made but the log was not actually persisted in progress.md as stated.
+- R3: READY — all 8 verifiable criteria grounded in persisted artifacts; criterion #9 (operator visual confirmation of Personal nav placement) correctly DEFERRED to PR body.
+
+(Log: `tasks/review-logs/reality-check-log-pa-v1-cleanup-batch-round3-*.md`)
+
+**Fix-loop iterations:** 1 (pr-reviewer R1 BLOCKING REQ-C4 provisioning shape — closed in commit `44776dc6`).
+
+**dual-reviewer verdict:** APPROVED (2 iterations, Codex CLI available). 1 P1 fix applied to `migrations/0360_voice_profiles_schema_align.down.sql` (idempotent guards via `DO $$ ... END $$` + `information_schema.columns` checks per the `0358` convention). 1 P2 finding rejected as out-of-scope (`refreshPolicy: 'periodic'` infinite-retry-on-failure semantics) and routed to `tasks/todo.md` as PA-CLEANUP-DEF-7. Commit `d60e94b9`. (`tasks/review-logs/dual-review-log-pa-v1-cleanup-batch-2026-05-15T08-59-44Z.md`)
+
+**REVIEW_GAP entries:**
+
+```
+REVIEW_GAP: chatgpt-plan-review | task-class: Significant | reason: autonomous mode — manual ChatGPT-web loop unavailable | operator-override: yes-2026-05-15T00:00:00Z | remediation: chatgpt-pr-review at Phase 3 will be the primary second-opinion pass and runs manually per operator instruction
+```
+
+**Doc-sync gate:**
+- architecture.md updated: yes (Key files per domain — Voice profile service row; corrected stale path `server/services/calendar/voiceProfileService.ts` → `server/services/voiceProfile/voiceProfileService.ts` + documented post-2026-05-15 column-alignment row shape)
+- capabilities.md updated: n/a: internal refactor with no capability surface change (REQ-C4 schema rename is internal alignment of an already-registered capability; REQ-M15 is a placement tweak within an existing UI surface)
+- integration-reference.md updated: no — checked voiceProfile / voice_profile / sample_size / last_derived_at / opt_out_at / source_config / refresh_config; zero references in this doc
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — no build-discipline / convention / locked-rule / §8 development-discipline changes
+- frontend-design-principles.md updated: no — no new UI pattern or hard rule (sidebar reorder is a placement change within existing pattern)
+- KNOWLEDGE.md updated: no — patterns identified (column-rename grep discipline, spec-amendment-vs-pre-PR resolution path, fresh-DB down-migration guard convention) deferred to finalisation Step 7
+- spec-context.md updated: n/a (feature pipeline)
+
+**Open issues for finalisation:**
+- 7 deferred items in `tasks/todo.md` as PA-CLEANUP-DEF-1 through PA-CLEANUP-DEF-7 (all advisory; no blockers).
+- 13 `[status:closed:pr:<pending>]` placeholders in `tasks/todo.md` to substitute with merge PR number.
+- chatgpt-pr-review (Phase 3) is the operator's manual stopping point per instruction.
+- Operator visual confirmation of Personal nav group placement (spec §14.1 criterion #9) — required at PR review before merge.
+
+**Note on `tasks/current-focus.md`:** the operator intentionally reverted this file to remain pointed at `split-skill-analyzer` (MERGE_READY for PR #320). Phase 2 did NOT transition current-focus to REVIEWING for this build. Phase 3 finalisation should likewise NOT transition it unless the operator wants it pivoted. Build state is recorded entirely in `tasks/builds/pa-v1-cleanup-batch/` artifacts.
+
+---
+
+## Phase 3 (FINALISATION) — pending
+
+Operator instructed autonomous run through to manual chatgpt-pr-review handoff. Phase 3 plan:
+
+1. **S2 branch sync** — branch was created directly from `origin/main`; no rebase needed. Verify no main changes since branch creation.
+2. **G4 regression guard** — run `npm run lint && npm run typecheck` against post-S2 state.
+3. **PR creation** — `gh pr create` with body that explicitly requests operator visual confirmation of Personal nav group placement (spec §9 criterion #7).
+4. **chatgpt-pr-review (MANUAL)** — STOPPING POINT per operator instruction.
