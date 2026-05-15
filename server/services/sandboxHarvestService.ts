@@ -36,7 +36,7 @@ import {
   type HarvestStepResult,
 } from './sandboxHarvestServicePure.js';
 import type { RedactionPattern } from '../lib/redaction.js';
-import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../lib/withSandboxProvider.js';
 import { subaccountIeeBrowserSettingsService } from './subaccountIeeBrowserSettingsService.js';
 import { evaluateTaskCost, IEE_BROWSER_EVENT_TASK_COST_ANOMALY } from './sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
 import { isCredentialLeakFilename } from './sandbox/credentialLeakFilenameGuardPure.js';
@@ -106,6 +106,32 @@ async function writeTelemetryEvent(
     criticality,
     payloadJson,
   });
+}
+
+function makeTelemetryWriter(ctx: HarvestContext): (event: ProviderDiagnosticEvent) => Promise<void> {
+  return async (event) => {
+    const db = getOrgScopedDb('sandboxHarvestService.telemetryWriter');
+    await allocateAndInsertTelemetryEvent(db, {
+      sandboxExecutionId: ctx.sandboxExecutionId,
+      organisationId: ctx.organisationId,
+      subaccountId: ctx.subaccountId,
+      runId: ctx.runId,
+      agentId: ctx.agentId,
+      taskId: ctx.taskId,
+      provider: ctx.provider,
+      templateName: ctx.templateName,
+      templateVersion: ctx.templateVersion,
+      eventType: 'provider_diagnostic',
+      criticality: 'info',
+      payloadJson: {
+        subKind: event.subKind,
+        attempt: event.attempt,
+        elapsedMs: event.elapsedMs,
+        status: event.status,
+        code: event.code,
+      },
+    });
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +243,7 @@ async function step2OutputRead(
     const rawContent = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => {
         // Providers expose file reads through their SDK. Stubbed until C8/C9/C10.
         // The actual provider call will read /workspace/output.json.
@@ -327,6 +354,7 @@ async function step5LogRead(ctx: HarvestContext): Promise<LogReadResult> {
       const content = await withSandboxProvider({
         phase: 'harvest',
         sandboxExecutionId: ctx.sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(ctx),
         call: async () => {
           // Actual provider read of /workspace/logs/{stdout|stderr}.log — stubbed until C8/C9/C10.
           return '';
@@ -406,6 +434,7 @@ async function step6ArtefactEnumeration(
     artefactList = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => {
         // Actual provider list of /workspace/artefacts/ — stubbed until C8/C9/C10.
         return [] as Array<{ filename: string; bytes: number; mime: string }>;
@@ -477,6 +506,7 @@ async function step6ArtefactEnumeration(
     const content = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => Buffer.alloc(0), // stub — actual read in C9/C10
     });
 

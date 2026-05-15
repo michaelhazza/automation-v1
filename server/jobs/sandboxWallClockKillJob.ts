@@ -20,7 +20,8 @@ import { logger } from '../lib/logger.js';
 import { SANDBOX_WALL_CLOCK_KILL_JOB } from '../lib/sandboxJobNames.js';
 import { resolveSandboxProvider } from '../services/sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService } from '../services/sandbox/sandboxProviderResolver.js';
-import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../lib/withSandboxProvider.js';
+import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
 
 // Side-effect imports so the provider registry is populated before getProvider() runs.
 import '../services/sandbox/e2bSandbox.js';
@@ -45,7 +46,7 @@ export interface SandboxWallClockKillPayload {
 export async function sandboxWallClockKillHandler(
   job: PgBoss.Job<SandboxWallClockKillPayload>,
 ): Promise<void> {
-  const { sandboxExecutionId, organisationId, wallClockMs } = job.data;
+  const { sandboxExecutionId, organisationId, subaccountId, wallClockMs } = job.data;
 
   const db = getOrgScopedDb('jobs.sandboxWallClockKill');
 
@@ -54,6 +55,12 @@ export async function sandboxWallClockKillHandler(
     .select({
       status: sandboxExecutions.status,
       providerSandboxId: sandboxExecutions.providerSandboxId,
+      runId: sandboxExecutions.runId,
+      agentId: sandboxExecutions.agentId,
+      taskId: sandboxExecutions.taskId,
+      provider: sandboxExecutions.provider,
+      templateName: sandboxExecutions.templateName,
+      templateVersion: sandboxExecutions.templateVersion,
     })
     .from(sandboxExecutions)
     .where(
@@ -81,10 +88,35 @@ export async function sandboxWallClockKillHandler(
   // Terminate the provider sandbox before flipping the row status.
   // providerSandboxId is non-null only for running rows (pending rows never claimed a handle).
   if (row.providerSandboxId) {
+    const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+      async (event) => {
+        await allocateAndInsertTelemetryEvent(db, {
+          sandboxExecutionId,
+          organisationId,
+          subaccountId,
+          runId: row.runId,
+          agentId: row.agentId,
+          taskId: row.taskId,
+          provider: row.provider,
+          templateName: row.templateName,
+          templateVersion: row.templateVersion,
+          eventType: 'provider_diagnostic',
+          criticality: 'info',
+          payloadJson: {
+            subKind: event.subKind,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            status: event.status,
+            code: event.code,
+          },
+        });
+      };
+
     try {
       await withSandboxProvider({
         phase: 'terminal',
         sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(),
         call: () => getProvider().terminate(row.providerSandboxId as string),
       });
     } catch (err) {

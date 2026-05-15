@@ -28,7 +28,9 @@ import {
   registerSandboxProvider,
   type SandboxExecutionService,
 } from './sandboxProviderResolver.js';
-import { withSandboxProvider } from '../../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../../lib/withSandboxProvider.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../../lib/sandboxTelemetrySequencePure.js';
 import { parseCurrentVersion } from './templateVersionParserPure.js';
 import {
   dockerExitCodeToTerminal,
@@ -102,7 +104,13 @@ export class LocalDockerSandbox implements SandboxExecutionService {
   async runTask(input: SandboxRunTaskInput): Promise<SandboxRunTaskOutput> {
     const {
       sandboxExecutionId,
+      organisationId,
+      subaccountId,
+      runId,
+      agentId,
+      taskId,
       templateName,
+      templateVersion,
       policy,
     } = input;
 
@@ -115,10 +123,36 @@ export class LocalDockerSandbox implements SandboxExecutionService {
 
     const startMs = Date.now();
 
+    const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+      async (event) => {
+        const db = getOrgScopedDb('localDockerSandbox.telemetryWriter');
+        await allocateAndInsertTelemetryEvent(db, {
+          sandboxExecutionId,
+          organisationId,
+          subaccountId,
+          runId,
+          agentId,
+          taskId,
+          provider: 'local_docker',
+          templateName,
+          templateVersion,
+          eventType: 'provider_diagnostic',
+          criticality: 'info',
+          payloadJson: {
+            subKind: event.subKind,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            status: event.status,
+            code: event.code,
+          },
+        });
+      };
+
     // --- Phase: start (spawn docker run) ---
     const exitCode = await withSandboxProvider({
       phase: 'start',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () =>
         this._runContainer({
           sandboxExecutionId,

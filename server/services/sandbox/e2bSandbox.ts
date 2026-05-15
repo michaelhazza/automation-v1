@@ -36,7 +36,9 @@ import {
   registerSandboxProvider,
   type SandboxExecutionService,
 } from './sandboxProviderResolver.js';
-import { withSandboxProvider } from '../../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../../lib/withSandboxProvider.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../../lib/sandboxTelemetrySequencePure.js';
 import { parsePublishedVersion } from './templateVersionParserPure.js';
 import {
   e2bTerminalSignalToInternal,
@@ -258,6 +260,31 @@ export class E2bSandbox implements SandboxExecutionService {
     // Wall-clock ceiling → SDK timeout parameter (ms → seconds, rounded up).
     const timeoutSeconds = Math.ceil(policy.ceilings.wallClockMs / 1000);
 
+    const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+      async (event) => {
+        const db = getOrgScopedDb('e2bSandbox.telemetryWriter');
+        await allocateAndInsertTelemetryEvent(db, {
+          sandboxExecutionId,
+          organisationId,
+          subaccountId,
+          runId,
+          agentId,
+          taskId,
+          provider: 'e2b',
+          templateName,
+          templateVersion,
+          eventType: 'provider_diagnostic',
+          criticality: 'info',
+          payloadJson: {
+            subKind: event.subKind,
+            attempt: event.attempt,
+            elapsedMs: event.elapsedMs,
+            status: event.status,
+            code: event.code,
+          },
+        });
+      };
+
     const metadataTags = buildE2bMetadataTags({
       organisationId,
       subaccountId,
@@ -281,6 +308,7 @@ export class E2bSandbox implements SandboxExecutionService {
       const handle = await withSandboxProvider({
         phase: 'start',
         sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(),
         call: () =>
           this.sdkClient.createSandbox({
             templateAlias: resolveTemplateAlias(templateName, {
@@ -336,6 +364,7 @@ export class E2bSandbox implements SandboxExecutionService {
       await withSandboxProvider({
         phase: 'start',
         sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(),
         call: () =>
           this.sdkClient.writeFile(
             providerSandboxId,
@@ -363,6 +392,7 @@ export class E2bSandbox implements SandboxExecutionService {
     const terminalSignal = await withSandboxProvider({
       phase: 'terminal',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () => this.sdkClient.getTerminalState(providerSandboxId),
     });
 
@@ -377,6 +407,7 @@ export class E2bSandbox implements SandboxExecutionService {
         const outputBuf = await withSandboxProvider({
           phase: 'harvest',
           sandboxExecutionId,
+          telemetryWriter: makeTelemetryWriter(),
           call: () => this.sdkClient.readFile(providerSandboxId, '/workspace/output.json'),
         });
         rawOutput = JSON.parse(outputBuf.toString('utf-8')) as unknown;
@@ -396,6 +427,7 @@ export class E2bSandbox implements SandboxExecutionService {
     await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(),
       call: () => this.sdkClient.terminateSandbox(providerSandboxId),
     }).catch(() => {
       // Terminate failure is non-fatal: the sandbox may already be closed
