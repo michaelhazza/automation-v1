@@ -13,13 +13,14 @@
 // instead of silently producing dark calls.
 //
 // Exempt callers:
-//   - `server/services/llmRouter.ts`        — the router itself
+//   - `server/services/llmRouter.ts`        — the router barrel
+//   - `server/services/llmRouter/*.ts`      — router sub-modules (e.g. routeCall.ts)
 //   - `server/services/providers/*.ts`      — intra-provider fallback
 //   - `*.test.ts` / `*.test.tsx`            — unit tests legitimately stub
 //                                             adapter calls (NODE_ENV='test')
 // ---------------------------------------------------------------------------
 
-const ROUTER_FRAME_PATTERN = /server[/\\]services[/\\]llmRouter\./;
+const ROUTER_FRAME_PATTERN = /server[/\\]services[/\\]llmRouter([/\\]|\.)/;
 
 export function assertCalledFromRouter(): void {
   // In test mode, adapters are legitimately called directly — every adapter
