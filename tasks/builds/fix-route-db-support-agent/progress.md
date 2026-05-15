@@ -73,6 +73,20 @@ The current client calls `/api/support/agent/dashboard` and `/api/support/inboxe
 ### Test coverage note
 Chunk 3's test file (`supportAgentRoutes.test.ts`) covers the deep-merge pure logic (4 cases) and structural service-delegation assertions. The plan §Chunk 3 also listed 404/422/403 path tests; these were deferred per `docs/testing-conventions.md §"Things explicitly NOT in scope"` (route-level integration tests discouraged in this phase). The service-level tests in `supportInboxService.activeOnly.test.ts` and the pure-function gate tests in `agentsRouteF5.test.ts` cover the critical invariants.
 
+## Branch-level review pass results
+
+| Reviewer | Result | Notes |
+|---|---|---|
+| spec-conformance | CONFORMANT | All 14 requirements met; Q1/Q2/Q3 deviations operator-approved |
+| adversarial-reviewer | HOLES_FOUND — closed | C1 `getInbox` subaccount predicate added; C2 `ownerScope=user` bypass documented as intentional |
+| pr-reviewer | APPROVED | 4 should-fix resolved: mergeAgentConfigPatch extracted, tests strengthened |
+| reality-checker | READY | All 6 success criteria verified |
+| dual-reviewer | REVIEW_GAP | Codex CLI unavailable locally |
+
+```
+REVIEW_GAP: dual-reviewer | task-class: Standard | reason: Codex CLI not installed in local session | operator-override: no | remediation: chatgpt-pr-review serves as primary second-opinion pass at Phase 3 (enforced by finalisation-coordinator)
+```
+
 ## Closure text for finalisation-coordinator
 
 After PR number is known, `finalisation-coordinator` applies these edits to `tasks/todo.md`:
