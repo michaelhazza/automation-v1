@@ -109,7 +109,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 
 - Services contain all business logic. Routes are thin wrappers.
 - Services throw errors as `{ statusCode: number, message: string, errorCode?: string }` — `asyncHandler` catches these.
-- One service per domain. Target max ~500 lines; `skillExecutor.ts` (65KB) is the exception.
+- One service per domain. Target max ~500 lines; `skillExecutor.ts` was the historical exception and has since been split into `server/services/skillExecutor/` (see § Skill executor & processor hooks).
 - Never access `db` directly in a route — call a service. `server/lib/**` files are pure helpers and must not import `db` either.
 
 ### When to create a new service file
@@ -810,7 +810,9 @@ Owner-tier viewers always see `full` regardless of the visibility value. Visibil
 
 ### Skill executor & processor hooks
 
-`skillExecutor.ts` implements a three-phase pipeline for every skill execution:
+The skill executor has been split into a directory at `server/services/skillExecutor/`. The public API is re-exported from the thin barrel `server/services/skillExecutor.ts` (exports: `skillExecutor`, `SKILL_HANDLERS`, `SkillExecutionContext`, `SkillHandler`, `registerProcessor`, `setHandoffJobSender`). Internal dependency order: `context` → `pipeline` → `gating` → `handlers/*` → `registry` → barrel (with `adapter-registration.ts` side-effect imported first). All callers import from the barrel; see `tasks/builds/feat-split-skillexecutor/spec.md` for the full module conventions.
+
+The executor implements a three-phase pipeline for every skill execution:
 
 1. **`processInput`** — before permission gate: validate and transform input
 2. **`processInputStep`** — after gate, before execute: prepare execution context
@@ -826,7 +828,7 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 | Org | `skills` | Org admin can create/manage |
 | Subaccount | inherited from org assignment | Subaccount-specific overrides |
 
-System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in `skillExecutor.ts`'s `SKILL_HANDLERS` map, enforced at server boot by `validateSystemSkillHandlers()`.
+System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in the `SKILL_HANDLERS` map (assembled in `server/services/skillExecutor/registry.ts`, re-exported from the barrel), enforced at server boot by `validateSystemSkillHandlers()`.
 
 **Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
 
